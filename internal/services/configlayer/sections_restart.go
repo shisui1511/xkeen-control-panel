@@ -3,6 +3,8 @@ package configlayer
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
@@ -25,7 +27,19 @@ const (
 // снимок и на план (restartBase), чтобы объявление и признак полного перезапуска
 // считались одним расчётом.
 type RestartBase struct {
+	xray   *xrayTransition
 	mihomo *mihomoTransition
+}
+
+// xrayTransition — переход владения «Входящими» Xray: входящие по ту сторону
+// перехода. unread — сторону прочитать не удалось.
+type xrayTransition struct {
+	// taking — взятие: сторона панели — черновик; иначе отпускание: сторона
+	// панели — применённое состояние.
+	taking bool
+	// other — Effective секции inbounds по ту сторону (nil — входящих там нет).
+	other  json.RawMessage
+	unread bool
 }
 
 // mihomoTransition — переход владения маршрутизацией Mihomo: факты профиля до и
@@ -47,7 +61,17 @@ func RestartReasons(applied, draft Sections, base RestartBase) []RestartNote {
 	out := []RestartNote{}
 	appliedCores, draftCores := DesiredCores(applied), DesiredCores(draft)
 
-	if xrayInboundsPortChanged(appliedCores[SectionXrayInbounds], draftCores[SectionXrayInbounds]) {
+	var xrayPort bool
+	if tr := base.xray; tr != nil {
+		panel := appliedCores[SectionXrayInbounds]
+		if tr.taking {
+			panel = draftCores[SectionXrayInbounds]
+		}
+		xrayPort = xrayTransitionPortChanged(panel, tr)
+	} else {
+		xrayPort = xrayInboundsPortChanged(appliedCores[SectionXrayInbounds], draftCores[SectionXrayInbounds])
+	}
+	if xrayPort {
 		out = append(out, RestartNote{Kernel: KernelXray, Reason: RestartReasonPort})
 	}
 	reason := ""
@@ -70,20 +94,160 @@ func RestartReasons(applied, draft Sections, base RestartBase) []RestartNote {
 // только при переходе; любая ошибка чтения даёт «не прочиталось», а не отказ.
 func restartBase(roots Roots, st State, draft Sections, installed InstalledKernels, foreignOwned func(kernel, rel string) bool) RestartBase {
 	var base RestartBase
+	if installed.Xray {
+		base.xray = xrayInboundsTransition(roots, st, draft, foreignOwned)
+	}
 	if installed.Mihomo {
 		base.mihomo = mihomoRoutingTransition(roots, st, draft)
 	}
 	return base
 }
 
-// mihomoRoutingTransition считает переход владения маршрутизацией Mihomo.
-// Отпускание: до — действующий профиль панели, после — прежний профиль, к
-// которому вернётся config.yaml. nil — перехода для расчёта нет.
-func mihomoRoutingTransition(roots Roots, st State, draft Sections) *mihomoTransition {
-	prev := st.Routing.Mihomo
-	if prev == nil || DesiredRouting(draft).Managed {
+// xrayInboundsTransition считает переход владения «Входящими» Xray (D-01, D-05,
+// D-28). Взятие — секция управляется в черновике, записи в State.Cores нет:
+// другая сторона — Effective секции по configs/. Отпускание — секция не
+// управляется, запись есть: другая сторона — configs/ плюс копии из резервного
+// набора, то есть то, что вернётся на диск. nil — перехода нет, либо объявлять
+// нечего (значение секции панели пусто — будет пресет), и диск не читается.
+func xrayInboundsTransition(roots Roots, st State, draft Sections, foreignOwned func(kernel, rel string) bool) *xrayTransition {
+	if roots.Xray == "" {
 		return nil
 	}
+	entry := st.Cores.Xray[xraySectionInbounds]
+	cs := DesiredCores(draft)[SectionXrayInbounds]
+	var panel CoreSection
+	tr := &xrayTransition{}
+	switch {
+	case cs.Managed && entry == nil:
+		panel, tr.taking = cs, true
+	case !cs.Managed && entry != nil:
+		panel = DesiredCores(st.Applied)[SectionXrayInbounds]
+	default:
+		return nil
+	}
+	if _, ok := inboundPorts(panel.Value); !panel.Managed || !ok {
+		return nil
+	}
+	files, err := ScanXrayKeyFiles(roots.Xray, foreignOwned)
+	if err != nil {
+		tr.unread = true
+		return tr
+	}
+	if !tr.taking {
+		have := make(map[string]bool, len(files))
+		for _, f := range files {
+			have[f.Name] = true
+		}
+		for _, mf := range entry.Moved {
+			if !safeRoutingName(mf.Name) || have[mf.Name] {
+				tr.unread = true
+				return tr
+			}
+			data, err := readLimited(movedCopyPath(mf), maxXrayKeyFileBytes)
+			if err != nil || HashContent(data) != mf.Hash {
+				tr.unread = true
+				return tr
+			}
+			f := parseXrayKeyFile(mf.Name, data)
+			if f.Broken {
+				tr.unread = true
+				return tr
+			}
+			files = append(files, f)
+		}
+	}
+	tr.other = ScanXraySections(files)[xraySectionInbounds].Effective
+	return tr
+}
+
+// xrayTransitionPortChanged — на переходе владения порт читаемого XKeen входящего
+// у панели и по ту сторону разный. Читаемые входящие — Keep секции панели и
+// прозрачные входящие обеих сторон; тег есть только с одной стороны — порт
+// изменился. Значение секции панели пусто — объявления нет; сторона не
+// прочиталась — port.
+func xrayTransitionPortChanged(panel CoreSection, tr *xrayTransition) bool {
+	if !panel.Managed {
+		return false
+	}
+	mine, ok := inboundPorts(panel.Value)
+	if !ok {
+		return false
+	}
+	if tr.unread {
+		return true
+	}
+	theirs := map[string]inboundInfo{}
+	if len(bytes.TrimSpace(tr.other)) > 0 {
+		if theirs, ok = inboundPorts(tr.other); !ok {
+			return true
+		}
+	}
+	tags := map[string]bool{}
+	for _, tag := range panel.Keep {
+		tags[tag] = true
+	}
+	for _, side := range []map[string]inboundInfo{mine, theirs} {
+		for tag, in := range side {
+			if _, transparent := IsTransparentInbound(in.raw); transparent {
+				tags[tag] = true
+			}
+		}
+	}
+	for tag := range tags {
+		a, hasA := mine[tag]
+		b, hasB := theirs[tag]
+		if hasA != hasB || a.port != b.port {
+			return true
+		}
+	}
+	return false
+}
+
+// mihomoRoutingTransition считает переход владения маршрутизацией Mihomo.
+// Взятие: до — активный профиль, после — секции черновика. Отпускание: до —
+// действующий профиль панели, после — прежний профиль, к которому вернётся
+// config.yaml. nil — перехода для расчёта нет.
+func mihomoRoutingTransition(roots Roots, st State, draft Sections) *mihomoTransition {
+	prev := st.Routing.Mihomo
+	managed := DesiredRouting(draft).Managed
+	switch {
+	case managed && prev == nil:
+		return mihomoTakeTransition(roots, draft)
+	case !managed && prev != nil:
+		return mihomoReleaseTransition(roots, prev)
+	}
+	return nil
+}
+
+// mihomoTakeTransition — взятие маршрутизации: активный профиль против секций
+// черновика. Секции без значения (будет пресет) и отсутствие профиля перехода для
+// расчёта не дают.
+func mihomoTakeTransition(roots Roots, draft Sections) *mihomoTransition {
+	after, ok := mihomoFactsFromSections(DesiredCores(draft))
+	if !ok {
+		return nil
+	}
+	_, data, err := ReadMihomoActive(roots.Mihomo)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	tr := &mihomoTransition{after: after}
+	if err != nil {
+		tr.unread = true
+		return tr
+	}
+	before, ok := mihomoFactsFromYAML(data)
+	if !ok {
+		tr.unread = true
+		return tr
+	}
+	tr.before = before
+	return tr
+}
+
+// mihomoReleaseTransition — отпускание маршрутизации: профиль панели против
+// прежнего профиля по виду прежнего config.yaml.
+func mihomoReleaseTransition(roots Roots, prev *MihomoRoutingState) *mihomoTransition {
 	var data []byte
 	var err error
 	switch prev.PrevKind {

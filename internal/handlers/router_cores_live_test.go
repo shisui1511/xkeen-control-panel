@@ -356,6 +356,15 @@ type rtCoresLiveXray struct {
 // rtCoresLiveXrayTake берёт «Входящие» Xray через API и применяет.
 func rtCoresLiveXrayTake(t *testing.T, e *rtSrc) *rtCoresLiveXray {
 	t.Helper()
+	x := rtCoresLiveXrayTakeDraft(t, e)
+	e.rtRtApplyOK("взятие «Входящих» Xray")
+	return x
+}
+
+// rtCoresLiveXrayTakeDraft берёт «Входящие» Xray в черновик, без «Применить».
+// Стенд возвращается при любом исходе (t.Cleanup).
+func rtCoresLiveXrayTakeDraft(t *testing.T, e *rtSrc) *rtCoresLiveXray {
+	t.Helper()
 	view := e.rtCoresView("xray")
 	if installed, _ := view["installed"].(bool); !installed {
 		t.Fatal("Xray не установлен на стенде: ветка xray не проверяется")
@@ -407,7 +416,6 @@ func rtCoresLiveXrayTake(t *testing.T, e *rtSrc) *rtCoresLiveXray {
 		t.Fatalf("take inbounds: %d %s", r.Status, r.Code)
 	}
 	x.taken = true
-	e.rtRtApplyOK("взятие «Входящих» Xray")
 	return x
 }
 
@@ -423,6 +431,46 @@ func (x *rtCoresLiveXray) rtCoresLiveRelease(t *testing.T) bool {
 	c.rtRtApplyOK("возврат «Входящих» Xray")
 	x.taken = false
 	return true
+}
+
+// rtCoresLiveReleaseChecked отпускает «Входящие» и проверяет способ перезапуска
+// (G-147-3, D-16): reason "port" — до «Применить» в снимке есть {xray, port},
+// итог — restarted с full_restart_port и новым PID; reason "" — записи xray с port
+// нет, итог — restarted (Xray всегда идёт xkeen -restart) без пояснения. Затем
+// исходные файлы сверяются по sha256.
+func (x *rtCoresLiveXray) rtCoresLiveReleaseChecked(t *testing.T, reason string) {
+	t.Helper()
+	c := x.e.with(t)
+	r := c.rtCoresPost("/release", map[string]any{"kernel": "xray", "section": "inbounds"})
+	if r.Status != http.StatusOK {
+		t.Fatalf("release inbounds: %d %s", r.Status, r.Code)
+	}
+	notes := c.rtCoresLiveRestartNotes()
+	if reason != "" && !rtCoresLiveHasNote(notes, "xray", reason) {
+		t.Fatalf("отпускание: cores.restart без {xray, %s}: %v", reason, notes)
+	}
+	if reason == "" && rtCoresLiveHasNote(notes, "xray", "port") {
+		t.Fatalf("отпускание: лишнее объявление {xray, port}: %v", notes)
+	}
+
+	pidBefore := rtRstKernelPID(t, "xray")
+	outcome, note, a := c.rtCoresLiveApplyRestart("xray")
+	if reason == "" {
+		if outcome != "restarted" || note != "" {
+			t.Fatalf("отпускание без смены порта: исход %q, пояснение %q, ожидалось restarted без пояснения; %s", outcome, note, rtRstDescribe(a))
+		}
+	} else {
+		if outcome != "restarted" || note != "full_restart_"+reason {
+			t.Fatalf("отпускание: исход %q, пояснение %q, ожидалось restarted / full_restart_%s; %s", outcome, note, reason, rtRstDescribe(a))
+		}
+		pidAfter := rtRstKernelPID(t, "xray")
+		if pidAfter == pidBefore {
+			t.Fatalf("отпускание: PID xray не сменился (%d); %s", pidBefore, rtRstDescribe(a))
+		}
+		rtRstHoldPID(t, "xray", pidAfter)
+	}
+	x.taken = false
+	x.rtCoresLiveCheckRestored(t)
 }
 
 // rtCoresLiveCheckRestored сверяет исходные файлы секции по sha256 и отсутствие
@@ -484,7 +532,12 @@ func rtCoresLiveXrayRules(ins []rtCoresLiveInbound) (redirect, tproxy int) {
 func rtCoresLiveXrayInbounds(t *testing.T, e *rtSrc) {
 	t.Helper()
 	rtRstKernelPID(t, "xray")
-	x := rtCoresLiveXrayTake(t, e)
+	x := rtCoresLiveXrayTakeDraft(t, e)
+	// Взятие без смены порта ничего не объявляет: самый лёгкий способ (D-16).
+	if notes := e.rtCoresLiveRestartNotes(); rtCoresLiveHasNote(notes, "xray", "port") {
+		t.Fatalf("взятие: лишнее объявление {xray, port}: %v", notes)
+	}
+	e.rtRtApplyOK("взятие «Входящих» Xray")
 
 	// Файл панели: те же входящие с теми же полями, которые читает XKeen.
 	after := rtCoresLivePanelInbounds(t)
@@ -526,12 +579,11 @@ func rtCoresLiveXrayInbounds(t *testing.T, e *rtSrc) {
 	rtCoresLiveWaitStatus(t)
 	rtRstKernelPID(t, "xray")
 
-	// Возврат: файлы побайтно, правила прежние.
-	if x.rtCoresLiveRelease(t) {
-		x.rtCoresLiveCheckRestored(t)
-		rtCoresLiveWaitRules(t, redirect, tproxy, 0, 0)
-		rtCoresLiveWaitStatus(t)
-	}
+	// Возврат: файлы побайтно, правила прежние; порт не менялся, поэтому объявлений
+	// перезапуска нет (D-16).
+	x.rtCoresLiveReleaseChecked(t, "")
+	rtCoresLiveWaitRules(t, redirect, tproxy, 0, 0)
+	rtCoresLiveWaitStatus(t)
 }
 
 // --- ветка Mihomo ---------------------------------------------------------------
@@ -587,6 +639,15 @@ func rtCoresLiveMihomoActivePorts(t *testing.T) (redir, tproxy int) {
 // rtCoresLiveMihomoTake берёт маршрутизацию Mihomo через API и применяет.
 func rtCoresLiveMihomoTake(t *testing.T, e *rtSrc, tg routertest.Target) *rtCoresLiveMihomo {
 	t.Helper()
+	m := rtCoresLiveMihomoTakeDraft(t, e, tg)
+	e.rtRtApplyOK("взятие маршрутизации Mihomo")
+	return m
+}
+
+// rtCoresLiveMihomoTakeDraft берёт маршрутизацию Mihomo с «Моими узлами» в
+// черновик, без «Применить». Стенд возвращается при любом исходе (t.Cleanup).
+func rtCoresLiveMihomoTakeDraft(t *testing.T, e *rtSrc, tg routertest.Target) *rtCoresLiveMihomo {
+	t.Helper()
 	if installed, _ := e.rtCoresView("mihomo")["installed"].(bool); !installed {
 		t.Fatal("Mihomo не установлен на стенде: ветка mihomo не проверяется")
 	}
@@ -611,7 +672,6 @@ func rtCoresLiveMihomoTake(t *testing.T, e *rtSrc, tg routertest.Target) *rtCore
 		t.Fatalf("routing/take: %d %s", take.Status, take.Code)
 	}
 	m.taken = true
-	e.rtRtApplyOK("взятие маршрутизации Mihomo")
 	return m
 }
 
@@ -718,12 +778,22 @@ func (m *rtCoresLiveMihomo) rtCoresLivePorted(t *testing.T) (redir, tproxy int) 
 func rtCoresLiveMihomoProfile(t *testing.T, e *rtSrc, tg routertest.Target) {
 	t.Helper()
 	rtRstKernelPID(t, "mihomo")
-	m := rtCoresLiveMihomoTake(t, e, tg)
+	m := rtCoresLiveMihomoTakeDraft(t, e, tg)
+	// Взятие без смены порта и tun ничего не объявляет и применяется самым лёгким
+	// способом — горячей перезагрузкой (D-16).
+	for _, n := range e.rtCoresLiveRestartNotes() {
+		if n["kernel"] == "mihomo" {
+			t.Fatalf("взятие: лишнее объявление {mihomo, %v}", n["reason"])
+		}
+	}
+	if outcome, _, a := e.rtCoresLiveApplyRestart("mihomo"); outcome != "hot_reloaded" {
+		t.Fatalf("взятие без смены порта и tun: исход %q, ожидалась горячая перезагрузка (hot_reloaded); %s", outcome, rtRstDescribe(a))
+	}
 	redir, tproxy := m.rtCoresLivePorted(t)
 	rtCoresLiveWaitRules(t, redir, tproxy, 0, 0)
 	rtCoresLiveWaitStatus(t)
 	rtRstKernelPID(t, "mihomo")
-	m.rtCoresLiveRelease(t)
+	m.rtCoresLiveReleaseChecked(t, "")
 }
 
 // Трасса: «Входящие» Xray берутся через API и «Применить» (Mihomo — маршрутизация
@@ -772,15 +842,11 @@ func (e *rtSrc) rtCoresLiveApplyRestart(kernel string) (outcome, note string, ap
 	return outcome, note, a
 }
 
-// rtCoresLiveXrayRestart — ветка Xray TestRouterCoresRestartKind: смена порта
-// прозрачного входящего.
-func rtCoresLiveXrayRestart(t *testing.T, e *rtSrc) {
+// rtCoresLiveXrayChangePort меняет порт прозрачного входящего, который читает
+// XKeen (redirect, иначе tproxy), на свободный и сохраняет секцию. Возвращает
+// входящее, прежний и новый порт.
+func rtCoresLiveXrayChangePort(t *testing.T, e *rtSrc, x *rtCoresLiveXray) (pick rtCoresLiveInbound, oldPort, newPort int) {
 	t.Helper()
-	rtRstKernelPID(t, "xray")
-	x := rtCoresLiveXrayTake(t, e)
-	rtCoresLiveWaitStatus(t)
-
-	// Входящее, чей порт читает XKeen: redirect, иначе tproxy.
 	ins := rtCoresLiveTransparent(x.items)
 	pick, ok := rtCoresLivePick(ins, "redirect")
 	if !ok {
@@ -788,8 +854,8 @@ func rtCoresLiveXrayRestart(t *testing.T, e *rtSrc) {
 			t.Fatal("нет прозрачного входящего без тега force-proxy: смену порта проверить нельзя")
 		}
 	}
-	oldPort := pick.port
-	newPort := rtCoresLiveFreePort(t)
+	oldPort = pick.port
+	newPort = rtCoresLiveFreePort(t)
 	if newPort == oldPort {
 		t.Fatalf("свободный порт фикстуры совпал с портом входящего (%d)", oldPort)
 	}
@@ -810,12 +876,14 @@ func rtCoresLiveXrayRestart(t *testing.T, e *rtSrc) {
 		t.Fatalf("в форме «Входящих» нет строки с тегом %q", pick.tag)
 	}
 	e.rtCoresLiveSave("xray", rows, advanced)
+	return pick, oldPort, newPort
+}
 
-	// Способ перезапуска объявлен до «Применить».
-	if notes := e.rtCoresLiveRestartNotes(); !rtCoresLiveHasNote(notes, "xray", "port") {
-		t.Fatalf("cores.restart до «Применить» без {xray, port}: %v", notes)
-	}
-
+// rtCoresLiveXrayExpectPortRestart проверяет «Применить» после смены порта:
+// restarted с full_restart_port, новый PID, правила XKeen на новом порту без
+// старого, порт в файле панели.
+func rtCoresLiveXrayExpectPortRestart(t *testing.T, e *rtSrc, pick rtCoresLiveInbound, oldPort, newPort int) {
+	t.Helper()
 	pidBefore := rtRstKernelPID(t, "xray")
 	outcome, note, a := e.rtCoresLiveApplyRestart("xray")
 	if outcome != "restarted" || note != "full_restart_port" {
@@ -840,29 +908,58 @@ func rtCoresLiveXrayRestart(t *testing.T, e *rtSrc) {
 			t.Errorf("в файле панели порт входящего %q равен %d, ожидался %d", pick.tag, in.port, newPort)
 		}
 	}
-
-	// Возврат: файлы побайтно, правила на прежнем порту.
-	if x.rtCoresLiveRelease(t) {
-		x.rtCoresLiveCheckRestored(t)
-		switch pick.mode {
-		case "redirect":
-			rtCoresLiveWaitRules(t, oldPort, 0, newPort, 0)
-		default:
-			rtCoresLiveWaitRules(t, 0, oldPort, 0, newPort)
-		}
-		rtCoresLiveWaitStatus(t)
-	}
 }
 
-// rtCoresLiveMihomoRestart — ветка Mihomo TestRouterCoresRestartKind: смена tun.
-func rtCoresLiveMihomoRestart(t *testing.T, e *rtSrc, tg routertest.Target) {
+// rtCoresLiveXrayRulesBack ждёт правила XKeen на прежнем порту без нового.
+func rtCoresLiveXrayRulesBack(t *testing.T, pick rtCoresLiveInbound, oldPort, newPort int) {
 	t.Helper()
-	rtRstKernelPID(t, "mihomo")
-	m := rtCoresLiveMihomoTake(t, e, tg)
-	redir, tproxy := m.rtCoresLivePorted(t)
+	switch pick.mode {
+	case "redirect":
+		rtCoresLiveWaitRules(t, oldPort, 0, newPort, 0)
+	default:
+		rtCoresLiveWaitRules(t, 0, oldPort, 0, newPort)
+	}
+	rtCoresLiveWaitStatus(t)
+}
+
+// rtCoresLiveXrayRestart — ветка Xray TestRouterCoresRestartKind: смена порта
+// прозрачного входящего. Последовательность A: взято и применено, смена порта,
+// «Применить», отпускание. Последовательность B: взятие и смена порта в одном
+// черновике, затем отпускание.
+func rtCoresLiveXrayRestart(t *testing.T, e *rtSrc) {
+	t.Helper()
+	rtRstKernelPID(t, "xray")
+	x := rtCoresLiveXrayTake(t, e)
 	rtCoresLiveWaitStatus(t)
 
-	// stack tun меняется на другое значение; enable не трогаем (нет tun — enable false).
+	pick, oldPort, newPort := rtCoresLiveXrayChangePort(t, e, x)
+	// Способ перезапуска объявлен до «Применить».
+	if notes := e.rtCoresLiveRestartNotes(); !rtCoresLiveHasNote(notes, "xray", "port") {
+		t.Fatalf("cores.restart до «Применить» без {xray, port}: %v", notes)
+	}
+	rtCoresLiveXrayExpectPortRestart(t, e, pick, oldPort, newPort)
+
+	// Возврат вернёт файлы с прежним портом: перезапуск объявлен до «Применить».
+	x.rtCoresLiveReleaseChecked(t, "port")
+	rtCoresLiveXrayRulesBack(t, pick, oldPort, newPort)
+
+	// B: взятие со сменой порта в одном черновике сравнивается с действующим
+	// значением configs/.
+	rtRstKernelPID(t, "xray")
+	x = rtCoresLiveXrayTakeDraft(t, e)
+	pick, oldPort, newPort = rtCoresLiveXrayChangePort(t, e, x)
+	if notes := e.rtCoresLiveRestartNotes(); !rtCoresLiveHasNote(notes, "xray", "port") {
+		t.Fatalf("взятие: cores.restart без {xray, port}: %v", notes)
+	}
+	rtCoresLiveXrayExpectPortRestart(t, e, pick, oldPort, newPort)
+	x.rtCoresLiveReleaseChecked(t, "port")
+	rtCoresLiveXrayRulesBack(t, pick, oldPort, newPort)
+}
+
+// rtCoresLiveMihomoChangeTun меняет stack у tun в секции «Входящие» на другое
+// значение и сохраняет; enable не трогается (нет tun — enable false).
+func rtCoresLiveMihomoChangeTun(t *testing.T, e *rtSrc) {
+	t.Helper()
 	sec := rtCoresSection(e.rtCoresView("mihomo"), "inbounds")
 	form, _ := sec["form"].(map[string]any)
 	if form == nil {
@@ -880,12 +977,13 @@ func rtCoresLiveMihomoRestart(t *testing.T, e *rtSrc, tg routertest.Target) {
 	}
 	tun["stack"] = next
 	e.rtCoresLiveSave("mihomo", form, advanced)
+}
 
-	// Способ перезапуска объявлен до «Применить».
-	if notes := e.rtCoresLiveRestartNotes(); !rtCoresLiveHasNote(notes, "mihomo", "tun") {
-		t.Fatalf("cores.restart до «Применить» без {mihomo, tun}: %v", notes)
-	}
-
+// rtCoresLiveMihomoExpectTunRestart проверяет «Применить» после смены tun:
+// restarted с full_restart_tun (не hot_reloaded), новый PID, правила XKeen
+// прежние.
+func rtCoresLiveMihomoExpectTunRestart(t *testing.T, e *rtSrc, m *rtCoresLiveMihomo) {
+	t.Helper()
 	pidBefore := rtRstKernelPID(t, "mihomo")
 	outcome, note, a := e.rtCoresLiveApplyRestart("mihomo")
 	if outcome == "hot_reloaded" {
@@ -901,19 +999,52 @@ func rtCoresLiveMihomoRestart(t *testing.T, e *rtSrc, tg routertest.Target) {
 	rtRstHoldPID(t, "mihomo", pidAfter)
 
 	// Полный перезапуск не сдвинул порты: правила XKeen прежние.
+	redir, tproxy := m.rtCoresLivePorted(t)
 	rtCoresLiveWaitRules(t, redir, tproxy, 0, 0)
 	rtCoresLiveWaitStatus(t)
+}
+
+// rtCoresLiveMihomoRestart — ветка Mihomo TestRouterCoresRestartKind: смена tun.
+// Последовательность A: маршрутизация взята и применена, смена tun, «Применить»,
+// отпускание. Последовательность B: взятие и смена tun в одном черновике, затем
+// отпускание.
+func rtCoresLiveMihomoRestart(t *testing.T, e *rtSrc, tg routertest.Target) {
+	t.Helper()
+	rtRstKernelPID(t, "mihomo")
+	m := rtCoresLiveMihomoTake(t, e, tg)
+	m.rtCoresLivePorted(t)
+	rtCoresLiveWaitStatus(t)
+
+	rtCoresLiveMihomoChangeTun(t, e)
+	// Способ перезапуска объявлен до «Применить».
+	if notes := e.rtCoresLiveRestartNotes(); !rtCoresLiveHasNote(notes, "mihomo", "tun") {
+		t.Fatalf("cores.restart до «Применить» без {mihomo, tun}: %v", notes)
+	}
+	rtCoresLiveMihomoExpectTunRestart(t, e, m)
 
 	// Отпускание возвращает config.yaml к прежнему профилю с прежним tun: способ
 	// перезапуска объявлен до «Применить» и совпадает с фактическим (G-147-3).
+	m.rtCoresLiveReleaseChecked(t, "tun")
+
+	// B: взятие со сменой tun в одном черновике сравнивается с активным профилем.
+	rtRstKernelPID(t, "mihomo")
+	m = rtCoresLiveMihomoTakeDraft(t, e, tg)
+	rtCoresLiveMihomoChangeTun(t, e)
+	if notes := e.rtCoresLiveRestartNotes(); !rtCoresLiveHasNote(notes, "mihomo", "tun") {
+		t.Fatalf("взятие: cores.restart без {mihomo, tun}: %v", notes)
+	}
+	rtCoresLiveMihomoExpectTunRestart(t, e, m)
 	m.rtCoresLiveReleaseChecked(t, "tun")
 }
 
 // Трасса: «Входящие» Xray взяты и применены → смена порта прозрачного входящего
 // сохранением → cores.restart {xray, port} до «Применить» → итог: restarted с
-// full_restart_port, новый PID, правила XKeen на новом порту без старого. Ветка
-// Mihomo: маршрутизация взята и применена → смена stack у tun → cores.restart
-// {mihomo, tun} → итог: restarted с full_restart_tun (не hot_reloaded), новый PID.
+// full_restart_port, новый PID, правила XKeen на новом порту без старого →
+// «Отпустить»: {xray, port} до «Применить» и тот же итог; затем взятие со сменой
+// порта в одном черновике. Ветка Mihomo: маршрутизация взята и применена → смена
+// stack у tun → cores.restart {mihomo, tun} → итог: restarted с full_restart_tun
+// (не hot_reloaded), новый PID → «Отпустить»: {mihomo, tun} и тот же итог; затем
+// взятие со сменой tun в одном черновике.
 // Метка ядра: ветка выбирается по активному ядру цели.
 func TestRouterCoresRestartKind(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
