@@ -1347,7 +1347,7 @@
 
   .search-input:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(41, 194, 240, 0.2);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2);
     width: 260px;
   }
 
@@ -1408,7 +1408,7 @@
     font-size: var(--font-size-xs);
     padding: 4px 10px;
     background: var(--bg-elevated);
-    border: 1px solid var(--border-light, rgba(255, 255, 255, 0.06));
+    border: 1px solid var(--border-light);
     border-radius: var(--radius-sm);
     font-family: var(--font-family-mono);
   }
@@ -1546,23 +1546,23 @@
   }
 
   .conn-row {
-    border-bottom: 1px solid var(--border-light, rgba(255, 255, 255, 0.04));
+    border-bottom: 1px solid var(--border-light);
     cursor: pointer;
     transition: background 0.1s ease;
   }
 
   .conn-row:hover {
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--surface-tint-faint);
   }
 
   .conn-row:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
-    background: rgba(41, 194, 240, 0.08);
+    background: rgba(var(--accent-rgb), 0.08);
   }
 
   .conn-row.selected {
-    background: rgba(41, 194, 240, 0.08);
+    background: rgba(var(--accent-rgb), 0.08);
   }
 
   .conn-row td {
@@ -1629,7 +1629,7 @@
 
   /* Badges & Route (CONN-03) */
   .badge-rule {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--surface-tint);
     color: var(--fg-secondary);
     font-size: var(--font-size-xs);
     font-weight: 600;
@@ -1646,7 +1646,7 @@
   }
 
   .badge-direct {
-    background: rgba(70, 209, 138, 0.15);
+    background: color-mix(in srgb, var(--success) 15%, transparent);
     color: var(--success);
     font-size: var(--font-size-xs);
     font-weight: 700;
@@ -1834,7 +1834,7 @@
     background: var(--bg-card);
     padding: 12px 14px;
     border-radius: var(--radius-sm);
-    border: 1px solid var(--border-light, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--border-light);
   }
 
   .m-row {

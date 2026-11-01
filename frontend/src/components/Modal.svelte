@@ -244,7 +244,7 @@
       color var(--transition-fast);
   }
   .modal-close-btn:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-tint);
     color: var(--fg-primary);
   }
   .modal-content {

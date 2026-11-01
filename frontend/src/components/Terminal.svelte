@@ -546,32 +546,32 @@
   }
 
   .status-pill.connected {
-    background: rgba(70, 209, 138, 0.12);
+    background: color-mix(in srgb, var(--success) 12%, transparent);
     color: var(--success);
-    border: 1px solid rgba(70, 209, 138, 0.25);
+    border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
   }
 
   .status-pill.connected .dot {
     background: var(--success);
-    box-shadow: 0 0 6px rgba(70, 209, 138, 0.7);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--success) 70%, transparent);
   }
 
   .status-pill.connecting {
-    background: rgba(240, 180, 80, 0.12);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
     color: var(--warning);
-    border: 1px solid rgba(240, 180, 80, 0.25);
+    border: 1px solid color-mix(in srgb, var(--warning) 25%, transparent);
   }
 
   .status-pill.connecting .dot {
     background: var(--warning);
-    box-shadow: 0 0 6px rgba(240, 180, 80, 0.7);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--warning) 70%, transparent);
     animation: blink 1.2s infinite;
   }
 
   .status-pill.disconnected {
-    background: rgba(244, 112, 127, 0.12);
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
     color: var(--danger);
-    border: 1px solid rgba(244, 112, 127, 0.25);
+    border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
   }
 
   .status-pill.disconnected .dot {

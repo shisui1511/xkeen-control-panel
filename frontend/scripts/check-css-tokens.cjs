@@ -64,6 +64,55 @@ for (const [f, s] of sources) {
   });
 }
 
+// 3) rgba(...) с цветами, у которых есть токены дизайн-системы: акцент,
+//    статусы (success/warning/danger/idle/purple) и белые наложения.
+//    Вместо них — rgba(var(--accent-rgb), a), color-mix(... var(--success) ...)
+//    или --surface-tint*/--border-light. Нейтральный чёрный (тени, подложки
+//    модалок) разрешён. Исключения: строки с inset/gradient (блики на
+//    тёмных поверхностях), файлы с заведомо тёмным фоном и marker
+//    ds-allow-rgba в той же строке.
+const RGBA_ALLOW_FILES = new Set([
+  'src/components/status/SystemStatusCapsule.svelte',
+  'src/components/Skeleton.svelte',
+  'src/components/Terminal.svelte'
+]);
+const TOKEN_RGB = new Set([
+  '255,255,255',
+  '41,194,240',
+  '70,209,138',
+  '34,197,94',
+  '244,112,127',
+  '239,68,68',
+  '235,94,85',
+  '239,91,107',
+  '240,180,80',
+  '245,158,11',
+  '245,166,35',
+  '234,179,8',
+  '201,162,58',
+  '168,85,247',
+  '220,38,38',
+  '59,130,246',
+  '25,118,210'
+]);
+for (const [f, s] of sources) {
+  if (!f.endsWith('.svelte')) continue;
+  const rel = path.relative(path.join(__dirname, '..'), f);
+  if (RGBA_ALLOW_FILES.has(rel)) continue;
+  s.split('\n').forEach((line, i) => {
+    if (/inset|gradient|ds-allow-rgba/.test(line)) return;
+    for (const m of line.matchAll(
+      /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*[0-9.]+\s*)?\)/g
+    )) {
+      if (TOKEN_RGB.has(`${m[1]},${m[2]},${m[3]}`)) {
+        problems.push(
+          `${rel}:${i + 1}: rgba(${m[1]}, ${m[2]}, ${m[3]}, …) — используйте токены (accent-rgb, color-mix с --success/--danger/--warning, --surface-tint*, --border-light)`
+        );
+      }
+    }
+  });
+}
+
 if (problems.length) {
   console.error(`check-css-tokens: найдено проблем: ${problems.length}`);
   for (const p of problems) console.error('  ' + p);

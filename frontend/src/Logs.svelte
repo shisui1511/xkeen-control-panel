@@ -1120,7 +1120,7 @@
   }
 
   .btn-active {
-    background: rgba(41, 194, 240, 0.15) !important;
+    background: rgba(var(--accent-rgb), 0.15) !important;
     border-color: var(--accent) !important;
     color: var(--accent) !important;
   }
@@ -1183,7 +1183,7 @@
 
   .search-input:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(41, 194, 240, 0.2);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2);
     width: 240px;
   }
 
@@ -1253,7 +1253,7 @@
 
   .source-pill:hover {
     color: var(--fg-primary);
-    background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+    background: var(--bg-hover);
   }
 
   .source-pill.active {

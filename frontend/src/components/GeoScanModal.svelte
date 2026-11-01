@@ -427,7 +427,7 @@
 
   .geoscan-clear-btn:hover {
     color: var(--fg-primary);
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--surface-tint-strong);
   }
 
   .geoscan-filters-row {
@@ -689,7 +689,7 @@
     align-items: center;
     gap: 8px;
     font-size: var(--font-size-xs, 11px);
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    border-top: 1px solid var(--border-light);
     padding-top: 6px;
   }
 
@@ -705,7 +705,7 @@
   }
 
   .sample-tag {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-tint);
     padding: 1px 6px;
     border-radius: 3px;
     font-family: var(--font-mono);

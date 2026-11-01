@@ -923,7 +923,7 @@
 
   .profile-card.active {
     border-color: var(--success);
-    box-shadow: 0 4px 12px rgba(70, 209, 138, 0.05);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--success) 5%, transparent);
   }
 
   .profile-card-header {
@@ -995,7 +995,7 @@
   }
 
   .dropdown-menu button.delete-action:hover {
-    background: rgba(235, 94, 85, 0.1);
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
   }
 
   /* Wizard Step indicators styling */
@@ -1109,7 +1109,7 @@
     text-align: center;
     color: var(--fg-faint);
     border-bottom: 1px solid var(--border);
-    border-right: 1px solid rgba(255, 255, 255, 0.05);
+    border-right: 1px solid var(--border-light);
   }
 
   .grid-cell {
@@ -1118,12 +1118,12 @@
     border-bottom: 1px solid var(--border);
     cursor: crosshair;
     touch-action: none;
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--surface-tint-faint);
     transition: background var(--transition-fast);
   }
 
   .grid-cell:hover {
-    background: rgba(41, 194, 240, 0.15);
+    background: rgba(var(--accent-rgb), 0.15);
   }
 
   .grid-cell.active {
@@ -1200,7 +1200,7 @@
 
   :global(.status-dot.active) {
     background-color: var(--success);
-    box-shadow: 0 0 8px rgba(70, 209, 138, 0.4);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--success) 40%, transparent);
   }
 
   /* Empty state template cards design & Onboarding Hero */
@@ -1265,7 +1265,7 @@
   .template-card:hover {
     border-color: var(--accent);
     transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(41, 194, 240, 0.08);
+    box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.08);
   }
 
   .template-card:focus-visible {
@@ -1287,14 +1287,14 @@
     width: 38px;
     height: 38px;
     border-radius: var(--radius-md);
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--surface-tint);
   }
 
   .template-badge {
     font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-secondary);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-tint);
     padding: 3px 8px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
@@ -1328,7 +1328,7 @@
     position: relative;
     width: 100%;
     height: 6px;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--surface-tint-strong);
     border-radius: 3px;
     overflow: hidden;
   }

@@ -154,8 +154,8 @@
   }
 
   .diag-section {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+    background: var(--surface-tint-faint);
+    border: 1px solid var(--border);
     border-radius: var(--radius-md, 10px);
     padding: 16px;
     display: flex;
@@ -197,7 +197,7 @@
 
   .diag-item {
     background: rgba(0, 0, 0, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-light);
     border-radius: var(--radius-sm, 6px);
     padding: 8px 12px;
     display: flex;
@@ -232,12 +232,12 @@
     border-radius: 4px;
     font-size: 12px;
     font-weight: 600;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--surface-tint-strong);
     color: var(--fg-secondary);
   }
 
   .status-pill-ok {
-    background: rgba(70, 209, 138, 0.15);
+    background: color-mix(in srgb, var(--success) 15%, transparent);
     color: var(--success);
   }
 

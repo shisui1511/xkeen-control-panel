@@ -67,7 +67,7 @@
 <style>
   .seg {
     display: inline-flex;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-control);
     border-radius: var(--radius-md);
     overflow-x: auto;
     flex-wrap: nowrap;

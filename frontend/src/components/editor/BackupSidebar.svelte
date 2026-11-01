@@ -314,7 +314,7 @@
   }
 
   .diff-line-collapsed {
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--surface-tint-faint);
     color: var(--fg-faint);
     text-align: center;
     font-style: italic;

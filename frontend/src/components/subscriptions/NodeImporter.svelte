@@ -186,13 +186,13 @@
 
   .diag-tab-btn:hover {
     color: var(--fg-primary);
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--surface-tint-faint);
   }
 
   .diag-tab-btn.active {
     color: var(--accent);
     border-bottom-color: var(--accent);
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--surface-tint);
   }
 
   .diag-body {

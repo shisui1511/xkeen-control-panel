@@ -73,7 +73,7 @@
     justify-content: space-between;
     gap: 16px;
     padding: 12px 18px;
-    background: rgba(245, 158, 11, 0.12);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
     border: 1px solid var(--warning);
     border-radius: var(--radius-md);
     margin-bottom: 16px;

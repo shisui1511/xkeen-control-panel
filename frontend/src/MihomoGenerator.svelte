@@ -1065,7 +1065,7 @@
     max-width: 100%;
     min-width: 0;
     gap: 2px;
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--surface-tint-faint);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 4px;

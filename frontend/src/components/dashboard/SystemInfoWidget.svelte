@@ -132,7 +132,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 10px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--border-light);
     border-right: 0;
     font-size: 13px;
   }
@@ -193,8 +193,8 @@
   }
 
   .info-badge-muted {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--surface-tint);
     color: var(--fg-secondary);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--border);
   }
 </style>

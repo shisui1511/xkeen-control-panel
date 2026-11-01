@@ -31,6 +31,7 @@
   --border: #1c3e5c;
   --border-light: rgba(255, 255, 255, 0.04);
   --border-strong: #244c70;
+  --border-control: #5282ac;
 
   /* Accent — cyan-teal */
   --accent: #29c2f0;
@@ -57,7 +58,9 @@
   --surface-overlay-to: #08182a;
   --scrollbar-thumb: #102a44;
   --scrollbar-thumb-hover: #1a426b;
+  --surface-tint-faint: rgba(255, 255, 255, 0.02);
   --surface-tint: rgba(255, 255, 255, 0.04);
+  --surface-tint-strong: rgba(255, 255, 255, 0.08);
   --btn-primary-text: #03182a;
   --on-danger: #03182a;
   --bg-group-head-from: rgba(20, 51, 79, 0.9);
@@ -231,6 +234,7 @@
   --border: #e1e7ef;
   --border-light: rgba(0, 0, 0, 0.05);
   --border-strong: #c9d3df;
+  --border-control: #7d8fa6;
 
   --accent: #0a779f;
   --primary: #0a779f;
@@ -248,7 +252,9 @@
   --accent-text: var(--accent);
   --scrollbar-thumb: var(--border-strong);
   --scrollbar-thumb-hover: #a9b8c9;
+  --surface-tint-faint: rgba(12, 34, 55, 0.02);
   --surface-tint: rgba(12, 34, 55, 0.04);
+  --surface-tint-strong: rgba(12, 34, 55, 0.08);
   --surface-overlay-from: #ffffff;
   --surface-overlay-to: #f3f6fa;
   --btn-primary-text: #ffffff;
@@ -608,7 +614,7 @@ h2.card-title {
   min-height: var(--input-h);
   height: var(--input-h);
   padding: 0 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-md);
   font-size: 13px;
   color: var(--fg-primary);
@@ -1582,7 +1588,7 @@ select.input {
   padding: 0 11px;
   box-sizing: border-box;
   background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-md);
   color: var(--fg-primary);
   font-family: inherit;

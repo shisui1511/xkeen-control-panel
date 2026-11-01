@@ -386,7 +386,7 @@
     align-items: center;
     cursor: grab;
     touch-action: none;
-    background: var(--bg-elevated, rgba(255, 255, 255, 0.02));
+    background: var(--bg-elevated);
   }
 
   .qs-drag-bar {
@@ -399,7 +399,7 @@
   .qs-header {
     padding: 8px 10px;
     border-bottom: 1px solid var(--border);
-    background: var(--bg-elevated, rgba(255, 255, 255, 0.02));
+    background: var(--bg-elevated);
   }
 
   .qs-search {
@@ -422,7 +422,7 @@
     padding: 6px 10px;
     font-size: 12px;
     color: var(--warning);
-    background: rgba(234, 179, 8, 0.08);
+    background: color-mix(in srgb, var(--warning) 8%, transparent);
     border-bottom: 1px solid var(--border);
     line-height: 1.3;
   }
@@ -440,7 +440,7 @@
   }
 
   .qs-list::-webkit-scrollbar-thumb {
-    background: var(--scrollbar-thumb, rgba(255, 255, 255, 0.15));
+    background: var(--scrollbar-thumb);
     border-radius: 3px;
   }
 
@@ -471,7 +471,7 @@
 
   .qs-item:hover,
   .qs-item.qs-item-active {
-    background: var(--hover, rgba(255, 255, 255, 0.08));
+    background: var(--hover);
   }
 
   .qs-item[aria-selected='true'] {
@@ -529,21 +529,21 @@
 
   .lat.ok {
     color: var(--success);
-    background: rgba(34, 197, 94, 0.1);
+    background: color-mix(in srgb, var(--success) 10%, transparent);
   }
 
   .lat.mid {
     color: var(--warning);
-    background: rgba(234, 179, 8, 0.1);
+    background: color-mix(in srgb, var(--warning) 10%, transparent);
   }
 
   .lat.bad {
     color: var(--danger);
-    background: rgba(239, 68, 68, 0.1);
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
   }
 
   .lat.dim {
     color: var(--fg-dim);
-    background: rgba(100, 116, 139, 0.1);
+    background: color-mix(in srgb, var(--fg-secondary) 10%, transparent);
   }
 </style>

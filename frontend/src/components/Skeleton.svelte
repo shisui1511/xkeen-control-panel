@@ -28,7 +28,7 @@
       linear-gradient(
         90deg,
         rgba(255, 255, 255, 0) 0%,
-        rgba(41, 194, 240, 0.08) 50%,
+        rgba(var(--accent-rgb), 0.08) 50%,
         rgba(255, 255, 255, 0) 100%
       ),
       var(--bg-elevated);
