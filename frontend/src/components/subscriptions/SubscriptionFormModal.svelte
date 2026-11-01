@@ -355,10 +355,7 @@
         <span class="form-label" style="display: block; margin-bottom: 4px;"
           >{$t('subscr.sockopt.title')}</span
         >
-        <div
-          class="form-hint"
-          style="font-size: 12px; color: var(--fg-dim); margin-bottom: 12px;"
-        >
+        <div class="form-hint" style="font-size: 12px; color: var(--fg-dim); margin-bottom: 12px;">
           {$t('subscr.sockopt.hint')}
         </div>
 

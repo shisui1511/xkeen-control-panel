@@ -22,7 +22,7 @@ const DEPRECATED = {
   '--card-bg': '--bg-card',
   '--bg-secondary': '--bg-elevated',
   '--border-color': '--border',
-  '--error': '--danger',
+  '--error': '--danger'
 };
 
 function walk(dir, out = []) {
@@ -56,7 +56,9 @@ for (const [f, s] of sources) {
       if (DEPRECATED[name] && f !== GLOBAL) {
         problems.push(`${rel}:${i + 1}: устаревший токен ${name} → ${DEPRECATED[name]}`);
       } else if (!defined.has(name) && !hasFallback) {
-        problems.push(`${rel}:${i + 1}: токен ${name} нигде не объявлен (добавьте в global.css или задайте запасное значение)`);
+        problems.push(
+          `${rel}:${i + 1}: токен ${name} нигде не объявлен (добавьте в global.css или задайте запасное значение)`
+        );
       }
     }
   });
