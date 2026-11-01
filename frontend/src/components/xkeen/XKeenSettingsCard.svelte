@@ -328,7 +328,7 @@
 
   .xs-hint {
     margin: 0;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     font-size: var(--font-size-sm);
   }
 
@@ -360,7 +360,7 @@
     align-items: center;
     gap: var(--spacing-2);
     font-size: var(--font-size-xs);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .xs-path {
@@ -434,7 +434,7 @@
   .xs-line {
     flex-shrink: 0;
     font-family: var(--font-family-mono);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .xs-actions {

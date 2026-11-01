@@ -279,7 +279,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: var(--font-size-xs);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .provider-url-check {
@@ -433,7 +433,7 @@
   }
 
   .meta-label {
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .meta-value {

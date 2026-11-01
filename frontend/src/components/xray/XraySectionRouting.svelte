@@ -317,7 +317,7 @@
         <div
           class="test-route-result card"
           data-testid="test-route-result"
-          style="margin-top: 12px; padding: 12px; background: var(--bg-surface);"
+          style="margin-top: 12px; padding: 12px; background: var(--bg-card);"
         >
           {#if testRouteResult.outbound_tag}
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
@@ -695,8 +695,8 @@
   }
 
   .rule-card.drag-over {
-    border-color: var(--color-primary);
-    box-shadow: 0 0 0 2px var(--color-primary-subtle, rgba(0, 120, 255, 0.2));
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-soft);
   }
 
   .rule-card.rule-disabled {
@@ -734,7 +734,7 @@
     width: 28px;
     height: 16px;
     background: var(--bg-surface-active);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border);
     border-radius: 9999px;
     padding: 0;
     cursor: pointer;
@@ -745,8 +745,8 @@
   }
 
   .rule-toggle-btn.active {
-    background: var(--color-primary);
-    border-color: var(--color-primary);
+    background: var(--accent);
+    border-color: var(--accent);
   }
 
   .toggle-dot {
@@ -755,7 +755,7 @@
     left: 1px;
     width: 12px;
     height: 12px;
-    background: var(--color-on-primary);
+    background: var(--btn-primary-text);
     border-radius: 50%;
     transition: transform 0.2s;
   }
@@ -775,18 +775,18 @@
   }
 
   .badge-direct {
-    background: var(--color-success-subtle, rgba(16, 185, 129, 0.15));
-    color: var(--color-success);
+    background: var(--success-soft);
+    color: var(--success);
   }
 
   .badge-block {
-    background: var(--color-danger-subtle, rgba(239, 68, 68, 0.15));
-    color: var(--color-danger);
+    background: var(--danger-soft);
+    color: var(--danger);
   }
 
   .badge-proxy {
-    background: var(--color-primary-subtle, rgba(59, 130, 246, 0.15));
-    color: var(--color-primary);
+    background: var(--accent-soft);
+    color: var(--accent);
   }
 
   .rule-actions {
@@ -797,7 +797,7 @@
 
   .btn-rule-action {
     background: none;
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border);
     border-radius: var(--radius-xs);
     padding: 4px 6px;
     color: var(--fg-secondary);
@@ -853,13 +853,13 @@
   }
 
   .chip-domain {
-    background: var(--color-primary-subtle, rgba(59, 130, 246, 0.15));
-    color: var(--color-primary);
+    background: var(--accent-soft);
+    color: var(--accent);
   }
 
   .chip-ip {
-    background: var(--color-warning-subtle, rgba(245, 158, 11, 0.15));
-    color: var(--color-warning);
+    background: var(--warning-soft);
+    color: var(--warning);
   }
 
   .form-row2 {
@@ -894,8 +894,8 @@
   }
 
   .form-input {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 6px 10px;
     font-size: 0.8125rem;
@@ -904,12 +904,12 @@
 
   .form-input:focus {
     outline: none;
-    border-color: var(--color-primary);
+    border-color: var(--accent);
   }
 
   :global(.form-select) {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 6px 10px;
     font-size: 0.8125rem;
@@ -917,8 +917,8 @@
   }
 
   .add-btn {
-    background: var(--bg-surface);
-    border: 1px dashed var(--border-color);
+    background: var(--bg-card);
+    border: 1px dashed var(--border);
     border-radius: var(--radius);
     padding: 10px 16px;
     color: var(--fg-secondary);
@@ -930,8 +930,8 @@
   }
 
   .add-btn:hover {
-    border-color: var(--primary);
-    color: var(--primary);
+    border-color: var(--accent);
+    color: var(--accent);
     background: var(--hover);
   }
 

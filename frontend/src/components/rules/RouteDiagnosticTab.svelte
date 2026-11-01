@@ -365,7 +365,7 @@
   .diagnostic-input {
     width: 100%;
     padding: 8px 12px;
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
@@ -471,7 +471,7 @@
   }
 
   .step-card {
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 12px;
@@ -487,7 +487,7 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .step-header-row {

@@ -989,7 +989,7 @@
   }
 
   .dialer-chain-sep {
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .form-actions {

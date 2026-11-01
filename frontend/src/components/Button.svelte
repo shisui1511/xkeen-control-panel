@@ -94,11 +94,11 @@
 
   .btn-danger {
     background: var(--danger);
-    color: #fff;
+    color: var(--on-danger);
   }
   .btn-danger:hover:not(:disabled) {
     opacity: 0.92;
-    color: #fff;
+    color: var(--on-danger);
   }
 
   .btn-warning {

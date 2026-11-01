@@ -390,7 +390,7 @@
   }
 
   .item-edit:hover {
-    color: var(--primary);
+    color: var(--accent);
   }
 
   .item-del:hover {

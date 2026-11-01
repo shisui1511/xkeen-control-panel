@@ -189,7 +189,7 @@
             loading={isStopping}
             title={$t('app.stop')}
           >
-            <Icon name="stop" size={13} color="var(--error, #f4707f)" />
+            <Icon name="stop" size={13} color="var(--danger, #f4707f)" />
             <span>{$t('app.stop')}</span>
           </Button>
         {:else if !isRunning && onStart}

@@ -1012,7 +1012,7 @@
   }
 
   .directive-tag {
-    background: var(--bg-surface);
+    background: var(--bg-card);
     padding: 2px 6px;
     border-radius: 4px;
     font-size: var(--font-size-xs);
@@ -1021,7 +1021,7 @@
   .btn-tag-expand {
     background: none;
     border: none;
-    color: var(--primary);
+    color: var(--accent);
     font-size: var(--font-size-xs);
     cursor: pointer;
     padding: 2px 4px;
@@ -1108,7 +1108,7 @@
   }
 
   .sec-count {
-    background: var(--primary);
+    background: var(--accent);
     color: var(--bg-page);
     font-weight: 700;
     font-size: var(--font-size-xs);

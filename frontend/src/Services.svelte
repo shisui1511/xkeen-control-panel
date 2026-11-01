@@ -2026,7 +2026,7 @@
     align-items: center;
     gap: 12px;
     padding: 12px 16px;
-    background: var(--bg-secondary);
+    background: var(--bg-elevated);
     border: 1.5px solid var(--border);
     border-radius: var(--radius-md);
     cursor: pointer;
@@ -2221,7 +2221,7 @@
     justify-content: space-between;
     gap: 8px;
     padding: 10px 14px;
-    background: var(--bg-secondary);
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
   }
@@ -2286,7 +2286,7 @@
     flex-wrap: wrap;
     gap: 10px 12px;
     padding: 12px 14px;
-    background: var(--bg-secondary);
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
   }
@@ -2348,7 +2348,7 @@
     border-radius: var(--radius-sm);
     border-left: 3px solid var(--border);
     padding: 8px 12px;
-    background: var(--bg-secondary);
+    background: var(--bg-elevated);
   }
 
   .log-entry.log-success {
@@ -2402,7 +2402,7 @@
     justify-content: space-between;
     gap: 12px;
     padding: 12px 14px;
-    background: var(--bg-secondary);
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
   }

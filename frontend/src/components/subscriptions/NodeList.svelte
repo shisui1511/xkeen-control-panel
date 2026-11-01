@@ -1109,7 +1109,7 @@
     padding: 2px 6px;
     border-radius: var(--radius-sm, 4px);
     background: var(--bg-card-subtle);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     border: 1px solid var(--border-subtle);
     cursor: default;
     white-space: nowrap;

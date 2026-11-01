@@ -1175,7 +1175,7 @@
     font-size: 12px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
-    background: var(--bg-secondary);
+    background: var(--bg-elevated);
     color: var(--fg-primary);
     width: 200px;
     transition: all 0.15s ease;
@@ -1231,7 +1231,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     overflow: hidden;
-    background: var(--bg-secondary);
+    background: var(--bg-elevated);
     padding: 1px;
   }
 

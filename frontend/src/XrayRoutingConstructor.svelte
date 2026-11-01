@@ -1341,7 +1341,7 @@
     align-items: center;
     margin-bottom: var(--spacing-3, 12px);
     padding-bottom: var(--spacing-2, 8px);
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border);
   }
 
   .embedded-title-tag {
@@ -1395,7 +1395,7 @@
     max-width: 100%;
     min-width: 0;
     gap: var(--spacing-2, 8px);
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border);
     margin-bottom: var(--spacing-4, 16px);
     overflow-x: auto;
     scrollbar-width: none;
@@ -1422,8 +1422,8 @@
   }
 
   .sec-tab.active {
-    color: var(--color-primary);
-    border-bottom-color: var(--color-primary);
+    color: var(--accent);
+    border-bottom-color: var(--accent);
     font-weight: 500;
   }
 
@@ -1493,7 +1493,7 @@
 
   .apply-diff :global(.diff-same),
   .apply-diff :global(.diff-gap) {
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .apply-plan-warn {

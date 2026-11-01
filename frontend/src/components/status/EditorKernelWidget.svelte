@@ -97,7 +97,7 @@
   .widget-name {
     font-size: 12px;
     font-weight: 600;
-    color: var(--text);
+    color: var(--fg-primary);
   }
 
   .led-dot {

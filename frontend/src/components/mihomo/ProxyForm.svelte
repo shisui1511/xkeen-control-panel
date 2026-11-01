@@ -1239,7 +1239,7 @@
     margin-left: auto;
     background: none;
     border: none;
-    color: var(--primary);
+    color: var(--accent);
     font-size: var(--font-size-xs);
     cursor: pointer;
     text-decoration: underline;
@@ -1247,7 +1247,7 @@
   }
 
   .toggle-all-fields-btn:hover {
-    color: var(--primary-hover);
+    color: var(--accent-hover);
   }
 
   .dialer-chain-preview {
@@ -1298,7 +1298,7 @@
   }
 
   .form-input:focus {
-    border-color: var(--primary);
+    border-color: var(--accent);
   }
 
   .input-with-btn {
@@ -1312,7 +1312,7 @@
   }
 
   .btn-gen {
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     color: var(--fg-secondary);
     border-radius: var(--radius-sm);
