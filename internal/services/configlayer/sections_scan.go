@@ -278,7 +278,8 @@ func scanXraySection(id string, files []XrayKeyFile) XraySectionScan {
 		members = append(members, f)
 		s.Files = append(s.Files, f.Name)
 		s.Sources = append(s.Sources, SourceFile{Name: f.Name, Hash: f.Hash})
-		if n == len(f.Keys) && !f.Broken && !f.Legacy && !f.Symlink {
+		pure := n == len(f.Keys) && !f.Broken && !f.Legacy && !f.Symlink
+		if pure {
 			s.Pure = append(s.Pure, f.Name)
 		} else {
 			s.Mixed = append(s.Mixed, f.Name)
@@ -289,7 +290,8 @@ func scanXraySection(id string, files []XrayKeyFile) XraySectionScan {
 		if f.Comments {
 			s.Comments = append(s.Comments, f.Name)
 		}
-		if id != xraySectionInbounds && f.Name > panelFile {
+		// Чистый файл при взятии уходит в резервный набор и файл панели не перекроет
+		if id != xraySectionInbounds && f.Name > panelFile && !pure {
 			s.Shadowing = append(s.Shadowing, f.Name)
 		}
 		if !xkeenTemplateFiles[f.Name] {

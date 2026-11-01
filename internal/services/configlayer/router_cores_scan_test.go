@@ -164,15 +164,17 @@ func TestRouterCoresScanXray(t *testing.T) {
 }
 
 const (
-	rtCoresLogName     = "01_log.json"
-	rtCoresPolicyName  = "06_policy.json"
-	rtCoresInbName     = "03_inbounds.json"
-	rtCoresAPIName     = "00_api.json"
-	rtCoresExtraName   = "05_extra.json"
-	rtCoresShadowName  = "99_zz.json"
-	rtCoresLogBody     = `{"log": {"loglevel": "warning"}}` + "\n"
-	rtCoresPolicyBody  = `{"policy": {"levels": {"0": {"connIdle": 300}}, "system": {"statsInboundUplink": true}}}` + "\n"
-	rtCoresShadowBody  = `{"dns": {"servers": ["127.0.0.3"]}}` + "\n"
+	rtCoresLogName    = "01_log.json"
+	rtCoresPolicyName = "06_policy.json"
+	rtCoresInbName    = "03_inbounds.json"
+	rtCoresAPIName    = "00_api.json"
+	rtCoresExtraName  = "05_extra.json"
+	rtCoresShadowName = "99_zz.json"
+	rtCoresLogBody    = `{"log": {"loglevel": "warning"}}` + "\n"
+	rtCoresPolicyBody = `{"policy": {"levels": {"0": {"connIdle": 300}}, "system": {"statsInboundUplink": true}}}` + "\n"
+	// Смешанный файл (dns и stats) после файла панели: остаётся на месте и перекрывает его.
+	// Чистый файл так же поздно по имени при взятии уходит в копии и не перекрывает.
+	rtCoresShadowBody  = `{"dns": {"servers": ["127.0.0.3"]}, "stats": {}}` + "\n"
 	rtCoresShadowValue = `{"servers":["127.0.0.3"]}`
 	// Прозрачные входящие: redirect, tproxy и входящий XKeen force-proxy-redirect.
 	rtCoresInbBody = `{"inbounds": [

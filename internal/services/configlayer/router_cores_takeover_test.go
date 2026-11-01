@@ -487,8 +487,9 @@ func TestRouterCoresTakeoverGuards(t *testing.T) {
 
 	t.Run("shadowed", func(t *testing.T) {
 		e := rtNewCoresEnv(t, map[string]string{
-			rtCoDNSFile:      rtCoDNSBody,
-			shadowFile:       `{"dns": {"servers": ["8.8.8.8"]}}` + "\n",
+			rtCoDNSFile: rtCoDNSBody,
+			// смешанный файл остаётся на месте при взятии и перекрыл бы файл панели
+			shadowFile:       `{"dns": {"servers": ["8.8.8.8"]}, "stats": {}}` + "\n",
 			rtCoOutboundFile: rtCoOutboundBody,
 		})
 		e.editSections(t, map[string]json.RawMessage{SectionXrayDNS: e.takeDraft(t, xraySectionDNS, true)})
@@ -498,6 +499,22 @@ func TestRouterCoresTakeoverGuards(t *testing.T) {
 			t.Fatalf("перекрывающий файл секции: %+v", res)
 		}
 		e.assertKept(t, before)
+	})
+
+	t.Run("shadowed_pure_moves", func(t *testing.T) {
+		// Чистый файл секции, идущий по имени после файла панели, при взятии уходит в
+		// копии вместе с остальными: перекрытия нет, взятие проходит.
+		e := rtNewCoresEnv(t, map[string]string{
+			rtCoDNSFile:      rtCoDNSBody,
+			shadowFile:       `{"dns": {"servers": ["8.8.8.8"]}}` + "\n",
+			rtCoOutboundFile: rtCoOutboundBody,
+		})
+		e.editSections(t, map[string]json.RawMessage{SectionXrayDNS: e.takeDraft(t, xraySectionDNS, true)})
+		res := e.apply(t)
+		if !res.OK || res.Code != ResultApplied {
+			t.Fatalf("взятие с чистым поздним файлом секции: %+v", res)
+		}
+		e.assertAbsent(t, shadowFile)
 	})
 
 	t.Run("validation", func(t *testing.T) {
