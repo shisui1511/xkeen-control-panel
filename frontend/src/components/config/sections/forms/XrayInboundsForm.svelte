@@ -132,17 +132,20 @@
       let portErr = '';
       if (!unchanged && !(/^\d{1,5}$/.test(port) && Number(port) >= 1 && Number(port) <= 65535)) {
         portErr = $t('cfg.sec.err_port');
-      } else if (
-        before.some((o) => o.listen.trim() === r.listen.trim() && o.port.trim() === port)
-      ) {
+      } else if (before.some((o) => listenOf(o) === listenOf(r) && o.port.trim() === port)) {
         portErr = $t('cfg.sec.err_duplicate', {
           what: $t('cfg.sec.f.listen_port'),
-          value: `${r.listen.trim()}:${port}`
+          value: `${listenOf(r)}:${port}`
         });
       }
       return { tag: tagErr, port: portErr };
     })
   );
+
+  // Адрес прослушивания для сравнения повтора: пустой равен 0.0.0.0, как на сервере
+  function listenOf(row: Row): string {
+    return row.listen.trim() || '0.0.0.0';
+  }
 
   // Порт закреплённой строки изменён: способ применения станет другим (D-16)
   function portChanged(row: Row): boolean {
