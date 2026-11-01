@@ -343,15 +343,14 @@ test('cores: Mihomo — listener force-proxy переживает правку �
     expect(kept[0].port, 'порт listener не изменился').toBe(port);
     await expect.poll(nameValues, { timeout: T.action }).toContain(name);
 
-    // профиль уже у панели: смена tun объявляет полный перезапуск (D-16)
-    if (before.profileOwner === 'panel') {
-      await expect(page.getByTestId('section-restart-note-mihomo-inbounds')).toBeVisible({
-        timeout: T.action
-      });
-      await expect(
-        page.locator('[data-testid="draft-restart-note"][data-kernel="mihomo"]')
-      ).toHaveAttribute('data-reason', 'tun', { timeout: T.action });
-    }
+    // смена tun объявляет полный перезапуск (D-16) и тогда, когда профиль взят в этом же
+    // черновике: взятие сравнивается с активным профилем (G-147-3)
+    await expect(page.getByTestId('section-restart-note-mihomo-inbounds')).toBeVisible({
+      timeout: T.action
+    });
+    await expect(
+      page.locator('[data-testid="draft-restart-note"][data-kernel="mihomo"]')
+    ).toHaveAttribute('data-reason', 'tun', { timeout: T.action });
 
     await guard.assertClean();
   } finally {
