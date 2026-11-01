@@ -403,4 +403,67 @@ func TestRouterCoresMihomoSeedRoundTrip(t *testing.T) {
 		seeded["other"] = securedRaw
 		rtMihomoSeedKernelCheck(t, rtMihomoSeedProfile(t, rtMihomoSeedSections(t, seeded, rtMihomoSeedAll...), configlayer.MihomoPorts{}))
 	})
+	// Сочетания секций, которые через API собирать дольше (G-147-4, D-11): вердикт
+	// даёт та же CheckMihomo, что блокирует «Применить». Как подсценарий «проверка»,
+	// работает в памяти по секциям из переноса; tls, пустой secret, неуправляемая
+	// секция и mihomo -t идут через панель в TestRouterCoresMihomoControllerSecret.
+	t.Run("external-controller в любой секции", func(t *testing.T) {
+		seeded, err := SeedMihomo([]byte(rtMihomoSeedFull), configlayer.MihomoPorts{Redir: 7100, TProxy: 7101})
+		if err != nil {
+			t.Fatalf("SeedMihomo: %v", err)
+		}
+		// edit возвращает копию значений секций с выставленными ключами (сырой JSON).
+		type keys map[string]string
+		edit := func(set map[string]keys) map[string]json.RawMessage {
+			out := map[string]json.RawMessage{}
+			for id, raw := range seeded {
+				out[id] = raw
+			}
+			for id, kv := range set {
+				o := rtMihomoSeedObject(t, seeded[id])
+				for k, v := range kv {
+					o.Set(k, json.RawMessage(v))
+				}
+				b, err := o.MarshalJSON()
+				if err != nil {
+					t.Fatal(err)
+				}
+				out[id] = b
+			}
+			return out
+		}
+		cases := []struct {
+			name string
+			set  map[string]keys
+			want []string
+		}{
+			// Адрес не строкой тоже считается заданным.
+			{"main: адрес числом", map[string]keys{"main": {"external-controller": `9090`}},
+				[]string{"mihomo_main:external-controller"}},
+			// Обратное направление к живому secret_in_other_section.
+			{"other: контроллер, main: secret", map[string]keys{
+				"other": {"external-controller": `"127.0.0.1:9090"`}, "main": {"secret": `"s"`}}, nil},
+			{"контроллеры в двух секциях без secret", map[string]keys{
+				"main": {"external-controller": `"127.0.0.1:9090"`}, "inbounds": {"external-controller-tls": `"127.0.0.1:9091"`}},
+				[]string{"mihomo_main:external-controller", "mihomo_inbounds:external-controller-tls"}},
+		}
+		for _, c := range cases {
+			in := configlayer.Input{Sections: rtMihomoSeedSections(t, edit(c.set), rtMihomoSeedAll...)}
+			got := map[string]bool{}
+			for _, bi := range CheckMihomo(in, configlayer.InstalledKernels{Mihomo: true}) {
+				if bi.Code == configlayer.IssueControllerNoSecret {
+					got[bi.Key+":"+bi.Params["key"]] = true
+				}
+			}
+			for _, w := range c.want {
+				if !got[w] {
+					t.Errorf("CheckMihomo, %s: %s без secret принят", c.name, w)
+				}
+				delete(got, w)
+			}
+			for g := range got {
+				t.Errorf("CheckMihomo, %s: лишний controller_no_secret %s — secret другой секции не учтён", c.name, g)
+			}
+		}
+	})
 }

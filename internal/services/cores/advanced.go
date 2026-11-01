@@ -769,11 +769,12 @@ func MergeForm(kernel, id string, prev, form json.RawMessage, advanced string) (
 	if kernel == configlayer.KernelXray && id == "inbounds" {
 		keep = XrayKeepTags(prev)
 	}
-	return mergeForm(kernel, id, prev, form, advanced, keep)
+	return mergeForm(kernel, id, prev, form, advanced, keep, nil)
 }
 
-// mergeForm — MergeForm с явным списком защищённых входящих keep.
-func mergeForm(kernel, id string, prev, form json.RawMessage, advanced string, keep []string) (json.RawMessage, []configlayer.KeyIssue, error) {
+// mergeForm — MergeForm с явным списком защищённых входящих keep и соседними
+// секциями Mihomo siblings, из которых берётся secret контроллера.
+func mergeForm(kernel, id string, prev, form json.RawMessage, advanced string, keep []string, siblings []*configlayer.OrderedObject) (json.RawMessage, []configlayer.KeyIssue, error) {
 	kind, ok := kindOf(kernel, id)
 	if !ok {
 		return nil, nil, &Error{Code: codeSectionUnknown}
@@ -825,7 +826,7 @@ func mergeForm(kernel, id string, prev, form json.RawMessage, advanced string, k
 			iss.add(is.Key, is.Code)
 		}
 	} else {
-		for _, is := range MihomoValueIssues(id, value) {
+		for _, is := range mihomoValueIssues(id, value, siblings) {
 			iss.add(is.Key, is.Code)
 		}
 	}

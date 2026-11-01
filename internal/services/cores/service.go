@@ -817,7 +817,16 @@ func (s *Service) Save(rev int64, kernel, id string, form json.RawMessage, advan
 		if err != nil {
 			return nil, err
 		}
-		value, issues, err := mergeForm(kernel, id, prev, form, advanced, keepOf(kernel, id, cs, prev))
+		// Save отклоняет только ключи контроллера сохраняемой секции, secret берётся
+		// из её самой и соседних секций черновика, как их увидит «Применить». Снятие
+		// secret в другой секции Save пропускает: CheckMihomo покажет
+		// controller_no_secret у секции с контроллером в checks снимка и заблокирует
+		// «Применить» (409 apply_blocked).
+		var siblings []*configlayer.OrderedObject
+		if kernel == configlayer.KernelMihomo {
+			siblings = mihomoSiblingTops(st.Draft, id)
+		}
+		value, issues, err := mergeForm(kernel, id, prev, form, advanced, keepOf(kernel, id, cs, prev), siblings)
 		if err != nil {
 			var re *RawError
 			if errors.As(err, &re) {
@@ -966,7 +975,15 @@ func (s *Service) ParseRaw(kernel, id, text string) (RawResult, error) {
 	if err := checkKernel(kernel); err != nil {
 		return RawResult{}, err
 	}
-	return ParseRaw(kernel, id, text)
+	// Секции черновика дают secret контроллера так же, как у Save. Ошибка чтения —
+	// secret только из текста: строже, окончательно решают Save и CheckMihomo.
+	var siblings []*configlayer.OrderedObject
+	if kernel == configlayer.KernelMihomo {
+		if st, err := s.d.Layer.ReadState(); err == nil {
+			siblings = mihomoSiblingTops(st.Draft, id)
+		}
+	}
+	return parseRaw(kernel, id, text, siblings)
 }
 
 // Reclaim — «Вернуть файл панели»: решает дрейф секции Xray, оставляя секцию у

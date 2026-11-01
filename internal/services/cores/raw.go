@@ -32,8 +32,16 @@ func xkeenInboundTag(tag string) bool {
 // (Mihomo). Текст больше 256 КиБ — *Error raw_too_large. Синтаксическая ошибка не
 // ошибка вызова: она в RawResult.Error с номером строки. Ключи, занятые панелью,
 // закреплённые и повторяющие поля формы, а также TCP external-controller без
-// secret попадают в Rejected.
+// secret (external-controller и external-controller-tls в любой секции main,
+// inbounds, other) попадают в Rejected. С соседними секциями черновика текст
+// разбирает Service.ParseRaw.
 func ParseRaw(kernel, id, text string) (RawResult, error) {
+	return parseRaw(kernel, id, text, nil)
+}
+
+// parseRaw — ParseRaw с соседними секциями Mihomo siblings, из которых берётся
+// secret контроллера.
+func parseRaw(kernel, id, text string, siblings []*configlayer.OrderedObject) (RawResult, error) {
 	kind, ok := kindOf(kernel, id)
 	if !ok {
 		return RawResult{}, &Error{Code: codeSectionUnknown}
@@ -79,8 +87,12 @@ func ParseRaw(kernel, id, text string) (RawResult, error) {
 				iss.add(k, configlayer.IssueCoreSectionInvalid)
 			}
 		}
+		// Ключи контроллера и secret полями формы не бывают: они целиком в тексте.
+		for _, is := range mihomoControllerIssues(obj, siblings) {
+			iss.add(is.Key, is.Code)
+		}
 	case kindRaw:
-		addValueIssues(kernel, id, value, iss)
+		addValueIssues(kernel, id, value, iss, siblings)
 	default:
 		lay := layoutFor(kernel, id, obj)
 		form, rest := splitObj(lay, "", obj)
@@ -91,7 +103,7 @@ func ParseRaw(kernel, id, text string) (RawResult, error) {
 		value = mihomoObjectRaw(rest)
 		// Закреплённые значения Xray в остаток не попадают, но в тексте они
 		// отклоняются так же, как при сохранении.
-		addValueIssues(kernel, id, mihomoObjectRaw(obj), iss)
+		addValueIssues(kernel, id, mihomoObjectRaw(obj), iss, siblings)
 	}
 	res.Rejected = append(res.Rejected, iss.list...)
 	res.Value = value
@@ -100,12 +112,12 @@ func ParseRaw(kernel, id, text string) (RawResult, error) {
 
 // addValueIssues добавляет проблемы значения секции (зарезервированные и
 // закреплённые ключи, controller_no_secret).
-func addValueIssues(kernel, id string, value json.RawMessage, iss *issueSink) {
+func addValueIssues(kernel, id string, value json.RawMessage, iss *issueSink, siblings []*configlayer.OrderedObject) {
 	var issues []configlayer.KeyIssue
 	if kernel == configlayer.KernelXray {
 		issues = XrayValueIssues(id, value, nil)
 	} else {
-		issues = MihomoValueIssues(id, value)
+		issues = mihomoValueIssues(id, value, siblings)
 	}
 	for _, is := range issues {
 		iss.add(is.Key, is.Code)
