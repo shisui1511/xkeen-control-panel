@@ -229,20 +229,6 @@ func parsePort(raw json.RawMessage) (single int, ok bool) {
 	return single, true
 }
 
-// xrayChecker — проверка секций Xray в реестре слоя.
-type xrayChecker struct{}
-
-// XrayChecker возвращает проверку секций Xray для реестра слоя.
-func XrayChecker() configlayer.Checker { return xrayChecker{} }
-
-// ID — идентификатор проверки в реестре.
-func (xrayChecker) ID() string { return xrayGenID }
-
-// Check — CheckXray.
-func (xrayChecker) Check(in configlayer.Input, installed configlayer.InstalledKernels) []configlayer.BuildIssue {
-	return CheckXray(in, installed)
-}
-
 // CheckXray проверяет секции Xray черновика до записи. Xray не установлен —
 // проблем нет. Секция черновика, которая не разбирается, — core_section_invalid;
 // для секции с managed=true проверяется значение (XrayValueIssues). Ключ
