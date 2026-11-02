@@ -148,19 +148,40 @@ func (a *API) ConfigRoutingGroupsSave(w http.ResponseWriter, r *http.Request) {
 	JSONSuccess(w, map[string]any{"event": ev, "group": g})
 }
 
-// ConfigRoutingTake — POST /api/configlayer/routing/take {revision}: желание
+// takeScopeOf разбирает область взятия из запроса: пусто или all — оба ядра, mihomo,
+// xray; иное значение — InvalidInputError (400 scope_invalid).
+func takeScopeOf(scope string) (routing.TakeScope, error) {
+	switch routing.TakeScope(scope) {
+	case "", routing.ScopeAll:
+		return routing.ScopeAll, nil
+	case routing.ScopeMihomo:
+		return routing.ScopeMihomo, nil
+	case routing.ScopeXray:
+		return routing.ScopeXray, nil
+	}
+	return "", &routing.InvalidInputError{Field: "scope", Reason: "scope_invalid"}
+}
+
+// ConfigRoutingTake — POST /api/configlayer/routing/take {revision, scope}: желание
 // «маршрутизацией управляет панель» в черновик; взятие происходит при «Применить».
+// scope — all (по умолчанию), mihomo или xray: какие ядра берёт панель.
 func (a *API) ConfigRoutingTake(w http.ResponseWriter, r *http.Request) {
 	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
 		return
 	}
 	var req struct {
-		Revision int64 `json:"revision"`
+		Revision int64  `json:"revision"`
+		Scope    string `json:"scope"`
 	}
 	if !a.decodeLayerBody(w, r, &req) {
 		return
 	}
-	ev, err := a.routing.Take(req.Revision)
+	scope, err := takeScopeOf(req.Scope)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	ev, err := a.routing.TakeScoped(req.Revision, scope)
 	if err != nil {
 		a.writeRoutingError(w, r, err)
 		return
@@ -493,8 +514,9 @@ func (a *API) ConfigRoutingPresetsPlan(w http.ResponseWriter, r *http.Request) {
 }
 
 // ConfigRoutingPresetsApply — POST /api/configlayer/routing/presets/apply
-// {revision, choice, take}: пресет одной правкой черновика (группы и правила);
-// take=true — вместе с взятием маршрутизации под панель.
+// {revision, choice, take, scope}: пресет одной правкой черновика (группы и правила);
+// take=true — вместе с взятием маршрутизации под панель, scope (all, mihomo, xray)
+// задаёт, какие ядра берутся.
 func (a *API) ConfigRoutingPresetsApply(w http.ResponseWriter, r *http.Request) {
 	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
 		return
@@ -503,16 +525,19 @@ func (a *API) ConfigRoutingPresetsApply(w http.ResponseWriter, r *http.Request) 
 		Revision int64                `json:"revision"`
 		Choice   routing.PresetChoice `json:"choice"`
 		Take     bool                 `json:"take"`
+		Scope    string               `json:"scope"`
 	}
 	if !a.decodeLayerBody(w, r, &req) {
 		return
 	}
-	var (
-		ev  configlayer.DraftEvent
-		err error
-	)
+	scope, err := takeScopeOf(req.Scope)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	var ev configlayer.DraftEvent
 	if req.Take {
-		ev, err = a.routing.TakeWithPreset(req.Revision, req.Choice)
+		ev, err = a.routing.TakeWithPresetScoped(req.Revision, req.Choice, scope)
 	} else {
 		ev, err = a.routing.ApplyPreset(req.Revision, req.Choice)
 	}

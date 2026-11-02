@@ -3,13 +3,18 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 )
@@ -353,4 +358,267 @@ func TestRouterMihomoSwitch(t *testing.T) {
 		t.Error("файл rt-sw-a изменился после отпускания")
 	}
 	expectXrayUntouched("release")
+}
+
+// Отказ запуска возвращает панель целиком (D-10, T-147.1-22): Mihomo у панели,
+// activate rt-sw-b, а пока ссылка на rt-sw-b, процесс Mihomo гасится сигналом KILL —
+// подтверждение запуска не приходит и по сроку откатывает переход. Ответ: rolled_back
+// true, active прежний, error непустой; config.yaml снова на профиле панели, файл
+// профиля панели прежний, секции Mihomo под управлением, черновик чистый, Mihomo
+// работает на прежнем профиле с новым процессом. Метка ядра: нужен активный Mihomo.
+func TestRouterMihomoSwitchRollback(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	if tg.Core != "mihomo" {
+		t.Skip("нужен активный Mihomo: отказ запуска подтверждается погашенным процессом")
+	}
+	e := rtNewSrc(t)
+	e.enableLayer()
+	e.rtRstIdle()
+	s := rtSwPrepare(t, e, tg, rtSwB)
+	rtCoresLiveMihomoTake(t, e, tg)
+	e.rtSwSeedKeys()
+
+	panelFile := filepath.Join(rtRtMihomoDir, rtRtPanelProfile)
+	panelData, err := os.ReadFile(panelFile)
+	if err != nil {
+		t.Fatalf("профиль панели не читается: %v", err)
+	}
+	bSum := rtRtSum(s.read(rtSwB))
+	pidBefore := rtRstKernelPID(t, "mihomo")
+
+	// Настоящий отказ запуска: пока config.yaml указывает на rt-sw-b, процесс
+	// гасится. Горутина останавливается в t.Cleanup раньше, чем стенд возвращается.
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		tick := time.NewTicker(time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+			}
+			target, err := os.Readlink(s.cfg)
+			if err != nil || filepath.Base(target) != rtSwB+".yaml" {
+				continue
+			}
+			pids, _ := rtRstKernelPIDs("mihomo")
+			for _, pid := range pids {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		wg.Wait()
+	})
+
+	// Предел ожидания ответа — routertest.SlowCallTimeout у callSlow: больше срока
+	// подтверждения вместе с откатом.
+	r := e.callSlow(http.MethodPost, rtSwBase, map[string]string{"action": "activate", "profile": rtSwB})
+	cancel()
+	wg.Wait()
+	if r.Status != http.StatusOK {
+		t.Fatalf("activate %s: %d %s", rtSwB, r.Status, r.Code)
+	}
+	res := r.object(t)
+	if rb, _ := res["rolled_back"].(bool); !rb {
+		t.Fatalf("rolled_back=false при погашенном процессе: restarted=%v", res["restarted"])
+	}
+	if active, _ := res["active"].(string); active != rtSwPanel {
+		t.Errorf("active %q после отката, ожидался %s", active, rtSwPanel)
+	}
+	if msg, _ := res["error"].(string); msg == "" {
+		t.Error("после отката текст error пуст")
+	}
+
+	// Панель вернулась целиком: ссылка, файл, состояние, секции, черновик.
+	if !rtSwLinkOn(t, rtRtPanelProfile) {
+		t.Errorf("после отката config.yaml не указывает на %s", rtRtPanelProfile)
+	}
+	if got, err := os.ReadFile(panelFile); err != nil || rtRtSum(got) != rtRtSum(panelData) {
+		t.Errorf("профиль панели после отката не на месте или изменён: %v", err)
+	}
+	if got := rtRtSum(s.read(rtSwB)); got != bSum {
+		t.Error("файл rt-sw-b изменился при отказе")
+	}
+	routing := e.rtSwRouting()
+	if k, _ := routing["mihomo"].(map[string]any); k == nil || k["taken"] != true {
+		t.Errorf("после отката routing.mihomo: %v, ожидалось taken=true", routing["mihomo"])
+	}
+	if routing["desired_mihomo"] != true {
+		t.Errorf("после отката desired_mihomo=%v: желание отпустить Mihomo осталось в черновике", routing["desired_mihomo"])
+	}
+	if owner := e.rtCoresRetakeProfileOwner(); owner != "panel" {
+		t.Errorf("после отката профиль Mihomo: владелец %q, ожидался panel", owner)
+	}
+	if owner := e.rtCoresRetakeOwner("mihomo", "other"); owner != "panel" {
+		t.Errorf("после отката секция other: владелец %q, ожидался panel", owner)
+	}
+	if n := e.rtRtDraftChanges(); n != 0 {
+		t.Errorf("после отката в черновике %d изменений, ожидалось 0 (D-10: возвращается всё)", n)
+	}
+
+	// Откат перезапускает Mihomo на прежнем профиле: ждём новый устойчивый процесс.
+	var pidAfter int
+	deadline := time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		if pids, _ := rtRstKernelPIDs("mihomo"); len(pids) == 1 {
+			pidAfter = pids[0]
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if pidAfter == 0 {
+		t.Fatal("после отката Mihomo не запущен")
+	}
+	if pidAfter == pidBefore {
+		t.Fatalf("PID mihomo не сменился (%d): процесс не перезапускался", pidBefore)
+	}
+	rtRstHoldPID(t, "mihomo", pidAfter)
+}
+
+// Открытый черновик (D-08): в черновике правка параметров проб Xray; activate,
+// release и return отвечают 409 draft_open, файлы, ссылка, черновик и владение не
+// меняются, правка Xray не применяется. Неизвестные профили и действие отклоняются
+// кодами profile_unknown и action_invalid. После сброса черновика release проходит.
+// Область взятия: неизвестное значение scope — 400 scope_invalid, допустимые
+// принимаются; без X-CSRF-Token — 403. Без метки ядра: исход не зависит от активного.
+func TestRouterMihomoSwitchDraftOpen(t *testing.T) {
+	tg := routertest.Current(t)
+	e := rtNewSrc(t)
+	e.enableLayer()
+	e.rtRstIdle()
+	s := rtSwPrepare(t, e, tg, rtSwC)
+	m := rtCoresLiveMihomoTake(t, e, tg)
+
+	t.Run("draft_open", func(t *testing.T) {
+		c := e.with(t)
+		probe, _ := c.rtRtView()["probe"].(map[string]any)
+		interval, _ := probe["interval_s"].(float64)
+		if interval == 0 {
+			t.Fatalf("в представлении нет probe.interval_s: %v", probe)
+		}
+		probe["interval_s"] = int(interval) + 1
+		if r := c.call(http.MethodPost, rtRoutingBase+"/probe", map[string]any{"revision": c.rtRtRevision(), "probe": probe}); r.Status != http.StatusOK {
+			t.Fatalf("probe: %d %s", r.Status, r.Code)
+		}
+		changes := c.rtRtDraftChanges()
+		if changes == 0 {
+			t.Fatal("правка проб не открыла черновик")
+		}
+		rev := c.rtRtRevision()
+		disk := rtRtScanDisk(t)
+		routing := rtSwJSON(c.rtSwRouting())
+		xrayFiles := rtCoresDirSums(t)
+		cSum := rtRtSum(s.read(rtSwC))
+
+		for _, req := range []map[string]string{
+			{"action": "activate", "profile": rtSwC},
+			{"action": "release"},
+			{"action": "return"},
+		} {
+			r := c.callSlow(http.MethodPost, rtSwBase, req)
+			c.rtRtExpect(req["action"]+" при открытом черновике", r, http.StatusConflict, "draft_open")
+			if got := rtRtScanDisk(t); got.mihomoTarget != disk.mihomoTarget || got.mihomoSum != disk.mihomoSum {
+				t.Errorf("%s: config.yaml изменился при отказе", req["action"])
+			}
+			if got := rtCoresDirSums(t); !reflect.DeepEqual(got, xrayFiles) {
+				t.Errorf("%s: правка Xray из черновика применилась (файлы каталога изменились)", req["action"])
+			}
+			if got := c.rtRtRevision(); got != rev {
+				t.Errorf("%s: ревизия черновика %d -> %d", req["action"], rev, got)
+			}
+			if got := c.rtRtDraftChanges(); got != changes {
+				t.Errorf("%s: изменений черновика %d -> %d", req["action"], changes, got)
+			}
+			if got := rtSwJSON(c.rtSwRouting()); got != routing {
+				t.Errorf("%s: снимок владения изменился при отказе", req["action"])
+			}
+		}
+		if got := rtRtSum(s.read(rtSwC)); got != cSum {
+			t.Error("файл rt-sw-c изменился при отказе")
+		}
+
+		// Профиль и действие проверяются до черновика и без него.
+		for _, name := range []string{"rt-sw-no-such", "../config", "xcp-main", "xcp-x", "a/b", ""} {
+			r := c.call(http.MethodPost, rtSwBase, map[string]string{"action": "activate", "profile": name})
+			c.rtRtExpect("activate профиля вне набора (длина имени "+strconv.Itoa(len(name))+")", r, http.StatusNotFound, "profile_unknown")
+		}
+		bad := c.call(http.MethodPost, rtSwBase, map[string]string{"action": "nope"})
+		c.rtRtExpect("неизвестное действие", bad, http.StatusBadRequest, "action_invalid")
+		if bad.Params["field"] != "action" {
+			t.Errorf("неизвестное действие: field %q, ожидался action", bad.Params["field"])
+		}
+	})
+
+	t.Run("release_after_reset", func(t *testing.T) {
+		c := e.with(t)
+		c.resetDraft()
+		if n := c.rtRtDraftChanges(); n != 0 {
+			t.Fatalf("после сброса в черновике %d изменений", n)
+		}
+		res := c.rtSwCall("release", "")
+		if rb, _ := res["rolled_back"].(bool); rb {
+			t.Fatalf("release откатился: ошибка %q", res["error"])
+		}
+		m.taken = false
+		rtRstExpectApplied(t, c.rtRstApplyView())
+		if k, _ := c.rtSwRouting()["mihomo"].(map[string]any); k == nil || k["taken"] != false {
+			t.Errorf("после release routing.mihomo: %v, ожидалось taken=false", c.rtSwRouting()["mihomo"])
+		}
+		// Прежний профиль возвращён побайтно.
+		now := rtRtScanDisk(t)
+		if now.mihomoTarget != m.before.mihomoTarget || now.mihomoSum != m.before.mihomoSum {
+			t.Error("после release config.yaml не вернулся на исходный профиль")
+		}
+	})
+
+	t.Run("scope", func(t *testing.T) {
+		c := e.with(t)
+		bad := c.call(http.MethodPost, rtRoutingBase+"/take", map[string]any{"revision": c.rtRtRevision(), "scope": "nope"})
+		c.rtRtExpect("take: неизвестная область", bad, http.StatusBadRequest, "scope_invalid")
+		if bad.Params["field"] != "scope" {
+			t.Errorf("take: неизвестная область: field %q, ожидался scope", bad.Params["field"])
+		}
+		badPreset := c.call(http.MethodPost, rtRoutingBase+"/presets/apply",
+			map[string]any{"revision": c.rtRtRevision(), "choice": map[string]any{}, "take": true, "scope": "nope"})
+		c.rtRtExpect("presets/apply: неизвестная область", badPreset, http.StatusBadRequest, "scope_invalid")
+		if n := c.rtRtDraftChanges(); n != 0 {
+			t.Errorf("отказ по области изменил черновик: %d изменений", n)
+		}
+
+		status, _, err := c.p.Request(http.MethodPost, rtRoutingBase+"/take", []byte(`{"scope":"mihomo"}`), routertest.AuthNoCSRF)
+		if err != nil {
+			t.Fatalf("take без CSRF: %v", err)
+		}
+		if status != http.StatusForbidden {
+			t.Errorf("take без X-CSRF-Token: статус %d, ожидался 403", status)
+		}
+		status, _, err = c.p.Request(http.MethodPost, rtSwBase, []byte(`{"action":"return"}`), routertest.AuthNoCSRF)
+		if err != nil {
+			t.Fatalf("mihomo без CSRF: %v", err)
+		}
+		if status != http.StatusForbidden {
+			t.Errorf("routing/mihomo без X-CSRF-Token: статус %d, ожидался 403", status)
+		}
+
+		// Допустимые области принимаются; взятие Mihomo ложится в черновик и сбрасывается.
+		for _, scope := range []string{"mihomo", "xray", "all", ""} {
+			body := map[string]any{"revision": c.rtRtRevision()}
+			if scope != "" {
+				body["scope"] = scope
+			}
+			if r := c.call(http.MethodPost, rtRoutingBase+"/take", body); r.Status != http.StatusOK {
+				t.Errorf("take scope=%q: %d %s", scope, r.Status, r.Code)
+			}
+			if scope == "mihomo" && c.rtSwRouting()["desired_mihomo"] != true {
+				t.Error("take scope=mihomo: желание взять Mihomo не попало в черновик")
+			}
+			c.resetDraft()
+		}
+	})
 }
