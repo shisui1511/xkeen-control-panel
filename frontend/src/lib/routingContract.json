@@ -241,7 +241,15 @@
     "children": {}
   },
   "RoutingSnapshot": {
-    "required": ["desired", "xray", "mihomo"],
+    "required": [
+      "desired",
+      "desired_xray",
+      "desired_mihomo",
+      "mihomo_active",
+      "mihomo_saved",
+      "xray",
+      "mihomo"
+    ],
     "optional": [],
     "children": {
       "xray": "RoutingKernelView",

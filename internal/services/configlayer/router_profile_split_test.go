@@ -123,6 +123,15 @@ func TestRouterProfileSplitOps(t *testing.T) {
 	}
 	e.assertConfigLink(t, e.link)
 
+	// Снимок слоя: владение по ядрам, активный свой профиль Mihomo.
+	snap := e.layer.Snapshot().Routing
+	if !snap.Desired || !snap.DesiredXray || snap.DesiredMihomo {
+		t.Errorf("снимок: desired=%v desired_xray=%v desired_mihomo=%v", snap.Desired, snap.DesiredXray, snap.DesiredMihomo)
+	}
+	if snap.MihomoActive != "user" {
+		t.Errorf("mihomo_active = %q, ожидалось user", snap.MihomoActive)
+	}
+
 	// Всё отпущено: Xray возвращается, Mihomo остаётся на своём профиле.
 	e.setRouting(t, `{"v":1,"managed":false}`)
 	st = e.layer.store.Snapshot()
@@ -147,6 +156,10 @@ func TestRouterProfileSplitOps(t *testing.T) {
 		t.Errorf("файл routing панели Xray записан без управления: %v", err)
 	}
 	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
+	snap = e.layer.Snapshot().Routing
+	if !snap.Desired || snap.DesiredXray || !snap.DesiredMihomo || snap.MihomoActive != "" {
+		t.Errorf("снимок: %+v", snap)
+	}
 
 	// Секция без поля после этого ведёт себя как раньше: Xray берётся, Mihomo
 	// остаётся у панели, затем отпускание возвращает оба.
