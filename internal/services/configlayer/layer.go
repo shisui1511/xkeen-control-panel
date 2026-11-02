@@ -1499,6 +1499,66 @@ func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 	return view, nil
 }
 
+// SectionLiveRun — параметры запуска «секция поверх применённого состояния»
+// (RunSectionLive, D-13).
+type SectionLiveRun struct {
+	// Trigger — что запустило конвейер (TriggerAccessLog).
+	Trigger Trigger
+	// Kernel ограничивает запуск одним ядром; пусто — все установленные.
+	Kernel string
+	// Sections — подменяемые секции: заменяют одноимённые в применённом состоянии
+	// на время сборки и после успеха фиксируются в Applied.
+	Sections Sections
+	// MergeDraft сливает значение секции в черновик: получает имя и значение секции
+	// в черновике, возвращает новое; другие ключи секции и другие секции черновика
+	// остаются как есть. nil — черновик не меняется.
+	MergeDraft func(name string, draft json.RawMessage) (json.RawMessage, error)
+}
+
+// RunSectionLive — запуск конвейера поверх применённого состояния с подменой
+// секций (D-13): сборка, проверки до записи, проверка обоих ядер, запись,
+// перезапуск только запущенного ядра, коммит. Значение секции пишется одной
+// записью с манифестом в Applied, а в Draft сливается функцией run.MergeDraft;
+// остальные правки черновика не применяются и остаются в нём. Владение
+// маршрутизацией и секциями не меняется. Занятость как у StartApply по кнопке
+// (user=true). Отказ проверки или перезапуска — ни Applied, ни Draft, ни файлы не
+// меняются; нерешённый дрейф — ErrDriftBlocked. Вызов синхронный; после снятия
+// замка идут afterRun и хуки AddAfterApply.
+func (l *Layer) RunSectionLive(ctx context.Context, run SectionLiveRun) (ApplyView, error) {
+	if !l.Enabled() {
+		return ApplyView{}, ErrDisabled
+	}
+	if run.Trigger == "" {
+		return ApplyView{}, errors.New("configlayer: не задан триггер запуска")
+	}
+	if len(run.Sections) == 0 {
+		return ApplyView{}, errors.New("configlayer: не заданы секции запуска")
+	}
+	l.mu.Lock()
+	stopped := l.stopped
+	l.mu.Unlock()
+	if stopped {
+		return ApplyView{}, ErrStopped
+	}
+	release, err := l.pipeline.TryBegin(ctx, true)
+	if err != nil {
+		return ApplyView{}, l.mapBusy(err)
+	}
+	defer release()
+	req := ApplyRequest{
+		Trigger: run.Trigger, Source: SourceApplied, Kernel: run.Kernel,
+		SectionsOverlay: run.Sections.Clone(), MergeDraft: run.MergeDraft,
+	}
+	view := l.runPipeline(req)
+	release()
+	l.afterRun()
+	l.fireAfterApply(req, view)
+	if view.Result != nil && view.Result.Code == ResultDriftBlocked {
+		return view, ErrDriftBlocked
+	}
+	return view, nil
+}
+
 // RunSourceRefresh — фоновое обновление источника: RunLive с триггером
 // TriggerSourceRefresh (его зовёт сервис источников).
 func (l *Layer) RunSourceRefresh(ctx context.Context, overlay Sections) (ApplyView, error) {
