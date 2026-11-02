@@ -17,6 +17,7 @@
   } from '../../../lib/configProfiles';
   import TakeRoutingModal from '../routing/TakeRoutingModal.svelte';
   import { activateOwnProfile, confirmMihomoReturn, routingBusy } from '../routing/routingOwner';
+  import FillSectionsModal from './FillSectionsModal.svelte';
   import NewProfileModal from './NewProfileModal.svelte';
   import ProfileRow from './ProfileRow.svelte';
 
@@ -48,6 +49,7 @@
   let newOpen = $state(false);
   let newMode = $state<'template' | 'copy'>('template');
   let newFrom = $state('');
+  let fillOpen = $state(false);
 
   // Номер запроса: поздний ответ устаревшего чтения не затирает свежий
   let seq = 0;
@@ -138,8 +140,10 @@
     });
   }
 
-  /** «Заполнить из профиля» (секции профиля панели). Диалог добавит план 147.1-22. */
-  function openFill(): void {}
+  /** «Заполнить из профиля»: значения секций профиля панели из шаблона или профиля. */
+  function openFill(): void {
+    fillOpen = true;
+  }
 
   // --- Действия ---
 
@@ -383,6 +387,8 @@
   {profiles}
   oncreated={created}
 />
+
+<FillSectionsModal bind:open={fillOpen} profileNames={userProfiles.map((p) => p.name)} />
 
 <TakeRoutingModal open={takeOpen} mode="take" scope="mihomo" onclose={() => (takeOpen = false)} />
 
