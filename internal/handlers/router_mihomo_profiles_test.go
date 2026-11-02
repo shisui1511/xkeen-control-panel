@@ -3,11 +3,14 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -212,4 +215,90 @@ func TestRouterProfileActivatePID(t *testing.T) {
 			t.Fatalf("PID xray сменился при сохранении профиля Mihomo: %d -> %d", pidBefore, pid)
 		}
 	}
+}
+
+func TestRouterProfileActivateRollback(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	if tg.Core != "mihomo" {
+		t.Skip("нужен активный Mihomo")
+	}
+	pidBefore := rtRstKernelPID(t, "mihomo")
+	s := rtPrfPrepare(t, "mihomo")
+	baseBytes, aBytes := s.readProfile(s.base), s.readProfile(rtPrfA)
+
+	// Настоящий отказ запуска: пока config.yaml указывает на rt-pid-a, процесс
+	// Mihomo гасится сигналом KILL. Подтверждение панели не доходит до окна
+	// устойчивости и по сроку откатывает активацию. Горутина останавливается
+	// в t.Cleanup раньше, чем стенд возвращается.
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		tick := time.NewTicker(time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+			}
+			if s.activeName() != rtPrfA {
+				continue
+			}
+			pids, _ := rtRstKernelPIDs("mihomo")
+			for _, pid := range pids {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		wg.Wait()
+	})
+
+	// Предел ожидания ответа — routertest.SlowCallTimeout у callSlow, он больше
+	// срока подтверждения RestartConfirmTimeout вместе с откатом.
+	r := s.e.callSlow(http.MethodPost, "/api/mihomo/profiles/activate", map[string]string{"name": rtPrfA})
+	cancel()
+	wg.Wait()
+
+	if r.Status != http.StatusOK {
+		t.Fatalf("activate %s: %d %s", rtPrfA, r.Status, r.Code)
+	}
+	res := r.object(t)
+	if rolledBack, _ := res["rolled_back"].(bool); !rolledBack {
+		t.Fatalf("rolled_back=false при погашенном процессе: restarted=%v", res["restarted"])
+	}
+	if active, _ := res["active"].(string); active != s.base {
+		t.Fatalf("active %q после отката, ожидался %s", active, s.base)
+	}
+	if msg, _ := res["error"].(string); msg == "" {
+		t.Fatal("после отката текст error пуст")
+	}
+	if got := s.activeName(); got != s.base {
+		t.Fatalf("config.yaml указывает на %q после отката, ожидался %s", got, s.base)
+	}
+	// D-23: откат возвращает ссылку, содержимое профилей не переписывается.
+	if !bytes.Equal(s.readProfile(s.base), baseBytes) || !bytes.Equal(s.readProfile(rtPrfA), aBytes) {
+		t.Fatal("содержимое профилей изменилось при откате")
+	}
+
+	// Откат перезапускает Mihomo на прежнем профиле: ждём новый устойчивый процесс.
+	var pidAfter int
+	deadline := time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		if pids, _ := rtRstKernelPIDs("mihomo"); len(pids) == 1 {
+			pidAfter = pids[0]
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if pidAfter == 0 {
+		t.Fatal("после отката Mihomo не запущен")
+	}
+	if pidAfter == pidBefore {
+		t.Fatalf("PID mihomo не сменился (%d): процесс не перезапускался", pidBefore)
+	}
+	rtRstHoldPID(t, "mihomo", pidAfter)
 }
