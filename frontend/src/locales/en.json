@@ -3983,6 +3983,7 @@
   "cfg.sec.err.root_key_duplicate": "The key “{key}” is already set in another section: all sections share one profile root. Keep it in one section only.",
   "cfg.sec.err.core_section_invalid": "The section value is invalid. Fix it in the form or in “Advanced” and try again.",
   "cfg.sec.err.draft_conflict": "The draft was changed in another tab. The fresh version is shown — repeat the edit.",
+  "cfg.sec.err.draft_open": "There are unapplied changes. Apply or discard them, then try again.",
   "cfg.sec.err.foreign_mixed": "The file {file} mixes the section key with other keys: the panel cannot take it over as a whole. Move the key to a separate file or edit in the Editor.",
   "cfg.sec.err.group_not_found": "The group “{group}” was not found. Choose another group.",
   "cfg.sec.err.inbound_duplicate": "An inbound tag or an address and port pair is repeated. Set another value.",

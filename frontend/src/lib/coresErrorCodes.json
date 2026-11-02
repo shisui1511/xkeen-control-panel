@@ -5,6 +5,7 @@
     "controller_no_secret",
     "core_section_invalid",
     "draft_conflict",
+    "draft_open",
     "foreign_mixed",
     "group_not_found",
     "inbound_duplicate",

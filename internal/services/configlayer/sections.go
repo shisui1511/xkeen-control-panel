@@ -142,6 +142,9 @@ type CoreSection struct {
 	// ForceProxyGroup — группа для входящих force-proxy* (ключ панели, в файл
 	// ядра не попадает).
 	ForceProxyGroup string `json:"force_proxy_group,omitempty"`
+	// LastAccess — последний путь access-лога Xray у секции log (ключ панели, в
+	// файл ядра не попадает): включение после выключения возвращает его (D-15).
+	LastAccess string `json:"last_access,omitempty"`
 }
 
 // ParseCoreSection разбирает секцию ядра. Пустой или null raw — секции нет:

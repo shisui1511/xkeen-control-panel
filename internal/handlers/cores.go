@@ -9,6 +9,7 @@ import (
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/cores"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // Маршруты секций ядер (/api/configlayer/cores*) работают только при включённом
@@ -47,6 +48,7 @@ var coresErrorStatus = map[string]int{
 	"apply_busy":                http.StatusConflict,
 	"comments_not_acknowledged": http.StatusConflict,
 	"draft_conflict":            http.StatusConflict,
+	"draft_open":                http.StatusConflict,
 	"foreign_mixed":             http.StatusConflict,
 	"inbounds_mixed":            http.StatusConflict,
 	"mihomo_with_profile":       http.StatusConflict,
@@ -90,6 +92,8 @@ func (a *API) writeCoresError(w http.ResponseWriter, r *http.Request, err error)
 		JSONErrorCode(w, http.StatusConflict, "draft_conflict", a.t(r, "configlayer.cores.draft_conflict"))
 	case errors.Is(err, configlayer.ErrApplyBusy):
 		JSONErrorCode(w, http.StatusConflict, "apply_busy", a.t(r, "configlayer.cores.apply_busy"))
+	case errors.Is(err, configlayer.ErrDraftOpen):
+		JSONErrorCode(w, http.StatusConflict, "draft_open", a.t(r, "configlayer.cores.draft_open"))
 	case errors.As(err, &mixed):
 		JSONErrorCodeParams(w, http.StatusConflict, "foreign_mixed", a.t(r, "configlayer.cores.foreign_mixed"),
 			map[string]string{"file": mixed.File})
@@ -292,4 +296,35 @@ func (a *API) ConfigCoresReclaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSONSuccess(w, map[string]bool{"reclaimed": true})
+}
+
+// ConfigCoresAccessLog — POST /api/configlayer/cores/access-log {enabled,
+// ack_comments}: включает или выключает access-лог Xray через секцию log. Секция у
+// панели — применяется только log.access поверх применённого состояния (xray -test,
+// запись, перезапуск запущенного ядра), остальные правки черновика ждут «Применить».
+// Секция за XKeen или пользователем берётся и применяется одним шагом, если
+// черновик чист; иначе 409 draft_open. Каталог журнала создаётся только для пути
+// внутри каталога журналов (проверка пути валидатором). Ответ приходит после
+// перезапуска ядра; отмена запроса вкладкой операцию не прерывает.
+func (a *API) ConfigCoresAccessLog(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireCores(w, r) {
+		return
+	}
+	var req struct {
+		Enabled     bool `json:"enabled"`
+		AckComments bool `json:"ack_comments"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	dirOK := func(path string) (string, bool) {
+		clean, err := a.pathVal.ValidateUnder(path, utils.LogRoot)
+		return clean, err == nil
+	}
+	view, err := a.cores.SetAccessLog(context.WithoutCancel(r.Context()), req.Enabled, req.AckComments, dirOK)
+	if err != nil {
+		a.writeCoresError(w, r, err)
+		return
+	}
+	JSONSuccess(w, view)
 }
