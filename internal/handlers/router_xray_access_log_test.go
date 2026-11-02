@@ -3,12 +3,14 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
@@ -515,4 +517,196 @@ func TestRouterAccessLogForeignTake(t *testing.T) {
 	if st := e.rtAccStatus(); st["owner"] != "panel" || st["access_path"] != wantAccess {
 		t.Errorf("статус после взятия: owner %v, access_path %v", st["owner"], st["access_path"])
 	}
+}
+
+// --- «выключено» всегда none, свой путь помнится (D-15, D-16) ---------------------
+
+const (
+	// rtAccEmptyDir — каталог журналов сценария внутри /opt/var/log; убирается при выходе.
+	rtAccEmptyDir = "/opt/var/log/xcp-rt"
+	// rtAccEmptyPathA, rtAccEmptyPathB — свои пути журнала сценария.
+	rtAccEmptyPathA = rtAccEmptyDir + "/a.log"
+	rtAccEmptyPathB = rtAccEmptyDir + "/b.log"
+	// rtAccDeniedPath — путь вне /opt/var/log: панель его не читает и не создаёт.
+	rtAccDeniedPath = "/opt/etc/xray/rt.log"
+)
+
+// rtAccSaveForm сохраняет секцию log с заданным access: nil снимает ключ в форме
+// (поле не прислано), иначе значение ставится как есть, в том числе пустое.
+func (e *rtSrc) rtAccSaveForm(label string, access *string) {
+	e.t.Helper()
+	sec := rtCoresSection(e.rtCoresView("xray"), "log")
+	if sec == nil {
+		e.t.Fatalf("%s: в виде Xray нет секции log", label)
+	}
+	form, _ := sec["form"].(map[string]any)
+	if form == nil {
+		form = map[string]any{}
+	}
+	if access == nil {
+		delete(form, "access")
+	} else {
+		form["access"] = *access
+	}
+	advanced, _ := sec["advanced"].(string)
+	sv := e.rtCoresPost("/save", map[string]any{"kernel": "xray", "section": "log", "form": form, "advanced": advanced})
+	if sv.Status != http.StatusOK {
+		e.t.Fatalf("%s: save log: %d %s", label, sv.Status, sv.Code)
+	}
+}
+
+// rtAccXrayTest проверяет каталог конфигов Xray самим ядром (xray run -test).
+func rtAccXrayTest(t *testing.T, label string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	_, stderr, code := routertest.Exec(ctx, rtCoresXrayBin, "run", "-test", "-confdir", rtRtXrayDir)
+	if code != 0 {
+		t.Fatalf("%s: xray run -test вернул %d: %s", label, code, stderr)
+	}
+}
+
+// rtAccSize — размер файла или -1, если файла нет.
+func rtAccSize(path string) int64 {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return -1
+	}
+	return fi.Size()
+}
+
+// rtAccExpectDisabled проверяет, что в файле панели access равен none, ядро
+// принимает каталог, а статус описывает то же состояние: журнал выключен.
+func (e *rtSrc) rtAccExpectDisabled(label string) {
+	e.t.Helper()
+	if got := rtAccFileAccess(e.t); got != "none" {
+		e.t.Fatalf("%s: access в %s %q, ожидалось none", label, configlayer.PanelXrayLogFile, got)
+	}
+	rtAccXrayTest(e.t, label)
+	if st := e.rtAccStatus(); st["enabled"] != false {
+		e.t.Errorf("%s: статус enabled %v, ожидалось false", label, st["enabled"])
+	}
+}
+
+// Трасса (D-15, D-16): секция log у панели. Форма без access и с access:"" после
+// «Применить» даёт в файле access none, xray run -test принимает каталог, статус
+// «выключен» (ветка xray: размеры журналов XKeen до и после перезапуска пишутся в
+// журнал теста без вердикта). Свой путь переживает выключение и «Сбросить»: путь
+// из формы → выключение → сброс черновика → включение возвращает его. Очистка поля
+// формы не теряет путь. Путь вне /opt/var/log: статус path_denied, записей нет,
+// панель каталог и файл не создаёт. Метка ядра: исход перезапуска и поведение
+// консольного журнала зависят от активного ядра.
+func TestRouterAccessLogEmptyAccess(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	core := tg.Core
+	e := rtNewSrc(t)
+	e.enableLayer()
+	e.rtRstIdle()
+	if core == "xray" {
+		rtRstKernelPID(t, "xray")
+	}
+	rtAccLogGuard(t, e)
+	orig := rtCoresDirSums(t)
+
+	if err := os.MkdirAll(rtAccEmptyDir, 0o755); err != nil {
+		t.Fatalf("каталог журналов сценария: %v", err)
+	}
+	// Убирается последним: сначала возврат секции log прежнему владельцу.
+	t.Cleanup(func() {
+		_ = os.RemoveAll(rtAccEmptyDir)
+		if err := os.Remove(rtAccDeniedPath); err == nil && core == "xray" {
+			t.Log("Xray сам создал журнал по пути вне /opt/var/log, убран при выходе")
+		}
+	})
+	t.Cleanup(func() { rtAccReleaseLog(t, e, orig) })
+
+	take := e.rtCoresPost("/take", map[string]any{"kernel": "xray", "sections": []string{"log"}, "ack_comments": true})
+	if take.Status != http.StatusOK {
+		t.Fatalf("take log: %d %s", take.Status, take.Code)
+	}
+	e.rtRtApplyOK("взятие секции log Xray")
+
+	pathB, pathA, denied, empty := rtAccEmptyPathB, rtAccEmptyPathA, rtAccDeniedPath, ""
+
+	t.Run("without_access", func(t *testing.T) {
+		c := e.with(t)
+		c.rtAccSaveForm("путь в форме", &pathB)
+		c.rtRtApplyOK("access с путём")
+		if got := rtAccFileAccess(t); got != pathB {
+			t.Fatalf("access в %s %q, ожидалось %q", configlayer.PanelXrayLogFile, got, pathB)
+		}
+		var xkeenBefore, detachedBefore int64
+		if core == "xray" {
+			xkeenBefore = rtAccSize("/opt/var/log/xkeen.log")
+			detachedBefore = rtAccSize("/opt/var/log/xkeen-detached.log")
+		}
+		c.rtAccSaveForm("форма без access", nil)
+		c.rtRtApplyOK("форма без access")
+		c.rtAccExpectDisabled("форма без access")
+		if core == "xray" {
+			t.Logf("журналы XKeen до и после перезапуска (байт, -1 — файла нет): xkeen.log %d -> %d, xkeen-detached.log %d -> %d",
+				xkeenBefore, rtAccSize("/opt/var/log/xkeen.log"), detachedBefore, rtAccSize("/opt/var/log/xkeen-detached.log"))
+		}
+	})
+
+	t.Run("empty_access", func(t *testing.T) {
+		c := e.with(t)
+		c.rtAccSaveForm("путь в форме", &pathB)
+		c.rtRtApplyOK("access с путём")
+		c.rtAccSaveForm("форма с пустым access", &empty)
+		c.rtRtApplyOK("форма с пустым access")
+		c.rtAccExpectDisabled("форма с пустым access")
+	})
+
+	t.Run("remembers_path", func(t *testing.T) {
+		c := e.with(t)
+		c.rtAccSaveForm("путь в форме", &pathA)
+		c.rtRtApplyOK("свой путь access")
+		rtAccResult(t, "выключение access-лога", c.rtAccPost(false, false))
+		c.rtAccExpectDisabled("выключение access-лога")
+		c.resetDraft()
+		rtAccResult(t, "включение access-лога после сброса", c.rtAccPost(true, false))
+		if got := rtAccFileAccess(t); got != pathA {
+			t.Fatalf("после выключения и сброса access в %s %q, ожидался свой путь %q", configlayer.PanelXrayLogFile, got, pathA)
+		}
+	})
+
+	t.Run("form_clear", func(t *testing.T) {
+		c := e.with(t)
+		// Состояние после remembers_path: журнал включён на своём пути.
+		if got := rtAccFileAccess(t); got != pathA {
+			c.rtAccSaveForm("путь в форме", &pathA)
+			c.rtRtApplyOK("свой путь access")
+		}
+		c.rtAccSaveForm("очистка поля access", &empty)
+		c.rtRtApplyOK("очистка поля access")
+		c.rtAccExpectDisabled("очистка поля access")
+		rtAccResult(t, "включение после очистки поля", c.rtAccPost(true, false))
+		if got := rtAccFileAccess(t); got != pathA {
+			t.Fatalf("после очистки поля и включения access %q, ожидался прежний путь %q", got, pathA)
+		}
+	})
+
+	t.Run("outside_root", func(t *testing.T) {
+		c := e.with(t)
+		c.rtAccSaveForm("путь вне каталога журналов", &denied)
+		c.rtRtApplyOK("путь вне каталога журналов")
+		st := c.rtAccStatus()
+		if st["path_denied"] != true {
+			t.Errorf("статус для пути вне /opt/var/log: path_denied %v, ожидалось true", st["path_denied"])
+		}
+		r := c.call(http.MethodGet, rtAccStatusPath, nil)
+		if r.Status != http.StatusOK {
+			t.Fatalf("GET %s: %d %s", rtAccStatusPath, r.Status, r.Code)
+		}
+		report, _ := r.object(t)["report"].(map[string]any)
+		if entries, _ := report["entries"].([]any); len(entries) != 0 {
+			t.Errorf("для запрещённого пути в отчёте %d записей, ожидалось 0", len(entries))
+		}
+		if core != "xray" {
+			if _, err := os.Stat(denied); err == nil {
+				t.Error("панель создала журнал по пути вне /opt/var/log")
+			}
+		}
+	})
 }

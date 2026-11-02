@@ -737,6 +737,7 @@ func (s *Service) Take(rev int64, kernel string, ids []string, ackComments bool)
 				From:            sc.Sources,
 				CommentsAck:     ackComments && len(commentFiles) > 0,
 				ForceProxyGroup: cs.ForceProxyGroup,
+				LastAccess:      cs.LastAccess,
 			}
 			if len(sc.Files) == 0 || isEmptyValue(next.Value) {
 				next.Value = XrayPreset(id)
@@ -837,6 +838,13 @@ func (s *Service) Save(rev int64, kernel, id string, form json.RawMessage, advan
 		if len(issues) > 0 {
 			return nil, errCode(issues[0].Code, "key", issues[0].Key)
 		}
+		if kernel == configlayer.KernelXray && id == logID {
+			// Очистка поля access не теряет путь: панель помнит его для включения
+			// (D-15); явный новый путь LastAccess не трогает.
+			if before := accessOf(prev); accessEnabled(before) && !accessEnabled(accessOf(value)) {
+				cs.LastAccess = before
+			}
+		}
 		cs.Managed = true
 		cs.Value = value
 		raw, err := encodeSection(cs)
@@ -916,7 +924,7 @@ func (s *Service) Release(rev int64, kernel, id string) (configlayer.DraftEvent,
 		if err != nil {
 			return nil, err
 		}
-		raw, err := encodeSection(configlayer.CoreSection{Managed: false, ForceProxyGroup: cs.ForceProxyGroup})
+		raw, err := encodeSection(configlayer.CoreSection{Managed: false, ForceProxyGroup: cs.ForceProxyGroup, LastAccess: cs.LastAccess})
 		if err != nil {
 			return nil, err
 		}

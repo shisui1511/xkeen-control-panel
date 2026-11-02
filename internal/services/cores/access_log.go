@@ -95,6 +95,31 @@ func withAccess(value json.RawMessage, access string) (json.RawMessage, error) {
 	return obj.MarshalJSON()
 }
 
+// withAccessNone приводит значение секции log к виду, который пишется в файл ядра
+// (D-16): без ключа access или с пустым значением Xray включает журнал в консоль,
+// поэтому состояние «выключено» всегда пишется как access: none. Заданное значение
+// и порядок существующих ключей не меняются, новый ключ дописывается в конец.
+func withAccessNone(value json.RawMessage) (json.RawMessage, error) {
+	obj, err := configlayer.ParseOrderedObject(value)
+	if err != nil {
+		return nil, errCode(configlayer.IssueCoreSectionInvalid)
+	}
+	if raw, ok := obj.Get(accessKey); ok {
+		var s string
+		// null разбирается в пустую строку и тоже становится none; значение другого
+		// типа остаётся как есть, его отклонит xray -test.
+		if err := json.Unmarshal(raw, &s); err != nil || s != "" {
+			return value, nil
+		}
+	}
+	quoted, err := json.Marshal(accessOff)
+	if err != nil {
+		return nil, err
+	}
+	obj.Set(accessKey, quoted)
+	return obj.MarshalJSON()
+}
+
 // lastAccessAfter возвращает путь, который секция помнит после действия: при
 // включении — новый путь, при выключении — прежний, если журнал был включён.
 func lastAccessAfter(prevLast, prevAccess, next string) string {
