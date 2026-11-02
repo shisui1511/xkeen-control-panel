@@ -39,6 +39,7 @@
   const uid = $props.id();
   const DEFAULTS = KERNEL_DEFAULTS['xray.log'] ?? {};
   const FIELD_KEYS = ['loglevel', 'access', 'error', 'dnsLog'];
+  const LOG_ROOT = '/opt/var/log/';
   const LEVELS = ['none', 'error', 'warning', 'info', 'debug'];
 
   function clone(value: unknown): Record<string, unknown> {
@@ -55,6 +56,12 @@
   const level = $derived(String(getPath(form, 'loglevel') ?? ''));
   const access = $derived(String(getPath(form, 'access') ?? ''));
   const errorPath = $derived(String(getPath(form, 'error') ?? ''));
+  // Путь вне каталога журналов: «Логи» файл не прочитают; сохранение не блокируется (D-26)
+  const accessDenied = $derived(
+    access.trim() !== '' &&
+      access.trim().toLowerCase() !== 'none' &&
+      !access.trim().startsWith(LOG_ROOT)
+  );
   const dnsLogOn = $derived(getPath(form, 'dnsLog') === true);
   const dnsLogSet = $derived(getPath(form, 'dnsLog') !== undefined);
 
@@ -98,6 +105,12 @@
 
 {#snippet pathField(path: string, label: string, value: string, hint: boolean)}
   {@const testId = fieldTestId(kernel, ID, path)}
+  {@const denied = hint && accessDenied}
+  {@const describedBy = byField.has(path)
+    ? `${uid}-${path}-err`
+    : [hint ? `${uid}-${path}-hint` : '', denied ? `${uid}-${path}-denied` : '']
+        .filter((id) => id !== '')
+        .join(' ') || undefined}
   <div class="xf-row">
     <label class="xf-lbl" for="{uid}-{path}">{label}</label>
     <div class="xf-ctl">
@@ -112,11 +125,7 @@
         {readonly}
         aria-readonly={readonly ? 'true' : undefined}
         aria-invalid={byField.has(path) ? 'true' : 'false'}
-        aria-describedby={byField.has(path)
-          ? `${uid}-${path}-err`
-          : hint
-            ? `${uid}-${path}-hint`
-            : undefined}
+        aria-describedby={describedBy}
         data-testid={testId}
         {value}
         oninput={(e) => onText(path, e.currentTarget.value)}
@@ -124,8 +133,15 @@
       />
       {#if byField.has(path)}
         <span class="error-text" id="{uid}-{path}-err" role="alert">{issueText(path)}</span>
-      {:else if hint}
-        <span class="xf-hint" id="{uid}-{path}-hint">{$t('cfg.sec.f.access_hint')}</span>
+      {:else}
+        {#if hint}
+          <span class="xf-hint" id="{uid}-{path}-hint">{$t('cfg.sec.log_access_hint')}</span>
+        {/if}
+        {#if denied}
+          <span class="warning-text" id="{uid}-{path}-denied" data-testid="{testId}-denied">
+            {$t('cfg.sec.log_access_denied')}
+          </span>
+        {/if}
       {/if}
     </div>
   </div>
