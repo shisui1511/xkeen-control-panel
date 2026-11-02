@@ -1896,6 +1896,45 @@
     border-top: 1px solid var(--border);
   }
 
+  /* Цепочка в инспекторе переносится внутри своей колонки, а не за край шторки */
+  .m-val.chain-flow {
+    min-width: 0;
+    justify-content: flex-end;
+  }
+
+  .m-val.chain-flow .chain-node {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  /* Телефон: инспектор — во весь экран, без полоски фона слева */
+  @media (max-width: 768px) {
+    .inspector-drawer {
+      width: 100%;
+      max-width: 100%;
+      border-left: 0;
+      padding-top: env(safe-area-inset-top);
+    }
+
+    .drawer-header {
+      padding: 12px 8px 12px 16px;
+    }
+
+    .drawer-close {
+      width: 44px;
+      height: 44px;
+    }
+
+    .drawer-body {
+      padding: 16px;
+    }
+
+    .drawer-footer {
+      padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    }
+  }
+
   .w-100 {
     width: 100%;
   }
