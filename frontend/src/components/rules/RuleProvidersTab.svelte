@@ -1,12 +1,16 @@
 <script lang="ts">
   import { t } from '../../i18n';
   import {
+    apiFetchJSON,
     checkRuleProviderURL,
     type RuleProvider,
     type RuleProviderDetails,
     type RuleProviderURLCheck
   } from '../../lib/api';
+  import { formatDateTime } from '../../lib/nodesView';
   import RuleProviderContentModal from './RuleProviderContentModal.svelte';
+  import ProviderUrlResult from './ProviderUrlResult.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import EmptyState from '../EmptyState.svelte';
   import Button from '../Button.svelte';
   import DatIcon from '../../lib/components/icons/Dat.svelte';
@@ -16,17 +20,40 @@
     /** Config-level details by provider name (file state, URL). */
     details?: Record<string, RuleProviderDetails>;
     loading?: boolean;
+    /** Причина, по которой API Mihomo недоступен; null — API работает. */
+    offline?: 'xray' | 'not_running' | 'api_down' | null;
     onUpdate: (name: string) => Promise<void>;
     onUpdateAll: () => Promise<void>;
   }
 
-  let { providers = [], details = {}, loading = false, onUpdate, onUpdateAll }: Props = $props();
+  let {
+    providers = [],
+    details = {},
+    loading = false,
+    offline = null,
+    onUpdate,
+    onUpdateAll
+  }: Props = $props();
 
   let updatingProvider = $state<string | null>(null);
   let updatingAll = $state(false);
   let contentName = $state<string | null>(null);
   let checkingURL = $state<string | null>(null);
   let urlChecks = $state<Record<string, RuleProviderURLCheck>>({});
+  // Сбой самого запроса проверки (не результат диагностики ссылки): отдельная строка.
+  let urlFailures = $state<Record<string, string>>({});
+  // Имя активного профиля для подписи без API; сбой чтения — config.yaml.
+  let profileName = $state('config.yaml');
+
+  // Состояние файла провайдера по данным профиля (используется без API ядра).
+  type FileState = 'ok' | 'none_http' | 'none_file' | 'empty';
+
+  function fileState(p: RuleProvider): FileState {
+    const d = details[p.name];
+    if (!d || isInline(p)) return 'ok';
+    if (!d.file_exists) return (d.type || '').toLowerCase() === 'http' ? 'none_http' : 'none_file';
+    return d.file_size ? 'ok' : 'empty';
+  }
 
   const emptyCount = $derived(providers.filter((p) => isEmpty(p)).length);
 
@@ -34,33 +61,58 @@
     return (details[p.name]?.type || p.vehicleType || '').toLowerCase() === 'inline';
   }
 
+  // Без API числа записей нет: пустыми считаются file-провайдеры без файла и файлы нулевого размера.
   function isEmpty(p: RuleProvider): boolean {
+    if (offline) {
+      const fs = fileState(p);
+      return fs === 'none_file' || fs === 'empty';
+    }
     return !isInline(p) && p.ruleCount === 0;
   }
+
+  // «Содержимое» без файла читать нечего (inline лежит в самом профиле).
+  function noContent(p: RuleProvider): boolean {
+    if (!offline) return isEmpty(p);
+    return fileState(p) !== 'ok';
+  }
+
+  function offlineLabel(reason: NonNullable<Props['offline']>): string {
+    if (reason === 'xray') return $t('rules.offline_xray');
+    return reason === 'api_down' ? $t('rules.offline_api') : $t('rules.offline_stopped');
+  }
+
+  function fileSizeText(bytes: number): string {
+    return $t('rules.provider_file_size', { size: (bytes / 1024).toFixed(1) });
+  }
+
+  $effect(() => {
+    if (!offline) return;
+    let cancelled = false;
+    apiFetchJSON<{ active?: string }>('/api/mihomo/profiles')
+      .then((state) => {
+        if (!cancelled && state?.active) profileName = state.active;
+      })
+      .catch(() => {
+        // имя не прочиталось — в подписи остаётся config.yaml
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
 
   async function handleCheckURL(name: string) {
     if (checkingURL) return;
     checkingURL = name;
+    delete urlFailures[name];
     try {
       urlChecks[name] = await checkRuleProviderURL(name);
     } catch (e: any) {
       if (e?.status === 401) return;
-      urlChecks[name] = {
-        name,
-        url: '',
-        ok: false,
-        error: e?.message || String(e),
-        duration_ms: 0
-      };
+      delete urlChecks[name];
+      urlFailures[name] = e?.message || String(e);
     } finally {
       checkingURL = null;
     }
-  }
-
-  function urlCheckText(c: RuleProviderURLCheck): string {
-    if (c.ok) return $t('rules.provider_url_ok', { code: String(c.status_code ?? '') });
-    if (c.status_code) return $t('rules.provider_url_http_error', { code: String(c.status_code) });
-    return $t('rules.provider_url_error', { error: c.error || '' });
   }
 
   async function handleUpdate(name: string) {
@@ -107,6 +159,11 @@
     <div class="header-info">
       <span class="header-title">{$t('rules.tab_providers')}</span>
       <span class="header-badge">{providers.length}</span>
+      {#if offline}
+        <span class="badge badge-info" data-testid="rules-offline-badge"
+          >{offlineLabel(offline)}</span
+        >
+      {/if}
       {#if emptyCount > 0}
         <span class="header-warning" role="status">
           {$t('rules.providers_empty_warning', { n: String(emptyCount) })}
@@ -119,7 +176,7 @@
         class="btn-sm"
         onclick={handleUpdateAll}
         loading={updatingAll}
-        disabled={updatingAll || !!updatingProvider}
+        disabled={!!offline || updatingAll || !!updatingProvider}
       >
         <svg
           width="14"
@@ -141,6 +198,12 @@
     {/if}
   </div>
 
+  {#if offline}
+    <p class="offline-note" data-testid="rules-offline-note">
+      {$t('rules.offline_note', { profile: profileName })}
+    </p>
+  {/if}
+
   {#if loading}
     <div class="loading-state">
       <span class="spinner"></span>
@@ -154,7 +217,9 @@
   {:else}
     <div class="providers-grid">
       {#each providers as provider (provider.name)}
-        <div class="provider-card">
+        {@const d = details[provider.name]}
+        {@const fs = offline ? fileState(provider) : 'ok'}
+        <div class="provider-card" data-testid="provider-card-{provider.name}">
           <div class="provider-body">
             <div class="provider-top">
               <span class="provider-name" title={provider.name}>{provider.name}</span>
@@ -165,40 +230,98 @@
                 {#if provider.behavior}
                   <span class="badge badge-behavior">{provider.behavior}</span>
                 {/if}
-                {#if isEmpty(provider)}
-                  <span class="badge badge-empty">{$t('rules.provider_status_empty')}</span>
-                {/if}
-                {#if details[provider.name] && !details[provider.name].file_exists}
-                  <span class="badge badge-empty">{$t('rules.provider_status_no_file')}</span>
+                {#if offline}
+                  {#if fs === 'none_file'}
+                    <span class="badge badge-error">{$t('rules.provider_badge_nofile')}</span>
+                  {:else if fs === 'empty'}
+                    <span class="badge badge-error">{$t('rules.provider_badge_empty_file')}</span>
+                  {/if}
+                {:else}
+                  {#if isEmpty(provider)}
+                    <span class="badge badge-empty">{$t('rules.provider_status_empty')}</span>
+                  {/if}
+                  {#if d && !d.file_exists}
+                    <span class="badge badge-empty">{$t('rules.provider_status_no_file')}</span>
+                  {/if}
                 {/if}
               </div>
             </div>
 
-            {#if details[provider.name]?.url}
-              <span class="provider-url font-mono" title={details[provider.name].url}>
-                {details[provider.name].url}
+            {#if d?.url}
+              <span class="provider-url font-mono" class:url-full={!!offline} title={d.url}>
+                {d.url}
               </span>
             {/if}
-            {#if urlChecks[provider.name]}
-              <span
-                class="provider-url-check"
-                class:is-ok={urlChecks[provider.name].ok}
-                role="status"
-              >
-                {urlCheckText(urlChecks[provider.name])}
+            {#if offline && d?.proxy}
+              <span class="provider-via font-mono">
+                {$t('rules.provider_via_proxy', { proxy: d.proxy })}
+              </span>
+            {/if}
+
+            {#if offline}
+              {#if fs === 'none_http'}
+                <p class="provider-status" data-testid="provider-status-{provider.name}">
+                  <Icon name="info" size={14} />
+                  <span>{$t('rules.provider_no_file_http')}</span>
+                </p>
+              {:else if fs === 'none_file'}
+                <p
+                  class="error-text provider-wrap"
+                  role="alert"
+                  data-testid="provider-status-{provider.name}"
+                >
+                  {$t('rules.provider_no_file_local', { path: d?.path ?? '' })}
+                </p>
+              {/if}
+            {/if}
+
+            {#if urlChecks[provider.name] || urlFailures[provider.name]}
+              <ProviderUrlResult
+                name={provider.name}
+                result={urlChecks[provider.name]}
+                failure={urlFailures[provider.name]}
+              />
+            {/if}
+            {#if checkingURL === provider.name}
+              <span class="provider-checking" aria-live="polite">
+                {$t('rules.provider_url_checking')}
               </span>
             {/if}
 
             <div class="provider-meta">
-              <div class="meta-item">
-                <span class="meta-label">{$t('rules.provider_rules_count')}:</span>
-                <span class="meta-value mono">{provider.ruleCount.toLocaleString()}</span>
-              </div>
-              <div class="meta-item">
-                <span class="meta-label">{$t('rules.provider_updated')}:</span>
-                <span class="meta-value updated-time">{formatRelativeTime(provider.updatedAt)}</span
-                >
-              </div>
+              {#if offline}
+                {#if d?.file_exists && d.file_size}
+                  <div class="meta-item">
+                    <span class="meta-value mono">{fileSizeText(d.file_size)}</span>
+                  </div>
+                {/if}
+                {#if d?.file_exists && d.file_mtime}
+                  <div class="meta-item">
+                    <span class="meta-value updated-time"
+                      >{$t('rules.provider_file_date', {
+                        date: formatDateTime(d.file_mtime * 1000)
+                      })}</span
+                    >
+                  </div>
+                {/if}
+                {#if d && isInline(provider) && d.inline_count}
+                  <div class="meta-item">
+                    <span class="meta-label">{$t('rules.provider_rules_count')}:</span>
+                    <span class="meta-value mono">{d.inline_count.toLocaleString()}</span>
+                  </div>
+                {/if}
+              {:else}
+                <div class="meta-item">
+                  <span class="meta-label">{$t('rules.provider_rules_count')}:</span>
+                  <span class="meta-value mono">{provider.ruleCount.toLocaleString()}</span>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-label">{$t('rules.provider_updated')}:</span>
+                  <span class="meta-value updated-time"
+                    >{formatRelativeTime(provider.updatedAt)}</span
+                  >
+                </div>
+              {/if}
             </div>
           </div>
 
@@ -206,19 +329,20 @@
             <Button
               variant="secondary"
               class="btn-sm"
-              disabled={isEmpty(provider)}
+              disabled={noContent(provider)}
               title={$t('rules.provider_content_btn_title')}
               onclick={() => (contentName = provider.name)}
             >
               <span>{$t('rules.provider_content_btn')}</span>
             </Button>
-            {#if details[provider.name]?.url}
+            {#if d?.url}
               <Button
                 variant="secondary"
                 class="btn-sm"
                 loading={checkingURL === provider.name}
                 disabled={!!checkingURL}
                 title={$t('rules.provider_url_check_title')}
+                data-testid="provider-check-{provider.name}"
                 onclick={() => handleCheckURL(provider.name)}
               >
                 <span>{$t('rules.provider_url_check')}</span>
@@ -229,7 +353,7 @@
               class="btn-sm"
               onclick={() => handleUpdate(provider.name)}
               loading={updatingProvider === provider.name}
-              disabled={updatingAll || updatingProvider === provider.name}
+              disabled={!!offline || updatingAll || updatingProvider === provider.name}
             >
               <svg
                 width="13"
@@ -282,13 +406,44 @@
     color: var(--fg-dim);
   }
 
-  .provider-url-check {
-    font-size: var(--font-size-xs);
-    color: var(--danger);
+  .provider-url.url-full {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
-  .provider-url-check.is-ok {
-    color: var(--success);
+  .provider-via {
+    font-size: var(--font-size-xs);
+    color: var(--fg-secondary);
+    overflow-wrap: anywhere;
+  }
+
+  .provider-status {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin: 0;
+    font-size: var(--font-size-xs);
+    color: var(--fg-secondary);
+    overflow-wrap: anywhere;
+  }
+
+  .provider-wrap {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .provider-checking {
+    font-size: var(--font-size-xs);
+    color: var(--fg-secondary);
+  }
+
+  .offline-note {
+    margin: 0;
+    font-size: var(--font-size-xs);
+    color: var(--fg-secondary);
+    overflow-wrap: anywhere;
   }
 
   .providers-tab {
@@ -477,9 +632,19 @@
     }
   }
 
+  .provider-status :global(svg) {
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
   @media (max-width: 768px) {
     .providers-grid {
       grid-template-columns: 1fr;
+    }
+
+    .provider-actions :global(.btn),
+    .tab-header :global(.btn) {
+      min-height: 44px;
     }
   }
 </style>
