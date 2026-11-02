@@ -66,6 +66,7 @@
   import { anyKernelInstalled } from './lib/navCaps';
   import { capsuleConfigStore } from './lib/capsuleSettings';
   import { tabFromHash, legacyRedirectHash } from './lib/tabFromHash';
+  import { currentTheme, schemeOf, toggleThemeScheme } from './lib/theme';
   import {
     isAnySourceDirty,
     getDirtySources,
@@ -117,7 +118,6 @@
     $conflictVisible &&
       (conflictGatedTabs.includes(currentTab) || (currentTab === 'editor' && isConstructorMode))
   );
-  let theme = $state(document.documentElement.getAttribute('data-theme') || 'light');
   let pwaInstallPrompt = $state<any>(null);
 
   // Mobile drawer modal gate (D-10): drawer behaves as an accessible modal dialog
@@ -564,12 +564,6 @@
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
-  function toggleTheme() {
-    theme = theme === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('theme', theme);
-  }
-
   async function fetchVersion() {
     try {
       const data = await apiFetchJSON<{ version: string; panel_version: string }>('/api/version');
@@ -997,8 +991,8 @@
     <Sidebar
       {currentTab}
       onSwitchTab={switchTab}
-      {theme}
-      onToggleTheme={toggleTheme}
+      theme={schemeOf($currentTheme)}
+      onToggleTheme={toggleThemeScheme}
       onLogout={handleLogout}
       {loading}
       {pwaInstallPrompt}

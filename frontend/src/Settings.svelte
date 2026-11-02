@@ -33,6 +33,13 @@
   import PasswordField from './components/PasswordField.svelte';
   import PasswordStrengthMeter from './components/PasswordStrengthMeter.svelte';
   import { validatePasswordPolicy, policyErrorKey } from './lib/passwordPolicy';
+  import {
+    THEMES,
+    themeInfo,
+    readThemeChoice,
+    setThemeChoice,
+    type ThemeChoice
+  } from './lib/theme';
 
   let { onSwitchTab }: { onSwitchTab?: (tab: string) => void } = $props();
 
@@ -113,11 +120,10 @@
     { value: 'about', label: $t('settings.tab_about') }
   ]);
 
-  const themeItems = $derived<SegmentItem[]>([
-    { value: 'light', label: $t('settings.theme_light_btn') },
-    { value: 'dark', label: $t('settings.theme_dark_btn') },
-    { value: 'auto', label: $t('settings.theme_auto_btn') }
-  ]);
+  const themeAuto = {
+    dark: themeInfo('dark').preview,
+    light: themeInfo('light').preview
+  };
 
   type AccentChoice = 'blue' | 'indigo' | 'steel' | 'graphite';
   const accentItems: { value: AccentChoice; labelKey: string }[] = [
@@ -488,7 +494,7 @@
   }
 
   // Appearance & Behavior settings (persisted in localStorage)
-  let selectedTheme = $state<'light' | 'dark' | 'auto'>('auto');
+  let selectedTheme = $state<ThemeChoice>('auto');
   let selectedAccent = $state<AccentChoice>('blue');
   let selectedDensity = $state<ThemeDensity>('auto');
   let systemTimezone = $state('—');
@@ -508,8 +514,7 @@
 
   function loadAppearanceSettings() {
     try {
-      const saved = localStorage.getItem('theme') || '';
-      selectedTheme = saved === 'light' || saved === 'dark' ? saved : 'auto';
+      selectedTheme = readThemeChoice();
       const savedAccent = localStorage.getItem('accent') || '';
       selectedAccent =
         savedAccent === 'indigo' || savedAccent === 'steel' || savedAccent === 'graphite'
@@ -525,18 +530,9 @@
     } catch {}
   }
 
-  function setTheme(t: 'light' | 'dark' | 'auto') {
-    selectedTheme = t;
-    try {
-      if (t === 'auto') {
-        localStorage.removeItem('theme');
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        document.documentElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
-      } else {
-        localStorage.setItem('theme', t);
-        document.documentElement.setAttribute('data-theme', t);
-      }
-    } catch {}
+  function setTheme(choice: ThemeChoice) {
+    selectedTheme = choice;
+    setThemeChoice(choice);
   }
 
   function setAccent(a: AccentChoice) {
@@ -897,17 +893,64 @@
       <Section title={$t('settings.section_appearance')}>
         <div class="card card-rows">
           <div class="field-group">
-            <div class="field-row">
+            <div class="field-row field-row--stack">
               <div>
-                <span class="field-row-name">{$t('settings.theme')}</span>
+                <span class="field-row-name" id="theme-picker-label">{$t('settings.theme')}</span>
                 <div class="field-row-desc">{$t('settings.theme_desc')}</div>
               </div>
-              <SegmentedControl
-                items={themeItems}
-                value={selectedTheme}
-                ariaLabel={$t('settings.theme')}
-                onchange={(val) => setTheme(val as 'light' | 'dark' | 'auto')}
-              />
+              <div class="theme-picker" role="radiogroup" aria-labelledby="theme-picker-label">
+                <label class="theme-option" class:is-active={selectedTheme === 'auto'}>
+                  <input
+                    type="radio"
+                    name="theme-choice"
+                    value="auto"
+                    checked={selectedTheme === 'auto'}
+                    onchange={() => setTheme('auto')}
+                  />
+                  <span class="theme-preview theme-preview--auto" aria-hidden="true">
+                    {#each [themeAuto.dark, themeAuto.light] as pv, i (i)}
+                      <span
+                        class="theme-preview-half"
+                        style:--pv-bg={pv.bg}
+                        style:--pv-card={pv.card}
+                        style:--pv-accent={pv.accent}
+                        style:--pv-text={pv.text}
+                      >
+                        <span class="pv-side"><i></i><i></i><i></i></span>
+                        <span class="pv-body"><span class="pv-card"><i></i><i></i></span></span>
+                      </span>
+                    {/each}
+                  </span>
+                  <span class="theme-option-name">{$t('settings.theme_auto_btn')}</span>
+                </label>
+                {#each THEMES as th (th.id)}
+                  <label class="theme-option" class:is-active={selectedTheme === th.id}>
+                    <input
+                      type="radio"
+                      name="theme-choice"
+                      value={th.id}
+                      checked={selectedTheme === th.id}
+                      onchange={() => setTheme(th.id)}
+                    />
+                    <span
+                      class="theme-preview"
+                      aria-hidden="true"
+                      style:--pv-bg={th.preview.bg}
+                      style:--pv-card={th.preview.card}
+                      style:--pv-accent={th.preview.accent}
+                      style:--pv-text={th.preview.text}
+                    >
+                      <span class="pv-side"><i></i><i></i><i></i></span>
+                      <span class="pv-body"
+                        ><span class="pv-card"><i></i><i></i></span><span class="pv-card"
+                          ><i></i><i></i></span
+                        ></span
+                      >
+                    </span>
+                    <span class="theme-option-name">{$t(th.labelKey)}</span>
+                  </label>
+                {/each}
+              </div>
             </div>
             <div class="field-row">
               <div>
@@ -1764,6 +1807,138 @@
     text-align: right;
   }
 
+  /* theme picker: a grid of mini panels painted in each palette */
+  .field-row--stack {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .theme-picker {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+    gap: 10px;
+  }
+
+  .theme-option {
+    /* Значения по умолчанию; каждое превью задаёт свои через style:--pv-*. */
+    --pv-bg: var(--bg);
+    --pv-card: var(--bg-card);
+    --pv-accent: var(--accent);
+    --pv-text: var(--fg-primary);
+    position: relative;
+    display: grid;
+    gap: 6px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    transition: border-color var(--transition-fast);
+  }
+
+  .theme-option:hover {
+    border-color: var(--border-strong);
+  }
+
+  .theme-option.is-active {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+
+  .theme-option input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .theme-option:has(input:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .theme-option-name {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--fg-primary);
+    padding: 0 2px 2px;
+  }
+
+  .theme-preview {
+    display: grid;
+    grid-template-columns: 26% 1fr;
+    height: 56px;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--pv-bg);
+    border: 1px solid var(--border);
+  }
+
+  .theme-preview--auto {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .theme-preview-half {
+    display: grid;
+    grid-template-columns: 40% 1fr;
+    background: var(--pv-bg);
+    min-width: 0;
+  }
+
+  .pv-side {
+    display: grid;
+    align-content: start;
+    gap: 4px;
+    padding: 7px 5px;
+    background: var(--pv-card);
+  }
+
+  .pv-side i,
+  .pv-card i {
+    display: block;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--pv-text);
+    opacity: 0.35;
+  }
+
+  .pv-side i:first-child {
+    background: var(--pv-accent);
+    opacity: 1;
+  }
+
+  .pv-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-content: start;
+    gap: 5px;
+    padding: 7px 6px;
+    min-width: 0;
+  }
+
+  .theme-preview-half .pv-body {
+    grid-template-columns: 1fr;
+  }
+
+  .pv-card {
+    display: grid;
+    gap: 4px;
+    align-content: start;
+    padding: 5px;
+    height: 26px;
+    border-radius: 3px;
+    background: var(--pv-card);
+  }
+
+  .pv-card i {
+    opacity: 0.7;
+  }
+
+  .pv-card i + i {
+    width: 55%;
+    background: var(--pv-accent);
+    opacity: 1;
+  }
+
   /* accent color picker */
   .accent-picker {
     display: flex;
@@ -2099,6 +2274,15 @@
 
     .field-row > :last-child:not(:first-child) {
       max-width: 100%;
+    }
+
+    /* В колонке flex-basis задаёт высоту: подпись над сеткой тем не растягиваем */
+    .field-row--stack > :first-child {
+      flex: none;
+    }
+
+    .theme-picker {
+      grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
     }
   }
 

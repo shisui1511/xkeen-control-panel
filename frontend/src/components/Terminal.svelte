@@ -45,13 +45,14 @@
     const danger = styles.getPropertyValue('--danger').trim() || '#f4707f';
     const success = styles.getPropertyValue('--success').trim() || '#46d18a';
     const warning = styles.getPropertyValue('--warning').trim() || '#f0b450';
+    const accentRgb = styles.getPropertyValue('--accent-rgb').trim() || '41, 194, 240';
 
     return {
       background: bgDeep,
       foreground: fgTerminal,
       cursor: accent,
       cursorAccent: bgDeep,
-      selectionBackground: 'rgba(41, 194, 240, 0.3)',
+      selectionBackground: `rgba(${accentRgb}, 0.3)`,
       black: '#0c2237',
       red: danger,
       green: success,
@@ -258,7 +259,7 @@
     });
     themeObserver.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ['data-theme', 'class']
+      attributeFilter: ['data-theme', 'data-accent', 'class']
     });
 
     window.addEventListener('keydown', handleKeydown);

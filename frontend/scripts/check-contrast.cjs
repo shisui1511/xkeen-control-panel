@@ -6,6 +6,7 @@ const CSS_PATH = path.join(__dirname, '../src/styles/global.css');
 const PAIRS_PATH = path.join(__dirname, 'contrast-pairs.json');
 const TOAST_PATH = path.join(__dirname, '../src/components/Toast.svelte');
 const LOGIN_PATH = path.join(__dirname, '../src/Login.svelte');
+const THEME_INIT_PATH = path.join(__dirname, '../public/theme-init.js');
 
 function extractBlock(css, selectorRegex) {
   const blocks = [];
@@ -151,16 +152,44 @@ function main() {
     let failed = false;
     const css = fs.readFileSync(CSS_PATH, 'utf8');
     const rootText = extractBlock(css, /:root\s*\{/);
-    const lightText = extractBlock(css, /\[data-theme=['"]light['"]\]\s*\{/);
+    const lightText = extractBlock(css, /\[data-scheme=['"]light['"]\]\s*\{/);
     const darkTokens = parseTokens(rootText);
     const lightTokens = { ...darkTokens, ...parseTokens(lightText) };
+
+    // Дополнительные палитры наследуют свою схему (:root или [data-scheme='light'])
+    // и проверяются по тем же парам, что и базовая тема этой схемы.
+    const themeInit = fs.readFileSync(THEME_INIT_PATH, 'utf8');
+    const variants = [
+      { name: 'dark', scheme: 'dark', tokens: darkTokens },
+      { name: 'light', scheme: 'light', tokens: lightTokens }
+    ];
+    for (const m of themeInit.matchAll(/^\s*(\w+): \['(light|dark)'/gm)) {
+      const [, name, scheme] = m;
+      if (name === 'dark' || name === 'light') continue;
+      const block = extractBlock(css, new RegExp(`\\[data-theme=['"]${name}['"]\\]\\s*\\{`));
+      if (!block) {
+        console.error(`❌ Ошибка: в global.css нет блока [data-theme='${name}']`);
+        failed = true;
+        continue;
+      }
+      const base = scheme === 'light' ? lightTokens : darkTokens;
+      variants.push({ name, scheme, tokens: { ...base, ...parseTokens(block) } });
+    }
 
     const pairs = JSON.parse(fs.readFileSync(PAIRS_PATH, 'utf8'));
 
     console.log('🔄 Запуск проверки контраста WCAG AA...');
 
+    const checks = [];
     for (const pair of pairs) {
-      const tokens = pair.theme === 'light' ? lightTokens : darkTokens;
+      for (const v of variants) {
+        if (v.scheme !== pair.theme) continue;
+        checks.push({ ...pair, theme: v.name, tokens: v.tokens });
+      }
+    }
+
+    for (const pair of checks) {
+      const tokens = pair.tokens;
       const fgVal = tokens[pair.fg];
       if (!fgVal) {
         console.error(`❌ Ошибка: Токен ${pair.fg} не найден для темы ${pair.theme}`);

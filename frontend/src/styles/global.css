@@ -7,7 +7,7 @@
    ============================================================ */
 
 :root {
-  /* DARK is now the production look. Light theme is below in [data-theme="light"]. */
+  /* DARK is now the production look. Light theme is below in [data-scheme="light"]. */
 
   /* Canvas */
   --bg: #0c2237;
@@ -215,7 +215,7 @@
 }
 
 /* ------------ Light theme (inverted) ------------- */
-[data-theme='light'] {
+[data-scheme='light'] {
   --bg: #f3f6fa;
   --bg-page: #f3f6fa;
   --bg-card: #ffffff;
@@ -289,6 +289,244 @@
   --seq-8: #1f7a63;
 }
 
+/* ------------ Additional palettes -------------
+   data-theme names the palette, data-scheme (light|dark) says which family it
+   belongs to. Dark palettes start from the :root values above, light ones from
+   the [data-scheme='light'] block, and each overrides only what differs.
+   Keep these blocks above the accent variants: a chosen accent must win over
+   the palette's own accent. The list of ids lives in src/lib/theme.ts and
+   public/theme-init.js. */
+
+/* Charcoal: neutral grey without the blue cast; pure black chrome for OLED. */
+[data-theme='charcoal'] {
+  --bg: #121416;
+  --bg-page: #121416;
+  --bg-card: #181b1e;
+  --card-bg: #181b1e;
+  --bg-elevated: #1f2226;
+  --bg-deep: #000000;
+
+  --fg-primary: #e3e6e9;
+  --fg-secondary: #9ba2aa;
+  --text: #e3e6e9;
+  --text-secondary: #9ba2aa;
+  --fg-dim: #949ba3;
+  --fg-faint: #3d4248;
+
+  --border: #282c31;
+  --border-strong: #363b41;
+  --border-control: #6b737c;
+
+  --surface-overlay-from: #16191c;
+  --surface-overlay-to: #0b0c0e;
+  --scrollbar-thumb: #26292d;
+  --scrollbar-thumb-hover: #3a3f45;
+  --bg-group-head-from: rgba(31, 34, 38, 0.9);
+  --bg-group-head-to: rgba(24, 27, 30, 0.95);
+
+  --bg-terminal: #000000;
+  --fg-terminal: #e3e6e9;
+
+  --cm-bg: #0a0b0c;
+  --cm-comment: #949ba3;
+  --cm-property: #e3e6e9;
+  --cm-variable: #e3e6e9;
+  --cm-bracket: #e3e6e9;
+  --cm-active-line: #15181b;
+  --cm-border: #1c1f22;
+}
+
+/* Dusk: low-glare dark for long evening sessions; every hue is softened. */
+[data-theme='dusk'] {
+  --bg: #1f242c;
+  --bg-page: #1f242c;
+  --bg-card: #272d36;
+  --card-bg: #272d36;
+  --bg-elevated: #2e3540;
+  --bg-deep: #171b21;
+
+  --fg-primary: #c6d0dc;
+  --fg-secondary: #9ca7b5;
+  --text: #c6d0dc;
+  --text-secondary: #9ca7b5;
+  --fg-dim: #9aa5b3;
+  --fg-faint: #4a5361;
+
+  --border: #343b46;
+  --border-strong: #444d5a;
+  --border-control: #6a7584;
+
+  --accent: #6db3d6;
+  --primary: #6db3d6;
+  --accent-hover: #86c2e0;
+  --accent-2: #4f9bc2;
+  --accent-rgb: 109, 179, 214;
+
+  --success: #72c39a;
+  --warning: #d3a961;
+  --danger: #e48c95;
+  --idle: #b8974a;
+  --purple: #b79be0;
+
+  --btn-primary-text: #131a22;
+  --on-danger: #131a22;
+  --surface-overlay-from: #232931;
+  --surface-overlay-to: #1a1e25;
+  --scrollbar-thumb: #343b46;
+  --scrollbar-thumb-hover: #46505d;
+  --bg-group-head-from: rgba(46, 53, 64, 0.9);
+  --bg-group-head-to: rgba(39, 45, 54, 0.95);
+
+  --bg-terminal: #171b21;
+  --fg-terminal: #c6d0dc;
+
+  --cm-bg: #1a1e25;
+  --cm-keyword: #7fbede;
+  --cm-string: #8fc9a6;
+  --cm-number: #d3a961;
+  --cm-comment: #9aa5b3;
+  --cm-property: #c6d0dc;
+  --cm-variable: #c6d0dc;
+  --cm-operator: #7fbede;
+  --cm-boolean: #d3a961;
+  --cm-null: #e48c95;
+  --cm-bracket: #c6d0dc;
+  --cm-active-line: #20252d;
+  --cm-border: #2b313a;
+
+  --seq-6: #7fa6e0;
+  --seq-7: #d39ac0;
+  --seq-8: #8fcfb8;
+}
+
+/* Fog: light without white; grey-blue surfaces that don't glare by day. */
+[data-theme='fog'] {
+  --bg: #e2e7ec;
+  --bg-page: #e2e7ec;
+  --bg-card: #eef1f4;
+  --card-bg: #eef1f4;
+  --bg-elevated: #f5f7f9;
+  --bg-deep: #22303d;
+
+  --fg-primary: #1c2834;
+  --fg-secondary: #44525f;
+  --text: #1c2834;
+  --text-secondary: #44525f;
+  --fg-dim: #4f5e6c;
+  --fg-faint: #a6b1bd;
+
+  --border: #cbd3dc;
+  --border-strong: #b3bec9;
+  --border-control: #75838f;
+
+  --accent: #1b6a8e;
+  --primary: #1b6a8e;
+  --accent-hover: #155a79;
+  --accent-rgb: 27, 106, 142;
+
+  --success: #24693f;
+  --warning: #74520a;
+  --danger: #a4303c;
+  --purple: #6d1fb5;
+
+  --scrollbar-thumb: #b3bec9;
+  --scrollbar-thumb-hover: #9aa7b4;
+  --surface-overlay-from: #eef1f4;
+  --surface-overlay-to: #e2e7ec;
+  --bg-group-head-from: rgba(226, 231, 236, 0.95);
+  --bg-group-head-to: rgba(214, 221, 228, 0.95);
+
+  --cm-bg: #f5f7f9;
+  --cm-keyword: #165a79;
+  --cm-string: #24693f;
+  --cm-number: #74520a;
+  --cm-comment: #4f5e6c;
+  --cm-property: #1c2834;
+  --cm-variable: #1c2834;
+  --cm-operator: #165a79;
+  --cm-boolean: #74520a;
+  --cm-null: #a4303c;
+  --cm-bracket: #1c2834;
+  --cm-active-line: #e8ecf0;
+  --cm-border: #cbd3dc;
+
+  --seq-6: #2b56b0;
+  --seq-7: #9e3672;
+  --seq-8: #1b6a56;
+}
+
+/* Amber: phosphor terminal look; monospace UI and tight corners. */
+[data-theme='amber'] {
+  --bg: #110d07;
+  --bg-page: #110d07;
+  --bg-card: #18120a;
+  --card-bg: #18120a;
+  --bg-elevated: #20180d;
+  --bg-deep: #0a0704;
+
+  --fg-primary: #f1c47e;
+  --fg-secondary: #c49a5c;
+  --text: #f1c47e;
+  --text-secondary: #c49a5c;
+  --fg-dim: #b88f55;
+  --fg-faint: #4d3a18;
+
+  --border: #33260f;
+  --border-light: rgba(255, 190, 85, 0.06);
+  --border-strong: #4d3a18;
+  --border-control: #8a6a3a;
+
+  --accent: #ffbe55;
+  --primary: #ffbe55;
+  --accent-hover: #ffcb73;
+  --accent-2: #e6a43c;
+  --accent-rgb: 255, 190, 85;
+
+  --success: #a9d46e;
+  --warning: #ff9447;
+  --danger: #ff6a55;
+  --idle: #d4a03a;
+  --purple: #d9a3e8;
+
+  --btn-primary-text: #110d07;
+  --on-danger: #110d07;
+  --surface-overlay-from: #18120a;
+  --surface-overlay-to: #0d0a05;
+  --scrollbar-thumb: #33260f;
+  --scrollbar-thumb-hover: #4d3a18;
+  --bg-group-head-from: rgba(32, 24, 13, 0.9);
+  --bg-group-head-to: rgba(24, 18, 10, 0.95);
+
+  --bg-terminal: #0a0704;
+  --fg-terminal: #f1c47e;
+
+  --cm-bg: #0a0704;
+  --cm-keyword: #ffcb73;
+  --cm-string: #a9d46e;
+  --cm-number: #ff9447;
+  --cm-comment: #b88f55;
+  --cm-property: #f1c47e;
+  --cm-variable: #f1c47e;
+  --cm-operator: #ffcb73;
+  --cm-boolean: #ff9447;
+  --cm-null: #ff6a55;
+  --cm-bracket: #f1c47e;
+  --cm-active-line: #17110a;
+  --cm-border: #22190b;
+
+  --seq-6: #7fb8d9;
+  --seq-7: #f08fb0;
+  --seq-8: #9fd9a8;
+
+  --font-family-sans:
+    'JetBrains Mono', 'TwemojiMozilla', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius: 3px;
+  --radius-xs: 2px;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+}
+
 /* ------------ Density Modes (Theme-agnostic: applies orthogonally to dark and light themes) ------------- */
 [data-density='compact'] {
   --card-pad: 14px;
@@ -315,14 +553,14 @@
   --accent-2: #4f46e5;
 }
 
-[data-accent='indigo']:not([data-theme='light']) {
+[data-accent='indigo']:not([data-scheme='light']) {
   --accent: #818cf8;
   --primary: #818cf8;
   --accent-hover: #a5b4fc;
   --accent-rgb: 129, 140, 248;
 }
 
-[data-theme='light'][data-accent='indigo'] {
+[data-scheme='light'][data-accent='indigo'] {
   --accent: #4f46e5;
   --primary: #4f46e5;
   --accent-hover: #4338ca;
@@ -333,14 +571,14 @@
   --accent-2: #5c7691;
 }
 
-[data-accent='steel']:not([data-theme='light']) {
+[data-accent='steel']:not([data-scheme='light']) {
   --accent: #7d95ad;
   --primary: #7d95ad;
   --accent-hover: #93a8bd;
   --accent-rgb: 125, 149, 173;
 }
 
-[data-theme='light'][data-accent='steel'] {
+[data-scheme='light'][data-accent='steel'] {
   --accent: #46647c;
   --primary: #46647c;
   --accent-hover: #3a5468;
@@ -351,14 +589,14 @@
   --accent-2: #8b96a3;
 }
 
-[data-accent='graphite']:not([data-theme='light']) {
+[data-accent='graphite']:not([data-scheme='light']) {
   --accent: #aab4bf;
   --primary: #aab4bf;
   --accent-hover: #c0c8d1;
   --accent-rgb: 170, 180, 191;
 }
 
-[data-theme='light'][data-accent='graphite'] {
+[data-scheme='light'][data-accent='graphite'] {
   --accent: #33393f;
   --primary: #33393f;
   --accent-hover: #262b30;
@@ -367,7 +605,7 @@
 
 /* The dark-theme --accent-2 is a lighter tint; under white button text in the
    light theme it drops below 3:1, so the gradient ends on the hover shade. */
-[data-theme='light'] {
+[data-scheme='light'] {
   --accent-2: var(--accent-hover);
 }
 
@@ -1930,7 +2168,7 @@ td.mono,
 }
 
 /* Светлая тема: при 10% подложки контраст акцентного текста 4.4:1 — ниже порога AA */
-[data-theme='light'] .status-badge.info {
+[data-scheme='light'] .status-badge.info {
   background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 
