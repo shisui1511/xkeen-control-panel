@@ -209,7 +209,7 @@ func xrayTransitionPortChanged(panel CoreSection, tr *xrayTransition) bool {
 // config.yaml. nil — перехода для расчёта нет.
 func mihomoRoutingTransition(roots Roots, st State, draft Sections) *mihomoTransition {
 	prev := st.Routing.Mihomo
-	managed := DesiredRouting(draft).Managed
+	managed := DesiredRouting(draft).ManagedFor(KernelMihomo)
 	switch {
 	case managed && prev == nil:
 		return mihomoTakeTransition(roots, draft)

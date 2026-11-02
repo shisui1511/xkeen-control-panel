@@ -1222,9 +1222,10 @@ func (l *Layer) StartApply(user bool) error {
 	// это и есть решение «Отпустить маршрутизацию» (D-06, D-07).
 	fe := l.checkNow(true)
 	// Расхождение взятой секции блокирует применение, пока секция желаема (managed):
-	// «Отпустить» (managed=false) её не блокирует (FND-03, D-07 из 146).
+	// «Отпустить» (managed=false) её не блокирует (FND-03, D-07 из 146). Расхождение
+	// маршрутизации блокирует только то ядро, которое панель держит (D-06 из 147.1).
 	draft := l.store.Snapshot().Draft
-	if fe.DriftCount-len(fe.Routing)-len(fe.Sections) > 0 || (len(fe.Routing) > 0 && DesiredRouting(draft).Managed) || sectionDriftBlocks(draft, fe.Sections) {
+	if fe.DriftCount-len(fe.Routing)-len(fe.Sections) > 0 || routingDriftBlocks(draft, fe.Routing) || sectionDriftBlocks(draft, fe.Sections) {
 		release()
 		return ErrDriftBlocked
 	}

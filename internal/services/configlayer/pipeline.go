@@ -363,10 +363,10 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		}
 		blocked := len(drift(p.d.Roots, manifest)) > 0
 		// Дрейф маршрутизации (D-06, D-07) блокирует запуск, который держит
-		// маршрутизацию панели; запуск с желаемым managed=false — это и есть
-		// решение «Отпустить», он дрейфом маршрутизации не блокируется.
-		if !blocked && DesiredRouting(src).Managed {
-			blocked = len(routingDrift(p.d.Roots, snap.Routing, installed, req.Kernel, p.d.ForeignOwned)) > 0
+		// маршрутизацию этого ядра; запуск, отпускающий ядро, — это и есть решение
+		// «Отпустить», дрейфом этого ядра он не блокируется (по ядрам, D-06 из 147.1).
+		if !blocked {
+			blocked = routingDriftBlocks(src, routingDrift(p.d.Roots, snap.Routing, installed, req.Kernel, p.d.ForeignOwned))
 		}
 		// Чужой файл с ключом взятой секции блокирует запуск, который эту секцию
 		// держит (managed); запуск с managed=false — «Отпустить» — не блокируется.
