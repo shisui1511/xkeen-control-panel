@@ -1,3 +1,4 @@
+import type { Component } from 'svelte';
 import { writable, derived, get } from 'svelte/store';
 import { apiFetchJSON } from './lib/api';
 import { isServiceRestarting, clearRestartGrace } from './lib/serviceGrace';
@@ -306,6 +307,11 @@ export interface ConfirmRequest {
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: 'danger' | 'warning' | 'primary';
+  /** Необязательный блок между последствием и кнопками: компонент сам грузит данные и не блокирует действие. */
+  extra?: {
+    component: Component<any>;
+    props: Record<string, unknown>;
+  };
   resolve: (value: boolean) => void;
 }
 
