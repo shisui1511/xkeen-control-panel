@@ -4038,5 +4038,8 @@
   "errors.file_not_found": "File not found. It may have been deleted or renamed.",
   "errors.no_space": "The router's storage is full. Free up space and try again.",
   "errors.server_error": "router error (code {code}), see the panel logs for details",
-  "logs.jump_latest": "Jump to latest"
+  "logs.jump_latest": "Jump to latest",
+  "svc.actions_for": "Actions: {name}",
+  "svc.restart_hint": "The service stops for a few seconds; connections reconnect",
+  "svc.stop_hint": "Proxying through this service stops until it is started again"
 }
