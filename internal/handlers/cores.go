@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/cores"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
@@ -296,6 +297,70 @@ func (a *API) ConfigCoresReclaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSONSuccess(w, map[string]bool{"reclaimed": true})
+}
+
+// ConfigCoresFill — POST /api/configlayer/cores/fill {revision, template, profile}:
+// заполняет секции профиля панели Mihomo значениями шаблона (файл из
+// services.ProfileTemplateFiles) или профиля пользователя (D-18 фазы 147). Значения
+// уходят в черновик, маршрутизация не переносится; применяется обычным «Применить».
+// Работает, пока панель управляет Mihomo (иначе 409 section_not_managed). Нужен ровно
+// один источник; шаблон вне списка и профиль, которого нет, — 400 invalid_input.
+func (a *API) ConfigCoresFill(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireCores(w, r) {
+		return
+	}
+	var req struct {
+		Revision int64  `json:"revision"`
+		Template string `json:"template"`
+		Profile  string `json:"profile"`
+	}
+	if !a.decodeLayerBodyLimit(w, r, &req, maxCoresBodyBytes) {
+		return
+	}
+	badSource := &cores.Error{Code: "invalid_input", Params: map[string]string{"key": "source"}}
+	if (req.Template == "") == (req.Profile == "") {
+		a.writeCoresError(w, r, badSource)
+		return
+	}
+	var data []byte
+	if req.Template != "" {
+		if !services.IsProfileTemplateFile(req.Template) || a.templateSvc == nil {
+			a.writeCoresError(w, r, badSource)
+			return
+		}
+		for _, t := range a.templateSvc.List() {
+			if t.Type == "mihomo" && t.Filename == req.Template {
+				data = []byte(t.Content)
+				break
+			}
+		}
+		if data == nil {
+			a.writeCoresError(w, r, badSource)
+			return
+		}
+	} else {
+		if a.mihomoProfileSvc == nil {
+			a.writeCoresError(w, r, badSource)
+			return
+		}
+		var err error
+		data, err = a.mihomoProfileSvc.ReadProfile(req.Profile)
+		switch {
+		case errors.Is(err, services.ErrProfileInvalidName), errors.Is(err, services.ErrProfileReserved), errors.Is(err, services.ErrProfileNotFound):
+			a.writeCoresError(w, r, badSource)
+			return
+		case err != nil:
+			a.writeCoresError(w, r, err)
+			return
+		}
+	}
+	// Источник в секции не записывается: значения становятся панельными сразу.
+	ev, err := a.cores.Fill(req.Revision, data, configlayer.SourceFile{})
+	if err != nil {
+		a.writeCoresError(w, r, err)
+		return
+	}
+	JSONSuccess(w, ev)
 }
 
 // ConfigCoresAccessLog — POST /api/configlayer/cores/access-log {enabled,

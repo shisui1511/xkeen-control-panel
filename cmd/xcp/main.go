@@ -349,6 +349,7 @@ func main() {
 	api.SetMihomoProfileService(services.NewMihomoProfileService(cfg.MihomoConfigDir, cfg.DataDir))
 	srv.HandleProtected("/api/mihomo/profiles", api.MihomoProfiles)
 	srv.HandleProtected("/api/mihomo/profiles/preview", api.MihomoProfilePreview)
+	srv.HandleProtected("/api/mihomo/profiles/deps", api.MihomoProfileDeps)
 	for _, action := range []string{"create", "rename", "delete", "activate", "adopt"} {
 		srv.HandleProtected("/api/mihomo/profiles/"+action, api.MihomoProfileAction)
 	}
@@ -968,6 +969,7 @@ func main() {
 	srv.HandleProtected("/api/configlayer/cores/raw/parse", api.ConfigCoresRawParse)
 	srv.HandleProtected("/api/configlayer/cores/reclaim", api.ConfigCoresReclaim)
 	srv.HandleProtected("/api/configlayer/cores/access-log", api.ConfigCoresAccessLog)
+	srv.HandleProtected("/api/configlayer/cores/fill", api.ConfigCoresFill)
 	srv.HandleProtected("/api/configlayer/geodata", api.ConfigGeodata)
 	srv.HandleProtected("/api/configlayer/geodata/output", api.ConfigGeodataOutput)
 	srv.HandleProtected("/api/configlayer/geodata/run", api.ConfigGeodataRun)
