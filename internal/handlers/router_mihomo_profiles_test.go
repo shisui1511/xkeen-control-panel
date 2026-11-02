@@ -302,3 +302,143 @@ func TestRouterProfileActivateRollback(t *testing.T) {
 	}
 	rtRstHoldPID(t, "mihomo", pidAfter)
 }
+
+// Обычный маршрут «Сделать активным» при слое «Конфигурация» (PART-02, PART-03; D-06,
+// D-08, D-12, D-24, D-27). Вердикт — процессы ядер в /proc, ссылка config.yaml и файлы
+// профилей на диске; ответы панели и снимок слоя — вспомогательные. Профили сценариев
+// создаются копией действующего config.yaml; стенд возвращает rtSwPrepare (config.yaml,
+// каталог профилей, config-xkeen*, файлы Xray), свои файлы — t.Cleanup сценария.
+
+const (
+	rtOwnA = "rt-own-a"
+	rtOwnB = "rt-own-b"
+
+	rtPrfActivate = "/api/mihomo/profiles/activate"
+	rtPrfList     = "/api/mihomo/profiles"
+)
+
+// rtOwnPrepare готовит стенд сценария: исходное состояние снимается rtSwPrepare, свои
+// профили names пишутся копией действующего config.yaml, в t.Cleanup удаляются по
+// маске prefix* (до возврата стенда, он зарегистрирован раньше).
+func rtOwnPrepare(t *testing.T, e *rtSrc, prefix string, names ...string) *rtSwStand {
+	t.Helper()
+	s := rtSwPrepare(t, e)
+	rtOwnRemove(s, prefix)
+	t.Cleanup(func() { rtOwnRemove(s, prefix) })
+	if err := os.MkdirAll(s.profDir, 0o755); err != nil {
+		t.Fatalf("каталог профилей Mihomo не создан: %v", err)
+	}
+	for _, name := range names {
+		if err := os.WriteFile(s.profile(name), s.data, s.mode); err != nil {
+			t.Fatalf("профиль %s не записан: %v", name, err)
+		}
+	}
+	return s
+}
+
+// rtOwnRemove удаляет профили сценария по маске.
+func rtOwnRemove(s *rtSwStand, prefix string) {
+	files, _ := filepath.Glob(filepath.Join(s.profDir, prefix+"*.yaml"))
+	for _, f := range files {
+		_ = os.Remove(f)
+	}
+}
+
+// rtOwnOpenDraft открывает черновик правкой параметров проб Xray и возвращает
+// ревизию и число изменений.
+func (e *rtSrc) rtOwnOpenDraft() (int64, int) {
+	e.t.Helper()
+	probe, _ := e.rtRtView()["probe"].(map[string]any)
+	interval, _ := probe["interval_s"].(float64)
+	if interval == 0 {
+		e.t.Fatalf("в представлении нет probe.interval_s: %v", probe)
+	}
+	probe["interval_s"] = int(interval) + 1
+	if r := e.call(http.MethodPost, rtRoutingBase+"/probe", map[string]any{"revision": e.rtRtRevision(), "probe": probe}); r.Status != http.StatusOK {
+		e.t.Fatalf("probe: %d %s", r.Status, r.Code)
+	}
+	changes := e.rtRtDraftChanges()
+	if changes == 0 {
+		e.t.Fatal("правка проб не открыла черновик")
+	}
+	return e.rtRtRevision(), changes
+}
+
+// rtOwnActivate вызывает обычный маршрут активации и требует 200.
+func (e *rtSrc) rtOwnActivate(name string) map[string]any {
+	e.t.Helper()
+	r := e.callSlow(http.MethodPost, rtPrfActivate, map[string]string{"name": name})
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("activate %s: %d %s", name, r.Status, r.Code)
+	}
+	return r.object(e.t)
+}
+
+// Трасса (D-06, D-08): Mihomo у панели → обычная активация rt-own-a идёт через
+// конвейер, панель отпускает Mihomo на свой профиль (ссылка на rt-own-a, файла xcp-main
+// нет, routing.mihomo.taken false) → смена на rt-own-b при открытом черновике идёт
+// обычной активацией, черновик не тронут → возврат панели → активация при открытом
+// черновике отвечает 409 draft_open без изменений на диске. Ветка mihomo — перезапуск
+// с новым PID, ветка xray — outcome saved_kernel_inactive. Метка ядра: сценарий читает
+// активное ядро и проверяет его процесс.
+func TestRouterProfileActivateOwnership(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	e := rtNewSrc(t)
+	e.enableLayer()
+	e.rtRstIdle()
+	rtOwnPrepare(t, e, "rt-own-", rtOwnA, rtOwnB)
+	m := rtCoresLiveMihomoTake(t, e, tg)
+	pid := rtRstKernelPID(t, tg.Core)
+
+	// Панель владеет Mihomo: активация идёт через конвейер.
+	pid = rtSwExpectKernel(t, tg.Core, e.rtOwnActivate(rtOwnA), rtOwnA, pid)
+	m.taken = false
+	if !rtSwLinkOn(t, "profiles/"+rtOwnA+".yaml") {
+		t.Fatalf("после активации config.yaml не указывает на %s", rtOwnA)
+	}
+	if _, err := os.Stat(filepath.Join(rtRtMihomoDir, rtRtPanelProfile)); err == nil {
+		t.Error("после активации файл профиля панели остался на диске")
+	}
+	if k, _ := e.rtSwRouting()["mihomo"].(map[string]any); k == nil || k["taken"] != false {
+		t.Errorf("после активации routing.mihomo: %v, ожидалось taken=false", e.rtSwRouting()["mihomo"])
+	}
+
+	// Смена своего профиля на другой при открытом черновике: черновик не касается.
+	rev, changes := e.rtOwnOpenDraft()
+	pid = rtSwExpectKernel(t, tg.Core, e.rtOwnActivate(rtOwnB), rtOwnB, pid)
+	if !rtSwLinkOn(t, "profiles/"+rtOwnB+".yaml") {
+		t.Fatalf("после смены config.yaml не указывает на %s", rtOwnB)
+	}
+	if got := e.rtRtRevision(); got != rev {
+		t.Errorf("смена профиля: ревизия черновика %d -> %d", rev, got)
+	}
+	if got := e.rtRtDraftChanges(); got != changes {
+		t.Errorf("смена профиля: изменений черновика %d -> %d", changes, got)
+	}
+	e.resetDraft()
+
+	// Возврат панели, затем активация при открытом черновике: отказ без изменений.
+	pid = rtSwExpectKernel(t, tg.Core, e.rtSwCall("return", ""), rtSwPanel, pid)
+	m.taken = true
+	if !rtSwLinkOn(t, rtRtPanelProfile) {
+		t.Fatalf("после возврата config.yaml не указывает на %s", rtRtPanelProfile)
+	}
+	rev, changes = e.rtOwnOpenDraft()
+	disk := rtRtScanDisk(t)
+	r := e.callSlow(http.MethodPost, rtPrfActivate, map[string]string{"name": rtOwnA})
+	e.rtRtExpect("активация при открытом черновике", r, http.StatusConflict, "draft_open")
+	if got := rtRtScanDisk(t); got.mihomoTarget != disk.mihomoTarget || got.mihomoSum != disk.mihomoSum {
+		t.Error("активация при открытом черновике изменила config.yaml")
+	}
+	if got := e.rtRtRevision(); got != rev {
+		t.Errorf("отказ: ревизия черновика %d -> %d", rev, got)
+	}
+	if got := e.rtRtDraftChanges(); got != changes {
+		t.Errorf("отказ: изменений черновика %d -> %d", changes, got)
+	}
+	e.resetDraft()
+
+	// Стенд к возврату: Mihomo отпущен на прежний профиль (rt-own-b).
+	rtSwExpectKernel(t, tg.Core, e.rtSwCall("release", ""), rtOwnB, pid)
+	m.taken = false
+}

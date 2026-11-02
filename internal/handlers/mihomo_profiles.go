@@ -147,6 +147,38 @@ func (a *API) profileActivationResult(res *services.ActivationResult) profileAct
 	return out
 }
 
+// activateByOwner ведёт «Сделать активным» по владельцу Mihomo, когда слой
+// «Конфигурация» включён. Панель владеет Mihomo — переход идёт через конвейер
+// (ActivateProfile под замком применения): черновик не затрагивается, при открытом
+// ответ 409 draft_open. Панель не владеет, но черновик хочет взять Mihomo (желание
+// есть, файл ещё не переключён) — тоже 409 draft_open: иначе «Применить» взял бы
+// профиль, который пользователь только что выбрал. Смена одного своего профиля на
+// другой черновика не касается и идёт обычной активацией. Возвращает true, когда
+// ответ уже записан.
+func (a *API) activateByOwner(w http.ResponseWriter, r *http.Request, name string) bool {
+	if a.configLayer == nil || !a.configLayer.Enabled() || a.routing == nil {
+		return false
+	}
+	if a.configLayer.MihomoTaken() {
+		view, err := a.routing.ActivateProfile(context.WithoutCancel(r.Context()), name)
+		switch {
+		case errors.Is(err, configlayer.ErrDraftOpen):
+			JSONErrorCode(w, http.StatusConflict, "draft_open", a.t(r, "profiles.err_draft_open"))
+		case err != nil:
+			a.writeRoutingError(w, r, err)
+		default:
+			a.ClearCapabilitiesCache()
+			JSONSuccess(w, mihomoSwitchResult(view, name, panelMihomoProfileName))
+		}
+		return true
+	}
+	if st, err := a.configLayer.ReadState(); err == nil && configlayer.DesiredRouting(st.Draft).ManagedFor(configlayer.KernelMihomo) {
+		JSONErrorCode(w, http.StatusConflict, "draft_open", a.t(r, "profiles.err_draft_open"))
+		return true
+	}
+	return false
+}
+
 type mihomoProfileRequest struct {
 	Name    string `json:"name"`
 	NewName string `json:"new_name"`
@@ -207,6 +239,11 @@ func (a *API) MihomoProfileAction(w http.ResponseWriter, r *http.Request) {
 	case "adopt":
 		err = svc.Adopt(req.Name)
 	case "activate":
+		// Слой включён: путь выбирает владелец Mihomo (D-06, D-08). Ответ записан —
+		// дальше нечего делать.
+		if a.activateByOwner(w, r, req.Name) {
+			return
+		}
 		// Активация перезапускает ядро: под общим замком жизненного цикла, до
 		// переключения ссылки config.yaml. create/rename/delete/adopt ядро не трогают.
 		if !a.tryLifecycleLock(w, r) {
