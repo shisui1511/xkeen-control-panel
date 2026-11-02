@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -149,6 +150,59 @@ func (a *API) isActiveMihomoConfig(path string) bool {
 	return false
 }
 
+// isMihomoProfilePath сообщает, что path — файл *.yaml/*.yml внутри profiles/
+// корня Mihomo. Корень сравнивается и в исходном, и в развёрнутом по симлинкам виде:
+// PathValidator возвращает уже развёрнутый путь.
+func (a *API) isMihomoProfilePath(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext != ".yaml" && ext != ".yml" {
+		return false
+	}
+	root := filepath.Clean(a.cfg.MihomoConfigDir)
+	bases := []string{root}
+	if resolved, err := filepath.EvalSymlinks(root); err == nil && resolved != root {
+		bases = append(bases, resolved)
+	}
+	for _, base := range bases {
+		rel, err := filepath.Rel(base, filepath.Clean(path))
+		if err != nil {
+			continue
+		}
+		parts := strings.Split(filepath.ToSlash(rel), "/")
+		if len(parts) >= 2 && parts[0] == "profiles" && parts[1] != ".." {
+			return true
+		}
+	}
+	return false
+}
+
+// lockMihomoFiles берёт замок записи файлов Mihomo (SubscriptionService.mihomoMu)
+// и возвращает функцию снятия. Для создания и копирования профиля: методы сервиса
+// профилей берут свой замок сами, поэтому здесь он не берётся.
+func (a *API) lockMihomoFiles() func() {
+	if a.subscriptionSvc == nil {
+		return func() {}
+	}
+	a.subscriptionSvc.LockMihomo()
+	return a.subscriptionSvc.UnlockMihomo
+}
+
+// lockProfileWrite берёт замок записи профиля: mihomoMu, затем замок сервиса
+// профилей (порядок всегда такой, обратный не встречается). lifecycleMu не берётся:
+// запись профиля ядро не перезапускает. Только для ConfigSave, который методов
+// сервиса не зовёт: они берут тот же замок сами, повторное взятие повисло бы.
+func (a *API) lockProfileWrite() func() {
+	unlockFiles := a.lockMihomoFiles()
+	if a.mihomoProfileSvc == nil {
+		return unlockFiles
+	}
+	a.mihomoProfileSvc.LockWrite()
+	return func() {
+		a.mihomoProfileSvc.UnlockWrite()
+		unlockFiles()
+	}
+}
+
 func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
@@ -166,11 +220,14 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isMihomoConfig := a.isActiveMihomoConfig(cleanPath)
-
-	if isMihomoConfig && a.subscriptionSvc != nil {
-		a.subscriptionSvc.LockMihomo()
-		defer a.subscriptionSvc.UnlockMihomo()
+	// Файл профиля (в том числе активный, config.yaml → profiles/x.yaml) пишется под
+	// замком записи профиля; обычный config.yaml — под замком Mihomo. Замки не
+	// накладываются: активный профиль берёт только lockProfileWrite.
+	switch {
+	case a.isMihomoProfilePath(cleanPath):
+		defer a.lockProfileWrite()()
+	case a.isActiveMihomoConfig(cleanPath):
+		defer a.lockMihomoFiles()()
 	}
 
 	// T032: extension whitelist — only .json, .yaml, .yml allowed
@@ -751,15 +808,25 @@ func (a *API) runConfigValidator(ctx context.Context, cleanPath, content string)
 	defer os.RemoveAll(tempDir)
 
 	filename := filepath.Base(cleanPath)
-	if err := copyDirConfigs(filepath.Dir(cleanPath), tempDir, filename, content, a.cfg.AllowedRoots); err != nil {
+	// Файл профиля проверяется в зеркале корня Mihomo (геобазы, rules/, providers/
+	// видны ядру), а не в копии его каталога profiles/.
+	mirror := kernelType == "mihomo" && a.isMihomoProfilePath(cleanPath)
+	if mirror {
+		if err := configlayer.MirrorMihomo(a.cfg.MihomoConfigDir, []byte(content), tempDir); err != nil {
+			return "", err
+		}
+	} else if err := copyDirConfigs(filepath.Dir(cleanPath), tempDir, filename, content, a.cfg.AllowedRoots); err != nil {
 		return "", err
 	}
 
 	var cmd *exec.Cmd
-	if kernelType == "xray" {
+	switch {
+	case kernelType == "xray":
 		cmd = exec.CommandContext(ctx, binaryPath, "-test", "-confdir", tempDir)
 		setupXrayCmdEnv(cmd, tempDir)
-	} else {
+	case mirror:
+		cmd = exec.CommandContext(ctx, binaryPath, "-t", "-d", tempDir, "-f", filepath.Join(tempDir, "config.yaml"))
+	default:
 		cmd = exec.CommandContext(ctx, binaryPath, "-t", "-d", tempDir, "-f", filepath.Join(tempDir, filename))
 	}
 	// После таймаута не ждать дочерние процессы валидатора, держащие вывод
@@ -767,6 +834,10 @@ func (a *API) runConfigValidator(ctx context.Context, cleanPath, content string)
 	// Замок вспомогательных запусков берёт вызывающий до таймаута проверки: ожидание
 	// конца операции XKeen не должно съедать её время.
 	out, err := cmd.CombinedOutput()
+	if mirror {
+		// Вывод ядра показывает рабочий путь, а не временный каталог.
+		return strings.ReplaceAll(string(out), tempDir, a.cfg.MihomoConfigDir), err
+	}
 	return string(out), err
 }
 

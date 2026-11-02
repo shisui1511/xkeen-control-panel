@@ -471,6 +471,19 @@ func mirrorMihomo(root, resolvedConfig string, override []byte, tmp string) erro
 	return nil
 }
 
+// MirrorMihomo строит во временном каталоге tmp зеркало корня Mihomo, в котором
+// config.yaml — обычный файл с содержимым content: geodata (*.dat, *.metadb, *.mmdb)
+// и файлы подкаталогов (rules/, providers/, proxy_providers/, rule_providers/,
+// profiles/; кроме backups) подключены симлинками, остальные конфигурации верхнего
+// уровня скопированы. Так `mihomo -t -d <tmp> -f <tmp>/config.yaml` проверяет любой
+// файл профиля теми же геобазами и каталогами провайдеров, что видит рабочее ядро.
+func MirrorMihomo(root string, content []byte, tmp string) error {
+	if content == nil {
+		content = []byte{}
+	}
+	return mirrorMihomo(root, "", content, tmp)
+}
+
 // maxMirrorDepth — предел вложенности зеркала подкаталогов (защита от петель).
 const maxMirrorDepth = 8
 

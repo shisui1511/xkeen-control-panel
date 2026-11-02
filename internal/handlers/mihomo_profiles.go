@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 // waits for the Mihomo process to come back.
 func (a *API) SetMihomoProfileService(svc *services.MihomoProfileService) {
 	svc.Validate = a.validateMihomoProfile
+	svc.ValidateContent = a.validateMihomoContent
 	// Перезапуск после активации профиля решает KernelApplier: Mihomo должен
 	// быть активным ядром, а его процесс — мочь работать (unknown считается
 	// запущенным). Логика отката в Activate остаётся прежней.
@@ -57,7 +60,20 @@ func (a *API) SetMihomoProfileService(svc *services.MihomoProfileService) {
 	a.mihomoProfileSvc = svc
 }
 
+// validateMihomoProfile проверяет файл профиля: читает его и отдаёт содержимое
+// validateMihomoContent (то же зеркало корня Mihomo, что у сохранения).
 func (a *API) validateMihomoProfile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return a.validateMihomoContent(data)
+}
+
+// validateMihomoContent проверяет содержимое профиля `mihomo -t` в зеркале корня
+// Mihomo: геобазы, rules/, providers/ видны ядру, config.yaml зеркала — проверяемое
+// содержимое. Вывод ядра показывает рабочий корень, а не временный каталог.
+func (a *API) validateMihomoContent(data []byte) error {
 	bin := a.cfg.MihomoBinary
 	if a.mihomoSvc != nil && a.mihomoSvc.BinaryPath != "" {
 		bin = a.mihomoSvc.BinaryPath
@@ -69,14 +85,22 @@ func (a *API) validateMihomoProfile(path string) error {
 		// No core installed (e.g. development machine): nothing to test with.
 		return nil
 	}
+	tmp, err := os.MkdirTemp("", "xcp-prof-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	if err := configlayer.MirrorMihomo(a.cfg.MihomoConfigDir, data, tmp); err != nil {
+		return err
+	}
 	// Проверка не идёт во время операции XKeen над ядром (services.AcquireKernelHelper);
 	// ожидание не съедает её таймаут.
 	defer services.AcquireKernelHelper(context.Background())()
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, bin, "-t", "-d", a.cfg.MihomoConfigDir, "-f", path).CombinedOutput()
+	out, err := exec.CommandContext(ctx, bin, "-t", "-d", tmp, "-f", filepath.Join(tmp, "config.yaml")).CombinedOutput()
 	if err != nil {
-		msg := strings.TrimSpace(string(out))
+		msg := strings.TrimSpace(strings.ReplaceAll(string(out), tmp, a.cfg.MihomoConfigDir))
 		if len(msg) > 600 {
 			msg = msg[len(msg)-600:]
 		}
@@ -170,7 +194,12 @@ func (a *API) MihomoProfileAction(w http.ResponseWriter, r *http.Request) {
 	var result interface{}
 	switch action {
 	case "create":
+		// Создание читает активный конфиг или другой профиль: под замком записи
+		// файлов Mihomo, чтобы не прочесть его на полпути записи (сам сервис берёт
+		// свой замок в Create).
+		unlock := a.lockMihomoFiles()
 		err = svc.Create(req.Name, req.From, req.Empty)
+		unlock()
 	case "rename":
 		err = svc.Rename(req.Name, req.NewName)
 	case "delete":
