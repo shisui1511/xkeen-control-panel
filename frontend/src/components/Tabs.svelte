@@ -31,6 +31,21 @@
 
   let { items, value = $bindable(), variant = 'line', ariaLabel, onchange }: Props = $props();
 
+  // На телефоне вкладки прокручиваются вбок: выбранная (в том числе открытая по адресу)
+  // докручивается в видимую часть полосы, а не остаётся за краем.
+  function revealActive(node: HTMLElement) {
+    void value;
+    const active = node.querySelector<HTMLElement>('.tab-btn.active');
+    if (!active || node.scrollWidth <= node.clientWidth) return;
+    const left = active.offsetLeft - node.offsetLeft;
+    const right = left + active.offsetWidth;
+    if (left < node.scrollLeft + 24) {
+      node.scrollTo({ left: Math.max(0, left - 24), behavior: 'smooth' });
+    } else if (right > node.scrollLeft + node.clientWidth - 24) {
+      node.scrollTo({ left: right - node.clientWidth + 24, behavior: 'smooth' });
+    }
+  }
+
   function handleClick(item: TabItem) {
     const next = resolveTabValue(item, value);
     if (next === value) return;
@@ -46,6 +61,7 @@
     role="tablist"
     aria-label={ariaLabel}
     {@attach slidingIndicator('.tab-btn.active')}
+    {@attach revealActive}
   >
     {#each items as item (item.value)}
       <button
@@ -80,6 +96,38 @@
 
   .tabs::-webkit-scrollbar {
     display: none;
+  }
+
+  /* Края прокручиваемой полосы растворяются, пока за ними есть вкладки: видно, что
+     полоса листается. Без прокрутки шкала неактивна и маски нет. */
+  @supports (animation-timeline: scroll()) {
+    .tabs:not(.tabs-pill) {
+      mask-image: linear-gradient(
+        to right,
+        transparent 0,
+        black var(--tabs-fade-l),
+        black calc(100% - var(--tabs-fade-r)),
+        transparent 100%
+      );
+      animation: tabs-edge-fade linear both;
+      animation-timeline: scroll(self inline);
+    }
+  }
+
+  @keyframes tabs-edge-fade {
+    0% {
+      --tabs-fade-l: 0px;
+      --tabs-fade-r: 32px;
+    }
+    8%,
+    92% {
+      --tabs-fade-l: 32px;
+      --tabs-fade-r: 32px;
+    }
+    100% {
+      --tabs-fade-l: 32px;
+      --tabs-fade-r: 0px;
+    }
   }
 
   .tabs-pill {

@@ -2,6 +2,7 @@
   import type { Snippet } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import { t } from '../i18n';
+  import { swipeToDismiss } from '../lib/gestures';
 
   let {
     isOpen = false,
@@ -26,6 +27,15 @@
   } = $props();
 
   const MODAL_SELECTOR = '[role="dialog"][aria-modal="true"]';
+
+  // Телефон: лист тянут вниз за шапку (с ручкой), чтобы закрыть
+  let containerEl: HTMLDivElement | null = $state(null);
+  const sheetSwipe = swipeToDismiss({
+    direction: 'down',
+    onDismiss: () => onclose(),
+    target: () => containerEl,
+    enabled: () => window.matchMedia('(max-width: 768px)').matches
+  });
 
   // Диалог рендерится только внутри {#if isOpen}, поэтому вложения на его контейнере
   // начинают работу при открытии и снимаются при закрытии.
@@ -140,6 +150,7 @@
   <div class="modal-backdrop" role="presentation" onclick={onclose}>
     <div
       class="modal-container {className}"
+      bind:this={containerEl}
       role="dialog"
       aria-modal="true"
       aria-label={ariaLabel || undefined}
@@ -153,7 +164,7 @@
       style="max-width: {maxWidth};"
       tabindex="-1"
     >
-      <header class="modal-header">
+      <header class="modal-header" {@attach sheetSwipe}>
         <h2 id="modal-title" class="modal-title">{title}</h2>
         <button
           class="modal-close-btn"
@@ -189,6 +200,7 @@
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.65);
+    -webkit-backdrop-filter: blur(2px);
     backdrop-filter: blur(2px);
     display: flex;
     align-items: center;
@@ -256,21 +268,47 @@
     font-size: var(--font-size-base);
   }
 
-  @media (max-width: 480px) {
+  /* Телефон: окно — нижний лист во всю ширину. Кнопки действий оказываются
+     под большим пальцем, длинная форма прокручивается внутри листа, низ
+     учитывает системную полосу жестов */
+  @media (max-width: 768px) {
     .modal-backdrop {
-      padding: 8px;
+      align-items: flex-end;
+      padding: 0;
+      padding-top: env(safe-area-inset-top);
     }
     .modal-container {
-      width: calc(100% - 16px);
-      margin: 8px auto;
-      max-height: calc(100dvh - 16px);
-      border-radius: 12px;
+      width: 100%;
+      max-width: none !important;
+      max-height: 92dvh;
+      border-radius: 16px 16px 0 0;
+      border-bottom: 0;
+      padding-bottom: env(safe-area-inset-bottom);
+      animation-name: sheet-in;
     }
     .modal-header {
-      padding: 12px 14px;
+      position: relative;
+      padding: 18px 8px 10px 16px;
+      touch-action: none;
+    }
+    /* Ручка листа: подсказывает, что лист можно смахнуть вниз */
+    .modal-header::before {
+      content: '';
+      position: absolute;
+      top: 6px;
+      left: 50%;
+      width: 36px;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--border-strong, var(--border));
+      transform: translateX(-50%);
+    }
+    .modal-close-btn {
+      width: 40px;
+      height: 40px;
     }
     .modal-content {
-      padding: 14px 16px;
+      padding: 14px 16px 18px;
     }
   }
 
@@ -278,6 +316,12 @@
      не ждали уходящего окна. */
   @keyframes modal-backdrop-in {
     from {
+      opacity: 0;
+    }
+  }
+  @keyframes sheet-in {
+    from {
+      transform: translateY(24px);
       opacity: 0;
     }
   }

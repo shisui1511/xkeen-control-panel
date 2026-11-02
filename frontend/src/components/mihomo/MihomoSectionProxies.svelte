@@ -744,7 +744,6 @@
     padding: 2px 6px;
     border-radius: 4px;
     font-weight: 500;
-    text-transform: uppercase;
     flex-shrink: 0;
   }
 

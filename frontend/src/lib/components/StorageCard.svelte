@@ -88,7 +88,8 @@
 
   .storage-percent {
     color: var(--fg-secondary);
-    font-family: var(--font-family-mono);
+    font-family: var(--font-family-sans);
+    font-variant-numeric: tabular-nums;
   }
 
   .storage-track {

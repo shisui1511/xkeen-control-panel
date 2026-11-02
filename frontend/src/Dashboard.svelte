@@ -32,6 +32,7 @@
   import { kernelLabel } from './lib/kernelState';
   import { panelNewVersion, rememberPanelVersion } from './lib/panelHealth';
   import Sidebar from './components/Sidebar.svelte';
+  import BottomDock from './components/BottomDock.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
   import Card from './components/Card.svelte';
   import Button from './components/Button.svelte';
@@ -66,6 +67,8 @@
   import { anyKernelInstalled } from './lib/navCaps';
   import { capsuleConfigStore } from './lib/capsuleSettings';
   import { tabFromHash, legacyRedirectHash } from './lib/tabFromHash';
+  import { swipeToDismiss, pullToRefresh } from './lib/gestures';
+  import DashboardPulse from './components/dashboard/DashboardPulse.svelte';
   import { currentTheme, schemeOf, toggleThemeScheme } from './lib/theme';
   import {
     isAnySourceDirty,
@@ -821,6 +824,34 @@
     isSidebarOpen.set(false);
   }
 
+  // Число замечаний для «пульта» на телефоне — те же условия, что у панели проблем
+  const problemCount = $derived(
+    [
+      systemStats?.invalid_config,
+      currentNextStep !== null,
+      $capabilities !== null &&
+        !$capabilities?.mihomo?.api_reachable &&
+        $capabilities?.mihomo?.process_running,
+      $capabilities !== null && $capabilities?.mihomo?.is_insecure_lan,
+      isKernelCrashed,
+      isDiskLow,
+      isSSLExpiring,
+      isWatchdogIncident
+    ].filter(Boolean).length
+  );
+
+  function scrollToProblems() {
+    document.querySelector('.dash-alerts')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // Телефон: открытое меню смахивается влево, как системные выдвижные панели
+  const drawerSwipe = swipeToDismiss({
+    direction: 'left',
+    onDismiss: closeSidebar,
+    threshold: 70,
+    enabled: () => isMobile && $isSidebarOpen
+  });
+
   async function installPWA() {
     if (!pwaInstallPrompt) return;
     pwaInstallPrompt.prompt();
@@ -981,6 +1012,7 @@
     style="display: flex; flex-direction: column;"
     {@attach drawerFocus}
     {@attach drawerScrollLock}
+    {@attach drawerSwipe}
     onkeydown={handleDrawerKeydown}
     role={drawerIsModal ? 'dialog' : undefined}
     aria-modal={drawerIsModal ? 'true' : undefined}
@@ -1068,7 +1100,12 @@
           />
         </div>
       {:else if currentTab === 'dashboard'}
-        <div class="container" data-testid="dashboard-page" in:pageIn>
+        <div
+          class="container"
+          data-testid="dashboard-page"
+          in:pageIn
+          {@attach pullToRefresh(handleRefresh)}
+        >
           <!-- Page header -->
           <PageHeader
             title={$t('dash.title')}
@@ -1088,6 +1125,21 @@
               {$t('app.refresh')}
             </Button>
           </PageHeader>
+
+          <DashboardPulse
+            kernel={$activeKernelName ?? ''}
+            kernelStatus={$activeKernelName === 'mihomo'
+              ? serviceStatus.mihomo
+              : $activeKernelName === 'xray'
+                ? serviceStatus.xray
+                : statusLoading
+                  ? 'loading'
+                  : 'not_installed'}
+            xkeenInstalled={serviceStatus.xkeen !== 'not_installed'}
+            {problemCount}
+            onShowProblems={scrollToProblems}
+            onSwitchTab={switchTab}
+          />
 
           <!-- Quickstart Checklist (карточка видна только при активном Mihomo, auto-hides when all steps complete).
                Gated on statusLoading/subsSummaryLoaded so it doesn't flash "incomplete"
@@ -1830,6 +1882,11 @@
       {/if}
     {/key}
   </div>
+
+  <!-- Нижняя панель разделов (только телефон, ≤768 px) -->
+  <div class="bottom-dock-slot" inert={drawerIsModal}>
+    <BottomDock {currentTab} onOpenMenu={toggleSidebar} />
+  </div>
 </div>
 
 <ConfirmDialog />
@@ -2068,6 +2125,34 @@
   @media (max-width: 768px) {
     .problem-item {
       padding: var(--spacing-3, 12px) var(--spacing-4, 16px);
+    }
+
+    /* Телефон: замечание — компактная строка под «пультом», а не крупная
+       карточка на пол-экрана; описание сокращено до трёх строк */
+    .problem-icon {
+      width: 28px;
+      height: 28px;
+    }
+
+    .problem-title {
+      font-size: var(--font-size-base, 14px);
+    }
+
+    .problem-desc {
+      font-size: var(--font-size-sm);
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+      line-clamp: 3;
+      overflow: hidden;
+    }
+
+    .problems-list {
+      gap: var(--spacing-2, 8px);
+    }
+
+    .dash-alerts {
+      scroll-margin-top: calc(var(--mhdr-h) + env(safe-area-inset-top) + 12px);
     }
 
     .problem-item > :global(.btn),

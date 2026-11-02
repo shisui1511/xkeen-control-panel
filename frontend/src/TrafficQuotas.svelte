@@ -581,7 +581,7 @@
                           : q.target_id}
                       </span>
                     </td>
-                    <td class="mono">
+                    <td>
                       {q.period === 'daily'
                         ? $t('trafficquotas.period_daily')
                         : q.period === 'weekly'
@@ -590,7 +590,7 @@
                             ? $t('trafficquotas.period_monthly')
                             : q.period}
                     </td>
-                    <td class="mono">
+                    <td class="num">
                       {formatBytes(q.current_bytes)}
                       <div
                         class="stat-bar"
@@ -609,7 +609,7 @@
                         ></div>
                       </div>
                     </td>
-                    <td class="mono">{formatBytes(q.limit_bytes)}</td>
+                    <td class="num">{formatBytes(q.limit_bytes)}</td>
                     <td>
                       <span class={getActionBadgeClass(q.action)}>
                         {getActionLabel(q.action)}
@@ -730,9 +730,9 @@
                 {#each stats.proxies as p, i (i)}
                   <tr>
                     <td><b>{p.proxy_name}</b></td>
-                    <td class="mono">{formatBytes(p.upload_bytes)}</td>
-                    <td class="mono">{formatBytes(p.download_bytes)}</td>
-                    <td class="mono" style="color: var(--fg-primary); font-weight: 600;"
+                    <td class="num">{formatBytes(p.upload_bytes)}</td>
+                    <td class="num">{formatBytes(p.download_bytes)}</td>
+                    <td class="num" style="color: var(--fg-primary); font-weight: 600;"
                       >{formatBytes(p.total_bytes)}</td
                     >
                   </tr>
@@ -909,6 +909,8 @@
     font-weight: 600;
     font-size: var(--font-size-2xl);
     color: var(--fg-primary);
+    font-family: var(--font-family-sans);
+    font-variant-numeric: tabular-nums;
   }
 
   .stat-value-unit {
@@ -957,6 +959,11 @@
 
   .mono {
     font-family: var(--font-mono, monospace);
+  }
+
+  .num {
+    font-family: var(--font-family-sans);
+    font-variant-numeric: tabular-nums;
   }
 
   .stat-bar {

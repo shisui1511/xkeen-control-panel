@@ -28,6 +28,31 @@
   let term: Terminal | null = null;
   let fitAddon: FitAddon | null = null;
   let ws: WebSocket | null = null;
+
+  function sendStdin(data: string) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'stdin', data }));
+    }
+  }
+
+  // Клавиши, которых нет на экранной клавиатуре телефона. Нажатие не забирает
+  // фокус у терминала (pointerdown без фокуса), клавиатура не прячется.
+  const TOUCH_KEYS: { label: string; data: string; aria?: string }[] = [
+    { label: 'Esc', data: '\x1b' },
+    { label: 'Tab', data: '\t' },
+    { label: 'Ctrl+C', data: '\x03' },
+    { label: 'Ctrl+D', data: '\x04' },
+    { label: 'Ctrl+L', data: '\x0c' },
+    { label: '↑', data: '\x1b[A', aria: 'console.key_up' },
+    { label: '↓', data: '\x1b[B', aria: 'console.key_down' },
+    { label: '←', data: '\x1b[D', aria: 'console.key_left' },
+    { label: '→', data: '\x1b[C', aria: 'console.key_right' }
+  ];
+
+  function pressTouchKey(data: string) {
+    sendStdin(data);
+    term?.focus();
+  }
   let resizeObserver: ResizeObserver | null = null;
   let themeObserver: MutationObserver | null = null;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -233,11 +258,7 @@
     term.loadAddon(fitAddon);
     term.open(container);
 
-    term.onData((data) => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'stdin', data }));
-      }
-    });
+    term.onData((data) => sendStdin(data));
 
     term.onBinary((data) => {
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -419,6 +440,19 @@
   <!-- Terminal Canvas Viewport -->
   <div class="terminal-screen">
     <div class="xterm-mount" {@attach mountTerminal}></div>
+  </div>
+
+  <!-- Сенсорный экран: полоса недостающих клавиш вместо подсказок горячих клавиш -->
+  <div class="touch-keys" role="toolbar" aria-label={$t('console.touch_keys')}>
+    {#each TOUCH_KEYS as key (key.label)}
+      <button
+        type="button"
+        class="touch-key"
+        aria-label={key.aria ? $t(key.aria) : key.label}
+        onpointerdown={(e) => e.preventDefault()}
+        onclick={() => pressTouchKey(key.data)}>{key.label}</button
+      >
+    {/each}
   </div>
 
   <!-- Подсказки горячих клавиш и бейдж размера нужны только обычной консоли:
@@ -701,9 +735,54 @@
     border: 1px solid var(--border);
   }
 
+  .touch-keys {
+    display: none;
+  }
+
+  @media (pointer: coarse), (max-width: 768px) {
+    .touch-keys {
+      display: flex;
+      gap: 6px;
+      padding: 6px 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      background: var(--bg-elevated);
+      border-top: 1px solid var(--border);
+    }
+
+    .touch-keys::-webkit-scrollbar {
+      display: none;
+    }
+
+    .touch-key {
+      flex-shrink: 0;
+      min-width: 44px;
+      height: 40px;
+      padding: 0 10px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm);
+      font-family: var(--font-family-mono);
+      font-size: var(--font-size-sm);
+      color: var(--fg-primary);
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .touch-key:active {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+    }
+
+    .footer-hints {
+      display: none;
+    }
+  }
+
   @media (max-width: 768px) {
     .terminal-card {
-      height: calc(100vh - 160px);
+      height: calc(100dvh - var(--mhdr-h) - env(safe-area-inset-top) - var(--dock-space) - 150px);
+      min-height: 260px;
     }
     .header-right :global(.btn span) {
       display: none;

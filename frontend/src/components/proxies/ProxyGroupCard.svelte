@@ -231,7 +231,7 @@
         </span>
       {/if}
       <span class="name">{group.name}</span>
-      <span class="type-badge">
+      <span class="type-badge" title={getGroupTypeLabel(group.type)}>
         <span class="type-badge-icon" aria-hidden="true">
           {#if groupTypeKey === 'selector'}
             <svg
@@ -274,7 +274,7 @@
             >
           {/if}
         </span>
-        {getGroupTypeLabel(group.type)}
+        <span class="type-badge-label">{getGroupTypeLabel(group.type)}</span>
       </span>
 
       <div class="gc-head-actions">
@@ -745,6 +745,21 @@
     font-size: var(--font-size-lg);
     letter-spacing: -0.01em;
   }
+  /* Длинное имя занимает всю свободную ширину и обрезается на второй строке,
+     а не сжимается в столбик по слову */
+  .group-card .gc-head-row1 .name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+  .group-card .gc-head-row1 .type-badge {
+    flex-shrink: 0;
+  }
   .gc-head-actions {
     margin-left: auto;
     display: flex;
@@ -808,7 +823,8 @@
   .gc-lat-box {
     padding: 3px 10px;
     border-radius: 99px;
-    font-family: var(--font-family-mono);
+    font-family: var(--font-family-sans);
+    font-variant-numeric: tabular-nums;
     font-size: var(--font-size-xs);
     font-weight: 800;
     background: none;
@@ -1364,6 +1380,31 @@
   :global(.group-list) .gc-body-inner {
     overflow: hidden;
     min-height: 0;
+  }
+
+  /* Узкий телефон: тип группы — только значком (подпись остаётся для диктора
+     и во всплывающей подсказке), чтобы флаг не отрывался от имени группы */
+  @media (max-width: 480px) {
+    .type-badge-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+
+    .type-badge-icon {
+      opacity: 1;
+    }
+  }
+
+  /* Телефон: карточки групп плоские — тени под каждой в столбике сливались */
+  @media (max-width: 768px) {
+    .group-card,
+    .group-card:hover {
+      box-shadow: none;
+    }
   }
 
   @media (max-width: 768px) {

@@ -563,8 +563,7 @@
 
   .detail-label {
     font-size: var(--font-size-2xs);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0;
     font-weight: 600;
     color: var(--fg-dim);
   }

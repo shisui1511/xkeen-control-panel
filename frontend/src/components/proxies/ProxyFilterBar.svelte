@@ -46,7 +46,12 @@
     ]}
     onchange={(mode) => (viewMode = mode as ProxiesViewMode)}
   />
-  <Button variant="secondary" onclick={() => onExpandAll?.()} title={$t('proxies.expand_all')}>
+  <Button
+    variant="secondary"
+    onclick={() => onExpandAll?.()}
+    title={$t('proxies.expand_all')}
+    ariaLabel={$t('proxies.expand_all')}
+  >
     <svg
       width="14"
       height="14"
@@ -59,9 +64,14 @@
       <polyline points="6 9 12 15 18 9" />
       <polyline points="6 4 12 10 18 4" />
     </svg>
-    {$t('proxies.expand_all')}
+    <span class="fb-label">{$t('proxies.expand_all')}</span>
   </Button>
-  <Button variant="secondary" onclick={() => onCollapseAll?.()} title={$t('proxies.collapse_all')}>
+  <Button
+    variant="secondary"
+    onclick={() => onCollapseAll?.()}
+    title={$t('proxies.collapse_all')}
+    ariaLabel={$t('proxies.collapse_all')}
+  >
     <svg
       width="14"
       height="14"
@@ -74,9 +84,15 @@
       <polyline points="18 15 12 9 6 15" />
       <polyline points="18 20 12 14 6 20" />
     </svg>
-    {$t('proxies.collapse_all')}
+    <span class="fb-label">{$t('proxies.collapse_all')}</span>
   </Button>
-  <Button variant="secondary" onclick={() => onRefresh?.()} disabled={loading}>
+  <Button
+    variant="secondary"
+    onclick={() => onRefresh?.()}
+    disabled={loading}
+    title={$t('app.refresh')}
+    ariaLabel={$t('app.refresh')}
+  >
     <svg
       width="14"
       height="14"
@@ -87,7 +103,7 @@
     >
       <path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" />
     </svg>
-    {loading ? $t('app.loading') : $t('app.refresh')}
+    <span class="fb-label">{loading ? $t('app.loading') : $t('app.refresh')}</span>
   </Button>
   <PingTargetQuickMenu />
 </div>
@@ -116,9 +132,27 @@
     outline: none;
   }
 
+  /* Телефон: поиск — отдельной строкой, остальное — одной строкой значков
+     (подписи остаются для экранного диктора и во всплывающей подсказке) */
   @media (max-width: 768px) {
     .group-search {
       width: 100%;
+      font-size: var(--font-size-lg);
+      padding: 8px 12px;
+    }
+
+    .fb-label,
+    .proxy-filter-bar :global(.seg-label) {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+
+    .proxy-filter-bar :global(svg) {
+      margin-right: 0 !important;
     }
   }
 </style>
