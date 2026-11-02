@@ -32,6 +32,14 @@ type XrayAccessLogStatus struct {
 	AccessPath string `json:"access_path"`
 	Enabled    bool   `json:"enabled"`
 	FileSize   int64  `json:"file_size"`
+	// PathDenied: the path in the core config is outside the log root (or no
+	// validator is wired), so the file is not opened and its size is not read.
+	PathDenied bool `json:"path_denied,omitempty"`
+	// WillWrite is where the log goes once it is switched on; set for the
+	// enabled and the disabled state alike.
+	WillWrite string `json:"will_write,omitempty"`
+	// Owner is filled by the profile layer when it owns the access log path.
+	Owner string `json:"owner,omitempty"`
 }
 
 // XrayAccessEntry is one parsed access log line.
@@ -79,6 +87,9 @@ type XrayAccessLogService struct {
 	configDir string
 	// accessPath is where the log goes when it is switched on.
 	accessPath string
+	// PathVal checks the access log path taken from the core config; nil
+	// forbids reading.
+	PathVal *utils.PathValidator
 	// Resolve maps a LAN IP to a device name (router clients).
 	Resolve func(ip string) string
 }
@@ -117,20 +128,44 @@ func (s *XrayAccessLogService) findLogConfig() (string, string, bool, error) {
 	return "", "", false, ErrXrayLogConfigNotFound
 }
 
+// ReadablePath reports whether path may be opened for reading: it passes the
+// path validator and lies inside utils.LogRoot. It returns the checked path.
+func (s *XrayAccessLogService) ReadablePath(path string) (string, bool) {
+	if s.PathVal == nil {
+		return "", false
+	}
+	clean, err := s.PathVal.ValidateUnder(path, utils.LogRoot)
+	if err != nil {
+		return "", false
+	}
+	return clean, true
+}
+
+// StatusOf builds the status for an access value taken from configFile.
+// The file is touched only when the path passes ReadablePath.
+func (s *XrayAccessLogService) StatusOf(configFile, access string) *XrayAccessLogStatus {
+	st := &XrayAccessLogStatus{ConfigFile: configFile, AccessPath: access, WillWrite: s.accessPath}
+	st.Enabled = access != "" && !strings.EqualFold(access, "none")
+	if st.Enabled {
+		clean, ok := s.ReadablePath(access)
+		if !ok {
+			st.PathDenied = true
+			return st
+		}
+		if fi, err := os.Stat(clean); err == nil {
+			st.FileSize = fi.Size()
+		}
+	}
+	return st
+}
+
 // Status reports where the access log goes and whether it is enabled.
 func (s *XrayAccessLogService) Status() (*XrayAccessLogStatus, error) {
 	file, access, _, err := s.findLogConfig()
 	if err != nil {
 		return nil, err
 	}
-	st := &XrayAccessLogStatus{ConfigFile: file, AccessPath: access}
-	st.Enabled = access != "" && !strings.EqualFold(access, "none")
-	if st.Enabled {
-		if fi, err := os.Stat(access); err == nil {
-			st.FileSize = fi.Size()
-		}
-	}
-	return st, nil
+	return s.StatusOf(file, access), nil
 }
 
 var accessValueRe = regexp.MustCompile(`("access"\s*:\s*)"[^"]*"`)
@@ -224,11 +259,21 @@ func (s *XrayAccessLogService) Report(f XrayAccessFilter) (*XrayAccessReport, er
 	if err != nil {
 		return nil, err
 	}
+	return s.ReportOf(st, f)
+}
+
+// ReportOf parses the access log for an already built status. A disabled log
+// or a denied path gives an empty report and the file is not opened.
+func (s *XrayAccessLogService) ReportOf(st *XrayAccessLogStatus, f XrayAccessFilter) (*XrayAccessReport, error) {
 	report := &XrayAccessReport{Entries: []XrayAccessEntry{}, Devices: []XrayDeviceSummary{}}
-	if !st.Enabled {
+	if !st.Enabled || st.PathDenied {
 		return report, nil
 	}
-	lines, err := tailLines(st.AccessPath, xrayAccessTailBytes)
+	path, ok := s.ReadablePath(st.AccessPath)
+	if !ok {
+		return report, nil
+	}
+	lines, err := tailLines(path, xrayAccessTailBytes)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return report, nil

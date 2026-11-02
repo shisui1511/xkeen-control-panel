@@ -8,6 +8,9 @@ import (
 	"strings"
 )
 
+// LogRoot is the only directory the panel reads core logs from.
+const LogRoot = "/opt/var/log"
+
 // PathValidator validates file paths against allowed root directories to prevent path traversal attacks.
 type PathValidator struct {
 	AllowedRoots []string
@@ -65,6 +68,29 @@ func (v *PathValidator) Validate(path string) (string, error) {
 		}
 	}
 	return "", errors.New("path traversal detected or path not allowed")
+}
+
+// ValidateUnder is Validate plus a check that the resolved path is root itself
+// or lies under it (symlinks of both sides resolved), so an allowed root that is
+// wider than root (a config directory next to the logs) does not let the path out.
+func (v *PathValidator) ValidateUnder(path, root string) (string, error) {
+	clean, err := v.Validate(path)
+	if err != nil {
+		return "", err
+	}
+	absRoot, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return "", errors.New("path traversal detected or path not allowed")
+	}
+	resolvedRoot, err := resolveExisting(absRoot)
+	if err != nil {
+		return "", errors.New("path traversal detected or path not allowed")
+	}
+	rel, err := filepath.Rel(resolvedRoot, clean)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errors.New("path traversal detected or path not allowed")
+	}
+	return clean, nil
 }
 
 // resolveExisting resolves symlinks of the longest existing prefix of absPath
