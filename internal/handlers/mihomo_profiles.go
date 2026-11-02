@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
 
 // SetMihomoProfileService wires the profile service to the running panel:
@@ -43,7 +44,16 @@ func (a *API) SetMihomoProfileService(svc *services.MihomoProfileService) {
 			return services.ErrRestartSkipped
 		}
 	}
-	svc.Healthy = a.waitMihomoRunning
+	// Успех запуска — только новый процесс: PID берётся до перезапуска, процесс со
+	// старым PID не засчитывается, один PID должен продержаться RestartStableWindow
+	// (то же подтверждение, что у конвейера «Применить»).
+	svc.RunningPID = a.mihomoRunningPID
+	svc.Healthy = func(oldPID int) bool {
+		if a.kernelSvc == nil {
+			return true
+		}
+		return configlayer.ConfirmRestarted(context.Background(), a.kernelSvc.ProcessStates, "mihomo", oldPID) == nil
+	}
 	a.mihomoProfileSvc = svc
 }
 
@@ -75,23 +85,18 @@ func (a *API) validateMihomoProfile(path string) error {
 	return nil
 }
 
-// waitMihomoRunning polls the Mihomo process for up to 20 seconds.
-func (a *API) waitMihomoRunning() bool {
+// mihomoRunningPID — PID работающего процесса Mihomo, 0 — не запущен. По
+// процессам, без определения версии: опрос не ждёт конца операции XKeen.
+func (a *API) mihomoRunningPID() int {
 	if a.kernelSvc == nil {
-		return true
+		return 0
 	}
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		time.Sleep(2 * time.Second)
-		// По процессам, без определения версии: двадцатисекундный опрос не должен
-		// растягиваться ожиданием конца операции XKeen.
-		for _, st := range a.kernelSvc.ProcessStates() {
-			if st.Name == "mihomo" && st.Status == "running" {
-				return true
-			}
+	for _, st := range a.kernelSvc.ProcessStates() {
+		if st.Name == "mihomo" && st.Status == "running" && st.PID > 0 {
+			return st.PID
 		}
 	}
-	return false
+	return 0
 }
 
 // profileActivationResponse — ответ активации профиля: результат сервиса и
