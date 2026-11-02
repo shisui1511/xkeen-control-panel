@@ -967,6 +967,7 @@ func main() {
 	srv.HandleProtected("/api/configlayer/cores/force-proxy", api.ConfigCoresForceProxy)
 	srv.HandleProtected("/api/configlayer/cores/raw/parse", api.ConfigCoresRawParse)
 	srv.HandleProtected("/api/configlayer/cores/reclaim", api.ConfigCoresReclaim)
+	srv.HandleProtected("/api/configlayer/cores/access-log", api.ConfigCoresAccessLog)
 	srv.HandleProtected("/api/configlayer/geodata", api.ConfigGeodata)
 	srv.HandleProtected("/api/configlayer/geodata/output", api.ConfigGeodataOutput)
 	srv.HandleProtected("/api/configlayer/geodata/run", api.ConfigGeodataRun)
