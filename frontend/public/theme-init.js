@@ -1,8 +1,18 @@
-// Блокирующий скрипт первого кадра: ставит data-theme и data-accent до отрисовки.
+// Блокирующий скрипт первого кадра: ставит data-theme, data-scheme и data-accent до отрисовки.
 // Внешний файл, потому что CSP запрещает inline-скрипты (script-src 'self').
-// Логика совпадает с initTheme()/initAccent() в src/main.ts; источник правды
-// при монтировании приложения — main.ts. Плотность (theme_density) не трогается.
+// Список тем совпадает с THEMES в src/lib/theme.ts; источник правды
+// при монтировании приложения — initTheme()/initAccent() в src/main.ts.
+// Плотность (theme_density) не трогается.
 (function () {
+  // id -> [схема, цвет строки браузера]
+  var THEMES = {
+    dark: ['dark', '#07182a'],
+    light: ['light', '#07182a'],
+    charcoal: ['dark', '#000000'],
+    dusk: ['dark', '#171b21'],
+    fog: ['light', '#22303d'],
+    amber: ['dark', '#0a0704']
+  };
   var theme = '';
   var accent = '';
   try {
@@ -12,13 +22,16 @@
     // localStorage недоступен (приватный режим, заблокированные cookies) — системная тема
   }
   var root = document.documentElement;
-  if (theme !== 'light' && theme !== 'dark') {
+  if (!Object.prototype.hasOwnProperty.call(THEMES, theme)) {
     var prefersDark =
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(prefers-color-scheme: dark)').matches;
     theme = prefersDark ? 'dark' : 'light';
   }
   root.setAttribute('data-theme', theme);
+  root.setAttribute('data-scheme', THEMES[theme][0]);
+  var meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', THEMES[theme][1]);
   if (accent === 'indigo' || accent === 'steel' || accent === 'graphite') {
     root.setAttribute('data-accent', accent);
   }

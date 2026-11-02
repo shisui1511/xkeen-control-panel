@@ -80,7 +80,7 @@
   }
 
   /* Тень для тёмного фона на светлой теме ложилась грязным серым пятном */
-  :global([data-theme='light']) .login-card {
+  :global([data-scheme='light']) .login-card {
     box-shadow:
       0 24px 48px -28px rgba(12, 34, 55, 0.28),
       0 0 0 1px rgba(255, 255, 255, 0.6) inset;
