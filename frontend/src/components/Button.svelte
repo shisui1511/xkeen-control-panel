@@ -8,6 +8,7 @@
     loading = false,
     title,
     ariaLabel,
+    ariaDescribedby,
     style,
     class: className = '',
     'data-testid': testId,
@@ -20,6 +21,8 @@
     loading?: boolean;
     title?: string;
     ariaLabel?: string;
+    /** Идентификатор элемента с постоянным пояснением, почему кнопка неактивна. */
+    ariaDescribedby?: string;
     style?: string;
     class?: string;
     'data-testid'?: string;
@@ -34,6 +37,7 @@
   disabled={disabled || loading}
   {title}
   aria-label={ariaLabel}
+  aria-describedby={ariaDescribedby}
   data-testid={testId}
   {style}
   {onclick}
