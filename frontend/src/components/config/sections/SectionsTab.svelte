@@ -17,6 +17,7 @@
   import KernelSwitch from './KernelSwitch.svelte';
   import SectionCard from './SectionCard.svelte';
   import MihomoProfileNotice from './MihomoProfileNotice.svelte';
+  import ProfilesCard from '../profiles/ProfilesCard.svelte';
   import TakeSectionModal from './TakeSectionModal.svelte';
   import { coresBusy } from './coresOwner';
 
@@ -83,6 +84,12 @@
     return current.running ? $t('cfg.sec.kernel_running') : $t('cfg.sec.kernel_stopped_state');
   });
   const stopped = $derived(current !== null && current.installed && !current.running);
+
+  // Плашка профиля показывает primary «Управлять в панели», когда Mihomo ведёт XKeen,
+  // пользователь или файла нет: тогда «Новый профиль» в карточке — secondary
+  function mihomoNoticePrimary(owner: string | undefined): boolean {
+    return owner === 'user' || owner === 'xkeen' || owner === 'none';
+  }
 
   function kernelTitle(k: CoreKernel): string {
     return k === 'xray' ? 'Xray' : 'Mihomo';
@@ -212,6 +219,12 @@
         {/if}
         {#if k === 'mihomo' && view.profile}
           <MihomoProfileNotice profile={view.profile} stopped={!view.running} />
+        {/if}
+        {#if k === 'mihomo'}
+          <ProfilesCard
+            running={view.running}
+            panelPrimary={mihomoNoticePrimary(view.profile?.owner)}
+          />
         {/if}
         <div class="cores-sections" data-testid="cores-sections-{k}">
           {#each ordered(view) as sec (sec.id)}

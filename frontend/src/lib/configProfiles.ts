@@ -31,8 +31,8 @@ export interface ProfilesState {
   managed: boolean;
   active?: string;
   profiles: ProfileEntry[];
-  /** config.yaml — обычный файл XKeen: он есть в списке источников копии. */
-  plain_config?: boolean;
+  /** config.yaml — обычный файл XKeen (владелец xkeen, активен): источник копии и строка списка. */
+  plain_config?: ProfileEntry | null;
   /** Профиль, на который Mihomo вернётся при отпускании. */
   return_target?: string;
 }

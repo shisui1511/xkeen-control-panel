@@ -102,6 +102,7 @@
     font-size: var(--font-size-sm);
     color: var(--fg-secondary);
     line-height: 1.5;
+    overflow-wrap: anywhere;
   }
 
   .confirm-consequence {
