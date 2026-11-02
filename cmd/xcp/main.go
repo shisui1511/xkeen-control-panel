@@ -951,6 +951,7 @@ func main() {
 	srv.HandleProtected("/api/configlayer/routing/release", api.ConfigRoutingRelease)
 	srv.HandleProtected("/api/configlayer/routing/takeover", api.ConfigRoutingTakeover)
 	srv.HandleProtected("/api/configlayer/routing/reclaim", api.ConfigRoutingReclaim)
+	srv.HandleProtected("/api/configlayer/routing/mihomo", api.ConfigRoutingMihomo)
 	srv.HandleProtected("/api/configlayer/routing/select", api.ConfigRoutingSelect)
 	srv.HandleProtected("/api/configlayer/routing/lists", api.ConfigRoutingLists)
 	srv.HandleProtected("/api/configlayer/routing/presets", api.ConfigRoutingPresets)

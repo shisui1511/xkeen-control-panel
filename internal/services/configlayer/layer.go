@@ -32,6 +32,9 @@ var (
 	// ErrChecksFailed — проверка черновика нашла проблемы: применение не начато.
 	// Конкретная ошибка — *ChecksError со списком проблем.
 	ErrChecksFailed = errors.New("применение заблокировано проверкой черновика")
+	// ErrDraftOpen — в черновике есть неприменённые правки: действие «правка плюс
+	// применение» (ApplyEdit) применило бы и их. Файлы и черновик не менялись.
+	ErrDraftOpen = errors.New("configlayer: открыт черновик")
 )
 
 // ChecksError — отказ применения по проверкам до записи; Is совпадает с
@@ -1250,6 +1253,129 @@ func (l *Layer) StartApply(user bool) error {
 		return ErrStopped
 	}
 	return nil
+}
+
+// ApplyEdit — «правка черновика плюс применение» одной операцией (D-06, D-08, D-10):
+// переход панель ↔ свой профиль Mihomo. Занятость как у StartApply по кнопке
+// (user=true): отказ сразу, не ожидание. Под замком применения: открытый черновик
+// (draftChanges != 0) — ErrDraftOpen без изменений, чтобы запуск не применил чужие
+// неприменённые правки. edit читает состояние и возвращает секции; они пишутся одной
+// ревизией, затем конвейер идёт синхронно (TriggerUser, SourceDraft) — дрейф и
+// проверки до записи он делает сам. Результат не OK — черновик возвращается к
+// применённому состоянию: желание не остаётся висеть. Дрейф — ErrDriftBlocked.
+// Вызов синхронный; после снятия замка идут afterRun и хуки AddAfterApply.
+func (l *Layer) ApplyEdit(ctx context.Context, edit func(st StateView) (map[string]json.RawMessage, error)) (ApplyView, error) {
+	if !l.Enabled() {
+		return ApplyView{}, ErrDisabled
+	}
+	l.mu.Lock()
+	stopped := l.stopped
+	l.mu.Unlock()
+	if stopped {
+		return ApplyView{}, ErrStopped
+	}
+	release, err := l.pipeline.TryBegin(ctx, true)
+	if err != nil {
+		return ApplyView{}, l.mapBusy(err)
+	}
+	defer release()
+	st := l.store.Snapshot()
+	if draftChanges(st) != 0 {
+		return ApplyView{}, ErrDraftOpen
+	}
+	sections, err := edit(StateView{DraftRevision: st.DraftRevision, Draft: st.Draft.Clone(), Applied: st.Applied.Clone(), Live: st.Live.Clone()})
+	if err != nil {
+		return ApplyView{}, err
+	}
+	ev, err := l.store.EditDraftBatch(st.DraftRevision, sections, nil)
+	if err != nil {
+		return ApplyView{}, err
+	}
+	req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft}
+	view := l.runPipeline(req)
+	if view.Result == nil || !view.Result.OK {
+		l.discardEdit(ev.DraftRevision, st.Draft, sections)
+	}
+	release()
+	l.afterRun()
+	l.fireAfterApply(req, view)
+	if view.Result != nil && view.Result.Code == ResultDriftBlocked {
+		return view, ErrDriftBlocked
+	}
+	return view, nil
+}
+
+// discardEdit возвращает черновик после неудавшегося ApplyEdit: до правки он совпадал
+// с применённым состоянием, поэтому сброс (ResetDraft) возвращает его целиком. Если
+// пока шёл запуск, черновик успели поправить (ревизия ушла), возвращаются только
+// секции этой правки к значениям до неё: чужая правка остаётся.
+func (l *Layer) discardEdit(rev int64, before Sections, edited map[string]json.RawMessage) {
+	defer l.RequestCheck()
+	if _, err := l.store.ResetDraft(rev); err == nil || !errors.Is(err, ErrDraftConflict) {
+		if err != nil {
+			log.Printf("configlayer: сброс черновика после отказа применения: %v", err)
+		}
+		return
+	}
+	for range 5 {
+		cur := l.store.Snapshot()
+		back := make(map[string]json.RawMessage, len(edited))
+		for name := range edited {
+			back[name] = before[name]
+		}
+		_, err := l.store.EditDraftBatch(cur.DraftRevision, back, nil)
+		if err == nil {
+			return
+		}
+		if !errors.Is(err, ErrDraftConflict) {
+			log.Printf("configlayer: возврат секций после отказа применения: %v", err)
+			return
+		}
+	}
+	log.Printf("configlayer: секции правки не возвращены: черновик меняется параллельно")
+}
+
+// MihomoTaken — панель владеет маршрутизацией Mihomo по State.Routing (фактическое
+// владение, не желаемое). Слой выключен — false.
+func (l *Layer) MihomoTaken() bool {
+	if !l.Enabled() {
+		return false
+	}
+	return l.store.Snapshot().Routing.Mihomo != nil
+}
+
+// MihomoReturnTarget — профиль, на который вернётся Mihomo при «Отпустить»: "" если
+// панель Mihomo не владеет или прежнего профиля нет; "config.yaml" — прежний обычный
+// файл; иначе имя профиля без каталога profiles/ и суффикса .yaml.
+func (l *Layer) MihomoReturnTarget() string {
+	if !l.Enabled() {
+		return ""
+	}
+	m := l.store.Snapshot().Routing.Mihomo
+	if m == nil || m.PrevProfile == "" {
+		return ""
+	}
+	if m.PrevProfile == mihomoConfigFile {
+		return mihomoConfigFile
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(m.PrevProfile, "profiles/"), ".yaml")
+}
+
+// MihomoProfileUsable — профиль profiles/<name>.yaml можно назвать целью отпускания:
+// имя допустимо, это не профиль панели (xcp-), под каталогом Mihomo лежит обычный файл.
+// Тот же отбор конвейер повторяет под замком применения.
+func (l *Layer) MihomoProfileUsable(name string) bool {
+	rel := "profiles/" + name + ".yaml"
+	if _, ok := mihomoTargetFile(rel); !ok {
+		return false
+	}
+	return checkMihomoTarget(l.opts.Roots.Mihomo, rel) == nil
+}
+
+// MihomoActiveName — имя действующего своего профиля Mihomo по config.yaml: пусто при
+// профиле панели или без файла, "config.yaml" для обычного файла.
+func (l *Layer) MihomoActiveName() string {
+	return mihomoActiveName(l.opts.Roots.Mihomo)
 }
 
 // runPipeline запускает конвейер и следит за владением маршрутизацией: если запуск

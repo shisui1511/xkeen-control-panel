@@ -199,6 +199,7 @@ const ROUTES = {
   "/api/configlayer/routing/release": "ConfigRoutingRelease",
   "/api/configlayer/routing/takeover": "ConfigRoutingTakeover",
   "/api/configlayer/routing/reclaim": "ConfigRoutingReclaim",
+  "/api/configlayer/routing/mihomo": "ConfigRoutingMihomo",
   "/api/configlayer/routing/select": "ConfigRoutingSelect",
   "/api/configlayer/routing/lists": "ConfigRoutingLists",
   "/api/configlayer/routing/presets": "ConfigRoutingPresets",
