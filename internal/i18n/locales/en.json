@@ -188,6 +188,7 @@
 
   "profiles.err_reserved": "The xcp- prefix is reserved by the panel. Choose another name.",
   "profiles.err_return_target": "Mihomo returns to this profile when released. Deleting and renaming are unavailable while the panel manages Mihomo.",
+  "profiles.err_invalid": "The core rejected the profile; no file was created.",
   "profiles.err_template_unknown": "There is no such template.",
   "profiles.err_panel_absent": "The xcp-main.yaml file does not exist right now: there is nothing to copy.",
   "profiles.err_draft_open": "There are unapplied changes. Apply or discard them, then try again."

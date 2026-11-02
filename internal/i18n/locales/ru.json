@@ -188,6 +188,7 @@
 
   "profiles.err_reserved": "Префикс xcp- занят панелью. Выберите другое имя.",
   "profiles.err_return_target": "К этому профилю Mihomo вернётся при отпускании. Удаление и переименование недоступны, пока панель управляет Mihomo.",
+  "profiles.err_invalid": "Ядро отвергло профиль, файл не создан.",
   "profiles.err_template_unknown": "Такого шаблона нет.",
   "profiles.err_panel_absent": "Файла xcp-main.yaml сейчас нет: копировать нечего.",
   "profiles.err_draft_open": "Есть неприменённые изменения. Примените или сбросьте их, затем повторите."
