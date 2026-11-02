@@ -113,4 +113,120 @@ func TestRouterMihomoScopedTake(t *testing.T) {
 		}
 		rtscSameFile(t, foreign)
 	})
+
+	// Mihomo на своём профиле, берётся только Xray: config.yaml и секции Mihomo не
+	// меняются, секция routing запоминает решение по Mihomo.
+	t.Run("own_profile_scope_xray", func(t *testing.T) {
+		e := rtNewEnv(t)
+		user := e.writeUserProfile(t)
+
+		if _, err := e.svc.TakeScoped(e.rev(t), ScopeXray); err != nil {
+			t.Fatalf("TakeScoped(xray): %v", err)
+		}
+		d := rtscRouting(t, e.state(t).Draft)
+		if !d.Managed || d.Mihomo == nil || *d.Mihomo {
+			t.Fatalf("секция routing после взятия Xray: managed=%v mihomo=%v, ожидались managed=true, mihomo=false", d.Managed, d.Mihomo)
+		}
+		for _, id := range configlayer.MihomoSectionIDs {
+			if cs := rtmsSection(t, e.state(t).Draft, id); cs.Managed {
+				t.Errorf("секция mihomo_%s под управлением после взятия только Xray", id)
+			}
+		}
+		e.applyOK(t)
+
+		if link := rtscConfigLink(t, e); link != user {
+			t.Errorf("config.yaml после взятия Xray: %q, ожидался прежний профиль", link)
+		}
+		if _, err := os.Stat(e.mihomoPath(configlayer.PanelMihomoProfile)); err == nil {
+			t.Error("профиль панели появился при взятии только Xray")
+		}
+		snap := e.layer.Snapshot().Routing
+		if snap.Xray == nil || !snap.Xray.Taken {
+			t.Errorf("Xray не взят: %+v", snap.Xray)
+		}
+		if snap.Mihomo != nil && snap.Mihomo.Taken {
+			t.Errorf("Mihomo взят: %+v", snap.Mihomo)
+		}
+		if !e.xrayFileExists(configlayer.PanelXrayRoutingFile) {
+			t.Errorf("нет файла %s", configlayer.PanelXrayRoutingFile)
+		}
+	})
+
+	// «Отпустить» с «Групп» и «Правил» не снимает решение «Mihomo на своём профиле»:
+	// «Взять всё» тоже оставляет Mihomo на своём профиле (D-07).
+	t.Run("release_keeps_mihomo_off", func(t *testing.T) {
+		e := rtNewEnv(t)
+		user := e.writeUserProfile(t)
+		if _, err := e.svc.TakeScoped(e.rev(t), ScopeXray); err != nil {
+			t.Fatalf("TakeScoped(xray): %v", err)
+		}
+		e.applyOK(t)
+
+		if _, err := e.svc.Release(e.rev(t)); err != nil {
+			t.Fatalf("Release: %v", err)
+		}
+		d := rtscRouting(t, e.state(t).Draft)
+		if d.Managed || d.Mihomo == nil || *d.Mihomo {
+			t.Fatalf("секция routing после Release: managed=%v mihomo=%v, ожидались managed=false, mihomo=false", d.Managed, d.Mihomo)
+		}
+		e.applyOK(t)
+		if link := rtscConfigLink(t, e); link != user {
+			t.Errorf("config.yaml после Release: %q, ожидался прежний профиль", link)
+		}
+		if e.xrayFileExists(configlayer.PanelXrayRoutingFile) {
+			t.Errorf("файл %s остался после Release", configlayer.PanelXrayRoutingFile)
+		}
+		if snap := e.layer.Snapshot().Routing; snap.Xray != nil {
+			t.Errorf("Xray остался взятым: %+v", snap.Xray)
+		}
+
+		// Взять всё: Mihomo остаётся на своём профиле (D-07), Xray взят.
+		if _, err := e.svc.Take(e.rev(t)); err != nil {
+			t.Fatalf("Take: %v", err)
+		}
+		d = rtscRouting(t, e.state(t).Draft)
+		if !d.Managed || d.ManagedFor(configlayer.KernelMihomo) {
+			t.Fatalf("секция routing после Take: managed=%v mihomo=%v, ожидались managed=true, Mihomo не взят", d.Managed, d.Mihomo)
+		}
+		e.applyOK(t)
+		if link := rtscConfigLink(t, e); link != user {
+			t.Errorf("config.yaml после Take: %q, Mihomo ушёл со своего профиля", link)
+		}
+		if snap := e.layer.Snapshot().Routing; snap.Xray == nil || !snap.Xray.Taken {
+			t.Errorf("Xray не взят после Take: %+v", snap.Xray)
+		}
+	})
+
+	// Оба ядра у панели: «Отпустить» возвращает оба, значения секций Mihomo
+	// сохраняются в черновике и в применённом состоянии (D-09).
+	t.Run("all_when_both_panel", func(t *testing.T) {
+		e := rtNewEnv(t)
+		user := e.writeUserProfile(t)
+		e.takeAndApply(t)
+		snap := e.layer.Snapshot().Routing
+		if snap.Xray == nil || !snap.Xray.Taken || snap.Mihomo == nil || !snap.Mihomo.Taken {
+			t.Fatalf("после Take взяты не оба ядра: xray=%+v mihomo=%+v", snap.Xray, snap.Mihomo)
+		}
+
+		if _, err := e.svc.Release(e.rev(t)); err != nil {
+			t.Fatalf("Release: %v", err)
+		}
+		e.applyOK(t)
+		snap = e.layer.Snapshot().Routing
+		if snap.Xray != nil || (snap.Mihomo != nil && snap.Mihomo.Taken) {
+			t.Errorf("после Release остались взятые ядра: xray=%+v mihomo=%+v", snap.Xray, snap.Mihomo)
+		}
+		if link := rtscConfigLink(t, e); link != user {
+			t.Errorf("config.yaml после Release: %q, ожидался прежний профиль", link)
+		}
+		st := e.state(t)
+		for _, id := range configlayer.MihomoSectionIDs {
+			for name, sections := range map[string]configlayer.Sections{"черновик": st.Draft, "применённое": st.Applied} {
+				if cs := rtmsSection(t, sections, id); cs.Managed || len(cs.Value) == 0 {
+					t.Errorf("секция mihomo_%s (%s) после Release: managed=%v value=%d, ожидались managed=false и сохранённое значение",
+						id, name, cs.Managed, len(cs.Value))
+				}
+			}
+		}
+	})
 }
