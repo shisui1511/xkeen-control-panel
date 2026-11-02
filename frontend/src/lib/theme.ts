@@ -6,7 +6,7 @@ import { writable } from 'svelte/store';
 // Список дублируется в public/theme-init.js (CSP запрещает inline-скрипты) —
 // при добавлении темы правьте оба места и блок токенов в styles/global.css.
 export type ThemeScheme = 'light' | 'dark';
-export type ThemeId = 'dark' | 'light' | 'charcoal' | 'dusk' | 'fog' | 'amber';
+export type ThemeId = 'dark' | 'charcoal' | 'dusk' | 'amber' | 'light';
 export type ThemeChoice = ThemeId | 'auto';
 
 export interface ThemeInfo {
@@ -28,13 +28,6 @@ export const THEMES: readonly ThemeInfo[] = [
     preview: { bg: '#0c2237', card: '#102a44', accent: '#29c2f0', text: '#d9e7f4' }
   },
   {
-    id: 'light',
-    scheme: 'light',
-    themeColor: '#07182a',
-    labelKey: 'settings.theme_light_btn',
-    preview: { bg: '#f3f6fa', card: '#ffffff', accent: '#0a779f', text: '#0c2237' }
-  },
-  {
     id: 'charcoal',
     scheme: 'dark',
     themeColor: '#000000',
@@ -49,20 +42,28 @@ export const THEMES: readonly ThemeInfo[] = [
     preview: { bg: '#1f242c', card: '#272d36', accent: '#6db3d6', text: '#c6d0dc' }
   },
   {
-    id: 'fog',
-    scheme: 'light',
-    themeColor: '#22303d',
-    labelKey: 'settings.theme_fog_btn',
-    preview: { bg: '#e2e7ec', card: '#eef1f4', accent: '#1b6a8e', text: '#1c2834' }
-  },
-  {
     id: 'amber',
     scheme: 'dark',
     themeColor: '#0a0704',
     labelKey: 'settings.theme_amber_btn',
     preview: { bg: '#110d07', card: '#18120a', accent: '#ffbe55', text: '#f1c47e' }
+  },
+  // «Туман». id остаётся 'light': так его уже сохранили пользователи прежней
+  // «Светлой» и на него опираются роутерные тесты.
+  {
+    id: 'light',
+    scheme: 'light',
+    themeColor: '#22303d',
+    labelKey: 'settings.theme_fog_btn',
+    preview: { bg: '#e2e7ec', card: '#eef1f4', accent: '#1b6a8e', text: '#1c2834' }
   }
 ];
+
+/** Тёмная и светлая темы, которые включает «Авто» по настройке системы. */
+export const AUTO_THEMES: Record<ThemeScheme, ThemeId> = { dark: 'charcoal', light: 'light' };
+
+/** Устаревшие id: 'fog' был отдельной темой, пока «Светлая» не стала «Туманом». */
+const LEGACY_IDS: Record<string, ThemeId> = { fog: 'light' };
 
 const PREV_KEY = 'theme_prev';
 
@@ -106,13 +107,14 @@ function storageSet(key: string, value: string | null) {
 
 /** Сохранённый выбор пользователя; всё, чего нет в списке, — «авто». */
 export function readThemeChoice(): ThemeChoice {
-  const saved = storageGet('theme');
+  const raw = storageGet('theme');
+  const saved = LEGACY_IDS[raw] ?? raw;
   return isThemeId(saved) ? saved : 'auto';
 }
 
 export function resolveTheme(choice: ThemeChoice): ThemeId {
   if (choice !== 'auto') return choice;
-  return systemPrefersDark() ? 'dark' : 'light';
+  return AUTO_THEMES[systemPrefersDark() ? 'dark' : 'light'];
 }
 
 function readAppliedTheme(): ThemeId {
@@ -144,7 +146,7 @@ export function setThemeChoice(choice: ThemeChoice) {
 
 /**
  * Быстрый переключатель в меню: светлая ↔ тёмная. Возвращается к последней теме
- * другой схемы (например, «Туман» ↔ «Уголь»), иначе — к базовой светлой/тёмной.
+ * другой схемы (например, «Туман» ↔ «Сумерки»), иначе — к темам режима «Авто».
  */
 export function toggleThemeScheme() {
   const cur = readAppliedTheme();
@@ -152,9 +154,7 @@ export function toggleThemeScheme() {
   const target: ThemeId =
     isThemeId(prev) && schemeOf(prev) !== schemeOf(cur)
       ? prev
-      : schemeOf(cur) === 'dark'
-        ? 'light'
-        : 'dark';
+      : AUTO_THEMES[schemeOf(cur) === 'dark' ? 'light' : 'dark'];
   setThemeChoice(target);
 }
 
