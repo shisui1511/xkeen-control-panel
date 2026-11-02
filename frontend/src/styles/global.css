@@ -3715,3 +3715,33 @@ a.chip:hover {
     box-shadow: none;
   }
 }
+
+/* ------------ Конструкторы на телефоне (ConstructorMobileNav) --------------
+   Экран «список» — общие настройки и список разделов; «раздел» — только
+   выбранный раздел; «превью» — только YAML/JSON с кнопками применения.
+   Отступ снизу — под плавающую панель «Превью / Применить». */
+@media (max-width: 768px) {
+  [data-mview='list'] .gen-section-body,
+  [data-mview='list'] .constructor-preview-wrapper,
+  [data-mview='section'] .gen-global,
+  [data-mview='section'] .constructor-preview-wrapper,
+  [data-mview='preview'] .gen-global,
+  [data-mview='preview'] .gen-section-body {
+    /* !important: у блоков свои scoped display той же специфичности */
+    display: none !important;
+  }
+
+  [data-mview='list'],
+  [data-mview='section'] {
+    padding-bottom: 76px;
+  }
+
+  /* Переключатель превью не нужен: превью — отдельный экран */
+  :root:has([data-mview]) .constructor-header-actions {
+    display: none;
+  }
+
+  [data-mview] .sec-tabs[hidden] {
+    display: none !important;
+  }
+}

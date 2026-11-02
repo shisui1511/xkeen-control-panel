@@ -4069,5 +4069,22 @@
   "dash.pulse.open_services": "Open Services",
   "dash.pulse.problems_one": "{count} warning",
   "dash.pulse.problems_few": "{count} warnings",
-  "dash.pulse.problems_many": "{count} warnings"
+  "dash.pulse.problems_many": "{count} warnings",
+  "constructor.m_sections": "Sections",
+  "constructor.m_preview": "Preview",
+  "mihomo.m_summary_nodes_one": "{count} node",
+  "mihomo.m_summary_nodes_few": "{count} nodes",
+  "mihomo.m_summary_nodes_many": "{count} nodes",
+  "mihomo.m_summary_groups_one": "{count} group",
+  "mihomo.m_summary_groups_few": "{count} groups",
+  "mihomo.m_summary_groups_many": "{count} groups",
+  "mihomo.m_summary_rulesets_one": "{count} set",
+  "mihomo.m_summary_rulesets_few": "{count} sets",
+  "mihomo.m_summary_rulesets_many": "{count} sets",
+  "mihomo.m_summary_rules_one": "{count} rule",
+  "mihomo.m_summary_rules_few": "{count} rules",
+  "mihomo.m_summary_rules_many": "{count} rules",
+  "mihomo.m_summary_listeners_one": "{count} listener",
+  "mihomo.m_summary_listeners_few": "{count} listeners",
+  "mihomo.m_summary_listeners_many": "{count} listeners"
 }

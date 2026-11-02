@@ -4069,5 +4069,22 @@
   "dash.pulse.open_services": "Открыть сервисы",
   "dash.pulse.problems_one": "{count} замечание",
   "dash.pulse.problems_few": "{count} замечания",
-  "dash.pulse.problems_many": "{count} замечаний"
+  "dash.pulse.problems_many": "{count} замечаний",
+  "constructor.m_sections": "Разделы",
+  "constructor.m_preview": "Превью",
+  "mihomo.m_summary_nodes_one": "{count} узел",
+  "mihomo.m_summary_nodes_few": "{count} узла",
+  "mihomo.m_summary_nodes_many": "{count} узлов",
+  "mihomo.m_summary_groups_one": "{count} группа",
+  "mihomo.m_summary_groups_few": "{count} группы",
+  "mihomo.m_summary_groups_many": "{count} групп",
+  "mihomo.m_summary_rulesets_one": "{count} набор",
+  "mihomo.m_summary_rulesets_few": "{count} набора",
+  "mihomo.m_summary_rulesets_many": "{count} наборов",
+  "mihomo.m_summary_rules_one": "{count} правило",
+  "mihomo.m_summary_rules_few": "{count} правила",
+  "mihomo.m_summary_rules_many": "{count} правил",
+  "mihomo.m_summary_listeners_one": "{count} слушатель",
+  "mihomo.m_summary_listeners_few": "{count} слушателя",
+  "mihomo.m_summary_listeners_many": "{count} слушателей"
 }
