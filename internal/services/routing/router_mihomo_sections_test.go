@@ -173,7 +173,8 @@ func rtmsRemoveSections(t *testing.T, e *rtEnv) {
 
 // «Управлять в панели» переносит в секции Mihomo все ключи прежнего профиля, а
 // профиль панели их сохраняет в прежнем порядке; «Отпустить» возвращает прежний
-// профиль и снимает секции; профиль без секций собирается из пресетов с портами
+// профиль, а значения секций остаются сохранёнными и возвращаются повторным
+// взятием (D-09); профиль без секций собирается из пресетов с портами
 // прежнего профиля; без прежнего профиля секции берутся из встроенной базы.
 func TestRouterMihomoSectionsKeepUserKeys(t *testing.T) {
 	t.Run("take_keeps_user_keys", func(t *testing.T) {
@@ -259,7 +260,7 @@ func TestRouterMihomoSectionsKeepUserKeys(t *testing.T) {
 		}
 	})
 
-	t.Run("release_restores_profile_and_drops_sections", func(t *testing.T) {
+	t.Run("release_restores_profile_and_keeps_values", func(t *testing.T) {
 		e := rtNewEnv(t, rtWithKernels(rtMihomoOnly))
 		user := rtmsWriteProfile(t, e, rtmsFixture)
 		if _, err := e.svc.Take(e.rev(t)); err != nil {
@@ -271,8 +272,9 @@ func TestRouterMihomoSectionsKeepUserKeys(t *testing.T) {
 			t.Fatalf("Release: %v", err)
 		}
 		for _, id := range configlayer.MihomoSectionIDs {
-			if cs := rtmsSection(t, e.state(t).Draft, id); cs.Managed || len(cs.Value) != 0 || len(cs.From) != 0 {
-				t.Errorf("секция mihomo_%s в черновике после Release: %+v, ожидалась {managed: false}", id, cs)
+			if cs := rtmsSection(t, e.state(t).Draft, id); cs.Managed || len(cs.Value) == 0 || len(cs.From) != 0 {
+				t.Errorf("секция mihomo_%s в черновике после Release: managed=%v value=%d from=%v, ожидались managed=false, значение сохранено, from пуст",
+					id, cs.Managed, len(cs.Value), cs.From)
 			}
 		}
 		e.applyOK(t)
@@ -320,6 +322,90 @@ func TestRouterMihomoSectionsKeepUserKeys(t *testing.T) {
 		keys := rtmsKeys(rtmsNode(t, e))
 		for _, k := range []string{"hosts", "ntp", "sub-rules", "experimental"} {
 			rtmsIndex(t, keys, k)
+		}
+	})
+
+	// D-09: значения панели переживают отпускание и возвращаются при взятии, а не
+	// заменяются ключами прежнего профиля: перенос D-06 идёт только при первом
+	// взятии.
+	t.Run("retake_restores_saved_values", func(t *testing.T) {
+		e := rtNewEnv(t, rtWithKernels(rtMihomoOnly))
+		user := rtmsWriteProfile(t, e, rtmsFixture)
+		if _, err := e.svc.Take(e.rev(t)); err != nil {
+			t.Fatalf("Take: %v", err)
+		}
+		// Значение панели в «Прочих ключах» (hosts), которого в прежнем профиле нет.
+		other := configlayer.CoreSectionName(configlayer.KernelMihomo, "other")
+		oc := rtmsSection(t, e.state(t).Draft, "other")
+		if !bytes.Contains(oc.Value, []byte("zz.example.test")) {
+			t.Fatalf("в секции other нет hosts прежнего профиля")
+		}
+		oc.Value = bytes.Replace(oc.Value, []byte("zz.example.test"), []byte("panel.example.test"), 1)
+		raw, err := configlayer.EncodeCoreSection(oc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.putSection(t, other, raw)
+		e.applyOK(t)
+
+		if _, err := e.svc.Release(e.rev(t)); err != nil {
+			t.Fatalf("Release: %v", err)
+		}
+		e.applyOK(t)
+
+		// Прежний профиль изменили вне панели: другие hosts.
+		changed := strings.Replace(rtmsFixture, "zz.example.test: 127.0.0.1", "other.example.test: 127.0.0.7", 1)
+		if err := os.WriteFile(user, []byte(changed), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := e.svc.Take(e.rev(t)); err != nil {
+			t.Fatalf("повторный Take: %v", err)
+		}
+		for _, id := range configlayer.MihomoSectionIDs {
+			if cs := rtmsSection(t, e.state(t).Draft, id); !cs.Managed || len(cs.From) != 0 {
+				t.Errorf("секция mihomo_%s после повторного Take: managed=%v from=%v, ожидались managed и пустой from", id, cs.Managed, cs.From)
+			}
+		}
+		e.applyOK(t)
+
+		var doc map[string]any
+		if err := rtmsDecode(e, &doc); err != nil {
+			t.Fatal(err)
+		}
+		hostsDoc, _ := doc["hosts"].(map[string]any)
+		if hostsDoc["panel.example.test"] != "127.0.0.1" {
+			t.Errorf("hosts после повторного Take: ключи %v, ожидалось значение панели", rtmsKeys(rtmsChild(rtmsNode(t, e), "hosts")))
+		}
+		if _, ok := hostsDoc["other.example.test"]; ok {
+			t.Error("hosts: ключ изменённого прежнего профиля перенесён при повторном Take")
+		}
+	})
+
+	// D-09: сохранённые значения переживают «Сбросить» после применённого отпускания.
+	t.Run("reset_keeps_saved_values", func(t *testing.T) {
+		e := rtNewEnv(t, rtWithKernels(rtMihomoOnly))
+		rtmsWriteProfile(t, e, rtmsFixture)
+		if _, err := e.svc.Take(e.rev(t)); err != nil {
+			t.Fatalf("Take: %v", err)
+		}
+		e.applyOK(t)
+		if _, err := e.svc.Release(e.rev(t)); err != nil {
+			t.Fatalf("Release: %v", err)
+		}
+		e.applyOK(t)
+
+		if _, err := e.layer.ResetDraft(e.rev(t)); err != nil {
+			t.Fatalf("ResetDraft: %v", err)
+		}
+		st := e.state(t)
+		for _, id := range configlayer.MihomoSectionIDs {
+			if cs := rtmsSection(t, st.Draft, id); cs.Managed || len(cs.Value) == 0 {
+				t.Errorf("секция mihomo_%s после сброса: managed=%v value=%d, ожидались managed=false и значение", id, cs.Managed, len(cs.Value))
+			}
+			if cs := rtmsSection(t, st.Applied, id); cs.Managed || len(cs.Value) == 0 {
+				t.Errorf("секция mihomo_%s в применённом состоянии: managed=%v value=%d", id, cs.Managed, len(cs.Value))
+			}
 		}
 	})
 

@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -78,6 +79,9 @@ func (s *Service) seedMihomoSections(st configlayer.StateView) (map[string]json.
 	if mihomoDraftManaged(st.Draft) {
 		return nil, nil
 	}
+	if configlayer.MihomoSectionsSaved(st.Draft) {
+		return restoreSavedMihomoSections(st.Draft)
+	}
 	// Основа секций: с прежним профилем — from с его именем и md5; без него —
 	// значения встроенной базы с пометкой preset и без from.
 	base := configlayer.CoreSection{V: 1, Managed: true, Preset: true}
@@ -136,6 +140,31 @@ func restoreAppliedMihomoSections(st configlayer.StateView) (map[string]json.Raw
 	return out, nil
 }
 
+// restoreSavedMihomoSections возвращает под управление секции Mihomo, значения
+// которых сохранены отпусканием (Managed=false и непустой Value, D-09): From пуст,
+// сверять значения панели с чужим файлом не с чем. Остальные секции черновика не
+// трогаются.
+func restoreSavedMihomoSections(draft configlayer.Sections) (map[string]json.RawMessage, error) {
+	desired := configlayer.DesiredCores(draft)
+	out := map[string]json.RawMessage{}
+	for _, id := range configlayer.MihomoSectionIDs {
+		name := configlayer.CoreSectionName(configlayer.KernelMihomo, id)
+		cs := desired[name]
+		if cs.Managed || len(bytes.TrimSpace(cs.Value)) == 0 {
+			continue
+		}
+		cs.V = 1
+		cs.Managed = true
+		cs.From = nil
+		raw, err := configlayer.EncodeCoreSection(cs)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = raw
+	}
+	return out, nil
+}
+
 // releaseMihomoSections снимает управление секциями Mihomo, которые сейчас под
 // управлением (D-05, D-09): после «Применить» config.yaml возвращается к прежнему
 // профилю, а значения секций остаются в черновике и возвращаются повторным
@@ -151,7 +180,7 @@ func releaseMihomoSections(draft configlayer.Sections) (map[string]json.RawMessa
 			continue
 		}
 		raw, err := configlayer.EncodeCoreSection(configlayer.CoreSection{
-			V: 1, Managed: false,
+			V: 1, Managed: false, Value: cs.Value, Preset: cs.Preset, ForceProxyGroup: cs.ForceProxyGroup,
 		})
 		if err != nil {
 			return nil, err
