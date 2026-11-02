@@ -222,6 +222,16 @@ func hasIssue(res *ResultView, code string) bool {
 	return false
 }
 
+// hasRestartNote — среди объявлений перезапуска есть запись ядра с причиной.
+func hasRestartNote(notes []RestartNote, kernel, reason string) bool {
+	for _, n := range notes {
+		if n.Kernel == kernel && n.Reason == reason {
+			return true
+		}
+	}
+	return false
+}
+
 // Отпускание Mihomo с целью (147.1, D-06, D-10): одно «Применить» переводит
 // config.yaml на выбранный профиль, цель проверяет настоящий `mihomo -t`, отказ
 // и сбой записи оставляют всё как было.
@@ -233,6 +243,18 @@ func TestRouterProfileTargetRelease(t *testing.T) {
 	// Панель держит оба ядра; затем Mihomo уходит на профиль other одним применением.
 	e.setRouting(t, `{"v":1,"managed":true}`)
 	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
+
+	// Объявление до «Применить»: решение по Mihomo с целью объявляет полный
+	// перезапуск по причине profile; отпускание обоих ядер без решения — нет.
+	e.edit(t, RoutingSection, json.RawMessage(toOther))
+	if !hasRestartNote(e.layer.Snapshot().Cores.Restart, KernelMihomo, RestartReasonProfile) {
+		t.Errorf("нет объявления {mihomo, profile}: %+v", e.layer.Snapshot().Cores.Restart)
+	}
+	e.edit(t, RoutingSection, json.RawMessage(`{"v":1,"managed":false}`))
+	if hasRestartNote(e.layer.Snapshot().Cores.Restart, KernelMihomo, RestartReasonProfile) {
+		t.Errorf("объявление profile без решения по Mihomo: %+v", e.layer.Snapshot().Cores.Restart)
+	}
+
 	e.setRouting(t, toOther)
 	e.assertConfigLink(t, e.targetLink(t, "other"))
 	st := e.layer.store.Snapshot()

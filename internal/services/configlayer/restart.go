@@ -110,6 +110,9 @@ const (
 	// NoteFullRestartPort — ядро перезапущено целиком (Xray — xkeen -restart): изменился
 	// порт прозрачного входящего, правила iptables пересобирает XKeen.
 	NoteFullRestartPort = "full_restart_port"
+	// NoteFullRestartProfile — Mihomo перезапущен целиком: config.yaml переведён на
+	// другой профиль решением по Mihomo, PUT /configs контроллер не переключает.
+	NoteFullRestartProfile = "full_restart_profile"
 )
 
 // errInterrupted — запуск прерван отменой контекста (остановка панели). Откат и
@@ -321,6 +324,8 @@ func fullRestartNote(reason string) string {
 		return NoteFullRestartTun
 	case RestartReasonPort:
 		return NoteFullRestartPort
+	case RestartReasonProfile:
+		return NoteFullRestartProfile
 	}
 	return ""
 }
@@ -428,9 +433,16 @@ func providerTargets(plan Plan, set *BackupSet) []*Expectation {
 // confirmMihomoAfterRestart ждёт готовности API Mihomo после рестарта и сверяет
 // провайдеры с Expect (API поднимается не сразу после старта процесса). У Mihomo
 // без external-controller API нет и не будет: там достаточно подтверждения процесса
-// (confirmRestarted), которое к этому моменту уже пройдено.
+// (confirmRestarted), которое к этому моменту уже пройдено. То же при отпускании
+// Mihomo: свой профиль пользователя не обязан поднять API в срок.
 func (p *Pipeline) confirmMihomoAfterRestart(ctx context.Context, plan Plan) error {
 	if p.d.Mihomo != nil && !p.d.Mihomo.HasController() {
+		return nil
+	}
+	if plan.Routing != nil && plan.Routing.MihomoRestore != nil {
+		// Отпускание Mihomo: запускается свой профиль пользователя, API у него может
+		// подниматься минуты (десяток http-провайдеров) или отсутствовать. Успех
+		// определяет подтверждение процесса по новому PID (confirmRestarted), а не API.
 		return nil
 	}
 	if p.d.MihomoAPIReady != nil {

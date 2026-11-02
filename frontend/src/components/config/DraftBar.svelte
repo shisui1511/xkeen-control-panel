@@ -77,7 +77,9 @@
         ? $t('cfg.sec.kernel_stopped')
         : n.reason === 'port'
           ? $t('cfg.sec.restart_xkeen')
-          : $t('cfg.sec.restart_tun')
+          : n.reason === 'profile'
+            ? $t('cfg.sec.restart_profile')
+            : $t('cfg.sec.restart_tun')
     }));
   });
 
