@@ -581,10 +581,15 @@ func (p *Pipeline) restartAndConfirm(ctx context.Context, kernel string) (servic
 
 // processState — текущее состояние процесса ядра.
 func (p *Pipeline) processState(kernel string) (services.KernelProcessState, bool) {
-	if p.d.ProcessStates == nil {
+	return kernelProcessState(p.d.ProcessStates, kernel)
+}
+
+// kernelProcessState выбирает из states процесс ядра kernel.
+func kernelProcessState(states func() []services.KernelProcessState, kernel string) (services.KernelProcessState, bool) {
+	if states == nil {
 		return services.KernelProcessState{}, false
 	}
-	for _, st := range p.d.ProcessStates() {
+	for _, st := range states() {
 		if st.Name == kernel {
 			return st, true
 		}
@@ -657,7 +662,15 @@ func (p *Pipeline) confirmRunning(ctx context.Context, kernel string, wantPID in
 // непрерывно и ни одно окно не доходит до конца. Ядро, которое так и не поднялось
 // устойчиво, даёт ошибку.
 func (p *Pipeline) confirmRestarted(ctx context.Context, kernel string, oldPID int) error {
-	if p.d.ProcessStates == nil {
+	return ConfirmRestarted(ctx, p.d.ProcessStates, kernel, oldPID)
+}
+
+// ConfirmRestarted — подтверждение перезапуска по процессу без привязки к
+// конвейеру: тот же разбор, что у confirmRestarted, состояния процессов
+// передаются функцией states (nil — источника нет). Им же пользуется активация
+// профиля Mihomo: oldPID берётся до перезапуска, прежний процесс не засчитывается.
+func ConfirmRestarted(ctx context.Context, states func() []services.KernelProcessState, kernel string, oldPID int) error {
+	if states == nil {
 		return errors.New("нет источника состояния процессов ядер")
 	}
 	deadline := time.Now().Add(RestartConfirmTimeout)
@@ -667,7 +680,7 @@ func (p *Pipeline) confirmRestarted(ctx context.Context, kernel string, oldPID i
 	tick := time.NewTicker(RestartPollInterval)
 	defer tick.Stop()
 	for {
-		st, ok := p.processState(kernel)
+		st, ok := kernelProcessState(states, kernel)
 		now := time.Now()
 		running := ok && st.Status == "running" && st.PID > 0
 		onlyOld = false

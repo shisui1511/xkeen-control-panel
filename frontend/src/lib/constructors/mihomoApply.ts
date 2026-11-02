@@ -214,12 +214,19 @@ export async function applyMihomoConfig({
   try {
     const path = selectedFile || '/opt/etc/mihomo/config.yaml';
 
-    // Save previous state to localStorage for Undo
+    // Save previous state to localStorage for Undo. The snapshot is bound to the
+    // active profile name: after the profile changes it must not be written back.
     let currentYAML = '';
     const readRes = await apiFetch(`/api/config/read?path=${encodeURIComponent(path)}`);
     if (readRes.ok) {
       currentYAML = await readRes.text();
-      localStorage.setItem('xcp_prev_mihomo_yaml', currentYAML);
+      const profile = await activeProfileName();
+      if (profile) {
+        localStorage.setItem(UNDO_YAML_KEY, currentYAML);
+        localStorage.setItem(UNDO_PROFILE_KEY, profile);
+      } else {
+        clearUndoSnapshot();
+      }
     }
 
     const yamlContent = ctx.generateYaml(capabilitiesKernel);
@@ -315,11 +322,54 @@ export async function applyMihomoConfig({
   }
 }
 
+const UNDO_YAML_KEY = 'xcp_prev_mihomo_yaml';
+const UNDO_PROFILE_KEY = 'xcp_prev_mihomo_profile';
+
+function clearUndoSnapshot() {
+  localStorage.removeItem(UNDO_YAML_KEY);
+  localStorage.removeItem(UNDO_PROFILE_KEY);
+}
+
+// activeProfileName — имя профиля, в который пишет конструктор: активный профиль
+// при ссылке config.yaml на профиль, иначе сам config.yaml. Пустая строка — не
+// удалось определить.
+async function activeProfileName(): Promise<string> {
+  try {
+    const state = await apiFetchJSON<{ managed?: boolean; active?: string }>(
+      '/api/mihomo/profiles'
+    );
+    if (state?.managed) return state.active || '';
+    return 'config.yaml';
+  } catch {
+    return '';
+  }
+}
+
+// undoAvailable — снимок Undo есть и взят из активного профиля. Снимок без имени
+// профиля или с чужим именем непригоден и удаляется: содержимое прежнего профиля
+// не должно попасть в новый активный.
+export async function undoAvailable(): Promise<boolean> {
+  const yaml = localStorage.getItem(UNDO_YAML_KEY);
+  const saved = localStorage.getItem(UNDO_PROFILE_KEY);
+  if (!yaml || !saved) {
+    if (yaml || saved) clearUndoSnapshot();
+    return false;
+  }
+  const active = await activeProfileName();
+  if (!active) return false;
+  if (saved !== active) {
+    clearUndoSnapshot();
+    return false;
+  }
+  return true;
+}
+
 export async function undoMihomoConfig(
   selectedFile: string,
   onPopulateFromYaml: (text: string) => void
 ): Promise<boolean> {
-  const prevYAML = localStorage.getItem('xcp_prev_mihomo_yaml');
+  if (!(await undoAvailable())) return false;
+  const prevYAML = localStorage.getItem(UNDO_YAML_KEY);
   if (!prevYAML) return false;
   try {
     const path = selectedFile || '/opt/etc/mihomo/config.yaml';

@@ -74,8 +74,12 @@ type MihomoProfileService struct {
 	// Restart restarts the running core. It may return ErrRestartSkipped when
 	// the core turned out not to need a restart at that moment.
 	Restart func() error
-	// Healthy reports whether the core came up after a restart.
-	Healthy func() bool
+	// RunningPID returns the PID of the running Mihomo process, 0 when it is
+	// not running. Activate reads it before the restart.
+	RunningPID func() int
+	// Healthy reports whether the core came up after a restart as a NEW process:
+	// oldPID is the PID taken before the restart and must not count.
+	Healthy func(oldPID int) bool
 
 	mu sync.Mutex
 }
@@ -319,6 +323,10 @@ func (s *MihomoProfileService) Activate(name string) (*ActivationResult, error) 
 		return res, nil
 	}
 
+	oldPID := 0
+	if s.RunningPID != nil {
+		oldPID = s.RunningPID()
+	}
 	restartErr := s.Restart()
 	if errors.Is(restartErr, ErrRestartSkipped) {
 		// Решение CoreActive устарело: ядро остановили между проверкой и
@@ -326,7 +334,7 @@ func (s *MihomoProfileService) Activate(name string) (*ActivationResult, error) 
 		return res, nil
 	}
 	res.Restarted = true
-	if restartErr == nil && (s.Healthy == nil || s.Healthy()) {
+	if restartErr == nil && (s.Healthy == nil || s.Healthy(oldPID)) {
 		return res, nil
 	}
 
