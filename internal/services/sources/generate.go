@@ -71,9 +71,10 @@ func (s *Service) generate(in configlayer.Input, installed configlayer.Installed
 	if err != nil {
 		return nil, err
 	}
-	// managed — желаемое состояние «маршрутизацией управляет панель» (D-28): от него
+	// managed — желаемое состояние «маршрутизацией Mihomo управляет панель» (D-28,
+	// D-06 из 147.1: решение по ядрам; для файлов Xray значение не используется): от него
 	// зависит, подключён ли провайдер Mihomo профилем панели.
-	managed := configlayer.DesiredRouting(in.Sections).Managed
+	managed := configlayer.DesiredRouting(in.Sections).ManagedFor(configlayer.KernelMihomo)
 	names := make([]string, 0, len(in.Sections))
 	for name := range in.Sections {
 		names = append(names, name)
