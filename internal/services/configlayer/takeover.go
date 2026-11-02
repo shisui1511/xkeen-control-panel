@@ -17,6 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // Взятие и возврат маршрутизации (D-01…D-05, D-43, D-44) — переход состояния
@@ -52,6 +53,38 @@ const (
 	// отпускании Mihomo, не найден в profiles/, не обычный файл или имя недопустимо.
 	IssueMihomoTargetMissing = "mihomo_target_missing"
 )
+
+// XKeenProfileBase — основа имени профиля, в который при отпускании Mihomo
+// превращается прежний обычный config.yaml XKeen (D-27).
+const XKeenProfileBase = "config-xkeen"
+
+// maxFreeProfileSuffix — наибольший суффикс -N у FreeProfileRel.
+const maxFreeProfileSuffix = 99
+
+// FreeProfileRel возвращает первый свободный путь profiles/<base>[-N].yaml
+// (N от 2 до 99) под корнем Mihomo; занятость — по Lstat, оборванный симлинк
+// тоже занимает имя. Свободного имени нет — пустая строка.
+func FreeProfileRel(root, base string) string {
+	for n := 1; n <= maxFreeProfileSuffix; n++ {
+		name := base
+		if n > 1 {
+			name = fmt.Sprintf("%s-%d", base, n)
+		}
+		rel := "profiles/" + name + ".yaml"
+		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(rel))); errors.Is(err, fs.ErrNotExist) {
+			return rel
+		}
+	}
+	return ""
+}
+
+// safeKeptRel — путь сохранённого файла XKeen допустим: profiles/<имя>.yaml с
+// одним уровнем и без выхода из каталога.
+func safeKeptRel(rel string) bool {
+	file, ok := strings.CutPrefix(rel, "profiles/")
+	return ok && file != "" && file == filepath.Base(file) && !strings.ContainsAny(file, `/\`) &&
+		!strings.Contains(file, "..") && strings.HasSuffix(file, ".yaml")
+}
 
 // mihomoTargetNameRE — допустимое имя профиля Mihomo; то же правило, что у
 // сервиса профилей (пакет services импортировать нельзя: цикл).
@@ -246,6 +279,12 @@ type RoutingOps struct {
 	// MihomoTarget — относительный путь profiles/<имя>.yaml; непусто — после
 	// отпускания config.yaml указывает на него, а не на прежнее значение (D-06).
 	MihomoTarget string
+	// MihomoKeepAs — путь profiles/config-xkeen[-N].yaml, куда перед перекладкой
+	// пишется прежний обычный config.yaml XKeen (D-27); заполняет prepareRouting.
+	MihomoKeepAs string
+	// mihomoKeepData — содержимое сохраняемого файла (копия из набора), прочитанное
+	// при подготовке: тот же срез, что хэшируется в журнале.
+	mihomoKeepData []byte
 	// Next — фактическое владение после применения (Moved заполняется при записи).
 	Next RoutingState
 	// xrayTaking — это применение берёт Xray (Moved в Next заполняется при записи).
@@ -1039,6 +1078,9 @@ type JournalRouting struct {
 	// такой файл, только если его содержимое осталось тем, что записала панель.
 	XrayReleased []MovedFile `json:"xray_released,omitempty"`
 	Config       *ConfigWas  `json:"config,omitempty"`
+	// MihomoKept — прежний обычный файл XKeen, записанный в profiles/ при
+	// отпускании Mihomo (D-27): откат удаляет его, только если хэш совпал.
+	MihomoKept *MovedFile `json:"mihomo_kept,omitempty"`
 }
 
 // clone возвращает копию записи журнала.
@@ -1053,6 +1095,10 @@ func (j *JournalRouting) clone() *JournalRouting {
 		c := *j.Config
 		out.Config = &c
 	}
+	if j.MihomoKept != nil {
+		k := *j.MihomoKept
+		out.MihomoKept = &k
+	}
 	return &out
 }
 
@@ -1064,6 +1110,22 @@ func panelProfileLink(root string) string {
 		abs = root
 	}
 	return filepath.Join(abs, filepath.FromSlash(PanelMihomoProfile))
+}
+
+// writeKeptProfile пишет прежний файл XKeen в profiles/: каталог создаётся,
+// существующий файл не перезаписывается (AtomicWriteFile прошёл бы сквозь симлинк).
+func writeKeptProfile(root, rel string, data []byte) error {
+	if !safeKeptRel(rel) {
+		return ErrInvalidPanelPath
+	}
+	abs := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(abs); err == nil {
+		return fs.ErrExist
+	}
+	return utils.AtomicWriteFile(abs, data, 0o600)
 }
 
 // profileLink — текст симлинка config.yaml на профиль rel внутри каталога Mihomo:
@@ -1202,6 +1264,16 @@ func undoRoutingJournal(roots Roots, set *BackupSet, j *JournalRouting) error {
 	if err := undoConfig(roots, set, j.Config); err != nil {
 		errs = append(errs, err)
 	}
+	// Файл XKeen, записанный в profiles/, убирается после возврата ссылки; чужое
+	// содержимое под тем же именем не трогаем.
+	if k := j.MihomoKept; k != nil && safeKeptRel(k.Name) && roots.Mihomo != "" {
+		abs := filepath.Join(roots.Mihomo, filepath.FromSlash(k.Name))
+		if hashOf(abs) == k.Hash {
+			if err := os.Remove(abs); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				errs = append(errs, fmt.Errorf("%s: %w", k.Name, err))
+			}
+		}
+	}
 	return errors.Join(errs...)
 }
 
@@ -1327,6 +1399,9 @@ func (p *Pipeline) prepareRouting(set *BackupSet, ops *RoutingOps) (*JournalRout
 			return nil, nil, err
 		}
 		jr.Config = was
+		if err := p.prepareMihomoKeep(ops, jr); err != nil {
+			return nil, nil, err
+		}
 		if was.Kind == configKindFile {
 			files = append(files, JournalFile{Key: ManifestKey(KernelMihomo, "config.yaml"), Existed: true})
 		}
@@ -1340,6 +1415,31 @@ func (p *Pipeline) prepareRouting(set *BackupSet, ops *RoutingOps) (*JournalRout
 		}
 	}
 	return jr, files, nil
+}
+
+// prepareMihomoKeep готовит сохранение прежнего обычного файла XKeen (D-27): при
+// отпускании Mihomo с целью, если config.yaml был обычным файлом, его байты из
+// набора копий пишутся в profiles/config-xkeen[-N].yaml. Копия читается здесь,
+// до любых изменений; нет копии — ошибка записи, ничего не меняется.
+func (p *Pipeline) prepareMihomoKeep(ops *RoutingOps, jr *JournalRouting) error {
+	r := ops.MihomoRestore
+	if r == nil || ops.MihomoTarget == "" || r.PrevKind != configKindFile {
+		return nil
+	}
+	if _, ok := mihomoTargetFile(ops.MihomoTarget); !ok {
+		return fmt.Errorf("%s: %w", ops.MihomoTarget, ErrInvalidPanelPath)
+	}
+	data, err := os.ReadFile(filepath.Join(r.PrevBackup, KernelMihomo, "config.yaml"))
+	if err != nil {
+		return fmt.Errorf("config.yaml: копия прежнего файла: %w", err)
+	}
+	keep := FreeProfileRel(p.d.Roots.Mihomo, XKeenProfileBase)
+	if keep == "" {
+		return fmt.Errorf("%s: нет свободного имени профиля", XKeenProfileBase)
+	}
+	ops.MihomoKeepAs, ops.mihomoKeepData = keep, data
+	jr.MihomoKept = &MovedFile{Name: keep, Hash: HashContent(data)}
+	return nil
 }
 
 // movedCopyPath — путь копии перенесённого файла в наборе.
@@ -1398,6 +1498,11 @@ func (p *Pipeline) applyRoutingOps(ops *RoutingOps) error {
 	case ops.MihomoRestore != nil && ops.MihomoTarget != "":
 		if _, ok := mihomoTargetFile(ops.MihomoTarget); !ok {
 			return fmt.Errorf("config.yaml: %w", ErrInvalidPanelPath)
+		}
+		if ops.MihomoKeepAs != "" {
+			if err := writeKeptProfile(root, ops.MihomoKeepAs, ops.mihomoKeepData); err != nil {
+				return fmt.Errorf("%s: %w", ops.MihomoKeepAs, err)
+			}
 		}
 		if err := setConfigSymlink(root, profileLink(root, ops.MihomoTarget)); err != nil {
 			return fmt.Errorf("config.yaml: %w", err)

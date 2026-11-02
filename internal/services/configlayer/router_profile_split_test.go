@@ -314,3 +314,124 @@ func TestRouterProfileTargetRelease(t *testing.T) {
 	e.assertProfileKept(t, "user")
 	e.assertProfileKept(t, "other")
 }
+
+// Прежний обычный файл XKeen при отпускании Mihomo с целью не теряется (D-27):
+// он становится profiles/config-xkeen[-N].yaml, содержимое то же побайтно; сбой
+// записи и прерванная запись возвращают всё.
+func TestRouterProfileTargetKeepsXKeen(t *testing.T) {
+	e := rtNewSplitEnvKind(t, true)
+	e.writeProfile(t, "other", rtTkUserProfile)
+	const toOther = `{"v":1,"managed":true,"mihomo":false,"mihomo_profile":"other"}`
+	cfg := e.mihomo("config.yaml")
+	keep := e.mihomo("profiles/config-xkeen.yaml")
+	keep2 := e.mihomo("profiles/config-xkeen-2.yaml")
+
+	// Взятие: config.yaml стал ссылкой на профиль панели, прежний файл — в наборе.
+	e.setRouting(t, `{"v":1,"managed":true}`)
+	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
+	m := e.layer.store.Snapshot().Routing.Mihomo
+	if m == nil || m.PrevKind != configKindFile || m.PrevBackup == "" {
+		t.Fatalf("State.Routing.Mihomo: %+v", m)
+	}
+	copyPath := filepath.Join(m.PrevBackup, KernelMihomo, "config.yaml")
+	wantHash := e.hashes["config.yaml"]
+
+	// Сбой записи после переноса: помеха перекладке ссылки. Файла config-xkeen нет,
+	// config.yaml снова на профиле панели, копия в наборе на месте.
+	e.edit(t, RoutingSection, json.RawMessage(toOther))
+	blocker := e.mihomo("config.yaml.xcp-link")
+	if err := os.MkdirAll(filepath.Join(blocker, "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res := e.apply(t)
+	if res.OK || res.Code != ResultWriteFailed || !res.RolledBack {
+		t.Fatalf("итог при сбое записи: %+v", res)
+	}
+	if _, err := os.Lstat(keep); !os.IsNotExist(err) {
+		t.Errorf("config-xkeen.yaml остался после отката: %v", err)
+	}
+	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
+	if _, err := os.Lstat(e.mihomo(PanelMihomoProfile)); err != nil {
+		t.Errorf("профиль панели не возвращён откатом: %v", err)
+	}
+	if got := hashOf(copyPath); got != wantHash {
+		t.Errorf("копия прежнего файла в наборе изменена: %q", got)
+	}
+	if err := os.RemoveAll(blocker); err != nil {
+		t.Fatal(err)
+	}
+
+	// Без помехи: прежний файл XKeen стал профилем побайтно, config.yaml -> other.
+	res = e.apply(t)
+	if !res.OK || res.Code != ResultApplied {
+		t.Fatalf("отпускание: %+v", res)
+	}
+	if got := hashOf(keep); got != wantHash {
+		t.Errorf("config-xkeen.yaml не совпадает с прежним config.yaml: %q", got)
+	}
+	e.assertConfigLink(t, e.targetLink(t, "other"))
+	e.assertProfileKept(t, "user")
+	e.assertProfileKept(t, "other")
+	if st := e.layer.store.Snapshot(); st.Routing.Mihomo != nil || st.Journal != nil {
+		t.Errorf("состояние после отпускания: routing=%+v journal=%+v", st.Routing.Mihomo, st.Journal)
+	}
+
+	// Коллизия: config-xkeen.yaml занят, новый файл получает суффикс -2, прежний
+	// файл не тронут. Обычный config.yaml возвращается руками, как у пользователя.
+	e.setRouting(t, `{"v":1,"managed":false}`)
+	if err := os.Remove(cfg); err != nil {
+		t.Fatal(err)
+	}
+	const second = rtTkUserProfile + "# вторая правка\n"
+	if err := os.WriteFile(cfg, []byte(second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e.setRouting(t, `{"v":1,"managed":true}`)
+	e.setRouting(t, toOther)
+	if got := hashOf(keep2); got != HashContent([]byte(second)) {
+		t.Errorf("config-xkeen-2.yaml не совпадает с прежним config.yaml: %q", got)
+	}
+	if got := hashOf(keep); got != wantHash {
+		t.Errorf("прежний config-xkeen.yaml тронут: %q", got)
+	}
+	e.assertConfigLink(t, e.targetLink(t, "other"))
+
+	// Прерванная запись: журнал с MihomoKept обрабатывается RecoverJournal, файл
+	// убран, если его содержимое осталось записанным панелью; чужое не трогается.
+	body := []byte("# записано панелью\n")
+	for _, tc := range []struct {
+		name     string
+		onDisk   []byte
+		wantGone bool
+	}{{"файл панели", body, true}, {"чужое содержимое", []byte("# чужое\n"), false}} {
+		path := e.mihomo("profiles/config-xkeen-9.yaml")
+		if err := os.WriteFile(path, tc.onDisk, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		set, err := NewBackupSet(e.layer.opts.DataDir, time.Now(), "rt-recover")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := set.WriteMeta(); err != nil {
+			t.Fatal(err)
+		}
+		err = e.layer.store.Update(func(st *State) error {
+			st.Journal = &Journal{
+				BackupDir: set.Dir, Trigger: "rt-recover", StartedAt: time.Now().UTC(),
+				Routing: &JournalRouting{MihomoKept: &MovedFile{Name: "profiles/config-xkeen-9.yaml", Hash: HashContent(body)}},
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := RecoverJournal(e.layer.store, e.roots); !ok || err != nil {
+			t.Fatalf("%s: RecoverJournal: %v, %v", tc.name, ok, err)
+		}
+		_, statErr := os.Lstat(path)
+		if gone := os.IsNotExist(statErr); gone != tc.wantGone {
+			t.Errorf("%s: файл убран = %v, ожидалось %v", tc.name, gone, tc.wantGone)
+		}
+		_ = os.Remove(path)
+	}
+}
