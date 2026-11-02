@@ -51,6 +51,7 @@ func (a *API) SetMihomoProfileService(svc *services.MihomoProfileService) {
 	// старым PID не засчитывается, один PID должен продержаться RestartStableWindow
 	// (то же подтверждение, что у конвейера «Применить»).
 	svc.RunningPID = a.mihomoRunningPID
+	svc.ReturnTarget = a.mihomoReturnTarget
 	svc.Healthy = func(oldPID int) bool {
 		if a.kernelSvc == nil {
 			return true
@@ -109,6 +110,16 @@ func (a *API) validateMihomoContent(data []byte) error {
 	return nil
 }
 
+// mihomoReturnTarget — профиль, на который вернётся Mihomo при отпускании; пусто,
+// когда слой выключен или панель Mihomo не владеет. Читается при каждом обращении к
+// сервису профилей: владение меняется применением, а не перезапуском панели.
+func (a *API) mihomoReturnTarget() string {
+	if a.configLayer == nil {
+		return ""
+	}
+	return a.configLayer.MihomoReturnTarget()
+}
+
 // mihomoRunningPID — PID работающего процесса Mihomo, 0 — не запущен. По
 // процессам, без определения версии: опрос не ждёт конца операции XKeen.
 func (a *API) mihomoRunningPID() int {
@@ -160,6 +171,10 @@ func (a *API) activateByOwner(w http.ResponseWriter, r *http.Request, name strin
 		return false
 	}
 	if a.configLayer.MihomoTaken() {
+		if services.IsReservedProfileName(name) {
+			JSONErrorCode(w, http.StatusBadRequest, "profile_reserved", a.t(r, "profiles.err_reserved"))
+			return true
+		}
 		view, err := a.routing.ActivateProfile(context.WithoutCancel(r.Context()), name)
 		switch {
 		case errors.Is(err, configlayer.ErrDraftOpen):
@@ -264,9 +279,15 @@ func (a *API) MihomoProfileAction(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, services.ErrProfileInvalidName):
 		JSONError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, services.ErrProfileReserved):
+		JSONErrorCode(w, http.StatusBadRequest, "profile_reserved", a.t(r, "profiles.err_reserved"))
 	case errors.Is(err, services.ErrProfileNotFound):
 		JSONError(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, services.ErrProfileExists), errors.Is(err, services.ErrProfileActive), errors.Is(err, services.ErrProfilesUnmanaged):
+	case errors.Is(err, services.ErrProfileExists):
+		JSONErrorCode(w, http.StatusConflict, "profile_exists", err.Error())
+	case errors.Is(err, services.ErrProfileReturnTarget):
+		JSONErrorCode(w, http.StatusConflict, "profile_return_target", a.t(r, "profiles.err_return_target"))
+	case errors.Is(err, services.ErrProfileActive), errors.Is(err, services.ErrProfilesUnmanaged):
 		JSONError(w, http.StatusConflict, err.Error())
 	case err != nil:
 		JSONError(w, http.StatusInternalServerError, err.Error())

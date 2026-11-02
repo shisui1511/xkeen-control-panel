@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 )
 
@@ -441,4 +442,153 @@ func TestRouterProfileActivateOwnership(t *testing.T) {
 	// Стенд к возврату: Mihomo отпущен на прежний профиль (rt-own-b).
 	rtSwExpectKernel(t, tg.Core, e.rtSwCall("release", ""), rtOwnB, pid)
 	m.taken = false
+}
+
+const (
+	rtNamesA = "rt-names-a"
+	rtNamesB = "rt-names-b"
+	rtNamesC = "rt-names-c"
+)
+
+// rtNamesBackups — копии удалённых профилей rt-names-* в резервном каталоге панели.
+func rtNamesBackups() []string {
+	files, _ := filepath.Glob(filepath.Join(config.Default().DataDir, "backup", "mihomo-profiles", "rt-names-*.yaml"))
+	return files
+}
+
+// rtNamesLinkTo переключает config.yaml на profiles/<name>.yaml напрямую, на диске:
+// содержимое профилей одинаково, перезапуск ядру не нужен. Исходный вид config.yaml
+// возвращает rtSwPrepare.
+func rtNamesLinkTo(t *testing.T, s *rtSwStand, name string) {
+	t.Helper()
+	tmp := s.cfg + ".rt-link"
+	_ = os.Remove(tmp)
+	if err := os.Symlink(s.profile(name), tmp); err != nil {
+		t.Fatalf("ссылка на %s: %v", name, err)
+	}
+	if err := os.Rename(tmp, s.cfg); err != nil {
+		_ = os.Remove(tmp)
+		t.Fatalf("config.yaml -> %s: %v", name, err)
+	}
+}
+
+// rtNamesProfile ищет профиль в ответе списка.
+func rtNamesProfile(list map[string]any, name string) map[string]any {
+	items, _ := list["profiles"].([]any)
+	for _, it := range items {
+		if m, _ := it.(map[string]any); m != nil && m["name"] == name {
+			return m
+		}
+	}
+	return nil
+}
+
+// Имена профилей (D-24, D-12): префикс xcp- без учёта регистра занят панелью —
+// профиль пользователя с таким именем не создать, не переименовать в него и не
+// активировать; xcp-main нельзя удалить и переименовать; прочие файлы xcp- в списке не
+// видны. Цель возврата (прежний профиль, пока Mihomo у панели) нельзя ни удалить, ни
+// переименовать: 409 profile_return_target; после отпускания переименование проходит.
+// Список отдаёт owner и return_target; удаление профиля пользователя оставляет копию.
+// Метка ядра: отпускание проверяется по процессу активного ядра.
+func TestRouterProfileNames(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	e := rtNewSrc(t)
+	e.enableLayer()
+	e.rtRstIdle()
+	s := rtOwnPrepare(t, e, "rt-names-", rtNamesA, rtNamesB)
+	t.Cleanup(func() {
+		rtOwnRemove(s, "xcp-rt")
+		for _, f := range rtNamesBackups() {
+			_ = os.Remove(f)
+		}
+	})
+	rtNamesLinkTo(t, s, rtNamesB)
+	for _, f := range rtNamesBackups() {
+		_ = os.Remove(f)
+	}
+
+	post := func(action string, body map[string]any) rtSrcResp {
+		t.Helper()
+		return e.call(http.MethodPost, "/api/mihomo/profiles/"+action, body)
+	}
+
+	// Зарезервированные имена при Mihomo не у панели.
+	for _, name := range []string{"xcp-rt", "XCP-rt", "Xcp-rt"} {
+		e.rtRtExpect("create "+name, post("create", map[string]any{"name": name, "from": rtNamesA}), http.StatusBadRequest, "profile_reserved")
+	}
+	e.rtRtExpect("create xcp-rt (пустой)", post("create", map[string]any{"name": "xcp-rt", "empty": true}), http.StatusBadRequest, "profile_reserved")
+	e.rtRtExpect("rename в xcp-rt", post("rename", map[string]any{"name": rtNamesA, "new_name": "xcp-rt"}), http.StatusBadRequest, "profile_reserved")
+	e.rtRtExpect("rename в XCP-rt", post("rename", map[string]any{"name": rtNamesA, "new_name": "XCP-rt"}), http.StatusBadRequest, "profile_reserved")
+	e.rtRtExpect("rename xcp-main", post("rename", map[string]any{"name": "xcp-main", "new_name": "rt-names-x"}), http.StatusBadRequest, "profile_reserved")
+	e.rtRtExpect("delete xcp-main", post("delete", map[string]any{"name": "xcp-main"}), http.StatusBadRequest, "profile_reserved")
+	e.rtRtExpect("delete XCP-rt", post("delete", map[string]any{"name": "XCP-rt"}), http.StatusBadRequest, "profile_reserved")
+	r := e.callSlow(http.MethodPost, rtPrfActivate, map[string]string{"name": "xcp-main"})
+	e.rtRtExpect("activate xcp-main", r, http.StatusBadRequest, "profile_reserved")
+	if _, err := os.Stat(s.profile("xcp-rt")); err == nil {
+		t.Error("профиль xcp-rt создан")
+	}
+	if _, err := os.Stat(s.profile(rtNamesA)); err != nil {
+		t.Errorf("профиль %s исчез после отказов: %v", rtNamesA, err)
+	}
+	if !rtSwLinkOn(t, "profiles/"+rtNamesB+".yaml") {
+		t.Errorf("отказы изменили config.yaml: не указывает на %s", rtNamesB)
+	}
+
+	// Панель владеет Mihomo: прежний профиль — цель возврата.
+	m := rtCoresLiveMihomoTake(t, e, tg)
+	if err := os.WriteFile(s.profile("xcp-rt-orphan"), s.data, s.mode); err != nil {
+		t.Fatalf("файл сироты не записан: %v", err)
+	}
+	prevRel := "profiles/" + rtNamesB + ".yaml"
+	if k, _ := e.rtSwRouting()["mihomo"].(map[string]any); k == nil || k["prev_profile"] != prevRel {
+		t.Fatalf("prev_profile %v, ожидался %s", e.rtSwRouting()["mihomo"], prevRel)
+	}
+	e.rtRtExpect("activate xcp-main при панели", e.callSlow(http.MethodPost, rtPrfActivate, map[string]string{"name": "xcp-main"}), http.StatusBadRequest, "profile_reserved")
+	e.rtRtExpect("delete цели возврата", post("delete", map[string]any{"name": rtNamesB}), http.StatusConflict, "profile_return_target")
+	e.rtRtExpect("rename цели возврата", post("rename", map[string]any{"name": rtNamesB, "new_name": rtNamesC}), http.StatusConflict, "profile_return_target")
+	if _, err := os.Stat(s.profile(rtNamesB)); err != nil {
+		t.Errorf("цель возврата %s исчезла после отказов: %v", rtNamesB, err)
+	}
+
+	list := e.call(http.MethodGet, rtPrfList, nil)
+	if list.Status != http.StatusOK {
+		t.Fatalf("GET %s: %d %s", rtPrfList, list.Status, list.Code)
+	}
+	state := list.object(t)
+	if got, _ := state["return_target"].(string); got != rtNamesB {
+		t.Errorf("return_target %q, ожидался %s", got, rtNamesB)
+	}
+	if p := rtNamesProfile(state, "xcp-main"); p == nil || p["owner"] != "panel" {
+		t.Errorf("профиль xcp-main в списке: %v, ожидался owner panel", p)
+	}
+	if p := rtNamesProfile(state, rtNamesA); p == nil || p["owner"] != "user" {
+		t.Errorf("профиль %s в списке: %v, ожидался owner user", rtNamesA, p)
+	}
+	if p := rtNamesProfile(state, "xcp-rt-orphan"); p != nil {
+		t.Errorf("файл xcp-rt-orphan показан в списке профилей: %v", p)
+	}
+
+	// Удаление профиля пользователя оставляет копию в резервном каталоге панели.
+	if r := post("delete", map[string]any{"name": rtNamesA}); r.Status != http.StatusOK {
+		t.Fatalf("delete %s: %d %s", rtNamesA, r.Status, r.Code)
+	}
+	if _, err := os.Stat(s.profile(rtNamesA)); err == nil {
+		t.Errorf("профиль %s остался после удаления", rtNamesA)
+	}
+	if len(rtNamesBackups()) == 0 {
+		t.Error("после удаления копии профиля нет в резервном каталоге панели")
+	}
+
+	// После отпускания цели возврата нет: переименование проходит и ведёт ссылку.
+	rtSwExpectKernel(t, tg.Core, e.rtSwCall("release", ""), rtNamesB, rtRstKernelPID(t, tg.Core))
+	m.taken = false
+	if got := e.call(http.MethodGet, rtPrfList, nil).object(t)["return_target"]; got != nil && got != "" {
+		t.Errorf("после отпускания return_target %v, ожидался пустой", got)
+	}
+	if r := post("rename", map[string]any{"name": rtNamesB, "new_name": rtNamesC}); r.Status != http.StatusOK {
+		t.Fatalf("rename %s после отпускания: %d %s", rtNamesB, r.Status, r.Code)
+	}
+	if !rtSwLinkOn(t, "profiles/"+rtNamesC+".yaml") {
+		t.Errorf("переименование активного профиля не повело ссылку на %s", rtNamesC)
+	}
 }
