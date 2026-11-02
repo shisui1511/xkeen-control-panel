@@ -219,7 +219,7 @@
   onclose={close}
 >
   <div class="np-body">
-    <div class="np-scroll">
+    <div class="np-scroll" data-testid="new-profile-scroll">
       <div class="form-group np-field">
         <label class="form-label" for={nameId}>{$t('cfg.prof.name_label')}</label>
         <input
