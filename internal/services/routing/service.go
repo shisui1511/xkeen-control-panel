@@ -543,56 +543,128 @@ func (s *Service) Probe() (ProbeConfig, error) {
 	return parseProbe(st.Draft[ProbeSection], s.d.GOARCH)
 }
 
-// setManaged записывает секцию routing черновика: желаемое состояние «маршрутизацией
-// управляет панель». Фактическое взятие делает «Применить» (146-06). Взятие той же
-// правкой переносит в черновик ключи прежнего активного профиля Mihomo (секции
-// mihomo_*) и поля чужого burstObservatory Xray (секция probe); возврат снимает
-// секции Mihomo.
-func (s *Service) setManaged(rev int64, managed bool) (configlayer.DraftEvent, error) {
+// TakeScope — область взятия маршрутизации (D-07 из 147.1): какие ядра берёт
+// панель. Область не выходит за пределы того, что диалог показал владельцу.
+type TakeScope string
+
+const (
+	// ScopeAll — оба ядра, как раньше.
+	ScopeAll TakeScope = "all"
+	// ScopeMihomo — только Mihomo; Xray за XKeen остаётся.
+	ScopeMihomo TakeScope = "mihomo"
+	// ScopeXray — только Xray; Mihomo на своём профиле не трогается.
+	ScopeXray TakeScope = "xray"
+)
+
+// desiredAfterTake — секция routing после взятия с областью. all: Managed, решение
+// «Mihomo под панелью» снимается (Mihomo следует за Managed), «Mihomo на своём
+// профиле» остаётся (D-07). xray: Managed; Mihomo остаётся как есть, а если сейчас
+// не под управлением — фиксируется «на своём профиле». mihomo: только Mihomo, Xray
+// не меняется.
+func desiredAfterTake(cur configlayer.RoutingDesired, scope TakeScope) configlayer.RoutingDesired {
+	next := cur
+	next.V = sectionVersion
+	switch scope {
+	case ScopeMihomo:
+		return next.WithMihomo(true, "")
+	case ScopeXray:
+		wasMihomo := cur.ManagedFor(configlayer.KernelMihomo)
+		next.Managed = true
+		if !wasMihomo {
+			off := false
+			next.Mihomo = &off
+		}
+		return next
+	default:
+		next.Managed = true
+		if next.Mihomo != nil && *next.Mihomo {
+			next.Mihomo = nil
+			next.MihomoProfile = ""
+		}
+		return next
+	}
+}
+
+// desiredAfterRelease — секция routing после «Отпустить»: оба ядра отпущены, но
+// решение «Mihomo на своём профиле» с именем профиля сохраняется (D-07): вернуть
+// Mihomo панели можно только с плашки или из «Профилей».
+func desiredAfterRelease(cur configlayer.RoutingDesired) configlayer.RoutingDesired {
+	next := cur
+	next.V = sectionVersion
+	next.Managed = false
+	if cur.Mihomo == nil || *cur.Mihomo {
+		next.Mihomo = nil
+		next.MihomoProfile = ""
+	}
+	return next
+}
+
+// takeSections собирает правку черновика для взятия: секция routing, «Остальное →
+// DIRECT» при пустых правилах (D-04, для всех областей) и перенос настроек
+// прежней конфигурации по области.
+func (s *Service) takeSections(st configlayer.StateView, scope TakeScope, next configlayer.RoutingDesired) (map[string]json.RawMessage, error) {
+	raw, err := json.Marshal(next)
+	if err != nil {
+		return nil, err
+	}
+	sections := map[string]json.RawMessage{configlayer.RoutingSection: raw}
+	if isEmptyRaw(st.Draft[RulesSection]) {
+		// «Начать с пустого» (D-04): «Остальное → DIRECT» явное.
+		rules, err := encodeRules(RulesConfig{Final: Target{Kind: KindDirect}})
+		if err != nil {
+			return nil, err
+		}
+		sections[RulesSection] = rules
+	}
+	seeded, err := s.takeSeeds(st, scope, next)
+	if err != nil {
+		return nil, err
+	}
+	for name, v := range seeded {
+		sections[name] = v
+	}
+	return sections, nil
+}
+
+// TakeScoped записывает в черновик желание управлять маршрутизацией ядер области
+// и переносит настройки прежней конфигурации: ключи профиля Mihomo в секции
+// (только если Mihomo берётся и сохранённых значений нет), поля чужого
+// burstObservatory в пробы (только если берётся Xray). Фактическое взятие делает
+// «Применить» (146-06).
+func (s *Service) TakeScoped(rev int64, scope TakeScope) (configlayer.DraftEvent, error) {
 	return s.edit(rev, func(st configlayer.StateView) (map[string]json.RawMessage, error) {
-		raw, err := json.Marshal(configlayer.RoutingDesired{V: sectionVersion, Managed: managed})
+		next := desiredAfterTake(configlayer.DesiredRouting(st.Draft), scope)
+		return s.takeSections(st, scope, next)
+	})
+}
+
+// Take — взятие обоих ядер (область all).
+func (s *Service) Take(rev int64) (configlayer.DraftEvent, error) {
+	return s.TakeScoped(rev, ScopeAll)
+}
+
+// Release записывает в черновик отказ от управления маршрутизацией. Секции Mihomo
+// остаются со значениями, но без управления (D-09): проверка перестаёт блокировать
+// «Применить только узлы», а config.yaml после «Применить» возвращается к прежнему
+// профилю. Решение «Mihomo на своём профиле» не снимается (D-07).
+func (s *Service) Release(rev int64) (configlayer.DraftEvent, error) {
+	return s.edit(rev, func(st configlayer.StateView) (map[string]json.RawMessage, error) {
+		cur := configlayer.DesiredRouting(st.Draft)
+		raw, err := json.Marshal(desiredAfterRelease(cur))
 		if err != nil {
 			return nil, err
 		}
 		sections := map[string]json.RawMessage{configlayer.RoutingSection: raw}
-		if !managed {
-			released, err := releaseMihomoSections(st.Draft)
-			if err != nil {
-				return nil, err
-			}
-			for name, v := range released {
-				sections[name] = v
-			}
+		if !cur.ManagedFor(configlayer.KernelMihomo) {
 			return sections, nil
 		}
-		if isEmptyRaw(st.Draft[RulesSection]) {
-			// «Начать с пустого» (D-04): «Остальное → DIRECT» явное.
-			rules, err := encodeRules(RulesConfig{Final: Target{Kind: KindDirect}})
-			if err != nil {
-				return nil, err
-			}
-			sections[RulesSection] = rules
-		}
-		seeded, err := s.takeSeeds(st)
+		released, err := releaseMihomoSections(st.Draft)
 		if err != nil {
 			return nil, err
 		}
-		for name, v := range seeded {
+		for name, v := range released {
 			sections[name] = v
 		}
 		return sections, nil
 	})
-}
-
-// Take записывает в черновик желание управлять маршрутизацией и переносит
-// настройки прежней конфигурации: ключи профиля Mihomo в секции, поля чужого
-// burstObservatory в пробы. Если секции правил нет, она создаётся с «Остальное →
-// DIRECT».
-func (s *Service) Take(rev int64) (configlayer.DraftEvent, error) { return s.setManaged(rev, true) }
-
-// Release записывает в черновик отказ от управления маршрутизацией и снимает
-// секции Mihomo: проверка перестаёт блокировать «Применить только узлы», а
-// config.yaml после «Применить» возвращается к прежнему профилю.
-func (s *Service) Release(rev int64) (configlayer.DraftEvent, error) {
-	return s.setManaged(rev, false)
 }

@@ -20,13 +20,19 @@ import (
 // сервиса и ничего не переносит: профиль без секций собирается из пресетов.
 
 // takeSeeds собирает секции, которые взятие маршрутизации переносит из прежней
-// конфигурации: секции Mihomo и пробы. Его зовут оба пути взятия: Take и
-// TakeWithPreset.
-func (s *Service) takeSeeds(st configlayer.StateView) (map[string]json.RawMessage, error) {
+// конфигурации: секции Mihomo и пробы. Его зовут оба пути взятия: TakeScoped и
+// TakeWithPresetScoped. Секции Mihomo переносятся, только если Mihomo после
+// взятия под панелью; пробы Xray — если под панелью Xray и область не mihomo.
+func (s *Service) takeSeeds(st configlayer.StateView, scope TakeScope, next configlayer.RoutingDesired) (map[string]json.RawMessage, error) {
+	var seeds []func(configlayer.StateView) (map[string]json.RawMessage, error)
+	if next.ManagedFor(configlayer.KernelMihomo) {
+		seeds = append(seeds, s.seedMihomoSections)
+	}
+	if next.ManagedFor(configlayer.KernelXray) && scope != ScopeMihomo {
+		seeds = append(seeds, s.seedProbeFromForeign)
+	}
 	out := map[string]json.RawMessage{}
-	for _, seed := range []func(configlayer.StateView) (map[string]json.RawMessage, error){
-		s.seedMihomoSections, s.seedProbeFromForeign,
-	} {
+	for _, seed := range seeds {
 		seeded, err := seed(st)
 		if err != nil {
 			return nil, err
@@ -56,7 +62,10 @@ func mihomoDraftManaged(draft configlayer.Sections) bool {
 // Если маршрутизация Mihomo уже взята, ничего не переносится: секции, снятые
 // только в черновике, возвращаются из применённого состояния. Нечего делать и
 // когда Mihomo не установлен или в черновике уже есть секция Mihomo под
-// управлением. Результат: имя секции черновика → её значение.
+// управлением. Если после отпускания в черновике сохранены значения секций
+// (D-09), они возвращаются как есть, а ключи активного профиля не переносятся:
+// перенос D-06 идёт только при первом взятии. Результат: имя секции черновика →
+// её значение.
 func (s *Service) seedMihomoSections(st configlayer.StateView) (map[string]json.RawMessage, error) {
 	if !s.d.Installed().Mihomo {
 		return nil, nil
@@ -127,19 +136,23 @@ func restoreAppliedMihomoSections(st configlayer.StateView) (map[string]json.Raw
 	return out, nil
 }
 
-// releaseMihomoSections снимает секции Mihomo, которые сейчас под управлением
-// (D-05): после «Применить» config.yaml возвращается к прежнему профилю, правки
-// панели в секциях не остаются. Секции, которых нет или которые не под
-// управлением, черновик не получает.
+// releaseMihomoSections снимает управление секциями Mihomo, которые сейчас под
+// управлением (D-05, D-09): после «Применить» config.yaml возвращается к прежнему
+// профилю, а значения секций остаются в черновике и возвращаются повторным
+// взятием. From не сохраняется: значения теперь панельные. Секции, которых нет
+// или которые не под управлением, черновик не получает.
 func releaseMihomoSections(draft configlayer.Sections) (map[string]json.RawMessage, error) {
 	desired := configlayer.DesiredCores(draft)
 	out := map[string]json.RawMessage{}
 	for _, id := range configlayer.MihomoSectionIDs {
 		name := configlayer.CoreSectionName(configlayer.KernelMihomo, id)
-		if !desired[name].Managed {
+		cs := desired[name]
+		if !cs.Managed {
 			continue
 		}
-		raw, err := configlayer.EncodeCoreSection(configlayer.CoreSection{V: 1, Managed: false})
+		raw, err := configlayer.EncodeCoreSection(configlayer.CoreSection{
+			V: 1, Managed: false,
+		})
 		if err != nil {
 			return nil, err
 		}

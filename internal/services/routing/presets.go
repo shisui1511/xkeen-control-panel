@@ -770,7 +770,8 @@ func (s *Service) PlanPreset(c PresetChoice) (PresetPlan, error) {
 }
 
 // presetSections кодирует секции черновика после пресета.
-func presetSections(res presetResult, managed bool) (map[string]json.RawMessage, error) {
+// next не nil — секция routing пишется вместе с пресетом (взятие).
+func presetSections(res presetResult, next *configlayer.RoutingDesired) (map[string]json.RawMessage, error) {
 	rules, err := encodeRules(res.rules)
 	if err != nil {
 		return nil, err
@@ -783,8 +784,8 @@ func presetSections(res presetResult, managed bool) (map[string]json.RawMessage,
 		}
 		sections[GroupsSection] = g
 	}
-	if managed {
-		raw, err := json.Marshal(configlayer.RoutingDesired{V: sectionVersion, Managed: true})
+	if next != nil {
+		raw, err := json.Marshal(*next)
 		if err != nil {
 			return nil, err
 		}
@@ -801,25 +802,31 @@ func (s *Service) ApplyPreset(rev int64, c PresetChoice) (configlayer.DraftEvent
 		if err != nil {
 			return nil, err
 		}
-		return presetSections(res, false)
+		return presetSections(res, nil)
 	})
 }
 
-// TakeWithPreset берёт маршрутизацию под панель и применяет пресет той же
-// правкой черновика (D-04, D-25): routing.managed, группы и правила, а также
-// секции Mihomo и пробы из прежней конфигурации (как Take).
+// TakeWithPreset берёт маршрутизацию обоих ядер под панель и применяет пресет той
+// же правкой черновика (D-04, D-25): routing, группы и правила, а также секции
+// Mihomo и пробы из прежней конфигурации (как Take).
 func (s *Service) TakeWithPreset(rev int64, c PresetChoice) (configlayer.DraftEvent, error) {
+	return s.TakeWithPresetScoped(rev, c, ScopeAll)
+}
+
+// TakeWithPresetScoped — взятие с областью и пресетом одной правкой.
+func (s *Service) TakeWithPresetScoped(rev int64, c PresetChoice, scope TakeScope) (configlayer.DraftEvent, error) {
 	return s.edit(rev, func(st configlayer.StateView) (map[string]json.RawMessage, error) {
 		res, err := s.buildPreset(st, c)
 		if err != nil {
 			return nil, err
 		}
-		sections, err := presetSections(res, true)
+		next := desiredAfterTake(configlayer.DesiredRouting(st.Draft), scope)
+		sections, err := presetSections(res, &next)
 		if err != nil {
 			return nil, err
 		}
 		// Взятие с пресетом переносит настройки прежней конфигурации так же, как Take.
-		seeded, err := s.takeSeeds(st)
+		seeded, err := s.takeSeeds(st, scope, next)
 		if err != nil {
 			return nil, err
 		}
