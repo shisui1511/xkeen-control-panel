@@ -5,7 +5,7 @@ import "encoding/json"
 // Пресеты секций Xray (D-04): значения, которые берутся, когда чужого файла
 // секции нет. Сырые JSON-литералы: порядок ключей и запись чисел не меняются.
 const (
-	xrayLogPreset = `{"loglevel":"warning"}`
+	xrayLogPreset = `{"loglevel":"warning","access":"none"}`
 	// DNS как у Xray без секции DNS.
 	xrayDNSPreset = `{"servers":["localhost"]}`
 	// Обязательная часть прозрачных входящих XKeen (143 Q7): redirect (tcp) и

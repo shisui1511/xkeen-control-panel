@@ -77,7 +77,12 @@ func XraySectionFile(id string, value json.RawMessage) (content []byte, ok bool,
 		value = XrayPreset(id)
 	}
 	switch id {
-	case "log", "dns":
+	case "log":
+		// Выключенный журнал всегда пишется как access: none (D-16).
+		if value, err = withAccessNone(value); err == nil {
+			content, err = wrapXrayKey(spec.Key, value)
+		}
+	case "dns":
 		content, err = wrapXrayKey(spec.Key, value)
 	case "policy":
 		if value, err = policyWithCounters(value); err == nil {
