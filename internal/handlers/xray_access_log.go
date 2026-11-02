@@ -23,6 +23,7 @@ func (a *API) SetXrayAccessLogService(svc *services.XrayAccessLogService) {
 		}
 		return ""
 	}
+	svc.PathVal = a.pathVal
 	a.xrayAccessLogSvc = svc
 }
 
