@@ -36,6 +36,7 @@
     trafficPercent,
     type NodeItem
   } from '../../../lib/nodesView';
+  import DependentProfilesNote from '../profiles/DependentProfilesNote.svelte';
   import NodeRow from './NodeRow.svelte';
   import NodeEditModal from './NodeEditModal.svelte';
   import SourceSettingsModal from './SourceSettingsModal.svelte';
@@ -221,6 +222,7 @@
       title: $t('cfg.nodes.delete_sub_title', { name: source.name }),
       message: $tp('cfg.nodes.delete_sub_body', source.nodes.length),
       consequence,
+      extra: { component: DependentProfilesNote, props: { source: source.id } },
       confirmLabel: $t('cfg.nodes.delete_sub_btn'),
       cancelLabel: $t('cfg.nodes.cancel')
     });
