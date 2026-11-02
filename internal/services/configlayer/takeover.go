@@ -480,6 +480,57 @@ func scanMihomoActive(root string) (mihomoActive, error) {
 	return out, nil
 }
 
+// mihomoActiveName — имя активного своего профиля Mihomo для снимка: симлинк на
+// профиль панели — пусто; симлинк в profiles/*.yaml — имя без расширения; обычный
+// файл — "config.yaml"; нет файла или иной путь — пусто. Только Lstat и Readlink:
+// зовётся на каждом снимке.
+func mihomoActiveName(root string) string {
+	if root == "" {
+		return ""
+	}
+	cfg := filepath.Join(root, mihomoConfigFile)
+	fi, err := os.Lstat(cfg)
+	if err != nil {
+		return ""
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		return mihomoConfigFile
+	}
+	link, err := os.Readlink(cfg)
+	if err != nil {
+		return ""
+	}
+	if !filepath.IsAbs(link) {
+		link = filepath.Join(root, link)
+	}
+	rel, ok := relInsideRoot(root, link)
+	if !ok || rel == PanelMihomoProfile {
+		return ""
+	}
+	file, ok := strings.CutPrefix(rel, "profiles/")
+	if !ok || strings.Contains(file, "/") || !strings.HasSuffix(file, ".yaml") {
+		return ""
+	}
+	return strings.TrimSuffix(file, ".yaml")
+}
+
+// routingDriftBlocks — среди расхождений маршрутизации есть ядро, которое желаемое
+// состояние (s) держит под управлением панели: такой запуск не идёт. Запуск,
+// отпускающий ядро, его дрейфом не блокируется (D-06, D-07 из 146). Секционные
+// расхождения здесь не считаются — их решает sectionDriftBlocks.
+func routingDriftBlocks(s Sections, items []RoutingDriftItem) bool {
+	if len(items) == 0 {
+		return false
+	}
+	desired := DesiredRouting(s)
+	for _, it := range items {
+		if desired.ManagedFor(it.Kernel) {
+			return true
+		}
+	}
+	return false
+}
+
 // ScanMihomoActive возвращает вид и путь прежнего активного профиля Mihomo и
 // его порты (D-05): symlink или обычный файл, путь внутри root; порты —
 // redir-port/tproxy-port, иначе port первого listeners[] типа redir/tproxy без
@@ -641,8 +692,8 @@ type routingScans struct {
 
 // needScan — какие ядра сканировать для расчёта операций.
 func needScan(desired RoutingDesired, actual RoutingState, installed InstalledKernels, scope string) (xray, mihomo bool) {
-	xray = kernelInScope(KernelXray, installed, scope) && desired.Managed && actual.Xray == nil
-	mihomo = kernelInScope(KernelMihomo, installed, scope) && desired.Managed && actual.Mihomo == nil
+	xray = kernelInScope(KernelXray, installed, scope) && desired.ManagedFor(KernelXray) && actual.Xray == nil
+	mihomo = kernelInScope(KernelMihomo, installed, scope) && desired.ManagedFor(KernelMihomo) && actual.Mihomo == nil
 	return xray, mihomo
 }
 
@@ -678,7 +729,7 @@ func computeRoutingOps(desired RoutingDesired, actual RoutingState, installed In
 
 	if kernelInScope(KernelXray, installed, scope) {
 		switch {
-		case desired.Managed && actual.Xray == nil:
+		case desired.ManagedFor(KernelXray) && actual.Xray == nil:
 			changed = true
 			st := &XrayRoutingState{TakenAt: now, Moved: []MovedFile{}, Left: []string{}}
 			move, left := splitRoutingFiles(scans.Xray)
@@ -688,7 +739,7 @@ func computeRoutingOps(desired RoutingDesired, actual RoutingState, installed In
 			st.Left = left
 			ops.Next.Xray = st
 			ops.xrayTaking = true
-		case !desired.Managed && actual.Xray != nil:
+		case !desired.ManagedFor(KernelXray) && actual.Xray != nil:
 			changed = true
 			ops.XrayRelease = append([]MovedFile(nil), actual.Xray.Moved...)
 			ops.Next.Xray = nil
@@ -697,7 +748,7 @@ func computeRoutingOps(desired RoutingDesired, actual RoutingState, installed In
 
 	if kernelInScope(KernelMihomo, installed, scope) {
 		switch {
-		case desired.Managed && actual.Mihomo == nil:
+		case desired.ManagedFor(KernelMihomo) && actual.Mihomo == nil:
 			changed = true
 			ops.MihomoPoint = scans.Mihomo.Kind != ""
 			ops.Next.Mihomo = &MihomoRoutingState{
@@ -707,7 +758,7 @@ func computeRoutingOps(desired RoutingDesired, actual RoutingState, installed In
 				PrevLink:    scans.Mihomo.Link,
 				Ports:       scans.Mihomo.Ports,
 			}
-		case !desired.Managed && actual.Mihomo != nil:
+		case !desired.ManagedFor(KernelMihomo) && actual.Mihomo != nil:
 			changed = true
 			prev := *actual.Mihomo
 			ops.MihomoRestore = &prev

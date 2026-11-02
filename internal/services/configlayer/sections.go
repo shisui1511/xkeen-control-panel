@@ -205,6 +205,20 @@ func DesiredCores(s Sections) map[string]CoreSection {
 	return out
 }
 
+// MihomoSectionsSaved — значения секций Mihomo сохранены в черновике: хотя бы одна
+// секция Mihomo с Managed=false и непустым Value (D-09 из 147.1). Такие значения
+// переживают отпускание и возвращаются в форму при повторном взятии.
+func MihomoSectionsSaved(s Sections) bool {
+	cores := DesiredCores(s)
+	for _, id := range MihomoSectionIDs {
+		cs := cores[CoreSectionName(KernelMihomo, id)]
+		if !cs.Managed && len(bytes.TrimSpace(cs.Value)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // XraySectionState — фактическое владение одной секцией Xray: файл панели и
 // перенесённые в резервный набор «чистые» файлы.
 type XraySectionState struct {

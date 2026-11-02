@@ -16,9 +16,52 @@ const routingSectionVersion = 1
 // RoutingDesired — содержимое секции routing черновика: желаемое состояние
 // «маршрутизацией управляет панель» (D-01). Фактическое владение — State.Routing
 // (146-06): оно меняется только применением, а секция — правкой черновика.
+//
+// Решение по ядрам (147.1, D-06): Managed — владение Xray, и Mihomo, пока поле
+// Mihomo не задано. Mihomo=false при Managed=true — Mihomo на своём профиле, Xray
+// у панели; Managed=false при Mihomo=true — только Mihomo у панели, Xray за XKeen.
+// Читать решение — только через ManagedFor и AnyManaged.
 type RoutingDesired struct {
-	V       int  `json:"v"`
-	Managed bool `json:"managed"`
+	V       int   `json:"v"`
+	Managed bool  `json:"managed"`
+	Mihomo  *bool `json:"mihomo,omitempty"`
+	// MihomoProfile — имя своего профиля, на котором остаётся Mihomo при Mihomo=false.
+	MihomoProfile string `json:"mihomo_profile,omitempty"`
+}
+
+// ManagedFor — управляет ли панель маршрутизацией ядра. Mihomo с заданным полем
+// Mihomo следует ему, иначе — Managed; Xray и прочие — Managed.
+func (d RoutingDesired) ManagedFor(kernel string) bool {
+	if kernel == KernelMihomo && d.Mihomo != nil {
+		return *d.Mihomo
+	}
+	return d.Managed
+}
+
+// AnyManaged — панель держит хотя бы одно ядро.
+func (d RoutingDesired) AnyManaged() bool {
+	return d.ManagedFor(KernelXray) || d.ManagedFor(KernelMihomo)
+}
+
+// WithMihomo — копия с решением по Mihomo. on при Managed снимает поле (Mihomo
+// следует за Managed); on без Managed — &true. off — всегда &false: решение
+// «Mihomo на своём профиле» переживает «Отпустить» и «Взять» на других вкладках
+// (D-07). profile пишется только при off.
+func (d RoutingDesired) WithMihomo(on bool, profile string) RoutingDesired {
+	out := d
+	out.MihomoProfile = ""
+	switch {
+	case on && d.Managed:
+		out.Mihomo = nil
+	case on:
+		v := true
+		out.Mihomo = &v
+	default:
+		v := false
+		out.Mihomo = &v
+		out.MihomoProfile = profile
+	}
+	return out
 }
 
 // ParseRoutingDesired разбирает секцию routing. Пустой или null raw — секции

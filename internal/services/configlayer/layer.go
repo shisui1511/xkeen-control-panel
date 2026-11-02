@@ -553,7 +553,13 @@ func (l *Layer) restartNotes(st State) []RestartNote {
 // routingSnapshot собирает раздел routing снимка: желаемое из секции черновика,
 // по установленным ядрам — взято ли, перенесённые и оставленные файлы, дрейф.
 func (l *Layer) routingSnapshot(st State, drift []RoutingDriftItem) RoutingSnapshot {
-	out := RoutingSnapshot{Desired: DesiredRouting(st.Draft).Managed}
+	desired := DesiredRouting(st.Draft)
+	out := RoutingSnapshot{
+		Desired:       desired.AnyManaged(),
+		DesiredXray:   desired.ManagedFor(KernelXray),
+		DesiredMihomo: desired.ManagedFor(KernelMihomo),
+		MihomoSaved:   MihomoSectionsSaved(st.Draft),
+	}
 	installed := l.installed()
 	view := func(kernel string, taken bool, moved, left []string, prev string) *RoutingKernelView {
 		v := &RoutingKernelView{Taken: taken, Moved: []string{}, Left: []string{}, Drift: []string{}}
@@ -585,6 +591,9 @@ func (l *Layer) routingSnapshot(st State, drift []RoutingDriftItem) RoutingSnaps
 			prev = m.PrevProfile
 		}
 		out.Mihomo = view(KernelMihomo, st.Routing.Mihomo != nil, nil, nil, prev)
+		if st.Routing.Mihomo == nil {
+			out.MihomoActive = mihomoActiveName(l.opts.Roots.Mihomo)
+		}
 	}
 	return out
 }
@@ -1222,9 +1231,10 @@ func (l *Layer) StartApply(user bool) error {
 	// это и есть решение «Отпустить маршрутизацию» (D-06, D-07).
 	fe := l.checkNow(true)
 	// Расхождение взятой секции блокирует применение, пока секция желаема (managed):
-	// «Отпустить» (managed=false) её не блокирует (FND-03, D-07 из 146).
+	// «Отпустить» (managed=false) её не блокирует (FND-03, D-07 из 146). Расхождение
+	// маршрутизации блокирует только то ядро, которое панель держит (D-06 из 147.1).
 	draft := l.store.Snapshot().Draft
-	if fe.DriftCount-len(fe.Routing)-len(fe.Sections) > 0 || (len(fe.Routing) > 0 && DesiredRouting(draft).Managed) || sectionDriftBlocks(draft, fe.Sections) {
+	if fe.DriftCount-len(fe.Routing)-len(fe.Sections) > 0 || routingDriftBlocks(draft, fe.Routing) || sectionDriftBlocks(draft, fe.Sections) {
 		release()
 		return ErrDriftBlocked
 	}

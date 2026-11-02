@@ -125,7 +125,14 @@ export interface RoutingKernelView {
 
 /** Раздел routing снимка: желаемое владение и фактическое по ядрам (null — ядро не установлено). */
 export interface RoutingSnapshot {
+  /** Панель держит хотя бы одно ядро. */
   desired: boolean;
+  desired_xray: boolean;
+  desired_mihomo: boolean;
+  /** Имя активного своего профиля Mihomo, пусто при профиле панели, без файла или при взятом Mihomo. */
+  mihomo_active: string;
+  /** Значения секций Mihomo сохранены в черновике (переживают отпускание). */
+  mihomo_saved: boolean;
   xray: RoutingKernelView | null;
   mihomo: RoutingKernelView | null;
 }
@@ -304,6 +311,10 @@ function normalizeRouting(raw: unknown): RoutingSnapshot {
   const r = isObject(raw) ? raw : {};
   return {
     desired: r.desired === true,
+    desired_xray: r.desired_xray === true,
+    desired_mihomo: r.desired_mihomo === true,
+    mihomo_active: typeof r.mihomo_active === 'string' ? r.mihomo_active : '',
+    mihomo_saved: r.mihomo_saved === true,
     xray: normalizeRoutingKernel(r.xray),
     mihomo: normalizeRoutingKernel(r.mihomo)
   };
