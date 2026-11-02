@@ -96,6 +96,24 @@
       border-top: 1px solid var(--on-deep-line);
       color: var(--on-deep-dim);
     }
+
+    /* Тёмное стекло, как у шапки: список, уходящий под панель, просвечивает */
+    @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+      .bottom-dock {
+        background: color-mix(in srgb, var(--bg-deep) 88%, transparent);
+        -webkit-backdrop-filter: blur(18px) saturate(1.6);
+        backdrop-filter: blur(18px) saturate(1.6);
+      }
+    }
+  }
+
+  /* Телефон боком: панель ниже (--dock-h 44 px), подпись встаёт рядом со значком */
+  @media (max-width: 768px) and (max-height: 480px) {
+    .bottom-dock .dock-item {
+      flex-direction: row;
+      gap: 6px;
+      padding: 0 4px;
+    }
   }
 
   .dock-item {

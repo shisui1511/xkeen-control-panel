@@ -421,7 +421,14 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 12px;
     margin-bottom: 14px;
+  }
+
+  /* Заголовок переносится сам, а кнопка «Расширенная форма» остаётся одной строкой */
+  .quick-add-header :global(.btn) {
+    flex-shrink: 0;
+    white-space: nowrap;
   }
 
   .quick-add-title {

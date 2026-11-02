@@ -1035,7 +1035,7 @@
      поиск и уровень — одной строкой, источники листаются вбок */
   @media (max-width: 768px) {
     .logs-page {
-      height: calc(100dvh - 69px - env(safe-area-inset-top) - var(--dock-space));
+      height: calc(100dvh - var(--mhdr-h) - env(safe-area-inset-top) - var(--dock-space));
       padding: 12px 12px 8px;
       gap: 8px;
     }

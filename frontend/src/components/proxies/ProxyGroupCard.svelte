@@ -231,7 +231,7 @@
         </span>
       {/if}
       <span class="name">{group.name}</span>
-      <span class="type-badge">
+      <span class="type-badge" title={getGroupTypeLabel(group.type)}>
         <span class="type-badge-icon" aria-hidden="true">
           {#if groupTypeKey === 'selector'}
             <svg
@@ -274,7 +274,7 @@
             >
           {/if}
         </span>
-        {getGroupTypeLabel(group.type)}
+        <span class="type-badge-label">{getGroupTypeLabel(group.type)}</span>
       </span>
 
       <div class="gc-head-actions">
@@ -1379,6 +1379,23 @@
   :global(.group-list) .gc-body-inner {
     overflow: hidden;
     min-height: 0;
+  }
+
+  /* Узкий телефон: тип группы — только значком (подпись остаётся для диктора
+     и во всплывающей подсказке), чтобы флаг не отрывался от имени группы */
+  @media (max-width: 480px) {
+    .type-badge-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+
+    .type-badge-icon {
+      opacity: 1;
+    }
   }
 
   @media (max-width: 768px) {

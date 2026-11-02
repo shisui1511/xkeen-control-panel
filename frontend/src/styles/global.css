@@ -164,6 +164,8 @@
      она реально занимает снизу (0 там, где панели нет) */
   --dock-h: 58px;
   --dock-space: 0px;
+  /* Высота мобильной шапки без строки состояния: 12 + 44 (кнопка меню) + 12 + 1 */
+  --mhdr-h: 69px;
   /* Чернила тёмной поверхности --bg-deep (шапка и нижняя панель тёмные во всех
      темах, поэтому светлые независимо от схемы) */
   --on-deep: rgba(255, 255, 255, 0.96);
@@ -1111,7 +1113,9 @@ input[type='number'] {
 
 /* ------------ Sidebar ------------- */
 .sidebar {
-  width: var(--sidebar-w);
+  /* Вырез iPhone в альбомной ориентации (viewport-fit=cover): меню шире на
+     его размер, а пункты стоят правее него */
+  width: calc(var(--sidebar-w) + env(safe-area-inset-left));
   height: 100vh;
   height: 100dvh;
   position: fixed;
@@ -1120,7 +1124,8 @@ input[type='number'] {
   background: var(--bg-card);
   /* Цвет границы из темы: жёсткий #03101e давал чёрную черту на светлой теме */
   border-right: 1px solid var(--border);
-  padding: 0;
+  /* Строка состояния, вырез и полоска «домой» не перекрывают пункты меню */
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
   /* CR-01: `overflow-x: visible` next to `overflow-y: auto` is a no-op —
      per the CSS Overflow spec, when one axis is `auto`/`scroll` and the
      other is explicitly `visible`, the `visible` one is recomputed to
@@ -1361,7 +1366,7 @@ input[type='number'] {
   }
 
   .sidebar.rail {
-    width: var(--rail-w);
+    width: calc(var(--rail-w) + env(safe-area-inset-left));
   }
 
   .sidebar.rail .sidebar-logo {
@@ -1447,7 +1452,7 @@ input[type='number'] {
      outside .sidebar's clipping box entirely. */
 
   .main-content.rail {
-    margin-left: var(--rail-w);
+    margin-left: calc(var(--rail-w) + env(safe-area-inset-left));
   }
 
   /* .nav-item already sets position: relative (base rule above), so the
@@ -1467,7 +1472,8 @@ input[type='number'] {
 /* Main content */
 .main-content {
   flex: 1;
-  margin-left: var(--sidebar-w);
+  margin-left: calc(var(--sidebar-w) + env(safe-area-inset-left));
+  padding-right: env(safe-area-inset-right);
   min-width: 0;
   background: var(--bg-page);
 }
@@ -3389,7 +3395,7 @@ a.chip:hover {
   /* Фокус с клавиатуры и прокрутка к элементу не оставляют его под липкой
      шапкой или нижней панелью (WCAG 2.4.11) */
   html {
-    scroll-padding-top: calc(69px + env(safe-area-inset-top));
+    scroll-padding-top: calc(var(--mhdr-h) + env(safe-area-inset-top));
     scroll-padding-bottom: var(--dock-space);
   }
 
@@ -3535,5 +3541,128 @@ a.chip:hover {
     overflow: hidden;
     clip: rect(0 0 0 0);
     white-space: nowrap;
+  }
+}
+
+/* ------------ Телефон: доводка оболочки ------------------------------------
+   Шапка — тёмное «стекло», как и нижняя панель (BottomDock.svelte): контент
+   уходит под неё и просвечивает, как в системных панелях iOS и Android. Без
+   поддержки backdrop-filter остаётся сплошной --bg-deep. */
+@media (max-width: 768px) {
+  .mobile-header {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .mobile-header {
+      background: color-mix(in srgb, var(--bg-deep) 88%, transparent);
+      -webkit-backdrop-filter: blur(18px) saturate(1.6);
+      backdrop-filter: blur(18px) saturate(1.6);
+    }
+  }
+
+  /* Вырез в альбомной ориентации не наезжает на карточки */
+  .container {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+
+  /* Кнопки шапки страницы — одной высоты: в ряду не пляшут пилюли и кнопки */
+  .page-header-actions > :is(.btn, button, a) {
+    min-height: 40px;
+  }
+
+  /* Отклик на касание: кнопка чуть проседает под пальцем — видно, что нажатие
+     принято, ещё до ответа роутера */
+  .btn {
+    transition-property: background-color, border-color, color, box-shadow, opacity, transform;
+  }
+
+  .btn:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+
+  /* Разделы конструкторов Xray и Mihomo: пункты под палец, края полосы
+     растворяются, пока за ними есть разделы */
+  .sec-tabs .sec-tab {
+    min-height: 36px;
+  }
+
+  /* Чипы пресетов и кнопки добавления в конструкторах стоят рядами впритык:
+     прозрачная зона перекрыла бы соседний ряд, поэтому растёт сама кнопка */
+  .scenario-chip,
+  .add-btn {
+    min-height: 36px;
+  }
+
+  @supports (animation-timeline: scroll()) {
+    .sec-tabs {
+      mask-image: linear-gradient(
+        to right,
+        transparent 0,
+        black var(--tabs-fade-l),
+        black calc(100% - var(--tabs-fade-r)),
+        transparent 100%
+      );
+      animation: scroll-edge-fade linear both;
+      animation-timeline: scroll(self inline);
+    }
+  }
+
+  /* «Открыть в редакторе» и «Применить и перезапустить Mihomo» не помещались
+     в половину строки и обрезались: на телефоне — друг под другом */
+  .gen-embedded-actions {
+    flex-direction: column-reverse;
+  }
+
+  .gen-embedded-actions > .btn {
+    flex: none !important;
+    width: 100%;
+    min-height: 44px;
+  }
+}
+
+@keyframes scroll-edge-fade {
+  0% {
+    --tabs-fade-l: 0px;
+    --tabs-fade-r: 28px;
+  }
+  8%,
+  92% {
+    --tabs-fade-l: 28px;
+    --tabs-fade-r: 28px;
+  }
+  100% {
+    --tabs-fade-l: 28px;
+    --tabs-fade-r: 0px;
+  }
+}
+
+/* Телефон боком: по высоте всего ~340 px, и шапка с панелью съедали треть.
+   Шапка тоньше, панель ниже, подписи встают рядом со значками. */
+@media (max-width: 768px) and (max-height: 480px) {
+  :root {
+    --dock-h: 44px;
+    --mhdr-h: 53px;
+  }
+
+  .mobile-header {
+    padding-top: calc(4px + env(safe-area-inset-top));
+    padding-bottom: 4px;
+  }
+
+  .page-header {
+    margin-bottom: 0.75rem;
+  }
+
+  .page-header-subtitle {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn:active:not(:disabled) {
+    transform: none;
   }
 }

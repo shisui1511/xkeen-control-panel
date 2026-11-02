@@ -781,7 +781,7 @@
 
   @media (max-width: 768px) {
     .terminal-card {
-      height: calc(100dvh - 69px - env(safe-area-inset-top) - var(--dock-space) - 150px);
+      height: calc(100dvh - var(--mhdr-h) - env(safe-area-inset-top) - var(--dock-space) - 150px);
       min-height: 260px;
     }
     .header-right :global(.btn span) {
