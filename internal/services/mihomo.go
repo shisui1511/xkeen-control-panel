@@ -393,7 +393,9 @@ func (s *MihomoService) ValidateMihomoConfig() (PreflightResult, error) {
 			})
 		}
 	} else {
-		errors = append(errors, PreflightIssue{
+		// Свой профиль без API — норма: ядро запускается, недоступны только
+		// графики, группы и квоты. Предупреждение не останавливает запуск.
+		warnings = append(warnings, PreflightIssue{
 			Code:    "no_external_controller",
 			Message: "external-controller is not configured; Clash API will be unavailable",
 		})
