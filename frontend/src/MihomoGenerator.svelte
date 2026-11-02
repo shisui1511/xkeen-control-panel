@@ -16,6 +16,7 @@
   import {
     applyMihomoConfig,
     undoMihomoConfig,
+    undoAvailable,
     mergeMihomoProviders,
     applyMihomoPreset
   } from './lib/constructors/mihomoApply';
@@ -64,8 +65,8 @@
   let presetBaseline = $state('');
 
   let canUndo = $state(false);
-  function checkUndo() {
-    canUndo = !!localStorage.getItem('xcp_prev_mihomo_yaml');
+  async function checkUndo() {
+    canUndo = await undoAvailable();
   }
 
   // Preflight warnings & validation
@@ -291,7 +292,7 @@
     await loadSchema();
     await loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml');
     await checkZkeenGeodata();
-    checkUndo();
+    await checkUndo();
 
     const draft = getDraft('mihomo_generator');
     if (draft) {
@@ -417,7 +418,7 @@
           warningsTitle = title || '';
         }
       });
-      checkUndo();
+      await checkUndo();
     } finally {
       applyLoading = false;
     }
@@ -431,7 +432,7 @@
       );
       if (ok) {
         ctx.resetDirty();
-        checkUndo();
+        await checkUndo();
       }
     } finally {
       applyLoading = false;
@@ -864,6 +865,7 @@
               <button
                 type="button"
                 class="btn btn-secondary"
+                data-testid="mihomo-undo"
                 onclick={handleUndo}
                 disabled={applyLoading}
                 style="flex: 1;"
