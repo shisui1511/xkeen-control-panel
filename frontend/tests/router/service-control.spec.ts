@@ -80,51 +80,22 @@ async function waitStable(page: Page, core: string, what: string): Promise<void>
 }
 
 /**
- * Шлюз запуска: перед `xkeen -start` панель опрашивает Preflight (не дольше 3 с) и, если в
- * конфиге есть ошибки, просит подтверждение («Исправить» / «Запустить всё равно»). У Mihomo без
- * external-controller (на стенде нет API ядра) Preflight сообщает именно такую ошибку, поэтому
- * окно — штатная часть запуска, а не сбой. Если окно появилось, проверяется его геометрия и
- * запуск подтверждается последней кнопкой; если ядро поднялось без вопроса, ничего не делается.
+ * Запуск идёт без окна подтверждения: отсутствие API Mihomo Preflight сообщает
+ * предупреждением (no_external_controller), а не ошибкой конфигурации. Окно в этом
+ * сценарии — падение теста: поводов для него нет ни у Xray, ни у Mihomo без API.
  */
-async function passStartGate(page: Page, badge: Locator): Promise<void> {
+async function expectStartWithoutDialog(page: Page, badge: Locator): Promise<void> {
   const dialog = page.getByRole('dialog');
-  const wait = 10_000 * RT.slow;
   const shown = await Promise.race([
-    dialog.waitFor({ state: 'visible', timeout: wait }).then(() => true),
+    dialog.waitFor({ state: 'visible', timeout: 10_000 * RT.slow }).then(() => true),
     expect(badge)
-      .toHaveClass(/\brunning\b/, { timeout: wait })
+      .toHaveClass(/\brunning\b/, { timeout: ACTION })
       .then(() => false)
   ]).catch(() => false);
-  if (!shown) return;
-  // окно появляется с анимацией: ждём, пока рамка остановится
-  await page.waitForTimeout(400);
-  const vp = page.viewportSize();
-  const buttons = dialog.locator('.confirm-actions button');
-  const n = await buttons.count();
-  expect(n, 'шлюз запуска: кнопок действий в окне').toBeGreaterThanOrEqual(2);
-  for (let i = 0; i < n; i++) {
-    const b = buttons.nth(i);
-    await expect(b).toBeVisible();
-    await expect(b).toBeEnabled();
-    const box = await b.boundingBox();
-    expect(box, `шлюз запуска: кнопка ${i + 1} без рамки`).not.toBeNull();
-    if (box && vp) {
-      expect(box.x, `шлюз запуска: кнопка ${i + 1} левее экрана`).toBeGreaterThanOrEqual(-0.5);
-      expect(box.x + box.width, `шлюз запуска: кнопка ${i + 1} правее экрана`).toBeLessThanOrEqual(
-        vp.width + 0.5
-      );
-      expect(box.y + box.height, `шлюз запуска: кнопка ${i + 1} ниже экрана`).toBeLessThanOrEqual(
-        vp.height + 0.5
-      );
-    }
-  }
-  test.info().annotations.push({
-    type: 'start-gate',
-    description: 'Preflight запуска показал окно подтверждения: запуск подтверждён'
-  });
-  // последняя кнопка — «Запустить всё равно»
-  await buttons.nth(n - 1).click();
-  await expect(dialog).toBeHidden({ timeout: T.action });
+  expect(
+    shown,
+    'запуск службы остановило окно подтверждения: Preflight не должен считать конфиг без API ошибкой'
+  ).toBe(false);
 }
 
 /** Запрос к API панели из страницы с её сессией и токеном CSRF. */
@@ -238,7 +209,7 @@ test(`service-control core:${RT.core || 'unknown'}`, { tag: CORE_TAG }, async ({
   // --- запуск ----------------------------------------------------------------------
   await expect(startBtn).toBeEnabled({ timeout: ACTION });
   await startBtn.click();
-  await passStartGate(page, heroStatus);
+  await expectStartWithoutDialog(page, heroStatus);
   await expectState(true, 'после запуска');
   const started = (await readStatus(page)) as Status;
   expect(started.active, 'ядро после запуска').toBe(core);
