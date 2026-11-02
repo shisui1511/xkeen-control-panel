@@ -406,6 +406,8 @@
     const key = `xkeen-${action}`;
     actionLoading[key] = true;
     try {
+      // Предупреждение Preflight о Mihomo без API: тост после успешного запуска
+      let noApiWarning = false;
       if (action === 'start') {
         // Pre-flight check: determine kernel to validate
         const kernel = $activeKernelName || 'xray';
@@ -416,6 +418,10 @@
           if (pfRes.ok) {
             const pfBody = await pfRes.json();
             const data = pfBody.data ?? pfBody;
+            noApiWarning =
+              kernel === 'mihomo' &&
+              Array.isArray(data.warnings) &&
+              data.warnings.some((w: { code?: string }) => w?.code === 'no_external_controller');
             if (Array.isArray(data.errors) && data.errors.length > 0) {
               const errList = data.errors
                 .map((e: { message?: string; code?: string }) => e.message || e.code || '')
@@ -439,6 +445,7 @@
         }
       }
       await serviceAction(action);
+      if (noApiWarning) showToast('warning', $t('svc.mihomo_started_no_api'), 8000);
       await fetchStatus();
       await fetchKernels();
       await fetchCapabilities();
