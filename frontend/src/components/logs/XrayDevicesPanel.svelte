@@ -1,21 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { t, currentLang } from '../../i18n';
-  import { apiFetch, apiFetchJSON } from '../../lib/api';
+  import { t } from '../../i18n';
+  import { apiFetchJSON } from '../../lib/api';
   import { usePoller } from '../../lib/poller';
-  import { applyToKernel, notifyApplyOutcome, type ApplyResult } from '../../lib/serviceApply';
-  import { parseValidationError } from '../../lib/errorParser';
-  import { showConfirm, showToast } from '../../stores';
-  import Button from '../Button.svelte';
   import Select from '../Select.svelte';
   import EmptyState from '../EmptyState.svelte';
-
-  interface Status {
-    config_file?: string;
-    access_path: string;
-    enabled: boolean;
-    file_size: number;
-  }
+  import AccessLogControl, { type AccessLogStatus } from './AccessLogControl.svelte';
 
   interface Entry {
     time: string;
@@ -40,7 +30,7 @@
   }
 
   interface Response {
-    status: Status;
+    status: AccessLogStatus;
     report: { entries: Entry[]; devices: Device[]; parsed: number };
   }
 
@@ -49,7 +39,6 @@
 
   let data = $state<Response | null>(null);
   let loadError = $state('');
-  let toggling = $state(false);
   let selectedIP = $state('');
   let outbound = $state('');
   let dest = $state('');
@@ -93,55 +82,6 @@
     }, SEARCH_DELAY_MS);
   }
 
-  async function toggle(enabled: boolean) {
-    if (enabled) {
-      const ok = await showConfirm({
-        title: $t('xlog.enable_confirm_title'),
-        message: $t('xlog.enable_confirm_msg'),
-        confirmLabel: $t('xlog.enable'),
-        cancelLabel: $t('app.cancel'),
-        variant: 'warning'
-      });
-      if (!ok) return;
-    }
-    toggling = true;
-    try {
-      const res = await apiFetch('/api/xray/access-log/toggle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled })
-      });
-      const payload = await res.json().catch(() => null);
-      if (!res.ok || !payload?.success) throw new Error(payload?.error || `HTTP ${res.status}`);
-      // Конфиг записан: сервер сам решает, перезапускать ли запущенный активный Xray
-      let result: ApplyResult | null = null;
-      try {
-        result = await applyToKernel({ kernel: 'xray' });
-      } catch (applyErr: any) {
-        if (applyErr?.status === 401) return;
-        const reason =
-          parseValidationError(applyErr?.message || '', $currentLang) || applyErr?.message;
-        showToast('error', $t('apply.restart_failed', { reason }), 10000, {
-          label: $t('apply.open_logs'),
-          onClick: () => {
-            window.location.hash = '#/logs';
-          }
-        });
-      }
-      if (result) {
-        notifyApplyOutcome(result, {
-          restartedMessage: enabled ? $t('xlog.enabled_toast') : $t('xlog.disabled_toast')
-        });
-      }
-      await load();
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', `${$t('xlog.toggle_error')}: ${e?.message || e}`);
-    } finally {
-      toggling = false;
-    }
-  }
-
   function deviceLabel(d: { device?: string; ip?: string; source_ip?: string }): string {
     return d.device || d.ip || d.source_ip || '';
   }
@@ -158,107 +98,95 @@
 <div class="xdev">
   {#if loadError}
     <p class="xdev-error" role="alert">{$t('xlog.load_error')}: {loadError}</p>
-  {:else if data && !data.status.enabled}
-    <div class="card xdev-off">
-      <EmptyState title={$t('xlog.off_title')} description={$t('xlog.off_desc')} />
-      <Button variant="primary" loading={toggling} onclick={() => toggle(true)}>
-        {$t('xlog.enable')}
-      </Button>
-    </div>
   {:else if data}
-    <div class="xdev-bar">
-      <span class="xdev-meta font-mono" title={data.status.config_file}>
-        {data.status.access_path} · {(data.status.file_size / 1024).toFixed(0)} KB
-      </span>
-      <Button variant="secondary" class="btn-sm" loading={toggling} onclick={() => toggle(false)}>
-        {$t('xlog.disable')}
-      </Button>
-    </div>
+    <AccessLogControl status={data.status} onchange={load} />
 
-    {#if data.report.devices.length === 0}
-      <EmptyState title={$t('xlog.empty_title')} description={$t('xlog.empty_desc')} />
-    {:else}
-      <div class="xdev-grid">
-        <ul class="xdev-devices" aria-label={$t('xlog.devices')}>
-          {#each data.report.devices as d (d.ip)}
-            <li>
-              <button
-                type="button"
-                class="xdev-device"
-                class:active={selectedIP === d.ip}
-                aria-pressed={selectedIP === d.ip}
-                onclick={() => selectDevice(d.ip)}
-              >
-                <span class="xdev-name">{deviceLabel(d)}</span>
-                {#if d.device}<span class="xdev-ip font-mono">{d.ip}</span>{/if}
-                <span class="xdev-counts">
-                  {$t('xlog.connections', { n: String(d.connections) })}
-                  {#if d.rejected > 0}
-                    · <span class="xdev-rejected"
-                      >{$t('xlog.rejected', { n: String(d.rejected) })}</span
-                    >
-                  {/if}
-                </span>
-                <span class="xdev-top font-mono">{d.top_destinations.join(', ')}</span>
-              </button>
-            </li>
-          {/each}
-        </ul>
+    {#if data.status.enabled && !data.status.path_denied}
+      {#if data.report.devices.length === 0}
+        <EmptyState title={$t('xlog.empty_title')} description={$t('xlog.empty_desc')} />
+      {:else}
+        <div class="xdev-grid">
+          <ul class="xdev-devices" aria-label={$t('xlog.devices')}>
+            {#each data.report.devices as d (d.ip)}
+              <li>
+                <button
+                  type="button"
+                  class="xdev-device"
+                  class:active={selectedIP === d.ip}
+                  aria-pressed={selectedIP === d.ip}
+                  onclick={() => selectDevice(d.ip)}
+                >
+                  <span class="xdev-name">{deviceLabel(d)}</span>
+                  {#if d.device}<span class="xdev-ip font-mono">{d.ip}</span>{/if}
+                  <span class="xdev-counts">
+                    {$t('xlog.connections', { n: String(d.connections) })}
+                    {#if d.rejected > 0}
+                      · <span class="xdev-rejected"
+                        >{$t('xlog.rejected', { n: String(d.rejected) })}</span
+                      >
+                    {/if}
+                  </span>
+                  <span class="xdev-top font-mono">{d.top_destinations.join(', ')}</span>
+                </button>
+              </li>
+            {/each}
+          </ul>
 
-        <div class="xdev-entries">
-          <div class="xdev-filters">
-            <label class="visually-hidden" for="xdev-dest">{$t('xlog.filter_dest')}</label>
-            <input
-              id="xdev-dest"
-              class="input font-mono"
-              type="search"
-              placeholder={$t('xlog.filter_dest')}
-              value={destInput}
-              oninput={onDestInput}
-            />
-            <Select
-              id="xdev-outbound"
-              bind:value={outbound}
-              ariaLabel={$t('xlog.filter_outbound')}
-              options={outboundOptions}
-              onchange={() => load()}
-            />
-          </div>
+          <div class="xdev-entries">
+            <div class="xdev-filters">
+              <label class="visually-hidden" for="xdev-dest">{$t('xlog.filter_dest')}</label>
+              <input
+                id="xdev-dest"
+                class="input font-mono"
+                type="search"
+                placeholder={$t('xlog.filter_dest')}
+                value={destInput}
+                oninput={onDestInput}
+              />
+              <Select
+                id="xdev-outbound"
+                bind:value={outbound}
+                ariaLabel={$t('xlog.filter_outbound')}
+                options={outboundOptions}
+                onchange={() => load()}
+              />
+            </div>
 
-          <div class="xdev-table-wrap">
-            <table class="xdev-table">
-              <thead>
-                <tr>
-                  <th>{$t('xlog.col_time')}</th>
-                  <th>{$t('xlog.col_device')}</th>
-                  <th>{$t('xlog.col_dest')}</th>
-                  <th>{$t('xlog.col_route')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each data.report.entries as e, i (i)}
-                  <tr class:is-rejected={e.status === 'rejected'}>
-                    <td class="font-mono">{e.time.slice(11)}</td>
-                    <td>{deviceLabel(e)}</td>
-                    <td class="font-mono xdev-dest">
-                      {#if e.status === 'rejected'}
-                        {e.reason}
-                      {:else}
-                        {e.destination}{e.port ? `:${e.port}` : ''}
-                        {#if e.network}<span class="xdev-net">{e.network}</span>{/if}
-                      {/if}
-                    </td>
-                    <td class="font-mono">
-                      {#if e.inbound}{e.inbound} →
-                      {/if}{e.outbound || '—'}
-                    </td>
+            <div class="xdev-table-wrap">
+              <table class="xdev-table">
+                <thead>
+                  <tr>
+                    <th>{$t('xlog.col_time')}</th>
+                    <th>{$t('xlog.col_device')}</th>
+                    <th>{$t('xlog.col_dest')}</th>
+                    <th>{$t('xlog.col_route')}</th>
                   </tr>
-                {/each}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {#each data.report.entries as e, i (i)}
+                    <tr class:is-rejected={e.status === 'rejected'}>
+                      <td class="font-mono">{e.time.slice(11)}</td>
+                      <td>{deviceLabel(e)}</td>
+                      <td class="font-mono xdev-dest">
+                        {#if e.status === 'rejected'}
+                          {e.reason}
+                        {:else}
+                          {e.destination}{e.port ? `:${e.port}` : ''}
+                          {#if e.network}<span class="xdev-net">{e.network}</span>{/if}
+                        {/if}
+                      </td>
+                      <td class="font-mono">
+                        {#if e.inbound}{e.inbound} →
+                        {/if}{e.outbound || '—'}
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
-      </div>
+      {/if}
     {/if}
   {/if}
 </div>
@@ -274,27 +202,6 @@
     margin: 0;
     color: var(--danger);
     font-size: var(--font-size-sm);
-  }
-
-  .xdev-off {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--spacing-3);
-  }
-
-  .xdev-bar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--spacing-2);
-  }
-
-  .xdev-meta {
-    font-size: var(--font-size-xs);
-    color: var(--fg-dim);
-    word-break: break-all;
   }
 
   .xdev-grid {
