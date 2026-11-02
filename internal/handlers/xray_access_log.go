@@ -27,6 +27,25 @@ func (a *API) SetXrayAccessLogService(svc *services.XrayAccessLogService) {
 	a.xrayAccessLogSvc = svc
 }
 
+// xrayAccessLogStatus builds the access log status. With the configuration layer
+// on, the value in force comes from the section service (the last file with
+// "log" as Xray merges them, or the panel section) and the owner of the section
+// is reported; the path is read only after ReadablePath inside StatusOf. With
+// the layer off the old single-file lookup is used.
+func (a *API) xrayAccessLogStatus() (*services.XrayAccessLogStatus, error) {
+	if a.cores != nil && a.configLayer != nil && a.configLayer.Enabled() {
+		view, err := a.cores.AccessLog()
+		if err != nil {
+			return nil, err
+		}
+		status := a.xrayAccessLogSvc.StatusOf("", view.Path)
+		status.Owner = view.Owner
+		status.WillWrite = view.WillWrite
+		return status, nil
+	}
+	return a.xrayAccessLogSvc.Status()
+}
+
 // XrayAccessLog handles GET /api/xray/access-log?ip=&dest=&outbound=&limit=:
 // access log status plus parsed entries and a per-device summary.
 func (a *API) XrayAccessLog(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +57,7 @@ func (a *API) XrayAccessLog(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusServiceUnavailable, "xray access log service unavailable")
 		return
 	}
-	status, err := a.xrayAccessLogSvc.Status()
+	status, err := a.xrayAccessLogStatus()
 	if errors.Is(err, services.ErrXrayLogConfigNotFound) {
 		JSONError(w, http.StatusNotFound, err.Error())
 		return
@@ -49,7 +68,7 @@ func (a *API) XrayAccessLog(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	report, err := a.xrayAccessLogSvc.Report(services.XrayAccessFilter{
+	report, err := a.xrayAccessLogSvc.ReportOf(status, services.XrayAccessFilter{
 		SourceIP:    q.Get("ip"),
 		Destination: q.Get("dest"),
 		Outbound:    q.Get("outbound"),

@@ -386,3 +386,133 @@ func TestRouterAccessLogEnable(t *testing.T) {
 		t.Errorf("после повторного включения access %q, ожидалось %q", got, services.DefaultXrayAccessLog)
 	}
 }
+
+// rtAccFixtures пишет файлы-фикстуры чужой секции log и убирает их при выходе.
+func rtAccFixtures(t *testing.T) {
+	t.Helper()
+	files := map[string]string{
+		rtAccPure:   "// комментарий фикстуры\n{\n  \"log\": {\"loglevel\": \"warning\", \"access\": \"none\"}\n}\n",
+		rtAccMixed:  "{\"log\": {\"loglevel\": \"warning\"}, \"stats\": {}}\n",
+		rtAccShadow: "{\"log\": {\"access\": \"" + rtAccSideLog + "\"}, \"stats\": {}}\n",
+	}
+	for name, body := range files {
+		path := filepath.Join(rtRtXrayDir, name)
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("запись фикстуры (длина имени %d): %v", len(name), err)
+		}
+		t.Cleanup(func() { _ = os.Remove(path) })
+	}
+}
+
+// Трасса: секция log за чужими файлами; поверх них смешанный файл после файла
+// панели с другим access → статус показывает значение последнего файла, владелец
+// xkeen или user; при открытом черновике POST access-log отвечает 409 draft_open,
+// файлы те же; без черновика смешанный файл после файла панели — 409
+// section_shadowed; после его удаления без ack_comments — 409
+// comments_not_acknowledged, файлы те же; с ack_comments секция берётся и
+// применяется одним шагом: «чистый» файл ушёл в копии, смешанный остался, файл
+// панели хранит access; «Отпустить» возвращает файлы побайтно. Метка ядра: исход
+// перезапуска зависит от активного ядра.
+func TestRouterAccessLogForeignTake(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	core := tg.Core
+	if core != "xray" && core != "mihomo" {
+		t.Fatalf("неизвестное ядро цели %q", core)
+	}
+	e := rtNewSrc(t)
+	e.enableLayer()
+	e.rtRstIdle()
+	if core == "xray" {
+		rtRstKernelPID(t, "xray")
+	}
+	rtAccLogGuard(t, e)
+
+	// Очистка идёт в обратном порядке: сначала возврат секции, затем фикстуры, затем
+	// сверка каталога с исходным.
+	orig := rtCoresDirSums(t)
+	t.Cleanup(func() {
+		if got := rtCoresDirSums(t); !rtCoresSumsEqual(got, orig) {
+			t.Errorf("после сценария каталог конфигов Xray отличается от исходного (файлов %d, ожидалось %d)", len(got), len(orig))
+		}
+	})
+	rtAccFixtures(t)
+	withFixtures := rtCoresDirSums(t)
+	t.Cleanup(func() { rtAccReleaseLog(t, e, withFixtures) })
+
+	// D-25: действующее значение — у последнего файла с log.
+	st := e.rtAccStatus()
+	if st["access_path"] != rtAccSideLog || st["enabled"] != true {
+		t.Errorf("статус при смешанном файле: access_path %v, enabled %v, ожидалось значение последнего файла", st["access_path"], st["enabled"])
+	}
+	if owner, _ := st["owner"].(string); owner != "xkeen" && owner != "user" {
+		t.Errorf("статус при чужой секции: владелец %q, ожидался xkeen или user", owner)
+	}
+
+	// Открытый черновик: взятие чужой секции отклоняется, файлы не меняются.
+	rtAccDraftEdit(t, e)
+	r := e.rtAccPost(true, true)
+	e.rtRtExpect("access-лог при открытом черновике", r, http.StatusConflict, "draft_open")
+	if got := rtCoresDirSums(t); !rtCoresSumsEqual(got, withFixtures) {
+		t.Error("отказ draft_open изменил файлы каталога конфигов Xray")
+	}
+	e.resetDraft()
+
+	// Смешанный файл после файла панели перекрыл бы его.
+	r = e.rtAccPost(true, true)
+	e.rtRtExpect("access-лог при файле после файла панели", r, http.StatusConflict, "section_shadowed")
+	if r.Params["file"] != rtAccShadow {
+		t.Errorf("section_shadowed: файл в параметрах не совпадает с фикстурой (длина %d)", len(r.Params["file"]))
+	}
+	if err := os.Remove(filepath.Join(rtRtXrayDir, rtAccShadow)); err != nil {
+		t.Fatalf("удаление файла-перекрытия: %v", err)
+	}
+	withoutShadow := rtCoresDirSums(t)
+	// Путь записи при включении: действующий путь или последний путь панели.
+	wantAccess, _ := e.rtAccStatus()["will_write"].(string)
+	if wantAccess == "" {
+		t.Fatal("статус без will_write: путь записи при включении неизвестен")
+	}
+
+	// Комментарии JSONC: без согласия — отказ, файлы те же.
+	r = e.rtAccPost(true, false)
+	e.rtRtExpect("access-лог без согласия на потерю комментариев", r, http.StatusConflict, "comments_not_acknowledged")
+	if got := rtCoresDirSums(t); !rtCoresSumsEqual(got, withoutShadow) {
+		t.Error("отказ comments_not_acknowledged изменил файлы каталога конфигов Xray")
+	}
+
+	// С согласием: секция берётся и применяется одним шагом.
+	var pid int
+	if core == "xray" {
+		pid = rtRstKernelPID(t, "xray")
+	}
+	view := rtAccResult(t, "взятие чужой секции log с включением", e.rtAccPost(true, true))
+	rtAccRestarted(t, "взятие чужой секции log с включением", core, view, pid)
+	if _, err := os.Stat(filepath.Join(rtRtXrayDir, rtAccPure)); err == nil {
+		t.Error("«чистый» файл секции log остался в configs/ после взятия")
+	}
+	if _, err := os.Stat(filepath.Join(rtRtXrayDir, rtAccMixed)); err != nil {
+		t.Errorf("смешанный файл секции log пропал из configs/: %v", err)
+	}
+	if got := rtAccFileAccess(t); got != wantAccess {
+		t.Errorf("access в %s %q, ожидалось %q", configlayer.PanelXrayLogFile, got, wantAccess)
+	}
+	state := e.call(http.MethodGet, "/api/configlayer/state", nil)
+	if state.Status != http.StatusOK {
+		t.Fatalf("GET /api/configlayer/state: %d %s", state.Status, state.Code)
+	}
+	cores, _ := state.object(t)["cores"].(map[string]any)
+	xrayCores, _ := cores["xray"].(map[string]any)
+	logSnap, _ := xrayCores["log"].(map[string]any)
+	if taken, _ := logSnap["taken"].(bool); !taken {
+		t.Error("в снимке слоя секция log не взята после взятия")
+	}
+	if !slices.Contains(rtCoresStrings(logSnap["moved"]), rtAccPure) {
+		t.Error("«чистый» файл секции log не в списке перенесённых в копии")
+	}
+	if !slices.Contains(rtCoresStrings(logSnap["left"]), rtAccMixed) {
+		t.Error("смешанный файл секции log не в списке оставленных на месте")
+	}
+	if st := e.rtAccStatus(); st["owner"] != "panel" || st["access_path"] != wantAccess {
+		t.Errorf("статус после взятия: owner %v, access_path %v", st["owner"], st["access_path"])
+	}
+}
