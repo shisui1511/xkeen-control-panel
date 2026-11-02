@@ -42,7 +42,13 @@ export type StepId = 'build' | 'validate_xray' | 'validate_mihomo' | 'write' | '
 export type StepState = 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'deferred';
 
 export type LayerTrigger =
-  'user' | 'rebuild' | 'kernel_installed' | 'flag_on' | 'flag_off' | 'source_refresh';
+  | 'user'
+  | 'rebuild'
+  | 'kernel_installed'
+  | 'flag_on'
+  | 'flag_off'
+  | 'source_refresh'
+  | 'access_log';
 
 export interface LayerStep {
   id: StepId;
