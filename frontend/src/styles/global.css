@@ -3311,3 +3311,232 @@ a.chip:hover {
   flex-shrink: 0;
   user-select: none;
 }
+
+/* ============================================================
+   Телефон: нижняя панель разделов (BottomDock) и место под неё
+   ============================================================ */
+
+@property --tabs-fade-l {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --tabs-fade-r {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+:root {
+  /* Высота панели без системной полосы жестов; --dock-space — сколько места
+     она реально занимает снизу (0 там, где панели нет) */
+  --dock-h: 58px;
+  --dock-space: 0px;
+  /* Чернила тёмной поверхности --bg-deep (шапка и нижняя панель тёмные во всех
+     темах, поэтому светлые независимо от схемы) */
+  --on-deep: rgba(255, 255, 255, 0.96);
+  --on-deep-dim: rgba(255, 255, 255, 0.6);
+  --on-deep-line: rgba(255, 255, 255, 0.06);
+  --on-deep-led: rgba(255, 255, 255, 0.1);
+}
+
+@media (max-width: 768px) {
+  :root {
+    --dock-space: calc(var(--dock-h) + env(safe-area-inset-bottom));
+  }
+
+  /* Экранная клавиатура: панель прячется, чтобы не подниматься над клавиатурой
+     и не отнимать высоту у поля ввода, редактора и терминала */
+  :root:has(
+    :is(
+      input:not(
+        [type='checkbox'],
+        [type='radio'],
+        [type='range'],
+        [type='button'],
+        [type='submit'],
+        [type='color'],
+        [type='file']
+      ),
+      textarea,
+      [contenteditable='true']
+    ):focus
+  ) {
+    --dock-space: 0px;
+  }
+
+  :root:has(
+      :is(
+        input:not(
+          [type='checkbox'],
+          [type='radio'],
+          [type='range'],
+          [type='button'],
+          [type='submit'],
+          [type='color'],
+          [type='file']
+        ),
+        textarea,
+        [contenteditable='true']
+      ):focus
+    )
+    .bottom-dock-slot {
+    display: none;
+  }
+
+  .main-content {
+    padding-bottom: var(--dock-space);
+  }
+
+  /* Фокус с клавиатуры и прокрутка к элементу не оставляют его под липкой
+     шапкой или нижней панелью (WCAG 2.4.11) */
+  html {
+    scroll-padding-top: calc(69px + env(safe-area-inset-top));
+    scroll-padding-bottom: var(--dock-space);
+  }
+
+  .floating-progress-bar {
+    bottom: calc(16px + var(--dock-space));
+    max-width: calc(100vw - 24px);
+  }
+
+  /* Крошки на телефоне дублируют заголовок страницы и съедают строку-две:
+     где ты, показывают заголовок и подсвеченный пункт нижней панели */
+  .page-header .breadcrumbs {
+    display: none;
+  }
+
+  .page-header {
+    margin-bottom: 1rem;
+  }
+
+  .page-header h1 {
+    font-size: var(--font-size-2xl);
+    line-height: 1.2;
+  }
+
+  .page-header-subtitle {
+    font-size: var(--font-size-sm);
+  }
+}
+
+/* ------------ Сенсорный ввод: зоны нажатия мелких элементов -------------
+   Плотные чипы, переключатели и значки остаются того же видимого размера,
+   а прозрачная зона вокруг дотягивает их до 44 px по высоте (WCAG 2.5.5).
+   Классы — из компонентов страниц; position у них не задан, поэтому
+   relative отсюда не спорит с их собственной раскладкой. */
+@media (max-width: 768px), (pointer: coarse) {
+  :is(
+    .about-link,
+    .pill-main,
+    .refresh-icon-btn,
+    .source-pill,
+    .qs-type-btn,
+    .accent-swatch,
+    .key-btn,
+    .info-banner-close,
+    .manual-create-btn,
+    .install-link,
+    .gc-pin-btn,
+    .gc-ping-btn,
+    .gc-chevron-btn,
+    .gc-lat-box
+  ) {
+    position: relative;
+  }
+
+  :is(
+    .about-link,
+    .pill-main,
+    .refresh-icon-btn,
+    .source-pill,
+    .qs-type-btn,
+    .accent-swatch,
+    .key-btn,
+    .info-banner-close,
+    .manual-create-btn,
+    .install-link,
+    .gc-pin-btn,
+    .gc-ping-btn,
+    .gc-chevron-btn,
+    .gc-lat-box
+  )::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+
+  /* Значки в шапке карточки группы стоят плотно (8 px): зона растёт в высоту,
+     а в ширину — только до середины промежутка, чтобы не перекрывать соседа */
+  :is(.gc-pin-btn, .gc-ping-btn, .gc-chevron-btn, .gc-lat-box)::after {
+    width: calc(100% + 8px);
+  }
+}
+
+/* Плашка «API недоступен» на телефоне: одна компактная строка — индикатор,
+   заголовок с коротким пояснением и кнопка справа; обратный отсчёт повтора
+   скрыт (повтор всё равно идёт сам) */
+@media (max-width: 768px) {
+  .api-offline {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 4px 12px;
+    padding: 10px 10px 10px 14px;
+  }
+
+  .api-offline .api-offline-led {
+    grid-column: 1;
+    grid-row: 1;
+    margin-top: 0;
+  }
+
+  .api-offline .api-offline-body {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+  }
+
+  .api-offline .api-offline-desc {
+    font-size: var(--font-size-xs);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+
+  .api-offline .api-offline-meta {
+    display: none;
+  }
+
+  .api-offline .api-offline-action {
+    grid-column: 3;
+    grid-row: 1;
+    min-height: 36px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Узкий телефон: кнопка повтора — значок 40×40, подпись остаётся для диктора */
+  .api-offline .api-offline-action {
+    min-width: 40px;
+    min-height: 40px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .api-offline-action-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}

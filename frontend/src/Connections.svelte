@@ -758,6 +758,22 @@
         </Select>
       </div>
 
+      <!-- Сортировка на телефоне: заголовков колонок там нет, строки — карточки -->
+      <div class="grouping-control sort-control-mobile">
+        <span class="group-lbl">{$t('conn.sort_by')}</span>
+        <Select
+          bind:value={sortKey}
+          class="group-select"
+          ariaLabel={$t('conn.sort_by')}
+          onchange={() => (sortAsc = false)}
+        >
+          <option value="download">↓ {$t('conn.download')}</option>
+          <option value="upload">↑ {$t('conn.upload')}</option>
+          <option value="speed">{$t('conn.speed')}</option>
+          <option value="start">{$t('conn.duration')}</option>
+        </Select>
+      </div>
+
       <!-- Live Totals Summary -->
       <div class="metrics-pill">
         <span class="m-stat"
@@ -1082,7 +1098,7 @@
     </td>
 
     <!-- Rule Column -->
-    <td>
+    <td class="col-rule">
       <span class="badge badge-rule">{conn.rule || 'Match'}</span>
       {#if conn.rulePayload}
         <div class="rule-payload monospace">{conn.rulePayload}</div>
@@ -1142,7 +1158,7 @@
     </td>
 
     <!-- Action Close Column -->
-    <td style="text-align:center;">
+    <td class="col-close">
       <button
         class="btn-close-conn"
         onclick={(e) => closeConnection(conn.id, e)}
@@ -1884,14 +1900,194 @@
     width: 100%;
   }
 
+  .col-close {
+    text-align: center;
+  }
+
+  .sort-control-mobile {
+    display: none;
+  }
+
+  /* Телефон: строка таблицы — карточка. Хост крупно, под ним источник, сеть
+     и длительность, затем правило с цепочкой и трафик; всё видно без
+     горизонтальной прокрутки */
   @media (max-width: 768px) {
-    .conn-toolbar {
-      flex-direction: column;
-      align-items: stretch;
+    .sort-control-mobile {
+      display: flex;
     }
 
+    .connections-table {
+      min-width: 0;
+    }
+
+    .connections-table thead {
+      display: none;
+    }
+
+    .connections-table tbody {
+      display: block;
+    }
+
+    .conn-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
+      grid-template-areas:
+        'host host host close'
+        'src src net dur'
+        'rule chain chain chain'
+        'up down speed speed';
+      align-items: center;
+      gap: 4px 10px;
+      padding: 10px 4px 10px 12px;
+    }
+
+    .conn-row td {
+      display: block;
+      min-width: 0;
+      padding: 0;
+    }
+
+    .conn-row .col-host {
+      grid-area: host;
+      font-size: var(--font-size-base);
+      font-weight: 600;
+      color: var(--fg-primary);
+    }
+
+    .conn-row .col-host .host-cell {
+      display: block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .conn-row .col-src {
+      grid-area: src;
+      color: var(--fg-secondary);
+      font-size: var(--font-size-xs);
+    }
+
+    .conn-row .col-network {
+      grid-area: net;
+    }
+
+    .conn-row .col-duration {
+      grid-area: dur;
+      font-size: var(--font-size-xs);
+      color: var(--fg-secondary);
+    }
+
+    .conn-row .col-rule {
+      grid-area: rule;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .conn-row .col-rule .rule-payload {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .conn-row .col-chain {
+      grid-area: chain;
+      overflow: hidden;
+    }
+
+    .conn-row .col-chain .chain-flow {
+      flex-wrap: nowrap;
+      justify-content: flex-end;
+    }
+
+    .conn-row .col-chain .chain-node {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .conn-row .col-upload {
+      grid-area: up;
+      text-align: left;
+    }
+
+    .conn-row .col-download {
+      grid-area: down;
+      text-align: left;
+    }
+
+    .conn-row .col-speed {
+      grid-area: speed;
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    .conn-row .col-upload,
+    .conn-row .col-download,
+    .conn-row .col-speed {
+      font-size: var(--font-size-xs);
+    }
+
+    /* На десктопе направление подписывает заголовок колонки, здесь — стрелка */
+    .conn-row .col-upload .bytes-val::before {
+      content: '↑ ';
+    }
+
+    .conn-row .col-download .bytes-val::before {
+      content: '↓ ';
+    }
+
+    .conn-row .col-close {
+      grid-area: close;
+      align-self: start;
+    }
+
+    .conn-row .btn-close-conn {
+      width: 40px;
+      height: 40px;
+      margin: -10px 0 -6px;
+    }
+
+    /* Поиск и фильтры — во всю ширину, группировка и сортировка — рядом в одну строку */
+    .conn-toolbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 10px;
+    }
+
+    .conn-toolbar > :not(.grouping-control) {
+      grid-column: 1 / -1;
+    }
+
+    .grouping-control .group-lbl {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+
+    .grouping-control,
+    .grouping-control :global(.xcp-select) {
+      min-width: 0;
+      width: 100%;
+    }
+
+    .search-wrap,
+    .search-field,
     .search-input {
       width: 100%;
+      height: 38px;
+      font-size: var(--font-size-lg);
+    }
+
+    .conn-row td {
+      border: 0;
     }
 
     .search-input:focus {

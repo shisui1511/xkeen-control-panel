@@ -256,21 +256,33 @@
     font-size: var(--font-size-base);
   }
 
-  @media (max-width: 480px) {
+  /* Телефон: окно — нижний лист во всю ширину. Кнопки действий оказываются
+     под большим пальцем, длинная форма прокручивается внутри листа, низ
+     учитывает системную полосу жестов */
+  @media (max-width: 768px) {
     .modal-backdrop {
-      padding: 8px;
+      align-items: flex-end;
+      padding: 0;
+      padding-top: env(safe-area-inset-top);
     }
     .modal-container {
-      width: calc(100% - 16px);
-      margin: 8px auto;
-      max-height: calc(100dvh - 16px);
-      border-radius: 12px;
+      width: 100%;
+      max-width: none !important;
+      max-height: 92dvh;
+      border-radius: 16px 16px 0 0;
+      border-bottom: 0;
+      padding-bottom: env(safe-area-inset-bottom);
+      animation-name: sheet-in;
     }
     .modal-header {
-      padding: 12px 14px;
+      padding: 10px 8px 10px 16px;
+    }
+    .modal-close-btn {
+      width: 40px;
+      height: 40px;
     }
     .modal-content {
-      padding: 14px 16px;
+      padding: 14px 16px 18px;
     }
   }
 
@@ -278,6 +290,12 @@
      не ждали уходящего окна. */
   @keyframes modal-backdrop-in {
     from {
+      opacity: 0;
+    }
+  }
+  @keyframes sheet-in {
+    from {
+      transform: translateY(24px);
       opacity: 0;
     }
   }

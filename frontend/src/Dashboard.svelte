@@ -32,6 +32,7 @@
   import { kernelLabel } from './lib/kernelState';
   import { panelNewVersion, rememberPanelVersion } from './lib/panelHealth';
   import Sidebar from './components/Sidebar.svelte';
+  import BottomDock from './components/BottomDock.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
   import Card from './components/Card.svelte';
   import Button from './components/Button.svelte';
@@ -1829,6 +1830,11 @@
         {/await}
       {/if}
     {/key}
+  </div>
+
+  <!-- Нижняя панель разделов (только телефон, ≤768 px) -->
+  <div class="bottom-dock-slot" inert={drawerIsModal}>
+    <BottomDock {currentTab} onOpenMenu={toggleSidebar} />
   </div>
 </div>
 

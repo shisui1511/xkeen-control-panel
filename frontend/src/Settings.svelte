@@ -1974,6 +1974,13 @@
     border-color: var(--fg-primary);
   }
 
+  @media (max-width: 768px), (pointer: coarse) {
+    .accent-swatch {
+      width: 36px;
+      height: 36px;
+    }
+  }
+
   .accent-swatch--blue {
     background: var(--swatch-blue);
   }

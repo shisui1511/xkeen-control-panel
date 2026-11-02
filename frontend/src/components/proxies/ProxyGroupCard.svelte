@@ -745,6 +745,21 @@
     font-size: var(--font-size-lg);
     letter-spacing: -0.01em;
   }
+  /* Длинное имя занимает всю свободную ширину и обрезается на второй строке,
+     а не сжимается в столбик по слову */
+  .group-card .gc-head-row1 .name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+  .group-card .gc-head-row1 .type-badge {
+    flex-shrink: 0;
+  }
   .gc-head-actions {
     margin-left: auto;
     display: flex;

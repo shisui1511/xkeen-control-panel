@@ -1029,11 +1029,145 @@
     background: var(--bg);
   }
 
+  /* Телефон: страница ровно между шапкой (69 px) и нижней панелью, консоль
+     забирает всю оставшуюся высоту. Панель управления сжата: кнопки потока —
+     одной строкой значков (подписи остаются для диктора и в подсказке),
+     поиск и уровень — одной строкой, источники листаются вбок */
   @media (max-width: 768px) {
     .logs-page {
-      height: calc(100vh - 50px);
-      padding: 16px;
-      gap: 10px;
+      height: calc(100dvh - 69px - env(safe-area-inset-top) - var(--dock-space));
+      padding: 12px 12px 8px;
+      gap: 8px;
+    }
+
+    .logs-page :global(.page-header-subtitle) {
+      display: none;
+    }
+
+    .logs-toolbar {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      padding: 8px;
+    }
+
+    .tb-group.tb-stream {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      scrollbar-width: none;
+      gap: 6px;
+    }
+
+    .tb-stream::-webkit-scrollbar {
+      display: none;
+    }
+
+    .tb-stream > .btn,
+    .tb-stream .export-split > .btn:first-child {
+      min-width: 40px;
+      min-height: 36px;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .tb-stream > .btn > span,
+    .tb-stream .export-split > .btn:first-child > span {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+
+    .tb-stream .export-split .btn-icon {
+      min-height: 36px;
+    }
+
+    .tb-stream .runtime-level-control {
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+
+    .tb-stream .runtime-level-control .ctrl-label {
+      display: none;
+    }
+
+    .tb-group.tb-filters {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+    }
+
+    .tb-filters .search-wrap {
+      grid-column: 1;
+      width: 100%;
+    }
+
+    .tb-filters .search-input,
+    .tb-filters .search-input:focus {
+      width: 100%;
+      height: 36px;
+      font-size: var(--font-size-lg);
+    }
+
+    .tb-filters :global(.level-select-wrap) {
+      grid-column: 2;
+      grid-row: 1;
+      min-width: 0;
+    }
+
+    .tb-filters .source-pills {
+      grid-column: 1 / -1;
+      overflow-x: auto;
+    }
+
+    .source-pills .source-pill {
+      padding: 7px 10px;
+    }
+
+    .logs-console {
+      min-height: 160px;
+    }
+
+    .tb-stream .export-split,
+    .tb-stream .runtime-level-control {
+      flex-shrink: 0;
+    }
+
+    /* Строка лога: меньше места под время и источник — больше под сообщение */
+    .log-row {
+      padding: 0 4px 0 8px;
+    }
+
+    .log-row .col-ts {
+      width: 62px;
+    }
+
+    .log-row .col-src {
+      width: 44px;
+      margin-right: 4px;
+      overflow: hidden;
+    }
+
+    .log-row .col-src .src-tag {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      vertical-align: middle;
+    }
+
+    .log-row .col-level {
+      width: 34px;
+      margin-right: 4px;
+    }
+  }
+
+  /* Без наведения (сенсорный экран) кнопка копирования строки всегда видна */
+  @media (hover: none) {
+    .copy-row-btn {
+      opacity: 0.55;
+      padding: 4px 8px;
     }
   }
 
