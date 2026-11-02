@@ -18,6 +18,7 @@ import {
   type TakeScope
 } from '../../../lib/configRouting';
 import {
+  activateProfile,
   mihomoOwnerAction,
   profileErrorText,
   switchOutcomeToast,
@@ -235,6 +236,22 @@ export async function confirmMihomoReturn(name: string, stopped: boolean): Promi
     (reason) => showToast('error', `${get(t)('profiles.error')}: ${reason}`, 10000)
   );
   if (res !== null) switchOutcomeToast(res, res.active);
+}
+
+/**
+ * «Сделать активным» из карточки «Профили»: подтверждение берёт сама карточка, здесь — запрос
+ * под признаком «идёт запрос», окно перезапуска и тост по исходу (успех, откат, отказ проверки,
+ * запись без перезапуска). Сервер сам выбирает путь по владельцу Mihomo; тосты смены владельца
+ * на это время молчат. false — запрос отклонён (черновик открыт и др.), причина уже в тосте.
+ */
+export async function activateOwnProfile(name: string): Promise<boolean> {
+  const res = await runMihomoAction(
+    () => activateProfile(name),
+    (reason) => showToast('error', `${get(t)('profiles.error')}: ${reason}`, 10000)
+  );
+  if (res === null) return false;
+  switchOutcomeToast(res, name);
+  return true;
 }
 
 /**
