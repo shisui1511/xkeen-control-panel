@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { pullToRefresh } from './lib/gestures';
   import { onMount, onDestroy, tick } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { t, tp, currentLang } from './i18n';
@@ -947,7 +948,7 @@
   });
 </script>
 
-<div class="container">
+<div class="container" {@attach pullToRefresh(() => fetchProxies())}>
   <PageHeader
     title={$t('proxies.title')}
     subtitle={$t('proxies.subtitle')}

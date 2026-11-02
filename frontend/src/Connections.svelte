@@ -23,6 +23,17 @@
   import PlayIcon from './lib/components/icons/Play.svelte';
   import DownloadIcon from './lib/components/icons/Download.svelte';
   import WarningIcon from './lib/components/icons/Warning.svelte';
+  import { swipeToDismiss } from './lib/gestures';
+
+  // Телефон: карточку подключения смахивают влево, чтобы закрыть его
+  const isPhone = () => window.matchMedia('(max-width: 768px)').matches;
+  const rowSwipe = (id: string) =>
+    swipeToDismiss({
+      direction: 'left',
+      threshold: 110,
+      enabled: isPhone,
+      onDismiss: () => closeConnection(id)
+    });
   let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
 
   interface Connection {
@@ -1055,6 +1066,7 @@
   <tr
     class="conn-row"
     class:selected={selectedConnectionId === conn.id}
+    {@attach rowSwipe(conn.id)}
     tabindex="0"
     role="button"
     aria-label={`${getHost(conn)}:${conn.metadata.destinationPort}`}

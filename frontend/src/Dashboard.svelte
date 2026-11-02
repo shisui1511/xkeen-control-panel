@@ -67,6 +67,7 @@
   import { anyKernelInstalled } from './lib/navCaps';
   import { capsuleConfigStore } from './lib/capsuleSettings';
   import { tabFromHash, legacyRedirectHash } from './lib/tabFromHash';
+  import { swipeToDismiss, pullToRefresh } from './lib/gestures';
   import { currentTheme, schemeOf, toggleThemeScheme } from './lib/theme';
   import {
     isAnySourceDirty,
@@ -822,6 +823,14 @@
     isSidebarOpen.set(false);
   }
 
+  // Телефон: открытое меню смахивается влево, как системные выдвижные панели
+  const drawerSwipe = swipeToDismiss({
+    direction: 'left',
+    onDismiss: closeSidebar,
+    threshold: 70,
+    enabled: () => isMobile && $isSidebarOpen
+  });
+
   async function installPWA() {
     if (!pwaInstallPrompt) return;
     pwaInstallPrompt.prompt();
@@ -982,6 +991,7 @@
     style="display: flex; flex-direction: column;"
     {@attach drawerFocus}
     {@attach drawerScrollLock}
+    {@attach drawerSwipe}
     onkeydown={handleDrawerKeydown}
     role={drawerIsModal ? 'dialog' : undefined}
     aria-modal={drawerIsModal ? 'true' : undefined}
@@ -1069,7 +1079,12 @@
           />
         </div>
       {:else if currentTab === 'dashboard'}
-        <div class="container" data-testid="dashboard-page" in:pageIn>
+        <div
+          class="container"
+          data-testid="dashboard-page"
+          in:pageIn
+          {@attach pullToRefresh(handleRefresh)}
+        >
           <!-- Page header -->
           <PageHeader
             title={$t('dash.title')}

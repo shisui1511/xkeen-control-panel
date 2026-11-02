@@ -3664,3 +3664,42 @@ a.chip:hover {
     transform: none;
   }
 }
+
+/* Индикатор обновления потягиванием (lib/gestures.ts, pullToRefresh) */
+.ptr-indicator {
+  position: fixed;
+  top: calc(var(--mhdr-h) + env(safe-area-inset-top) - 18px);
+  left: 50%;
+  z-index: 95;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  color: var(--fg-secondary);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ptr-indicator.is-armed {
+  color: var(--accent);
+}
+
+.ptr-indicator.is-spinning svg {
+  animation: ptr-spin 0.8s linear infinite;
+}
+
+@keyframes ptr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ptr-indicator.is-spinning svg {
+    animation: none;
+  }
+}

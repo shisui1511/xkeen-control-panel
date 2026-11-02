@@ -2,6 +2,7 @@
   import type { Snippet } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import { t } from '../i18n';
+  import { swipeToDismiss } from '../lib/gestures';
 
   let {
     isOpen = false,
@@ -26,6 +27,15 @@
   } = $props();
 
   const MODAL_SELECTOR = '[role="dialog"][aria-modal="true"]';
+
+  // Телефон: лист тянут вниз за шапку (с ручкой), чтобы закрыть
+  let containerEl: HTMLDivElement | null = $state(null);
+  const sheetSwipe = swipeToDismiss({
+    direction: 'down',
+    onDismiss: () => onclose(),
+    target: () => containerEl,
+    enabled: () => window.matchMedia('(max-width: 768px)').matches
+  });
 
   // Диалог рендерится только внутри {#if isOpen}, поэтому вложения на его контейнере
   // начинают работу при открытии и снимаются при закрытии.
@@ -140,6 +150,7 @@
   <div class="modal-backdrop" role="presentation" onclick={onclose}>
     <div
       class="modal-container {className}"
+      bind:this={containerEl}
       role="dialog"
       aria-modal="true"
       aria-label={ariaLabel || undefined}
@@ -153,7 +164,7 @@
       style="max-width: {maxWidth};"
       tabindex="-1"
     >
-      <header class="modal-header">
+      <header class="modal-header" {@attach sheetSwipe}>
         <h2 id="modal-title" class="modal-title">{title}</h2>
         <button
           class="modal-close-btn"
@@ -275,7 +286,21 @@
       animation-name: sheet-in;
     }
     .modal-header {
-      padding: 10px 8px 10px 16px;
+      position: relative;
+      padding: 18px 8px 10px 16px;
+      touch-action: none;
+    }
+    /* Ручка листа: подсказывает, что лист можно смахнуть вниз */
+    .modal-header::before {
+      content: '';
+      position: absolute;
+      top: 6px;
+      left: 50%;
+      width: 36px;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--border-strong, var(--border));
+      transform: translateX(-50%);
     }
     .modal-close-btn {
       width: 40px;
