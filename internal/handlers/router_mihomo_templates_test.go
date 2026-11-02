@@ -652,3 +652,109 @@ func TestRouterProfileDeps(t *testing.T) {
 		t.Errorf("после удаления источника source=my: %v, ожидалось %v", got, want)
 	}
 }
+
+// --- заполнение секций профиля панели (D-18 фазы 147) --------------------------------
+
+// rtFillSniffer — значение секции sniffer из вида Mihomo.
+func (e *rtSrc) rtFillSniffer() (value map[string]any, dirty bool) {
+	e.t.Helper()
+	sec := rtCoresSection(e.rtCoresView("mihomo"), "sniffer")
+	if sec == nil {
+		e.t.Fatal("в виде Mihomo нет секции sniffer")
+	}
+	value, _ = sec["value"].(map[string]any)
+	dirty, _ = sec["dirty"].(bool)
+	return value, dirty
+}
+
+// rtFillHasSkip — в секции sniffer есть skip-domain с записью шаблона.
+func rtFillHasSkip(sniffer map[string]any) bool {
+	list, _ := sniffer["skip-domain"].([]any)
+	for _, it := range list {
+		if s, _ := it.(string); s == "Mijia Cloud" {
+			return true
+		}
+	}
+	return false
+}
+
+// Трасса: Mihomo взят → POST fill {template} → секция sniffer в черновике получила ключи
+// шаблона, файл панели не менялся → «Применить»: mihomo -t принял профиль панели, в нём
+// sniffer шаблона и нет его proxy-providers (заглушка подписки) → неизвестный шаблон,
+// профиль и пустой запрос — 400 invalid_input → Mihomo отпущен: fill — 409
+// section_not_managed. Взят шаблон smart-antifilter: у zkeen в sniffer есть ссылка на
+// набор правил rule-set:..., которого в профиле панели нет. Метки ядра нет: взятие идёт
+// при любом активном ядре.
+func TestRouterCoresFill(t *testing.T) {
+	tg := routertest.Current(t)
+	if _, err := os.Stat(rtSaveBinary); err != nil {
+		t.Skip("Mihomo не установлен на стенде")
+	}
+	const file = "smart-antifilter.yaml"
+	e := rtNewSrc(t)
+	e.enableLayer()
+	e.rtRstIdle()
+	tpl := e.rtTplContents()[file]
+	if !strings.Contains(tpl, "https://example.com") || !strings.Contains(tpl, "Mijia Cloud") {
+		t.Fatalf("шаблон %s больше не содержит заглушки подписки или skip-domain: сценарий устарел", file)
+	}
+
+	m := rtCoresLiveMihomoTake(t, e, tg)
+	panelFile := rtTplProfilePath("xcp-main")
+	before, err := os.ReadFile(panelFile)
+	if err != nil {
+		t.Fatalf("профиль панели не записан: %v", err)
+	}
+	if v, _ := e.rtFillSniffer(); rtFillHasSkip(v) {
+		t.Fatal("в секции sniffer до заполнения уже есть skip-domain шаблона: сценарий ничего бы не доказал")
+	}
+
+	r := e.rtCoresPost("/fill", map[string]any{"template": file})
+	if r.Status != http.StatusOK {
+		t.Fatalf("fill из шаблона: %d %s", r.Status, r.Code)
+	}
+	value, dirty := e.rtFillSniffer()
+	if !dirty {
+		t.Error("после fill секция sniffer не помечена изменённой")
+	}
+	if !rtFillHasSkip(value) || value["sniff"] == nil {
+		t.Errorf("секция sniffer после fill без ключей шаблона: %v", value)
+	}
+	if after, _ := os.ReadFile(panelFile); !bytes.Equal(after, before) {
+		t.Error("fill изменил файл профиля панели до «Применить»")
+	}
+
+	e.rtRtApplyOK("заполнение секций из шаблона")
+	got := rtTplReadProfile(t, "xcp-main")
+	rtTplRealCheck(t, "xcp-main")
+	if !rtTplHasKey(got, "sniffer") || !strings.Contains(got, "Mijia Cloud") {
+		t.Error("в профиле панели после применения нет sniffer шаблона")
+	}
+	if strings.Contains(got, "https://example.com") {
+		t.Error("в профиль панели попали proxy-providers шаблона")
+	}
+	if !strings.Contains(got, "proxy_providers/xcp-my.yaml") {
+		t.Error("в профиле панели пропал файл источника xcp-my")
+	}
+
+	for name, body := range map[string]map[string]any{
+		"неизвестный шаблон":  {"template": "awg-antifilter.yaml"},
+		"путь вместо шаблона": {"template": "../" + file},
+		"профиля нет":         {"profile": "rt-fill-absent"},
+		"профиль панели":      {"profile": "xcp-main"},
+		"оба источника":       {"template": file, "profile": "rt-fill-absent"},
+		"пустой запрос":       {},
+	} {
+		bad := e.rtCoresPost("/fill", body)
+		if bad.Status != http.StatusBadRequest || bad.Code != "invalid_input" || bad.Params["key"] != "source" {
+			t.Errorf("fill (%s): %d %q %v, ожидалось 400 invalid_input key=source", name, bad.Status, bad.Code, bad.Params)
+		}
+	}
+
+	if !m.rtCoresLiveRelease(t) {
+		t.FailNow()
+	}
+	if r := e.rtCoresPost("/fill", map[string]any{"template": file}); r.Status != http.StatusConflict || r.Code != "section_not_managed" {
+		t.Errorf("fill при отпущенном Mihomo: %d %q, ожидалось 409 section_not_managed", r.Status, r.Code)
+	}
+}
