@@ -4037,5 +4037,6 @@
   "errors.permission_denied": "No permission for this file. Check its owner and mode in Entware.",
   "errors.file_not_found": "File not found. It may have been deleted or renamed.",
   "errors.no_space": "The router's storage is full. Free up space and try again.",
-  "errors.server_error": "router error (code {code}), see the panel logs for details"
+  "errors.server_error": "router error (code {code}), see the panel logs for details",
+  "logs.jump_latest": "Jump to latest"
 }

@@ -169,9 +169,42 @@
     }));
   });
 
+  // Пользователь листает вверх — автопрокрутка встаёт на паузу и появляется
+  // «К новым строкам»; дошёл до низа — автопрокрутка включается снова.
+  // На телефоне панель фильтров прячется, пока листают вниз, и возвращается
+  // при движении вверх (как адресная строка браузера).
+  let toolbarHidden = $state(false);
+  let lastScrollTop = 0;
+  let jumping = false;
+  const atBottom = $derived(
+    !logContainer || scrollTop + containerHeight >= (logContainer?.scrollHeight ?? 0) - 24
+  );
+
   function handleScroll(e: Event) {
     const target = e.currentTarget as HTMLElement;
+    const prev = lastScrollTop;
     scrollTop = target.scrollTop;
+    lastScrollTop = scrollTop;
+    const nearBottom = target.scrollTop + target.clientHeight >= target.scrollHeight - 24;
+    const delta = scrollTop - prev;
+    // Плавный переход «к новым строкам» — не жест пользователя
+    if (jumping) {
+      if (nearBottom) jumping = false;
+      return;
+    }
+    if (delta < -4 && autoScroll && !nearBottom) autoScroll = false;
+    else if (nearBottom && delta > 0 && !autoScroll) autoScroll = true;
+    // Прокрутка к низу при автопрокрутке — программная, панель не трогаем
+    if (nearBottom && autoScroll) return;
+    if (delta > 8 && scrollTop > 48) toolbarHidden = true;
+    else if (delta < -8 || scrollTop <= 48) toolbarHidden = false;
+  }
+
+  function jumpToLatest() {
+    autoScroll = true;
+    toolbarHidden = false;
+    jumping = true;
+    if (logContainer) logContainer.scrollTo({ top: logContainer.scrollHeight, behavior: 'smooth' });
   }
 
   function updateSources() {
@@ -643,7 +676,7 @@
   {:else}
     <div class="logs-page-container">
       <!-- Unified Balanced Toolbar (LOGHUB-08) -->
-      <div class="logs-toolbar">
+      <div class="logs-toolbar" class:tb-collapsed={toolbarHidden}>
         <!-- Left Controls: Stream Lifecycle -->
         <div class="tb-group tb-stream">
           <button
@@ -877,116 +910,133 @@
       </div>
 
       <!-- Log Console Pane (Virtual Scroll + Fluid Layout) -->
-      <div
-        class="logs-console"
-        class:wrap-mode={wordWrap}
-        bind:this={logContainer}
-        bind:clientHeight={containerHeight}
-        onscroll={handleScroll}
-      >
-        {#if totalItems > 0}
-          {#if !wordWrap}
-            <div
-              class="logs-spacer"
-              style="height: {totalItems *
-                ROW_HEIGHT}px; width: 100%; pointer-events: none; position: absolute; top: 0; left: 0;"
-            ></div>
+      <div class="logs-console-wrap">
+        <div
+          class="logs-console"
+          class:wrap-mode={wordWrap}
+          bind:this={logContainer}
+          bind:clientHeight={containerHeight}
+          onscroll={handleScroll}
+        >
+          {#if totalItems > 0}
+            {#if !wordWrap}
+              <div
+                class="logs-spacer"
+                style="height: {totalItems *
+                  ROW_HEIGHT}px; width: 100%; pointer-events: none; position: absolute; top: 0; left: 0;"
+              ></div>
+            {/if}
+
+            <div class="lines-container" class:static-layout={wordWrap}>
+              {#each visibleLogs as item (item.log.id)}
+                <div
+                  class="log-row"
+                  class:row-error={item.log.level === 'error' || item.log.level === 'fatal'}
+                  class:row-warning={item.log.level === 'warning'}
+                  class:row-debug={item.log.level === 'debug'}
+                  style={!wordWrap
+                    ? `position: absolute; top: 0; left: 0; right: 0; height: ${ROW_HEIGHT}px; transform: translateY(${item.y}px);`
+                    : ''}
+                >
+                  <span class="col-ts monospace">{item.log.timestamp}</span>
+                  <span class="col-src">
+                    <span class="src-tag">{item.log.source || 'sys'}</span>
+                  </span>
+                  <span class="col-level">
+                    {#if item.log.level === 'error' || item.log.level === 'fatal'}
+                      <span class="lvl-badge lvl-error">ERR</span>
+                    {:else if item.log.level === 'warning'}
+                      <span class="lvl-badge lvl-warn">WRN</span>
+                    {:else if item.log.level === 'debug'}
+                      <span class="lvl-badge lvl-debug">DBG</span>
+                    {:else}
+                      <span class="lvl-badge lvl-info">INF</span>
+                    {/if}
+                  </span>
+                  {#if item.log.subsystem}
+                    <span class="col-subsystem">[{item.log.subsystem}]</span>
+                  {/if}
+                  <span class="col-msg">
+                    <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                    {@html highlightMatches(item.log.message, filter)}
+                  </span>
+
+                  <button
+                    type="button"
+                    class="copy-row-btn"
+                    onclick={() => copyRow(item.log)}
+                    title={$t('logs.copy_row')}
+                    aria-label={$t('logs.copy_row')}
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      ><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
+                        d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                      /></svg
+                    >
+                  </button>
+                </div>
+              {/each}
+            </div>
           {/if}
 
-          <div class="lines-container" class:static-layout={wordWrap}>
-            {#each visibleLogs as item (item.log.id)}
-              <div
-                class="log-row"
-                class:row-error={item.log.level === 'error' || item.log.level === 'fatal'}
-                class:row-warning={item.log.level === 'warning'}
-                class:row-debug={item.log.level === 'debug'}
-                style={!wordWrap
-                  ? `position: absolute; top: 0; left: 0; right: 0; height: ${ROW_HEIGHT}px; transform: translateY(${item.y}px);`
-                  : ''}
+          {#if totalItems === 0}
+            <div class="empty-state">
+              <svg
+                width="32"
+                height="32"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                ><circle cx="12" cy="12" r="10" /><line x1="8" y1="12" x2="16" y2="12" /></svg
               >
-                <span class="col-ts monospace">{item.log.timestamp}</span>
-                <span class="col-src">
-                  <span class="src-tag">{item.log.source || 'sys'}</span>
-                </span>
-                <span class="col-level">
-                  {#if item.log.level === 'error' || item.log.level === 'fatal'}
-                    <span class="lvl-badge lvl-error">ERR</span>
-                  {:else if item.log.level === 'warning'}
-                    <span class="lvl-badge lvl-warn">WRN</span>
-                  {:else if item.log.level === 'debug'}
-                    <span class="lvl-badge lvl-debug">DBG</span>
-                  {:else}
-                    <span class="lvl-badge lvl-info">INF</span>
-                  {/if}
-                </span>
-                {#if item.log.subsystem}
-                  <span class="col-subsystem">[{item.log.subsystem}]</span>
-                {/if}
-                <span class="col-msg">
-                  <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                  {@html highlightMatches(item.log.message, filter)}
-                </span>
-
-                <button
-                  type="button"
-                  class="copy-row-btn"
-                  onclick={() => copyRow(item.log)}
-                  title={$t('logs.copy_row')}
-                  aria-label={$t('logs.copy_row')}
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    ><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
-                      d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                    /></svg
-                  >
-                </button>
+              <div class="empty-title">
+                {!connected
+                  ? $t('logs.disconnected_title')
+                  : filter || sourceFilter || levelFilter
+                    ? $t('logs.no_filtered_logs')
+                    : $t('logs.no_logs')}
               </div>
-            {/each}
-          </div>
-        {/if}
+              <div class="empty-desc">
+                {!connected
+                  ? $t('logs.disconnected_desc')
+                  : connected
+                    ? $t('logs.waiting')
+                    : $t('logs.connect_hint')}
+              </div>
+            </div>
+          {/if}
 
-        {#if totalItems === 0}
-          <div class="empty-state">
+          <!-- Floating Paused Notification Banner -->
+          {#if paused && pausedNewCount > 0}
+            <div class="floating-pause-banner">
+              <span>{$t('logs.paused_notice', { count: String(pausedNewCount) })}</span>
+              <button class="btn btn-sm btn-primary" onclick={unpauseAndScroll}>
+                {$t('logs.scroll_to_bottom')}
+              </button>
+            </div>
+          {/if}
+        </div>
+
+        {#if !autoScroll && totalItems > 0 && !atBottom}
+          <button type="button" class="jump-latest" onclick={jumpToLatest}>
             <svg
-              width="32"
-              height="32"
+              width="14"
+              height="14"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              stroke-width="1.5"
-              ><circle cx="12" cy="12" r="10" /><line x1="8" y1="12" x2="16" y2="12" /></svg
+              stroke-width="2.2"
+              aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7" /></svg
             >
-            <div class="empty-title">
-              {!connected
-                ? $t('logs.disconnected_title')
-                : filter || sourceFilter || levelFilter
-                  ? $t('logs.no_filtered_logs')
-                  : $t('logs.no_logs')}
-            </div>
-            <div class="empty-desc">
-              {!connected
-                ? $t('logs.disconnected_desc')
-                : connected
-                  ? $t('logs.waiting')
-                  : $t('logs.connect_hint')}
-            </div>
-          </div>
-        {/if}
-
-        <!-- Floating Paused Notification Banner -->
-        {#if paused && pausedNewCount > 0}
-          <div class="floating-pause-banner">
-            <span>{$t('logs.paused_notice', { count: String(pausedNewCount) })}</span>
-            <button class="btn btn-sm btn-primary" onclick={unpauseAndScroll}>
-              {$t('logs.scroll_to_bottom')}
-            </button>
-          </div>
+            {$t('logs.jump_latest')}
+          </button>
         {/if}
       </div>
 
@@ -1034,6 +1084,28 @@
      одной строкой значков (подписи остаются для диктора и в подсказке),
      поиск и уровень — одной строкой, источники листаются вбок */
   @media (max-width: 768px) {
+    /* Панель фильтров уезжает, пока листают вниз, и возвращается при движении
+       вверх; с фокусом внутри (идёт поиск) остаётся на месте */
+    .logs-toolbar {
+      max-height: 320px;
+      transition:
+        max-height var(--duration-move) var(--ease-out),
+        opacity var(--transition-fast),
+        padding var(--duration-move) var(--ease-out),
+        margin var(--duration-move) var(--ease-out);
+    }
+
+    .logs-toolbar.tb-collapsed:not(:focus-within) {
+      max-height: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+      margin-bottom: -10px;
+      border-width: 0;
+      opacity: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+
     .logs-page {
       height: calc(100dvh - var(--mhdr-h) - env(safe-area-inset-top) - var(--dock-space));
       padding: 12px 12px 8px;
@@ -1231,6 +1303,41 @@
     gap: 10px;
     flex: 1;
     min-height: 0;
+  }
+
+  .logs-console-wrap {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* «К новым строкам»: плавает над низом консоли, пока автопрокрутка на паузе */
+  .jump-latest {
+    position: absolute;
+    left: 50%;
+    bottom: 14px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 36px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: var(--radius-full);
+    background: var(--accent);
+    color: var(--btn-primary-text);
+    font: inherit;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    box-shadow: var(--shadow-md);
+    cursor: pointer;
+    transform: translateX(-50%);
+  }
+
+  .jump-latest:active {
+    transform: translateX(-50%) scale(0.97);
   }
 
   /* Unified Toolbar */
@@ -1460,7 +1567,9 @@
     opacity: 1;
   }
 
+  /* Полоса слева — ошибку и предупреждение видно краем глаза при быстрой прокрутке */
   .row-error {
+    box-shadow: inset 3px 0 0 var(--danger);
     background: color-mix(in srgb, var(--danger) 9%, transparent);
     color: var(--danger);
   }
@@ -1472,6 +1581,7 @@
   .row-warning {
     background: color-mix(in srgb, var(--warning) 8%, transparent);
     color: var(--warning);
+    box-shadow: inset 3px 0 0 var(--warning);
   }
 
   .row-warning:hover {
