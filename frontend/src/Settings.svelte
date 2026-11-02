@@ -35,6 +35,7 @@
   import { validatePasswordPolicy, policyErrorKey } from './lib/passwordPolicy';
   import {
     THEMES,
+    AUTO_THEMES,
     themeInfo,
     readThemeChoice,
     setThemeChoice,
@@ -121,8 +122,8 @@
   ]);
 
   const themeAuto = {
-    dark: themeInfo('dark').preview,
-    light: themeInfo('light').preview
+    dark: themeInfo(AUTO_THEMES.dark).preview,
+    light: themeInfo(AUTO_THEMES.light).preview
   };
 
   type AccentChoice = 'blue' | 'indigo' | 'steel' | 'graphite';

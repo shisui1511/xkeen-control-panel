@@ -7,11 +7,10 @@
   // id -> [схема, цвет строки браузера]
   var THEMES = {
     dark: ['dark', '#07182a'],
-    light: ['light', '#07182a'],
     charcoal: ['dark', '#000000'],
     dusk: ['dark', '#171b21'],
-    fog: ['light', '#22303d'],
-    amber: ['dark', '#0a0704']
+    amber: ['dark', '#0a0704'],
+    light: ['light', '#22303d'] // «Туман»
   };
   var theme = '';
   var accent = '';
@@ -21,12 +20,13 @@
   } catch (e) {
     // localStorage недоступен (приватный режим, заблокированные cookies) — системная тема
   }
+  if (theme === 'fog') theme = 'light'; // устаревший id «Тумана»
   var root = document.documentElement;
   if (!Object.prototype.hasOwnProperty.call(THEMES, theme)) {
     var prefersDark =
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(prefers-color-scheme: dark)').matches;
-    theme = prefersDark ? 'dark' : 'light';
+    theme = prefersDark ? 'charcoal' : 'light'; // AUTO_THEMES
   }
   root.setAttribute('data-theme', theme);
   root.setAttribute('data-scheme', THEMES[theme][0]);

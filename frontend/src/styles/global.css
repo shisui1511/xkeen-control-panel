@@ -214,79 +214,81 @@
   --seq-8: #8de6c8;
 }
 
-/* ------------ Light theme (inverted) ------------- */
+/* ------------ Light scheme: the Fog palette (data-theme='light') -------------
+   Grey-blue surfaces instead of white. The id stays 'light' so saved settings
+   and tests keep working; the Settings label is «Туман». */
 [data-scheme='light'] {
-  --bg: #f3f6fa;
-  --bg-page: #f3f6fa;
-  --bg-card: #ffffff;
+  --bg: #e2e7ec;
+  --bg-page: #e2e7ec;
+  --bg-card: #eef1f4;
   --bg-surface: var(--bg-card);
-  --card-bg: #ffffff;
-  --bg-elevated: #ffffff;
-  --bg-deep: #07182a;
-  /* sidebar stays dark for character */
+  --card-bg: #eef1f4;
+  --bg-elevated: #f5f7f9;
+  /* mobile header and terminal stay dark */
+  --bg-deep: #22303d;
 
-  --fg-primary: #0c2237;
-  --fg-secondary: #4a5d73;
-  --text: #0c2237;
-  --text-secondary: #4a5d73;
+  --fg-primary: #1c2834;
+  --fg-secondary: #44525f;
+  --text: #1c2834;
+  --text-secondary: #44525f;
   /* 4.5:1 on the page background: 12px labels and hints use this token. */
-  --fg-dim: #5e738a;
-  --fg-faint: #b0bccc;
+  --fg-dim: #4f5e6c;
+  --fg-faint: #a6b1bd;
 
-  --border: #e1e7ef;
+  --border: #cbd3dc;
   --border-light: rgba(0, 0, 0, 0.05);
-  --border-strong: #c9d3df;
-  --border-control: #7d8fa6;
+  --border-strong: #b3bec9;
+  --border-control: #75838f;
 
-  --accent: #0a779f;
-  --primary: #0a779f;
-  --accent-hover: #08698c;
-  --accent-rgb: 10, 119, 159;
+  --accent: #1b6a8e;
+  --primary: #1b6a8e;
+  --accent-hover: #155a79;
+  --accent-rgb: 27, 106, 142;
 
   --hover: rgba(var(--accent-rgb), 0.07);
 
-  --success: #1a7f4e;
-  --warning: #8b5c00;
-  --danger: #c22a3a;
-  --purple: #7e22ce;
+  --success: #24693f;
+  --warning: #74520a;
+  --danger: #a4303c;
+  --purple: #6d1fb5;
   --purple-bg: rgba(126, 34, 206, 0.08);
   --purple-border: rgba(126, 34, 206, 0.25);
   --accent-text: var(--accent);
-  --scrollbar-thumb: var(--border-strong);
-  --scrollbar-thumb-hover: #a9b8c9;
+  --scrollbar-thumb: #b3bec9;
+  --scrollbar-thumb-hover: #9aa7b4;
   --surface-tint-faint: rgba(12, 34, 55, 0.02);
   --surface-tint: rgba(12, 34, 55, 0.04);
   --surface-tint-strong: rgba(12, 34, 55, 0.08);
-  --surface-overlay-from: #ffffff;
-  --surface-overlay-to: #f3f6fa;
+  --surface-overlay-from: #eef1f4;
+  --surface-overlay-to: #e2e7ec;
   --btn-primary-text: #ffffff;
   --on-danger: #ffffff;
-  --bg-group-head-from: rgba(240, 244, 248, 0.95);
-  --bg-group-head-to: rgba(228, 235, 244, 0.95);
+  --bg-group-head-from: rgba(226, 231, 236, 0.95);
+  --bg-group-head-to: rgba(214, 221, 228, 0.95);
 
   --shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 8px 20px -14px rgba(12, 34, 55, 0.18);
 
   /* CodeMirror tokens */
-  --cm-bg: #ffffff;
-  --cm-keyword: #0a779f;
-  --cm-string: #1a7f4e;
-  --cm-number: #8b5c00;
-  --cm-comment: #5b6f86;
+  --cm-bg: #f5f7f9;
+  --cm-keyword: #165a79;
+  --cm-string: #24693f;
+  --cm-number: #74520a;
+  --cm-comment: #4f5e6c;
   /* Используем fg-secondary вместо fg-dim для обеспечения контраста 5.18:1 */
-  --cm-property: #0c2237;
-  --cm-variable: #0c2237;
-  --cm-operator: #0a779f;
-  --cm-boolean: #8b5c00;
-  --cm-null: #c22a3a;
-  --cm-bracket: #0c2237;
-  --cm-active-line: #f0f4f9;
-  --cm-border: #e1e7ef;
+  --cm-property: #1c2834;
+  --cm-variable: #1c2834;
+  --cm-operator: #165a79;
+  --cm-boolean: #74520a;
+  --cm-null: #a4303c;
+  --cm-bracket: #1c2834;
+  --cm-active-line: #e8ecf0;
+  --cm-border: #cbd3dc;
 
   /* --seq-1..5 resolve through the already-overridden tokens above; only the
      3 literal steps need a light-theme override (DS2-02). */
-  --seq-6: #2f5fc7;
-  --seq-7: #b23e82;
-  --seq-8: #1f7a63;
+  --seq-6: #2b56b0;
+  --seq-7: #9e3672;
+  --seq-8: #1b6a56;
 }
 
 /* ------------ Additional palettes -------------
@@ -397,62 +399,6 @@
   --seq-6: #7fa6e0;
   --seq-7: #d39ac0;
   --seq-8: #8fcfb8;
-}
-
-/* Fog: light without white; grey-blue surfaces that don't glare by day. */
-[data-theme='fog'] {
-  --bg: #e2e7ec;
-  --bg-page: #e2e7ec;
-  --bg-card: #eef1f4;
-  --card-bg: #eef1f4;
-  --bg-elevated: #f5f7f9;
-  --bg-deep: #22303d;
-
-  --fg-primary: #1c2834;
-  --fg-secondary: #44525f;
-  --text: #1c2834;
-  --text-secondary: #44525f;
-  --fg-dim: #4f5e6c;
-  --fg-faint: #a6b1bd;
-
-  --border: #cbd3dc;
-  --border-strong: #b3bec9;
-  --border-control: #75838f;
-
-  --accent: #1b6a8e;
-  --primary: #1b6a8e;
-  --accent-hover: #155a79;
-  --accent-rgb: 27, 106, 142;
-
-  --success: #24693f;
-  --warning: #74520a;
-  --danger: #a4303c;
-  --purple: #6d1fb5;
-
-  --scrollbar-thumb: #b3bec9;
-  --scrollbar-thumb-hover: #9aa7b4;
-  --surface-overlay-from: #eef1f4;
-  --surface-overlay-to: #e2e7ec;
-  --bg-group-head-from: rgba(226, 231, 236, 0.95);
-  --bg-group-head-to: rgba(214, 221, 228, 0.95);
-
-  --cm-bg: #f5f7f9;
-  --cm-keyword: #165a79;
-  --cm-string: #24693f;
-  --cm-number: #74520a;
-  --cm-comment: #4f5e6c;
-  --cm-property: #1c2834;
-  --cm-variable: #1c2834;
-  --cm-operator: #165a79;
-  --cm-boolean: #74520a;
-  --cm-null: #a4303c;
-  --cm-bracket: #1c2834;
-  --cm-active-line: #e8ecf0;
-  --cm-border: #cbd3dc;
-
-  --seq-6: #2b56b0;
-  --seq-7: #9e3672;
-  --seq-8: #1b6a56;
 }
 
 /* Amber: phosphor terminal look; monospace UI and tight corners. */
