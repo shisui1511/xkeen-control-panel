@@ -115,7 +115,7 @@
   .obs-head .card-title.obs-title {
     font-size: var(--font-size-xs);
     font-weight: 700;
-    letter-spacing: 0.14em;
+    letter-spacing: 0;
     text-transform: none;
     color: var(--fg-secondary);
     margin: 0;
@@ -149,7 +149,7 @@
 
   .obs-stat-box .stat-label {
     font-size: var(--font-size-2xs);
-    letter-spacing: 0.12em;
+    letter-spacing: 0;
     margin-bottom: 2px;
     line-height: 1.2;
   }
@@ -165,6 +165,8 @@
     font-size: var(--font-size-xl);
     font-weight: 700;
     line-height: 1.15;
+    font-family: var(--font-family-sans);
+    font-variant-numeric: tabular-nums;
   }
 
   .obs-stat-box .stat-value.ok {

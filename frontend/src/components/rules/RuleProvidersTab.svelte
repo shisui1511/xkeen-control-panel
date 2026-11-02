@@ -403,8 +403,7 @@
     font-weight: 600;
     padding: 2px 6px;
     border-radius: 4px;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
+    letter-spacing: 0;
   }
 
   .badge-type {

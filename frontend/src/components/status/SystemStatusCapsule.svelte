@@ -613,7 +613,8 @@
   }
 
   .mobile-traffic {
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-sans);
+    font-variant-numeric: tabular-nums;
     color: var(--fg-secondary);
     font-size: var(--font-size-xs);
   }

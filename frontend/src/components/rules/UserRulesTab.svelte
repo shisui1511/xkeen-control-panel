@@ -435,8 +435,7 @@
     margin: 0;
     font-size: var(--font-size-xs);
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0;
     color: var(--fg-secondary);
   }
 
@@ -522,8 +521,7 @@
     color: var(--fg-secondary);
     font-weight: 600;
     font-size: var(--font-size-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0;
     border-bottom: 1px solid var(--border);
     white-space: nowrap;
   }

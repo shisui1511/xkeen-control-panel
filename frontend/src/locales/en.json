@@ -4028,5 +4028,14 @@
   "cfg.sec.api_unavailable": "The Xray api block is not written: Xray {min} or newer is required. “Traffic” and the core API for Xray are unavailable, everything else is applied as usual.",
   "cfg.sec.force_proxy_locked": "The group can be chosen when the panel manages routing.",
   "cfg.sec.value_on": "On",
-  "cfg.sec.value_off": "Off"
+  "cfg.sec.value_off": "Off",
+  "errors.path_not_allowed": "the file is outside the config folders the panel may read. Pick a file in /opt/etc/xray or /opt/etc/mihomo.",
+  "errors.login_locked": "Too many failed sign-in attempts. Wait a few minutes and try again.",
+  "errors.session_expired": "Your session ended. Sign in again.",
+  "errors.router_unreachable": "The router isn't responding. Check that it's on and the panel is running.",
+  "errors.timeout": "The router didn't respond in time. Try again.",
+  "errors.permission_denied": "No permission for this file. Check its owner and mode in Entware.",
+  "errors.file_not_found": "File not found. It may have been deleted or renamed.",
+  "errors.no_space": "The router's storage is full. Free up space and try again.",
+  "errors.server_error": "router error (code {code}), see the panel logs for details"
 }

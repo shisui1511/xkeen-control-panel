@@ -823,7 +823,8 @@
   .gc-lat-box {
     padding: 3px 10px;
     border-radius: 99px;
-    font-family: var(--font-family-mono);
+    font-family: var(--font-family-sans);
+    font-variant-numeric: tabular-nums;
     font-size: var(--font-size-xs);
     font-weight: 800;
     background: none;

@@ -1030,7 +1030,7 @@
                 <span class="peak-arrow">↓</span>
                 {$t('traffic.download')}:
               </span>
-              <span class="peak-val mono">{formatSpeed(peaks.peak_hour_down)}</span>
+              <span class="peak-val">{formatSpeed(peaks.peak_hour_down)}</span>
               <span class="peak-ts">{formatTime(peaks.peak_hour_down_time)}</span>
             </div>
             <div class="peak-metric-row">
@@ -1038,7 +1038,7 @@
                 <span class="peak-arrow">↑</span>
                 {$t('traffic.upload')}:
               </span>
-              <span class="peak-val mono">{formatSpeed(peaks.peak_hour_up)}</span>
+              <span class="peak-val">{formatSpeed(peaks.peak_hour_up)}</span>
               <span class="peak-ts">{formatTime(peaks.peak_hour_up_time)}</span>
             </div>
           </div>
@@ -1051,7 +1051,7 @@
                 <span class="peak-arrow">↓</span>
                 {$t('traffic.download')}:
               </span>
-              <span class="peak-val mono">{formatSpeed(peaks.peak_day_down)}</span>
+              <span class="peak-val">{formatSpeed(peaks.peak_day_down)}</span>
               <span class="peak-ts">{formatTime(peaks.peak_day_down_time)}</span>
             </div>
             <div class="peak-metric-row">
@@ -1059,7 +1059,7 @@
                 <span class="peak-arrow">↑</span>
                 {$t('traffic.upload')}:
               </span>
-              <span class="peak-val mono">{formatSpeed(peaks.peak_day_up)}</span>
+              <span class="peak-val">{formatSpeed(peaks.peak_day_up)}</span>
               <span class="peak-ts">{formatTime(peaks.peak_day_up_time)}</span>
             </div>
           </div>
@@ -1072,7 +1072,7 @@
                 <span class="peak-arrow">↓</span>
                 {$t('traffic.download')}:
               </span>
-              <span class="peak-val mono">{formatSpeed(peaks.peak_week_down)}</span>
+              <span class="peak-val">{formatSpeed(peaks.peak_week_down)}</span>
               <span class="peak-ts">{formatTime(peaks.peak_week_down_time)}</span>
             </div>
             <div class="peak-metric-row">
@@ -1080,7 +1080,7 @@
                 <span class="peak-arrow">↑</span>
                 {$t('traffic.upload')}:
               </span>
-              <span class="peak-val mono">{formatSpeed(peaks.peak_week_up)}</span>
+              <span class="peak-val">{formatSpeed(peaks.peak_week_up)}</span>
               <span class="peak-ts">{formatTime(peaks.peak_week_up_time)}</span>
             </div>
           </div>
@@ -1133,7 +1133,7 @@
                       )}</span
                     >
                   </div>
-                  <div class="client-bytes mono">{formatBytes(client.total_bytes)}</div>
+                  <div class="client-bytes">{formatBytes(client.total_bytes)}</div>
                 </div>
                 <div class="client-progress-track">
                   <div class="client-progress-bar" style="width: {sharePercent}%;"></div>
@@ -1261,13 +1261,13 @@
                             {item.tag}
                           </span>
                         </td>
-                        <td class="mono download-color">
+                        <td class="num download-color">
                           ↓ {formatBytes(item.downlink)}
                         </td>
-                        <td class="mono upload-color">
+                        <td class="num upload-color">
                           ↑ {formatBytes(item.uplink)}
                         </td>
-                        <td class="mono text-muted">
+                        <td class="num text-muted">
                           {formatBytes(item.total)}
                         </td>
                       </tr>
@@ -1580,7 +1580,8 @@
     justify-content: space-between;
     padding-right: 12px;
     font-size: var(--font-size-xs);
-    font-family: var(--font-family-mono);
+    font-family: var(--font-family-sans);
+    font-variant-numeric: tabular-nums;
     color: var(--fg-dim);
     text-align: right;
     min-width: 65px;
@@ -1729,6 +1730,8 @@
     font-weight: 800;
     color: var(--fg-primary);
     margin-top: 1px;
+    font-family: var(--font-family-sans);
+    font-variant-numeric: tabular-nums;
   }
 
   .peak-ts {
@@ -1791,6 +1794,8 @@
     font-size: var(--font-size-xs);
     font-weight: 700;
     color: var(--fg-primary);
+    font-family: var(--font-family-sans);
+    font-variant-numeric: tabular-nums;
   }
 
   .client-progress-track {
@@ -1827,5 +1832,10 @@
 
   .mono {
     font-family: var(--font-family-mono);
+  }
+
+  .num {
+    font-family: var(--font-family-sans);
+    font-variant-numeric: tabular-nums;
   }
 </style>

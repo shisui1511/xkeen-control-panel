@@ -1133,17 +1133,17 @@
     </td>
 
     <!-- Upload Column (CONN-04: Mute 0 B/s) -->
-    <td class="monospace col-traffic col-upload right-align">
+    <td class="num col-traffic col-upload right-align">
       <div class="bytes-val text-upload">{formatBytes(conn.upload)}</div>
     </td>
 
     <!-- Download Column (CONN-04: Mute 0 B/s) -->
-    <td class="monospace col-traffic col-download right-align">
+    <td class="num col-traffic col-download right-align">
       <div class="bytes-val text-download">{formatBytes(conn.download)}</div>
     </td>
 
     <!-- Speed Column (CONN-04: Mute 0 B/s, CONN-05: sortable) -->
-    <td class="monospace col-traffic col-speed right-align">
+    <td class="num col-traffic col-speed right-align">
       {#if speed && speed.uploadSpeed > 0}
         <div class="speed-active">↑ {formatBytes(speed.uploadSpeed)}/s</div>
       {/if}
@@ -1153,7 +1153,7 @@
     </td>
 
     <!-- Duration Column -->
-    <td class="monospace col-duration right-align">
+    <td class="num col-duration right-align">
       {getDuration(conn.start)}
     </td>
 
@@ -1429,7 +1429,8 @@
     background: var(--bg-elevated);
     border: 1px solid var(--border-light);
     border-radius: var(--radius-sm);
-    font-family: var(--font-family-mono);
+    font-family: var(--font-family-sans);
+    font-variant-numeric: tabular-nums;
   }
 
   .m-stat b {
@@ -1594,6 +1595,13 @@
     font-family: var(--font-family-mono);
   }
 
+  /* Числа (байты, скорость, длительность) — основной шрифт с цифрами одной
+     ширины: столбцы ровные, а текст не пестрит вторым шрифтом */
+  .num {
+    font-family: var(--font-family-sans);
+    font-variant-numeric: tabular-nums;
+  }
+
   /* Source Cell */
   .src-cell {
     display: flex;
@@ -1730,6 +1738,8 @@
     color: var(--accent);
     font-weight: 600;
     margin-top: 2px;
+    font-family: var(--font-family-sans);
+    font-variant-numeric: tabular-nums;
   }
 
   .col-speed {

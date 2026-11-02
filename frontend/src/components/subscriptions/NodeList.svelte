@@ -859,9 +859,8 @@
   .sub-node-avatar-text {
     font-size: var(--font-size-xs);
     font-weight: 600;
-    text-transform: uppercase;
     color: inherit;
-    letter-spacing: 0.02em;
+    letter-spacing: 0;
   }
 
   .sub-node-avatar-container.active .sub-node-avatar-text {
@@ -968,9 +967,8 @@
     border-radius: var(--radius-sm, 4px);
     font-size: var(--font-size-xs);
     font-weight: 700;
-    letter-spacing: 0.05em;
+    letter-spacing: 0;
     display: inline-block;
-    text-transform: uppercase;
     flex-shrink: 0;
   }
   .sub-node-row.active .sub-node-chip-gold {

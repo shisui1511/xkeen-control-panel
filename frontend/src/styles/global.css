@@ -994,9 +994,8 @@ input[type='number'] {
   margin-bottom: 0.4rem;
   font-weight: 600;
   font-size: var(--font-size-xs);
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   color: var(--fg-secondary);
-  text-transform: uppercase;
 }
 
 /* ------------ Alert ------------- */
@@ -1879,7 +1878,7 @@ body.drawer-locked {
   gap: 0.25rem 0.5rem;
   margin-bottom: 0.75rem;
   font-size: var(--font-size-xs);
-  letter-spacing: 0.06em;
+  letter-spacing: 0;
   color: var(--fg-dim);
   font-weight: 600;
 }
@@ -2033,8 +2032,7 @@ table.data-table thead th {
   text-align: left;
   padding: 11px 14px;
   font-size: var(--font-size-xs);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+  letter-spacing: 0;
   font-weight: 700;
   color: var(--fg-secondary);
   border-bottom: 1px solid var(--border);
