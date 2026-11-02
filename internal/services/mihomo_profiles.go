@@ -342,6 +342,45 @@ func (s *MihomoProfileService) Create(name, from string, empty bool) error {
 	return utils.AtomicWriteFile(dst, data, 0o600)
 }
 
+// ProfileInvalidError — содержимое профиля не прошло проверку ядра: файл не создан.
+// Output — вывод `mihomo -t` без префикса.
+type ProfileInvalidError struct {
+	Output string
+}
+
+func (e *ProfileInvalidError) Error() string { return e.Output }
+
+// CreateFromContent создаёт профиль с готовым содержимым (из шаблона или копии):
+// имя не зарезервировано и не занято, содержимое проходит ValidateContent (тот же
+// `mihomo -t` в зеркале корня, что у сохранения), файл пишется с правами 0600. Отказ
+// проверки — *ProfileInvalidError, файла нет.
+func (s *MihomoProfileService) CreateFromContent(name string, data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	dst, err := s.profilePath(name)
+	if err != nil {
+		return err
+	}
+	if isReservedProfileName(name) {
+		return ErrProfileReserved
+	}
+	if _, err := os.Stat(dst); err == nil {
+		return ErrProfileExists
+	}
+	if s.ValidateContent != nil {
+		if err := s.ValidateContent(data); err != nil {
+			if out, ok := strings.CutPrefix(err.Error(), "mihomo -t: "); ok {
+				return &ProfileInvalidError{Output: out}
+			}
+			return err
+		}
+	}
+	if err := os.MkdirAll(s.profilesDir(), 0o755); err != nil {
+		return err
+	}
+	return utils.AtomicWriteFile(dst, data, 0o600)
+}
+
 // Rename renames a profile; renaming the active one re-points config.yaml.
 func (s *MihomoProfileService) Rename(oldName, newName string) error {
 	target := s.returnTarget()

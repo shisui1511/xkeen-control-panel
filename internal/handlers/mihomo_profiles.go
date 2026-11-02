@@ -14,6 +14,7 @@ import (
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 )
 
 // SetMihomoProfileService wires the profile service to the running panel:
@@ -199,6 +200,64 @@ type mihomoProfileRequest struct {
 	NewName string `json:"new_name"`
 	From    string `json:"from"`
 	Empty   bool   `json:"empty"`
+	// Template — файл шаблона из services.ProfileTemplateFiles: профиль создаётся
+	// из него с файлами источников (D-01).
+	Template string `json:"template"`
+}
+
+// templatePlan — результат подстановки шаблона: готовое содержимое профиля, что
+// дописала панель и источники, чьи файлы вошли.
+type templatePlan struct {
+	data  []byte
+	added services.TemplateAdded
+	srcs  []sources.ProfileSource
+}
+
+// planMihomoTemplate готовит профиль из шаблона без записи на диск. Файл шаблона
+// берётся только из services.ProfileTemplateFiles, содержимое — из каталога по этому
+// имени (путь из запроса в файловые операции не попадает). Ответ при отказе уже
+// записан, тогда второй результат false.
+func (a *API) planMihomoTemplate(w http.ResponseWriter, r *http.Request, file string) (*templatePlan, bool) {
+	if !services.IsProfileTemplateFile(file) || a.templateSvc == nil {
+		JSONErrorCode(w, http.StatusBadRequest, "template_unknown", a.t(r, "profiles.err_template_unknown"))
+		return nil, false
+	}
+	var content []byte
+	for _, t := range a.templateSvc.List() {
+		if t.Type == "mihomo" && t.Filename == file {
+			content = []byte(t.Content)
+			break
+		}
+	}
+	if content == nil {
+		JSONErrorCode(w, http.StatusBadRequest, "template_unknown", a.t(r, "profiles.err_template_unknown"))
+		return nil, false
+	}
+	if !a.requireLayer(w, r) {
+		return nil, false
+	}
+	if a.sources == nil {
+		JSONError(w, http.StatusServiceUnavailable, "sources service unavailable")
+		return nil, false
+	}
+	srcs, err := a.sources.MihomoProfileSources()
+	if err != nil {
+		a.writeLayerError(w, r, err)
+		return nil, false
+	}
+	ids := make([]string, 0, len(srcs))
+	for _, s := range srcs {
+		ids = append(ids, s.ID)
+	}
+	// Порты активного профиля: XKeen читает их из активного файла (подстановка берёт
+	// их, только когда шаблон своих не задаёт).
+	ports := configlayer.MihomoActivePorts(a.cfg.MihomoConfigDir)
+	data, added, err := services.RenderMihomoTemplate(content, ids, services.ProfilePorts{Redir: ports.Redir, TProxy: ports.TProxy})
+	if err != nil {
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "internal", a.t(r, "error.internal"), err.Error())
+		return nil, false
+	}
+	return &templatePlan{data: data, added: added, srcs: srcs}, true
 }
 
 // MihomoProfiles handles GET /api/mihomo/profiles.
@@ -244,6 +303,16 @@ func (a *API) MihomoProfileAction(w http.ResponseWriter, r *http.Request) {
 		// Создание читает активный конфиг или другой профиль: под замком записи
 		// файлов Mihomo, чтобы не прочесть его на полпути записи (сам сервис берёт
 		// свой замок в Create).
+		if req.Template != "" {
+			plan, ok := a.planMihomoTemplate(w, r, req.Template)
+			if !ok {
+				return
+			}
+			unlock := a.lockMihomoFiles()
+			err = svc.CreateFromContent(req.Name, plan.data)
+			unlock()
+			break
+		}
 		unlock := a.lockMihomoFiles()
 		err = svc.Create(req.Name, req.From, req.Empty)
 		unlock()
@@ -282,7 +351,11 @@ func (a *API) MihomoProfileAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var invalid *services.ProfileInvalidError
 	switch {
+	case errors.As(err, &invalid):
+		msg := a.t(r, "profiles.err_invalid")
+		JSONErrorCodeDetail(w, http.StatusUnprocessableEntity, "profile_invalid", msg, invalid.Output)
 	case errors.Is(err, services.ErrProfileInvalidName):
 		JSONError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, services.ErrProfileReserved):
