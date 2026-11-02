@@ -156,3 +156,59 @@ func TestRouterMihomoSplitGenerators(t *testing.T) {
 		}
 	})
 }
+
+// TestRouterMihomoSplitChecks — проверка черновика считает только ядра под
+// управлением (D-06): force-proxy ядра, которое панель не держит, не блокирует
+// «Применить». Диск и ядра стенда не трогаются, ядро тест не читает и не
+// переключает — метка ядра не нужна.
+func TestRouterMihomoSplitChecks(t *testing.T) {
+	rtNeedKernels(t)
+
+	e := rtNewEnv(t)
+	e.addMyLinks(t, "vless_ws", "trojan_grpc", "ss_plain")
+	rtmsWriteProfile(t, e, rtfpMihomoProfile)
+	if _, err := e.svc.Take(e.rev(t)); err != nil {
+		t.Fatalf("Take: %v", err)
+	}
+	// Обе секции входящих ссылаются на группу, которой нет.
+	xrayInbounds := json.RawMessage(`[{"tag":"redirect","listen":"127.0.0.1","port":61219,"protocol":"dokodemo-door",` +
+		`"settings":{"network":"tcp","followRedirect":true}},` +
+		`{"tag":"force-proxy-redirect","listen":"127.0.0.1","port":61221,"protocol":"dokodemo-door",` +
+		`"settings":{"network":"tcp","followRedirect":true}}]`)
+	raw, err := configlayer.EncodeCoreSection(configlayer.CoreSection{Managed: true, Value: xrayInbounds, ForceProxyGroup: "deleted-group-id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.putSection(t, configlayer.SectionXrayInbounds, raw)
+	cs := rtmsSection(t, e.state(t).Draft, "inbounds")
+	cs.ForceProxyGroup = "deleted-group-id"
+	raw, err = configlayer.EncodeCoreSection(cs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.putSection(t, configlayer.SectionMihomoInbounds, raw)
+
+	cases := []struct {
+		name       string
+		routing    string
+		wantXray   bool
+		wantMihomo bool
+	}{
+		{"both_managed", rtsBoth, true, true},
+		{"mihomo_own_profile", rtsMihomoOff, true, false},
+		{"only_mihomo", `{"v":1,"managed":false,"mihomo":true}`, false, true},
+		{"released", `{"v":1,"managed":false}`, false, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e.putSection(t, configlayer.RoutingSection, json.RawMessage(c.routing))
+			issues := e.check(t)
+			if got := rtfpHasIssue(issues, configlayer.SectionXrayInbounds); got != c.wantXray {
+				t.Errorf("проблема force-proxy Xray: %v, ожидалось %v (%+v)", got, c.wantXray, issues)
+			}
+			if got := rtfpHasIssue(issues, configlayer.SectionMihomoInbounds); got != c.wantMihomo {
+				t.Errorf("проблема force-proxy Mihomo: %v, ожидалось %v (%+v)", got, c.wantMihomo, issues)
+			}
+		})
+	}
+}
