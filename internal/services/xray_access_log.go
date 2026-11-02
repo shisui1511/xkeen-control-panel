@@ -199,7 +199,13 @@ func (s *XrayAccessLogService) SetEnabled(enabled bool) (*XrayAccessLogStatus, e
 		if loc == nil {
 			return nil, ErrXrayLogConfigNotFound
 		}
-		content = content[:loc[1]] + "\n    \"access\": " + string(quoted) + "," + content[loc[1]:]
+		// The comma goes only before a non-empty body: `"log": {}` must not
+		// become `{"access": "...",}`. Comments after the brace are skipped.
+		sep := ","
+		if rest := strings.TrimSpace(StripJSONComments(content[loc[1]:])); strings.HasPrefix(rest, "}") {
+			sep = ""
+		}
+		content = content[:loc[1]] + "\n    \"access\": " + string(quoted) + sep + content[loc[1]:]
 	}
 	if !json.Valid([]byte(StripJSONComments(content))) {
 		return nil, fmt.Errorf("edited %s is not valid JSON", filepath.Base(file))
