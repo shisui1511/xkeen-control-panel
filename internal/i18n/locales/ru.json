@@ -158,7 +158,10 @@
   "configlayer.routing.invalid_json": "Файл настроек XKeen не разбирается как JSON",
   "configlayer.routing.invalid_structure": "В файле настроек XKeen неожиданная структура geodata",
   "configlayer.routing.update_unavailable": "Запуск обновления списков недоступен",
+  "configlayer.routing.draft_open": "Есть неприменённые изменения. Примените или сбросьте их, затем повторите.",
+  "configlayer.routing.profile_unknown": "Такого профиля нет.",
   "configlayer.cores.apply_busy": "Применение уже выполняется: повторите после его окончания",
+  "configlayer.cores.draft_open": "Есть неприменённые изменения. Примените или сбросьте их, затем повторите.",
   "configlayer.cores.comments_not_acknowledged": "В переносимых файлах есть комментарии, они пропадут: подтвердите потерю комментариев",
   "configlayer.cores.controller_no_secret": "Внешний контроллер Mihomo открыт без secret: задайте secret или уберите контроллер из блока «Дополнительно»",
   "configlayer.cores.root_key_duplicate": "Ключ корня профиля Mihomo уже задан в другой секции: оставьте его только в одной",
@@ -181,5 +184,11 @@
   "configlayer.cores.section_not_managed": "Секция не под управлением панели: сначала возьмите её",
   "configlayer.cores.section_shadowed": "Секцию перекрывает более поздний чужой файл: уберите его или оставьте секцию у XKeen",
   "configlayer.cores.section_unknown": "Такой секции нет",
-  "configlayer.cores.xkeen_too_old": "Версия XKeen слишком старая для взятия этой секции: обновите XKeen"
+  "configlayer.cores.xkeen_too_old": "Версия XKeen слишком старая для взятия этой секции: обновите XKeen",
+
+  "profiles.err_reserved": "Префикс xcp- занят панелью. Выберите другое имя.",
+  "profiles.err_return_target": "К этому профилю Mihomo вернётся при отпускании. Удаление и переименование недоступны, пока панель управляет Mihomo.",
+  "profiles.err_template_unknown": "Такого шаблона нет.",
+  "profiles.err_panel_absent": "Файла xcp-main.yaml сейчас нет: копировать нечего.",
+  "profiles.err_draft_open": "Есть неприменённые изменения. Примените или сбросьте их, затем повторите."
 }
