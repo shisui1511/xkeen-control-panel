@@ -1399,6 +1399,14 @@
     }
   }
 
+  /* Телефон: карточки групп плоские — тени под каждой в столбике сливались */
+  @media (max-width: 768px) {
+    .group-card,
+    .group-card:hover {
+      box-shadow: none;
+    }
+  }
+
   @media (max-width: 768px) {
     :global(.group-list) .gc-head {
       height: 44px;

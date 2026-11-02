@@ -1793,7 +1793,8 @@ body.drawer-locked {
   color: var(--fg-dim);
   font-size: var(--font-size-xs);
   margin-top: 8px;
-  font-family: var(--font-family-mono);
+  font-family: var(--font-family-sans);
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-bar {
@@ -3701,5 +3702,16 @@ a.chip:hover {
 @media (prefers-reduced-motion: reduce) {
   .ptr-indicator.is-spinning svg {
     animation: none;
+  }
+}
+
+/* ------------ Телефон: иерархия поверхностей -------------------------------
+   На узком экране карточки идут столбиком, и одинаковая тень под каждой
+   сливается в серый шум. Уровни различаются так: блоки страницы (.card,
+   карточки групп прокси) — плоские, с тонкой рамкой; тень остаётся только
+   у того, что лежит над страницей: пульт дашборда, листы, меню, тосты. */
+@media (max-width: 768px) {
+  .card {
+    box-shadow: none;
   }
 }

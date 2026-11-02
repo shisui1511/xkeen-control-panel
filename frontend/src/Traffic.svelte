@@ -1433,6 +1433,8 @@
 
   .stat-session {
     font-size: var(--font-size-xs);
+    font-family: var(--font-family-sans);
+    font-variant-numeric: tabular-nums;
     color: var(--fg-dim);
     margin-top: 4px;
   }
