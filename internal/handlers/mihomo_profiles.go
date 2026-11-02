@@ -373,6 +373,35 @@ func (a *API) MihomoProfilePreview(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// MihomoProfileDeps handles GET /api/mihomo/profiles/deps?source=<id> или ?all=1:
+// профили пользователя, ссылающиеся на файл источника панели proxy_providers/xcp-<id>.yaml
+// (любой xcp-* при all=1). Только чтение для предупреждения в диалогах (D-05).
+func (a *API) MihomoProfileDeps(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	if a.mihomoProfileSvc == nil {
+		JSONError(w, http.StatusServiceUnavailable, "profile service unavailable")
+		return
+	}
+	q := r.URL.Query()
+	source := q.Get("source")
+	if source == "" && q.Get("all") != "1" {
+		JSONError(w, http.StatusBadRequest, "source or all=1 is required")
+		return
+	}
+	names, err := a.mihomoProfileSvc.DependentProfiles(source)
+	switch {
+	case errors.Is(err, services.ErrInvalidSourceID):
+		JSONError(w, http.StatusBadRequest, "invalid source")
+	case err != nil:
+		JSONError(w, http.StatusInternalServerError, err.Error())
+	default:
+		JSONSuccess(w, map[string][]string{"profiles": names})
+	}
+}
+
 // MihomoProfileAction handles POST /api/mihomo/profiles/{create|rename|delete|activate|adopt}.
 func (a *API) MihomoProfileAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

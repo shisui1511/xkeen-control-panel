@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -550,5 +551,104 @@ func TestRouterProfileCopyPanel(t *testing.T) {
 	}
 	if rtTplReadProfile(t, rtCpConf) != string(conf) {
 		t.Error("копия config.yaml не побайтная")
+	}
+}
+
+// --- зависимые профили (D-05) --------------------------------------------------------
+
+const rtDepPrefix = "rt-dep-"
+
+const (
+	rtDepA = "mixed-port: 7891\nmode: rule\nproxy-providers:\n  own:\n    type: file\n    path: ./proxy_providers/xcp-my.yaml\nproxies: []\nproxy-groups: []\nrules:\n  - MATCH,DIRECT\n"
+	rtDepB = "mixed-port: 7891\nmode: rule\nproxy-providers:\n  own:\n    type: file\n    path: ./proxy_providers/own.yaml\nproxies: []\nproxy-groups: []\nrules:\n  - MATCH,DIRECT\n"
+	// Битый YAML: разбор не удаётся, ссылку находит запасной поиск по тексту.
+	rtDepBad = "proxy-providers: [\n  own:\n    path: proxy_providers/xcp-my.yaml\n"
+)
+
+// rtDepRemove убирает профили rt-dep-* (остатки прошлого прогона и свои).
+func rtDepRemove() {
+	files, _ := filepath.Glob(filepath.Join(rtRtMihomoDir, "profiles", rtDepPrefix+"*.yaml"))
+	for _, f := range files {
+		_ = os.Remove(f)
+	}
+}
+
+// rtDepNames разбирает ответ deps и оставляет профили сценария (на стенде могут быть
+// чужие профили пользователя).
+func rtDepNames(t *testing.T, r rtSrcResp) []string {
+	t.Helper()
+	if r.Status != http.StatusOK {
+		t.Fatalf("deps: %d %s", r.Status, r.Code)
+	}
+	list, _ := r.object(t)["profiles"].([]any)
+	names := []string{}
+	for _, it := range list {
+		if s, _ := it.(string); strings.HasPrefix(s, rtDepPrefix) {
+			names = append(names, s)
+		}
+	}
+	return names
+}
+
+// Трасса: профили rt-dep-a (ссылка на xcp-my), rt-dep-b (без неё) и профиль с битым
+// YAML со строкой path proxy_providers/xcp-my.yaml → deps?source=my называет a и битый,
+// all=1 — тех же, неверный source — 400; источник «Мои узлы» удаляется и применяется,
+// удаление не блокируется, файл rt-dep-a не меняется побайтно. Метки ядра нет: поиск
+// только читает файлы профилей.
+func TestRouterProfileDeps(t *testing.T) {
+	routertest.Current(t)
+	if _, err := os.Stat(rtSaveBinary); err != nil {
+		t.Skip("Mihomo не установлен на стенде")
+	}
+	e := rtNewSrc(t)
+	rtDepRemove()
+	t.Cleanup(rtDepRemove)
+	if err := os.MkdirAll(filepath.Join(rtRtMihomoDir, "profiles"), 0o755); err != nil {
+		t.Fatalf("каталог profiles/: %v", err)
+	}
+	profiles := map[string]string{
+		rtDepPrefix + "a":   rtDepA,
+		rtDepPrefix + "b":   rtDepB,
+		rtDepPrefix + "bad": rtDepBad,
+	}
+	for name, text := range profiles {
+		if err := os.WriteFile(rtTplProfilePath(name), []byte(text), 0o600); err != nil {
+			t.Fatalf("профиль %s не записан: %v", name, err)
+		}
+	}
+	want := []string{rtDepPrefix + "a", rtDepPrefix + "bad"}
+
+	if got := rtDepNames(t, e.call(http.MethodGet, "/api/mihomo/profiles/deps?source=my", nil)); !slices.Equal(got, want) {
+		t.Errorf("source=my: %v, ожидалось %v", got, want)
+	}
+	if got := rtDepNames(t, e.call(http.MethodGet, "/api/mihomo/profiles/deps?all=1", nil)); !slices.Equal(got, want) {
+		t.Errorf("all=1: %v, ожидалось %v", got, want)
+	}
+	if got := rtDepNames(t, e.call(http.MethodGet, "/api/mihomo/profiles/deps?source=0123abcd", nil)); len(got) != 0 {
+		t.Errorf("source=0123abcd: %v, ожидался пустой список", got)
+	}
+	for _, bad := range []string{"source=..%2Fmy", "source=MY", "source=0123ABCD", "source=my%0A", ""} {
+		if r := e.call(http.MethodGet, "/api/mihomo/profiles/deps?"+bad, nil); r.Status != http.StatusBadRequest {
+			t.Errorf("deps?%s: %d, ожидалось 400", bad, r.Status)
+		}
+	}
+
+	// Удаление источника не блокируется, файлы пользователя не меняются.
+	before := map[string]string{}
+	for name := range profiles {
+		before[name] = rtTplReadProfile(t, name)
+	}
+	e.rtTplPrepare(rtLinkText(t, "vless_ws"))
+	e.rtTplDropNode()
+	if rtCpExists(filepath.Join(rtRtMihomoDir, "proxy_providers", "xcp-my.yaml")) {
+		t.Error("после удаления источника файл proxy_providers/xcp-my.yaml остался")
+	}
+	for name, text := range before {
+		if got := rtTplReadProfile(t, name); got != text {
+			t.Errorf("удаление источника изменило профиль %s", name)
+		}
+	}
+	if got := rtDepNames(t, e.call(http.MethodGet, "/api/mihomo/profiles/deps?source=my", nil)); !slices.Equal(got, want) {
+		t.Errorf("после удаления источника source=my: %v, ожидалось %v", got, want)
 	}
 }

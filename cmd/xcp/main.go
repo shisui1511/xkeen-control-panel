@@ -349,6 +349,7 @@ func main() {
 	api.SetMihomoProfileService(services.NewMihomoProfileService(cfg.MihomoConfigDir, cfg.DataDir))
 	srv.HandleProtected("/api/mihomo/profiles", api.MihomoProfiles)
 	srv.HandleProtected("/api/mihomo/profiles/preview", api.MihomoProfilePreview)
+	srv.HandleProtected("/api/mihomo/profiles/deps", api.MihomoProfileDeps)
 	for _, action := range []string{"create", "rename", "delete", "activate", "adopt"} {
 		srv.HandleProtected("/api/mihomo/profiles/"+action, api.MihomoProfileAction)
 	}
