@@ -66,7 +66,7 @@ export interface LayerRestart {
     | 'failed_kernel_down'
     | 'interrupted'
     | 'no_runtime_effect';
-  /** Способ перезапуска Mihomo: full_restart_tun | full_restart_port — полный перезапуск вместо горячей перезагрузки. */
+  /** Способ перезапуска Mihomo: full_restart_tun | full_restart_port | full_restart_profile — полный перезапуск вместо горячей перезагрузки. */
   note_code?: string;
 }
 
@@ -150,7 +150,7 @@ export interface LayerCoreSectionSnap {
 /** Объявление о способе перезапуска: ядро и причина. Ключи — как RestartNote контракта секций. */
 export interface LayerRestartNote {
   kernel: string;
-  reason: 'port' | 'tun';
+  reason: 'port' | 'tun' | 'profile';
 }
 
 /**
@@ -338,7 +338,9 @@ function normalizeCores(raw: unknown): LayerCoresSnapshot {
   }
   const restart = asArray<unknown>(c.restart).filter(
     (n): n is LayerRestartNote =>
-      isObject(n) && typeof n.kernel === 'string' && (n.reason === 'port' || n.reason === 'tun')
+      isObject(n) &&
+      typeof n.kernel === 'string' &&
+      (n.reason === 'port' || n.reason === 'tun' || n.reason === 'profile')
   );
   return { xray, restart };
 }

@@ -14,10 +14,13 @@ import (
 // Один расчёт служит и снимку слоя (полоса черновика показывает объявления до
 // «Применить»), и плану запуска (признак полного перезапуска Mihomo).
 
-// Причины перезапуска: смена порта прозрачного входящего и смена tun.
+// Причины перезапуска: смена порта прозрачного входящего, смена tun и смена
+// профиля решением по Mihomo (config.yaml переводится на другой профиль:
+// PUT /configs контроллер его не переключает, нужен полный перезапуск).
 const (
-	RestartReasonPort = "port"
-	RestartReasonTun  = "tun"
+	RestartReasonPort    = "port"
+	RestartReasonTun     = "tun"
+	RestartReasonProfile = "profile"
 )
 
 // RestartBase — сторона перехода владения, которую RestartReasons по двум
@@ -29,6 +32,9 @@ const (
 type RestartBase struct {
 	xray   *xrayTransition
 	mihomo *mihomoTransition
+	// mihomoProfile — решение по Mihomo в черновике (секция routing с полем mihomo)
+	// расходится с фактическим владением: профиль ядра меняется.
+	mihomoProfile bool
 }
 
 // xrayTransition — переход владения «Входящими» Xray: входящие по ту сторону
@@ -83,6 +89,10 @@ func RestartReasons(applied, draft Sections, base RestartBase) []RestartNote {
 	default:
 		reason = mihomoFactsReason(tr.before, tr.after)
 	}
+	if reason == "" && base.mihomoProfile {
+		// tun и порт важнее: их причина объявляется, когда есть.
+		reason = RestartReasonProfile
+	}
 	if reason != "" {
 		out = append(out, RestartNote{Kernel: KernelMihomo, Reason: reason})
 	}
@@ -99,6 +109,10 @@ func restartBase(roots Roots, st State, draft Sections, installed InstalledKerne
 	}
 	if installed.Mihomo {
 		base.mihomo = mihomoRoutingTransition(roots, st, draft)
+		// Отдельное решение по Mihomo, расходящееся с фактическим владением: взятие и
+		// отпускание без него остаются на горячей перезагрузке (D-16 из 147).
+		d := DesiredRouting(draft)
+		base.mihomoProfile = d.Mihomo != nil && d.ManagedFor(KernelMihomo) != (st.Routing.Mihomo != nil)
 	}
 	return base
 }
@@ -209,12 +223,13 @@ func xrayTransitionPortChanged(panel CoreSection, tr *xrayTransition) bool {
 // config.yaml. nil — перехода для расчёта нет.
 func mihomoRoutingTransition(roots Roots, st State, draft Sections) *mihomoTransition {
 	prev := st.Routing.Mihomo
-	managed := DesiredRouting(draft).ManagedFor(KernelMihomo)
+	desired := DesiredRouting(draft)
+	managed := desired.ManagedFor(KernelMihomo)
 	switch {
 	case managed && prev == nil:
 		return mihomoTakeTransition(roots, draft)
 	case !managed && prev != nil:
-		return mihomoReleaseTransition(roots, prev)
+		return mihomoReleaseTransition(roots, prev, desired.MihomoProfile)
 	}
 	return nil
 }
@@ -246,18 +261,26 @@ func mihomoTakeTransition(roots Roots, draft Sections) *mihomoTransition {
 }
 
 // mihomoReleaseTransition — отпускание маршрутизации: профиль панели против
-// прежнего профиля по виду прежнего config.yaml.
-func mihomoReleaseTransition(roots Roots, prev *MihomoRoutingState) *mihomoTransition {
+// профиля, к которому вернётся config.yaml: выбранной цели (target — имя профиля
+// в profiles/) или прежнего профиля по виду прежнего config.yaml.
+func mihomoReleaseTransition(roots Roots, prev *MihomoRoutingState, target string) *mihomoTransition {
 	var data []byte
 	var err error
-	switch prev.PrevKind {
-	case configKindSymlink:
+	switch {
+	case target != "":
+		rel := "profiles/" + target + ".yaml"
+		if _, ok := mihomoTargetFile(rel); !ok {
+			err = ErrInvalidPanelPath
+			break
+		}
+		data, err = readLimited(filepath.Join(roots.Mihomo, filepath.FromSlash(rel)), MaxMihomoProfileBytes)
+	case prev.PrevKind == configKindSymlink:
 		link := prev.PrevLink
 		if link == "" {
 			link = filepath.Join(roots.Mihomo, filepath.FromSlash(prev.PrevProfile))
 		}
 		_, data, err = readMihomoLink(roots.Mihomo, link, MaxMihomoProfileBytes)
-	case configKindFile:
+	case prev.PrevKind == configKindFile:
 		data, err = readLimited(filepath.Join(prev.PrevBackup, KernelMihomo, "config.yaml"), MaxMihomoProfileBytes)
 	default:
 		return nil

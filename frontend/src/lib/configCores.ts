@@ -128,10 +128,10 @@ export interface CoreSectionSnap {
   drift: string[];
 }
 
-/** Объявление о способе перезапуска: ядро и причина (port, tun). */
+/** Объявление о способе перезапуска: ядро и причина (port, tun, profile). */
 export interface RestartNote {
   kernel: string;
-  reason: 'port' | 'tun';
+  reason: 'port' | 'tun' | 'profile';
 }
 
 /** Поле cores снимка слоя. */

@@ -3859,6 +3859,7 @@
   "cfg.sec.take_changed": "The file {file} changed after the check. Open the dialog again and repeat the takeover.",
   "cfg.sec.restart_xkeen": "Changing the port restarts XKeen with xkeen -restart: connections drop and the iptables rules are rebuilt.",
   "cfg.sec.restart_tun": "Changing tun requires a full Mihomo restart instead of a hot reload.",
+  "cfg.sec.restart_profile": "Switching the profile requires a full Mihomo restart: the controller does not switch profiles.",
   "cfg.sec.pinned_note": "The panel adds these values itself: “Traffic”, XKeen and the core API rely on them. They cannot be changed.",
   "cfg.sec.sb_note": "The speed balancer mode (xkeen -sb) is replaced by the “auto” group.",
   "cfg.sec.release_title": "Release the section “{name}”?",
