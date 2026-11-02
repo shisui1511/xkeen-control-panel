@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 // Профиль из шаблона на настоящей панели устройства (PART-02, D-01…D-03): панель
@@ -123,9 +125,22 @@ func (e *rtSrc) rtTplDropNode() {
 	}
 }
 
-// Трасса: «Мои узлы» с узлом применены → POST create {template: rule-based.yaml} →
-// профиль на диске с файлом источника, ключами для XKeen и комментариями шаблона,
-// без заглушки подписки; занятое имя — 409, шаблон вне списка — 400.
+// rtTplPreview читает GET /api/mihomo/profiles/preview для файла шаблона.
+func (e *rtSrc) rtTplPreview(template string) rtSrcResp {
+	e.t.Helper()
+	return e.call(http.MethodGet, "/api/mihomo/profiles/preview?template="+url.QueryEscape(template), nil)
+}
+
+// rtTplProfileCount — число файлов в profiles/ (предпросмотр ничего не пишет).
+func rtTplProfileCount() int {
+	files, _ := filepath.Glob(filepath.Join(rtRtMihomoDir, "profiles", "*"))
+	return len(files)
+}
+
+// Трасса: «Мои узлы» с узлом применены → POST create по каждому из восьми шаблонов →
+// профиль на диске с файлом источника, ключами для XKeen, комментариями шаблона и без
+// заглушки подписки, настоящий mihomo -t принял; затем предпросмотр, занятое имя (409),
+// шаблон вне списка (400) и профиль без единого источника.
 func TestRouterProfileTemplates(t *testing.T) {
 	routertest.Current(t)
 	if _, err := os.Stat(rtSaveBinary); err != nil {
@@ -138,39 +153,152 @@ func TestRouterProfileTemplates(t *testing.T) {
 	root.rtTplPrepare(link)
 	templates := root.rtTplContents()
 
-	t.Run("rule_based", func(t *testing.T) {
-		e := root.with(t)
-		const name = rtTplPrefix + "rule-based"
-		r := e.rtTplCreate(name, "rule-based.yaml")
-		if r.Status != http.StatusOK {
-			t.Fatalf("создание из rule-based.yaml: %d %s %s", r.Status, r.Code, r.Detail)
-		}
-		got := rtTplReadProfile(t, name)
-		for _, want := range []string{"xcp-my:", "./proxy_providers/xcp-my.yaml", "external-controller-unix:", "routing-mark: 255"} {
-			if !strings.Contains(got, want) {
-				t.Errorf("в профиле нет %q", want)
+	for _, file := range services.ProfileTemplateFiles {
+		t.Run(file, func(t *testing.T) {
+			e := root.with(t)
+			tpl := templates[file]
+			if tpl == "" {
+				t.Fatalf("шаблон %s не найден в каталоге панели", file)
 			}
-		}
-		if strings.Contains(got, "example.com") {
-			t.Errorf("в профиле осталась заглушка example.com")
-		}
-		tpl := templates["rule-based.yaml"]
-		if first := strings.SplitN(tpl, "\n", 2)[0]; !strings.Contains(got, first) {
-			t.Errorf("первая строка шаблона (комментарий) пропала из профиля")
-		}
-		rtTplRealCheck(t, name)
-	})
+			name := rtTplPrefix + strings.TrimSuffix(file, ".yaml")
+			r := e.rtTplCreate(name, file)
+			if r.Status != http.StatusOK {
+				t.Fatalf("создание из %s: %d %s %s", file, r.Status, r.Code, r.Detail)
+			}
+			got := rtTplReadProfile(t, name)
+			rtTplRealCheck(t, name)
+
+			if !strings.Contains(got, "xcp-my:") || !strings.Contains(got, "./proxy_providers/xcp-my.yaml") {
+				t.Errorf("в профиле из %s нет файла источника xcp-my", file)
+			}
+			if strings.Contains(got, "https://example.com") {
+				t.Errorf("в профиле из %s осталась заглушка подписки", file)
+			}
+			for _, key := range []string{"routing-mark", "redir-port", "tproxy-port"} {
+				if !rtTplHasKey(got, key) {
+					t.Errorf("в профиле из %s нет ключа %s", file, key)
+				}
+			}
+			if !rtTplHasKey(got, "external-controller-unix") {
+				t.Errorf("в профиле из %s нет external-controller-unix", file)
+			}
+			if first := strings.SplitN(tpl, "\n", 2)[0]; !strings.Contains(got, first) {
+				t.Errorf("первая строка шаблона %s пропала из профиля", file)
+			}
+			switch file {
+			case "rule-based.yaml":
+				if !strings.Contains(got, "routing-mark: 255") {
+					t.Errorf("в профиле из %s нет routing-mark: 255", file)
+				}
+			case "zkeen.yaml":
+				if a, b := strings.Count(got, "&"), strings.Count(tpl, "&"); a != b {
+					t.Errorf("zkeen: якорей %d, в шаблоне %d", a, b)
+				}
+				if a, b := strings.Count(got, "<<: *"), strings.Count(tpl, "<<: *"); a != b {
+					t.Errorf("zkeen: слияний %d, в шаблоне %d", a, b)
+				}
+			case "smart-antifilter.yaml", "split-services.yaml":
+				if !strings.Contains(tpl, "https://example.com") {
+					t.Errorf("шаблон %s больше не содержит заглушки: сценарий устарел", file)
+				}
+			}
+		})
+	}
 
 	t.Run("errors", func(t *testing.T) {
 		e := root.with(t)
 		if r := e.rtTplCreate(rtTplPrefix+"rule-based", "rule-based.yaml"); r.Status != http.StatusConflict || r.Code != "profile_exists" {
 			t.Errorf("повторное создание: %d %q, ожидалось 409 profile_exists", r.Status, r.Code)
 		}
-		if r := e.rtTplCreate(rtTplPrefix+"awg", "awg-antifilter.yaml"); r.Status != http.StatusBadRequest || r.Code != "template_unknown" {
-			t.Errorf("шаблон вне списка: %d %q, ожидалось 400 template_unknown", r.Status, r.Code)
-		}
-		if _, err := os.Stat(rtTplProfilePath(rtTplPrefix + "awg")); err == nil {
-			t.Errorf("отказанный шаблон оставил файл профиля")
+		for _, bad := range []string{"awg-antifilter.yaml", "multi-sub-hwid.yaml", "../rule-based.yaml"} {
+			name := rtTplPrefix + "bad"
+			if r := e.rtTplCreate(name, bad); r.Status != http.StatusBadRequest || r.Code != "template_unknown" {
+				t.Errorf("шаблон %s: %d %q, ожидалось 400 template_unknown", bad, r.Status, r.Code)
+			}
+			if _, err := os.Stat(rtTplProfilePath(name)); err == nil {
+				t.Errorf("отказанный шаблон %s оставил файл профиля", bad)
+			}
 		}
 	})
+
+	t.Run("preview", func(t *testing.T) {
+		e := root.with(t)
+		before := rtTplProfileCount()
+		r := e.rtTplPreview("rule-based.yaml")
+		if r.Status != http.StatusOK {
+			t.Fatalf("предпросмотр rule-based.yaml: %d %s", r.Status, r.Code)
+		}
+		o := r.object(t)
+		added, _ := o["added"].([]any)
+		if !rtTplContainsKey(added, "external-controller-unix") {
+			t.Errorf("предпросмотр rule-based.yaml: added без external-controller-unix: %v", added)
+		}
+		if o["kind"] != "template" || o["no_sources"] != false {
+			t.Errorf("предпросмотр rule-based.yaml: kind=%v no_sources=%v", o["kind"], o["no_sources"])
+		}
+		if n, _ := o["sources"].(float64); n < 1 {
+			t.Errorf("предпросмотр: источников %v, ожидался хотя бы один", o["sources"])
+		}
+		if n, _ := o["nodes"].(float64); n < 1 {
+			t.Errorf("предпросмотр: узлов %v, ожидался хотя бы один", o["nodes"])
+		}
+		for _, key := range []string{"redir", "tproxy"} {
+			if n, _ := o[key].(float64); n <= 0 {
+				t.Errorf("предпросмотр: порт %s = %v", key, o[key])
+			}
+		}
+		if _, ok := o["unix_unsupported"].(bool); !ok {
+			t.Errorf("предпросмотр: нет булева unix_unsupported: %.200s", r.Data)
+		}
+
+		z := e.rtTplPreview("zkeen.yaml")
+		if z.Status != http.StatusOK {
+			t.Fatalf("предпросмотр zkeen.yaml: %d %s", z.Status, z.Code)
+		}
+		zAdded, _ := z.object(t)["added"].([]any)
+		if rtTplContainsKey(zAdded, "external-controller-unix") {
+			t.Errorf("предпросмотр zkeen.yaml: сокет уже есть в шаблоне, added = %v", zAdded)
+		}
+
+		if bad := e.rtTplPreview("awg-antifilter.yaml"); bad.Status != http.StatusBadRequest || bad.Code != "template_unknown" {
+			t.Errorf("предпросмотр шаблона вне списка: %d %q, ожидалось 400 template_unknown", bad.Status, bad.Code)
+		}
+		if after := rtTplProfileCount(); after != before {
+			t.Errorf("предпросмотр изменил profiles/: было %d файлов, стало %d", before, after)
+		}
+	})
+
+	// Без источников профиль создаётся с пустым proxy-providers. Если ядро отвергает
+	// группы include-all без единого провайдера, это находка по шаблону.
+	t.Run("no_sources", func(t *testing.T) {
+		e := root.with(t)
+		e.rtTplDropNode()
+		const name = rtTplPrefix + "no-sources"
+		r := e.rtTplCreate(name, "rule-based.yaml")
+		if r.Status != http.StatusOK {
+			t.Fatalf("шаблон rule-based.yaml без источников отвергнут: %d %s %s", r.Status, r.Code, r.Detail)
+		}
+		got := rtTplReadProfile(t, name)
+		if !strings.Contains(got, "proxy-providers: {}") {
+			t.Errorf("без источников в профиле ожидался proxy-providers: {}")
+		}
+		rtTplRealCheck(t, name)
+		p := e.rtTplPreview("rule-based.yaml")
+		if p.Status != http.StatusOK {
+			t.Fatalf("предпросмотр без источников: %d %s", p.Status, p.Code)
+		}
+		if o := p.object(t); o["no_sources"] != true || o["sources"] != float64(0) {
+			t.Errorf("предпросмотр без источников: no_sources=%v sources=%v", o["no_sources"], o["sources"])
+		}
+	})
+}
+
+// rtTplContainsKey — среди added есть ключ.
+func rtTplContainsKey(added []any, key string) bool {
+	for _, v := range added {
+		if s, _ := v.(string); s == key {
+			return true
+		}
+	}
+	return false
 }

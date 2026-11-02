@@ -278,6 +278,53 @@ func (a *API) MihomoProfiles(w http.ResponseWriter, r *http.Request) {
 	JSONSuccess(w, state)
 }
 
+// profilePreviewResponse — что войдёт в профиль из шаблона (диалог создания).
+type profilePreviewResponse struct {
+	Kind string `json:"kind"`
+	// Sources и Nodes — число источников с файлами и сумма их узлов Mihomo.
+	Sources   int  `json:"sources"`
+	Nodes     int  `json:"nodes"`
+	NoSources bool `json:"no_sources"`
+	// Added — ключи, которые панель допишет шаблону.
+	Added  []string `json:"added"`
+	Redir  int      `json:"redir"`
+	TProxy int      `json:"tproxy"`
+	// UnixUnsupported — версия Mihomo ниже той, что знает external-controller-unix:
+	// профиль создаётся, но сокет ядро не откроет.
+	UnixUnsupported bool `json:"unix_unsupported"`
+}
+
+// MihomoProfilePreview handles GET /api/mihomo/profiles/preview?template=<файл>:
+// подстановка шаблона в памяти без записи на диск.
+func (a *API) MihomoProfilePreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	plan, ok := a.planMihomoTemplate(w, r, r.URL.Query().Get("template"))
+	if !ok {
+		return
+	}
+	nodes := 0
+	for _, s := range plan.srcs {
+		nodes += s.Nodes
+	}
+	added := plan.added.Keys
+	if added == nil {
+		added = []string{}
+	}
+	JSONSuccess(w, profilePreviewResponse{
+		Kind:            "template",
+		Sources:         len(plan.srcs),
+		Nodes:           nodes,
+		NoSources:       len(plan.srcs) == 0,
+		Added:           added,
+		Redir:           plan.added.Redir,
+		TProxy:          plan.added.TProxy,
+		UnixUnsupported: a.configLayer.Snapshot().Features[configlayer.FeatureMihomoUnixSocket] == configlayer.Unavailable,
+	})
+}
+
 // MihomoProfileAction handles POST /api/mihomo/profiles/{create|rename|delete|activate|adopt}.
 func (a *API) MihomoProfileAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

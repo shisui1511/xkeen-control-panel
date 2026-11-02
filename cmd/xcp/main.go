@@ -348,6 +348,7 @@ func main() {
 	// Mihomo profiles: profiles/<name>.yaml with config.yaml as a symlink
 	api.SetMihomoProfileService(services.NewMihomoProfileService(cfg.MihomoConfigDir, cfg.DataDir))
 	srv.HandleProtected("/api/mihomo/profiles", api.MihomoProfiles)
+	srv.HandleProtected("/api/mihomo/profiles/preview", api.MihomoProfilePreview)
 	for _, action := range []string{"create", "rename", "delete", "activate", "adopt"} {
 		srv.HandleProtected("/api/mihomo/profiles/"+action, api.MihomoProfileAction)
 	}
