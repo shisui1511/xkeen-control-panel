@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -143,6 +144,32 @@ func (a *API) isActiveMihomoConfig(path string) bool {
 			continue
 		}
 		if info, statErr := os.Stat(candidate); statErr == nil && os.SameFile(target, info) {
+			return true
+		}
+	}
+	return false
+}
+
+// isMihomoProfilePath сообщает, что path — файл *.yaml/*.yml внутри profiles/
+// корня Mihomo. Корень сравнивается и в исходном, и в развёрнутом по симлинкам виде:
+// PathValidator возвращает уже развёрнутый путь.
+func (a *API) isMihomoProfilePath(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext != ".yaml" && ext != ".yml" {
+		return false
+	}
+	root := filepath.Clean(a.cfg.MihomoConfigDir)
+	bases := []string{root}
+	if resolved, err := filepath.EvalSymlinks(root); err == nil && resolved != root {
+		bases = append(bases, resolved)
+	}
+	for _, base := range bases {
+		rel, err := filepath.Rel(base, filepath.Clean(path))
+		if err != nil {
+			continue
+		}
+		parts := strings.Split(filepath.ToSlash(rel), "/")
+		if len(parts) >= 2 && parts[0] == "profiles" && parts[1] != ".." {
 			return true
 		}
 	}
@@ -751,15 +778,25 @@ func (a *API) runConfigValidator(ctx context.Context, cleanPath, content string)
 	defer os.RemoveAll(tempDir)
 
 	filename := filepath.Base(cleanPath)
-	if err := copyDirConfigs(filepath.Dir(cleanPath), tempDir, filename, content, a.cfg.AllowedRoots); err != nil {
+	// Файл профиля проверяется в зеркале корня Mihomo (геобазы, rules/, providers/
+	// видны ядру), а не в копии его каталога profiles/.
+	mirror := kernelType == "mihomo" && a.isMihomoProfilePath(cleanPath)
+	if mirror {
+		if err := configlayer.MirrorMihomo(a.cfg.MihomoConfigDir, []byte(content), tempDir); err != nil {
+			return "", err
+		}
+	} else if err := copyDirConfigs(filepath.Dir(cleanPath), tempDir, filename, content, a.cfg.AllowedRoots); err != nil {
 		return "", err
 	}
 
 	var cmd *exec.Cmd
-	if kernelType == "xray" {
+	switch {
+	case kernelType == "xray":
 		cmd = exec.CommandContext(ctx, binaryPath, "-test", "-confdir", tempDir)
 		setupXrayCmdEnv(cmd, tempDir)
-	} else {
+	case mirror:
+		cmd = exec.CommandContext(ctx, binaryPath, "-t", "-d", tempDir, "-f", filepath.Join(tempDir, "config.yaml"))
+	default:
 		cmd = exec.CommandContext(ctx, binaryPath, "-t", "-d", tempDir, "-f", filepath.Join(tempDir, filename))
 	}
 	// После таймаута не ждать дочерние процессы валидатора, держащие вывод
@@ -767,6 +804,10 @@ func (a *API) runConfigValidator(ctx context.Context, cleanPath, content string)
 	// Замок вспомогательных запусков берёт вызывающий до таймаута проверки: ожидание
 	// конца операции XKeen не должно съедать её время.
 	out, err := cmd.CombinedOutput()
+	if mirror {
+		// Вывод ядра показывает рабочий путь, а не временный каталог.
+		return strings.ReplaceAll(string(out), tempDir, a.cfg.MihomoConfigDir), err
+	}
 	return string(out), err
 }
 
