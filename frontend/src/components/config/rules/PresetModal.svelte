@@ -18,7 +18,8 @@
     PresetPlan,
     PresetsView,
     RuleSummary,
-    ServiceView
+    ServiceView,
+    TakeScope
   } from '../../../lib/configRouting';
   import { condLabelKey } from '../../../lib/routingView';
   import { applyFromUi, reasonOf, routingBusy, takeIntoDraft } from '../routing/routingOwner';
@@ -31,11 +32,14 @@
   let {
     open,
     mode = 'preset',
+    scope = 'all',
     onclose
   }: {
     open: boolean;
     /** preset — кнопка «Пресет»; take — взятие маршрутизации; intercept — взятие из «Применить». */
     mode?: 'preset' | 'take' | 'intercept';
+    /** Область взятия в режимах take и intercept: какие ядра берёт панель (D-07). */
+    scope?: TakeScope;
     onclose: () => void;
   } = $props();
 
@@ -350,12 +354,12 @@
     try {
       if (selectedId === 'empty' && view === null) {
         // Список пресетов не прочитан: «пустой» — это просто взятие в черновике
-        const ok = await takeIntoDraft();
+        const ok = await takeIntoDraft(scope);
         if (ok) await afterDraft();
         onclose();
         return;
       }
-      await applyPreset(choiceOf(), takeMode);
+      await applyPreset(choiceOf(), takeMode, scope);
     } catch (e) {
       if ((e as { code?: string })?.code === 'draft_conflict') {
         handleLayerError(e);
@@ -385,7 +389,7 @@
     }
     busy = true;
     try {
-      const ok = await takeIntoDraft();
+      const ok = await takeIntoDraft(scope);
       if (ok) await afterDraft();
     } finally {
       busy = false;
