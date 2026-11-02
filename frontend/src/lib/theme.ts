@@ -126,9 +126,27 @@ function readAppliedTheme(): ThemeId {
 /** Тема, применённая к документу сейчас. */
 export const currentTheme = writable<ThemeId>(readAppliedTheme());
 
+let switchFrame = 0;
+
+/**
+ * На время смены темы (и акцента, плотности) снимает CSS-переходы: иначе каждый элемент с
+ * `transition: background/color` перекрашивается со своей скоростью и экран
+ * на долю секунды пестрит смесью двух палитр. Атрибут уходит через два кадра,
+ * когда новые цвета уже отрисованы.
+ */
+export function suppressTransitions(root: HTMLElement = document.documentElement) {
+  if (typeof requestAnimationFrame !== 'function') return;
+  root.setAttribute('data-theme-switching', '');
+  cancelAnimationFrame(switchFrame);
+  switchFrame = requestAnimationFrame(() => {
+    switchFrame = requestAnimationFrame(() => root.removeAttribute('data-theme-switching'));
+  });
+}
+
 export function applyTheme(id: ThemeId) {
   const info = themeInfo(id);
   const root = document.documentElement;
+  if (root.getAttribute('data-theme') !== info.id) suppressTransitions(root);
   root.setAttribute('data-theme', info.id);
   root.setAttribute('data-scheme', info.scheme);
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', info.themeColor);

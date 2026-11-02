@@ -868,7 +868,9 @@
     background: var(--accent);
     box-shadow: 0 0 8px var(--accent);
     flex-shrink: 0;
-    transition: all var(--transition-fast);
+    transition:
+      background var(--transition-fast),
+      box-shadow var(--transition-fast);
   }
   .type-dot.mihomo {
     background: var(--purple);
@@ -979,7 +981,13 @@
     border-radius: 12px;
     font-size: var(--font-size-xs);
     font-weight: 700;
-    transition: all var(--transition-fast);
+    transition:
+      color var(--transition-fast),
+      background-color var(--transition-fast),
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast),
+      opacity var(--transition-fast),
+      transform var(--transition-fast);
   }
 
   /* action кнопки-иконки */
@@ -992,7 +1000,10 @@
     border-radius: 6px;
     display: grid;
     place-items: center;
-    transition: all var(--transition-fast);
+    transition:
+      color var(--transition-fast),
+      background var(--transition-fast),
+      opacity var(--transition-fast);
   }
   .action-icon-btn:hover {
     color: var(--accent);
@@ -1106,7 +1117,11 @@
     align-items: center;
     gap: 6px;
     height: 28px;
-    transition: all var(--transition-fast);
+    transition:
+      color var(--transition-fast),
+      background var(--transition-fast),
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast);
   }
   .btn-support:hover {
     background: color-mix(in srgb, var(--purple) 24%, transparent);
@@ -1133,7 +1148,11 @@
     gap: 6px;
     height: 28px;
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition:
+      color var(--transition-fast),
+      background var(--transition-fast),
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast);
   }
   .btn-announcement:hover {
     background: color-mix(in srgb, var(--warning) 22%, transparent);
@@ -1158,8 +1177,8 @@
     pointer-events: none;
     transform: translateY(6px);
     transition:
-      opacity var(--transition-fast) ease,
-      transform var(--transition-fast) ease;
+      opacity var(--transition-fast),
+      transform var(--transition-fast);
     display: flex;
     flex-direction: column;
     gap: 10px;

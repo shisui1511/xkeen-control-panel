@@ -676,7 +676,7 @@
     border-radius: var(--radius-lg);
     overflow: hidden;
     box-shadow: var(--shadow-sm);
-    transition: all 0.2s ease;
+    transition: box-shadow 0.2s ease;
   }
   .group-card.expanded {
     grid-column: 1 / -1;
@@ -777,7 +777,10 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.15s ease;
+    transition:
+      color 0.15s ease,
+      background 0.15s ease,
+      opacity 0.15s ease;
     opacity: 0.6;
   }
   .gc-pin-btn:hover:not(:disabled) {
@@ -848,7 +851,10 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.15s ease;
+    transition:
+      color 0.15s ease,
+      background 0.15s ease,
+      opacity 0.15s ease;
   }
   .gc-ping-btn:hover:not(:disabled) {
     color: var(--accent);
@@ -918,7 +924,10 @@
     color: var(--fg-primary);
     font-size: var(--font-size-xs);
     font-weight: 600;
-    transition: all 0.2s;
+    transition:
+      color 0.2s,
+      background 0.2s,
+      border-color 0.2s;
     text-align: left;
     font-family: inherit;
   }
@@ -996,7 +1005,11 @@
     flex-direction: column;
     justify-content: space-between;
     position: relative;
-    transition: all var(--transition-fast);
+    transition:
+      background var(--transition-fast),
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast),
+      transform var(--transition-fast);
     min-height: 84px;
   }
   .proxy-select-btn {
@@ -1107,7 +1120,9 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition:
+      color 0.2s,
+      background 0.2s;
     border-radius: var(--radius-sm);
     flex-shrink: 0;
   }
@@ -1139,7 +1154,10 @@
     border: 1px solid var(--border);
     color: var(--fg-secondary);
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition:
+      color 0.15s ease,
+      background 0.15s ease,
+      border-color 0.15s ease;
   }
   .filter-chip:hover {
     background: var(--hover);
@@ -1272,7 +1290,9 @@
     padding: 6px 12px;
     font-size: var(--font-size-xs);
     cursor: pointer;
-    transition: all 0.15s;
+    transition:
+      background 0.15s,
+      border-color 0.15s;
   }
   .proxy-grid-more:hover {
     background: var(--bg-card-hover);

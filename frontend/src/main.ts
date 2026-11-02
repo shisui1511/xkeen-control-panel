@@ -3,6 +3,7 @@ import './styles/fonts.css';
 import App from './App.svelte';
 import { initDensity } from './stores';
 import { initTheme } from './lib/theme';
+import { initMotion } from './lib/motion.svelte';
 
 function initAccent() {
   let saved = '';
@@ -41,6 +42,7 @@ function removeLegacyServiceWorker() {
 initTheme();
 initAccent();
 initDensity();
+initMotion();
 removeLegacyServiceWorker();
 
 const app = mount(App, {

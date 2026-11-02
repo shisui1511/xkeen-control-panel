@@ -149,7 +149,9 @@
     background: transparent;
     color: var(--fg-dim);
     border-right: 1px solid var(--border);
-    transition: all 0.15s ease;
+    transition:
+      color 0.15s ease,
+      background 0.15s ease;
     position: relative;
     flex-shrink: 0;
   }
@@ -228,7 +230,9 @@
     cursor: pointer;
     padding: 0;
     margin-left: 4px;
-    transition: all 0.1s ease;
+    transition:
+      color 0.1s ease,
+      background 0.1s ease;
   }
 
   .tab-close-btn:hover {

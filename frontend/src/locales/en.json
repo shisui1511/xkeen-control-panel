@@ -696,7 +696,7 @@
   "settings.density_comfortable_btn": "Comfortable",
   "settings.density_compact_btn": "Compact",
   "settings.animations": "Animations",
-  "settings.animations_desc": "Reduced animation respects prefers-reduced-motion",
+  "settings.animations_desc": "Smooth transitions between screens and states. Off whenever your system asks to reduce motion",
   "settings.section_behavior": "Behavior",
   "settings.auto_refresh": "Auto-refresh statuses",
   "settings.auto_refresh_desc": "Poll /api/system/stats every 5s",

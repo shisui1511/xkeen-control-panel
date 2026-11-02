@@ -341,7 +341,10 @@
     border-radius: var(--radius-full, 9999px);
     font-size: var(--font-size-xs);
     color: var(--fg-primary);
-    transition: all 0.18s ease;
+    transition:
+      background 0.18s ease,
+      border-color 0.18s ease,
+      box-shadow 0.18s ease;
     user-select: none;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   }

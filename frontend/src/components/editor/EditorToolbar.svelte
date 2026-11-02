@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { fade } from 'svelte/transition';
+  import { fade } from '../../lib/motion.svelte';
   import { t } from '../../i18n';
   import Icon from '../../lib/components/Icon.svelte';
   import EditorTabs, { type EditorTab } from './EditorTabs.svelte';
@@ -232,7 +232,9 @@
     border-right: 1px solid var(--border);
     color: var(--fg-dim);
     cursor: pointer;
-    transition: all 0.15s;
+    transition:
+      color 0.15s,
+      background 0.15s;
     flex-shrink: 0;
   }
 
@@ -289,7 +291,9 @@
     border-radius: var(--radius-sm);
     color: var(--fg-dim);
     cursor: pointer;
-    transition: all 0.15s;
+    transition:
+      color 0.15s,
+      background 0.15s;
   }
 
   .btn-kebab:hover {

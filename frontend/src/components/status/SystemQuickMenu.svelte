@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
-  import { fade } from 'svelte/transition';
+  import { fade } from '../../lib/motion.svelte';
   import { t } from '../../i18n';
   import {
     showToast,

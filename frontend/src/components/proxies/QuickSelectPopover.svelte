@@ -363,6 +363,7 @@
     flex-direction: column;
     overflow: hidden;
     color: var(--fg-primary);
+    animation: menuPop 140ms var(--ease-out);
   }
 
   .qs-popover.qs-bottom-sheet {
@@ -376,6 +377,7 @@
     border-left: 0;
     border-right: 0;
     border-bottom: 0;
+    animation: sheetUp var(--duration-move) var(--ease-out);
   }
 
   .qs-drag-handle {

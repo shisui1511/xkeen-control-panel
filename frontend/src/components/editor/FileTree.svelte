@@ -559,7 +559,9 @@
     font-size: var(--font-size-xs);
     cursor: pointer;
     text-align: left;
-    transition: all 0.12s ease;
+    transition:
+      color 0.12s ease,
+      background 0.12s ease;
   }
 
   .file-row:hover {
@@ -693,6 +695,7 @@
     display: flex;
     flex-direction: column;
     gap: 1px;
+    animation: menuPop 140ms var(--ease-out);
   }
 
   .ctx-header {

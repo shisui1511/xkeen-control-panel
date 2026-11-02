@@ -70,7 +70,10 @@
     cursor: pointer;
     display: inline-flex;
     align-items: center;
-    transition: all var(--transition-fast, 0.15s ease);
+    transition:
+      color var(--transition-fast, 0.15s ease),
+      background var(--transition-fast, 0.15s ease),
+      border-color var(--transition-fast, 0.15s ease);
   }
 
   .scenario-chip:hover {

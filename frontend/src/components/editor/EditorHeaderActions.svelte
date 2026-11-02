@@ -263,6 +263,7 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+    animation: menuPop 140ms var(--ease-out);
   }
 
   .dropdown-item {

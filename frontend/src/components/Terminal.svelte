@@ -465,7 +465,9 @@
     height: min(680px, calc(100vh - 220px));
     min-height: 480px;
     box-shadow: var(--shadow-md);
-    transition: all var(--transition-fast);
+    transition:
+      box-shadow var(--transition-fast),
+      border-color var(--transition-fast);
   }
 
   .terminal-card.fullscreen {

@@ -2045,7 +2045,7 @@
     border-radius: 50%;
     border: 2px solid var(--border-hover, var(--fg-dim));
     position: relative;
-    transition: all 0.15s ease;
+    transition: border-color 0.15s ease;
   }
 
   .radio-dot.checked {

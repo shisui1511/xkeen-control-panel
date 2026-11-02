@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { setAnimationsEnabled } from './lib/motion.svelte';
   import Modal from './components/Modal.svelte';
   import { t, setLang, currentLang, getAvailableLangs, type Lang } from './i18n';
   import Icon from './lib/components/Icon.svelte';
@@ -39,6 +40,7 @@
     themeInfo,
     readThemeChoice,
     setThemeChoice,
+    suppressTransitions,
     type ThemeChoice
   } from './lib/theme';
 
@@ -539,6 +541,7 @@
   function setAccent(a: AccentChoice) {
     selectedAccent = a;
     try {
+      suppressTransitions();
       if (a === 'blue') {
         localStorage.removeItem('accent');
         document.documentElement.removeAttribute('data-accent');
@@ -551,6 +554,7 @@
 
   function setDensity(d: ThemeDensity) {
     selectedDensity = d;
+    suppressTransitions();
     applyDensity(d);
   }
 
@@ -997,7 +1001,7 @@
                   type="checkbox"
                   aria-label={$t('settings.animations')}
                   bind:checked={animationsEnabled}
-                  onchange={() => saveSetting('animations', String(animationsEnabled))}
+                  onchange={() => setAnimationsEnabled(animationsEnabled)}
                 />
                 <span class="toggle-slider"></span>
               </label>

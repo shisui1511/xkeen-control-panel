@@ -2,7 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import { get } from 'svelte/store';
-  import { fade } from 'svelte/transition';
+  import { pageIn } from './lib/motion.svelte';
   import { t, currentLang, pluralize } from './i18n';
   import {
     isSidebarOpen,
@@ -1068,7 +1068,7 @@
           />
         </div>
       {:else if currentTab === 'dashboard'}
-        <div class="container" data-testid="dashboard-page" transition:fade={{ duration: 150 }}>
+        <div class="container" data-testid="dashboard-page" in:pageIn>
           <!-- Page header -->
           <PageHeader
             title={$t('dash.title')}
@@ -1581,7 +1581,7 @@
             style={isEditorFullscreen
               ? 'flex: 1; display: flex; flex-direction: column; min-height: 0; height: 100%;'
               : 'flex: 1; display: flex; flex-direction: column; min-height: 100%;'}
-            transition:fade={{ duration: 150 }}
+            in:pageIn={{ y: 0 }}
           >
             <Editor onSwitchTab={switchTab} />
           </div>
@@ -1599,7 +1599,7 @@
         {#await import('./Logs.svelte')}
           <Skeleton type="card" height="60vh" />
         {:then { default: Logs }}
-          <div transition:fade={{ duration: 150 }}>
+          <div in:pageIn>
             <Logs />
           </div>
         {:catch err}
@@ -1616,7 +1616,7 @@
         {#await import('./Proxies.svelte')}
           <Skeleton type="card" height="60vh" />
         {:then { default: Proxies }}
-          <div transition:fade={{ duration: 150 }}>
+          <div in:pageIn>
             <Proxies />
           </div>
         {:catch err}
@@ -1633,7 +1633,7 @@
         {#await import('./Connections.svelte')}
           <Skeleton type="card" height="60vh" />
         {:then { default: Connections }}
-          <div transition:fade={{ duration: 150 }}>
+          <div in:pageIn>
             <Connections />
           </div>
         {:catch err}
@@ -1650,7 +1650,7 @@
         {#await import('./Rules.svelte')}
           <Skeleton type="card" height="60vh" />
         {:then { default: Rules }}
-          <div transition:fade={{ duration: 150 }}>
+          <div in:pageIn>
             <Rules onSwitchTab={switchTab} />
           </div>
         {:catch err}
@@ -1667,7 +1667,7 @@
         {#await import('./Traffic.svelte')}
           <Skeleton type="card" height="60vh" />
         {:then { default: Traffic }}
-          <div transition:fade={{ duration: 150 }}>
+          <div in:pageIn>
             <Traffic />
           </div>
         {:catch err}
@@ -1684,7 +1684,7 @@
         {#await import('./Services.svelte')}
           <Skeleton type="card" height="60vh" />
         {:then { default: Services }}
-          <div transition:fade={{ duration: 150 }}>
+          <div in:pageIn>
             <Services onSwitchTab={switchTab} />
           </div>
         {:catch err}
@@ -1701,7 +1701,7 @@
         {#await import('./SmartProxy.svelte')}
           <Skeleton type="card" height="60vh" />
         {:then { default: SmartProxy }}
-          <div transition:fade={{ duration: 150 }}>
+          <div in:pageIn>
             <SmartProxy onSwitchTab={switchTab} />
           </div>
         {:catch err}
@@ -1718,7 +1718,7 @@
         {#await import('./TrafficQuotas.svelte')}
           <Skeleton type="card" height="60vh" />
         {:then { default: TrafficQuotas }}
-          <div transition:fade={{ duration: 150 }}>
+          <div in:pageIn>
             <TrafficQuotas onSwitchTab={switchTab} />
           </div>
         {:catch err}
@@ -1735,7 +1735,7 @@
         {#await import('./DATManager.svelte')}
           <Skeleton type="card" height="60vh" />
         {:then { default: DATManager }}
-          <div transition:fade={{ duration: 150 }}>
+          <div in:pageIn>
             <DATManager onSwitchTab={switchTab} />
           </div>
         {:catch err}
@@ -1752,7 +1752,7 @@
         {#await import('./MihomoGenerator.svelte')}
           <Skeleton type="card" height="60vh" />
         {:then { default: MihomoGenerator }}
-          <div transition:fade={{ duration: 150 }}>
+          <div in:pageIn>
             <MihomoGenerator onSwitchTab={switchTab} />
           </div>
         {:catch err}
@@ -1769,7 +1769,7 @@
         {#await import('./Console.svelte')}
           <Skeleton type="card" height="60vh" />
         {:then { default: Console }}
-          <div transition:fade={{ duration: 150 }}>
+          <div in:pageIn>
             <Console onSwitchTab={switchTab} />
           </div>
         {:catch err}
@@ -1796,7 +1796,7 @@
           {#await import('./Config.svelte')}
             <Skeleton type="card" height="60vh" />
           {:then { default: Config }}
-            <div transition:fade={{ duration: 150 }}>
+            <div in:pageIn>
               <Config onSwitchTab={switchTab} />
             </div>
           {:catch err}
@@ -1814,7 +1814,7 @@
         {#await import('./Settings.svelte')}
           <Skeleton type="card" height="60vh" />
         {:then { default: Settings }}
-          <div transition:fade={{ duration: 150 }}>
+          <div in:pageIn>
             <Settings onSwitchTab={switchTab} />
           </div>
         {:catch err}

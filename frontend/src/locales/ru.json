@@ -693,7 +693,7 @@
   "settings.density_comfortable_btn": "Обычная",
   "settings.density_compact_btn": "Компактная",
   "settings.animations": "Анимации",
-  "settings.animations_desc": "Уменьшенная анимация уважает prefers-reduced-motion",
+  "settings.animations_desc": "Плавные переходы между экранами и состояниями. Если в системе включено уменьшение движения, анимаций не будет",
   "settings.section_behavior": "Поведение",
   "settings.auto_refresh": "Автообновление статусов",
   "settings.auto_refresh_desc": "Опрос /api/system/stats каждые 5 с",

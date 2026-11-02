@@ -19,6 +19,8 @@
 </script>
 
 <script lang="ts">
+  import { slidingIndicator } from '../lib/motion.svelte';
+
   interface Props {
     items: TabItem[];
     value: string;
@@ -38,7 +40,13 @@
 </script>
 
 {#if items.length > 0}
-  <div class="tabs" class:tabs-pill={variant === 'pill'} role="tablist" aria-label={ariaLabel}>
+  <div
+    class="tabs"
+    class:tabs-pill={variant === 'pill'}
+    role="tablist"
+    aria-label={ariaLabel}
+    {@attach slidingIndicator('.tab-btn.active')}
+  >
     {#each items as item (item.value)}
       <button
         type="button"
@@ -58,6 +66,8 @@
 
 <style>
   .tabs {
+    position: relative;
+    isolation: isolate;
     display: flex;
     gap: 0;
     border-bottom: 1px solid var(--border);
@@ -137,5 +147,51 @@
     color: var(--btn-primary-text);
     border-bottom: none;
     box-shadow: var(--shadow-sm);
+  }
+
+  /* Индикатор активной вкладки переезжает к выбранной: черта под вкладкой
+     в варианте line, подложка в варианте pill. Пока позиция не измерена,
+     активную вкладку рисуют её собственные border и фон. */
+  .tabs::after {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    left: 0;
+    bottom: 0;
+    width: var(--ind-w, 0);
+    height: 2px;
+    transform: translateX(var(--ind-x, 0));
+    background: var(--accent);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .tabs-pill::after {
+    top: 0;
+    bottom: auto;
+    height: var(--ind-h, 0);
+    transform: translate(var(--ind-x, 0), var(--ind-y, 0));
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .tabs:global([data-indicator])::after {
+    opacity: 1;
+  }
+
+  .tabs:global([data-indicator='animate'])::after {
+    transition:
+      transform var(--duration-move) var(--ease-out),
+      width var(--duration-move) var(--ease-out),
+      height var(--duration-move) var(--ease-out);
+  }
+
+  .tabs:global([data-indicator]) .tab-btn.active {
+    border-bottom-color: transparent;
+  }
+
+  .tabs-pill:global([data-indicator]) .tab-btn.active {
+    background: transparent;
+    box-shadow: none;
   }
 </style>

@@ -252,7 +252,9 @@
     border-radius: var(--radius-md);
     cursor: pointer;
     text-align: left;
-    transition: all 0.2s;
+    transition:
+      background 0.2s,
+      border-color 0.2s;
     width: 100%;
     color: var(--fg-primary);
   }

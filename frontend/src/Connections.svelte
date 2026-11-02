@@ -1342,7 +1342,10 @@
     background: var(--bg-elevated);
     color: var(--fg-primary);
     width: 220px;
-    transition: all 0.15s ease;
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease,
+      width 0.15s ease;
   }
 
   .search-input:focus {
@@ -1755,6 +1758,7 @@
     background: rgba(0, 0, 0, 0.5);
     backdrop-filter: blur(2px);
     z-index: 100;
+    animation: drawer-backdrop-in 180ms ease-out;
   }
 
   .inspector-drawer {
@@ -1770,6 +1774,21 @@
     z-index: 101;
     display: flex;
     flex-direction: column;
+    animation: drawer-in var(--duration-move) var(--ease-out);
+  }
+
+  /* Выезд справа при открытии. Переключение между соединениями шторку не
+     пересоздаёт, поэтому анимация играет только на первое открытие. */
+  @keyframes drawer-backdrop-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes drawer-in {
+    from {
+      transform: translateX(24px);
+      opacity: 0;
+    }
   }
 
   .drawer-header {

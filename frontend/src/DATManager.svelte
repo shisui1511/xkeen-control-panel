@@ -1458,7 +1458,9 @@
     color: var(--fg-secondary);
     border-radius: var(--radius-sm, 4px);
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition:
+      color 0.15s ease,
+      background 0.15s ease;
   }
 
   .qs-type-btn:hover {
@@ -1708,7 +1710,9 @@
     border-radius: var(--radius-sm, 4px);
     cursor: pointer;
     text-align: center;
-    transition: all 0.15s ease;
+    transition:
+      color 0.15s ease,
+      background 0.15s ease;
   }
 
   .pill-btn:hover {

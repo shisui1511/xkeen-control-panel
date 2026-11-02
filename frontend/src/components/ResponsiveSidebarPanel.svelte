@@ -4,7 +4,7 @@
   import type { Attachment } from 'svelte/attachments';
   import { fade, fly, type EasingFunction, type TransitionConfig } from 'svelte/transition';
   import { cubicIn, cubicOut } from 'svelte/easing';
-  import { prefersReducedMotion } from 'svelte/motion';
+  import { motion } from '../lib/motion.svelte';
   import { t } from '../i18n';
 
   export interface ResponsiveSidebarProps {
@@ -47,7 +47,7 @@
   // Длительность берётся при каждом переходе через sheetFly и sheetFade. При смене режима уход
   // ветки оверлея видит уже новый isOverlay и длится 0: шторка и бэкдроп исчезают сразу и не
   // гаснут поверх колонки ПК. Колонка не анимируется вовсе (panel(false)).
-  let sheetMotionMs = $derived(isOverlay && !prefersReducedMotion.current ? SHEET_MOTION_MS : 0);
+  let sheetMotionMs = $derived(isOverlay && !motion.reduced ? SHEET_MOTION_MS : 0);
   // Шторка выезжает со своей стороны экрана
   let sheetOffset = $derived(side === 'left' ? '-100%' : '100%');
 
@@ -56,7 +56,7 @@
   // ветка возобновляется вместе с менеджерами и хранит прежнюю длительность. Функция вместо
   // объекта кешируется как функция, и Svelte вызывает её при каждом выезде и уходе (в microtask
   // после обновления DOM), поэтому длительность и сторона читаются заново: после прерванного
-  // закрытия действуют и смена режима, и prefers-reduced-motion (G-142-4-WR01, D-15).
+  // закрытия действуют и смена режима, и выключенные анимации (G-142-4-WR01, D-15).
   function sheetFly(
     node: Element,
     p: { animated: boolean; easing: EasingFunction }
@@ -498,7 +498,7 @@
     width: 2px;
   }
 
-  /* Шторку и бэкдроп гасит prefersReducedMotion в скрипте; здесь — переходы сплиттера (D-15) */
+  /* Шторку и бэкдроп гасит motion.reduced в скрипте; здесь — переходы сплиттера (D-15) */
   @media (prefers-reduced-motion: reduce) {
     .editor-splitter::before {
       transition: none;

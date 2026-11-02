@@ -548,7 +548,9 @@
     align-items: center;
     justify-content: center;
     border-radius: var(--radius-sm);
-    transition: all 0.15s ease;
+    transition:
+      color 0.15s ease,
+      background 0.15s ease;
   }
 
   .btn-more:hover {
@@ -569,11 +571,13 @@
     display: flex;
     flex-direction: column;
     padding: 4px 0;
+    animation: menuPop 140ms var(--ease-out);
   }
 
   .dropdown-menu-up {
     top: auto;
     bottom: 32px;
+    animation-name: menuPopUp;
   }
 
   .dropdown-menu button {

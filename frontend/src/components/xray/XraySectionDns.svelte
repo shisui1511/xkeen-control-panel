@@ -504,7 +504,10 @@
     font-weight: 500;
     cursor: pointer;
     text-align: center;
-    transition: all 0.15s ease;
+    transition:
+      color 0.15s ease,
+      background 0.15s ease,
+      border-color 0.15s ease;
   }
 
   .add-btn:hover {

@@ -481,7 +481,9 @@
     font-size: var(--font-size-xs, 12px);
     color: var(--fg-secondary);
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition:
+      color 0.15s ease,
+      border-color 0.15s ease;
   }
 
   .geoscan-file-filter-btn:hover {
