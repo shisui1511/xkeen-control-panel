@@ -37,12 +37,12 @@ export function swipeToDismiss(opts: SwipeOptions): Attachment<HTMLElement> {
     let offset = 0;
     const moving = () => opts.target?.() ?? node;
 
-    function reset(animate: boolean) {
+    // Не дотянули до порога — элемент плавно возвращается на место
+    function snapBack() {
       const el = moving();
-      el.style.transition =
-        animate && !reduceMotion() ? 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1)' : '';
+      el.style.transition = reduceMotion() ? '' : 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1)';
       el.style.transform = '';
-      if (animate) setTimeout(() => (el.style.transition = ''), 220);
+      setTimeout(() => (el.style.transition = ''), 220);
     }
 
     function onStart(e: TouchEvent) {
@@ -91,7 +91,7 @@ export function swipeToDismiss(opts: SwipeOptions): Attachment<HTMLElement> {
         el.style.transform = '';
         opts.onDismiss();
       } else {
-        reset(true);
+        snapBack();
       }
     }
 
