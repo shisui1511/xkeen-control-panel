@@ -8,10 +8,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 // Сохранение файла профиля Mihomo на настоящей панели устройства (PART-02):
@@ -121,5 +124,72 @@ func TestRouterProfileSaveMirror(t *testing.T) {
 			t.Fatalf("сохранение с провайдером type: file без файла: %d, ожидалось 200", status)
 		}
 		rtSaveRequireFile(t, "после провайдера", path, rtSaveProvider)
+	})
+}
+
+// Трасса: маршрутизация взята и применена (Mihomo активно) → профиль панели
+// содержит external-controller-unix, а панель читает у него контроллер типа unix
+// (D-10) → два одновременных сохранения разных профилей под одним замком записи
+// проходят с кодом 200, каждый файл — со своим содержимым. Метка ядра: взятие
+// маршрутизации читает активное ядро; на Xray сценарий пропускается.
+func TestRouterPanelProfileUnixSocket(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	if tg.Core != "mihomo" {
+		t.Skip("профиль панели создаётся для активного Mihomo")
+	}
+	e := rtNewSrc(t)
+	e.enableLayer()
+	e.rtRstIdle()
+	// Взятие применяется здесь же; возврат («Отпустить» и «Применить») помощник
+	// регистрирует в t.Cleanup.
+	rtCoresLiveMihomoTake(t, e, tg)
+
+	t.Run("unix_controller", func(t *testing.T) {
+		data, err := os.ReadFile(filepath.Join(rtRtMihomoDir, filepath.FromSlash(rtRtPanelProfile)))
+		if err != nil {
+			t.Fatalf("профиль панели не читается: %v", err)
+		}
+		if !strings.Contains(string(data), "external-controller-unix") {
+			t.Error("в профиле панели нет external-controller-unix")
+		}
+		info, err := services.NewMihomoService("mihomo", "xkeen", rtRtMihomoDir).ParseControllerConfig()
+		if err != nil {
+			t.Fatalf("контроллер config.yaml не читается: %v", err)
+		}
+		if info.Type != "unix" {
+			t.Errorf("тип контроллера профиля панели %q, ожидался unix", info.Type)
+		}
+	})
+
+	t.Run("lock_parallel_saves", func(t *testing.T) {
+		p := routertest.NewPanel(t)
+		rtSavePrepare(t, "rt-lock")
+		names := []string{"rt-lock-a.yaml", "rt-lock-b.yaml"}
+		want := []string{rtSaveOld + "# a\n", rtSaveOld + "# b\n"}
+		for i, name := range names {
+			if err := os.WriteFile(rtSaveProfilePath(name), []byte(rtSaveOld), 0o600); err != nil {
+				t.Fatalf("исходный файл профиля №%d: %v", i, err)
+			}
+		}
+		status := make([]int, len(names))
+		var wg sync.WaitGroup
+		for i := range names {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				st, _, err := p.Request(http.MethodPost, "/api/config/save?path="+url.QueryEscape(rtSaveProfilePath(names[i])), []byte(want[i]), routertest.AuthFull)
+				if err != nil {
+					t.Errorf("сохранение №%d: %v", i, err)
+				}
+				status[i] = st
+			}()
+		}
+		wg.Wait()
+		for i, name := range names {
+			if status[i] != http.StatusOK {
+				t.Errorf("сохранение №%d: %d, ожидалось 200", i, status[i])
+			}
+			rtSaveRequireFile(t, "параллельное сохранение", rtSaveProfilePath(name), want[i])
+		}
 	})
 }

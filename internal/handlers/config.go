@@ -176,6 +176,33 @@ func (a *API) isMihomoProfilePath(path string) bool {
 	return false
 }
 
+// lockMihomoFiles берёт замок записи файлов Mihomo (SubscriptionService.mihomoMu)
+// и возвращает функцию снятия. Для создания и копирования профиля: методы сервиса
+// профилей берут свой замок сами, поэтому здесь он не берётся.
+func (a *API) lockMihomoFiles() func() {
+	if a.subscriptionSvc == nil {
+		return func() {}
+	}
+	a.subscriptionSvc.LockMihomo()
+	return a.subscriptionSvc.UnlockMihomo
+}
+
+// lockProfileWrite берёт замок записи профиля: mihomoMu, затем замок сервиса
+// профилей (порядок всегда такой, обратный не встречается). lifecycleMu не берётся:
+// запись профиля ядро не перезапускает. Только для ConfigSave, который методов
+// сервиса не зовёт: они берут тот же замок сами, повторное взятие повисло бы.
+func (a *API) lockProfileWrite() func() {
+	unlockFiles := a.lockMihomoFiles()
+	if a.mihomoProfileSvc == nil {
+		return unlockFiles
+	}
+	a.mihomoProfileSvc.LockWrite()
+	return func() {
+		a.mihomoProfileSvc.UnlockWrite()
+		unlockFiles()
+	}
+}
+
 func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
@@ -193,11 +220,14 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isMihomoConfig := a.isActiveMihomoConfig(cleanPath)
-
-	if isMihomoConfig && a.subscriptionSvc != nil {
-		a.subscriptionSvc.LockMihomo()
-		defer a.subscriptionSvc.UnlockMihomo()
+	// Файл профиля (в том числе активный, config.yaml → profiles/x.yaml) пишется под
+	// замком записи профиля; обычный config.yaml — под замком Mihomo. Замки не
+	// накладываются: активный профиль берёт только lockProfileWrite.
+	switch {
+	case a.isMihomoProfilePath(cleanPath):
+		defer a.lockProfileWrite()()
+	case a.isActiveMihomoConfig(cleanPath):
+		defer a.lockMihomoFiles()()
 	}
 
 	// T032: extension whitelist — only .json, .yaml, .yml allowed

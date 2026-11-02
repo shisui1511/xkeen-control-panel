@@ -68,6 +68,10 @@ type MihomoProfileService struct {
 
 	// Validate runs "mihomo -t" for a config file.
 	Validate func(path string) error
+	// ValidateContent runs "mihomo -t" for profile content in the mirror of the
+	// Mihomo root (no file on disk). Used when Validate is not set and for
+	// profiles created from a template or a copy.
+	ValidateContent func(data []byte) error
 	// CoreActive reports whether Mihomo is the kernel XKeen currently runs;
 	// only then activation restarts it.
 	CoreActive func() bool
@@ -89,6 +93,32 @@ func NewMihomoProfileService(mihomoDir, dataDir string) *MihomoProfileService {
 		dir:       filepath.Clean(mihomoDir),
 		backupDir: filepath.Join(dataDir, "backup", "mihomo-profiles"),
 	}
+}
+
+// LockWrite takes the profile write lock (s.mu) for a caller that writes a
+// profile file itself (ConfigSave). Lock order is always SubscriptionService
+// mihomoMu first, then this lock; the service methods take s.mu on their own,
+// so a caller that uses them must not call LockWrite.
+func (s *MihomoProfileService) LockWrite() { s.mu.Lock() }
+
+// UnlockWrite releases the lock taken by LockWrite.
+func (s *MihomoProfileService) UnlockWrite() { s.mu.Unlock() }
+
+// validatePath checks a profile file: through Validate when it is set, otherwise
+// by reading the file and passing it to ValidateContent. Without either, nothing
+// is checked.
+func (s *MihomoProfileService) validatePath(path string) error {
+	if s.Validate != nil {
+		return s.Validate(path)
+	}
+	if s.ValidateContent == nil {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return s.ValidateContent(data)
 }
 
 func (s *MihomoProfileService) profilesDir() string { return filepath.Join(s.dir, "profiles") }
@@ -310,10 +340,8 @@ func (s *MihomoProfileService) Activate(name string) (*ActivationResult, error) 
 	if previous == name {
 		return &ActivationResult{Active: name}, nil
 	}
-	if s.Validate != nil {
-		if err := s.Validate(path); err != nil {
-			return &ActivationResult{Active: previous, Error: err.Error()}, nil
-		}
+	if err := s.validatePath(path); err != nil {
+		return &ActivationResult{Active: previous, Error: err.Error()}, nil
 	}
 	if err := s.pointConfigTo(name); err != nil {
 		return nil, err
