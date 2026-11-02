@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -47,7 +48,48 @@ const (
 	IssueRoutingScanFailed = "routing_scan_failed"
 	// IssueRoutingTakeoverFailed — переносимый файл изменился между сканом и записью.
 	IssueRoutingTakeoverFailed = "routing_takeover_failed"
+	// IssueMihomoTargetMissing — профиль, на который переводится config.yaml при
+	// отпускании Mihomo, не найден в profiles/, не обычный файл или имя недопустимо.
+	IssueMihomoTargetMissing = "mihomo_target_missing"
 )
+
+// mihomoTargetNameRE — допустимое имя профиля Mihomo; то же правило, что у
+// сервиса профилей (пакет services импортировать нельзя: цикл).
+var mihomoTargetNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
+
+// mihomoTargetFile разбирает цель отпускания Mihomo «profiles/<имя>.yaml»:
+// возвращает имя профиля. Недопустимое имя и профили панели (префикс xcp- без
+// учёта регистра) отвергаются (T-147.1-13).
+func mihomoTargetFile(rel string) (string, bool) {
+	file, ok := strings.CutPrefix(rel, "profiles/")
+	if !ok {
+		return "", false
+	}
+	name, ok := strings.CutSuffix(file, ".yaml")
+	if !ok || !mihomoTargetNameRE.MatchString(name) || strings.HasPrefix(strings.ToLower(name), "xcp-") {
+		return "", false
+	}
+	return name, true
+}
+
+// checkMihomoTarget проверяет цель отпускания: имя допустимо, под корнем Mihomo
+// лежит обычный файл (Lstat: симлинк не принимается).
+func checkMihomoTarget(root, rel string) *BuildIssue {
+	issue := &BuildIssue{
+		Key:    RoutingSection,
+		Code:   IssueMihomoTargetMissing,
+		Detail: "профиль для config.yaml не найден",
+		Params: map[string]string{"file": rel},
+	}
+	if _, ok := mihomoTargetFile(rel); !ok || root == "" {
+		return issue
+	}
+	fi, err := os.Lstat(filepath.Join(root, filepath.FromSlash(rel)))
+	if err != nil || !fi.Mode().IsRegular() {
+		return issue
+	}
+	return nil
+}
 
 // Порты Mihomo по умолчанию — как у старого конструктора профиля.
 const (
@@ -201,6 +243,9 @@ type RoutingOps struct {
 	MihomoPoint bool
 	// MihomoRestore — config.yaml возвращается к прежнему значению.
 	MihomoRestore *MihomoRoutingState
+	// MihomoTarget — относительный путь profiles/<имя>.yaml; непусто — после
+	// отпускания config.yaml указывает на него, а не на прежнее значение (D-06).
+	MihomoTarget string
 	// Next — фактическое владение после применения (Moved заполняется при записи).
 	Next RoutingState
 	// xrayTaking — это применение берёт Xray (Moved в Next заполняется при записи).
@@ -762,7 +807,12 @@ func computeRoutingOps(desired RoutingDesired, actual RoutingState, installed In
 			changed = true
 			prev := *actual.Mihomo
 			ops.MihomoRestore = &prev
-			if prev.PrevKind == "" {
+			switch {
+			case desired.MihomoProfile != "":
+				// Отпускание с целью: config.yaml переводится на выбранный профиль,
+				// даже если панельный профиль был у Mihomo с самого начала.
+				ops.MihomoTarget = "profiles/" + desired.MihomoProfile + ".yaml"
+			case prev.PrevKind == "":
 				ops.MihomoRestore = nil // config.yaml уже указывал на профиль панели: оставляем
 			}
 			ops.Next.Mihomo = nil
@@ -816,6 +866,11 @@ func (p *Pipeline) planRouting(src Sections, actual RoutingState, installed Inst
 	ops := computeRoutingOps(desired, actual, installed, req.Kernel, scans, p.d.Now())
 	if issues := releaseConflicts(p.d.Roots, ops); len(issues) > 0 {
 		return nil, &BuildError{Issues: issues}
+	}
+	if ops != nil && ops.MihomoTarget != "" {
+		if issue := checkMihomoTarget(p.d.Roots.Mihomo, ops.MihomoTarget); issue != nil {
+			return nil, &BuildError{Issues: []BuildIssue{*issue}}
+		}
 	}
 	return ops, nil
 }
@@ -933,6 +988,11 @@ func mihomoActivePorts(root string) MihomoPorts {
 	return clonePorts(a.Ports)
 }
 
+// MihomoActivePorts возвращает порты текущего активного профиля Mihomo (с мемо):
+// redir/tproxy и доступ из LAN. Нет профиля или он не прочитался — порты по
+// умолчанию.
+func MihomoActivePorts(root string) MihomoPorts { return mihomoActivePorts(root) }
+
 func clonePorts(p MihomoPorts) MihomoPorts {
 	if p.AllowLAN != nil {
 		v := *p.AllowLAN
@@ -1004,6 +1064,16 @@ func panelProfileLink(root string) string {
 		abs = root
 	}
 	return filepath.Join(abs, filepath.FromSlash(PanelMihomoProfile))
+}
+
+// profileLink — текст симлинка config.yaml на профиль rel внутри каталога Mihomo:
+// абсолютный путь, как у panelProfileLink.
+func profileLink(root, rel string) string {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		abs = root
+	}
+	return filepath.Join(abs, filepath.FromSlash(rel))
 }
 
 // setConfigSymlink атомарно перекладывает config.yaml на link: временный
@@ -1323,6 +1393,13 @@ func (p *Pipeline) applyRoutingOps(ops *RoutingOps) error {
 	switch {
 	case ops.MihomoPoint:
 		if err := setConfigSymlink(root, panelProfileLink(root)); err != nil {
+			return fmt.Errorf("config.yaml: %w", err)
+		}
+	case ops.MihomoRestore != nil && ops.MihomoTarget != "":
+		if _, ok := mihomoTargetFile(ops.MihomoTarget); !ok {
+			return fmt.Errorf("config.yaml: %w", ErrInvalidPanelPath)
+		}
+		if err := setConfigSymlink(root, profileLink(root, ops.MihomoTarget)); err != nil {
 			return fmt.Errorf("config.yaml: %w", err)
 		}
 	case ops.MihomoRestore != nil:

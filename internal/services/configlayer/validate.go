@@ -172,12 +172,19 @@ func ValidateMihomo(ctx context.Context, tmpBase string, roots Roots, bin string
 
 // mihomoConfigAfterPlan возвращает файл, который Mihomo прочтёт как config.yaml
 // после записи плана: при взятии — профиль панели, даже если симлинк пока
-// указывает на другой профиль; при возврате — прежний профиль или копия прежнего
+// указывает на другой профиль; при отпускании с целью — выбранный профиль; при возврате — прежний профиль или копия прежнего
 // обычного файла (data не nil). Без операций маршрутизации — разрешённый
 // config.yaml.
 func mihomoConfigAfterPlan(roots Roots, plan Plan) (cfg string, data []byte, err error) {
 	ops := plan.Routing
 	switch {
+	case ops != nil && ops.MihomoRestore != nil && ops.MihomoTarget != "":
+		// Отпускание с целью: Mihomo прочтёт выбранный профиль; проверка идёт в
+		// зеркале с override цели.
+		if _, ok := mihomoTargetFile(ops.MihomoTarget); !ok {
+			return "", nil, fmt.Errorf("%s: %w", ops.MihomoTarget, ErrInvalidPanelPath)
+		}
+		return filepath.Join(roots.Mihomo, filepath.FromSlash(ops.MihomoTarget)), nil, nil
 	case ops != nil && ops.MihomoPoint:
 		return filepath.Join(roots.Mihomo, filepath.FromSlash(PanelMihomoProfile)), nil, nil
 	case ops != nil && ops.MihomoRestore != nil:

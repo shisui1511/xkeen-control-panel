@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -50,7 +51,10 @@ func (rtSplitGen) Generate(in Input, _ InstalledKernels) ([]GeneratedFile, error
 }
 
 // rtNewSplitEnv — слой с раскладкой rtWriteTakeoverLayout и генератором rtSplitGen.
-func rtNewSplitEnv(t *testing.T) *rtTakeoverEnv {
+func rtNewSplitEnv(t *testing.T) *rtTakeoverEnv { return rtNewSplitEnvKind(t, false) }
+
+// rtNewSplitEnvKind — то же; plain делает config.yaml обычным файлом.
+func rtNewSplitEnvKind(t *testing.T, plain bool) *rtTakeoverEnv {
 	t.Helper()
 	for _, bin := range []string{rtRefreshXrayBin, rtMhBin} {
 		if _, err := os.Stat(bin); err != nil {
@@ -58,7 +62,7 @@ func rtNewSplitEnv(t *testing.T) *rtTakeoverEnv {
 		}
 	}
 	dir := rtLiveDir(t)
-	roots, hashes, link := rtWriteTakeoverLayout(t, dir, false)
+	roots, hashes, link := rtWriteTakeoverLayout(t, dir, plain)
 	e := &rtTakeoverEnv{gen: &rtTakeoverGen{}, roots: roots, hashes: hashes, link: link}
 	e.enabled.Store(true)
 	layer, err := New(Options{
@@ -178,4 +182,135 @@ func TestRouterProfileSplitOps(t *testing.T) {
 	if got := hashOf(e.xray(rtTkRoutingFile)); got != e.hashes[rtTkRoutingFile] {
 		t.Errorf("чужой файл routing вернулся не побайтно: %q", got)
 	}
+}
+
+// writeProfile кладёт профиль в profiles/ и запоминает его хэш.
+func (e *rtTakeoverEnv) writeProfile(t *testing.T, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(e.mihomo("profiles/"+name+".yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e.hashes["profiles/"+name+".yaml"] = HashContent([]byte(body))
+}
+
+// targetLink — текст симлинка config.yaml на профиль profiles/<name>.yaml.
+func (e *rtTakeoverEnv) targetLink(t *testing.T, name string) string {
+	t.Helper()
+	abs, err := filepath.Abs(e.roots.Mihomo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(abs, "profiles", name+".yaml")
+}
+
+// assertProfileKept проверяет, что профиль пользователя на месте побайтно.
+func (e *rtTakeoverEnv) assertProfileKept(t *testing.T, name string) {
+	t.Helper()
+	rel := "profiles/" + name + ".yaml"
+	if got := hashOf(e.mihomo(rel)); got != e.hashes[rel] {
+		t.Errorf("%s не на месте или изменён: %q", rel, got)
+	}
+}
+
+// hasIssue — среди проблем сборки итога есть проблема с кодом.
+func hasIssue(res *ResultView, code string) bool {
+	for _, is := range res.Issues {
+		if is.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+// Отпускание Mihomo с целью (147.1, D-06, D-10): одно «Применить» переводит
+// config.yaml на выбранный профиль, цель проверяет настоящий `mihomo -t`, отказ
+// и сбой записи оставляют всё как было.
+func TestRouterProfileTargetRelease(t *testing.T) {
+	e := rtNewSplitEnv(t)
+	e.writeProfile(t, "other", rtTkUserProfile)
+	const toOther = `{"v":1,"managed":true,"mihomo":false,"mihomo_profile":"other"}`
+
+	// Панель держит оба ядра; затем Mihomo уходит на профиль other одним применением.
+	e.setRouting(t, `{"v":1,"managed":true}`)
+	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
+	e.setRouting(t, toOther)
+	e.assertConfigLink(t, e.targetLink(t, "other"))
+	st := e.layer.store.Snapshot()
+	if st.Routing.Mihomo != nil {
+		t.Errorf("State.Routing.Mihomo не снят: %+v", st.Routing.Mihomo)
+	}
+	if st.Routing.Xray == nil || len(st.Routing.Xray.Moved) != 1 {
+		t.Errorf("Xray тронут отпусканием Mihomo: %+v", st.Routing.Xray)
+	}
+	if _, err := os.Lstat(e.mihomo(PanelMihomoProfile)); !os.IsNotExist(err) {
+		t.Errorf("профиль панели остался на диске: %v", err)
+	}
+	if _, err := os.Lstat(e.xray(rtTkPanelRoute)); err != nil {
+		t.Errorf("файл routing панели Xray пропал: %v", err)
+	}
+	e.assertProfileKept(t, "user")
+	e.assertProfileKept(t, "other")
+	if st.Journal != nil {
+		t.Errorf("журнал не снят после применения: %+v", st.Journal)
+	}
+
+	// Отказ ядра: цель с неверным YAML не проходит mihomo -t, всё как было.
+	e.setRouting(t, `{"v":1,"managed":true}`)
+	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
+	e.writeProfile(t, "broken", "mode: rule\nrules: [unterminated\n")
+	e.edit(t, RoutingSection, json.RawMessage(`{"v":1,"managed":true,"mihomo":false,"mihomo_profile":"broken"}`))
+	res := e.apply(t)
+	if res.OK || res.Code != CodeValidationFailed || res.Kernel != KernelMihomo {
+		t.Fatalf("итог при неверной цели: %+v", res)
+	}
+	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
+	if _, err := os.Lstat(e.mihomo(PanelMihomoProfile)); err != nil {
+		t.Errorf("профиль панели пропал при отказе проверки: %v", err)
+	}
+	e.assertProfileKept(t, "broken")
+	e.assertProfileKept(t, "other")
+
+	// Цели нет на диске: сборка не проходит, проблема mihomo_target_missing.
+	e.edit(t, RoutingSection, json.RawMessage(`{"v":1,"managed":true,"mihomo":false,"mihomo_profile":"gone"}`))
+	res = e.apply(t)
+	if res.OK || res.Code != ResultBuildFailed || !hasIssue(res, IssueMihomoTargetMissing) {
+		t.Fatalf("итог при отсутствующей цели: %+v", res)
+	}
+	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
+
+	// Профиль панели целью быть не может, хотя файл есть.
+	e.edit(t, RoutingSection, json.RawMessage(`{"v":1,"managed":true,"mihomo":false,"mihomo_profile":"xcp-main"}`))
+	res = e.apply(t)
+	if res.OK || res.Code != ResultBuildFailed || !hasIssue(res, IssueMihomoTargetMissing) {
+		t.Fatalf("итог при цели-профиле панели: %+v", res)
+	}
+	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
+
+	// Сбой записи (D-23): перекладке config.yaml мешает непустой каталог на месте
+	// временного симлинка. Откат возвращает ссылку на профиль панели и сам профиль.
+	e.edit(t, RoutingSection, json.RawMessage(toOther))
+	blocker := e.mihomo("config.yaml.xcp-link")
+	if err := os.MkdirAll(filepath.Join(blocker, "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res = e.apply(t)
+	if res.OK || res.Code != ResultWriteFailed || !res.RolledBack {
+		t.Fatalf("итог при сбое записи: %+v", res)
+	}
+	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
+	if _, err := os.Lstat(e.mihomo(PanelMihomoProfile)); err != nil {
+		t.Errorf("профиль панели не возвращён откатом: %v", err)
+	}
+	if err := os.RemoveAll(blocker); err != nil {
+		t.Fatal(err)
+	}
+
+	// Без помехи то же применение проходит.
+	res = e.apply(t)
+	if !res.OK || res.Code != ResultApplied {
+		t.Fatalf("отпускание после отката: %+v", res)
+	}
+	e.assertConfigLink(t, e.targetLink(t, "other"))
+	e.assertProfileKept(t, "user")
+	e.assertProfileKept(t, "other")
 }
