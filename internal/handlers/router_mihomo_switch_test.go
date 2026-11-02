@@ -42,7 +42,7 @@ const (
 // rtSwStand — исходное состояние устройства для возврата после сценария.
 type rtSwStand struct {
 	t       *testing.T
-	tg      routertest.Target
+	running bool   // Mihomo работал до сценария
 	cfg     string // config.yaml Mihomo
 	link    string // текст исходного симлинка
 	linkErr error  // не nil — config.yaml был обычным файлом
@@ -57,10 +57,10 @@ type rtSwStand struct {
 // rtSwPrepare снимает исходное состояние, убирает следы маршрутизации, создаёт своё
 // профили names копией действующего config.yaml и регистрирует возврат стенда.
 // Выполняется до взятия маршрутизации: возврат идёт после очистки взятия.
-func rtSwPrepare(t *testing.T, e *rtSrc, tg routertest.Target, names ...string) *rtSwStand {
+func rtSwPrepare(t *testing.T, e *rtSrc, names ...string) *rtSwStand {
 	t.Helper()
 	s := &rtSwStand{
-		t: t, tg: tg, mode: 0o600,
+		t: t, mode: 0o600,
 		cfg:     filepath.Join(rtRtMihomoDir, "config.yaml"),
 		profDir: filepath.Join(rtRtMihomoDir, "profiles"),
 	}
@@ -85,6 +85,8 @@ func rtSwPrepare(t *testing.T, e *rtSrc, tg routertest.Target, names ...string) 
 	}
 
 	e.rtRtPurge()
+	pids, _ := rtRstKernelPIDs("mihomo")
+	s.running = len(pids) > 0
 	s.xray = rtCoresDirSums(t)
 	t.Cleanup(s.restore)
 
@@ -155,7 +157,7 @@ func (s *rtSwStand) restore() {
 	}
 	// Содержимое профилей одинаково, перезапуск ядру не нужен, кроме случая, когда
 	// сценарий оставил его остановленным.
-	if s.tg.Core == "mihomo" {
+	if s.running {
 		rtPrfEnsureRunning(t)
 	}
 }
@@ -223,7 +225,7 @@ func (e *rtSrc) rtSwSeedKeys() {
 // rtSwExpectKernel проверяет ответ перехода и ядро: при активном Mihomo — успех с
 // новым устойчивым PID (restarted), при активном Xray — профиль сохранён без
 // перезапуска (saved_kernel_inactive), PID Xray прежний. Возвращает PID активного ядра.
-func rtSwExpectKernel(t *testing.T, tg routertest.Target, res map[string]any, active string, pidBefore int) int {
+func rtSwExpectKernel(t *testing.T, core string, res map[string]any, active string, pidBefore int) int {
 	t.Helper()
 	if rb, _ := res["rolled_back"].(bool); rb {
 		t.Fatalf("переход откатился: ошибка %q", res["error"])
@@ -232,7 +234,7 @@ func rtSwExpectKernel(t *testing.T, tg routertest.Target, res map[string]any, ac
 		t.Fatalf("active %q, ожидался %s", got, active)
 	}
 	restarted, _ := res["restarted"].(bool)
-	switch tg.Core {
+	switch core {
 	case "mihomo":
 		if !restarted {
 			t.Fatalf("restarted=false при работающем Mihomo; outcome %q", res["outcome"])
@@ -269,7 +271,7 @@ func TestRouterMihomoSwitch(t *testing.T) {
 	e := rtNewSrc(t)
 	e.enableLayer()
 	e.rtRstIdle()
-	s := rtSwPrepare(t, e, tg, rtSwA)
+	s := rtSwPrepare(t, e, rtSwA)
 	m := rtCoresLiveMihomoTake(t, e, tg)
 	e.rtSwSeedKeys()
 
@@ -296,7 +298,7 @@ func TestRouterMihomoSwitch(t *testing.T) {
 	}
 
 	// activate: профиль панели сменяется своим профилем, Mihomo отпущен.
-	pid = rtSwExpectKernel(t, tg, e.rtSwCall("activate", rtSwA), rtSwA, pid)
+	pid = rtSwExpectKernel(t, tg.Core, e.rtSwCall("activate", rtSwA), rtSwA, pid)
 	expectApplied("activate")
 	if !rtSwLinkOn(t, "profiles/"+rtSwA+".yaml") {
 		t.Fatalf("после activate config.yaml не указывает на %s", rtSwA)
@@ -318,7 +320,7 @@ func TestRouterMihomoSwitch(t *testing.T) {
 	m.taken = false
 
 	// return: Mihomo снова у панели, значения секций вернулись, прежний профиль — rt-sw-a.
-	pid = rtSwExpectKernel(t, tg, e.rtSwCall("return", ""), rtSwPanel, pid)
+	pid = rtSwExpectKernel(t, tg.Core, e.rtSwCall("return", ""), rtSwPanel, pid)
 	expectApplied("return")
 	m.taken = true
 	if !rtSwLinkOn(t, rtRtPanelProfile) {
@@ -342,7 +344,7 @@ func TestRouterMihomoSwitch(t *testing.T) {
 	expectXrayUntouched("return")
 
 	// release: Mihomo уходит на прежний профиль — rt-sw-a, а не на исходный (A6).
-	rtSwExpectKernel(t, tg, e.rtSwCall("release", ""), rtSwA, pid)
+	rtSwExpectKernel(t, tg.Core, e.rtSwCall("release", ""), rtSwA, pid)
 	expectApplied("release")
 	m.taken = false
 	if !rtSwLinkOn(t, "profiles/"+rtSwA+".yaml") {
@@ -374,7 +376,7 @@ func TestRouterMihomoSwitchRollback(t *testing.T) {
 	e := rtNewSrc(t)
 	e.enableLayer()
 	e.rtRstIdle()
-	s := rtSwPrepare(t, e, tg, rtSwB)
+	s := rtSwPrepare(t, e, rtSwB)
 	rtCoresLiveMihomoTake(t, e, tg)
 	e.rtSwSeedKeys()
 
@@ -492,7 +494,7 @@ func TestRouterMihomoSwitchDraftOpen(t *testing.T) {
 	e := rtNewSrc(t)
 	e.enableLayer()
 	e.rtRstIdle()
-	s := rtSwPrepare(t, e, tg, rtSwC)
+	s := rtSwPrepare(t, e, rtSwC)
 	m := rtCoresLiveMihomoTake(t, e, tg)
 
 	t.Run("draft_open", func(t *testing.T) {
