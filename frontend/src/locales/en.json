@@ -4041,5 +4041,11 @@
   "logs.jump_latest": "Jump to latest",
   "svc.actions_for": "Actions: {name}",
   "svc.restart_hint": "The service stops for a few seconds; connections reconnect",
-  "svc.stop_hint": "Proxying through this service stops until it is started again"
+  "svc.stop_hint": "Proxying through this service stops until it is started again",
+  "settings.tab_general_desc": "Language, theme, accent color, status widget, behavior",
+  "settings.tab_updates_desc": "Panel version and updates",
+  "settings.tab_security_desc": "Password, session length, active sessions",
+  "settings.tab_connection_desc": "Mihomo API address and secret",
+  "settings.tab_backups_desc": "Config file copies and snapshots",
+  "settings.tab_about_desc": "Version, links and system info"
 }
