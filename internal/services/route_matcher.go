@@ -55,6 +55,7 @@ type ruleProviderDef struct {
 	Format   string   `yaml:"format"`
 	Path     string   `yaml:"path"`
 	URL      string   `yaml:"url"`
+	Proxy    string   `yaml:"proxy"`
 	Payload  []string `yaml:"payload"`
 }
 

@@ -30,7 +30,10 @@ type RuleProviderInfo struct {
 	Format   string `json:"format"`
 	// URL is shown without query string and credentials: rule-set links are
 	// usually public, but the query may carry a token.
-	URL        string `json:"url,omitempty"`
+	URL string `json:"url,omitempty"`
+	// Proxy is the proxy or group the provider downloads through, as declared
+	// in the profile (a node name, no secrets).
+	Proxy      string `json:"proxy,omitempty"`
 	Path       string `json:"path,omitempty"`
 	FileExists bool   `json:"file_exists"`
 	FileSize   int64  `json:"file_size,omitempty"`
@@ -72,6 +75,7 @@ func (s *RouteTracerService) ListRuleProviders() ([]RuleProviderInfo, error) {
 			Behavior: strings.ToLower(def.Behavior),
 			Format:   strings.ToLower(def.Format),
 			URL:      redactProviderURL(def.URL),
+			Proxy:    def.Proxy,
 		}
 		if info.Type == "inline" {
 			info.Inline = len(def.Payload)
