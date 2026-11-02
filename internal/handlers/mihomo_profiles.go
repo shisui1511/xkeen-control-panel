@@ -51,6 +51,7 @@ func (a *API) SetMihomoProfileService(svc *services.MihomoProfileService) {
 	// старым PID не засчитывается, один PID должен продержаться RestartStableWindow
 	// (то же подтверждение, что у конвейера «Применить»).
 	svc.RunningPID = a.mihomoRunningPID
+	svc.ReturnTarget = a.mihomoReturnTarget
 	svc.Healthy = func(oldPID int) bool {
 		if a.kernelSvc == nil {
 			return true
@@ -109,6 +110,16 @@ func (a *API) validateMihomoContent(data []byte) error {
 	return nil
 }
 
+// mihomoReturnTarget — профиль, на который вернётся Mihomo при отпускании; пусто,
+// когда слой выключен или панель Mihomo не владеет. Читается при каждом обращении к
+// сервису профилей: владение меняется применением, а не перезапуском панели.
+func (a *API) mihomoReturnTarget() string {
+	if a.configLayer == nil {
+		return ""
+	}
+	return a.configLayer.MihomoReturnTarget()
+}
+
 // mihomoRunningPID — PID работающего процесса Mihomo, 0 — не запущен. По
 // процессам, без определения версии: опрос не ждёт конца операции XKeen.
 func (a *API) mihomoRunningPID() int {
@@ -145,6 +156,42 @@ func (a *API) profileActivationResult(res *services.ActivationResult) profileAct
 		out.Outcome = string(preview)
 	}
 	return out
+}
+
+// activateByOwner ведёт «Сделать активным» по владельцу Mihomo, когда слой
+// «Конфигурация» включён. Панель владеет Mihomo — переход идёт через конвейер
+// (ActivateProfile под замком применения): черновик не затрагивается, при открытом
+// ответ 409 draft_open. Панель не владеет, но черновик хочет взять Mihomo (желание
+// есть, файл ещё не переключён) — тоже 409 draft_open: иначе «Применить» взял бы
+// профиль, который пользователь только что выбрал. Смена одного своего профиля на
+// другой черновика не касается и идёт обычной активацией. Возвращает true, когда
+// ответ уже записан.
+func (a *API) activateByOwner(w http.ResponseWriter, r *http.Request, name string) bool {
+	if a.configLayer == nil || !a.configLayer.Enabled() || a.routing == nil {
+		return false
+	}
+	if a.configLayer.MihomoTaken() {
+		if services.IsReservedProfileName(name) {
+			JSONErrorCode(w, http.StatusBadRequest, "profile_reserved", a.t(r, "profiles.err_reserved"))
+			return true
+		}
+		view, err := a.routing.ActivateProfile(context.WithoutCancel(r.Context()), name)
+		switch {
+		case errors.Is(err, configlayer.ErrDraftOpen):
+			JSONErrorCode(w, http.StatusConflict, "draft_open", a.t(r, "profiles.err_draft_open"))
+		case err != nil:
+			a.writeRoutingError(w, r, err)
+		default:
+			a.ClearCapabilitiesCache()
+			JSONSuccess(w, mihomoSwitchResult(view, name, panelMihomoProfileName))
+		}
+		return true
+	}
+	if st, err := a.configLayer.ReadState(); err == nil && configlayer.DesiredRouting(st.Draft).ManagedFor(configlayer.KernelMihomo) {
+		JSONErrorCode(w, http.StatusConflict, "draft_open", a.t(r, "profiles.err_draft_open"))
+		return true
+	}
+	return false
 }
 
 type mihomoProfileRequest struct {
@@ -207,6 +254,11 @@ func (a *API) MihomoProfileAction(w http.ResponseWriter, r *http.Request) {
 	case "adopt":
 		err = svc.Adopt(req.Name)
 	case "activate":
+		// Слой включён: путь выбирает владелец Mihomo (D-06, D-08). Ответ записан —
+		// дальше нечего делать.
+		if a.activateByOwner(w, r, req.Name) {
+			return
+		}
 		// Активация перезапускает ядро: под общим замком жизненного цикла, до
 		// переключения ссылки config.yaml. create/rename/delete/adopt ядро не трогают.
 		if !a.tryLifecycleLock(w, r) {
@@ -214,7 +266,13 @@ func (a *API) MihomoProfileAction(w http.ResponseWriter, r *http.Request) {
 		}
 		defer a.lifecycleMu.Unlock()
 		var res *services.ActivationResult
-		res, err = svc.Activate(req.Name)
+		if a.configLayer != nil && a.configLayer.Enabled() {
+			// Слой включён: обычный config.yaml XKeen переезжает в profiles/ внутри
+			// активации (D-27). Выключен — прежнее поведение: ErrProfilesUnmanaged.
+			res, err = svc.ActivateAdopting(req.Name)
+		} else {
+			res, err = svc.Activate(req.Name)
+		}
 		if err == nil {
 			a.ClearCapabilitiesCache()
 			result = a.profileActivationResult(res)
@@ -227,9 +285,15 @@ func (a *API) MihomoProfileAction(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, services.ErrProfileInvalidName):
 		JSONError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, services.ErrProfileReserved):
+		JSONErrorCode(w, http.StatusBadRequest, "profile_reserved", a.t(r, "profiles.err_reserved"))
 	case errors.Is(err, services.ErrProfileNotFound):
 		JSONError(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, services.ErrProfileExists), errors.Is(err, services.ErrProfileActive), errors.Is(err, services.ErrProfilesUnmanaged):
+	case errors.Is(err, services.ErrProfileExists):
+		JSONErrorCode(w, http.StatusConflict, "profile_exists", err.Error())
+	case errors.Is(err, services.ErrProfileReturnTarget):
+		JSONErrorCode(w, http.StatusConflict, "profile_return_target", a.t(r, "profiles.err_return_target"))
+	case errors.Is(err, services.ErrProfileActive), errors.Is(err, services.ErrProfilesUnmanaged):
 		JSONError(w, http.StatusConflict, err.Error())
 	case err != nil:
 		JSONError(w, http.StatusInternalServerError, err.Error())
