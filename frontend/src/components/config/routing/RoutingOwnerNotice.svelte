@@ -17,11 +17,27 @@
 
   // Плашка владельца маршрутизации на вкладках «Группы» и «Правила» (D-01…D-07): пока
   // управляет XKeen — предупреждение с кнопкой взятия; после взятия — строка с «Отпустить
-  // маршрутизацию». Ядер нет — плашки нет. Решения принимает сервер: плашка читает снимок слоя.
+  // маршрутизацию». Ядер нет — плашки нет. Пока Mihomo на своём профиле, под основной строкой
+  // стоит строка D-07: настройки этих вкладок для Mihomo не действуют; без Xray остаётся только
+  // она. Решения принимает сервер: плашка читает снимок слоя.
   let { tab }: { tab: 'groups' | 'rules' } = $props();
 
   const kind = $derived($ownerState.kind);
   const blocked = $derived($routingBusy || $applyRunning);
+
+  // Строка о своём профиле Mihomo зависит только от него, не от kind плашки
+  const ownProfile = $derived($ownerState.mihomoOwnProfile);
+  // Xray не установлен, Mihomo на своём профиле: брать и отпускать на этих вкладках нечего
+  const showMain = $derived(!(ownProfile !== '' && !$ownerState.xrayInstalled));
+
+  // Разделитель, по которому текст с именем профиля режется на часть до и после имени
+  const NAME_TOKEN = '\u0001name\u0001';
+  const ownParts = $derived.by<[string, string]>(() => {
+    const [before, after = ''] = $t('cfg.routing.mihomo_own_profile', {
+      name: NAME_TOKEN
+    }).split(NAME_TOKEN);
+    return [before, after];
+  });
 
   // Имя файла в плашке: первый файл routing Xray, который уйдёт в копии, иначе файл по
   // умолчанию; без Xray — активный профиль Mihomo
@@ -38,7 +54,7 @@
   }
 
   $effect(() => {
-    if (kind === 'xkeen' || kind === 'pending') untrack(loadFile);
+    if (showMain && (kind === 'xkeen' || kind === 'pending')) untrack(loadFile);
   });
 
   let takeOpen = $state(false);
@@ -119,7 +135,7 @@
   </div>
 {/if}
 
-{#if kind === 'xkeen' || kind === 'pending'}
+{#if showMain && (kind === 'xkeen' || kind === 'pending')}
   <div
     class="alert alert-warning ro-notice"
     data-testid="routing-notice"
@@ -156,7 +172,7 @@
       {/if}
     </div>
   </div>
-{:else if kind === 'panel'}
+{:else if showMain && kind === 'panel'}
   <div class="ro-panel" data-testid="routing-notice" data-owner="panel">
     <span class="ro-ok"><Icon name="check" size={16} /></span>
     <span class="ro-panel-text">{$t('cfg.routing.notice_panel')}</span>
@@ -171,6 +187,24 @@
     >
       {$t('cfg.routing.release_btn')}
     </Button>
+  </div>
+{/if}
+
+{#if ownProfile !== ''}
+  <div class="ro-own" role="status" data-testid="routing-mihomo-own-profile">
+    <span class="ro-own-icon"><Icon name="info" size={16} /></span>
+    <div class="ro-own-body">
+      <span class="ro-own-text">
+        {ownParts[0]}<span class="ro-own-name">{ownProfile}</span>{ownParts[1]}
+      </span>
+      <a
+        class="ro-own-link"
+        href={configSubTabHash('cores')}
+        data-testid="routing-mihomo-profiles-link"
+      >
+        {$t('cfg.prof.title')}
+      </a>
+    </div>
   </div>
 {/if}
 
@@ -227,6 +261,52 @@
   .ro-panel-text {
     min-width: 0;
     overflow-wrap: anywhere;
+  }
+
+  .ro-own {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-2);
+    min-width: 0;
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+    color: var(--fg-secondary);
+  }
+
+  .ro-own-icon {
+    display: inline-flex;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .ro-own-body {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    min-width: 0;
+  }
+
+  .ro-own-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .ro-own-name {
+    font-family: var(--font-family-mono);
+    overflow-wrap: anywhere;
+  }
+
+  .ro-own-link {
+    color: var(--accent-text);
+    font-weight: 600;
+  }
+
+  @media (max-width: 768px) {
+    .ro-own-link {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+    }
   }
 
   @media (max-width: 480px) {

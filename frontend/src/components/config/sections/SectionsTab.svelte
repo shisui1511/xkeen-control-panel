@@ -211,7 +211,7 @@
           </div>
         {/if}
         {#if k === 'mihomo' && view.profile}
-          <MihomoProfileNotice profile={view.profile} />
+          <MihomoProfileNotice profile={view.profile} stopped={!view.running} />
         {/if}
         <div class="cores-sections" data-testid="cores-sections-{k}">
           {#each ordered(view) as sec (sec.id)}

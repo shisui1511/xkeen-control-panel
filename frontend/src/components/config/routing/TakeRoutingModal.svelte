@@ -10,10 +10,11 @@
     fetchTakeover,
     loadRouting,
     routingView,
+    type TakeScope,
     type TakeoverPreview
   } from '../../../lib/configRouting';
   import PresetModal from '../rules/PresetModal.svelte';
-  import { takeIntoDraft, applyFromUi } from './routingOwner';
+  import { takeIntoDraft, applyFromUi, ownerState } from './routingOwner';
 
   // Диалог взятия маршрутизации (D-01, D-02, D-43, D-44). Показывает, какие файлы routing
   // Xray уйдут в копии, какие останутся на месте и какой профиль Mihomo запомнится, и только
@@ -22,13 +23,18 @@
   // правилах без взятия: взятие сразу применяется либо применяются только узлы. Если список
   // правил пуст, «Взять» открывает диалог пресета (D-04): он сам берёт маршрутизацию в черновике
   // вместе с выбранным пресетом либо, при закрытии без выбора, с пустым списком правил.
+  // Область scope (D-07): mihomo — с плашки профиля, показана и берётся только секция Mihomo;
+  // all — с «Правил», оба ядра, но пока Mihomo на своём профиле, секции Mihomo нет и берётся
+  // только Xray: взятие оттуда профиль не возвращает. Показанное и берётся — одно и то же.
   let {
     open,
     mode = 'take',
+    scope = 'all',
     onclose
   }: {
     open: boolean;
     mode?: 'take' | 'intercept';
+    scope?: 'all' | 'mihomo';
     onclose: () => void;
   } = $props();
 
@@ -73,8 +79,13 @@
     else untrack(reset);
   });
 
-  const xray = $derived(preview?.xray ?? null);
-  const mihomo = $derived(preview?.mihomo ?? null);
+  // Область запроса: что показано, то и берётся
+  const ownProfile = $derived($ownerState.mihomoOwnProfile !== '');
+  const takeScope = $derived<TakeScope>(
+    scope === 'mihomo' ? 'mihomo' : ownProfile ? 'xray' : 'all'
+  );
+  const xray = $derived(takeScope === 'mihomo' ? null : (preview?.xray ?? null));
+  const mihomo = $derived(takeScope === 'xray' ? null : (preview?.mihomo ?? null));
   const moveFiles = $derived(xray?.move ?? []);
   const leftFiles = $derived(xray?.left ?? []);
   const warnings = $derived(xray?.warnings ?? []);
@@ -110,7 +121,7 @@
         presetStep = true;
         return;
       }
-      const ok = await takeIntoDraft();
+      const ok = await takeIntoDraft(takeScope);
       if (ok && mode === 'intercept') await applyFromUi();
     } finally {
       busy = false;
@@ -138,7 +149,7 @@
   dataTestid="take-routing-modal"
   onclose={close}
 >
-  <div class="tr-body" data-mode={mode}>
+  <div class="tr-body" data-mode={mode} data-scope={takeScope}>
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
       class="tr-scroll"
@@ -242,7 +253,7 @@
   </div>
 </Modal>
 
-<PresetModal open={presetStep} {mode} onclose={presetDone} />
+<PresetModal open={presetStep} {mode} scope={takeScope} onclose={presetDone} />
 
 <style>
   .tr-body {
