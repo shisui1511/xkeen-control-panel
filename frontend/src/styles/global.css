@@ -1573,6 +1573,7 @@ body.drawer-locked {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.65);
+  -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
   z-index: 300;
   display: flex;
@@ -3054,6 +3055,7 @@ a.chip:hover {
   opacity: 0.65;
   transition: opacity 0.15s ease-in-out;
   background: var(--bg-card);
+  -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   padding: 4px;
   border-radius: var(--radius-sm, 6px);
@@ -3177,6 +3179,7 @@ a.chip:hover {
   box-shadow:
     0 12px 36px -8px rgba(0, 0, 0, 0.65),
     0 0 0 1px rgba(41, 194, 240, 0.15);
+  -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   min-width: 320px;
   max-width: 90vw;

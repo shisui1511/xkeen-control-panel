@@ -1794,6 +1794,7 @@
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.5);
+    -webkit-backdrop-filter: blur(2px);
     backdrop-filter: blur(2px);
     z-index: 100;
     animation: drawer-backdrop-in 180ms ease-out;
