@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -301,4 +302,253 @@ func rtTplContainsKey(added []any, key string) bool {
 		}
 	}
 	return false
+}
+
+// --- копия профиля панели (D-04, D-11) -----------------------------------------------
+
+const (
+	rtCpCopy = "rt-copy"
+	rtCpBad  = "rt-copy-bad"
+	rtCpUser = "rt-copy-user"
+	rtCpConf = "rt-copy-conf"
+	rtCpSrc  = "rt-cp-src"
+)
+
+// rtCpRemove убирает профили и копии списков сценария (остатки прошлого прогона и свои).
+func rtCpRemove() {
+	for _, pat := range []string{
+		filepath.Join(rtRtMihomoDir, "profiles", "rt-copy*.yaml"),
+		filepath.Join(rtRtMihomoDir, "profiles", rtCpSrc+".yaml"),
+		filepath.Join(rtRtMihomoDir, "rule_providers", "rt-copy*.txt"),
+	} {
+		files, _ := filepath.Glob(pat)
+		for _, f := range files {
+			_ = os.Remove(f)
+		}
+	}
+}
+
+// rtCpListPaths — пути списков правил профиля панели вида ./rule_providers/xcp-<имя>.txt.
+func rtCpListPaths(text string) []string {
+	return regexp.MustCompile(`\./rule_providers/xcp-[a-z0-9][a-z0-9-]*\.txt`).FindAllString(text, -1)
+}
+
+// rtCpDuplicateKey — строка верхнего уровня, которую ядро считает известным ключом:
+// её повтор в конце файла ядро отвергает (поле задано дважды).
+func rtCpDuplicateKey(t *testing.T, content string) string {
+	t.Helper()
+	for _, key := range []string{"mode", "log-level", "mixed-port", "allow-lan", "ipv6"} {
+		if m := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(key) + `:[ \t]+\S.*$`).FindString(content); m != "" {
+			return m
+		}
+	}
+	t.Fatal("в профиле панели нет известного скалярного ключа верхнего уровня для повтора")
+	return ""
+}
+
+// rtCpExists — файл есть на диске.
+func rtCpExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// Трасса: маршрутизация Mihomo взята (группа и правило со списком dat, поэтому у профиля
+// панели есть свои файлы списков) → копия xcp-main: ссылок на rule_providers/xcp- нет,
+// рядом rule_providers/rt-copy-*.txt побайтно равные оригиналам, узлы по-прежнему из
+// proxy_providers/xcp-*; отказ `mihomo -t` не оставляет ни профиля, ни копий; отпускание
+// удаляет файлы xcp-* списков, копия и её списки остаются и принимаются mihomo -t;
+// при отпущенном — 409 panel_absent; копия профиля пользователя и обычного config.yaml
+// побайтная. Метки ядра нет: взятие идёт при любом активном ядре.
+func TestRouterProfileCopyPanel(t *testing.T) {
+	tg := routertest.Current(t)
+	if _, err := os.Stat(rtSaveBinary); err != nil {
+		t.Skip("Mihomo не установлен на стенде")
+	}
+	e := rtNewSrc(t)
+	e.enableLayer()
+	e.rtRstIdle()
+	rtCpRemove()
+	t.Cleanup(rtCpRemove)
+
+	// Список dat: самый короткий доменный список из каталога панели.
+	lr := e.call(http.MethodGet, rtRoutingBase+"/lists", nil)
+	if lr.Status != http.StatusOK {
+		t.Fatalf("GET lists: %d %s", lr.Status, lr.Code)
+	}
+	var ref map[string]any
+	best := 0.0
+	entries, _ := lr.object(t)["lists"].([]any)
+	for _, it := range entries {
+		m, _ := it.(map[string]any)
+		n, _ := m["count"].(float64)
+		if m != nil && m["kind"] == "site" && n > 0 && (ref == nil || n < best) {
+			ref, best = m, n
+		}
+	}
+	if ref == nil {
+		t.Fatal("в каталоге списков нет доменного списка dat")
+	}
+
+	m := rtCoresLiveMihomoTakeDraft(t, e, tg)
+	save := e.call(http.MethodPost, rtRoutingBase+"/groups/save", map[string]any{
+		"revision": e.rtRtRevision(),
+		"group": map[string]any{
+			"name": "rt-copy-group", "mode": "manual",
+			"sources": map[string]any{"all": true},
+			"members": []map[string]string{{"kind": "direct"}},
+		},
+	})
+	if save.Status != http.StatusOK {
+		t.Fatalf("groups/save: %d %s", save.Status, save.Code)
+	}
+	gid, _ := save.object(t)["group"].(map[string]any)["id"].(string)
+	rule := e.call(http.MethodPost, rtRoutingBase+"/rules/save", map[string]any{
+		"revision": e.rtRtRevision(),
+		"rule": map[string]any{
+			"enabled": true,
+			"conds": []map[string]any{{
+				"type": "geosite", "values": []string{},
+				"lists": []map[string]any{{"file": ref["file"], "tag": ref["tag"], "kind": ref["kind"]}},
+			}},
+			"target": map[string]string{"kind": "group", "id": gid},
+		},
+	})
+	if rule.Status != http.StatusOK {
+		t.Fatalf("rules/save со списком: %d %s", rule.Status, rule.Code)
+	}
+	e.rtRtApplyOK("взятие маршрутизации Mihomo со списком")
+
+	panelFile := rtTplProfilePath("xcp-main")
+	panel, err := os.ReadFile(panelFile)
+	if err != nil {
+		t.Fatalf("профиль панели не записан: %v", err)
+	}
+	panelSum := rtRtSum(panel)
+	paths := rtCpListPaths(string(panel))
+	if len(paths) == 0 {
+		t.Fatal("в профиле панели нет файлов списков rule_providers/xcp-*: сценарию нечего копировать")
+	}
+	originals := map[string][]byte{}
+	for _, p := range paths {
+		list := strings.TrimSuffix(strings.TrimPrefix(p, "./rule_providers/xcp-"), ".txt")
+		raw, rerr := os.ReadFile(filepath.Join(rtRtMihomoDir, "rule_providers", "xcp-"+list+".txt"))
+		if rerr != nil {
+			t.Fatalf("файл списка %s не записан панелью: %v", p, rerr)
+		}
+		originals[list] = raw
+	}
+
+	// Предпросмотр и копия при профиле панели на диске.
+	if pv := e.call(http.MethodGet, "/api/mihomo/profiles/preview?from=xcp-main", nil); pv.Status != http.StatusOK || pv.object(t)["kind"] != "copy_panel" {
+		t.Errorf("предпросмотр xcp-main: %d %q, ожидалось kind copy_panel", pv.Status, pv.Code)
+	}
+	r := e.callSlow(http.MethodPost, "/api/mihomo/profiles/create", map[string]string{"name": rtCpCopy, "from": "xcp-main"})
+	if r.Status != http.StatusOK {
+		t.Fatalf("копия xcp-main: %d %s %s", r.Status, r.Code, r.Detail)
+	}
+	got := rtTplReadProfile(t, rtCpCopy)
+	if strings.Contains(got, "rule_providers/xcp-") {
+		t.Error("в копии остались ссылки на rule_providers/xcp-*")
+	}
+	if !strings.Contains(got, "proxy_providers/xcp-my.yaml") {
+		t.Error("в копии нет ссылки на proxy_providers/xcp-my.yaml: узлы должны оставаться ссылками")
+	}
+	for list, want := range originals {
+		path := filepath.Join(rtRtMihomoDir, "rule_providers", rtCpCopy+"-"+list+".txt")
+		have, rerr := os.ReadFile(path)
+		if rerr != nil {
+			t.Errorf("копия списка %s не записана: %v", list, rerr)
+			continue
+		}
+		if !bytes.Equal(have, want) {
+			t.Errorf("копия списка %s отличается от оригинала", list)
+		}
+		if !strings.Contains(got, "./rule_providers/"+rtCpCopy+"-"+list+".txt") {
+			t.Errorf("в копии не переписан путь списка %s", list)
+		}
+	}
+	rtTplRealCheck(t, rtCpCopy)
+	if after, _ := os.ReadFile(panelFile); rtRtSum(after) != panelSum {
+		t.Error("копирование изменило профиль панели")
+	}
+
+	// Отказ mihomo -t: у настоящего файла панели его не воспроизвести, поэтому в файл
+	// дописывается повтор известного ключа; панельный файл возвращается сразу же.
+	info, err := os.Stat(panelFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore := func() { _ = os.WriteFile(panelFile, panel, info.Mode().Perm()) }
+	t.Cleanup(restore)
+	broken := append(append([]byte{}, panel...), []byte("\n"+rtCpDuplicateKey(t, string(panel))+"\n")...)
+	if err := os.WriteFile(panelFile, broken, info.Mode().Perm()); err != nil {
+		t.Fatalf("профиль панели не изменён: %v", err)
+	}
+	bad := e.callSlow(http.MethodPost, "/api/mihomo/profiles/create", map[string]string{"name": rtCpBad, "from": "xcp-main"})
+	restore()
+	if bad.Status != http.StatusUnprocessableEntity || bad.Code != "profile_invalid" {
+		t.Errorf("копия с отказом ядра: %d %q, ожидалось 422 profile_invalid", bad.Status, bad.Code)
+	}
+	if rtCpExists(rtTplProfilePath(rtCpBad)) {
+		t.Error("отказ ядра оставил файл профиля")
+	}
+	if left, _ := filepath.Glob(filepath.Join(rtRtMihomoDir, "rule_providers", rtCpBad+"-*.txt")); len(left) > 0 {
+		t.Errorf("отказ ядра оставил копий списков: %d", len(left))
+	}
+
+	// Отпустить и применить: файлы списков панели удалены, копия самостоятельна.
+	if !m.rtCoresLiveRelease(t) {
+		t.FailNow()
+	}
+	for _, p := range paths {
+		if rtCpExists(filepath.Join(rtRtMihomoDir, strings.TrimPrefix(p, "./"))) {
+			t.Errorf("после отпускания остался файл списка панели %s", p)
+		}
+	}
+	for list, want := range originals {
+		have, rerr := os.ReadFile(filepath.Join(rtRtMihomoDir, "rule_providers", rtCpCopy+"-"+list+".txt"))
+		if rerr != nil || !bytes.Equal(have, want) {
+			t.Errorf("после отпускания копия списка %s потеряна или изменена", list)
+		}
+	}
+	rtTplRealCheck(t, rtCpCopy)
+
+	// Профиля панели нет: копия и предпросмотр отвечают 409 panel_absent.
+	if rtCpExists(panelFile) {
+		t.Fatal("после отпускания файл профиля панели остался")
+	}
+	if r := e.callSlow(http.MethodPost, "/api/mihomo/profiles/create", map[string]string{"name": rtCpBad, "from": "xcp-main"}); r.Status != http.StatusConflict || r.Code != "panel_absent" {
+		t.Errorf("копия xcp-main без файла: %d %q, ожидалось 409 panel_absent", r.Status, r.Code)
+	}
+	if r := e.call(http.MethodGet, "/api/mihomo/profiles/preview?from=xcp-main", nil); r.Status != http.StatusConflict || r.Code != "panel_absent" {
+		t.Errorf("предпросмотр xcp-main без файла: %d %q, ожидалось 409 panel_absent", r.Status, r.Code)
+	}
+
+	// Копия профиля пользователя и обычного config.yaml — побайтная.
+	srcText := "mixed-port: 7891\nmode: rule\nproxies: []\nproxy-groups: []\nrules:\n  - MATCH,DIRECT\n"
+	if err := os.WriteFile(rtTplProfilePath(rtCpSrc), []byte(srcText), 0o600); err != nil {
+		t.Fatalf("профиль-источник не записан: %v", err)
+	}
+	if pv := e.call(http.MethodGet, "/api/mihomo/profiles/preview?from="+rtCpSrc, nil); pv.Status != http.StatusOK || pv.object(t)["kind"] != "copy_user" {
+		t.Errorf("предпросмотр профиля пользователя: %d %q, ожидалось kind copy_user", pv.Status, pv.Code)
+	}
+	if r := e.callSlow(http.MethodPost, "/api/mihomo/profiles/create", map[string]string{"name": rtCpUser, "from": rtCpSrc}); r.Status != http.StatusOK {
+		t.Fatalf("копия профиля пользователя: %d %s", r.Status, r.Code)
+	}
+	if rtTplReadProfile(t, rtCpUser) != srcText || rtTplReadProfile(t, rtCpSrc) != srcText {
+		t.Error("копия профиля пользователя не побайтная или источник изменён")
+	}
+	conf, err := os.ReadFile(filepath.Join(rtRtMihomoDir, "config.yaml"))
+	if err != nil {
+		t.Fatalf("config.yaml не читается: %v", err)
+	}
+	if pv := e.call(http.MethodGet, "/api/mihomo/profiles/preview?from=config.yaml", nil); pv.Status != http.StatusOK || pv.object(t)["kind"] != "copy_user" {
+		t.Errorf("предпросмотр config.yaml: %d %q, ожидалось kind copy_user", pv.Status, pv.Code)
+	}
+	if r := e.callSlow(http.MethodPost, "/api/mihomo/profiles/create", map[string]string{"name": rtCpConf, "from": "config.yaml"}); r.Status != http.StatusOK {
+		t.Fatalf("копия config.yaml: %d %s", r.Status, r.Code)
+	}
+	if rtTplReadProfile(t, rtCpConf) != string(conf) {
+		t.Error("копия config.yaml не побайтная")
+	}
 }

@@ -195,6 +195,10 @@ func (a *API) activateByOwner(w http.ResponseWriter, r *http.Request, name strin
 	return false
 }
 
+// mihomoPlainConfigName — обычный файл config.yaml XKeen в списке профилей: источник
+// копии «как есть».
+const mihomoPlainConfigName = "config.yaml"
+
 type mihomoProfileRequest struct {
 	Name    string `json:"name"`
 	NewName string `json:"new_name"`
@@ -294,11 +298,55 @@ type profilePreviewResponse struct {
 	UnixUnsupported bool `json:"unix_unsupported"`
 }
 
-// MihomoProfilePreview handles GET /api/mihomo/profiles/preview?template=<файл>:
-// подстановка шаблона в памяти без записи на диск.
+// previewCopy отвечает на предпросмотр копии: ?from=<имя> (диалог создания). Копия
+// профиля панели — kind copy_panel, файла нет — 409 panel_absent (D-11); копия
+// профиля пользователя и обычного config.yaml — kind copy_user. Диск не меняется.
+func (a *API) previewCopy(w http.ResponseWriter, r *http.Request, from string) {
+	if a.mihomoProfileSvc == nil {
+		JSONError(w, http.StatusServiceUnavailable, "profile service unavailable")
+		return
+	}
+	resp := profilePreviewResponse{Kind: "copy_user", Added: []string{}}
+	switch from {
+	case panelMihomoProfileName:
+		if _, err := os.Stat(filepath.Join(a.cfg.MihomoConfigDir, "profiles", panelMihomoProfileName+".yaml")); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				JSONErrorCode(w, http.StatusConflict, "panel_absent", a.t(r, "profiles.err_panel_absent"))
+				return
+			}
+			JSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		resp.Kind = "copy_panel"
+	case mihomoPlainConfigName:
+	default:
+		if _, err := a.mihomoProfileSvc.ReadProfile(from); err != nil {
+			switch {
+			case errors.Is(err, services.ErrProfileInvalidName):
+				JSONError(w, http.StatusBadRequest, err.Error())
+			case errors.Is(err, services.ErrProfileReserved):
+				JSONErrorCode(w, http.StatusBadRequest, "profile_reserved", a.t(r, "profiles.err_reserved"))
+			case errors.Is(err, services.ErrProfileNotFound):
+				JSONError(w, http.StatusNotFound, err.Error())
+			default:
+				JSONError(w, http.StatusInternalServerError, err.Error())
+			}
+			return
+		}
+	}
+	JSONSuccess(w, resp)
+}
+
+// MihomoProfilePreview handles GET /api/mihomo/profiles/preview?template=<файл> или
+// ?from=<имя>: подстановка шаблона в памяти либо предпросмотр копии, без записи на
+// диск.
 func (a *API) MihomoProfilePreview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	if from := r.URL.Query().Get("from"); from != "" {
+		a.previewCopy(w, r, from)
 		return
 	}
 	plan, ok := a.planMihomoTemplate(w, r, r.URL.Query().Get("template"))
@@ -361,7 +409,18 @@ func (a *API) MihomoProfileAction(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		unlock := a.lockMihomoFiles()
-		err = svc.Create(req.Name, req.From, req.Empty)
+		switch {
+		case req.Empty:
+			err = svc.Create(req.Name, "", true)
+		case req.From == panelMihomoProfileName:
+			// Копия профиля панели самостоятельна: списки правил копируются рядом (D-04).
+			err = svc.CopyPanelProfile(req.Name)
+		case req.From == mihomoPlainConfigName:
+			// Обычный config.yaml XKeen — копия действующего файла (побайтно).
+			err = svc.Create(req.Name, "", false)
+		default:
+			err = svc.Create(req.Name, req.From, false)
+		}
 		unlock()
 	case "rename":
 		err = svc.Rename(req.Name, req.NewName)
@@ -407,6 +466,8 @@ func (a *API) MihomoProfileAction(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, services.ErrProfileReserved):
 		JSONErrorCode(w, http.StatusBadRequest, "profile_reserved", a.t(r, "profiles.err_reserved"))
+	case errors.Is(err, services.ErrPanelProfileAbsent):
+		JSONErrorCode(w, http.StatusConflict, "panel_absent", a.t(r, "profiles.err_panel_absent"))
 	case errors.Is(err, services.ErrProfileNotFound):
 		JSONError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, services.ErrProfileExists):

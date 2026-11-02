@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -32,6 +34,9 @@ var (
 	// ErrProfileReturnTarget — профиль служит целью возврата Mihomo, пока им
 	// управляет панель: удалять и переименовывать его нельзя (D-12).
 	ErrProfileReturnTarget = errors.New("profile is the return target of Mihomo")
+	// ErrPanelProfileAbsent — файла профиля панели (xcp-main.yaml) сейчас нет:
+	// копировать нечего (D-11).
+	ErrPanelProfileAbsent = errors.New("panel profile file is absent")
 
 	// ErrRestartSkipped — Restart решил не перезапускать ядро: под замком
 	// применения оно оказалось остановленным или неактивным. Активация
@@ -379,6 +384,156 @@ func (s *MihomoProfileService) CreateFromContent(name string, data []byte) error
 		return err
 	}
 	return utils.AtomicWriteFile(dst, data, 0o600)
+}
+
+// panelRuleListRe — путь списка правил, который панель пишет сама: имя после xcp-
+// подчиняется тому же правилу, что имена файлов панели (латиница в нижнем регистре,
+// цифры и дефис). Другие пути копия не трогает.
+var panelRuleListRe = regexp.MustCompile(`^\./rule_providers/xcp-([a-z0-9][a-z0-9-]*)\.txt$`)
+
+// panelRuleListPaths возвращает пути списков правил профиля панели вида
+// ./rule_providers/xcp-<имя>.txt (без повторов, в порядке появления). Разбор — yaml.v3,
+// только ради rule-providers.*.path.
+func panelRuleListPaths(data []byte) ([]string, error) {
+	var doc struct {
+		Providers yaml.Node `yaml:"rule-providers"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, err
+	}
+	node := &doc.Providers
+	if node.Kind == yaml.AliasNode && node.Alias != nil {
+		node = node.Alias
+	}
+	var out []string
+	seen := map[string]bool{}
+	if node.Kind != yaml.MappingNode {
+		return nil, nil
+	}
+	for i := 1; i < len(node.Content); i += 2 {
+		def := node.Content[i]
+		if def.Kind != yaml.MappingNode {
+			continue
+		}
+		for j := 0; j+1 < len(def.Content); j += 2 {
+			if def.Content[j].Value != "path" {
+				continue
+			}
+			p := def.Content[j+1].Value
+			if panelRuleListRe.MatchString(p) && !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+	}
+	return out, nil
+}
+
+// CopyPanelProfile копирует профиль панели в профиль пользователя (D-04). Копия
+// самостоятельна: файлы списков правил rule_providers/xcp-<имя>.txt копируются рядом
+// в rule_providers/<профиль>-<имя>.txt (права 0600), пути в копии переписаны, а
+// списки замирают на момент копии. Файлы узлов proxy_providers/xcp-* остаются
+// ссылками: они переживают отпускание. Нет исходного файла списка — путь переписан
+// всё равно, файл появится у ядра. Результат проходит ValidateContent; отказ или сбой
+// записи — ни файла профиля, ни копий списков не остаётся. Нет профиля панели —
+// ErrPanelProfileAbsent.
+func (s *MihomoProfileService) CopyPanelProfile(name string) (err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	dst, err := s.profilePath(name)
+	if err != nil {
+		return err
+	}
+	if isReservedProfileName(name) {
+		return ErrProfileReserved
+	}
+	if _, err := os.Stat(dst); err == nil {
+		return ErrProfileExists
+	}
+	src, err := s.profilePath(panelProfileName)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrPanelProfileAbsent
+		}
+		return err
+	}
+	paths, err := panelRuleListPaths(data)
+	if err != nil {
+		// Файл панели не разбирается: копия отвергнута как профиль с ошибкой.
+		return &ProfileInvalidError{Output: err.Error()}
+	}
+
+	text := string(data)
+	listDir := filepath.Join(s.dir, "rule_providers")
+	var written []string
+	defer func() {
+		if err != nil {
+			for _, f := range written {
+				_ = os.Remove(f)
+			}
+		}
+	}()
+	for _, old := range paths {
+		// Имя части после xcp- уже проверено panelRuleListRe: путь собирается из
+		// проверенного имени профиля и проверенного имени списка, выйти за
+		// rule_providers он не может.
+		list := panelRuleListRe.FindStringSubmatch(old)[1]
+		newRel := "./rule_providers/" + name + "-" + list + ".txt"
+		text = strings.ReplaceAll(text, old, newRel)
+		body, rerr := os.ReadFile(filepath.Join(listDir, "xcp-"+list+".txt"))
+		if rerr != nil {
+			if errors.Is(rerr, os.ErrNotExist) {
+				continue
+			}
+			return rerr
+		}
+		if err = os.MkdirAll(listDir, 0o755); err != nil {
+			return err
+		}
+		target := filepath.Join(listDir, name+"-"+list+".txt")
+		if err = utils.AtomicWriteFile(target, body, 0o600); err != nil {
+			return err
+		}
+		written = append(written, target)
+	}
+
+	result := []byte(text)
+	if s.ValidateContent != nil {
+		if err = s.ValidateContent(result); err != nil {
+			if out, ok := strings.CutPrefix(err.Error(), "mihomo -t: "); ok {
+				err = &ProfileInvalidError{Output: out}
+			}
+			return err
+		}
+	}
+	if err = os.MkdirAll(s.profilesDir(), 0o755); err != nil {
+		return err
+	}
+	return utils.AtomicWriteFile(dst, result, 0o600)
+}
+
+// ReadProfile возвращает содержимое профиля пользователя. Имя проверяется как у
+// остальных операций; профиль панели (xcp-*) этим путём не читается.
+func (s *MihomoProfileService) ReadProfile(name string) ([]byte, error) {
+	path, err := s.profilePath(name)
+	if err != nil {
+		return nil, err
+	}
+	if isReservedProfileName(name) {
+		return nil, ErrProfileReserved
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrProfileNotFound
+		}
+		return nil, err
+	}
+	return data, nil
 }
 
 // Rename renames a profile; renaming the active one re-points config.yaml.
