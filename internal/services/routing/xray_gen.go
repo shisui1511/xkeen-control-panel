@@ -88,9 +88,9 @@ type xrayGen struct{ s *Service }
 func (xrayGen) ID() string { return xrayGenID }
 
 // Generate выдаёт файлы маршрутизации Xray. Xray не установлен или желаемое
-// routing.managed=false — файлов нет (D-01): панель маршрутизацией не владеет.
+// routing не под управлением панели для Xray (ManagedFor) — файлов нет (D-01, D-06).
 func (g xrayGen) Generate(in configlayer.Input, installed configlayer.InstalledKernels) ([]configlayer.GeneratedFile, error) {
-	if !installed.Xray || !configlayer.DesiredRouting(in.Sections).Managed {
+	if !installed.Xray || !configlayer.DesiredRouting(in.Sections).ManagedFor(configlayer.KernelXray) {
 		return nil, nil
 	}
 	return g.s.generateXray(in, installed)

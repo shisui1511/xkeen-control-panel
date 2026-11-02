@@ -518,7 +518,7 @@ func (s *Service) viewXray(v *KernelView, st configlayer.StateView) error {
 		v.ForceProxy = &ForceProxyView{
 			Tags:     tags,
 			Group:    desired[configlayer.SectionXrayInbounds].ForceProxyGroup,
-			Editable: configlayer.DesiredRouting(st.Draft).Managed,
+			Editable: configlayer.DesiredRouting(st.Draft).ManagedFor(configlayer.KernelXray),
 		}
 	}
 	return nil
@@ -527,7 +527,7 @@ func (s *Service) viewXray(v *KernelView, st configlayer.StateView) error {
 func (s *Service) viewMihomo(v *KernelView, st configlayer.StateView) error {
 	snap := s.d.Layer.Snapshot()
 	desired := configlayer.DesiredCores(st.Draft)
-	routingManaged := configlayer.DesiredRouting(st.Draft).Managed
+	routingManaged := configlayer.DesiredRouting(st.Draft).ManagedFor(configlayer.KernelMihomo)
 	taken := snap.Routing.Mihomo != nil && snap.Routing.Mihomo.Taken
 	name, data, _, perr := s.d.Layer.MihomoActiveProfile()
 
@@ -774,7 +774,7 @@ func editablePrev(kernel, id string, cs configlayer.CoreSection, st configlayer.
 		}
 		return cs.Value, nil
 	}
-	if !cs.Managed && !configlayer.DesiredRouting(st.Draft).Managed {
+	if !cs.Managed && !configlayer.DesiredRouting(st.Draft).ManagedFor(configlayer.KernelMihomo) {
 		return nil, errCode(codeSectionNotManaged)
 	}
 	if !cs.Managed || isEmptyValue(cs.Value) {

@@ -313,7 +313,8 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 	if err != nil {
 		return SelectResult{}, err
 	}
-	if !configlayer.DesiredRouting(st.Applied).Managed {
+	desired := configlayer.DesiredRouting(st.Applied)
+	if !desired.AnyManaged() {
 		return SelectResult{}, ErrGroupNotApplied
 	}
 	am, err := s.appliedModelOf(st)
@@ -336,7 +337,8 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 		configlayer.KernelXray:   selNotInstalled,
 		configlayer.KernelMihomo: selNotInstalled,
 	}}
-	if am.installed.Xray {
+	// Выбор идёт только в ядро, которым управляет панель (D-06).
+	if am.installed.Xray && desired.ManagedFor(configlayer.KernelXray) {
 		out, err := s.selectXray(ctx)
 		if err != nil {
 			s.restoreSelection(groupID, member, prev, had)
@@ -344,7 +346,7 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 		}
 		res.Kernels[configlayer.KernelXray] = out
 	}
-	if am.installed.Mihomo {
+	if am.installed.Mihomo && desired.ManagedFor(configlayer.KernelMihomo) {
 		res.Kernels[configlayer.KernelMihomo] = s.selectMihomo(ctx, groupID)
 	}
 	return res, nil
@@ -470,7 +472,7 @@ type mihomoSelEntry struct {
 // как генератор (имена групп и копий узлов). nil — Mihomo не установлен,
 // маршрутизацией не управляет панель или группы ниже порога версии (D-45).
 func (s *Service) mihomoBuildOf(st configlayer.StateView, installed configlayer.InstalledKernels) (*mihomoBuild, error) {
-	if !installed.Mihomo || !configlayer.DesiredRouting(st.Applied).Managed || !s.mihomoGroupsAvailable() {
+	if !installed.Mihomo || !configlayer.DesiredRouting(st.Applied).ManagedFor(configlayer.KernelMihomo) || !s.mihomoGroupsAvailable() {
 		return nil, nil
 	}
 	groups, err := parseGroups(st.Applied[GroupsSection])

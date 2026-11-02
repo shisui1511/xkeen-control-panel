@@ -1097,6 +1097,13 @@ func emptyGroups(groups []Group, nodes []sources.CatalogNode) map[string]bool {
 // не проверяются.
 func analyze(in configlayer.Input, installed configlayer.InstalledKernels, catalog catalogFunc, version versionFunc, ix *lists.Index) (issues, warnings []IssueView) {
 	issues, warnings = []IssueView{}, []IssueView{}
+	// Решение по ядрам (147.1, D-06): пока панель держит хотя бы одно ядро,
+	// проверка считает только ядра под управлением; при полном отпускании — все
+	// установленные, а проблемы становятся предупреждениями.
+	managed := configlayer.DesiredRouting(in.Sections).AnyManaged()
+	if managed {
+		installed = managedKernels(in.Sections, installed)
+	}
 	sectionBad := func(name string) {
 		issues = append(issues, IssueView{Code: issueSectionInvalid, Params: map[string]string{"section": name}, Key: "section:" + name})
 	}
@@ -1235,17 +1242,28 @@ func analyze(in configlayer.Input, installed configlayer.InstalledKernels, catal
 		if gderr == nil {
 			problems = append(problems, geodataRefProblems(rules.Items, gdraft, ix)...)
 		}
-		if configlayer.DesiredRouting(in.Sections).Managed {
+		if managed {
 			issues = append(issues, problems...)
 		} else {
 			warnings = append(warnings, problems...)
 		}
 		warnings = append(warnings, listWarns...)
 	}
-	if gerr == nil && configlayer.DesiredRouting(in.Sections).Managed {
+	if gerr == nil && managed {
 		issues = append(issues, forceProxyProblems(in, installed, groups.Items)...)
 	}
 	return issues, warnings
+}
+
+// managedKernels оставляет установленными только ядра, которыми управляет панель
+// (ManagedFor; хотя бы одно из них — AnyManaged): Mihomo на своём профиле не даёт проблем групп и force-proxy,
+// блокирующих «Применить» для Xray, и наоборот (147.1, D-06).
+func managedKernels(s configlayer.Sections, installed configlayer.InstalledKernels) configlayer.InstalledKernels {
+	desired := configlayer.DesiredRouting(s)
+	return configlayer.InstalledKernels{
+		Xray:   installed.Xray && desired.ManagedFor(configlayer.KernelXray),
+		Mihomo: installed.Mihomo && desired.ManagedFor(configlayer.KernelMihomo),
+	}
 }
 
 // forceProxyProblems — force_proxy_group_missing для каждого установленного ядра,
@@ -1332,7 +1350,7 @@ func listProblems(items []Rule, installed configlayer.InstalledKernels, ix *list
 }
 
 // routingChecker — проверка до записи (configlayer.Checker). При желаемом
-// routing.managed=false ничего не блокирует: группы не материализуются,
+// отпущенных обоих ядрах ничего не блокирует: группы не материализуются,
 // «Применить только узлы» разрешено (D-01).
 type routingChecker struct{ s *Service }
 
@@ -1341,7 +1359,7 @@ func (routingChecker) ID() string { return checkerID }
 // Check отдаёт блокирующие проблемы модели. Диск не читает: каталог источников
 // мемоизирован в sources.
 func (c routingChecker) Check(in configlayer.Input, installed configlayer.InstalledKernels) []configlayer.BuildIssue {
-	if !configlayer.DesiredRouting(in.Sections).Managed {
+	if !configlayer.DesiredRouting(in.Sections).AnyManaged() {
 		return nil
 	}
 	issues, _ := analyze(in, installed, c.s.d.Sources.Catalog, c.s.d.KernelVersion, c.s.d.Lists)
