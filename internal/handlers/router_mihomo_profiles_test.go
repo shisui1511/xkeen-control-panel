@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
@@ -590,5 +591,199 @@ func TestRouterProfileNames(t *testing.T) {
 	}
 	if !rtSwLinkOn(t, "profiles/"+rtNamesC+".yaml") {
 		t.Errorf("переименование активного профиля не повело ссылку на %s", rtNamesC)
+	}
+}
+
+const (
+	rtPlainA = "rt-plain-a"
+	// rtPlainMode — права обычного config.yaml сценария: отличаются от прав профилей
+	// панели (0600), чтобы откат был проверяем по правам.
+	rtPlainMode = os.FileMode(0o640)
+	rtKeepName  = "config-xkeen"
+)
+
+// rtPlainSet делает config.yaml обычным файлом с содержимым data и правами rtPlainMode
+// (временный файл рядом и переименование поверх ссылки или файла).
+func rtPlainSet(t *testing.T, s *rtSwStand, data []byte) {
+	t.Helper()
+	tmp := s.cfg + ".rt-plain"
+	_ = os.Remove(tmp)
+	if err := os.WriteFile(tmp, data, rtPlainMode); err != nil {
+		t.Fatalf("временный config.yaml: %v", err)
+	}
+	if err := os.Chmod(tmp, rtPlainMode); err != nil {
+		t.Fatalf("права config.yaml: %v", err)
+	}
+	if err := os.Rename(tmp, s.cfg); err != nil {
+		_ = os.Remove(tmp)
+		t.Fatalf("config.yaml обычным файлом: %v", err)
+	}
+}
+
+// rtPlainExpectFile сверяет, что config.yaml — обычный файл с теми же байтами и правами.
+func rtPlainExpectFile(t *testing.T, s *rtSwStand, label string, want []byte) {
+	t.Helper()
+	info, err := os.Lstat(s.cfg)
+	if err != nil {
+		t.Errorf("%s: config.yaml не читается: %v", label, err)
+		return
+	}
+	if !info.Mode().IsRegular() {
+		t.Errorf("%s: config.yaml не обычный файл (%s)", label, info.Mode())
+		return
+	}
+	if info.Mode().Perm() != rtPlainMode {
+		t.Errorf("%s: права config.yaml %v, ожидались %v", label, info.Mode().Perm(), rtPlainMode)
+	}
+	if got, err := os.ReadFile(s.cfg); err != nil || !bytes.Equal(got, want) {
+		t.Errorf("%s: содержимое config.yaml изменилось: %v", label, err)
+	}
+}
+
+// rtPlainKept — профили config-xkeen* каталога profiles/.
+func rtPlainKept(s *rtSwStand) []string {
+	files, _ := filepath.Glob(filepath.Join(s.profDir, rtKeepName+"*.yaml"))
+	return files
+}
+
+// Перенос обычного config.yaml внутри активации (D-27): при включённом слое активация
+// профиля на обычном файле XKeen одной операцией переносит файл в
+// profiles/config-xkeen.yaml (содержимое то же), config.yaml ведёт на выбранный профиль,
+// adopted называет копию; вернуться можно активацией config-xkeen; при занятом имени —
+// суффикс -2. Отказ запуска (ветка mihomo, процесс гасится) возвращает обычный файл с
+// теми же байтами и правами и убирает копию. При выключенном слое активация на обычном
+// файле — 409, adopt работает. Метка ядра: сценарий читает активное ядро и проверяет его
+// процесс. Вид config.yaml и файлы config-xkeen* возвращает rtSwPrepare.
+func TestRouterProfileActivatePlain(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	e := rtNewSrc(t)
+	e.enableLayer()
+	e.rtRstIdle()
+	s := rtOwnPrepare(t, e, "rt-plain-", rtPlainA)
+	plain := append(append([]byte{}, s.data...), []byte("\n# rt-plain: прежний файл XKeen\n")...)
+	keepPath := func(name string) string { return s.profile(name) }
+
+	// Перенос обычного файла.
+	rtPlainSet(t, s, plain)
+	pid := rtRstKernelPID(t, tg.Core)
+	res := e.rtOwnActivate(rtPlainA)
+	pid = rtSwExpectKernel(t, tg.Core, res, rtPlainA, pid)
+	if got, _ := res["adopted"].(string); got != rtKeepName {
+		t.Fatalf("adopted %q, ожидался %s", got, rtKeepName)
+	}
+	if got, err := os.ReadFile(keepPath(rtKeepName)); err != nil || !bytes.Equal(got, plain) {
+		t.Errorf("копия %s не совпадает побайтно с прежним config.yaml: %v", rtKeepName, err)
+	}
+	if !rtSwLinkOn(t, "profiles/"+rtPlainA+".yaml") {
+		t.Fatalf("после активации config.yaml не указывает на %s", rtPlainA)
+	}
+
+	// Возврат активацией config-xkeen: ссылка, переноса уже нет.
+	res = e.rtOwnActivate(rtKeepName)
+	pid = rtSwExpectKernel(t, tg.Core, res, rtKeepName, pid)
+	if got, _ := res["adopted"].(string); got != "" {
+		t.Errorf("активация config-xkeen: adopted %q, ожидался пустой", got)
+	}
+	if !rtSwLinkOn(t, "profiles/"+rtKeepName+".yaml") {
+		t.Fatalf("после возврата config.yaml не указывает на %s", rtKeepName)
+	}
+
+	// Коллизия: имя config-xkeen занято, копия получает суффикс.
+	rtPlainSet(t, s, plain)
+	res = e.rtOwnActivate(rtPlainA)
+	pid = rtSwExpectKernel(t, tg.Core, res, rtPlainA, pid)
+	if got, _ := res["adopted"].(string); got != rtKeepName+"-2" {
+		t.Fatalf("adopted %q при занятом имени, ожидался %s-2", got, rtKeepName)
+	}
+	if got, err := os.ReadFile(keepPath(rtKeepName + "-2")); err != nil || !bytes.Equal(got, plain) {
+		t.Errorf("копия %s-2 не совпадает побайтно: %v", rtKeepName, err)
+	}
+
+	// Отказ запуска: пока config.yaml указывает на rt-plain-a, процесс гасится.
+	if tg.Core == "mihomo" {
+		rtPlainSet(t, s, plain)
+		kept := rtPlainKept(s)
+		ctx, cancel := context.WithCancel(context.Background())
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tick := time.NewTicker(time.Second)
+			defer tick.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-tick.C:
+				}
+				target, err := os.Readlink(s.cfg)
+				if err != nil || filepath.Base(target) != rtPlainA+".yaml" {
+					continue
+				}
+				pids, _ := rtRstKernelPIDs("mihomo")
+				for _, p := range pids {
+					_ = syscall.Kill(p, syscall.SIGKILL)
+				}
+			}
+		}()
+		t.Cleanup(func() {
+			cancel()
+			wg.Wait()
+		})
+		pidBefore := rtRstKernelPID(t, "mihomo")
+		r := e.callSlow(http.MethodPost, rtPrfActivate, map[string]string{"name": rtPlainA})
+		cancel()
+		wg.Wait()
+		if r.Status != http.StatusOK {
+			t.Fatalf("activate %s: %d %s", rtPlainA, r.Status, r.Code)
+		}
+		out := r.object(t)
+		if rb, _ := out["rolled_back"].(bool); !rb {
+			t.Fatalf("rolled_back=false при погашенном процессе: restarted=%v", out["restarted"])
+		}
+		if msg, _ := out["error"].(string); msg == "" {
+			t.Error("после отката текст error пуст")
+		}
+		if got, _ := out["adopted"].(string); got != "" {
+			t.Errorf("после отката adopted %q, ожидался пустой", got)
+		}
+		rtPlainExpectFile(t, s, "после отката", plain)
+		if got := rtPlainKept(s); !reflect.DeepEqual(got, kept) {
+			t.Errorf("после отката набор config-xkeen* изменился: было %v, стало %v", kept, got)
+		}
+		var pidAfter int
+		deadline := time.Now().Add(2 * time.Minute)
+		for time.Now().Before(deadline) {
+			if pids, _ := rtRstKernelPIDs("mihomo"); len(pids) == 1 {
+				pidAfter = pids[0]
+				break
+			}
+			time.Sleep(time.Second)
+		}
+		if pidAfter == 0 {
+			t.Fatal("после отката Mihomo не запущен")
+		}
+		if pidAfter == pidBefore {
+			t.Fatalf("PID mihomo не сменился (%d): процесс не перезапускался", pidBefore)
+		}
+		rtRstHoldPID(t, "mihomo", pidAfter)
+	}
+
+	// Слой выключен: активация на обычном файле отказывает, adopt работает (CUT-01).
+	e.setLayer(false)
+	rtPlainSet(t, s, plain)
+	r := e.callSlow(http.MethodPost, rtPrfActivate, map[string]string{"name": rtPlainA})
+	if r.Status != http.StatusConflict {
+		t.Errorf("активация на обычном файле при выключенном слое: %d %s, ожидался 409", r.Status, r.Code)
+	}
+	rtPlainExpectFile(t, s, "после отказа при выключенном слое", plain)
+	if a := e.call(http.MethodPost, "/api/mihomo/profiles/adopt", map[string]string{"name": "rt-plain-adopt"}); a.Status != http.StatusOK {
+		t.Fatalf("adopt при выключенном слое: %d %s", a.Status, a.Code)
+	}
+	if !rtSwLinkOn(t, "profiles/rt-plain-adopt.yaml") {
+		t.Error("после adopt config.yaml не указывает на rt-plain-adopt")
+	}
+	if got, err := os.ReadFile(s.profile("rt-plain-adopt")); err != nil || !bytes.Equal(got, plain) {
+		t.Errorf("adopt: содержимое профиля не совпадает с прежним config.yaml: %v", err)
 	}
 }

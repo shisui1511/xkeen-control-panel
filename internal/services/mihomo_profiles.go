@@ -47,6 +47,13 @@ const (
 	reservedProfilePrefix = "xcp-"
 	// panelProfileName — профиль панели в каталоге profiles/.
 	panelProfileName = "xcp-main"
+	// xkeenProfileBase — основа имени, под которым прежний обычный config.yaml XKeen
+	// переезжает в profiles/ при активации (D-27). Пакет services не импортирует
+	// configlayer (цикл): значение и суффиксы совпадают с configlayer.XKeenProfileBase
+	// и FreeProfileRel.
+	xkeenProfileBase = "config-xkeen"
+	// maxProfileSuffix — наибольший суффикс -N у свободного имени.
+	maxProfileSuffix = 99
 	// plainConfigName — имя обычного файла config.yaml в списке профилей.
 	plainConfigName = "config.yaml"
 
@@ -410,6 +417,9 @@ type ActivationResult struct {
 	Restarted  bool   `json:"restarted"`
 	RolledBack bool   `json:"rolled_back"`
 	Error      string `json:"error,omitempty"`
+	// Adopted — имя профиля, в который при активации переехал прежний обычный
+	// config.yaml XKeen (D-27); пусто, когда переезда не было или он откатан.
+	Adopted string `json:"adopted,omitempty"`
 }
 
 // Activate validates a profile, points config.yaml to it and restarts the
@@ -450,6 +460,118 @@ func (s *MihomoProfileService) activateLocked(name string) (*ActivationResult, e
 	}
 	undo := func() error { return s.pointConfigTo(previous) }
 	return s.restartConfirmed(&ActivationResult{Active: name}, previous, undo)
+}
+
+// ActivateAdopting — Activate, который принимает и обычный config.yaml XKeen
+// (D-27): файл одной операцией переезжает в profiles/config-xkeen.yaml (содержимое
+// то же, при занятом имени — суффикс -2…-99), config.yaml становится ссылкой на
+// выбранный профиль. Не запустилось — возвращается всё: прежний обычный файл с теми же
+// байтами и правами, копия удалена. Вернуться на прежний файл можно активацией
+// config-xkeen.
+func (s *MihomoProfileService) ActivateAdopting(name string) (*ActivationResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	info, lerr := os.Lstat(s.configPath())
+	if lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+		return s.activateLocked(name)
+	}
+	if lerr != nil && !errors.Is(lerr, os.ErrNotExist) {
+		return nil, lerr
+	}
+	if lerr == nil && !info.Mode().IsRegular() {
+		return nil, ErrProfilesUnmanaged
+	}
+	path, err := s.profilePath(name)
+	if err != nil {
+		return nil, err
+	}
+	if isReservedProfileName(name) {
+		return nil, ErrProfileReserved
+	}
+	if _, err := os.Stat(path); err != nil {
+		return nil, ErrProfileNotFound
+	}
+	previous := ""
+	if lerr == nil {
+		previous = plainConfigName
+	}
+	if err := s.validatePath(path); err != nil {
+		return &ActivationResult{Active: previous, Error: err.Error()}, nil
+	}
+
+	cfg := s.configPath()
+	var (
+		keep string
+		undo func() error
+	)
+	if lerr == nil {
+		data, err := os.ReadFile(cfg)
+		if err != nil {
+			return nil, err
+		}
+		if keep = s.freeProfileName(xkeenProfileBase); keep == "" {
+			return nil, ErrProfileExists
+		}
+		keepPath, err := s.profilePath(keep)
+		if err != nil {
+			return nil, err
+		}
+		if err := os.MkdirAll(s.profilesDir(), 0o755); err != nil {
+			return nil, err
+		}
+		if err := utils.AtomicWriteFile(keepPath, data, 0o600); err != nil {
+			return nil, err
+		}
+		perm := info.Mode().Perm()
+		undo = func() error {
+			// Прежний обычный файл: временный файл рядом и переименование поверх ссылки.
+			tmp := cfg + ".xcp-restore"
+			_ = os.Remove(tmp)
+			if err := os.WriteFile(tmp, data, perm); err != nil {
+				_ = os.Remove(tmp)
+				return err
+			}
+			if err := os.Chmod(tmp, perm); err != nil {
+				_ = os.Remove(tmp)
+				return err
+			}
+			if err := os.Rename(tmp, cfg); err != nil {
+				_ = os.Remove(tmp)
+				return err
+			}
+			return os.Remove(keepPath)
+		}
+		if err := s.pointConfigTo(name); err != nil {
+			_ = os.Remove(keepPath)
+			return nil, err
+		}
+	} else {
+		if err := s.pointConfigTo(name); err != nil {
+			return nil, err
+		}
+		undo = func() error { return os.Remove(cfg) }
+	}
+	res, err := s.restartConfirmed(&ActivationResult{Active: name}, previous, undo)
+	if res != nil && keep != "" && !res.RolledBack {
+		res.Adopted = keep
+	}
+	return res, err
+}
+
+// freeProfileName возвращает первое свободное имя base[-N] (N от 2 до 99) в
+// profiles/; занятость — по Lstat, оборванная ссылка тоже занимает имя. Свободного
+// имени нет — пустая строка. Поведение как у configlayer.FreeProfileRel.
+func (s *MihomoProfileService) freeProfileName(base string) string {
+	for n := 1; n <= maxProfileSuffix; n++ {
+		name := base
+		if n > 1 {
+			name = fmt.Sprintf("%s-%d", base, n)
+		}
+		if _, err := os.Lstat(filepath.Join(s.profilesDir(), name+".yaml")); errors.Is(err, os.ErrNotExist) {
+			return name
+		}
+	}
+	return ""
 }
 
 // restartConfirmed перезапускает Mihomo после переключения config.yaml и ждёт новый

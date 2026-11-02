@@ -266,7 +266,13 @@ func (a *API) MihomoProfileAction(w http.ResponseWriter, r *http.Request) {
 		}
 		defer a.lifecycleMu.Unlock()
 		var res *services.ActivationResult
-		res, err = svc.Activate(req.Name)
+		if a.configLayer != nil && a.configLayer.Enabled() {
+			// Слой включён: обычный config.yaml XKeen переезжает в profiles/ внутри
+			// активации (D-27). Выключен — прежнее поведение: ErrProfilesUnmanaged.
+			res, err = svc.ActivateAdopting(req.Name)
+		} else {
+			res, err = svc.Activate(req.Name)
+		}
 		if err == nil {
 			a.ClearCapabilitiesCache()
 			result = a.profileActivationResult(res)
