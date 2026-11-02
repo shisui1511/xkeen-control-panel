@@ -17,6 +17,7 @@
   } from '../../../lib/configProfiles';
   import TakeRoutingModal from '../routing/TakeRoutingModal.svelte';
   import { activateOwnProfile, confirmMihomoReturn, routingBusy } from '../routing/routingOwner';
+  import NewProfileModal from './NewProfileModal.svelte';
   import ProfileRow from './ProfileRow.svelte';
 
   // Карточка «Профили» во вкладке Mihomo (PART-02, PART-03, D-06…D-12, D-24, D-27): профиль
@@ -24,7 +25,7 @@
   // «Сделать активным» с подтверждением по переходу, переименование и удаление. Решения
   // принимает сервер: владельца, цель возврата и блокировку черновиком отдаёт список и снимок
   // слоя, карточка их только отражает. Диалоги «Новый профиль» и «Заполнить из профиля»
-  // подключает следующий план через openNew и openFill.
+  // открываются через openNew и openFill.
   // running — Mihomo запущен; panelPrimary — над карточкой плашка с primary «Управлять в
   // панели», тогда «Новый профиль» становится secondary: на первом экране одна акцентная кнопка.
   let { running, panelPrimary }: { running: boolean; panelPrimary: boolean } = $props();
@@ -44,6 +45,9 @@
   let busyKey = $state<string | null>(null);
   let takeOpen = $state(false);
   let takeBusy = $state(false);
+  let newOpen = $state(false);
+  let newMode = $state<'template' | 'copy'>('template');
+  let newFrom = $state('');
 
   // Номер запроса: поздний ответ устаревшего чтения не затирает свежий
   let seq = 0;
@@ -104,10 +108,34 @@
 
   // --- Диалоги следующего плана ---
 
-  /** «Новый профиль»: из шаблона или копией профиля from. Диалог добавит план 147.1-22. */
+  /** «Новый профиль»: из шаблона или копией профиля from. */
   function openNew(mode: 'template' | 'copy', from = ''): void {
-    void mode;
-    void from;
+    newMode = mode;
+    newFrom = from;
+    newOpen = true;
+  }
+
+  /**
+   * Профиль создан: список из ответа, фокус на новой строке и тост с «Сделать активным».
+   * Профиль сам не активируется: действие тоста открывает то же подтверждение, что кнопка строки.
+   */
+  async function created(name: string, state: ProfilesState): Promise<void> {
+    profiles = state;
+    loadFailed = false;
+    await tick();
+    document.querySelector<HTMLElement>(`[data-testid="profile-row-${CSS.escape(name)}"]`)?.focus();
+    const tr = $t;
+    showToast('success', tr('profiles.created', { name }), 10000, {
+      label: tr('cfg.prof.activate'),
+      onClick: () => {
+        // Переход идёт применением через панель: открытый черновик его блокирует (D-08)
+        if (activateBlocked) {
+          showToast('warning', tr('cfg.prof.draft_block'), 6000);
+          return;
+        }
+        void activate(name);
+      }
+    });
   }
 
   /** «Заполнить из профиля» (секции профиля панели). Диалог добавит план 147.1-22. */
@@ -347,6 +375,14 @@
     </a>
   </div>
 </section>
+
+<NewProfileModal
+  bind:open={newOpen}
+  startMode={newMode}
+  startFrom={newFrom}
+  {profiles}
+  oncreated={created}
+/>
 
 <TakeRoutingModal open={takeOpen} mode="take" scope="mihomo" onclose={() => (takeOpen = false)} />
 

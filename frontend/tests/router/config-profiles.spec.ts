@@ -460,6 +460,85 @@ test('profiles: профиль без API', { tag: CORE_TAG }, async ({ page }) 
   await guard.assertClean();
 });
 
+// --- Диалоги «Новый профиль» и «Заполнить из профиля» ---
+
+const MIHOMO_DIR = '/opt/etc/mihomo';
+
+/** Текст файла роутера через API панели; null — файла нет. */
+async function readText(page: Page, path: string): Promise<string | null> {
+  const res = await page.evaluate(async (p) => {
+    const r = await fetch(`/api/config/read?path=${encodeURIComponent(p)}`, {
+      headers: { 'X-CSRF-Token': localStorage.getItem('csrf_token') ?? '' }
+    });
+    return { status: r.status, text: await r.text() };
+  }, path);
+  if (res.status === 404) return null;
+  expect(res.status, `чтение ${path}`).toBe(200);
+  return res.text;
+}
+
+/** «Новый профиль» открыт кнопкой шапки, сводка пришла с сервера. */
+async function openNewDialog(page: Page) {
+  await page.getByTestId('profiles-new').click();
+  const dialog = page.getByTestId('new-profile-modal');
+  await expect(dialog).toBeVisible({ timeout: T.action });
+  await expect(page.getByTestId('new-profile-summary-loading')).toHaveCount(0, {
+    timeout: T.page
+  });
+  await expect(page.getByTestId('new-profile-summary')).toBeVisible();
+  return dialog;
+}
+
+test('profiles: новый профиль из шаблона', async ({ page }) => {
+  test.setTimeout(T.save * 4);
+  test.skip(initial === null, 'Mihomo не установлен');
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  await resetDraft(page);
+  await openCores(page);
+  const before = await standState(page);
+
+  const dialog = await openNewDialog(page);
+  // восемь шаблонов, по умолчанию Rule-Based
+  await expect(dialog.locator('[data-testid^="new-profile-template-"]')).toHaveCount(8);
+  await expect(page.getByTestId('new-profile-template-rule-based')).toBeChecked();
+  await page.getByTestId('new-profile-template-zkeen').check();
+  await expect(page.getByTestId('new-profile-template-zkeen')).toBeChecked();
+
+  // сводка видна до создания; без имени создание недоступно
+  const summary = page.getByTestId('new-profile-summary');
+  await expect(summary).toContainText(startOf('cfg.prof.sum_check'));
+  await expect(summary).toContainText(startOf('cfg.prof.sum_added'));
+  const confirm = page.getByTestId('new-profile-confirm');
+  await expect(confirm).toBeDisabled();
+
+  await page.getByTestId('new-profile-name').fill(`${PREFIX}tpl`);
+  await expect(confirm).toBeEnabled();
+  await confirm.click();
+
+  // диалог закрылся, строка в списке под фокусом, профиль не активировался
+  await expect(dialog).toBeHidden({ timeout: T.save });
+  const row = page.getByTestId(`profile-row-${PREFIX}tpl`);
+  await expect(row).toBeVisible({ timeout: T.page });
+  await expect(row).toHaveAttribute('data-active', 'false');
+  await expect(row).toBeFocused();
+  const toast = page.locator('.toast').filter({ hasText: `${PREFIX}tpl` });
+  await expect(toast).toBeVisible({ timeout: T.action });
+  await expect(toast.getByRole('button', { name: exactOf('cfg.prof.activate') })).toBeVisible();
+  const after = await standState(page);
+  expect(after.active, 'профиль сам не активируется').toBe(before.active);
+  expect(after.taken, 'владелец Mihomo не менялся').toBe(before.taken);
+
+  // файл профиля: панель дописала контроллер, подписка шаблона не попала в профиль
+  const text = await readText(page, `${MIHOMO_DIR}/profiles/${PREFIX}tpl.yaml`);
+  expect(text, 'файл профиля создан').not.toBeNull();
+  expect(text).toContain('external-controller-unix');
+  expect(text).not.toContain('example.com');
+
+  await guard.assertClean();
+});
+
 // --- Доступность и 390 px ---
 
 /**

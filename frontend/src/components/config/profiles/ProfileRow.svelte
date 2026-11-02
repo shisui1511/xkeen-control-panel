@@ -145,6 +145,7 @@
 <li
   class="pr"
   class:is-active={active}
+  tabindex="-1"
   aria-current={active ? 'true' : undefined}
   data-testid={kind === 'panel' ? 'profile-panel-row' : `profile-row-${name}`}
   data-owner={kind}
@@ -380,6 +381,12 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--bg-card-subtle);
+  }
+
+  /* Строка получает фокус программно после создания профиля (tabindex=-1) */
+  .pr:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   .pr.is-active {
