@@ -1094,7 +1094,9 @@
     padding: 6px 10px;
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition:
+      color var(--transition-fast),
+      background var(--transition-fast);
     display: inline-flex;
     align-items: center;
     justify-content: center;

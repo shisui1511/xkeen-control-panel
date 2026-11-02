@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick, untrack } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
-  import { fade, slide } from 'svelte/transition';
+  import { fade, slide } from './lib/motion.svelte';
   import { MediaQuery, SvelteSet } from 'svelte/reactivity';
   import { t, currentLang } from './i18n';
   import {

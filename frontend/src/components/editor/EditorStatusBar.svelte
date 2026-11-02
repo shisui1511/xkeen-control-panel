@@ -153,7 +153,10 @@
     background: var(--surface-tint);
     color: var(--fg-dim);
     cursor: pointer;
-    transition: all 0.15s;
+    transition:
+      color 0.15s,
+      background 0.15s,
+      border-color 0.15s;
     line-height: 1.3;
   }
 
@@ -228,7 +231,9 @@
     padding: 3px 8px;
     cursor: pointer;
     font-family: var(--font-family-mono);
-    transition: all 0.15s ease;
+    transition:
+      color 0.15s ease,
+      background 0.15s ease;
     margin-left: 6px;
   }
 

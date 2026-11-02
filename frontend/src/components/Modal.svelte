@@ -195,6 +195,7 @@
     justify-content: center;
     z-index: 1000;
     padding: 24px;
+    animation: modal-backdrop-in 160ms ease-out;
   }
   .modal-container {
     background: var(--bg-card);
@@ -210,6 +211,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    animation: modal-in var(--duration-move) var(--ease-out);
   }
   .modal-header {
     display: flex;
@@ -269,6 +271,20 @@
     }
     .modal-content {
       padding: 14px 16px;
+    }
+  }
+
+  /* Только появление: закрытие мгновенное, чтобы фокус и следующий диалог
+     не ждали уходящего окна. */
+  @keyframes modal-backdrop-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes modal-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.98);
     }
   }
 </style>

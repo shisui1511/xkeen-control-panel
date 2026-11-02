@@ -1178,7 +1178,10 @@
     background: var(--bg-elevated);
     color: var(--fg-primary);
     width: 200px;
-    transition: all 0.15s ease;
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease,
+      width 0.15s ease;
   }
 
   .search-input:focus {

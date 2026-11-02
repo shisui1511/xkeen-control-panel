@@ -23,6 +23,8 @@
 </script>
 
 <script lang="ts">
+  import { slidingIndicator } from '../lib/motion.svelte';
+
   interface Props {
     items: SegmentItem[];
     value: string;
@@ -47,7 +49,7 @@
   }
 </script>
 
-<div class="seg" role="group" aria-label={ariaLabel}>
+<div class="seg" role="group" aria-label={ariaLabel} {@attach slidingIndicator('.seg-item.active')}>
   {#each items as item (item.value)}
     <button
       type="button"
@@ -69,6 +71,8 @@
 
 <style>
   .seg {
+    position: relative;
+    isolation: isolate;
     display: inline-flex;
     border: 1px solid var(--border-control);
     border-radius: var(--radius-md);
@@ -106,6 +110,44 @@
   .seg-item.active {
     background: var(--accent);
     color: var(--btn-primary-text);
+  }
+
+  /* Подложка активного сегмента переезжает к выбранному. Пока позиция не измерена
+     (первый кадр, скрытый контейнер), фон рисует сам сегмент. */
+  .seg::before {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    top: 0;
+    left: 0;
+    width: var(--ind-w, 0);
+    height: var(--ind-h, 0);
+    transform: translate(var(--ind-x, 0), var(--ind-y, 0));
+    border-radius: var(--radius-md);
+    background: var(--accent);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .seg:global([data-indicator])::before {
+    opacity: 1;
+  }
+
+  .seg:global([data-indicator='animate'])::before {
+    transition:
+      transform var(--duration-move) var(--ease-out),
+      width var(--duration-move) var(--ease-out),
+      height var(--duration-move) var(--ease-out);
+  }
+
+  .seg:global([data-indicator]) .seg-item.active {
+    background: transparent;
+  }
+
+  .seg:global([data-indicator='animate']) .seg-item {
+    transition:
+      background var(--transition-fast),
+      color var(--duration-move) var(--ease-out);
   }
 
   .seg-item.partial {

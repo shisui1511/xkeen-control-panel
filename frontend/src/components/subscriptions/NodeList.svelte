@@ -654,7 +654,9 @@
     color: var(--fg-primary);
     font-size: var(--font-size-sm);
     font-family: inherit;
-    transition: all var(--transition-fast);
+    transition:
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast);
   }
 
   .node-search-input:focus {
@@ -718,7 +720,10 @@
     border: 1px solid var(--border);
     color: var(--fg-secondary);
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition:
+      color 0.15s ease,
+      background 0.15s ease,
+      border-color 0.15s ease;
   }
 
   .node-filter-chip:hover {
@@ -829,7 +834,10 @@
     margin-right: 12px;
     flex-shrink: 0;
     font-size: var(--font-size-lg);
-    transition: all var(--transition-fast);
+    transition:
+      color var(--transition-fast),
+      background var(--transition-fast),
+      border-color var(--transition-fast);
     color: var(--fg-secondary);
   }
 

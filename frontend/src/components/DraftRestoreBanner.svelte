@@ -78,7 +78,7 @@
     border-radius: var(--radius-md);
     margin-bottom: 16px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    animation: fadeIn var(--transition-fast, 0.2s) ease-out;
+    animation: fadeIn var(--duration-enter) var(--ease-out);
   }
 
   .banner-content {

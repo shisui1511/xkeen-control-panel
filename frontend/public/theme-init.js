@@ -2,7 +2,8 @@
 // Внешний файл, потому что CSP запрещает inline-скрипты (script-src 'self').
 // Список тем совпадает с THEMES в src/lib/theme.ts; источник правды
 // при монтировании приложения — initTheme()/initAccent() в src/main.ts.
-// Плотность (theme_density) не трогается.
+// Плотность (theme_density) не трогается. data-motion="reduced" — выключенные в настройках
+// анимации (src/lib/motion.svelte.ts), чтобы первый кадр не успел ничего проиграть.
 (function () {
   // id -> [схема, цвет строки браузера]
   var THEMES = {
@@ -14,9 +15,11 @@
   };
   var theme = '';
   var accent = '';
+  var animations = '';
   try {
     theme = localStorage.getItem('theme') || '';
     accent = localStorage.getItem('accent') || '';
+    animations = localStorage.getItem('animations') || '';
   } catch (e) {
     // localStorage недоступен (приватный режим, заблокированные cookies) — системная тема
   }
@@ -35,4 +38,5 @@
   if (accent === 'indigo' || accent === 'steel' || accent === 'graphite') {
     root.setAttribute('data-accent', accent);
   }
+  if (animations === 'false') root.setAttribute('data-motion', 'reduced');
 })();

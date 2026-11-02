@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { slide } from 'svelte/transition';
+  import { slide } from '../../lib/motion.svelte';
   import { t } from '../../i18n';
 
   interface DiffGroup {
@@ -200,7 +200,9 @@
     background: transparent;
     color: var(--fg-dim);
     border-radius: var(--radius);
-    transition: all 0.15s ease;
+    transition:
+      color 0.15s ease,
+      background 0.15s ease;
     width: 100%;
   }
 

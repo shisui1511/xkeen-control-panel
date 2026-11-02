@@ -2,6 +2,7 @@
   import { toastStore, type ToastItem } from '../stores';
   import Icon from '../lib/components/Icon.svelte';
   import { t } from '../i18n';
+  import { fly, flip, easeOut } from '../lib/motion.svelte';
 
   function dismiss(id: number) {
     toastStore.update((items) => items.filter((t) => t.id !== id));
@@ -17,8 +18,13 @@
 
 <div class="toast-container" role="region" aria-label={$t('app.notifications')}>
   {#each $toastStore as toast (toast.id)}
+    <!-- Вход справа, уход туда же; оставшиеся тосты съезжают на место ушедшего (flip),
+         а не прыгают. -->
     <div
       class="toast toast--{toast.type}"
+      in:fly={{ x: 24, duration: 220, easing: easeOut }}
+      out:fly={{ x: 24, duration: 160, opacity: 0 }}
+      animate:flip={{ duration: 220, easing: easeOut }}
       role={toast.type === 'error' ? 'alert' : 'status'}
       aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
       aria-atomic="true"
@@ -72,7 +78,6 @@
     border: 1px solid var(--border);
     box-shadow: 0 20px 36px -16px rgba(0, 0, 0, 0.6);
     pointer-events: all;
-    animation: toast-in 180ms ease;
     font-family: var(--font-family-sans);
     font-size: var(--font-size-sm);
     border-left-width: 3px;
@@ -143,16 +148,5 @@
   }
   .toast__close:hover {
     color: var(--fg-primary);
-  }
-
-  @keyframes toast-in {
-    from {
-      opacity: 0;
-      transform: translateX(12px);
-    }
-    to {
-      opacity: 1;
-      transform: translateX(0);
-    }
   }
 </style>

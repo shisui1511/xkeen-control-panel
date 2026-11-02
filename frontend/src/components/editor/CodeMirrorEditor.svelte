@@ -771,7 +771,13 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     color: var(--fg-primary);
-    transition: all var(--transition-fast, 150ms ease);
+    transition:
+      color var(--transition-fast, 150ms ease),
+      background-color var(--transition-fast, 150ms ease),
+      border-color var(--transition-fast, 150ms ease),
+      box-shadow var(--transition-fast, 150ms ease),
+      opacity var(--transition-fast, 150ms ease),
+      transform var(--transition-fast, 150ms ease);
   }
   :global(.cm-schema-enum-pill:hover) {
     border-color: var(--accent);

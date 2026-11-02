@@ -181,7 +181,10 @@
     font-size: var(--font-size-sm);
     font-weight: 600;
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition:
+      color var(--transition-fast),
+      background var(--transition-fast),
+      border-bottom-color var(--transition-fast);
   }
 
   .diag-tab-btn:hover {

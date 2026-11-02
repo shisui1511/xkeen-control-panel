@@ -147,7 +147,10 @@
     align-items: center;
     justify-content: center;
     background: var(--bg-card);
-    transition: all 0.15s ease;
+    transition:
+      color 0.15s ease,
+      background 0.15s ease,
+      border-color 0.15s ease;
   }
 
   .btn-icon:hover,
@@ -257,7 +260,10 @@
     border-radius: var(--radius-sm);
     color: var(--fg-secondary);
     cursor: pointer;
-    transition: all 0.12s ease;
+    transition:
+      color 0.12s ease,
+      background 0.12s ease,
+      border-color 0.12s ease;
   }
 
   .timeout-chip:hover {

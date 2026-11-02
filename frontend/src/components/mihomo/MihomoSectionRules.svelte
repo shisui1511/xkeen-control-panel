@@ -228,7 +228,9 @@
     font-size: var(--font-size-xs);
     padding: 4px 6px;
     border-radius: var(--radius-sm);
-    transition: all var(--transition-fast);
+    transition:
+      color var(--transition-fast),
+      background var(--transition-fast);
     display: inline-flex;
     align-items: center;
   }
@@ -291,7 +293,13 @@
     padding: 6px 12px;
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition:
+      color var(--transition-fast),
+      background-color var(--transition-fast),
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast),
+      opacity var(--transition-fast),
+      transform var(--transition-fast);
   }
 
   .btn-secondary {
