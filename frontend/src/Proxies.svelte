@@ -1220,6 +1220,8 @@
       anchorEl={quickSelect.anchor}
       onSelect={handleQuickSelect}
       onClose={() => (quickSelect = null)}
+      onTestAll={() => testGroupLatency(selectedGrp)}
+      testing={testingGroupNames.has(selectedGrp.name)}
     />
   {/if}
 {/if}

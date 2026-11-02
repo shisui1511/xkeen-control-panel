@@ -4047,5 +4047,7 @@
   "settings.tab_security_desc": "Пароль, время сессии, активные сеансы",
   "settings.tab_connection_desc": "Адрес и ключ доступа к API Mihomo",
   "settings.tab_backups_desc": "Копии файлов конфигурации и снимки",
-  "settings.tab_about_desc": "Версия, ссылки и сведения о системе"
+  "settings.tab_about_desc": "Версия, ссылки и сведения о системе",
+  "proxies.quick_select_test_all": "Проверить все",
+  "proxies.quick_select_testing": "Проверяем…"
 }

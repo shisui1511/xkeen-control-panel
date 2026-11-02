@@ -4047,5 +4047,7 @@
   "settings.tab_security_desc": "Password, session length, active sessions",
   "settings.tab_connection_desc": "Mihomo API address and secret",
   "settings.tab_backups_desc": "Config file copies and snapshots",
-  "settings.tab_about_desc": "Version, links and system info"
+  "settings.tab_about_desc": "Version, links and system info",
+  "proxies.quick_select_test_all": "Test all",
+  "proxies.quick_select_testing": "Testing…"
 }
