@@ -64,7 +64,7 @@
       {#if item.icon}
         <item.icon size={14} />
       {/if}
-      {item.label}
+      <span class="seg-label">{item.label}</span>
     </button>
   {/each}
 </div>
@@ -76,10 +76,47 @@
     display: inline-flex;
     border: 1px solid var(--border-control);
     border-radius: var(--radius-md);
+    max-width: 100%;
     overflow-x: auto;
     flex-wrap: nowrap;
     padding: 2px;
     gap: 2px;
+    scrollbar-width: none;
+  }
+
+  .seg::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Не влезающие сегменты листаются; край растворяется, пока за ним есть ещё */
+  @supports (animation-timeline: scroll()) {
+    .seg {
+      mask-image: linear-gradient(
+        to right,
+        transparent 0,
+        black var(--tabs-fade-l),
+        black calc(100% - var(--tabs-fade-r)),
+        transparent 100%
+      );
+      animation: seg-edge-fade linear both;
+      animation-timeline: scroll(self inline);
+    }
+  }
+
+  @keyframes seg-edge-fade {
+    0% {
+      --tabs-fade-l: 0px;
+      --tabs-fade-r: 28px;
+    }
+    8%,
+    92% {
+      --tabs-fade-l: 28px;
+      --tabs-fade-r: 28px;
+    }
+    100% {
+      --tabs-fade-l: 28px;
+      --tabs-fade-r: 0px;
+    }
   }
 
   .seg-item {

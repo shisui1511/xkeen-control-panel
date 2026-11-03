@@ -570,7 +570,6 @@
   .file-type-badge {
     font-size: var(--font-size-2xs);
     color: var(--fg-dim);
-    text-transform: uppercase;
   }
 
   .geoscan-results-container {

@@ -22,6 +22,9 @@
     anchorEl: HTMLElement | null;
     onSelect: (nodeName: string) => void;
     onClose: () => void;
+    /** Проверка задержки всех узлов группы (кнопка в шапке листа на телефоне). */
+    onTestAll?: () => void;
+    testing?: boolean;
   }
 
   let {
@@ -31,7 +34,9 @@
     currentNode,
     anchorEl,
     onSelect,
-    onClose
+    onClose,
+    onTestAll,
+    testing = false
   }: Props = $props();
 
   // popoverEl — обычная переменная: заполняется вложением popoverPosition, читается из
@@ -247,10 +252,18 @@
     };
   };
 
+  // На телефоне поиск не фокусируется сам: клавиатура закрыла бы половину
+  // списка, а чаще узел выбирают пальцем, не печатая
   const focusOnMount: Attachment<HTMLInputElement> = (node) => {
-    node.focus();
+    if (!window.matchMedia('(max-width: 768px)').matches) node.focus();
   };
 </script>
+
+{#if isBottomSheet}
+  <!-- Затемнение под листом: касание закрывает лист, как в системных листах -->
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div class="qs-scrim" aria-hidden="true" onclick={onClose}></div>
+{/if}
 
 <div
   {@attach popoverPosition}
@@ -274,6 +287,23 @@
       ontouchcancel={handleTouchEnd}
     >
       <div class="qs-drag-bar"></div>
+    </div>
+    <div class="qs-sheet-head">
+      <span class="qs-sheet-title">{groupName}</span>
+      {#if onTestAll}
+        <button type="button" class="qs-test-all" disabled={testing} onclick={() => onTestAll?.()}>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            aria-hidden="true"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" /></svg
+          >
+          {testing ? $t('proxies.quick_select_testing') : $t('proxies.quick_select_test_all')}
+        </button>
+      {/if}
     </div>
   {/if}
 
@@ -372,12 +402,72 @@
     bottom: 0 !important;
     top: auto !important;
     width: 100% !important;
-    max-height: 60vh !important;
+    max-height: 72dvh !important;
     border-radius: var(--radius-lg, 10px) var(--radius-lg, 10px) 0 0 !important;
     border-left: 0;
     border-right: 0;
     border-bottom: 0;
     animation: sheetUp var(--duration-move) var(--ease-out);
+  }
+
+  /* В листе список занимает всю высоту листа, низ — над полоской «домой» */
+  .qs-bottom-sheet .qs-list {
+    max-height: none;
+    padding-bottom: calc(4px + env(safe-area-inset-bottom));
+  }
+
+  .qs-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    background: rgba(3, 16, 30, 0.45);
+    animation: qsFade var(--duration-move) var(--ease-out);
+  }
+
+  @keyframes qsFade {
+    from {
+      opacity: 0;
+    }
+  }
+
+  .qs-sheet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 14px 8px;
+    background: var(--bg-elevated);
+  }
+
+  .qs-sheet-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--font-size-lg);
+    font-weight: 700;
+  }
+
+  .qs-test-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    min-height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-full);
+    background: var(--bg-card);
+    color: var(--accent-text);
+    font: inherit;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .qs-test-all:disabled {
+    opacity: 0.6;
+    cursor: progress;
   }
 
   .qs-drag-handle {
@@ -522,7 +612,8 @@
   }
 
   .lat {
-    font-family: var(--font-family-mono);
+    font-family: var(--font-family-sans);
+    font-variant-numeric: tabular-nums;
     font-size: var(--font-size-xs);
     padding: 2px 4px;
     border-radius: 3px;

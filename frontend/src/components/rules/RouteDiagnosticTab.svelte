@@ -485,8 +485,7 @@
   .step-label {
     font-size: var(--font-size-xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
     color: var(--fg-dim);
   }
 
@@ -530,8 +529,7 @@
     font-weight: 600;
     padding: 2px 6px;
     border-radius: 4px;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
+    letter-spacing: 0;
     white-space: nowrap;
   }
 

@@ -536,6 +536,7 @@
     max-width: min(580px, calc(100vw - 32px)) !important;
     max-height: min(480px, 75vh) !important;
     overflow: hidden !important;
+    -webkit-backdrop-filter: blur(12px) !important;
     backdrop-filter: blur(12px) !important;
     z-index: 100 !important;
   }

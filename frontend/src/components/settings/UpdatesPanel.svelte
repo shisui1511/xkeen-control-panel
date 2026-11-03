@@ -1,15 +1,18 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { t, currentLang } from '../../i18n';
+  import { t, tp, currentLang } from '../../i18n';
   import { apiFetch, apiFetchJSON } from '../../lib/api';
   import { showToast, showConfirm } from '../../stores';
   import { formatBytes } from '../../lib/format';
   import {
-    parseReleaseNotes,
+    parseRelease,
     splitInlineCode,
     releaseKind,
+    type NoteItem,
+    type NoteKind,
     type ReleaseKind
   } from '../../lib/releaseNotes';
+  import Icon from '../Icon.svelte';
   import SegmentedControl, { type SegmentItem } from '../SegmentedControl.svelte';
   import Modal from '../Modal.svelte';
   import Section from '../Section.svelte';
@@ -94,8 +97,77 @@
             }
           ]
         : []
-    ).map((r) => ({ ...r, sections: parseReleaseNotes(r.body) }))
+    ).map((r) => ({ ...r, ...parseRelease(r.body) }))
   );
+
+  // «Что нового» — одна сводка изменений, которые придут с обновлением, а не лента
+  // выпусков: так показывают обновления Home Assistant, DSM и магазины приложений.
+  // Все выпуски между установленной и новой версией сливаются: главное из «Что вошло»
+  // каждого, затем пункты по типам без повторов (новые выпуски первыми).
+  const KIND_ORDER: NoteKind[] = ['feat', 'fix', 'other'];
+  const KIND_TITLE: Record<NoteKind, string> = {
+    feat: 'settings.update_group_feat',
+    fix: 'settings.update_group_fix',
+    other: 'settings.update_group_other'
+  };
+  // Сколько пунктов группы видно до «Показать все»
+  const GROUP_PREVIEW = 6;
+  const HIGHLIGHTS_PREVIEW = 4;
+
+  const digest = $derived.by(() => {
+    const highlights: string[] = [];
+    const seenHighlight = new Set<string>();
+    const groups = new Map<NoteKind, { items: NoteItem[]; more: number }>();
+    const seenItem = new Set<string>();
+    for (const note of notes) {
+      for (const line of note.summary) {
+        const text = capitalize(line);
+        const key = text.toLocaleLowerCase();
+        if (seenHighlight.has(key)) continue;
+        seenHighlight.add(key);
+        highlights.push(text);
+      }
+      for (const section of note.sections) {
+        const group = groups.get(section.kind) ?? { items: [], more: 0 };
+        groups.set(section.kind, group);
+        group.more += section.more;
+        for (const item of section.items) {
+          const key = item.text.toLocaleLowerCase();
+          if (seenItem.has(key)) continue;
+          seenItem.add(key);
+          group.items.push({ ...item, text: capitalize(item.text) });
+        }
+      }
+    }
+    // Пункт, повторяющий главное слово в слово, в главном и остаётся
+    const onlyItems = [...groups.values()].flatMap((g) => g.items);
+    const shownHighlights =
+      onlyItems.length === highlights.length &&
+      onlyItems.every((it) => seenHighlight.has(capitalize(it.text).toLocaleLowerCase()))
+        ? []
+        : highlights;
+    return {
+      highlights: shownHighlights,
+      groups: KIND_ORDER.filter((k) => groups.has(k)).map((k) => ({ kind: k, ...groups.get(k)! }))
+    };
+  });
+
+  let showAllHighlights = $state(false);
+  let expandedGroups = $state<Record<string, boolean>>({});
+
+  // Полный список — сравнение версий на GitHub; ссылка строится от страницы новейшего выпуска
+  const compareUrl = $derived.by(() => {
+    const latest = notes[0];
+    const from = info?.current_version || version;
+    if (!latest?.url) return '';
+    const m = latest.url.match(/^(https:\/\/github\.com\/[^/]+\/[^/]+)\/releases\/tag\/(.+)$/);
+    if (!m || !from || from === '...' || notes.length < 2) return latest.url;
+    return `${m[1]}/compare/v${from.replace(/^v/, '')}...${m[2]}`;
+  });
+
+  function capitalize(text: string): string {
+    return text.charAt(0).toLocaleUpperCase() + text.slice(1);
+  }
 
   // Окна автоустановки: ночные часы, когда сетью почти не пользуются
   const WINDOW_PRESETS = [
@@ -616,55 +688,114 @@
   {/if}
 
   {#if notes.length > 0 && !busy}
-    <Section title={$t('settings.update_whats_new')}>
-      <div class="card card-rows">
-        <div class="release-list">
-          {#each notes as note (note.version)}
-            {@const kind = releaseKind(note.version)}
-            <section class="release">
-              <header class="release-head">
-                <span class="release-version mono">v{note.version}</span>
-                {#if kind !== 'stable'}
-                  <span class="badge {kindBadge(kind)}">{$t(`settings.update_kind_${kind}`)}</span>
-                {/if}
-                {#if note.published_at}<span class="release-date"
-                    >{formatDate(note.published_at)}</span
-                  >{/if}
-                {#if note.url}
-                  <a class="release-link" href={note.url} target="_blank" rel="noopener noreferrer"
-                    >{$t('settings.update_release_page')}</a
-                  >
-                {/if}
-              </header>
-              {#if note.sections.length === 0}
-                <p class="release-empty">{$t('settings.update_no_notes')}</p>
-              {:else}
-                {#each note.sections as section, i (i)}
-                  <div class="release-section kind-{section.kind}">
-                    <div class="section-title">{section.title}</div>
-                    <ul>
-                      {#each section.items as item, j (j)}
-                        <li>
-                          {#each splitInlineCode(item.text) as seg, k (k)}
-                            {#if seg.code}<code>{seg.text}</code>{:else}{seg.text}{/if}
-                          {/each}
-                          {#if item.commit}
-                            <a
-                              class="commit-link mono"
-                              href={item.commit.url}
-                              target="_blank"
-                              rel="noopener noreferrer">{item.commit.sha}</a
-                            >
-                          {/if}
-                        </li>
+    {@const from = info?.current_version || version}
+    <Section
+      title={$t('settings.update_whats_new')}
+      description={notes.length > 1 && from && from !== '...'
+        ? $tp('settings.update_whats_new_range', notes.length, {
+            from: `v${from}`,
+            to: `v${notes[0].version}`
+          })
+        : $t('settings.update_whats_new_single', { version: `v${notes[0].version}` })}
+      testid="update-whats-new"
+    >
+      <div class="card card-rows whats-new">
+        {#if digest.highlights.length > 0}
+          {@const visible = showAllHighlights
+            ? digest.highlights
+            : digest.highlights.slice(0, HIGHLIGHTS_PREVIEW)}
+          <div class="digest-block digest-highlights">
+            <h3 class="digest-title">{$t('settings.update_highlights')}</h3>
+            <ul class="highlight-list">
+              {#each visible as line, i (i)}
+                <li>
+                  {#each splitInlineCode(line) as seg, k (k)}
+                    {#if seg.code}<code>{seg.text}</code>{:else}{seg.text}{/if}
+                  {/each}
+                </li>
+              {/each}
+            </ul>
+            {#if digest.highlights.length > HIGHLIGHTS_PREVIEW}
+              <button
+                type="button"
+                class="digest-more"
+                aria-expanded={showAllHighlights}
+                onclick={() => (showAllHighlights = !showAllHighlights)}
+              >
+                {showAllHighlights
+                  ? $t('settings.update_show_less')
+                  : $t('settings.update_show_all', { count: digest.highlights.length })}
+              </button>
+            {/if}
+          </div>
+        {/if}
+
+        {#if digest.groups.length === 0}
+          <p class="digest-block release-empty">{$t('settings.update_no_notes')}</p>
+        {:else}
+          {#each digest.groups as group (group.kind)}
+            {@const total = group.items.length + group.more}
+            {@const expanded = !!expandedGroups[group.kind]}
+            <details
+              class="digest-block digest-group kind-{group.kind}"
+              open={group.kind !== 'other'}
+            >
+              <summary class="group-head">
+                <span class="group-title">{$t(KIND_TITLE[group.kind])}</span>
+                <span class="group-count">{total}</span>
+                <span class="group-chevron" aria-hidden="true"
+                  ><Icon name="chevron-down" size={14} /></span
+                >
+              </summary>
+              <ul class="change-list">
+                {#each expanded ? group.items : group.items.slice(0, GROUP_PREVIEW) as item, j (j)}
+                  <li>
+                    <span class="item-text">
+                      {#each splitInlineCode(item.text) as seg, k (k)}
+                        {#if seg.code}<code>{seg.text}</code>{:else}{seg.text}{/if}
                       {/each}
-                    </ul>
-                  </div>
+                    </span>
+                    {#if item.commit}
+                      <a
+                        class="commit-link"
+                        href={item.commit.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={$t('settings.update_commit', { sha: item.commit.sha })}
+                        >{item.commit.sha}</a
+                      >
+                    {/if}
+                  </li>
                 {/each}
+              </ul>
+              {#if group.items.length > GROUP_PREVIEW}
+                <button
+                  type="button"
+                  class="digest-more"
+                  aria-expanded={expanded}
+                  onclick={() => (expandedGroups[group.kind] = !expanded)}
+                >
+                  {expanded
+                    ? $t('settings.update_show_less')
+                    : $t('settings.update_show_all', { count: group.items.length })}
+                </button>
               {/if}
-            </section>
+              {#if group.more > 0 && (expanded || group.items.length <= GROUP_PREVIEW)}
+                <p class="group-more">{$tp('settings.update_more_items', group.more)}</p>
+              {/if}
+            </details>
           {/each}
-        </div>
+        {/if}
+
+        {#if compareUrl}
+          <div class="digest-footer">
+            <a class="release-link" href={compareUrl} target="_blank" rel="noopener noreferrer"
+              >{notes.length > 1
+                ? $t('settings.update_compare_link')
+                : $t('settings.update_release_page')}</a
+            >
+          </div>
+        {/if}
       </div>
     </Section>
   {/if}
@@ -996,45 +1127,215 @@
     text-align: center;
   }
 
-  .release-list {
-    display: flex;
-    flex-direction: column;
-    padding: 16px var(--card-pad);
-    gap: 16px;
-    max-height: 480px;
-    overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
+  /* «Что нового»: сводка обновления. Главное — крупным текстом, ниже группы по типу
+     изменений; цвет типа — только точка у заголовка и линия вдоль списка. */
+  .digest-block {
+    padding: 18px var(--card-pad);
   }
 
-  .release + .release {
-    padding-top: 16px;
+  .digest-block + .digest-block,
+  .digest-footer {
     border-top: 1px solid var(--border);
   }
 
-  .release-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-bottom: 8px;
+  .digest-title {
+    margin: 0 0 12px;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--fg-secondary);
   }
 
-  .release-version {
-    font-size: var(--font-size-sm);
+  .highlight-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .highlight-list li {
+    position: relative;
+    max-width: 68ch;
+    padding-left: 18px;
+    font-size: var(--font-size-lg);
+    line-height: 1.45;
+    color: var(--fg-primary);
+    overflow-wrap: anywhere;
+  }
+
+  .highlight-list li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.62em;
+    width: 7px;
+    height: 7px;
+    border-radius: var(--radius-full);
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  .digest-group {
+    --kind: var(--fg-dim);
+  }
+
+  .digest-group.kind-feat {
+    --kind: var(--accent);
+  }
+
+  .digest-group.kind-fix {
+    --kind: var(--success);
+  }
+
+  .group-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: -6px -10px;
+    padding: 6px 10px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    list-style: none;
+    transition: background-color var(--duration-enter) var(--ease-out);
+  }
+
+  .group-head::-webkit-details-marker {
+    display: none;
+  }
+
+  .group-head:hover {
+    background: var(--hover);
+  }
+
+  .group-head:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: -2px;
+  }
+
+  .group-head::before {
+    content: '';
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: var(--radius-full);
+    background: var(--kind);
+  }
+
+  .group-title {
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
   }
 
-  .release-date {
+  .group-count {
+    font-size: var(--font-size-xs);
+    color: var(--fg-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .group-chevron {
+    display: inline-flex;
+    margin-left: auto;
+    color: var(--fg-dim);
+    transition: transform var(--duration-move) var(--ease-out);
+  }
+
+  .digest-group[open] .group-chevron {
+    transform: rotate(180deg);
+  }
+
+  .change-list {
+    margin: 14px 0 0 3px;
+    padding: 0 0 0 17px;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-left: 1px solid color-mix(in srgb, var(--kind) 35%, transparent);
+  }
+
+  .change-list li {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    max-width: 80ch;
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+    color: var(--fg-primary);
+  }
+
+  .item-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .whats-new code {
+    font-family: var(--font-family-mono);
+    font-size: 0.92em;
+    padding: 1px 5px;
+    border-radius: var(--radius-xs);
+    background: var(--surface-tint);
+  }
+
+  .commit-link {
+    flex: none;
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-2xs);
+    color: var(--fg-dim);
+    text-decoration: none;
+    font-variant-numeric: tabular-nums;
+    padding: 0 2px;
+    border-radius: var(--radius-xs);
+  }
+
+  .commit-link:hover,
+  .commit-link:focus-visible,
+  .release-link:hover,
+  .release-link:focus-visible {
+    color: var(--accent-text);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .digest-more {
+    margin: 12px 0 0 20px;
+    padding: 4px 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    color: var(--accent-text);
+    cursor: pointer;
+  }
+
+  .digest-highlights .digest-more {
+    margin-left: 18px;
+  }
+
+  .digest-more:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+  }
+
+  .group-more {
+    margin: 10px 0 0 20px;
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
 
+  .digest-footer {
+    padding: 14px var(--card-pad);
+  }
+
   .release-link {
-    margin-left: auto;
-    font-size: var(--font-size-xs);
-    color: var(--accent);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    color: var(--accent-text);
+    text-decoration: none;
   }
 
   .release-empty {
@@ -1043,55 +1344,11 @@
     color: var(--fg-dim);
   }
 
-  .release-section + .release-section {
-    margin-top: 10px;
-  }
-
-  .section-title {
-    font-size: var(--font-size-xs);
-    font-weight: 600;
-    margin-bottom: 4px;
-    color: var(--fg-secondary);
-  }
-
-  .kind-feat .section-title {
-    color: var(--accent);
-  }
-
-  .kind-fix .section-title {
-    color: var(--success);
-  }
-
-  .release-section ul {
-    margin: 0;
-    padding-left: 18px;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-
-  .release-section li {
-    font-size: var(--font-size-sm);
-    color: var(--fg-primary);
-    line-height: 1.45;
-  }
-
-  .release-section code {
-    font-family: var(--font-mono, monospace);
-    font-size: var(--font-size-xs);
-    padding: 0 4px;
-    border-radius: var(--radius-xs);
-    background: var(--surface-tint);
-  }
-
-  .commit-link {
-    margin-left: 6px;
-    font-size: var(--font-size-2xs);
-    color: var(--fg-dim);
-  }
-
-  .commit-link:hover {
-    color: var(--accent);
+  @media (prefers-reduced-motion: reduce) {
+    .group-head,
+    .group-chevron {
+      transition: none;
+    }
   }
 
   .auto-checked {
@@ -1128,8 +1385,13 @@
       text-align: left;
     }
 
-    .release-link {
-      margin-left: 0;
+    /* Хэши коммитов на телефоне — шум; полный список с ними — по ссылке на GitHub */
+    .commit-link {
+      display: none;
+    }
+
+    .highlight-list li {
+      font-size: var(--font-size-base);
     }
   }
 </style>

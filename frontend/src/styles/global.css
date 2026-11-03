@@ -160,6 +160,18 @@
   --sidebar-w: 252px;
   --rail-w: 64px;
   --topbar-h: 64px;
+  /* Высота панели без системной полосы жестов; --dock-space — сколько места
+     она реально занимает снизу (0 там, где панели нет) */
+  --dock-h: 58px;
+  --dock-space: 0px;
+  /* Высота мобильной шапки без строки состояния: 12 + 44 (кнопка меню) + 12 + 1 */
+  --mhdr-h: 69px;
+  /* Чернила тёмной поверхности --bg-deep (шапка и нижняя панель тёмные во всех
+     темах, поэтому светлые независимо от схемы) */
+  --on-deep: rgba(255, 255, 255, 0.96);
+  --on-deep-dim: rgba(255, 255, 255, 0.6);
+  --on-deep-line: rgba(255, 255, 255, 0.06);
+  --on-deep-led: rgba(255, 255, 255, 0.1);
 
   /* Density Tokens — Default (Comfortable) */
   --card-pad: 20px;
@@ -982,9 +994,8 @@ input[type='number'] {
   margin-bottom: 0.4rem;
   font-weight: 600;
   font-size: var(--font-size-xs);
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   color: var(--fg-secondary);
-  text-transform: uppercase;
 }
 
 /* ------------ Alert ------------- */
@@ -1101,7 +1112,9 @@ input[type='number'] {
 
 /* ------------ Sidebar ------------- */
 .sidebar {
-  width: var(--sidebar-w);
+  /* Вырез iPhone в альбомной ориентации (viewport-fit=cover): меню шире на
+     его размер, а пункты стоят правее него */
+  width: calc(var(--sidebar-w) + env(safe-area-inset-left));
   height: 100vh;
   height: 100dvh;
   position: fixed;
@@ -1110,7 +1123,8 @@ input[type='number'] {
   background: var(--bg-card);
   /* Цвет границы из темы: жёсткий #03101e давал чёрную черту на светлой теме */
   border-right: 1px solid var(--border);
-  padding: 0;
+  /* Строка состояния, вырез и полоска «домой» не перекрывают пункты меню */
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
   /* CR-01: `overflow-x: visible` next to `overflow-y: auto` is a no-op —
      per the CSS Overflow spec, when one axis is `auto`/`scroll` and the
      other is explicitly `visible`, the `visible` one is recomputed to
@@ -1351,7 +1365,7 @@ input[type='number'] {
   }
 
   .sidebar.rail {
-    width: var(--rail-w);
+    width: calc(var(--rail-w) + env(safe-area-inset-left));
   }
 
   .sidebar.rail .sidebar-logo {
@@ -1437,7 +1451,7 @@ input[type='number'] {
      outside .sidebar's clipping box entirely. */
 
   .main-content.rail {
-    margin-left: var(--rail-w);
+    margin-left: calc(var(--rail-w) + env(safe-area-inset-left));
   }
 
   /* .nav-item already sets position: relative (base rule above), so the
@@ -1457,7 +1471,8 @@ input[type='number'] {
 /* Main content */
 .main-content {
   flex: 1;
-  margin-left: var(--sidebar-w);
+  margin-left: calc(var(--sidebar-w) + env(safe-area-inset-left));
+  padding-right: env(safe-area-inset-right);
   min-width: 0;
   background: var(--bg-page);
 }
@@ -1558,6 +1573,7 @@ body.drawer-locked {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.65);
+  -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
   z-index: 300;
   display: flex;
@@ -1778,7 +1794,8 @@ body.drawer-locked {
   color: var(--fg-dim);
   font-size: var(--font-size-xs);
   margin-top: 8px;
-  font-family: var(--font-family-mono);
+  font-family: var(--font-family-sans);
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-bar {
@@ -1863,7 +1880,7 @@ body.drawer-locked {
   gap: 0.25rem 0.5rem;
   margin-bottom: 0.75rem;
   font-size: var(--font-size-xs);
-  letter-spacing: 0.06em;
+  letter-spacing: 0;
   color: var(--fg-dim);
   font-weight: 600;
 }
@@ -2017,8 +2034,7 @@ table.data-table thead th {
   text-align: left;
   padding: 11px 14px;
   font-size: var(--font-size-xs);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+  letter-spacing: 0;
   font-weight: 700;
   color: var(--fg-secondary);
   border-bottom: 1px solid var(--border);
@@ -3039,6 +3055,7 @@ a.chip:hover {
   opacity: 0.65;
   transition: opacity 0.15s ease-in-out;
   background: var(--bg-card);
+  -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   padding: 4px;
   border-radius: var(--radius-sm, 6px);
@@ -3162,6 +3179,7 @@ a.chip:hover {
   box-shadow:
     0 12px 36px -8px rgba(0, 0, 0, 0.65),
     0 0 0 1px rgba(41, 194, 240, 0.15);
+  -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   min-width: 320px;
   max-width: 90vw;
@@ -3310,4 +3328,423 @@ a.chip:hover {
   margin-right: 0.35rem;
   flex-shrink: 0;
   user-select: none;
+}
+
+/* ============================================================
+   Телефон: нижняя панель разделов (BottomDock) и место под неё
+   ============================================================ */
+
+@property --tabs-fade-l {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --tabs-fade-r {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@media (max-width: 768px) {
+  :root {
+    --dock-space: calc(var(--dock-h) + env(safe-area-inset-bottom));
+  }
+
+  /* Экранная клавиатура: панель прячется, чтобы не подниматься над клавиатурой
+     и не отнимать высоту у поля ввода, редактора и терминала */
+  :root:has(
+    :is(
+      input:not(
+        [type='checkbox'],
+        [type='radio'],
+        [type='range'],
+        [type='button'],
+        [type='submit'],
+        [type='color'],
+        [type='file']
+      ),
+      textarea,
+      [contenteditable='true']
+    ):focus
+  ) {
+    --dock-space: 0px;
+  }
+
+  :root:has(
+      :is(
+        input:not(
+          [type='checkbox'],
+          [type='radio'],
+          [type='range'],
+          [type='button'],
+          [type='submit'],
+          [type='color'],
+          [type='file']
+        ),
+        textarea,
+        [contenteditable='true']
+      ):focus
+    )
+    .bottom-dock-slot {
+    display: none;
+  }
+
+  .main-content {
+    padding-bottom: var(--dock-space);
+  }
+
+  /* Фокус с клавиатуры и прокрутка к элементу не оставляют его под липкой
+     шапкой или нижней панелью (WCAG 2.4.11) */
+  html {
+    scroll-padding-top: calc(var(--mhdr-h) + env(safe-area-inset-top));
+    scroll-padding-bottom: var(--dock-space);
+  }
+
+  .floating-progress-bar {
+    bottom: calc(16px + var(--dock-space));
+    max-width: calc(100vw - 24px);
+  }
+
+  /* Крошки на телефоне дублируют заголовок страницы и съедают строку-две:
+     где ты, показывают заголовок и подсвеченный пункт нижней панели */
+  .page-header .breadcrumbs {
+    display: none;
+  }
+
+  .page-header {
+    margin-bottom: 1rem;
+  }
+
+  .page-header h1 {
+    font-size: var(--font-size-2xl);
+    line-height: 1.2;
+  }
+
+  .page-header-subtitle {
+    font-size: var(--font-size-sm);
+  }
+}
+
+/* ------------ Сенсорный ввод: зоны нажатия мелких элементов -------------
+   Плотные чипы, переключатели и значки остаются того же видимого размера,
+   а прозрачная зона вокруг дотягивает их до 44 px по высоте (WCAG 2.5.5).
+   Классы — из компонентов страниц; position у них не задан, поэтому
+   relative отсюда не спорит с их собственной раскладкой. */
+@media (max-width: 768px), (pointer: coarse) {
+  :is(
+    .about-link,
+    .pill-main,
+    .refresh-icon-btn,
+    .source-pill,
+    .qs-type-btn,
+    .accent-swatch,
+    .key-btn,
+    .info-banner-close,
+    .manual-create-btn,
+    .install-link,
+    .gc-pin-btn,
+    .gc-ping-btn,
+    .gc-chevron-btn,
+    .gc-lat-box
+  ) {
+    position: relative;
+  }
+
+  :is(
+    .about-link,
+    .pill-main,
+    .refresh-icon-btn,
+    .source-pill,
+    .qs-type-btn,
+    .accent-swatch,
+    .key-btn,
+    .info-banner-close,
+    .manual-create-btn,
+    .install-link,
+    .gc-pin-btn,
+    .gc-ping-btn,
+    .gc-chevron-btn,
+    .gc-lat-box
+  )::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+
+  /* Значки в шапке карточки группы стоят плотно (8 px): зона растёт в высоту,
+     а в ширину — только до середины промежутка, чтобы не перекрывать соседа */
+  :is(.gc-pin-btn, .gc-ping-btn, .gc-chevron-btn, .gc-lat-box)::after {
+    width: calc(100% + 8px);
+  }
+}
+
+/* Плашка «API недоступен» на телефоне: одна компактная строка — индикатор,
+   заголовок с коротким пояснением и кнопка справа; обратный отсчёт повтора
+   скрыт (повтор всё равно идёт сам) */
+@media (max-width: 768px) {
+  .api-offline {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 4px 12px;
+    padding: 10px 10px 10px 14px;
+  }
+
+  .api-offline .api-offline-led {
+    grid-column: 1;
+    grid-row: 1;
+    margin-top: 0;
+  }
+
+  .api-offline .api-offline-body {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+  }
+
+  .api-offline .api-offline-desc {
+    font-size: var(--font-size-xs);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+
+  .api-offline .api-offline-meta {
+    display: none;
+  }
+
+  .api-offline .api-offline-action {
+    grid-column: 3;
+    grid-row: 1;
+    min-height: 36px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Узкий телефон: кнопка повтора — значок 40×40, подпись остаётся для диктора */
+  .api-offline .api-offline-action {
+    min-width: 40px;
+    min-height: 40px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .api-offline-action-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
+/* ------------ Телефон: доводка оболочки ------------------------------------
+   Шапка — тёмное «стекло», как и нижняя панель (BottomDock.svelte): контент
+   уходит под неё и просвечивает, как в системных панелях iOS и Android. Без
+   поддержки backdrop-filter остаётся сплошной --bg-deep. */
+@media (max-width: 768px) {
+  .mobile-header {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .mobile-header {
+      background: color-mix(in srgb, var(--bg-deep) 88%, transparent);
+      -webkit-backdrop-filter: blur(18px) saturate(1.6);
+      backdrop-filter: blur(18px) saturate(1.6);
+    }
+  }
+
+  /* Вырез в альбомной ориентации не наезжает на карточки */
+  .container {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+
+  /* Кнопки шапки страницы — одной высоты: в ряду не пляшут пилюли и кнопки */
+  .page-header-actions > :is(.btn, button, a) {
+    min-height: 40px;
+  }
+
+  /* Отклик на касание: кнопка чуть проседает под пальцем — видно, что нажатие
+     принято, ещё до ответа роутера */
+  .btn {
+    transition-property: background-color, border-color, color, box-shadow, opacity, transform;
+  }
+
+  .btn:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+
+  /* Разделы конструкторов Xray и Mihomo: пункты под палец, края полосы
+     растворяются, пока за ними есть разделы */
+  .sec-tabs .sec-tab {
+    min-height: 36px;
+  }
+
+  /* Чипы пресетов и кнопки добавления в конструкторах стоят рядами впритык:
+     прозрачная зона перекрыла бы соседний ряд, поэтому растёт сама кнопка */
+  .scenario-chip,
+  .add-btn {
+    min-height: 36px;
+  }
+
+  @supports (animation-timeline: scroll()) {
+    .sec-tabs {
+      mask-image: linear-gradient(
+        to right,
+        transparent 0,
+        black var(--tabs-fade-l),
+        black calc(100% - var(--tabs-fade-r)),
+        transparent 100%
+      );
+      animation: scroll-edge-fade linear both;
+      animation-timeline: scroll(self inline);
+    }
+  }
+
+  /* «Открыть в редакторе» и «Применить и перезапустить Mihomo» не помещались
+     в половину строки и обрезались: на телефоне — друг под другом */
+  .gen-embedded-actions {
+    flex-direction: column-reverse;
+  }
+
+  .gen-embedded-actions > .btn {
+    flex: none !important;
+    width: 100%;
+    min-height: 44px;
+  }
+}
+
+@keyframes scroll-edge-fade {
+  0% {
+    --tabs-fade-l: 0px;
+    --tabs-fade-r: 28px;
+  }
+  8%,
+  92% {
+    --tabs-fade-l: 28px;
+    --tabs-fade-r: 28px;
+  }
+  100% {
+    --tabs-fade-l: 28px;
+    --tabs-fade-r: 0px;
+  }
+}
+
+/* Телефон боком: по высоте всего ~340 px, и шапка с панелью съедали треть.
+   Шапка тоньше, панель ниже, подписи встают рядом со значками. */
+@media (max-width: 768px) and (max-height: 480px) {
+  :root {
+    --dock-h: 44px;
+    --mhdr-h: 53px;
+  }
+
+  .mobile-header {
+    padding-top: calc(4px + env(safe-area-inset-top));
+    padding-bottom: 4px;
+  }
+
+  .page-header {
+    margin-bottom: 0.75rem;
+  }
+
+  .page-header-subtitle {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* Индикатор обновления потягиванием (lib/gestures.ts, pullToRefresh) */
+.ptr-indicator {
+  position: fixed;
+  top: calc(var(--mhdr-h) + env(safe-area-inset-top) - 18px);
+  left: 50%;
+  z-index: 95;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  color: var(--fg-secondary);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ptr-indicator.is-armed {
+  color: var(--accent);
+}
+
+.ptr-indicator.is-spinning svg {
+  animation: ptr-spin 0.8s linear infinite;
+}
+
+@keyframes ptr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ptr-indicator.is-spinning svg {
+    animation: none;
+  }
+}
+
+/* ------------ Телефон: иерархия поверхностей -------------------------------
+   На узком экране карточки идут столбиком, и одинаковая тень под каждой
+   сливается в серый шум. Уровни различаются так: блоки страницы (.card,
+   карточки групп прокси) — плоские, с тонкой рамкой; тень остаётся только
+   у того, что лежит над страницей: пульт дашборда, листы, меню, тосты. */
+@media (max-width: 768px) {
+  .card {
+    box-shadow: none;
+  }
+}
+
+/* ------------ Конструкторы на телефоне (ConstructorMobileNav) --------------
+   Экран «список» — общие настройки и список разделов; «раздел» — только
+   выбранный раздел; «превью» — только YAML/JSON с кнопками применения.
+   Отступ снизу — под плавающую панель «Превью / Применить». */
+@media (max-width: 768px) {
+  [data-mview='list'] .gen-section-body,
+  [data-mview='list'] .constructor-preview-wrapper,
+  [data-mview='section'] .gen-global,
+  [data-mview='section'] .constructor-preview-wrapper,
+  [data-mview='preview'] .gen-global,
+  [data-mview='preview'] .gen-section-body {
+    /* !important: у блоков свои scoped display той же специфичности */
+    display: none !important;
+  }
+
+  [data-mview='list'],
+  [data-mview='section'] {
+    padding-bottom: 76px;
+  }
+
+  /* Переключатель превью не нужен: превью — отдельный экран */
+  :root:has([data-mview]) .constructor-header-actions {
+    display: none;
+  }
+
+  [data-mview] .sec-tabs[hidden] {
+    display: none !important;
+  }
 }

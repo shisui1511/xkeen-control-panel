@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
+  import { MediaQuery } from 'svelte/reactivity';
+  import ConstructorMobileNav from './components/ConstructorMobileNav.svelte';
   import Modal from './components/Modal.svelte';
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
   import Select from './components/Select.svelte';
@@ -7,7 +9,7 @@
   import ConstructorPreview from './components/ConstructorPreview.svelte';
   import ScenarioChips from './components/ScenarioChips.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
-  import { currentLang, t } from './i18n';
+  import { currentLang, t, tp } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { pickZkeenGeositeFile, hasZkeenTags } from './lib/constructors/geodata';
@@ -439,6 +441,32 @@
     }
   }
 
+  // Телефон: разделы — списком со сводкой, раздел и превью — отдельными
+  // экранами; «Превью» и «Применить» закреплены внизу (ConstructorMobileNav)
+  const phone = new MediaQuery('max-width: 768px');
+  let mView = $state<'list' | 'section' | 'preview'>('list');
+
+  function sectionSummary(id: string): string {
+    switch (id) {
+      case 'proxies':
+        return $tp('mihomo.m_summary_nodes', ctx.proxies.length);
+      case 'groups':
+        return $tp('mihomo.m_summary_groups', ctx.groups.length);
+      case 'rulesets':
+        return $tp('mihomo.m_summary_rulesets', ctx.selectedMetaRuleSets.size);
+      case 'rules':
+        return $tp('mihomo.m_summary_rules', ctx.rules.length);
+      case 'dns':
+        return ctx.dns.enabled ? $t('mihomo.tab_status_on') : $t('mihomo.tab_status_off');
+      case 'tun':
+        return ctx.tun.enabled ? $t('mihomo.tab_status_on') : $t('mihomo.tab_status_off');
+      case 'listeners':
+        return $tp('mihomo.m_summary_listeners', ctx.listeners.length);
+      default:
+        return '';
+    }
+  }
+
   let tabs = $derived([
     ['proxies', $t('mihomo.tab_proxies')],
     ['groups', $t('mihomo.tab_groups')],
@@ -630,102 +658,128 @@
       </div>
     {/if}
 
-    <div class="gen-layout">
+    <div class="gen-layout" data-mview={phone.current ? mView : undefined}>
       <!-- Left: sections -->
       <div class="gen-left">
-        <!-- Scenario selection -->
-        <ScenarioChips
-          label={$t('editor.constructor_scenario')}
-          options={schema && schema.mihomo && schema.mihomo.presets
-            ? schema.mihomo.presets.map((p: any) => ({
-                id: p.id,
-                label: $t(p.name),
-                description: $t(p.description)
-              }))
-            : [
-                { id: 'rule-based', label: $t('editor.scenario_rule_based') },
-                { id: 'global-proxy', label: $t('editor.scenario_global_proxy') },
-                { id: 'zkeen-selective', label: $t('editor.scenario_zkeen_selective') },
-                { id: 'only-blocked', label: $t('preset.only-blocked') }
-              ]}
-          active={ctx.activePreset}
-          modifiedBadge={isPresetModified ? $t('xray.preset_modified') : undefined}
-          onSelect={(val) => {
-            applyPreset(val);
-            if (val === 'rule-based') {
-              ctx.activeSection = 'rulesets';
-            } else if (val === 'zkeen-selective') {
-              ctx.activeSection = 'groups';
-            }
-          }}
-        />
-
-        <PreflightWarnings
-          warnings={saveWarnings}
-          title={warningsTitle}
-          onDismiss={() => {
-            saveWarnings = [];
-            warningsTitle = undefined;
-          }}
-        />
-
-        {#if ctx.activePreset === 'zkeen-selective' && !ctx.hasZkeenGeodata && !dismissZkeenGeodataWarning}
-          <div
-            class="alert alert-warning alert-dismissible"
-            style="margin-bottom: 16px; padding: 8px 12px; font-size: var(--font-size-sm); display: flex; align-items: center; gap: 8px; border-radius: var(--radius-sm);"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              style="flex-shrink: 0;"
-              ><path
-                d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
-              /><line x1="12" y1="9" x2="12" y2="13" /><line
-                x1="12"
-                y1="17"
-                x2="12.01"
-                y2="17"
-              /></svg
-            >
-            <span>{$t('editor.requires_zkeen_geodata')}</span>
-            <button
-              type="button"
-              class="alert-close-btn"
-              style="top: 50%; transform: translateY(-50%);"
-              onclick={() => {
-                dismissZkeenGeodataWarning = true;
-                localStorage.setItem('xcp:dismissed_warning:zkeen_geodata', ctx.activePreset);
-              }}
-              aria-label={$t('app.close')}>&times;</button
-            >
-          </div>
-        {/if}
-
-        <!-- Rule providers -->
-        <div class="rule-providers-row">
-          <label class="form-label" for="rp-select">{$t('mihomo.rule_provider_label')}</label>
-          <Select
-            id="rp-select"
-            class="form-select rp-select"
-            bind:value={ctx.activeRuleProvider}
-            onchange={(e) => {
-              if (e.currentTarget.value === 'metacubex') {
+        <div class="gen-global">
+          <!-- Scenario selection -->
+          <ScenarioChips
+            label={$t('editor.constructor_scenario')}
+            options={schema && schema.mihomo && schema.mihomo.presets
+              ? schema.mihomo.presets.map((p: any) => ({
+                  id: p.id,
+                  label: $t(p.name),
+                  description: $t(p.description)
+                }))
+              : [
+                  { id: 'rule-based', label: $t('editor.scenario_rule_based') },
+                  { id: 'global-proxy', label: $t('editor.scenario_global_proxy') },
+                  { id: 'zkeen-selective', label: $t('editor.scenario_zkeen_selective') },
+                  { id: 'only-blocked', label: $t('preset.only-blocked') }
+                ]}
+            active={ctx.activePreset}
+            modifiedBadge={isPresetModified ? $t('xray.preset_modified') : undefined}
+            onSelect={(val) => {
+              applyPreset(val);
+              if (val === 'rule-based') {
                 ctx.activeSection = 'rulesets';
+              } else if (val === 'zkeen-selective') {
+                ctx.activeSection = 'groups';
               }
             }}
-          >
-            <option value="none">{$t('editor.rp_none')}</option>
-            <option value="zkeen">{$t('editor.rp_zkeen')}</option>
-            <option value="metacubex">{$t('editor.rp_metacubex')}</option>
-          </Select>
+          />
+
+          <PreflightWarnings
+            warnings={saveWarnings}
+            title={warningsTitle}
+            onDismiss={() => {
+              saveWarnings = [];
+              warningsTitle = undefined;
+            }}
+          />
+
+          {#if ctx.activePreset === 'zkeen-selective' && !ctx.hasZkeenGeodata && !dismissZkeenGeodataWarning}
+            <div
+              class="alert alert-warning alert-dismissible"
+              style="margin-bottom: 16px; padding: 8px 12px; font-size: var(--font-size-sm); display: flex; align-items: center; gap: 8px; border-radius: var(--radius-sm);"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                style="flex-shrink: 0;"
+                ><path
+                  d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                /><line x1="12" y1="9" x2="12" y2="13" /><line
+                  x1="12"
+                  y1="17"
+                  x2="12.01"
+                  y2="17"
+                /></svg
+              >
+              <span>{$t('editor.requires_zkeen_geodata')}</span>
+              <button
+                type="button"
+                class="alert-close-btn"
+                style="top: 50%; transform: translateY(-50%);"
+                onclick={() => {
+                  dismissZkeenGeodataWarning = true;
+                  localStorage.setItem('xcp:dismissed_warning:zkeen_geodata', ctx.activePreset);
+                }}
+                aria-label={$t('app.close')}>&times;</button
+              >
+            </div>
+          {/if}
+
+          <!-- Rule providers -->
+          <div class="rule-providers-row">
+            <label class="form-label" for="rp-select">{$t('mihomo.rule_provider_label')}</label>
+            <Select
+              id="rp-select"
+              class="form-select rp-select"
+              bind:value={ctx.activeRuleProvider}
+              onchange={(e) => {
+                if (e.currentTarget.value === 'metacubex') {
+                  ctx.activeSection = 'rulesets';
+                }
+              }}
+            >
+              <option value="none">{$t('editor.rp_none')}</option>
+              <option value="zkeen">{$t('editor.rp_zkeen')}</option>
+              <option value="metacubex">{$t('editor.rp_metacubex')}</option>
+            </Select>
+          </div>
         </div>
 
+        {#if phone.current}
+          <ConstructorMobileNav
+            view={mView}
+            sections={tabs.map(([id, label]) => ({ id, label, summary: sectionSummary(id) }))}
+            activeId={ctx.activeSection}
+            onOpenSection={(id) => {
+              ctx.activeSection = id as ActiveMihomoSection;
+              mView = 'section';
+            }}
+            onBack={() => (mView = 'list')}
+            onPreview={() => {
+              ctx.showPreviewPane = true;
+              mView = 'preview';
+            }}
+            onApply={() => handleApplyMihomo()}
+            applyDisabled={applyLoading || !yaml || !!blockingValidationMsg}
+            applyLabel={applyLoading
+              ? $t('editor.saving')
+              : willRestart
+                ? $t('mihomo.apply_and_restart')
+                : $t('apply.apply')}
+          />
+        {/if}
+
         <!-- Section tabs -->
-        <div class="sec-tabs">
+        <div class="sec-tabs" hidden={phone.current}>
           {#each tabs as [id, label] (id)}
             <button
               class="sec-tab"
@@ -773,21 +827,23 @@
         </div>
 
         <!-- Subcomponents -->
-        {#if ctx.activeSection === 'proxies'}
-          <MihomoSectionProxies />
-        {:else if ctx.activeSection === 'groups'}
-          <MihomoSectionGroups />
-        {:else if ctx.activeSection === 'rulesets'}
-          <MihomoSectionRulesets />
-        {:else if ctx.activeSection === 'rules'}
-          <MihomoSectionRules />
-        {:else if ctx.activeSection === 'dns'}
-          <MihomoSectionDns />
-        {:else if ctx.activeSection === 'tun'}
-          <MihomoSectionTun />
-        {:else if ctx.activeSection === 'listeners'}
-          <MihomoSectionListeners />
-        {/if}
+        <div class="gen-section-body">
+          {#if ctx.activeSection === 'proxies'}
+            <MihomoSectionProxies />
+          {:else if ctx.activeSection === 'groups'}
+            <MihomoSectionGroups />
+          {:else if ctx.activeSection === 'rulesets'}
+            <MihomoSectionRulesets />
+          {:else if ctx.activeSection === 'rules'}
+            <MihomoSectionRules />
+          {:else if ctx.activeSection === 'dns'}
+            <MihomoSectionDns />
+          {:else if ctx.activeSection === 'tun'}
+            <MihomoSectionTun />
+          {:else if ctx.activeSection === 'listeners'}
+            <MihomoSectionListeners />
+          {/if}
+        </div>
       </div>
 
       <!-- Preview pane with unified ConstructorPreview -->

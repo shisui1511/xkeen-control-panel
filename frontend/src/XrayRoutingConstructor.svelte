@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
+  import { MediaQuery } from 'svelte/reactivity';
+  import ConstructorMobileNav from './components/ConstructorMobileNav.svelte';
   import Modal from './components/Modal.svelte';
   import Select from './components/Select.svelte';
   import Button from './components/Button.svelte';
@@ -181,6 +183,23 @@
 
   let showApplyConfirm = $state(false);
   const willRestart = $derived(willRestartOnApply($capabilities, 'xray'));
+  // Телефон: разделы списком, раздел и превью — отдельными экранами
+  // (ConstructorMobileNav), «Превью» и «Применить» закреплены внизу
+  const phone = new MediaQuery('max-width: 768px');
+  let mView = $state<'list' | 'section' | 'preview'>('list');
+  const xraySections = $derived([
+    {
+      id: 'routing',
+      label: $t('xray.tab_routing'),
+      summary: $tp('mihomo.m_summary_rules', routingRules.length)
+    },
+    { id: 'inbounds', label: $t('xray.tab_inbounds'), summary: String(inbounds.length) },
+    { id: 'dns', label: 'DNS' },
+    { id: 'outbounds', label: $t('xray.tab_outbounds'), summary: String(customOutbounds.length) },
+    { id: 'log', label: $t('xray.tab_log'), summary: logConfig.loglevel },
+    { id: 'policy', label: $t('xray.tab_policy') }
+  ]);
+
   const applyLabel = $derived(willRestart ? $t('editor.apply_and_restart') : $t('apply.apply'));
   interface FilePlan {
     name: string;
@@ -1057,46 +1076,68 @@
     }}
   />
 
-  <div class="gen-layout">
+  <div class="gen-layout" data-mview={phone.current ? mView : undefined}>
     <!-- Left Panel: Navigation and Section Content -->
     <div class="gen-left">
-      <!-- Scenario chips (BUILD-04) -->
-      <ScenarioChips
-        label={$t('editor.constructor_scenario')}
-        options={XRAY_DEFAULT_PRESETS.map((p) => ({
-          id: p.id,
-          label: $t(p.nameKey),
-          description: $t(p.descKey)
-        }))}
-        active={lastAppliedPreset || ''}
-        modifiedBadge={isPresetModified ? $t('xray.preset_modified') : undefined}
-        onSelect={applyPreset}
-      />
+      <div class="gen-global">
+        <!-- Scenario chips (BUILD-04) -->
+        <ScenarioChips
+          label={$t('editor.constructor_scenario')}
+          options={XRAY_DEFAULT_PRESETS.map((p) => ({
+            id: p.id,
+            label: $t(p.nameKey),
+            description: $t(p.descKey)
+          }))}
+          active={lastAppliedPreset || ''}
+          modifiedBadge={isPresetModified ? $t('xray.preset_modified') : undefined}
+          onSelect={applyPreset}
+        />
 
-      <!-- Outbound Tag selection -->
-      <div class="rule-providers-row">
-        <label class="form-label" for="proxy-tag-select">{$t('xray.main_proxy_outbound')}:</label>
-        <Select
-          id="proxy-tag-select"
-          class="form-select"
-          bind:value={proxyTag}
-          disabled={outboundTagsLoading}
-          onchange={() => (isDirty = true)}
-        >
-          {#if outboundTagsLoading}
-            <option value="" disabled>{$t('editor.loading_tags')}</option>
-          {:else if outboundTags.filter((t) => t !== 'direct' && t !== 'block' && t !== 'dns-out').length === 0}
-            <option value="" disabled>{$t('editor.no_outbounds_configured')}</option>
-          {:else}
-            {#each outboundTags.filter((t) => t !== 'direct' && t !== 'block' && t !== 'dns-out') as tag (tag)}
-              <option value={tag}>{tag}</option>
-            {/each}
-          {/if}
-        </Select>
+        <!-- Outbound Tag selection -->
+        <div class="rule-providers-row">
+          <label class="form-label" for="proxy-tag-select">{$t('xray.main_proxy_outbound')}:</label>
+          <Select
+            id="proxy-tag-select"
+            class="form-select"
+            bind:value={proxyTag}
+            disabled={outboundTagsLoading}
+            onchange={() => (isDirty = true)}
+          >
+            {#if outboundTagsLoading}
+              <option value="" disabled>{$t('editor.loading_tags')}</option>
+            {:else if outboundTags.filter((t) => t !== 'direct' && t !== 'block' && t !== 'dns-out').length === 0}
+              <option value="" disabled>{$t('editor.no_outbounds_configured')}</option>
+            {:else}
+              {#each outboundTags.filter((t) => t !== 'direct' && t !== 'block' && t !== 'dns-out') as tag (tag)}
+                <option value={tag}>{tag}</option>
+              {/each}
+            {/if}
+          </Select>
+        </div>
       </div>
 
+      {#if phone.current}
+        <ConstructorMobileNav
+          view={mView}
+          sections={xraySections}
+          activeId={activeSection}
+          onOpenSection={(id) => {
+            activeSection = id as XraySectionName;
+            mView = 'section';
+          }}
+          onBack={() => (mView = 'list')}
+          onPreview={() => {
+            showPreviewPane = true;
+            mView = 'preview';
+          }}
+          onApply={promptApplyChanges}
+          applyDisabled={applyLoading}
+          applyLabel={applyLoading ? $t('editor.saving') : applyLabel}
+        />
+      {/if}
+
       <!-- Section tabs -->
-      <div class="sec-tabs" data-testid="xray-section-tabs">
+      <div class="sec-tabs" data-testid="xray-section-tabs" hidden={phone.current}>
         {#each [['routing', $t('xray.tab_routing')], ['inbounds', $t('xray.tab_inbounds')], ['dns', 'DNS'], ['outbounds', $t('xray.tab_outbounds')], ['log', $t('xray.tab_log')], ['policy', $t('xray.tab_policy')]] as [id, label] (id)}
           <button
             class="sec-tab"
@@ -1115,53 +1156,55 @@
       </div>
 
       <!-- Section Content -->
-      {#if activeSection === 'routing'}
-        <XraySectionRouting
-          bind:routingConfig
-          bind:routingRules
-          bind:balancers
-          bind:observatorySettings
-          {outboundTags}
-          isXrayActive={$isXray}
-          bind:testRouteForm
-          {testRouteRunning}
-          {testRouteResult}
-          {testRouteError}
-          {restartingLogger}
-          onRunTestRoute={runTestRoute}
-          onRestartLogger={restartLogger}
-          onchange={() => (isDirty = true)}
-        />
-      {:else if activeSection === 'inbounds'}
-        <XraySectionInbounds bind:inbounds onchange={() => (isDirty = true)} />
-      {:else if activeSection === 'dns'}
-        <XraySectionDns
-          bind:dnsConfig
-          bind:dnsOverVless
-          {proxyTag}
-          xkeenDns={$capabilities?.xkeen_dns}
-          {dnsRedirectLoading}
-          onEnableDnsRedirect={enableDNSRedirect}
-          onchange={() => (isDirty = true)}
-        />
-      {:else if activeSection === 'outbounds'}
-        <XraySectionOutbounds
-          bind:customOutbounds
-          {subscriptionOutbounds}
-          {outboundDetails}
-          {outboundTags}
-          onchange={() => (isDirty = true)}
-        />
-      {:else if activeSection === 'log'}
-        <XraySectionLog
-          bind:logConfig
-          accessPath={xrayFiles['01_log.json']?.log?.access}
-          errorPath={xrayFiles['01_log.json']?.log?.error}
-          onchange={() => (isDirty = true)}
-        />
-      {:else if activeSection === 'policy'}
-        <XraySectionPolicy bind:policyConfig onchange={() => (isDirty = true)} />
-      {/if}
+      <div class="gen-section-body">
+        {#if activeSection === 'routing'}
+          <XraySectionRouting
+            bind:routingConfig
+            bind:routingRules
+            bind:balancers
+            bind:observatorySettings
+            {outboundTags}
+            isXrayActive={$isXray}
+            bind:testRouteForm
+            {testRouteRunning}
+            {testRouteResult}
+            {testRouteError}
+            {restartingLogger}
+            onRunTestRoute={runTestRoute}
+            onRestartLogger={restartLogger}
+            onchange={() => (isDirty = true)}
+          />
+        {:else if activeSection === 'inbounds'}
+          <XraySectionInbounds bind:inbounds onchange={() => (isDirty = true)} />
+        {:else if activeSection === 'dns'}
+          <XraySectionDns
+            bind:dnsConfig
+            bind:dnsOverVless
+            {proxyTag}
+            xkeenDns={$capabilities?.xkeen_dns}
+            {dnsRedirectLoading}
+            onEnableDnsRedirect={enableDNSRedirect}
+            onchange={() => (isDirty = true)}
+          />
+        {:else if activeSection === 'outbounds'}
+          <XraySectionOutbounds
+            bind:customOutbounds
+            {subscriptionOutbounds}
+            {outboundDetails}
+            {outboundTags}
+            onchange={() => (isDirty = true)}
+          />
+        {:else if activeSection === 'log'}
+          <XraySectionLog
+            bind:logConfig
+            accessPath={xrayFiles['01_log.json']?.log?.access}
+            errorPath={xrayFiles['01_log.json']?.log?.error}
+            onchange={() => (isDirty = true)}
+          />
+        {:else if activeSection === 'policy'}
+          <XraySectionPolicy bind:policyConfig onchange={() => (isDirty = true)} />
+        {/if}
+      </div>
     </div>
 
     <!-- Right Panel: ConstructorPreview with Tabs -->

@@ -4,6 +4,7 @@ import { apiFetchJSON } from './lib/api';
 import { isServiceRestarting, clearRestartGrace } from './lib/serviceGrace';
 import { NAV_CAPS_KEY, parseNavCaps, toNavCaps, mergeNavCaps, type NavCaps } from './lib/navCaps';
 import { kernelStateOf, kernelNameOf, runningKernelsOf } from './lib/kernelState';
+import { humanizeError } from './lib/errorText';
 
 // --- Capabilities store ---
 
@@ -288,6 +289,8 @@ export function showToast(
   action?: ToastAction
 ): void {
   if (type === 'error' && get(panelUnreachable)) return;
+  // Ошибки и предупреждения — без сырого JSON и технических фраз бэкенда
+  if (type === 'error' || type === 'warning') message = humanizeError(message);
   const id = ++_toastCounter;
   toastStore.update((items) => [...items, { id, type, message, duration, action }]);
   if (duration > 0) {

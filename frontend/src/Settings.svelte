@@ -28,6 +28,7 @@
   import UpdatesPanel from './components/settings/UpdatesPanel.svelte';
   import DependentProfilesNote from './components/config/profiles/DependentProfilesNote.svelte';
   import Tabs, { type TabItem } from './components/Tabs.svelte';
+  import { MediaQuery } from 'svelte/reactivity';
   import SegmentedControl, { type SegmentItem } from './components/SegmentedControl.svelte';
   import Select from './components/Select.svelte';
   import Skeleton from './components/Skeleton.svelte';
@@ -80,6 +81,48 @@
   }
 
   let activeTab = $state<SettingsTab>(tabFromHash());
+
+  // Телефон: вместо шести вкладок, уходящих за край, — список разделов, как в
+  // системных настройках. Раздел открывается отдельным экраном с кнопкой
+  // «‹ Настройки»; он записан в адрес (#/settings?tab=…), поэтому «назад»
+  // в браузере тоже возвращает к списку.
+  const phone = new MediaQuery('max-width: 768px');
+  const hasTabInHash = () =>
+    new URLSearchParams(window.location.hash.split('?')[1] ?? '').has('tab');
+  let showSectionList = $state(!hasTabInHash());
+  const listMode = $derived(phone.current && showSectionList);
+
+  const SECTION_ICONS: Record<SettingsTab, string> = {
+    general: 'settings',
+    updates: 'download',
+    security: 'lock',
+    connection: 'network',
+    backups: 'copy',
+    about: 'info'
+  };
+
+  function openSection(tab: SettingsTab) {
+    window.location.hash = `#/settings?tab=${tab}`;
+  }
+
+  function backToList() {
+    window.location.hash = '#/settings';
+  }
+
+  function syncFromHash() {
+    if (!window.location.hash.startsWith('#/settings')) return;
+    if (hasTabInHash()) {
+      const tab = tabFromHash();
+      if (tab !== activeTab) {
+        activeTab = tab;
+        loadTabData(tab);
+      }
+      showSectionList = false;
+    } else {
+      showSectionList = true;
+    }
+    window.scrollTo({ top: 0 });
+  }
 
   // Переключатель слоя «Конфигурация» (D-01, D-04): на время запроса заблокирован
   let configLayerPending = $state(false);
@@ -847,6 +890,8 @@
   });
 </script>
 
+<svelte:window onhashchange={syncFromHash} />
+
 <div class="container">
   <PageHeader
     title={$t('settings.h1')}
@@ -855,15 +900,68 @@
     {onSwitchTab}
   />
 
-  <Tabs
-    bind:value={activeTab}
-    items={settingsTabItems}
-    ariaLabel={$t('settings.h1')}
-    onchange={(tab) => loadTabData(tab as SettingsTab)}
-  />
+  {#if listMode}
+    <nav class="settings-list" aria-label={$t('settings.h1')}>
+      {#each settingsTabItems as item (item.value)}
+        <button
+          type="button"
+          class="settings-list-item"
+          onclick={() => openSection(item.value as SettingsTab)}
+        >
+          <span class="sli-icon" aria-hidden="true">
+            {#if SECTION_ICONS[item.value as SettingsTab] === 'lock'}
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                ><rect x="5" y="11" width="14" height="10" rx="2" /><path
+                  d="M8 11V7a4 4 0 0 1 8 0v4"
+                /></svg
+              >
+            {:else}
+              <Icon name={SECTION_ICONS[item.value as SettingsTab]} size={18} />
+            {/if}
+          </span>
+          <span class="sli-text">
+            <span class="sli-title">{item.label}</span>
+            <span class="sli-desc">{$t(`settings.tab_${item.value}_desc`)}</span>
+          </span>
+          <Icon name="chevron-right" size={16} />
+        </button>
+      {/each}
+    </nav>
+  {:else if phone.current}
+    <div class="settings-back-row">
+      <button type="button" class="settings-back" onclick={backToList}>
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.2"
+          aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg
+        >
+        {$t('settings.h1')}
+      </button>
+      <h2 class="settings-section-title">
+        {settingsTabItems.find((i) => i.value === activeTab)?.label}
+      </h2>
+    </div>
+  {:else}
+    <Tabs
+      bind:value={activeTab}
+      items={settingsTabItems}
+      ariaLabel={$t('settings.h1')}
+      onchange={(tab) => loadTabData(tab as SettingsTab)}
+    />
+  {/if}
 
   <!-- General tab -->
-  <div class="page-sections">
+  <div class="page-sections" hidden={listMode}>
     {#if activeTab === 'general'}
       <Section title={$t('settings.section_locale')}>
         <div class="card card-rows">
@@ -1760,6 +1858,100 @@
 />
 
 <style>
+  /* Список разделов на телефоне: одна карточка, строки с иконкой, описанием
+     и шевроном — как в системных настройках */
+  .settings-list {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+
+  .settings-list-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 64px;
+    padding: 10px 14px;
+    border: 0;
+    border-bottom: 1px solid var(--border-light);
+    background: none;
+    color: var(--fg-dim);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .settings-list-item:last-child {
+    border-bottom: 0;
+  }
+
+  .settings-list-item:active {
+    background: var(--hover);
+  }
+
+  .sli-icon {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-md);
+    background: var(--accent-soft);
+    color: var(--accent-text);
+  }
+
+  .sli-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .sli-title {
+    color: var(--fg-primary);
+    font-weight: 600;
+  }
+
+  .sli-desc {
+    font-size: var(--font-size-xs);
+    color: var(--fg-secondary);
+    line-height: 1.35;
+  }
+
+  .page-sections[hidden] {
+    display: none;
+  }
+
+  .settings-back-row {
+    margin: -4px 0 12px;
+  }
+
+  .settings-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    min-height: 40px;
+    margin-left: -8px;
+    padding: 0 10px 0 4px;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: none;
+    color: var(--accent-text);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .settings-section-title {
+    margin: 4px 0 0;
+    font-size: var(--font-size-xl);
+  }
+
   /* field-group / field-row */
   .field-group {
     display: flex;
@@ -1974,6 +2166,13 @@
 
   .accent-swatch.is-active {
     border-color: var(--fg-primary);
+  }
+
+  @media (max-width: 768px), (pointer: coarse) {
+    .accent-swatch {
+      width: 36px;
+      height: 36px;
+    }
   }
 
   .accent-swatch--blue {
@@ -2303,6 +2502,11 @@
 
     .password-row .password-field-wrap {
       max-width: none;
+    }
+
+    /* В колонке flex-basis 12rem из общего правила стал бы высотой подписи */
+    .password-row > :first-child {
+      flex: none;
     }
   }
 

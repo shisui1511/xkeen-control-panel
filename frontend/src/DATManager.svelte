@@ -2319,6 +2319,17 @@
   }
 
   /* Responsive Behavior */
+  /* Телефон: поле быстрого поиска — 16 px, иначе iOS увеличивает страницу при фокусе */
+  @media (max-width: 768px) {
+    .qs-input {
+      font-size: var(--font-size-lg);
+    }
+
+    .qs-type-btn {
+      padding-block: 6px;
+    }
+  }
+
   @media (max-width: 1024px) {
     .dat-workspace {
       grid-template-columns: 1fr;

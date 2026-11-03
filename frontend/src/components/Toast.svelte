@@ -14,16 +14,22 @@
     if (type === 'warning') return 'warning';
     return 'info';
   }
+
+  // На телефоне тосты выезжают снизу над нижней панелью (под большим пальцем
+  // и не закрывая заголовок страницы), на компьютере — справа сверху.
+  const fromBottom = () =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
+  const enterFrom = () => (fromBottom() ? { y: 16 } : { x: 24 });
 </script>
 
 <div class="toast-container" role="region" aria-label={$t('app.notifications')}>
   {#each $toastStore as toast (toast.id)}
-    <!-- Вход справа, уход туда же; оставшиеся тосты съезжают на место ушедшего (flip),
-         а не прыгают. -->
+    <!-- Вход справа (на телефоне — снизу), уход туда же; оставшиеся тосты съезжают
+         на место ушедшего (flip), а не прыгают. -->
     <div
       class="toast toast--{toast.type}"
-      in:fly={{ x: 24, duration: 220, easing: easeOut }}
-      out:fly={{ x: 24, duration: 160, opacity: 0 }}
+      in:fly={{ ...enterFrom(), duration: 220, easing: easeOut }}
+      out:fly={{ ...enterFrom(), duration: 160, opacity: 0 }}
       animate:flip={{ duration: 220, easing: easeOut }}
       role={toast.type === 'error' ? 'alert' : 'status'}
       aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
@@ -148,5 +154,27 @@
   }
   .toast__close:hover {
     color: var(--fg-primary);
+  }
+
+  /* Телефон: стопка во всю ширину над нижней панелью, новый тост — ближе к пальцу */
+  @media (max-width: 768px) {
+    .toast-container {
+      top: auto;
+      left: max(12px, env(safe-area-inset-left));
+      right: max(12px, env(safe-area-inset-right));
+      bottom: calc(var(--dock-space) + 12px);
+      max-width: none;
+    }
+
+    .toast {
+      align-items: center;
+      padding: 12px 8px 12px 14px;
+    }
+
+    .toast__close {
+      min-width: 36px;
+      min-height: 36px;
+      padding: 0;
+    }
   }
 </style>

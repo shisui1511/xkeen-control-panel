@@ -67,7 +67,8 @@
       color var(--transition-fast),
       filter var(--transition-fast),
       box-shadow var(--transition-fast),
-      opacity var(--transition-fast);
+      opacity var(--transition-fast),
+      transform var(--transition-fast);
     border: 1px solid transparent;
   }
   .btn:disabled {

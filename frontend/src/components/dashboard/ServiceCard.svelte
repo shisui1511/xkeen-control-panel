@@ -2,6 +2,7 @@
   import { t } from '../../i18n';
   import Icon from '../../lib/components/Icon.svelte';
   import Button from '../Button.svelte';
+  import Modal from '../Modal.svelte';
 
   let {
     name,
@@ -34,6 +35,15 @@
     onStop?: () => Promise<void> | void;
     onMigrate?: () => void;
   } = $props();
+
+  // Телефон: перезапуск и остановку легко задеть случайно, поэтому они живут
+  // в листе действий за кнопкой «⋯»; на виду остаётся только «Запустить».
+  let sheetOpen = $state(false);
+
+  async function fromSheet(action: () => Promise<void>) {
+    sheetOpen = false;
+    await action();
+  }
 
   let isRestarting = $state(false);
   let isStarting = $state(false);
@@ -155,7 +165,7 @@
     {/if}
   </div>
 
-  <div class="svc-actions">
+  <div class="svc-actions" class:has-touch-menu={!isNotInstalled && (onRestart || onStop)}>
     {#if isNotInstalled}
       <a href="#/services" class="install-link">
         {serviceId === 'xkeen'
@@ -194,6 +204,7 @@
       {:else if !isRunning && onStart}
         <Button
           variant="secondary"
+          class="btn-start"
           onclick={handleStart}
           disabled={isBusy || !!startBlocked}
           loading={isStarting}
@@ -204,9 +215,56 @@
           <span>{$t('app.start')}</span>
         </Button>
       {/if}
+
+      {#if onRestart || (isRunning && onStop)}
+        <button
+          type="button"
+          class="svc-more"
+          aria-haspopup="dialog"
+          aria-label={$t('svc.actions_for', { name })}
+          disabled={isBusy}
+          onclick={() => (sheetOpen = true)}
+        >
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <circle cx="4" cy="10" r="1.7" /><circle cx="10" cy="10" r="1.7" /><circle
+              cx="16"
+              cy="10"
+              r="1.7"
+            />
+          </svg>
+        </button>
+      {/if}
     {/if}
   </div>
 </div>
+
+<Modal isOpen={sheetOpen} title={name} maxWidth="420px" onclose={() => (sheetOpen = false)}>
+  <div class="svc-sheet">
+    {#if onRestart}
+      <button
+        type="button"
+        class="sheet-action"
+        disabled={!!mutationBlockedReason}
+        onclick={() => fromSheet(handleRestart)}
+      >
+        <Icon name="refresh" size={18} />
+        <span class="sheet-text">
+          <span class="sheet-title">{$t('app.restart')}</span>
+          <span class="sheet-hint">{mutationBlockedReason || $t('svc.restart_hint')}</span>
+        </span>
+      </button>
+    {/if}
+    {#if isRunning && onStop}
+      <button type="button" class="sheet-action is-danger" onclick={() => fromSheet(handleStop)}>
+        <Icon name="stop" size={18} />
+        <span class="sheet-text">
+          <span class="sheet-title">{$t('app.stop')}</span>
+          <span class="sheet-hint">{$t('svc.stop_hint')}</span>
+        </span>
+      </button>
+    {/if}
+  </div>
+</Modal>
 
 <style>
   /* Строка списка сервисов: имя слева, статус и действия справа.
@@ -421,6 +479,90 @@
     .service-row .svc-actions :global(.btn) {
       flex: 1 1 0;
     }
+  }
+
+  .svc-more {
+    display: none;
+  }
+
+  /* Телефон: перезапуск и остановка — в листе действий, в строке только «⋯»
+     (и «Запустить», если служба стоит) справа от статуса */
+  @media (max-width: 768px) {
+    .svc-actions.has-touch-menu {
+      grid-column: auto;
+      justify-content: flex-end;
+    }
+
+    .service-row .svc-actions.has-touch-menu :global(.btn:not(.btn-start)) {
+      display: none;
+    }
+
+    .service-row .svc-actions.has-touch-menu :global(.btn) {
+      flex: 0 0 auto;
+    }
+
+    .svc-more {
+      display: inline-grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--bg-elevated);
+      color: var(--fg-secondary);
+      cursor: pointer;
+    }
+
+    .svc-more:disabled {
+      opacity: 0.5;
+    }
+  }
+
+  .svc-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .sheet-action {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    min-height: 56px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    color: var(--fg-primary);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .sheet-action:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .sheet-action.is-danger {
+    color: var(--danger);
+  }
+
+  .sheet-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .sheet-title {
+    font-weight: 600;
+  }
+
+  .sheet-hint {
+    font-size: var(--font-size-xs);
+    color: var(--fg-secondary);
   }
 
   @media (prefers-reduced-motion: reduce) {

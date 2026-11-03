@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { pullToRefresh } from './lib/gestures';
   import { onMount, untrack } from 'svelte';
   import { t, currentLang, pluralize } from './i18n';
   import {
@@ -950,7 +951,7 @@
   });
 </script>
 
-<div class="container">
+<div class="container" {@attach pullToRefresh(handleRefreshStatus)}>
   <PageHeader
     title={$t('svc.h1')}
     subtitle={$t('svc.h1_sub')}
