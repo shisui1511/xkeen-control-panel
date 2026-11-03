@@ -249,7 +249,19 @@ func rtAccReleaseLog(t *testing.T, e *rtSrc, want map[string]string) {
 		c.rtRtApplyOK("возврат секции log Xray")
 	}
 	if got := rtCoresDirSums(t); !rtCoresSumsEqual(got, want) {
-		t.Errorf("после возврата секции log файлы каталога конфигов Xray отличаются от исходных (файлов %d, ожидалось %d)", len(got), len(want))
+		var diff []string
+		for name, sum := range got {
+			if want[name] != sum {
+				diff = append(diff, "+"+name)
+			}
+		}
+		for name := range want {
+			if _, ok := got[name]; !ok {
+				diff = append(diff, "-"+name)
+			}
+		}
+		slices.Sort(diff)
+		t.Errorf("после возврата секции log файлы каталога конфигов Xray отличаются от исходных (файлов %d, ожидалось %d): %v", len(got), len(want), diff)
 	}
 }
 
@@ -469,6 +481,8 @@ func TestRouterAccessLogForeignTake(t *testing.T) {
 		t.Fatalf("удаление файла-перекрытия: %v", err)
 	}
 	withoutShadow := rtCoresDirSums(t)
+	// Файла-перекрытия больше нет: очистка сверяет каталог уже без него.
+	withFixtures = withoutShadow
 	// Путь записи при включении: действующий путь или последний путь панели.
 	wantAccess, _ := e.rtAccStatus()["will_write"].(string)
 	if wantAccess == "" {

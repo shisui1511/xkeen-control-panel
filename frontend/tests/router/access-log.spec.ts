@@ -303,7 +303,10 @@ test('access-log: включение и выключение на секции �
   await dialog.getByRole('button', { name: RE_ENABLE }).click();
   await expect(page.getByTestId('xlog-path')).toBeVisible({ timeout: T.save * 2 });
   await expect(
-    page.locator('.toast').filter({ hasText: running ? RE_TOAST_ON : RE_STOPPED })
+    page
+      .locator('.toast')
+      .filter({ hasText: running ? RE_TOAST_ON : RE_STOPPED })
+      .last()
   ).toBeVisible({ timeout: T.save });
 
   // выключение: Xray запущен — подтверждение, остановлен — сразу
@@ -317,7 +320,11 @@ test('access-log: включение и выключение на секции �
   }
   await expect(page.getByTestId('xlog-enable')).toBeVisible({ timeout: T.save * 2 });
   await expect(
-    page.locator('.toast').filter({ hasText: running ? RE_TOAST_OFF : RE_STOPPED })
+    // при остановленном Xray текст тот же, что после включения: прежний тост ещё на экране
+    page
+      .locator('.toast')
+      .filter({ hasText: running ? RE_TOAST_OFF : RE_STOPPED })
+      .last()
   ).toBeVisible({ timeout: T.save });
 
   await guard.assertClean();

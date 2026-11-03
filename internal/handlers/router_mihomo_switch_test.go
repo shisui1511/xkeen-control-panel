@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -153,7 +154,19 @@ func (s *rtSwStand) restore() {
 		_ = os.Remove(s.profDir)
 	}
 	if got := rtCoresDirSums(t); !reflect.DeepEqual(got, s.xray) {
-		t.Errorf("файлы каталога конфигураций Xray после сценария отличаются от исходных")
+		var diff []string
+		for name, sum := range got {
+			if s.xray[name] != sum {
+				diff = append(diff, "+"+name)
+			}
+		}
+		for name := range s.xray {
+			if _, ok := got[name]; !ok {
+				diff = append(diff, "-"+name)
+			}
+		}
+		sort.Strings(diff)
+		t.Errorf("файлы каталога конфигураций Xray после сценария отличаются от исходных: %v", diff)
 	}
 	// Содержимое профилей одинаково, перезапуск ядру не нужен, кроме случая, когда
 	// сценарий оставил его остановленным.

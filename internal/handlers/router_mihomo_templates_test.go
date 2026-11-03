@@ -18,6 +18,7 @@ import (
 
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
 
 // Профиль из шаблона на настоящей панели устройства (PART-02, D-01…D-03): панель
@@ -667,6 +668,25 @@ func (e *rtSrc) rtFillSniffer() (value map[string]any, dirty bool) {
 	return value, dirty
 }
 
+// rtFillDropSaved удаляет сохранённые значения секций Mihomo из черновика и
+// применяет, если они там были. Секции под управлением панели не трогаются.
+func (e *rtSrc) rtFillDropSaved() {
+	e.t.Helper()
+	if _, taken := e.rtRtOwnership("mihomo"); taken {
+		return
+	}
+	for _, id := range configlayer.MihomoSectionIDs {
+		r := e.call(http.MethodPost, "/api/configlayer/draft", map[string]any{"revision": e.revision(), "section": configlayer.CoreSectionName(configlayer.KernelMihomo, id), "value": nil})
+		if r.Status != http.StatusOK {
+			e.t.Fatalf("удаление сохранённой секции Mihomo %s: %d %s", id, r.Status, r.Code)
+		}
+	}
+	if e.rtRtDraftChanges() > 0 {
+		e.rtRtApplyOK("сброс сохранённых секций Mihomo")
+	}
+	e.rtRstIdle()
+}
+
 // rtFillHasSkip — в секции sniffer есть skip-domain с записью шаблона.
 func rtFillHasSkip(sniffer map[string]any) bool {
 	list, _ := sniffer["skip-domain"].([]any)
@@ -698,6 +718,11 @@ func TestRouterCoresFill(t *testing.T) {
 	if !strings.Contains(tpl, "https://example.com") || !strings.Contains(tpl, "Mijia Cloud") {
 		t.Fatalf("шаблон %s больше не содержит заглушки подписки или skip-domain: сценарий устарел", file)
 	}
+
+	// Значения секций Mihomo переживают отпускание (D-09): прошлый прогон оставил
+	// бы sniffer шаблона в черновике, и проверка «до заполнения» не имела бы смысла.
+	e.rtFillDropSaved()
+	t.Cleanup(e.rtFillDropSaved)
 
 	m := rtCoresLiveMihomoTake(t, e, tg)
 	panelFile := rtTplProfilePath("xcp-main")

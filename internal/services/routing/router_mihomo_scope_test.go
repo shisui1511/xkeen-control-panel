@@ -30,6 +30,17 @@ func rtscForeignFile(t *testing.T, e *rtEnv) string {
 	return path
 }
 
+// rtscUserXray кладёт пользовательский файл исходящих в каталог Xray: у живого
+// Xray он есть всегда, а `xray run -test` на пустом каталоге отказывает, и
+// «Применить» после возврата файлов панели не прошло бы.
+func rtscUserXray(t *testing.T, e *rtEnv) {
+	t.Helper()
+	const outbounds = `{"outbounds":[{"tag":"direct","protocol":"freedom"}]}`
+	if err := os.WriteFile(filepath.Join(e.xrayDir(), "04_outbounds.json"), []byte(outbounds), 0o644); err != nil {
+		t.Fatalf("исходящие Xray: %v", err)
+	}
+}
+
 // rtscSameFile требует, чтобы файл существовал и совпадал с исходным побайтно.
 func rtscSameFile(t *testing.T, path string) {
 	t.Helper()
@@ -42,6 +53,10 @@ func rtscSameFile(t *testing.T, path string) {
 		t.Errorf("файл %s изменён", filepath.Base(path))
 	}
 }
+
+// rtscTaken — ядро взято панелью: снимок отдаёт вид и для невзятого ядра
+// (Taken=false), поэтому nil-проверки мало.
+func rtscTaken(v *configlayer.RoutingKernelView) bool { return v != nil && v.Taken }
 
 // rtscRouting читает секцию routing черновика или применённого состояния.
 func rtscRouting(t *testing.T, sections configlayer.Sections) configlayer.RoutingDesired {
@@ -87,7 +102,7 @@ func TestRouterMihomoScopedTake(t *testing.T) {
 			t.Errorf("config.yaml указывает на %q (%v), ожидался профиль панели", got, err)
 		}
 		snap := e.layer.Snapshot().Routing
-		if snap.Xray != nil {
+		if rtscTaken(snap.Xray) {
 			t.Errorf("Xray взят панелью: %+v", snap.Xray)
 		}
 		if snap.Mihomo == nil || !snap.Mihomo.Taken {
@@ -108,7 +123,7 @@ func TestRouterMihomoScopedTake(t *testing.T) {
 		if link := rtscConfigLink(t, e); link != user {
 			t.Errorf("config.yaml после Release: %q, ожидался прежний профиль", link)
 		}
-		if snap := e.layer.Snapshot().Routing; snap.Xray != nil || (snap.Mihomo != nil && snap.Mihomo.Taken) {
+		if snap := e.layer.Snapshot().Routing; rtscTaken(snap.Xray) || rtscTaken(snap.Mihomo) {
 			t.Errorf("после Release владение осталось: %+v", snap)
 		}
 		rtscSameFile(t, foreign)
@@ -156,6 +171,7 @@ func TestRouterMihomoScopedTake(t *testing.T) {
 	// «Взять всё» тоже оставляет Mihomo на своём профиле (D-07).
 	t.Run("release_keeps_mihomo_off", func(t *testing.T) {
 		e := rtNewEnv(t)
+		rtscUserXray(t, e)
 		user := e.writeUserProfile(t)
 		if _, err := e.svc.TakeScoped(e.rev(t), ScopeXray); err != nil {
 			t.Fatalf("TakeScoped(xray): %v", err)
@@ -176,7 +192,7 @@ func TestRouterMihomoScopedTake(t *testing.T) {
 		if e.xrayFileExists(configlayer.PanelXrayRoutingFile) {
 			t.Errorf("файл %s остался после Release", configlayer.PanelXrayRoutingFile)
 		}
-		if snap := e.layer.Snapshot().Routing; snap.Xray != nil {
+		if snap := e.layer.Snapshot().Routing; rtscTaken(snap.Xray) {
 			t.Errorf("Xray остался взятым: %+v", snap.Xray)
 		}
 
@@ -201,6 +217,7 @@ func TestRouterMihomoScopedTake(t *testing.T) {
 	// сохраняются в черновике и в применённом состоянии (D-09).
 	t.Run("all_when_both_panel", func(t *testing.T) {
 		e := rtNewEnv(t)
+		rtscUserXray(t, e)
 		user := e.writeUserProfile(t)
 		e.takeAndApply(t)
 		snap := e.layer.Snapshot().Routing
@@ -213,7 +230,7 @@ func TestRouterMihomoScopedTake(t *testing.T) {
 		}
 		e.applyOK(t)
 		snap = e.layer.Snapshot().Routing
-		if snap.Xray != nil || (snap.Mihomo != nil && snap.Mihomo.Taken) {
+		if rtscTaken(snap.Xray) || rtscTaken(snap.Mihomo) {
 			t.Errorf("после Release остались взятые ядра: xray=%+v mihomo=%+v", snap.Xray, snap.Mihomo)
 		}
 		if link := rtscConfigLink(t, e); link != user {

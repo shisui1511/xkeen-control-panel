@@ -173,11 +173,10 @@ func TestRouterProfileActivatePID(t *testing.T) {
 	if kernel != "xray" && kernel != "mihomo" {
 		t.Fatalf("неизвестное ядро цели %q", kernel)
 	}
-	pidBefore := rtRstKernelPID(t, kernel)
 	s := rtPrfPrepare(t, kernel)
-	if pid := rtRstKernelPID(t, kernel); pid != pidBefore {
-		t.Fatalf("PID %s сменился при подготовке: %d -> %d", kernel, pidBefore, pid)
-	}
+	// Включение слоя в подготовке запускает фоновую сборку, она может перезапустить
+	// ядро: PID берётся после неё, сравнение идёт только по самой активации.
+	pidBefore := rtRstKernelPID(t, kernel)
 
 	r := s.e.callSlow(http.MethodPost, "/api/mihomo/profiles/activate", map[string]string{"name": rtPrfA})
 	if r.Status != http.StatusOK {
@@ -581,7 +580,9 @@ func TestRouterProfileNames(t *testing.T) {
 	}
 
 	// После отпускания цели возврата нет: переименование проходит и ведёт ссылку.
-	rtSwExpectKernel(t, tg.Core, e.rtSwCall("release", ""), rtNamesB, rtRstKernelPID(t, tg.Core))
+	// PID берётся до вызова: аргументы вычисляются слева направо, иначе сравнение шло бы с уже новым процессом.
+	pidBefore := rtRstKernelPID(t, tg.Core)
+	rtSwExpectKernel(t, tg.Core, e.rtSwCall("release", ""), rtNamesB, pidBefore)
 	m.taken = false
 	if got := e.call(http.MethodGet, rtPrfList, nil).object(t)["return_target"]; got != nil && got != "" {
 		t.Errorf("после отпускания return_target %v, ожидался пустой", got)
@@ -786,4 +787,10 @@ func TestRouterProfileActivatePlain(t *testing.T) {
 	if got, err := os.ReadFile(s.profile("rt-plain-adopt")); err != nil || !bytes.Equal(got, plain) {
 		t.Errorf("adopt: содержимое профиля не совпадает с прежним config.yaml: %v", err)
 	}
+
+	// Слой возвращается включённым, как при снимке стенда: снимок файлов Xray и
+	// сброс черновика в очистке идут при включённом слое (файлы слоя, например
+	// диагностики, при выключении уходят из каталога).
+	e.setLayer(true)
+	e.rtRstIdle()
 }

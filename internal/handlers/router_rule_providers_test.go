@@ -303,8 +303,16 @@ func TestRouterRuleProviderCheckURL(t *testing.T) {
 		if strings.Contains(string(raw), rtRpSecretMark) {
 			t.Errorf("%s: в ответе остался query адреса", name)
 		}
-		if strings.Contains(string(raw), srv.Listener.Addr().String()) {
-			t.Errorf("%s: в тексте ответа адрес сервера теста", name)
+		// Поле url отдаёт адрес без query по замыслу (карточка показывает его);
+		// адрес сервера не должен попадать в тексты ошибок.
+		texts := res.Error
+		for _, p := range []*services.RuleProviderProbe{res.Direct, res.ViaProxy} {
+			if p != nil {
+				texts += " " + p.Error
+			}
+		}
+		if strings.Contains(texts, srv.Listener.Addr().String()) {
+			t.Errorf("%s: в тексте ошибки адрес сервера теста", name)
 		}
 		return res
 	}

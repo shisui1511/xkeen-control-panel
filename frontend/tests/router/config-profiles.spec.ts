@@ -143,9 +143,11 @@ async function activateViaApi(page: Page, name: string): Promise<void> {
 
 /** Mihomo у панели: возврат при сохранённых значениях секций, иначе взятие и «Применить». */
 async function ensurePanelOwns(page: Page): Promise<void> {
+  // Сборка после включения слоя ещё может идти: «Применить» тогда отвечает 409 apply_busy.
+  await resetDraft(page);
+  await settled(page);
   const s = await standState(page);
   if (s.taken) return;
-  await resetDraft(page);
   if (s.saved) {
     expectSwitched(
       await api(page, 'POST', '/api/configlayer/routing/mihomo', { action: 'return' }),
@@ -534,7 +536,8 @@ test('profiles: новый профиль из шаблона', async ({ page })
   const text = await readText(page, `${MIHOMO_DIR}/profiles/${PREFIX}tpl.yaml`);
   expect(text, 'файл профиля создан').not.toBeNull();
   expect(text).toContain('external-controller-unix');
-  expect(text).not.toContain('example.com');
+  // адрес подписки шаблона (https://example.com/...) в профиль не попадает; правило-образец DOMAIN-SUFFIX,example.com в шаблоне есть
+  expect(text).not.toMatch(/https?:\/\/example\.com/);
 
   await guard.assertClean();
 });
