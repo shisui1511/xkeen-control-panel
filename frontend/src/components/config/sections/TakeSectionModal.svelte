@@ -5,22 +5,33 @@
   import Button from '../../Button.svelte';
   import Skeleton from '../../Skeleton.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
-  import { handleLayerError } from '../../../lib/configLayer';
+  import {
+    draftChanges,
+    handleLayerError,
+    refetchLayerState,
+    type LayerApply
+  } from '../../../lib/configLayer';
   import {
     coresErrorText,
     fetchTakePreview,
+    setAccessLog,
     takeSections,
     type CoreKernel,
     type SectionPreview,
     type TakePreview
   } from '../../../lib/configCores';
+  import { accessLogFailure } from '../../../lib/accessLog';
+  import { runningKernels } from '../../../stores';
   import { coresBusy } from './coresOwner';
 
   // Диалог взятия секции или всех секций ядра (SEC-01, XCFG-03, D-01…D-04, D-12, D-25).
   // Показывает, какие файлы уйдут в резервные копии, какие останутся на месте, какие секции
   // не будут взяты и почему, и только по явному «Взять секцию» пишет желание в черновик.
   // При комментариях JSONC нужно согласие на их потерю (D-02). До подтверждения диалог
-  // ничего не пишет ни в черновик, ни на диск.
+  // ничего не пишет ни в черновик, ни на диск. С then (секция «Лог» Xray со страницы «Логи»,
+  // D-14) подтверждение берёт секцию и включает или выключает access-лог одним применением;
+  // при открытом черновике вместо тела показывается блокировка: секция меняет владельца
+  // только отдельным шагом.
   let {
     open = $bindable(false),
     kernel,
@@ -28,6 +39,7 @@
     section = '',
     ids,
     forceGroup = '',
+    then,
     ontaken
   }: {
     open?: boolean;
@@ -39,7 +51,10 @@
     ids: string[];
     /** Группа, в которую панель направит входящие force-proxy. */
     forceGroup?: string;
-    ontaken: (ids: string[]) => void;
+    /** Действие после взятия секции «Лог»: включить или выключить access-лог. */
+    then?: 'enable' | 'disable';
+    /** Секции взяты; в режиме then вторым аргументом приходит результат применения. */
+    ontaken: (ids: string[], applied?: LayerApply) => void | Promise<void>;
   } = $props();
 
   // Разделитель, по которому текст со списком файлов режется на часть до и после списка
@@ -51,6 +66,8 @@
   let busy = $state(false);
   let ack = $state(false);
   let takeError = $state('');
+  // Отказ применения в режиме then: текст до и после вывода ядра и сам вывод (моноширинный блок)
+  let takeFailure = $state<{ before: string; after: string; output: string } | null>(null);
   // Растёт с каждым чтением: устаревший ответ не затирает более свежий
   let seq = 0;
 
@@ -63,6 +80,7 @@
     preview = null;
     ack = false;
     takeError = '';
+    takeFailure = null;
     try {
       const data = await fetchTakePreview(kernel, wanted);
       if (mine === seq) preview = data;
@@ -81,6 +99,7 @@
     busy = false;
     ack = false;
     takeError = '';
+    takeFailure = null;
   }
 
   $effect(() => {
@@ -101,8 +120,11 @@
       takeable.some((r) => r.id === 'inbounds') &&
       (preview?.force_proxy_tags?.length ?? 0) > 0
   );
+  // Открытый черновик не даёт взять секцию «Лог» отдельным шагом (D-14)
+  const draftBlock = $derived(then !== undefined && $draftChanges > 0);
+  const xrayRunning = $derived($runningKernels.includes('xray'));
   const canConfirm = $derived(
-    preview !== null && takeable.length > 0 && (!needAck || ack) && !busy
+    preview !== null && takeable.length > 0 && (!needAck || ack) && !busy && !draftBlock
   );
 
   function sectionName(id: string): string {
@@ -127,9 +149,20 @@
   const allTail = $derived(filesParts[1].replace(/^[.\s]+/, ''));
 
   const title = $derived(
-    mode === 'one'
-      ? $t('cfg.sec.take_title_one', { name: sectionName(section) })
-      : $t('cfg.sec.take_title_all', { kernel: kernelName() })
+    then === 'enable'
+      ? $t('xlog.take_title_on')
+      : then === 'disable'
+        ? $t('xlog.take_title_off')
+        : mode === 'one'
+          ? $t('cfg.sec.take_title_one', { name: sectionName(section) })
+          : $t('cfg.sec.take_title_all', { kernel: kernelName() })
+  );
+  const confirmLabel = $derived(
+    then === 'enable'
+      ? $t('xlog.take_on')
+      : then === 'disable'
+        ? $t('xlog.take_off')
+        : $t('cfg.sec.take_confirm')
   );
 
   function blockedReason(r: SectionPreview): string {
@@ -150,8 +183,42 @@
     return coresErrorText($t, e?.code, e?.params);
   }
 
+  /** Режим then: берёт секцию и применяет log.access; отказ ядра остаётся в диалоге. */
+  async function confirmThen(enabled: boolean) {
+    busy = true;
+    coresBusy.set(true);
+    takeError = '';
+    takeFailure = null;
+    let view: LayerApply;
+    try {
+      view = await setAccessLog(enabled, ack);
+    } catch (err) {
+      takeError = errorText(err);
+      return;
+    } finally {
+      busy = false;
+      coresBusy.set(false);
+    }
+    await refetchLayerState().catch(() => {});
+    const failure = accessLogFailure(view);
+    if (failure) {
+      const [before, after = ''] = $t(
+        failure.kind === 'test' ? 'xlog.test_failed' : 'apply.restart_failed',
+        { reason: FILES_TOKEN }
+      ).split(FILES_TOKEN);
+      takeFailure = { before, after, output: failure.reason };
+      return;
+    }
+    open = false;
+    await ontaken(['log'], view);
+  }
+
   async function confirmTake() {
     if (!canConfirm) return;
+    if (then !== undefined) {
+      await confirmThen(then === 'enable');
+      return;
+    }
     const taking = takeable.map((r) => r.id);
     busy = true;
     coresBusy.set(true);
@@ -177,7 +244,13 @@
   }
 </script>
 
-<Modal isOpen={open} {title} maxWidth="640px" dataTestid="take-section-modal" onclose={close}>
+<Modal
+  isOpen={open}
+  {title}
+  maxWidth="640px"
+  dataTestid={then === undefined ? 'take-section-modal' : 'xlog-take-modal'}
+  onclose={close}
+>
   <div class="ts-body" data-mode={mode}>
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
@@ -187,7 +260,20 @@
       tabindex="0"
       data-testid="take-section-content"
     >
-      {#if loading}
+      {#if draftBlock}
+        <div class="alert alert-warning ts-alert" role="alert" data-testid="xlog-draft-block">
+          <Icon name="warning" size={16} class="ts-alert-icon" />
+          <span>{$t('xlog.draft_block')}</span>
+        </div>
+        <a
+          class="ts-link"
+          href="#/config"
+          data-testid="xlog-open-config"
+          onclick={() => (open = false)}
+        >
+          {$t('xlog.open_config')}
+        </a>
+      {:else if loading}
         <div class="ts-skeleton" aria-hidden="true" data-testid="take-section-loading">
           <Skeleton type="rect" height="20px" />
           <Skeleton type="rect" height="20px" />
@@ -273,9 +359,27 @@
           </div>
         {/if}
 
-        <div class="alert alert-warning ts-alert" data-testid="take-section-consequence">
+        {#if then === undefined}
+          <div class="alert alert-warning ts-alert" data-testid="take-section-consequence">
+            <Icon name="warning" size={16} class="ts-alert-icon" />
+            <span>{$t('cfg.sec.take_consequence')}</span>
+          </div>
+        {:else if xrayRunning}
+          <div class="alert alert-warning ts-alert" data-testid="xlog-take-restart">
+            <Icon name="warning" size={16} class="ts-alert-icon" />
+            <span>{$t('xlog.take_restart_note')}</span>
+          </div>
+        {/if}
+      {/if}
+
+      {#if takeFailure}
+        <div class="alert alert-error ts-alert" role="alert" data-testid="xlog-take-failure">
           <Icon name="warning" size={16} class="ts-alert-icon" />
-          <span>{$t('cfg.sec.take_consequence')}</span>
+          <div class="ts-fail">
+            <span>{takeFailure.before}</span>
+            <pre class="ts-pre font-mono" data-testid="xlog-take-output">{takeFailure.output}</pre>
+            <span>{takeFailure.after}</span>
+          </div>
         </div>
       {/if}
 
@@ -295,7 +399,7 @@
         data-testid="take-section-confirm"
         onclick={confirmTake}
       >
-        {$t('cfg.sec.take_confirm')}
+        {confirmLabel}
       </Button>
       <Button variant="secondary" disabled={busy} data-testid="take-section-cancel" onclick={close}>
         {$t('app.cancel')}
@@ -404,6 +508,30 @@
     accent-color: var(--accent);
   }
 
+  .ts-fail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+    min-width: 0;
+  }
+
+  /* Вывод ядра: ограниченная высота и прокрутка, длинные строки переносятся */
+  .ts-pre {
+    margin: 0;
+    max-height: 160px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: var(--font-size-xs);
+    scrollbar-width: thin;
+  }
+
+  .ts-link {
+    align-self: flex-start;
+    color: var(--accent);
+    text-decoration: underline;
+  }
+
   .ts-retry {
     display: flex;
   }
@@ -417,6 +545,12 @@
 
   @media (pointer: coarse), (max-width: 768px) {
     .ts-footer :global(.btn) {
+      min-height: 44px;
+    }
+
+    .ts-link {
+      display: inline-flex;
+      align-items: center;
       min-height: 44px;
     }
   }

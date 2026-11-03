@@ -26,6 +26,7 @@
   import PingTargetSettingsCard from './components/PingTargetSettingsCard.svelte';
   import PageHeader from './PageHeader.svelte';
   import UpdatesPanel from './components/settings/UpdatesPanel.svelte';
+  import DependentProfilesNote from './components/config/profiles/DependentProfilesNote.svelte';
   import Tabs, { type TabItem } from './components/Tabs.svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import SegmentedControl, { type SegmentItem } from './components/SegmentedControl.svelte';
@@ -135,6 +136,7 @@
         title: $t('settings.config_layer_off_title'),
         message: $t('settings.config_layer_off_message'),
         consequence: $t('settings.config_layer_off_consequence'),
+        extra: { component: DependentProfilesNote, props: { all: true } },
         confirmLabel: $t('settings.config_layer_off_ok')
       });
       if (!confirmed) {

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 )
@@ -26,6 +28,14 @@ var invalidReasonStatus = map[string]int{
 	"preset_unknown":      http.StatusBadRequest,
 	"country_unavailable": http.StatusBadRequest,
 	"catalog_unavailable": http.StatusServiceUnavailable,
+}
+
+// genericInvalidReasons — причины InvalidInputError, у которых свой код (совпадает с
+// причиной), статус 400 и общий текст invalid_input: отдельного слова в словаре у
+// них нет, поле и причина идут в params.
+var genericInvalidReasons = map[string]bool{
+	"scope_invalid":  true,
+	"action_invalid": true,
 }
 
 // requireRouting — requireLayer плюс наличие сервиса маршрутизации: без сервиса
@@ -60,6 +70,8 @@ func (a *API) writeRoutingError(w http.ResponseWriter, r *http.Request, err erro
 			code, key = reasonFinalRequiresRedirect, "configlayer.routing.final_requires_redirect"
 		} else if st, ok := invalidReasonStatus[invalid.Reason]; ok {
 			code, key, status = invalid.Reason, "configlayer.routing."+invalid.Reason, st
+		} else if genericInvalidReasons[invalid.Reason] {
+			code = invalid.Reason
 		}
 		JSONErrorCodeParams(w, status, code, a.t(r, key),
 			map[string]string{"field": invalid.Field, "reason": invalid.Reason})
@@ -90,6 +102,10 @@ func (a *API) writeRoutingError(w http.ResponseWriter, r *http.Request, err erro
 		JSONErrorCode(w, http.StatusBadRequest, "member_invalid", a.t(r, "configlayer.routing.member_invalid"))
 	case errors.Is(err, configlayer.ErrApplyBusy):
 		JSONErrorCode(w, http.StatusConflict, "apply_busy", a.t(r, "configlayer.routing.apply_busy"))
+	case errors.Is(err, configlayer.ErrDraftOpen):
+		JSONErrorCode(w, http.StatusConflict, "draft_open", a.t(r, "configlayer.routing.draft_open"))
+	case errors.Is(err, routing.ErrProfileUnknown):
+		JSONErrorCode(w, http.StatusNotFound, "profile_unknown", a.t(r, "configlayer.routing.profile_unknown"))
 	default:
 		// Ошибки источников (узел или источник не найден) и слоя — по их таблицам.
 		a.writeSourceError(w, r, err)
@@ -132,19 +148,40 @@ func (a *API) ConfigRoutingGroupsSave(w http.ResponseWriter, r *http.Request) {
 	JSONSuccess(w, map[string]any{"event": ev, "group": g})
 }
 
-// ConfigRoutingTake — POST /api/configlayer/routing/take {revision}: желание
+// takeScopeOf разбирает область взятия из запроса: пусто или all — оба ядра, mihomo,
+// xray; иное значение — InvalidInputError (400 scope_invalid).
+func takeScopeOf(scope string) (routing.TakeScope, error) {
+	switch routing.TakeScope(scope) {
+	case "", routing.ScopeAll:
+		return routing.ScopeAll, nil
+	case routing.ScopeMihomo:
+		return routing.ScopeMihomo, nil
+	case routing.ScopeXray:
+		return routing.ScopeXray, nil
+	}
+	return "", &routing.InvalidInputError{Field: "scope", Reason: "scope_invalid"}
+}
+
+// ConfigRoutingTake — POST /api/configlayer/routing/take {revision, scope}: желание
 // «маршрутизацией управляет панель» в черновик; взятие происходит при «Применить».
+// scope — all (по умолчанию), mihomo или xray: какие ядра берёт панель.
 func (a *API) ConfigRoutingTake(w http.ResponseWriter, r *http.Request) {
 	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
 		return
 	}
 	var req struct {
-		Revision int64 `json:"revision"`
+		Revision int64  `json:"revision"`
+		Scope    string `json:"scope"`
 	}
 	if !a.decodeLayerBody(w, r, &req) {
 		return
 	}
-	ev, err := a.routing.Take(req.Revision)
+	scope, err := takeScopeOf(req.Scope)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	ev, err := a.routing.TakeScoped(req.Revision, scope)
 	if err != nil {
 		a.writeRoutingError(w, r, err)
 		return
@@ -477,8 +514,9 @@ func (a *API) ConfigRoutingPresetsPlan(w http.ResponseWriter, r *http.Request) {
 }
 
 // ConfigRoutingPresetsApply — POST /api/configlayer/routing/presets/apply
-// {revision, choice, take}: пресет одной правкой черновика (группы и правила);
-// take=true — вместе с взятием маршрутизации под панель.
+// {revision, choice, take, scope}: пресет одной правкой черновика (группы и правила);
+// take=true — вместе с взятием маршрутизации под панель, scope (all, mihomo, xray)
+// задаёт, какие ядра берутся.
 func (a *API) ConfigRoutingPresetsApply(w http.ResponseWriter, r *http.Request) {
 	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
 		return
@@ -487,16 +525,19 @@ func (a *API) ConfigRoutingPresetsApply(w http.ResponseWriter, r *http.Request) 
 		Revision int64                `json:"revision"`
 		Choice   routing.PresetChoice `json:"choice"`
 		Take     bool                 `json:"take"`
+		Scope    string               `json:"scope"`
 	}
 	if !a.decodeLayerBody(w, r, &req) {
 		return
 	}
-	var (
-		ev  configlayer.DraftEvent
-		err error
-	)
+	scope, err := takeScopeOf(req.Scope)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	var ev configlayer.DraftEvent
 	if req.Take {
-		ev, err = a.routing.TakeWithPreset(req.Revision, req.Choice)
+		ev, err = a.routing.TakeWithPresetScoped(req.Revision, req.Choice, scope)
 	} else {
 		ev, err = a.routing.ApplyPreset(req.Revision, req.Choice)
 	}
@@ -505,4 +546,92 @@ func (a *API) ConfigRoutingPresetsApply(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	JSONSuccess(w, ev)
+}
+
+// panelMihomoProfileName — имя профиля панели («xcp-main»): под ним старый API
+// профилей называет активным профиль, когда Mihomo у панели.
+var panelMihomoProfileName = strings.TrimSuffix(strings.TrimPrefix(configlayer.PanelMihomoProfile, "profiles/"), ".yaml")
+
+// mihomoSwitchResult переводит итог конвейера в ответ активации профилей: active — name
+// при успехе, prev при отказе; restarted — Mihomo перезапущен или перезагружен;
+// rolled_back и error — из результата запуска; outcome — запись сохранена, а ядро не
+// трогалось (остановлено, неактивно или запущены оба).
+func mihomoSwitchResult(view configlayer.ApplyView, name, prev string) profileActivationResponse {
+	res := &services.ActivationResult{Active: prev}
+	out := profileActivationResponse{ActivationResult: res}
+	r := view.Result
+	if r == nil || !r.OK {
+		if r != nil {
+			out.Code = r.Code
+			res.RolledBack = r.RolledBack
+			res.Error = r.Message
+			if res.Error == "" {
+				res.Error = r.Code
+			}
+		}
+		return out
+	}
+	res.Active = name
+	for _, rv := range view.Restart {
+		if rv.Kernel != configlayer.KernelMihomo {
+			continue
+		}
+		switch rv.Outcome {
+		case configlayer.RestartOutcomeRestarted, configlayer.RestartOutcomeRestartedReload, configlayer.RestartOutcomeHotReloaded:
+			res.Restarted = true
+		case configlayer.RestartOutcomeDeferred:
+			out.Outcome = string(services.ApplySavedKernelStopped)
+		case configlayer.RestartOutcomeUntouchedIdle:
+			out.Outcome = string(services.ApplySavedKernelInactive)
+		case configlayer.RestartOutcomeUntouchedClash:
+			out.Outcome = string(services.ApplySavedKernelConflict)
+		}
+	}
+	return out
+}
+
+// ConfigRoutingMihomo — POST /api/configlayer/routing/mihomo {action, profile}:
+// переход панель ↔ свой профиль Mihomo одним синхронным применением (D-06). action:
+// activate (профиль profile становится активным вместо профиля панели), release
+// (возврат на прежний профиль), return (Mihomo снова у панели). Затрагивается только
+// Mihomo, Xray и его файлы не меняются. Открытый черновик — 409 draft_open без
+// изменений; отказ запуска возвращает панель целиком (rolled_back, error в ответе).
+// Ответ приходит после перезапуска Mihomo; отмена запроса вкладкой операцию не
+// прерывает.
+func (a *API) ConfigRoutingMihomo(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
+		return
+	}
+	var req struct {
+		Action  string `json:"action"`
+		Profile string `json:"profile"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	ctx := context.WithoutCancel(r.Context())
+	var (
+		view       configlayer.ApplyView
+		err        error
+		name, prev string
+	)
+	switch req.Action {
+	case "activate":
+		name, prev = req.Profile, panelMihomoProfileName
+		view, err = a.routing.ActivateProfile(ctx, req.Profile)
+	case "release":
+		name, prev = a.configLayer.MihomoReturnTarget(), panelMihomoProfileName
+		view, err = a.routing.ReleaseMihomo(ctx)
+	case "return":
+		name, prev = panelMihomoProfileName, a.configLayer.MihomoActiveName()
+		view, err = a.routing.ReturnMihomo(ctx)
+	default:
+		a.writeRoutingError(w, r, &routing.InvalidInputError{Field: "action", Reason: "action_invalid"})
+		return
+	}
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, mihomoSwitchResult(view, name, prev))
 }

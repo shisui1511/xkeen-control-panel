@@ -2,17 +2,23 @@
   import { t } from '../../../i18n';
   import Button from '../../Button.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
-  import { applyRunning } from '../../../lib/configLayer';
+  import { applyRunning, draftChanges, layerSnapshot } from '../../../lib/configLayer';
   import type { ProfileView } from '../../../lib/configCores';
   import TakeRoutingModal from '../routing/TakeRoutingModal.svelte';
-  import { routingBusy, confirmRelease } from '../routing/routingOwner';
+  import { routingBusy, confirmMihomoRelease, confirmMihomoReturn } from '../routing/routingOwner';
 
-  // Плашка владельца профиля Mihomo над его секциями (D-03, D-05, D-06): профилем управляет
-  // XKeen или пользователь — предупреждение и «Управлять в панели», которое открывает
-  // существующий диалог взятия маршрутизации (секции берутся вместе с профилем, одним
-  // действием); профиль у панели — строка с «Отпустить маршрутизацию и секции»; взятие ждёт
-  // «Применить» — бейдж без действий; файла профиля нет — пояснение и то же взятие.
-  let { profile }: { profile: ProfileView } = $props();
+  // Плашка владельца профиля Mihomo над его секциями (D-03, D-05, D-06, D-07, D-09): действует
+  // только на Mihomo, Xray и его файлы не затрагивает. Профилем управляет XKeen или
+  // пользователь — предупреждение и «Управлять в панели»: при сохранённых значениях секций это
+  // возврат с подтверждением, при первом взятии — диалог взятия с областью mihomo. Профиль у
+  // панели — строка с «Отпустить Mihomo» (подтверждение, применение сразу, итог тостом). Взятие
+  // ждёт «Применить» — бейдж без действий; файла профиля нет — пояснение и то же взятие.
+  // Открытый черновик блокирует отпускание и возврат постоянной строкой (D-08): оба идут
+  // применением. stopped — Mihomo остановлен: в подтверждение добавляется абзац об этом.
+  let { profile, stopped = false }: { profile: ProfileView; stopped?: boolean } = $props();
+
+  const uid = $props.id();
+  const hintId = `${uid}-draft-block`;
 
   // Разделитель, по которому текст с именем профиля режется на часть до и после имени
   const NAME_TOKEN = '\u0001name\u0001';
@@ -22,6 +28,36 @@
   const name = $derived(profile.name || 'config.yaml');
   const blocked = $derived($routingBusy || $applyRunning);
   const busyHint = $derived($applyRunning ? $t('cfg.routing.apply_busy_hint') : undefined);
+
+  // Значения секций сохранены при прошлом отпускании: «Управлять в панели» — возврат
+  const returnMode = $derived(
+    owner !== 'releasing' && $layerSnapshot?.routing.mihomo_saved === true
+  );
+  const draftOpen = $derived($draftChanges > 0);
+  // Отпускание и возврат идут применением всего черновика: открытый черновик их блокирует.
+  // Первое взятие через диалог пишет в черновик и не блокируется
+  const releaseBlocked = $derived(blocked || draftOpen);
+  const takeBlocked = $derived(blocked || (returnMode && draftOpen));
+  const showHint = $derived(draftOpen && (owner === 'panel' || returnMode));
+
+  /** Имя профиля без каталога и расширения: так он называется в списке профилей. */
+  function profileName(file: string): string {
+    return file.replace(/^profiles\//, '').replace(/\.yaml$/, '');
+  }
+
+  // Профиль, к которому Mihomo вернётся при отпускании
+  const returnName = $derived(
+    profileName($layerSnapshot?.routing.mihomo?.prev_profile ?? '') || 'config.yaml'
+  );
+
+  function release(): void {
+    void confirmMihomoRelease(returnName, stopped);
+  }
+
+  function take(): void {
+    if (returnMode) void confirmMihomoReturn(name, stopped);
+    else takeOpen = true;
+  }
 
   const foreignParts = $derived.by<[string, string]>(() => {
     const ownerLabel = $t(owner === 'user' ? 'cfg.sec.owner_user' : 'cfg.sec.owner_xkeen');
@@ -46,14 +82,16 @@
         <div class="mpn-actions">
           <Button
             variant="primary"
-            disabled={blocked}
+            disabled={takeBlocked}
             title={busyHint}
+            ariaDescribedby={showHint ? hintId : undefined}
             data-testid="mihomo-profile-take"
-            onclick={() => (takeOpen = true)}
+            onclick={take}
           >
             {$t('cfg.sec.take_btn')}
           </Button>
         </div>
+        {@render hint()}
       </div>
     </div>
   {:else if owner === 'panel'}
@@ -63,15 +101,17 @@
       <Button
         variant="secondary"
         class="mpn-btn"
-        disabled={blocked}
+        disabled={releaseBlocked}
         loading={$routingBusy}
         title={busyHint}
+        ariaDescribedby={showHint ? hintId : undefined}
         data-testid="mihomo-profile-release"
-        onclick={() => void confirmRelease()}
+        onclick={release}
       >
         {$t('cfg.sec.profile_release_btn')}
       </Button>
     </div>
+    {@render hint()}
   {:else if owner === 'pending'}
     <span class="badge badge-warning" data-testid="mihomo-profile-pending">
       {$t('cfg.sec.owner_pending')}
@@ -83,32 +123,45 @@
       <Button
         variant="secondary"
         class="mpn-btn"
-        disabled={blocked}
+        disabled={takeBlocked}
         title={busyHint}
+        ariaDescribedby={showHint ? hintId : undefined}
         data-testid="mihomo-profile-take"
-        onclick={() => (takeOpen = true)}
+        onclick={take}
       >
         {$t('cfg.sec.take_btn')}
       </Button>
     </div>
+    {@render hint()}
   {:else}
     <div class="mpn-row">
       <span class="mpn-row-text">{$t('cfg.sec.no_file_note')}</span>
       <Button
         variant="primary"
         class="mpn-btn"
-        disabled={blocked}
+        disabled={takeBlocked}
         title={busyHint}
+        ariaDescribedby={showHint ? hintId : undefined}
         data-testid="mihomo-profile-take"
-        onclick={() => (takeOpen = true)}
+        onclick={take}
       >
         {$t('cfg.sec.take_btn')}
       </Button>
     </div>
+    {@render hint()}
   {/if}
 </div>
 
-<TakeRoutingModal open={takeOpen} mode="take" onclose={() => (takeOpen = false)} />
+{#snippet hint()}
+  {#if showHint}
+    <p class="mpn-hint" id={hintId} data-testid="mihomo-profile-draft-block">
+      <Icon name="warning" size={16} class="mpn-hint-icon" />
+      <span>{$t('cfg.prof.draft_block')}</span>
+    </p>
+  {/if}
+{/snippet}
+
+<TakeRoutingModal open={takeOpen} mode="take" scope="mihomo" onclose={() => (takeOpen = false)} />
 
 <style>
   .mpn {
@@ -161,6 +214,24 @@
     font-size: var(--font-size-base);
     line-height: 1.5;
     color: var(--fg-secondary);
+  }
+
+  .mpn-hint {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-2);
+    margin: var(--spacing-2) 0 0;
+    min-width: 0;
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+    color: var(--fg-secondary);
+    overflow-wrap: anywhere;
+  }
+
+  .mpn-hint :global(.mpn-hint-icon) {
+    flex-shrink: 0;
+    margin-top: 2px;
+    color: var(--warning);
   }
 
   .mpn-ok {

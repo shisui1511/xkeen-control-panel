@@ -518,7 +518,7 @@ func (s *Service) viewXray(v *KernelView, st configlayer.StateView) error {
 		v.ForceProxy = &ForceProxyView{
 			Tags:     tags,
 			Group:    desired[configlayer.SectionXrayInbounds].ForceProxyGroup,
-			Editable: configlayer.DesiredRouting(st.Draft).Managed,
+			Editable: configlayer.DesiredRouting(st.Draft).ManagedFor(configlayer.KernelXray),
 		}
 	}
 	return nil
@@ -527,7 +527,7 @@ func (s *Service) viewXray(v *KernelView, st configlayer.StateView) error {
 func (s *Service) viewMihomo(v *KernelView, st configlayer.StateView) error {
 	snap := s.d.Layer.Snapshot()
 	desired := configlayer.DesiredCores(st.Draft)
-	routingManaged := configlayer.DesiredRouting(st.Draft).Managed
+	routingManaged := configlayer.DesiredRouting(st.Draft).ManagedFor(configlayer.KernelMihomo)
 	taken := snap.Routing.Mihomo != nil && snap.Routing.Mihomo.Taken
 	name, data, _, perr := s.d.Layer.MihomoActiveProfile()
 
@@ -737,6 +737,7 @@ func (s *Service) Take(rev int64, kernel string, ids []string, ackComments bool)
 				From:            sc.Sources,
 				CommentsAck:     ackComments && len(commentFiles) > 0,
 				ForceProxyGroup: cs.ForceProxyGroup,
+				LastAccess:      cs.LastAccess,
 			}
 			if len(sc.Files) == 0 || isEmptyValue(next.Value) {
 				next.Value = XrayPreset(id)
@@ -774,7 +775,7 @@ func editablePrev(kernel, id string, cs configlayer.CoreSection, st configlayer.
 		}
 		return cs.Value, nil
 	}
-	if !cs.Managed && !configlayer.DesiredRouting(st.Draft).Managed {
+	if !cs.Managed && !configlayer.DesiredRouting(st.Draft).ManagedFor(configlayer.KernelMihomo) {
 		return nil, errCode(codeSectionNotManaged)
 	}
 	if !cs.Managed || isEmptyValue(cs.Value) {
@@ -836,6 +837,13 @@ func (s *Service) Save(rev int64, kernel, id string, form json.RawMessage, advan
 		}
 		if len(issues) > 0 {
 			return nil, errCode(issues[0].Code, "key", issues[0].Key)
+		}
+		if kernel == configlayer.KernelXray && id == logID {
+			// Очистка поля access не теряет путь: панель помнит его для включения
+			// (D-15); явный новый путь LastAccess не трогает.
+			if before := accessOf(prev); accessEnabled(before) && !accessEnabled(accessOf(value)) {
+				cs.LastAccess = before
+			}
 		}
 		cs.Managed = true
 		cs.Value = value
@@ -916,7 +924,7 @@ func (s *Service) Release(rev int64, kernel, id string) (configlayer.DraftEvent,
 		if err != nil {
 			return nil, err
 		}
-		raw, err := encodeSection(configlayer.CoreSection{Managed: false, ForceProxyGroup: cs.ForceProxyGroup})
+		raw, err := encodeSection(configlayer.CoreSection{Managed: false, ForceProxyGroup: cs.ForceProxyGroup, LastAccess: cs.LastAccess})
 		if err != nil {
 			return nil, err
 		}

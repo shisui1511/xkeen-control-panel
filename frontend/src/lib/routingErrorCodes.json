@@ -1,8 +1,10 @@
 [
+  "action_invalid",
   "apply_busy",
   "catalog_unavailable",
   "country_unavailable",
   "draft_conflict",
+  "draft_open",
   "final_requires_redirect",
   "foreign_mixed",
   "group_cycle",
@@ -14,5 +16,7 @@
   "member_invalid",
   "nothing_to_reclaim",
   "preset_unknown",
-  "rule_not_found"
+  "profile_unknown",
+  "rule_not_found",
+  "scope_invalid"
 ]

@@ -1446,8 +1446,11 @@ expect(
   !/from '\.\/configCores'/.test(layerTs),
   `${LAYER_TS}: импортирует configCores (цикл импортов)`,
 );
+// Исключение: блок access-лога на «Логах» вызывает setAccessLog только при включённом слое
+// (при выключенном идёт прежний путь без запросов секций)
+const CORES_CLIENT_EXTRA = new Set([`${SRC}/components/logs/AccessLogControl.svelte`]);
 for (const file of walk(SRC, [])) {
-  if (file === CORES_TS) continue;
+  if (file === CORES_TS || CORES_CLIENT_EXTRA.has(file)) continue;
   const text = read(file);
   if (
     /^\s*import(?!\s+type\b)[^;]*?from '[^']*\/configCores'/m.test(text) &&

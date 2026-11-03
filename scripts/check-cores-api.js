@@ -9,7 +9,7 @@
  *    типов полей, встроенные структуры разворачиваются. Тип контракта, не найденный
  *    ни в одном файле, — ошибка. Тот же файл читают типы фронтенда и роутерные
  *    проверки ответов панели.
- * 2. Проводка: каждый из девяти маршрутов /api/configlayer/cores* зарегистрирован в
+ * 2. Проводка: каждый из одиннадцати маршрутов /api/configlayer/cores* зарегистрирован в
  *    cmd/xcp/main.go через HandleProtected, у него есть обработчик в
  *    internal/handlers/cores.go, маршруты не входят в kernelGatedPrefixes
  *    (internal/handlers/kernel_gate.go); cores.New вызывается только в
@@ -255,6 +255,8 @@ const ROUTES = {
   "/api/configlayer/cores/force-proxy": "ConfigCoresForceProxy",
   "/api/configlayer/cores/raw/parse": "ConfigCoresRawParse",
   "/api/configlayer/cores/reclaim": "ConfigCoresReclaim",
+  "/api/configlayer/cores/access-log": "ConfigCoresAccessLog",
+  "/api/configlayer/cores/fill": "ConfigCoresFill",
 };
 
 const MAIN = "cmd/xcp/main.go";

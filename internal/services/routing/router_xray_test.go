@@ -61,7 +61,7 @@ func (e *rtEnv) applyOK(t *testing.T) {
 		t.Fatalf("«Применить» отклонено: %v", err)
 	}
 	if !res.OK || res.Code != configlayer.ResultApplied {
-		t.Fatalf("«Применить»: ok=%v code=%q kernel=%q rolled_back=%v issues=%+v", res.OK, res.Code, res.Kernel, res.RolledBack, res.Issues)
+		t.Fatalf("«Применить»: ok=%v code=%q kernel=%q rolled_back=%v msg=%q issues=%+v", res.OK, res.Code, res.Kernel, res.RolledBack, res.Message, res.Issues)
 	}
 }
 
@@ -74,7 +74,7 @@ func (e *rtEnv) applyPasses(t *testing.T) {
 		t.Fatalf("«Применить» отклонено: %v", err)
 	}
 	if !res.OK || (res.Code != configlayer.ResultApplied && res.Code != configlayer.ResultNothingToApply) {
-		t.Fatalf("«Применить»: ok=%v code=%q kernel=%q rolled_back=%v issues=%+v", res.OK, res.Code, res.Kernel, res.RolledBack, res.Issues)
+		t.Fatalf("«Применить»: ok=%v code=%q kernel=%q rolled_back=%v msg=%q issues=%+v", res.OK, res.Code, res.Kernel, res.RolledBack, res.Message, res.Issues)
 	}
 }
 

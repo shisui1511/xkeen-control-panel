@@ -523,9 +523,12 @@ export function saveProbe(probe: ProbeConfig): Promise<DraftAck> {
   return editRouting<DraftAck>('probe', { probe });
 }
 
-/** Желание «маршрутизацией управляет панель»; файлы меняются при «Применить». */
-export function takeRouting(): Promise<DraftAck> {
-  return editRouting<DraftAck>('take', {});
+/** Область взятия: оба ядра, только Mihomo или только Xray. */
+export type TakeScope = 'all' | 'mihomo' | 'xray';
+
+/** Желание «маршрутизацией управляет панель» для области scope; файлы меняются при «Применить». */
+export function takeRouting(scope: TakeScope = 'all'): Promise<DraftAck> {
+  return editRouting<DraftAck>('take', { scope });
 }
 
 /** Желание вернуть маршрутизацию XKeen; файлы возвращаются при «Применить». */
@@ -557,9 +560,16 @@ export function planPreset(choice: PresetChoice): Promise<PresetPlan> {
   return post<PresetPlan>(`${BASE}/presets/plan`, { choice });
 }
 
-/** Применяет пресет одной правкой черновика; take — вместе со взятием маршрутизации. */
-export function applyPreset(choice: PresetChoice, take: boolean): Promise<DraftAck> {
-  return editRouting<DraftAck>('presets/apply', { choice, take });
+/**
+ * Применяет пресет одной правкой черновика; take — вместе со взятием маршрутизации области
+ * scope.
+ */
+export function applyPreset(
+  choice: PresetChoice,
+  take: boolean,
+  scope: TakeScope = 'all'
+): Promise<DraftAck> {
+  return editRouting<DraftAck>('presets/apply', { choice, take, scope });
 }
 
 /** Выбор участника ручной группы: Mihomo получает его сразу, Xray — перезапуском ядра. */

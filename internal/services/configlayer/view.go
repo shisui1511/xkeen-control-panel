@@ -63,10 +63,19 @@ type RoutingKernelView struct {
 
 // RoutingSnapshot — раздел routing снимка: желаемое владение (секция routing
 // черновика) и фактическое по установленным ядрам; неустановленное ядро — null.
+//
+// Desired — панель держит хотя бы одно ядро; DesiredXray и DesiredMihomo — решение
+// по ядрам (D-06 из 147.1). MihomoActive — имя активного своего профиля Mihomo
+// (пусто при профиле панели, без файла или при взятом Mihomo; "config.yaml" для
+// обычного файла); MihomoSaved — значения секций Mihomo сохранены (D-09).
 type RoutingSnapshot struct {
-	Desired bool               `json:"desired"`
-	Xray    *RoutingKernelView `json:"xray"`
-	Mihomo  *RoutingKernelView `json:"mihomo"`
+	Desired       bool               `json:"desired"`
+	DesiredXray   bool               `json:"desired_xray"`
+	DesiredMihomo bool               `json:"desired_mihomo"`
+	MihomoActive  string             `json:"mihomo_active"`
+	MihomoSaved   bool               `json:"mihomo_saved"`
+	Xray          *RoutingKernelView `json:"xray"`
+	Mihomo        *RoutingKernelView `json:"mihomo"`
 }
 
 // CoreSectionSnap — владение одной секцией Xray в снимке слоя.

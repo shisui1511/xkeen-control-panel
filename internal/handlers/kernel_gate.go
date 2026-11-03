@@ -81,6 +81,8 @@ var kernelRoutePolicies = map[string]KernelRoutePolicy{
 	"/api/mihomo/groups":            {"mihomo", GateData, "группы читаются из конфигурации на диске: вкладка работает при любом ядре"},
 	"/api/mihomo/profiles":          {"mihomo", GateData, reasonProfileFiles},
 	"/api/mihomo/profiles/create":   {"mihomo", GateData, reasonProfileFiles},
+	"/api/mihomo/profiles/preview":  {"mihomo", GateData, reasonProfileFiles},
+	"/api/mihomo/profiles/deps":     {"mihomo", GateData, reasonProfileFiles},
 	"/api/mihomo/profiles/rename":   {"mihomo", GateData, reasonProfileFiles},
 	"/api/mihomo/profiles/delete":   {"mihomo", GateData, reasonProfileFiles},
 	"/api/mihomo/profiles/activate": {"mihomo", GateData, reasonProfileFiles},

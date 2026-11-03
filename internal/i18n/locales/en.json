@@ -138,6 +138,8 @@
   "configlayer.routing.group_cycle": "The groups form a nesting cycle",
   "configlayer.routing.group_referenced": "The group is referenced: choose what to do with the references",
   "configlayer.routing.final_requires_redirect": "The group is used by the catch-all rule: choose another target for it",
+  "configlayer.routing.scope_invalid": "The scope is not recognised: use xray, mihomo or all.",
+  "configlayer.routing.action_invalid": "The action is not recognised.",
   "configlayer.routing.invalid_input": "Invalid value in the routing settings",
   "configlayer.routing.draft_conflict": "The draft was changed in another tab",
   "configlayer.routing.foreign_mixed": "The file contains more than routing: only Release can resolve it",
@@ -158,7 +160,10 @@
   "configlayer.routing.invalid_json": "The XKeen settings file is not valid JSON",
   "configlayer.routing.invalid_structure": "The geodata section of the XKeen settings has an unexpected structure",
   "configlayer.routing.update_unavailable": "Running the list update is not available",
+  "configlayer.routing.draft_open": "There are unapplied changes. Apply or discard them, then try again.",
+  "configlayer.routing.profile_unknown": "There is no such profile.",
   "configlayer.cores.apply_busy": "An apply is already in progress: try again when it finishes",
+  "configlayer.cores.draft_open": "There are unapplied changes. Apply or discard them, then try again.",
   "configlayer.cores.comments_not_acknowledged": "The files being moved contain comments that will be lost: confirm the loss of comments",
   "configlayer.cores.controller_no_secret": "The Mihomo external controller is open without a secret: set a secret or remove the controller from the Advanced block",
   "configlayer.cores.root_key_duplicate": "A Mihomo profile root key is already set in another section: keep it in one section only",
@@ -181,5 +186,13 @@
   "configlayer.cores.section_not_managed": "The section is not managed by the panel: take it first",
   "configlayer.cores.section_shadowed": "A later foreign file overrides the section: remove it or leave the section to XKeen",
   "configlayer.cores.section_unknown": "There is no such section",
-  "configlayer.cores.xkeen_too_old": "The XKeen version is too old to take this section: update XKeen"
+  "configlayer.cores.xkeen_too_old": "The XKeen version is too old to take this section: update XKeen",
+
+  "profiles.err_reserved": "The xcp- prefix is reserved by the panel. Choose another name.",
+  "profiles.err_return_target": "Mihomo returns to this profile when released. Deleting and renaming are unavailable while the panel manages Mihomo.",
+  "profiles.err_invalid": "The core rejected the profile; no file was created.",
+  "profiles.err_template_unknown": "There is no such template.",
+  "profiles.err_panel_absent": "The xcp-main.yaml file does not exist right now: there is nothing to copy.",
+  "profiles.err_draft_open": "There are unapplied changes. Apply or discard them, then try again.",
+  "xray.access_log_layer_enabled": "The configuration layer owns this setting: enable the access log in Configuration → Sections."
 }

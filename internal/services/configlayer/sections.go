@@ -142,6 +142,9 @@ type CoreSection struct {
 	// ForceProxyGroup — группа для входящих force-proxy* (ключ панели, в файл
 	// ядра не попадает).
 	ForceProxyGroup string `json:"force_proxy_group,omitempty"`
+	// LastAccess — последний путь access-лога Xray у секции log (ключ панели, в
+	// файл ядра не попадает): включение после выключения возвращает его (D-15).
+	LastAccess string `json:"last_access,omitempty"`
 }
 
 // ParseCoreSection разбирает секцию ядра. Пустой или null raw — секции нет:
@@ -203,6 +206,20 @@ func DesiredCores(s Sections) map[string]CoreSection {
 		out[name] = cs
 	}
 	return out
+}
+
+// MihomoSectionsSaved — значения секций Mihomo сохранены в черновике: хотя бы одна
+// секция Mihomo с Managed=false и непустым Value (D-09 из 147.1). Такие значения
+// переживают отпускание и возвращаются в форму при повторном взятии.
+func MihomoSectionsSaved(s Sections) bool {
+	cores := DesiredCores(s)
+	for _, id := range MihomoSectionIDs {
+		cs := cores[CoreSectionName(KernelMihomo, id)]
+		if !cs.Managed && len(bytes.TrimSpace(cs.Value)) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // XraySectionState — фактическое владение одной секцией Xray: файл панели и

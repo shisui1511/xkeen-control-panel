@@ -45,9 +45,10 @@ type mihomoGen struct{ s *Service }
 func (mihomoGen) ID() string { return mihomoGenID }
 
 // Generate выдаёт профиль панели и файлы провайдеров списков. Mihomo не
-// установлен или желаемое routing.managed=false — файлов нет (D-01).
+// установлен или панель не держит Mihomo (routing.managed=false или mihomo=false) —
+// файлов нет (D-01, D-11 из 147.1).
 func (g mihomoGen) Generate(in configlayer.Input, installed configlayer.InstalledKernels) ([]configlayer.GeneratedFile, error) {
-	if !installed.Mihomo || !configlayer.DesiredRouting(in.Sections).Managed {
+	if !installed.Mihomo || !configlayer.DesiredRouting(in.Sections).ManagedFor(configlayer.KernelMihomo) {
 		return nil, nil
 	}
 	return g.s.generateMihomo(in, installed)

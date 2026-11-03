@@ -195,13 +195,17 @@ function markKnown(route: string, theme: string, width: number, lists = false): 
   }
 
   // Зелёный и синий текст на подкрашенном фоне в светлой теме: контраст 3.8–4.3 из 4.5
-  if (light && route === 'connections')
+  // На 1440 px connections, console и traffic проходят (после обновления светлой темы),
+  // остаются 390 px, где метка общая с капсулой, и proxies на Mihomo
+  if (light && !wide && route === 'connections')
     knownFailure('arm64/mihomo', 'light-tinted-badge-text-contrast');
-  if (light && route === 'console') knownFailure('*', 'light-tinted-badge-text-contrast');
+  if (light && !wide && route === 'console') knownFailure('*', 'light-tinted-badge-text-contrast');
   if (light && wide && route === 'editor') knownFailure('*', 'light-tinted-badge-text-contrast');
   if (light && route === 'logs') knownFailure('*', 'light-tinted-badge-text-contrast');
-  if (light && route === 'proxies') knownFailure('*', 'light-tinted-badge-text-contrast');
-  if (light && route === 'traffic') knownFailure('*', 'light-tinted-badge-text-contrast');
+  if (light && !wide && route === 'proxies') knownFailure('*', 'light-tinted-badge-text-contrast');
+  if (light && wide && route === 'proxies')
+    knownFailure('arm64/mihomo', 'light-tinted-badge-text-contrast');
+  if (light && !wide && route === 'traffic') knownFailure('*', 'light-tinted-badge-text-contrast');
   // Бейдж вида выпуска в баннере обновления (dashboard, светлая тема, 1440 px) есть, пока
   // доступен более новый не-stable выпуск: метка ставится в самом тесте, когда бейдж на странице
 
@@ -210,7 +214,7 @@ function markKnown(route: string, theme: string, width: number, lists = false): 
   if (light && wide && dat) knownFailure('*', 'muted-small-label-text-contrast');
   if (light && route === 'logs') knownFailure('*', 'muted-small-label-text-contrast');
   if (route === 'proxies') knownFailure('arm64/mihomo', 'muted-small-label-text-contrast');
-  if (light && route === 'services') knownFailure('*', 'muted-small-label-text-contrast');
+  if (light && !wide && route === 'services') knownFailure('*', 'muted-small-label-text-contrast');
   if (route === 'smartproxy') knownFailure('*', 'muted-small-label-text-contrast');
 
   // Строки DAT-файлов с вложенными интерактивными элементами (при Xray)

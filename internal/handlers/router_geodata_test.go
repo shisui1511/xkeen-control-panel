@@ -89,6 +89,10 @@ func rtGeoAssertKeys(t *testing.T, typ reflect.Type, value any, path string) {
 	}
 	switch typ.Kind() {
 	case reflect.Struct:
+		// time.Time в JSON — строка, не объект: ключей у него нет.
+		if typ == reflect.TypeOf(time.Time{}) {
+			return
+		}
 		obj, ok := value.(map[string]any)
 		if !ok {
 			t.Errorf("%s: ожидался объект", path)

@@ -172,12 +172,19 @@ func ValidateMihomo(ctx context.Context, tmpBase string, roots Roots, bin string
 
 // mihomoConfigAfterPlan возвращает файл, который Mihomo прочтёт как config.yaml
 // после записи плана: при взятии — профиль панели, даже если симлинк пока
-// указывает на другой профиль; при возврате — прежний профиль или копия прежнего
+// указывает на другой профиль; при отпускании с целью — выбранный профиль; при возврате — прежний профиль или копия прежнего
 // обычного файла (data не nil). Без операций маршрутизации — разрешённый
 // config.yaml.
 func mihomoConfigAfterPlan(roots Roots, plan Plan) (cfg string, data []byte, err error) {
 	ops := plan.Routing
 	switch {
+	case ops != nil && ops.MihomoRestore != nil && ops.MihomoTarget != "":
+		// Отпускание с целью: Mihomo прочтёт выбранный профиль; проверка идёт в
+		// зеркале с override цели.
+		if _, ok := mihomoTargetFile(ops.MihomoTarget); !ok {
+			return "", nil, fmt.Errorf("%s: %w", ops.MihomoTarget, ErrInvalidPanelPath)
+		}
+		return filepath.Join(roots.Mihomo, filepath.FromSlash(ops.MihomoTarget)), nil, nil
 	case ops != nil && ops.MihomoPoint:
 		return filepath.Join(roots.Mihomo, filepath.FromSlash(PanelMihomoProfile)), nil, nil
 	case ops != nil && ops.MihomoRestore != nil:
@@ -462,6 +469,19 @@ func mirrorMihomo(root, resolvedConfig string, override []byte, tmp string) erro
 		}
 	}
 	return nil
+}
+
+// MirrorMihomo строит во временном каталоге tmp зеркало корня Mihomo, в котором
+// config.yaml — обычный файл с содержимым content: geodata (*.dat, *.metadb, *.mmdb)
+// и файлы подкаталогов (rules/, providers/, proxy_providers/, rule_providers/,
+// profiles/; кроме backups) подключены симлинками, остальные конфигурации верхнего
+// уровня скопированы. Так `mihomo -t -d <tmp> -f <tmp>/config.yaml` проверяет любой
+// файл профиля теми же геобазами и каталогами провайдеров, что видит рабочее ядро.
+func MirrorMihomo(root string, content []byte, tmp string) error {
+	if content == nil {
+		content = []byte{}
+	}
+	return mirrorMihomo(root, "", content, tmp)
 }
 
 // maxMirrorDepth — предел вложенности зеркала подкаталогов (защита от петель).

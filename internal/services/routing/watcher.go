@@ -150,7 +150,7 @@ func (w *datWatcher) tick(ctx context.Context) {
 	}
 	w.watchDraft(st)
 	var refs []datRef
-	if configlayer.DesiredRouting(st.Applied).Managed {
+	if configlayer.DesiredRouting(st.Applied).AnyManaged() {
 		rules, err := parseRules(st.Applied[RulesSection])
 		if err != nil {
 			return

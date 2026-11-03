@@ -12,7 +12,8 @@ import {
   currentRevision,
   applyDraftAck,
   layerSnapshot,
-  type DraftAck
+  type DraftAck,
+  type LayerApply
 } from './configLayer';
 import coresErrorCodes from './coresErrorCodes.json';
 
@@ -128,10 +129,10 @@ export interface CoreSectionSnap {
   drift: string[];
 }
 
-/** Объявление о способе перезапуска: ядро и причина (port, tun). */
+/** Объявление о способе перезапуска: ядро и причина (port, tun, profile). */
 export interface RestartNote {
   kernel: string;
-  reason: 'port' | 'tun';
+  reason: 'port' | 'tun' | 'profile';
 }
 
 /** Поле cores снимка слоя. */
@@ -253,6 +254,16 @@ export function releaseSection(kernel: CoreKernel, section: string): Promise<Dra
 /** Группа, в которую панель направляет входящие force-proxy. */
 export function setForceProxyGroup(kernel: CoreKernel, group: string): Promise<DraftAck> {
   return editCores('force-proxy', { kernel, group });
+}
+
+/**
+ * Включает или выключает access-лог Xray через секцию log: секция у панели меняет только
+ * log.access поверх применённого состояния, чужая берётся и применяется одним шагом (без
+ * открытого черновика, комментарии — с согласием). Ответ приходит после перезапуска
+ * запущенного Xray; отказ применения лежит в result, отказ запроса — ошибка с кодом.
+ */
+export function setAccessLog(enabled: boolean, ackComments = false): Promise<LayerApply> {
+  return post<LayerApply>(`${BASE}/access-log`, { enabled, ack_comments: ackComments });
 }
 
 /** Разбор сырого блока «Дополнительно»; черновик не меняется, ревизия не нужна. */

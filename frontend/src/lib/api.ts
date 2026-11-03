@@ -328,6 +328,8 @@ export interface RuleProviderDetails {
   behavior: string;
   format: string;
   url?: string;
+  /** Прокси или группа, через которые провайдер скачивает список (имя из профиля). */
+  proxy?: string;
   path?: string;
   file_exists: boolean;
   file_size?: number;
@@ -343,13 +345,31 @@ export interface RuleProviderPage {
   entries: string[];
 }
 
+/** Одна проба ссылки провайдера: через ядро (delay_ms, без кода HTTP) или напрямую (status_code). */
+export interface RuleProviderProbe {
+  ok: boolean;
+  delay_ms?: number;
+  status_code?: number;
+  error?: string;
+  /** Код причины отказа пробы через ядро; переводится в интерфейсе. */
+  error_code?: string;
+  error_status?: number;
+}
+
 export interface RuleProviderURLCheck {
   name: string;
   url: string;
+  proxy?: string;
+  /** Код и текст ошибки прямой пробы. */
   status_code?: number;
   error?: string;
+  /** Прошла хотя бы одна проба. */
   ok: boolean;
   duration_ms: number;
+  via_proxy?: RuleProviderProbe;
+  direct?: RuleProviderProbe;
+  /** Прокси задан, но API ядра недоступен: ссылку проверили только напрямую. */
+  direct_only?: boolean;
 }
 
 export async function fetchRuleProviderDetails(): Promise<RuleProviderDetails[]> {

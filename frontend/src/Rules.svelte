@@ -1,7 +1,14 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
   import { t } from './i18n';
-  import { showToast, mihomoApiReady } from './stores';
+  import {
+    showToast,
+    mihomoApiReady,
+    mihomoApiState,
+    mihomoOfflineReason,
+    activeKernelName,
+    isConflict
+  } from './stores';
   import {
     apiFetch,
     fetchCustomRules,
@@ -18,6 +25,7 @@
   import PageHeader from './PageHeader.svelte';
   import Tabs, { type TabItem } from './components/Tabs.svelte';
   import Button from './components/Button.svelte';
+  import Skeleton from './components/Skeleton.svelte';
   import Icon from './lib/components/Icon.svelte';
   import UserRulesTab from './components/rules/UserRulesTab.svelte';
   import RuleProvidersTab from './components/rules/RuleProvidersTab.svelte';
@@ -32,7 +40,30 @@
 
   // Active tab state
   type TabKey = 'exceptions' | 'providers' | 'diagnostic' | 'all_rules';
-  let activeTab = $state<TabKey>('exceptions');
+
+  // Адрес #/rules?tab=providers (ссылка из «Профилей») открывает «Провайдеры» при любом ядре.
+  function hashWantsProviders(): boolean {
+    const query = window.location.hash.split('?')[1] ?? '';
+    return new URLSearchParams(query).get('tab') === 'providers';
+  }
+
+  let activeTab = $state<TabKey>(hashWantsProviders() ? 'providers' : 'exceptions');
+  // Вкладку выбрали руками или адресом: самовыбор «Провайдеров» по состоянию ядра её не меняет.
+  let tabChosen = $state(hashWantsProviders());
+
+  // Страница без API Mihomo (D-19): ядро остановлено, API не отвечает или работает Xray.
+  // До первого ответа capabilities (unknown) причины нет — показывается скелетон.
+  type OfflineReason = 'xray' | 'not_running' | 'api_down';
+  const offlineReason = $derived.by<OfflineReason | null>(() => {
+    if ($mihomoApiState === 'unknown' || $isConflict || $mihomoApiReady) return null;
+    if ($activeKernelName === 'xray') return 'xray';
+    return $mihomoOfflineReason;
+  });
+  const stateKnown = $derived($mihomoApiState !== 'unknown');
+  const offline = $derived(offlineReason !== null);
+  const needApiText = $derived(
+    offlineReason === 'api_down' ? $t('rules.tabs_need_api_down') : $t('rules.tabs_need_api')
+  );
 
   // Custom Rules State
   let customRules = $state<UserRule[]>([]);
@@ -74,8 +105,18 @@
   let tabItems = $derived<TabItem[]>([
     { value: 'exceptions', label: $t('rules.tab_exceptions'), testId: 'tab-exceptions' },
     { value: 'providers', label: $t('rules.tab_providers'), testId: 'tab-providers' },
-    { value: 'diagnostic', label: $t('rules.tab_diagnostic'), testId: 'tab-diagnostic' },
-    { value: 'all_rules', label: $t('rules.tab_all_rules'), testId: 'tab-all_rules' }
+    {
+      value: 'diagnostic',
+      label: $t('rules.tab_diagnostic'),
+      testId: 'tab-diagnostic',
+      disabled: offline
+    },
+    {
+      value: 'all_rules',
+      label: $t('rules.tab_all_rules'),
+      testId: 'tab-all_rules',
+      disabled: offline
+    }
   ]);
 
   async function loadCustomRules() {
@@ -134,6 +175,30 @@
       ruleProviderDetails = Object.fromEntries(details.map((d) => [d.name, d]));
     } catch (e: any) {
       if (e?.status === 401) return;
+    } finally {
+      loadingProviders = false;
+    }
+  }
+
+  // Без API ядра список строится по файлам профиля: типа, поведения и размера файла достаточно,
+  // числа записей и времени обновления у панели без ядра нет. Прочие запросы ядра не идут.
+  async function loadProvidersOffline() {
+    loadingProviders = true;
+    try {
+      const details = await fetchRuleProviderDetails();
+      ruleProviders = details.map((d) => ({
+        name: d.name,
+        behavior: d.behavior,
+        type: d.type,
+        vehicleType: d.type,
+        ruleCount: 0,
+        updatedAt: ''
+      }));
+      ruleProviderDetails = Object.fromEntries(details.map((d) => [d.name, d]));
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      ruleProviders = [];
+      ruleProviderDetails = {};
     } finally {
       loadingProviders = false;
     }
@@ -239,6 +304,33 @@
       loadKernelRules().then(() => loadProxyGroups());
     });
   });
+
+  // Без API Mihomo «Провайдеры» читаются из файлов профиля (D-19, D-21).
+  $effect(() => {
+    if (!offline) return;
+    untrack(() => {
+      loadProvidersOffline();
+    });
+  });
+
+  // Первой открывается «Провайдеры»; если ядро остановилось при открытой «Диагностике» или
+  // «Всех правилах», страница сама возвращается на «Провайдеры».
+  $effect(() => {
+    if (!offline) return;
+    if (!tabChosen || activeTab === 'diagnostic' || activeTab === 'all_rules') {
+      activeTab = 'providers';
+    }
+  });
+
+  onMount(() => {
+    const onHash = () => {
+      if (!hashWantsProviders()) return;
+      tabChosen = true;
+      activeTab = 'providers';
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  });
 </script>
 
 <div class="container rules-page">
@@ -253,7 +345,8 @@
         variant="secondary"
         class="btn-sm"
         loading={flushingFakeIP}
-        disabled={flushingFakeIP}
+        disabled={flushingFakeIP || offline}
+        title={offline ? needApiText : undefined}
         onclick={handleFlushFakeIP}
       >
         <Icon name="refresh" size={14} />
@@ -263,8 +356,8 @@
         variant="secondary"
         class="btn-sm"
         loading={flushingDNS}
-        disabled={flushingDNS}
-        title={$t('rules.flush_dns_title')}
+        disabled={flushingDNS || offline}
+        title={offline ? needApiText : $t('rules.flush_dns_title')}
         onclick={handleFlushDNS}
       >
         <Icon name="refresh" size={14} />
@@ -277,13 +370,21 @@
     <Tabs
       items={tabItems}
       value={activeTab}
-      onchange={(val) => (activeTab = val as TabKey)}
+      onchange={(val) => {
+        tabChosen = true;
+        activeTab = val as TabKey;
+      }}
       ariaLabel={$t('rules.title')}
     />
+    {#if offline}
+      <p class="tabs-note" role="status" data-testid="rules-tabs-note">{needApiText}</p>
+    {/if}
   </div>
 
   <div class="tab-content" role="tabpanel">
-    {#if activeTab === 'exceptions'}
+    {#if !stateKnown}
+      <Skeleton type="card" height="280px" />
+    {:else if activeTab === 'exceptions'}
       <UserRulesTab
         rules={customRules}
         groups={proxyGroups}
@@ -295,6 +396,7 @@
         providers={ruleProviders}
         details={ruleProviderDetails}
         loading={loadingProviders}
+        offline={offlineReason}
         onUpdate={handleUpdateProvider}
         onUpdateAll={handleUpdateAllProviders}
       />
@@ -316,6 +418,13 @@
 
   .tabs-wrapper {
     margin-top: -4px;
+  }
+
+  .tabs-note {
+    margin: 8px 0 0;
+    font-size: var(--font-size-xs);
+    color: var(--fg-secondary);
+    overflow-wrap: anywhere;
   }
 
   .tab-content {

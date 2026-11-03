@@ -978,6 +978,7 @@ var rtRoutingRoutes = []struct{ method, path string }{
 	{http.MethodPost, rtRoutingBase + "/release"},
 	{http.MethodGet, rtRoutingBase + "/takeover"},
 	{http.MethodPost, rtRoutingBase + "/reclaim"},
+	{http.MethodPost, rtRoutingBase + "/mihomo"},
 	{http.MethodPost, rtRoutingBase + "/select"},
 	{http.MethodGet, rtRoutingBase + "/lists"},
 	{http.MethodGet, rtRoutingBase + "/presets"},

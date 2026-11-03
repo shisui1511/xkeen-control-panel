@@ -32,6 +32,9 @@ var (
 	// ErrChecksFailed — проверка черновика нашла проблемы: применение не начато.
 	// Конкретная ошибка — *ChecksError со списком проблем.
 	ErrChecksFailed = errors.New("применение заблокировано проверкой черновика")
+	// ErrDraftOpen — в черновике есть неприменённые правки: действие «правка плюс
+	// применение» (ApplyEdit) применило бы и их. Файлы и черновик не менялись.
+	ErrDraftOpen = errors.New("configlayer: открыт черновик")
 )
 
 // ChecksError — отказ применения по проверкам до записи; Is совпадает с
@@ -553,7 +556,13 @@ func (l *Layer) restartNotes(st State) []RestartNote {
 // routingSnapshot собирает раздел routing снимка: желаемое из секции черновика,
 // по установленным ядрам — взято ли, перенесённые и оставленные файлы, дрейф.
 func (l *Layer) routingSnapshot(st State, drift []RoutingDriftItem) RoutingSnapshot {
-	out := RoutingSnapshot{Desired: DesiredRouting(st.Draft).Managed}
+	desired := DesiredRouting(st.Draft)
+	out := RoutingSnapshot{
+		Desired:       desired.AnyManaged(),
+		DesiredXray:   desired.ManagedFor(KernelXray),
+		DesiredMihomo: desired.ManagedFor(KernelMihomo),
+		MihomoSaved:   MihomoSectionsSaved(st.Draft),
+	}
 	installed := l.installed()
 	view := func(kernel string, taken bool, moved, left []string, prev string) *RoutingKernelView {
 		v := &RoutingKernelView{Taken: taken, Moved: []string{}, Left: []string{}, Drift: []string{}}
@@ -585,6 +594,9 @@ func (l *Layer) routingSnapshot(st State, drift []RoutingDriftItem) RoutingSnaps
 			prev = m.PrevProfile
 		}
 		out.Mihomo = view(KernelMihomo, st.Routing.Mihomo != nil, nil, nil, prev)
+		if st.Routing.Mihomo == nil {
+			out.MihomoActive = mihomoActiveName(l.opts.Roots.Mihomo)
+		}
 	}
 	return out
 }
@@ -1222,9 +1234,10 @@ func (l *Layer) StartApply(user bool) error {
 	// это и есть решение «Отпустить маршрутизацию» (D-06, D-07).
 	fe := l.checkNow(true)
 	// Расхождение взятой секции блокирует применение, пока секция желаема (managed):
-	// «Отпустить» (managed=false) её не блокирует (FND-03, D-07 из 146).
+	// «Отпустить» (managed=false) её не блокирует (FND-03, D-07 из 146). Расхождение
+	// маршрутизации блокирует только то ядро, которое панель держит (D-06 из 147.1).
 	draft := l.store.Snapshot().Draft
-	if fe.DriftCount-len(fe.Routing)-len(fe.Sections) > 0 || (len(fe.Routing) > 0 && DesiredRouting(draft).Managed) || sectionDriftBlocks(draft, fe.Sections) {
+	if fe.DriftCount-len(fe.Routing)-len(fe.Sections) > 0 || routingDriftBlocks(draft, fe.Routing) || sectionDriftBlocks(draft, fe.Sections) {
 		release()
 		return ErrDriftBlocked
 	}
@@ -1240,6 +1253,129 @@ func (l *Layer) StartApply(user bool) error {
 		return ErrStopped
 	}
 	return nil
+}
+
+// ApplyEdit — «правка черновика плюс применение» одной операцией (D-06, D-08, D-10):
+// переход панель ↔ свой профиль Mihomo. Занятость как у StartApply по кнопке
+// (user=true): отказ сразу, не ожидание. Под замком применения: открытый черновик
+// (draftChanges != 0) — ErrDraftOpen без изменений, чтобы запуск не применил чужие
+// неприменённые правки. edit читает состояние и возвращает секции; они пишутся одной
+// ревизией, затем конвейер идёт синхронно (TriggerUser, SourceDraft) — дрейф и
+// проверки до записи он делает сам. Результат не OK — черновик возвращается к
+// применённому состоянию: желание не остаётся висеть. Дрейф — ErrDriftBlocked.
+// Вызов синхронный; после снятия замка идут afterRun и хуки AddAfterApply.
+func (l *Layer) ApplyEdit(ctx context.Context, edit func(st StateView) (map[string]json.RawMessage, error)) (ApplyView, error) {
+	if !l.Enabled() {
+		return ApplyView{}, ErrDisabled
+	}
+	l.mu.Lock()
+	stopped := l.stopped
+	l.mu.Unlock()
+	if stopped {
+		return ApplyView{}, ErrStopped
+	}
+	release, err := l.pipeline.TryBegin(ctx, true)
+	if err != nil {
+		return ApplyView{}, l.mapBusy(err)
+	}
+	defer release()
+	st := l.store.Snapshot()
+	if draftChanges(st) != 0 {
+		return ApplyView{}, ErrDraftOpen
+	}
+	sections, err := edit(StateView{DraftRevision: st.DraftRevision, Draft: st.Draft.Clone(), Applied: st.Applied.Clone(), Live: st.Live.Clone()})
+	if err != nil {
+		return ApplyView{}, err
+	}
+	ev, err := l.store.EditDraftBatch(st.DraftRevision, sections, nil)
+	if err != nil {
+		return ApplyView{}, err
+	}
+	req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft}
+	view := l.runPipeline(req)
+	if view.Result == nil || !view.Result.OK {
+		l.discardEdit(ev.DraftRevision, st.Draft, sections)
+	}
+	release()
+	l.afterRun()
+	l.fireAfterApply(req, view)
+	if view.Result != nil && view.Result.Code == ResultDriftBlocked {
+		return view, ErrDriftBlocked
+	}
+	return view, nil
+}
+
+// discardEdit возвращает черновик после неудавшегося ApplyEdit: до правки он совпадал
+// с применённым состоянием, поэтому сброс (ResetDraft) возвращает его целиком. Если
+// пока шёл запуск, черновик успели поправить (ревизия ушла), возвращаются только
+// секции этой правки к значениям до неё: чужая правка остаётся.
+func (l *Layer) discardEdit(rev int64, before Sections, edited map[string]json.RawMessage) {
+	defer l.RequestCheck()
+	if _, err := l.store.ResetDraft(rev); err == nil || !errors.Is(err, ErrDraftConflict) {
+		if err != nil {
+			log.Printf("configlayer: сброс черновика после отказа применения: %v", err)
+		}
+		return
+	}
+	for range 5 {
+		cur := l.store.Snapshot()
+		back := make(map[string]json.RawMessage, len(edited))
+		for name := range edited {
+			back[name] = before[name]
+		}
+		_, err := l.store.EditDraftBatch(cur.DraftRevision, back, nil)
+		if err == nil {
+			return
+		}
+		if !errors.Is(err, ErrDraftConflict) {
+			log.Printf("configlayer: возврат секций после отказа применения: %v", err)
+			return
+		}
+	}
+	log.Printf("configlayer: секции правки не возвращены: черновик меняется параллельно")
+}
+
+// MihomoTaken — панель владеет маршрутизацией Mihomo по State.Routing (фактическое
+// владение, не желаемое). Слой выключен — false.
+func (l *Layer) MihomoTaken() bool {
+	if !l.Enabled() {
+		return false
+	}
+	return l.store.Snapshot().Routing.Mihomo != nil
+}
+
+// MihomoReturnTarget — профиль, на который вернётся Mihomo при «Отпустить»: "" если
+// панель Mihomo не владеет или прежнего профиля нет; "config.yaml" — прежний обычный
+// файл; иначе имя профиля без каталога profiles/ и суффикса .yaml.
+func (l *Layer) MihomoReturnTarget() string {
+	if !l.Enabled() {
+		return ""
+	}
+	m := l.store.Snapshot().Routing.Mihomo
+	if m == nil || m.PrevProfile == "" {
+		return ""
+	}
+	if m.PrevProfile == mihomoConfigFile {
+		return mihomoConfigFile
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(m.PrevProfile, "profiles/"), ".yaml")
+}
+
+// MihomoProfileUsable — профиль profiles/<name>.yaml можно назвать целью отпускания:
+// имя допустимо, это не профиль панели (xcp-), под каталогом Mihomo лежит обычный файл.
+// Тот же отбор конвейер повторяет под замком применения.
+func (l *Layer) MihomoProfileUsable(name string) bool {
+	rel := "profiles/" + name + ".yaml"
+	if _, ok := mihomoTargetFile(rel); !ok {
+		return false
+	}
+	return checkMihomoTarget(l.opts.Roots.Mihomo, rel) == nil
+}
+
+// MihomoActiveName — имя действующего своего профиля Mihomo по config.yaml: пусто при
+// профиле панели или без файла, "config.yaml" для обычного файла.
+func (l *Layer) MihomoActiveName() string {
+	return mihomoActiveName(l.opts.Roots.Mihomo)
 }
 
 // runPipeline запускает конвейер и следит за владением маршрутизацией: если запуск
@@ -1353,6 +1489,79 @@ func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 	}
 	defer release()
 	req := ApplyRequest{Trigger: run.Trigger, Source: SourceApplied, LiveOverlay: run.Overlay, Kernel: run.Kernel}
+	view := l.runPipeline(req)
+	release()
+	l.afterRun()
+	l.fireAfterApply(req, view)
+	if view.Result != nil && view.Result.Code == ResultDriftBlocked {
+		return view, ErrDriftBlocked
+	}
+	return view, nil
+}
+
+// SectionLiveRun — параметры запуска «секция поверх применённого состояния»
+// (RunSectionLive, D-13).
+type SectionLiveRun struct {
+	// Trigger — что запустило конвейер (TriggerAccessLog).
+	Trigger Trigger
+	// Kernel ограничивает запуск одним ядром; пусто — все установленные.
+	Kernel string
+	// Sections — подменяемые секции: заменяют одноимённые в применённом состоянии
+	// на время сборки и после успеха фиксируются в Applied.
+	Sections Sections
+	// MergeDraft сливает значение секции в черновик: получает имя и значение секции
+	// в черновике, возвращает новое; другие ключи секции и другие секции черновика
+	// остаются как есть. nil — черновик не меняется.
+	MergeDraft func(name string, draft json.RawMessage) (json.RawMessage, error)
+	// Guard проверяет состояние слоя под замком применения, до сборки: решение,
+	// принятое вызывающим раньше (секция у панели), могло устареть, пока замок ждали.
+	// Ошибка Guard отменяет запуск; nil — проверки нет.
+	Guard func(st StateView) error
+}
+
+// RunSectionLive — запуск конвейера поверх применённого состояния с подменой
+// секций (D-13): сборка, проверки до записи, проверка обоих ядер, запись,
+// перезапуск только запущенного ядра, коммит. Значение секции пишется одной
+// записью с манифестом в Applied, а в Draft сливается функцией run.MergeDraft;
+// остальные правки черновика не применяются и остаются в нём. Владение
+// маршрутизацией и секциями не меняется. Занятость как у StartApply по кнопке
+// (user=true). Отказ проверки или перезапуска — ни Applied, ни Draft, ни файлы не
+// меняются; нерешённый дрейф — ErrDriftBlocked. Вызов синхронный; после снятия
+// замка идут afterRun и хуки AddAfterApply.
+func (l *Layer) RunSectionLive(ctx context.Context, run SectionLiveRun) (ApplyView, error) {
+	if !l.Enabled() {
+		return ApplyView{}, ErrDisabled
+	}
+	if run.Trigger == "" {
+		return ApplyView{}, errors.New("configlayer: не задан триггер запуска")
+	}
+	if len(run.Sections) == 0 {
+		return ApplyView{}, errors.New("configlayer: не заданы секции запуска")
+	}
+	l.mu.Lock()
+	stopped := l.stopped
+	l.mu.Unlock()
+	if stopped {
+		return ApplyView{}, ErrStopped
+	}
+	release, err := l.pipeline.TryBegin(ctx, true)
+	if err != nil {
+		return ApplyView{}, l.mapBusy(err)
+	}
+	defer release()
+	if run.Guard != nil {
+		st, err := l.ReadState()
+		if err == nil {
+			err = run.Guard(st)
+		}
+		if err != nil {
+			return ApplyView{}, err
+		}
+	}
+	req := ApplyRequest{
+		Trigger: run.Trigger, Source: SourceApplied, Kernel: run.Kernel,
+		SectionsOverlay: run.Sections.Clone(), MergeDraft: run.MergeDraft,
+	}
 	view := l.runPipeline(req)
 	release()
 	l.afterRun()

@@ -110,6 +110,9 @@ const (
 	// NoteFullRestartPort — ядро перезапущено целиком (Xray — xkeen -restart): изменился
 	// порт прозрачного входящего, правила iptables пересобирает XKeen.
 	NoteFullRestartPort = "full_restart_port"
+	// NoteFullRestartProfile — Mihomo перезапущен целиком: config.yaml переведён на
+	// другой профиль решением по Mihomo, PUT /configs контроллер не переключает.
+	NoteFullRestartProfile = "full_restart_profile"
 )
 
 // errInterrupted — запуск прерван отменой контекста (остановка панели). Откат и
@@ -321,6 +324,8 @@ func fullRestartNote(reason string) string {
 		return NoteFullRestartTun
 	case RestartReasonPort:
 		return NoteFullRestartPort
+	case RestartReasonProfile:
+		return NoteFullRestartProfile
 	}
 	return ""
 }
@@ -428,9 +433,16 @@ func providerTargets(plan Plan, set *BackupSet) []*Expectation {
 // confirmMihomoAfterRestart ждёт готовности API Mihomo после рестарта и сверяет
 // провайдеры с Expect (API поднимается не сразу после старта процесса). У Mihomo
 // без external-controller API нет и не будет: там достаточно подтверждения процесса
-// (confirmRestarted), которое к этому моменту уже пройдено.
+// (confirmRestarted), которое к этому моменту уже пройдено. То же при отпускании
+// Mihomo: свой профиль пользователя не обязан поднять API в срок.
 func (p *Pipeline) confirmMihomoAfterRestart(ctx context.Context, plan Plan) error {
 	if p.d.Mihomo != nil && !p.d.Mihomo.HasController() {
+		return nil
+	}
+	if plan.Routing != nil && plan.Routing.MihomoRestore != nil {
+		// Отпускание Mihomo: запускается свой профиль пользователя, API у него может
+		// подниматься минуты (десяток http-провайдеров) или отсутствовать. Успех
+		// определяет подтверждение процесса по новому PID (confirmRestarted), а не API.
 		return nil
 	}
 	if p.d.MihomoAPIReady != nil {
@@ -581,10 +593,15 @@ func (p *Pipeline) restartAndConfirm(ctx context.Context, kernel string) (servic
 
 // processState — текущее состояние процесса ядра.
 func (p *Pipeline) processState(kernel string) (services.KernelProcessState, bool) {
-	if p.d.ProcessStates == nil {
+	return kernelProcessState(p.d.ProcessStates, kernel)
+}
+
+// kernelProcessState выбирает из states процесс ядра kernel.
+func kernelProcessState(states func() []services.KernelProcessState, kernel string) (services.KernelProcessState, bool) {
+	if states == nil {
 		return services.KernelProcessState{}, false
 	}
-	for _, st := range p.d.ProcessStates() {
+	for _, st := range states() {
 		if st.Name == kernel {
 			return st, true
 		}
@@ -657,7 +674,15 @@ func (p *Pipeline) confirmRunning(ctx context.Context, kernel string, wantPID in
 // непрерывно и ни одно окно не доходит до конца. Ядро, которое так и не поднялось
 // устойчиво, даёт ошибку.
 func (p *Pipeline) confirmRestarted(ctx context.Context, kernel string, oldPID int) error {
-	if p.d.ProcessStates == nil {
+	return ConfirmRestarted(ctx, p.d.ProcessStates, kernel, oldPID)
+}
+
+// ConfirmRestarted — подтверждение перезапуска по процессу без привязки к
+// конвейеру: тот же разбор, что у confirmRestarted, состояния процессов
+// передаются функцией states (nil — источника нет). Им же пользуется активация
+// профиля Mihomo: oldPID берётся до перезапуска, прежний процесс не засчитывается.
+func ConfirmRestarted(ctx context.Context, states func() []services.KernelProcessState, kernel string, oldPID int) error {
+	if states == nil {
 		return errors.New("нет источника состояния процессов ядер")
 	}
 	deadline := time.Now().Add(RestartConfirmTimeout)
@@ -667,7 +692,7 @@ func (p *Pipeline) confirmRestarted(ctx context.Context, kernel string, oldPID i
 	tick := time.NewTicker(RestartPollInterval)
 	defer tick.Stop()
 	for {
-		st, ok := p.processState(kernel)
+		st, ok := kernelProcessState(states, kernel)
 		now := time.Now()
 		running := ok && st.Status == "running" && st.PID > 0
 		onlyOld = false

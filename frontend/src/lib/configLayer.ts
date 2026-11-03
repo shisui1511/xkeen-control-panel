@@ -42,7 +42,13 @@ export type StepId = 'build' | 'validate_xray' | 'validate_mihomo' | 'write' | '
 export type StepState = 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'deferred';
 
 export type LayerTrigger =
-  'user' | 'rebuild' | 'kernel_installed' | 'flag_on' | 'flag_off' | 'source_refresh';
+  | 'user'
+  | 'rebuild'
+  | 'kernel_installed'
+  | 'flag_on'
+  | 'flag_off'
+  | 'source_refresh'
+  | 'access_log';
 
 export interface LayerStep {
   id: StepId;
@@ -66,7 +72,7 @@ export interface LayerRestart {
     | 'failed_kernel_down'
     | 'interrupted'
     | 'no_runtime_effect';
-  /** Способ перезапуска Mihomo: full_restart_tun | full_restart_port — полный перезапуск вместо горячей перезагрузки. */
+  /** Способ перезапуска Mihomo: full_restart_tun | full_restart_port | full_restart_profile — полный перезапуск вместо горячей перезагрузки. */
   note_code?: string;
 }
 
@@ -125,7 +131,14 @@ export interface RoutingKernelView {
 
 /** Раздел routing снимка: желаемое владение и фактическое по ядрам (null — ядро не установлено). */
 export interface RoutingSnapshot {
+  /** Панель держит хотя бы одно ядро. */
   desired: boolean;
+  desired_xray: boolean;
+  desired_mihomo: boolean;
+  /** Имя активного своего профиля Mihomo, пусто при профиле панели, без файла или при взятом Mihomo. */
+  mihomo_active: string;
+  /** Значения секций Mihomo сохранены в черновике (переживают отпускание). */
+  mihomo_saved: boolean;
   xray: RoutingKernelView | null;
   mihomo: RoutingKernelView | null;
 }
@@ -143,7 +156,7 @@ export interface LayerCoreSectionSnap {
 /** Объявление о способе перезапуска: ядро и причина. Ключи — как RestartNote контракта секций. */
 export interface LayerRestartNote {
   kernel: string;
-  reason: 'port' | 'tun';
+  reason: 'port' | 'tun' | 'profile';
 }
 
 /**
@@ -304,6 +317,10 @@ function normalizeRouting(raw: unknown): RoutingSnapshot {
   const r = isObject(raw) ? raw : {};
   return {
     desired: r.desired === true,
+    desired_xray: r.desired_xray === true,
+    desired_mihomo: r.desired_mihomo === true,
+    mihomo_active: typeof r.mihomo_active === 'string' ? r.mihomo_active : '',
+    mihomo_saved: r.mihomo_saved === true,
     xray: normalizeRoutingKernel(r.xray),
     mihomo: normalizeRoutingKernel(r.mihomo)
   };
@@ -327,7 +344,9 @@ function normalizeCores(raw: unknown): LayerCoresSnapshot {
   }
   const restart = asArray<unknown>(c.restart).filter(
     (n): n is LayerRestartNote =>
-      isObject(n) && typeof n.kernel === 'string' && (n.reason === 'port' || n.reason === 'tun')
+      isObject(n) &&
+      typeof n.kernel === 'string' &&
+      (n.reason === 'port' || n.reason === 'tun' || n.reason === 'profile')
   );
   return { xray, restart };
 }

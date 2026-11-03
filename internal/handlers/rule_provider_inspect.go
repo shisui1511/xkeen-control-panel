@@ -82,7 +82,7 @@ func (a *API) RuleProviderCheckURL(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	res, err := a.routeTracerSvc.CheckRuleProviderURL(r.Context(), name)
+	res, err := a.routeTracerSvc.CheckRuleProviderURL(r.Context(), name, a.providerProxyProbe())
 	if errors.Is(err, services.ErrRuleProviderNotFound) {
 		JSONError(w, http.StatusNotFound, err.Error())
 		return
@@ -92,4 +92,34 @@ func (a *API) RuleProviderCheckURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSONSuccess(w, res)
+}
+
+// providerProxyProbe собирает пробу адреса через узел или группу работающего ядра
+// (GET /proxies/{имя}/delay). nil — API ядра недоступно: нет сервиса, не описан
+// контроллер или он не отвечает; проверка тогда идёт только напрямую. Проба
+// идёт под delayGuard: пачка проверок не должна перегружать ядро на слабом CPU.
+func (a *API) providerProxyProbe() services.ProxyProbe {
+	if a.mihomoSvc == nil || !a.mihomoSvc.HasController() {
+		return nil
+	}
+	// ProxyDelay ходит с секретом из профиля, тем же пользуется и проверка.
+	var secret string
+	if info, err := a.mihomoSvc.ParseControllerConfig(); err == nil {
+		secret = info.Secret
+	}
+	if reachable, authenticated := a.mihomoSvc.ProbeAPI(secret); !reachable || !authenticated {
+		return nil
+	}
+	return func(ctx context.Context, proxy, rawURL string) (int, error) {
+		if a.delayGuard != nil {
+			release, err := a.delayGuard.Acquire(ctx)
+			if err != nil {
+				return 0, err
+			}
+			defer release()
+		}
+		pctx, cancel := context.WithTimeout(ctx, services.RuleProviderProbeTimeout+3*time.Second)
+		defer cancel()
+		return a.mihomoSvc.ProxyDelay(pctx, proxy, rawURL, services.RuleProviderProbeTimeout)
+	}
 }

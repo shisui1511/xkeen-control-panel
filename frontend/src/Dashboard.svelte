@@ -1051,7 +1051,8 @@
           <span class="spinner"></span>
           <span>{$t('service.restarting_wait')}</span>
         </div>
-      {:else}
+      {:else if currentTab !== 'rules'}
+        <!-- «Правила» работают без API Mihomo: вместо баннера — пометка на самой странице (D-19) -->
         <div style="margin: 12px 16px 0;">
           <ApiOffline
             endpoint={$capabilities?.mihomo?.discovered_secret ? 'Mihomo API' : '127.0.0.1:9090'}

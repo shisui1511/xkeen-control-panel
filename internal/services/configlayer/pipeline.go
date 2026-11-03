@@ -2,9 +2,11 @@ package configlayer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,6 +36,9 @@ const (
 	// TriggerRoutingReclaim — «вернуть» маршрутизацию: профиль панели Mihomo или
 	// чужой файл routing Xray в копию (набор копий вне конвейера «Применить»).
 	TriggerRoutingReclaim Trigger = "routing_reclaim"
+	// Переключатель access-лога: запуск поверх применённого состояния с подменой
+	// секции (SectionsOverlay), чужие правки черновика не применяются.
+	TriggerAccessLog Trigger = "access_log"
 )
 
 // SourceKind — из какого состояния собираются файлы.
@@ -58,6 +63,24 @@ type ApplyRequest struct {
 	// генераторов этого запуска (кандидат фонового обновления источника). Сам State.Live
 	// оверлей не меняет: живые данные фиксируют хуки PipelineDeps.CommitLive.
 	LiveOverlay Sections
+	// SectionsOverlay — секции, которые заменяют одноимённые в применённом
+	// состоянии, из которого идёт запуск (D-13): только при Source == SourceApplied,
+	// для SourceDraft поле игнорируется. После успешной проверки, записи и
+	// перезапуска (и при пустом плане) значения фиксируются в Applied одной записью
+	// с манифестом; в Draft — только через MergeDraft.
+	SectionsOverlay Sections
+	// MergeDraft — слияние значения подменённой секции в черновик: получает имя
+	// секции и её значение в черновике (nil — секции там нет), возвращает новое.
+	// Вызывается внутри той же записи состояния; изменение черновика — одна
+	// ревизия на запуск. Ошибка отменяет всю запись (файлы возвращаются). nil —
+	// черновик не меняется.
+	MergeDraft func(name string, draft json.RawMessage) (json.RawMessage, error)
+}
+
+// overlayActive — у запуска есть подмена секций, которая действует: только
+// поверх применённого состояния.
+func (r ApplyRequest) overlayActive() bool {
+	return r.Source == SourceApplied && len(r.SectionsOverlay) > 0
 }
 
 // StepID — шаг конвейера.
@@ -345,6 +368,9 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	src := snap.Draft
 	if req.Source == SourceApplied {
 		src = snap.Applied
+		if req.overlayActive() {
+			src = liveWithOverlay(src, req.SectionsOverlay)
+		}
 	}
 	bins := p.binaries()
 	installed := InstalledKernels{Xray: bins.Xray != "", Mihomo: bins.Mihomo != ""}
@@ -363,10 +389,10 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		}
 		blocked := len(drift(p.d.Roots, manifest)) > 0
 		// Дрейф маршрутизации (D-06, D-07) блокирует запуск, который держит
-		// маршрутизацию панели; запуск с желаемым managed=false — это и есть
-		// решение «Отпустить», он дрейфом маршрутизации не блокируется.
-		if !blocked && DesiredRouting(src).Managed {
-			blocked = len(routingDrift(p.d.Roots, snap.Routing, installed, req.Kernel, p.d.ForeignOwned)) > 0
+		// маршрутизацию этого ядра; запуск, отпускающий ядро, — это и есть решение
+		// «Отпустить», дрейфом этого ядра он не блокируется (по ядрам, D-06 из 147.1).
+		if !blocked {
+			blocked = routingDriftBlocks(src, routingDrift(p.d.Roots, snap.Routing, installed, req.Kernel, p.d.ForeignOwned))
 		}
 		// Чужой файл с ключом взятой секции блокирует запуск, который эту секцию
 		// держит (managed); запуск с managed=false — «Отпустить» — не блокируется.
@@ -613,12 +639,20 @@ func (p *Pipeline) syncApplied(snap State, src Sections, req ApplyRequest, used 
 	syncDraft := req.Source == SourceDraft && len(req.Only) == 0 &&
 		draftChanges(State{Draft: src, Applied: snap.Applied}) != 0
 	hook := p.liveCommitter()
-	if !syncDraft && hook == nil {
+	overlay := req.overlayActive()
+	if !syncDraft && !overlay && hook == nil {
 		return nil
 	}
 	return p.d.Store.Update(func(st *State) error {
 		if syncDraft {
 			st.Applied = src.Clone()
+		}
+		// Пустой план: файл тот же, но панельное поле секции всё равно меняется
+		// (D-15): значение фиксируется в Applied и Draft, последний путь не теряется.
+		if overlay {
+			if err := applySectionsOverlay(st, req); err != nil {
+				return err
+			}
 		}
 		if hook != nil {
 			return hook(st, req, used)
@@ -635,6 +669,50 @@ func liveWithOverlay(live, overlay Sections) Sections {
 		out[k] = cloneRaw(v)
 	}
 	return out
+}
+
+// applySectionsOverlay фиксирует подменённые секции запуска (D-13) в st: значение
+// пишется в Applied, а в Draft сливается только функцией req.MergeDraft — другие
+// ключи секции и другие секции черновика не меняются. Если черновик изменился,
+// ревизия растёт один раз на запуск. Ошибка MergeDraft возвращается вызывающему:
+// Store.Update тогда не записывает состояние. Вызывается внутри Store.Update.
+func applySectionsOverlay(st *State, req ApplyRequest) error {
+	if st.Applied == nil {
+		st.Applied = Sections{}
+	}
+	if st.Draft == nil {
+		st.Draft = Sections{}
+	}
+	names := make([]string, 0, len(req.SectionsOverlay))
+	for name := range req.SectionsOverlay {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	draftChanged := false
+	for _, name := range names {
+		value := req.SectionsOverlay[name]
+		oldApplied, hadApplied := st.Applied[name]
+		if _, err := settleValue(st.Applied, name, cloneRaw(value), oldApplied, hadApplied); err != nil {
+			return err
+		}
+		if req.MergeDraft == nil {
+			continue
+		}
+		oldDraft, hadDraft := st.Draft[name]
+		next, err := req.MergeDraft(name, cloneRaw(oldDraft))
+		if err != nil {
+			return fmt.Errorf("configlayer: слияние секции %q в черновик: %w", name, err)
+		}
+		changed, err := settleValue(st.Draft, name, next, oldDraft, hadDraft)
+		if err != nil {
+			return err
+		}
+		draftChanged = draftChanged || changed
+	}
+	if draftChanged {
+		st.DraftRevision++
+	}
+	return nil
 }
 
 // afterValidation отражает итог проверки в шаге; failed=true — применение
@@ -659,6 +737,7 @@ func (p *Pipeline) commitState(plan Plan, src Sections, req ApplyRequest, used I
 	now := p.d.Now()
 	hook := p.liveCommitter()
 	applyDraft := req.Source == SourceDraft && len(req.Only) == 0
+	overlay := req.overlayActive()
 	return p.d.Store.Update(func(st *State) error {
 		for _, fp := range plan.Files {
 			switch fp.Action {
@@ -673,6 +752,11 @@ func (p *Pipeline) commitState(plan Plan, src Sections, req ApplyRequest, used I
 		}
 		if applyDraft {
 			st.Applied = src.Clone()
+		}
+		if overlay {
+			if err := applySectionsOverlay(st, req); err != nil {
+				return err
+			}
 		}
 		if plan.Routing != nil {
 			st.Routing = plan.Routing.Next.clone()

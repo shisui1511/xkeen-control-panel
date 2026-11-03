@@ -57,6 +57,11 @@
           <span>{$confirmStore.consequence}</span>
         </div>
       {/if}
+
+      {#if $confirmStore.extra}
+        {@const extra = $confirmStore.extra}
+        <extra.component {...extra.props} />
+      {/if}
     </div>
 
     <div class="confirm-actions">
@@ -97,6 +102,7 @@
     font-size: var(--font-size-sm);
     color: var(--fg-secondary);
     line-height: 1.5;
+    overflow-wrap: anywhere;
   }
 
   .confirm-consequence {

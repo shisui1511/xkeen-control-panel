@@ -2,6 +2,8 @@
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { T } from './lib/env';
 import { api, layerFlag } from './lib/nodes-api';
 
@@ -13,6 +15,17 @@ import { api, layerFlag } from './lib/nodes-api';
 // пишут. Ядро не запускается, не останавливается и не меняется.
 
 const layer = layerFlag();
+
+const LOCALES = ['ru', 'en'].map((lang) =>
+  fileURLToPath(new URL(`../../src/locales/${lang}.json`, import.meta.url))
+);
+
+/** Тексты ключа на обоих языках интерфейса: язык панели стенда заранее неизвестен. */
+function texts(key: string): string[] {
+  return LOCALES.map(
+    (file) => (JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>)[key]
+  );
+}
 
 test.describe.configure({ mode: 'serial' });
 
@@ -57,6 +70,17 @@ async function draftRevision(page: Page): Promise<number> {
   return Number(snap.data?.draft_revision);
 }
 
+/** Значения секций Mihomo сохранены, число правок черновика: от них зависит ход кнопок плашки. */
+async function layerState(page: Page): Promise<{ saved: boolean; draftChanges: number }> {
+  const snap = await api(page, 'GET', '/api/configlayer/state');
+  expect(snap.status, 'GET /api/configlayer/state').toBe(200);
+  const routing = (snap.data?.routing ?? {}) as { mihomo_saved?: boolean };
+  return {
+    saved: routing.mihomo_saved === true,
+    draftChanges: Number(snap.data?.draft_changes ?? 0)
+  };
+}
+
 test('cores: плашка профиля Mihomo', async ({ page }) => {
   const guard = attachConsoleGuard(page);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -82,15 +106,105 @@ test('cores: плашка профиля Mihomo', async ({ page }) => {
     await expect(page.getByTestId('mihomo-profile-pending')).toBeVisible();
     await expect(notice.getByRole('button')).toHaveCount(0);
   } else {
-    // xkeen, user или нет файла: «Управлять в панели» открывает диалог взятия маршрутизации
-    await page.getByTestId('mihomo-profile-take').click();
-    const modal = page.getByTestId('take-routing-modal');
-    await expect(modal).toBeVisible({ timeout: T.action });
-    await expect(modal.getByTestId('take-routing-sections')).toBeVisible({ timeout: T.page });
-    await page.getByTestId('take-routing-cancel').click();
-    await expect(modal).toBeHidden({ timeout: T.action });
+    const state = await layerState(page);
+    const take = page.getByTestId('mihomo-profile-take');
+    if (state.saved && state.draftChanges > 0) {
+      // возврат идёт применением всего черновика: кнопка неактивна, причина написана строкой
+      await expect(take).toBeDisabled();
+      await expect(page.getByTestId('mihomo-profile-draft-block')).toBeVisible();
+    } else if (state.saved) {
+      // значения секций сохранены: «Управлять в панели» — подтверждение возврата, не диалог взятия
+      await take.click();
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toBeVisible({ timeout: T.action });
+      await expect(page.getByTestId('take-routing-modal')).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden({ timeout: T.action });
+    } else {
+      // xkeen, user или нет файла: «Управлять в панели» открывает диалог взятия маршрутизации
+      await take.click();
+      const modal = page.getByTestId('take-routing-modal');
+      await expect(modal).toBeVisible({ timeout: T.action });
+      await expect(modal.getByTestId('take-routing-sections')).toBeVisible({ timeout: T.page });
+      await page.getByTestId('take-routing-cancel').click();
+      await expect(modal).toBeHidden({ timeout: T.action });
+    }
     expect(await draftRevision(page), 'черновик не изменился').toBe(revision);
   }
+
+  await guard.assertClean();
+});
+
+test('cores: плашка Mihomo — кнопка по владельцу', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  const mihomo = await mihomoView(page);
+  test.skip(!mihomo.installed, 'Mihomo не установлен');
+
+  await openConfig(page, '#/config/cores');
+  await tabReady(page, 'cores-tab');
+  await page.getByTestId('kernel-switch-mihomo').click();
+  await expect(page.getByTestId('cores-panel-mihomo')).toBeVisible();
+  const notice = page.getByTestId('mihomo-profile-notice');
+  await expect(notice).toBeVisible({ timeout: T.page });
+
+  const release = page.getByTestId('mihomo-profile-release');
+  const take = page.getByTestId('mihomo-profile-take');
+  if (mihomo.owner === 'panel') {
+    // профиль у панели: отпускается только Mihomo, текст кнопки — «Отпустить Mihomo»
+    await expect(release).toBeVisible();
+    await expect(take).toHaveCount(0);
+    const label = (await release.innerText()).trim();
+    expect(texts('cfg.sec.profile_release_btn'), 'текст кнопки отпускания').toContain(label);
+  } else if (mihomo.owner === 'pending') {
+    // взятие ждёт «Применить»: бейдж без действий
+    await expect(page.getByTestId('mihomo-profile-pending')).toBeVisible();
+    await expect(release).toHaveCount(0);
+    await expect(take).toHaveCount(0);
+  } else {
+    // xkeen, user, нет файла, отпускание ждёт «Применить»: «Управлять в панели»
+    await expect(take).toBeVisible();
+    await expect(release).toHaveCount(0);
+    const label = (await take.innerText()).trim();
+    expect(texts('cfg.sec.take_btn'), 'текст кнопки взятия').toContain(label);
+  }
+
+  await guard.assertClean();
+});
+
+test('cores: диалог с плашки показывает только Mihomo', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  const mihomo = await mihomoView(page);
+  test.skip(!mihomo.installed, 'Mihomo не установлен');
+  test.skip(
+    mihomo.owner === 'panel' || mihomo.owner === 'pending',
+    'профилем управляет панель или взятие ждёт «Применить»: кнопки взятия нет'
+  );
+  test.skip(
+    (await layerState(page)).saved,
+    'значения секций сохранены: кнопка ведёт в подтверждение возврата, не в диалог'
+  );
+  const revision = await draftRevision(page);
+
+  await openConfig(page, '#/config/cores');
+  await tabReady(page, 'cores-tab');
+  await page.getByTestId('kernel-switch-mihomo').click();
+  await expect(page.getByTestId('cores-panel-mihomo')).toBeVisible();
+
+  await page.getByTestId('mihomo-profile-take').click();
+  const modal = page.getByTestId('take-routing-modal');
+  await expect(modal).toBeVisible({ timeout: T.action });
+  // диалог загрузился: секция Mihomo есть, файлов и предупреждений Xray нет
+  await expect(modal.locator('[data-kernel="mihomo"]')).toHaveCount(1, { timeout: T.page });
+  await expect(modal.locator('[data-kernel="xray"]')).toHaveCount(0);
+  await expect(modal.getByTestId('take-routing-move')).toHaveCount(0);
+
+  await page.getByTestId('take-routing-cancel').click();
+  await expect(modal).toBeHidden({ timeout: T.action });
+  expect(await draftRevision(page), 'черновик не изменился').toBe(revision);
 
   await guard.assertClean();
 });

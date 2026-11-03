@@ -348,6 +348,8 @@ func main() {
 	// Mihomo profiles: profiles/<name>.yaml with config.yaml as a symlink
 	api.SetMihomoProfileService(services.NewMihomoProfileService(cfg.MihomoConfigDir, cfg.DataDir))
 	srv.HandleProtected("/api/mihomo/profiles", api.MihomoProfiles)
+	srv.HandleProtected("/api/mihomo/profiles/preview", api.MihomoProfilePreview)
+	srv.HandleProtected("/api/mihomo/profiles/deps", api.MihomoProfileDeps)
 	for _, action := range []string{"create", "rename", "delete", "activate", "adopt"} {
 		srv.HandleProtected("/api/mihomo/profiles/"+action, api.MihomoProfileAction)
 	}
@@ -951,6 +953,7 @@ func main() {
 	srv.HandleProtected("/api/configlayer/routing/release", api.ConfigRoutingRelease)
 	srv.HandleProtected("/api/configlayer/routing/takeover", api.ConfigRoutingTakeover)
 	srv.HandleProtected("/api/configlayer/routing/reclaim", api.ConfigRoutingReclaim)
+	srv.HandleProtected("/api/configlayer/routing/mihomo", api.ConfigRoutingMihomo)
 	srv.HandleProtected("/api/configlayer/routing/select", api.ConfigRoutingSelect)
 	srv.HandleProtected("/api/configlayer/routing/lists", api.ConfigRoutingLists)
 	srv.HandleProtected("/api/configlayer/routing/presets", api.ConfigRoutingPresets)
@@ -965,6 +968,8 @@ func main() {
 	srv.HandleProtected("/api/configlayer/cores/force-proxy", api.ConfigCoresForceProxy)
 	srv.HandleProtected("/api/configlayer/cores/raw/parse", api.ConfigCoresRawParse)
 	srv.HandleProtected("/api/configlayer/cores/reclaim", api.ConfigCoresReclaim)
+	srv.HandleProtected("/api/configlayer/cores/access-log", api.ConfigCoresAccessLog)
+	srv.HandleProtected("/api/configlayer/cores/fill", api.ConfigCoresFill)
 	srv.HandleProtected("/api/configlayer/geodata", api.ConfigGeodata)
 	srv.HandleProtected("/api/configlayer/geodata/output", api.ConfigGeodataOutput)
 	srv.HandleProtected("/api/configlayer/geodata/run", api.ConfigGeodataRun)

@@ -11,7 +11,9 @@
     runningKernels,
     activeKernelName,
     isConflict,
-    lockNav
+    lockNav,
+    mihomoOfflineReason,
+    configLayerEnabled
   } from './stores';
   import { anyKernelInstalled } from './lib/navCaps';
   import { usePoller } from './lib/poller';
@@ -52,6 +54,7 @@
   import XKeenSettingsCard from './components/xkeen/XKeenSettingsCard.svelte';
   import XKeenInstallCard from './components/xkeen/XKeenInstallCard.svelte';
   import MihomoProfilesCard from './components/mihomo/MihomoProfilesCard.svelte';
+  import Icon from './lib/components/Icon.svelte';
 
   let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
 
@@ -407,6 +410,8 @@
     const key = `xkeen-${action}`;
     actionLoading[key] = true;
     try {
+      // Предупреждение Preflight о Mihomo без API: тост после успешного запуска
+      let noApiWarning = false;
       if (action === 'start') {
         // Pre-flight check: determine kernel to validate
         const kernel = $activeKernelName || 'xray';
@@ -417,6 +422,10 @@
           if (pfRes.ok) {
             const pfBody = await pfRes.json();
             const data = pfBody.data ?? pfBody;
+            noApiWarning =
+              kernel === 'mihomo' &&
+              Array.isArray(data.warnings) &&
+              data.warnings.some((w: { code?: string }) => w?.code === 'no_external_controller');
             if (Array.isArray(data.errors) && data.errors.length > 0) {
               const errList = data.errors
                 .map((e: { message?: string; code?: string }) => e.message || e.code || '')
@@ -440,6 +449,7 @@
         }
       }
       await serviceAction(action);
+      if (noApiWarning) showToast('warning', $t('svc.mihomo_started_no_api'), 8000);
       await fetchStatus();
       await fetchKernels();
       await fetchCapabilities();
@@ -1100,6 +1110,17 @@
                     <StatusBadge variant="warning" label={$t('svc.mihomo_api_unavailable')} />
                   </a>
                 {/if}
+                {#if $mihomoOfflineReason === 'api_down'}
+                  <div class="no-api-note" data-testid="mihomo-no-api-note" role="status">
+                    <span class="mihomo-no-api-line">
+                      <span class="mihomo-no-api-icon"
+                        ><Icon name="warning" size={12} color="var(--warning)" /></span
+                      >
+                      <span>{$t('svc.mihomo_no_api')}</span>
+                    </span>
+                    <span class="mihomo-no-api-hint">{$t('svc.mihomo_no_api_hint')}</span>
+                  </div>
+                {/if}
               </div>
               {#if !isRunning && kernelInstalled(mihomo?.current_version, 'mihomo')}
                 <button
@@ -1742,7 +1763,7 @@
       />
     {/key}
 
-    {#if $capabilities?.kernels?.mihomo?.installed}
+    {#if $capabilities?.kernels?.mihomo?.installed && !$configLayerEnabled}
       <MihomoProfilesCard
         {onSwitchTab}
         onactivated={() => {
@@ -1935,6 +1956,34 @@
 />
 
 <style>
+  .no-api-note {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 6px;
+    font-size: var(--font-size-xs);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .mihomo-no-api-line {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    color: var(--warning);
+  }
+
+  .mihomo-no-api-icon {
+    display: inline-flex;
+    flex-shrink: 0;
+    padding-top: 3px;
+  }
+
+  .mihomo-no-api-hint {
+    color: var(--fg-dim);
+    padding-left: 18px;
+  }
+
   .mihomo-api-badge-link {
     margin-top: 6px;
     display: inline-flex;

@@ -290,7 +290,7 @@ func (s *Service) View() (RoutingView, error) {
 	view := RoutingView{
 		Revision:      st.DraftRevision,
 		Installed:     map[string]bool{configlayer.KernelXray: installed.Xray, configlayer.KernelMihomo: installed.Mihomo},
-		Desired:       configlayer.DesiredRouting(st.Draft).Managed,
+		Desired:       configlayer.DesiredRouting(st.Draft).AnyManaged(),
 		HasSources:    len(draftSourceIDs(st.Draft)) > 0,
 		DefaultsDone:  groups.DefaultsDone,
 		Groups:        make([]GroupView, 0, len(groups.Items)),
@@ -315,7 +315,7 @@ func (s *Service) View() (RoutingView, error) {
 		}
 	}
 	if hasManual {
-		if configlayer.DesiredRouting(st.Applied).Managed {
+		if configlayer.DesiredRouting(st.Applied).AnyManaged() {
 			if am, err := s.appliedModelOf(st); err == nil {
 				appliedM = &am
 			}
