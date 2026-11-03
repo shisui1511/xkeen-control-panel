@@ -709,7 +709,7 @@ func TestRouterProfileActivatePlain(t *testing.T) {
 	// Коллизия: имя config-xkeen занято, копия получает суффикс.
 	rtPlainSet(t, s, plain)
 	res = e.rtOwnActivate(rtPlainA)
-	pid = rtSwExpectKernel(t, tg.Core, res, rtPlainA, pid)
+	rtSwExpectKernel(t, tg.Core, res, rtPlainA, pid)
 	if got, _ := res["adopted"].(string); got != rtKeepName+"-2" {
 		t.Fatalf("adopted %q при занятом имени, ожидался %s-2", got, rtKeepName)
 	}

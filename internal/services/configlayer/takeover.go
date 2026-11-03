@@ -114,20 +114,17 @@ func checkMihomoTarget(root, rel string) *BuildIssue {
 		Detail: "профиль для config.yaml не найден",
 		Params: map[string]string{"file": rel},
 	}
-	if _, ok := mihomoTargetFile(rel); !ok || root == "" {
+	name, ok := mihomoTargetFile(rel)
+	if !ok || root == "" || strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
 		return issue
 	}
+	// Путь собирается из проверенного имени (один компонент), а не из rel.
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return issue
 	}
-	target := filepath.Join(absRoot, filepath.FromSlash(rel))
-	absTarget, err := filepath.Abs(target)
-	if err != nil {
-		return issue
-	}
-	relToRoot, err := filepath.Rel(absRoot, absTarget)
-	if err != nil || relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(os.PathSeparator)) {
+	absTarget := filepath.Join(absRoot, "profiles", filepath.Base(name)+".yaml")
+	if !strings.HasPrefix(absTarget, absRoot+string(os.PathSeparator)) {
 		return issue
 	}
 	fi, err := os.Lstat(absTarget)
