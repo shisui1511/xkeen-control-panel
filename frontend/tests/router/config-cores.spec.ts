@@ -3,6 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
+import { settleMotion } from './lib/motion';
 import { api, layerFlag, resetDraft } from './lib/nodes-api';
 
 // Вкладка «Xray │ Mihomo» раздела «Конфигурация» на настоящей панели (фаза 147, план 09):
@@ -114,7 +115,9 @@ test('cores: вкладка и переключатель ядра', async ({ pa
     await expect(panel).toBeVisible();
     if (installed[kernel]) {
       await expect(page.getByTestId(`cores-sections-${kernel}`)).toBeVisible();
-      await expect(panel.locator('.empty-state')).toHaveCount(0);
+      // пустое состояние «не установлено» — прямой потомок панели; внутри карточек
+      // вкладки свои пустые состояния (например, список профилей без файлов)
+      await expect(panel.locator(':scope > .empty-state')).toHaveCount(0);
     } else {
       await expect(panel.locator('.empty-state')).toBeVisible();
       await expect(panel.getByRole('button')).toHaveCount(0);
@@ -556,6 +559,7 @@ for (const theme of ['dark', 'light'] as const) {
         .getByTestId('take-section-content')
         .evaluate((el) => el.scrollWidth - el.clientWidth);
       expect(overflow, 'горизонтальная прокрутка тела диалога').toBeLessThanOrEqual(0);
+      await settleMotion(page);
       for (const id of ['take-section-confirm', 'take-section-cancel']) {
         const b = await modal.getByTestId(id).boundingBox();
         expect(b, `${id} виден`).not.toBeNull();

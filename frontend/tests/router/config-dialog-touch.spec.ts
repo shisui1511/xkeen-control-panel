@@ -2,6 +2,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
+import { settleMotion } from './lib/motion';
 import {
   addToDraft,
   api,
@@ -40,8 +41,9 @@ async function openTab(page: Page, route: string, tab: string): Promise<void> {
 }
 
 /** Кнопки подвала ниже 44 px: «подпись ширина×высота». */
-async function shortButtons(modal: Locator, footer: string): Promise<string[]> {
+async function shortButtons(page: Page, modal: Locator, footer: string): Promise<string[]> {
   await expect(modal.locator(`${footer} .btn`).first()).toBeVisible({ timeout: T.action });
+  await settleMotion(page);
   return modal.locator(`${footer} .btn`).evaluateAll((els) =>
     els
       .map((el) => ({ el, b: el.getBoundingClientRect() }))
@@ -68,7 +70,7 @@ async function footerProblems(page: Page, width: number, height: number): Promis
   const problems: string[] = [];
   const check = async (name: string, modal: Locator, footer: string) => {
     await expect(modal, name).toBeVisible({ timeout: T.action });
-    for (const v of await shortButtons(modal, footer)) problems.push(`${name}: ${v}`);
+    for (const v of await shortButtons(page, modal, footer)) problems.push(`${name}: ${v}`);
   };
   const close = async (modal: Locator) => {
     await page.keyboard.press('Escape');
