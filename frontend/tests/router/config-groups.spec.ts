@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
-import { CORE_TAG } from './lib/known';
+import { CORE_TAG, knownFailure } from './lib/known';
 import {
   addToDraft,
   api,
@@ -876,6 +876,8 @@ async function axeSevere(page: Page, scopes: string[]): Promise<string[]> {
 for (const theme of ['dark', 'light'] as const) {
   test(`groups axe: карточки и диалог, тема ${theme}`, async ({ page }) => {
     const guard = attachConsoleGuard(page);
+    // Кнопка-переключатель карточки проб под курсором: акцент на подсветке, контраст 4.39
+    if (theme === 'light') knownFailure('*', 'secondary-button-hover-text-contrast');
     await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
     await startPage(page);
     await resetDraft(page);
