@@ -297,7 +297,7 @@
                 {/if}
                 {#if d?.file_exists && d.file_mtime}
                   <div class="meta-item">
-                    <span class="meta-value updated-time"
+                    <span class="meta-value"
                       >{$t('rules.provider_file_date', {
                         date: formatDateTime(d.file_mtime * 1000)
                       })}</span
@@ -575,7 +575,7 @@
 
   .badge-behavior {
     background: color-mix(in srgb, var(--fg-dim) 12%, transparent);
-    color: var(--fg-secondary);
+    color: var(--fg-primary);
     border: 1px solid color-mix(in srgb, var(--fg-dim) 22%, transparent);
   }
 
