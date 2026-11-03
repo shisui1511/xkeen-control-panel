@@ -230,6 +230,7 @@ func (s *Server) GetAuthService() *auth.AuthService {
 // BuildHandler constructs and returns the HTTP handler with the complete middleware chain.
 func (s *Server) BuildHandler() http.Handler {
 	var handler http.Handler = s.mux
+	handler = middleware.GzipJSON(handler)
 	handler = i18n.Middleware(handler)
 	handler = auth.SecurityHeaders(handler)
 	handler = middleware.Recovery(handler)
