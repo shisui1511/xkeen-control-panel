@@ -355,7 +355,7 @@ func (a *API) ConfigCoresFill(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Источник в секции не записывается: значения становятся панельными сразу.
-	ev, err := a.cores.Fill(req.Revision, data, configlayer.SourceFile{})
+	ev, err := a.cores.Fill(req.Revision, data)
 	if err != nil {
 		a.writeCoresError(w, r, err)
 		return

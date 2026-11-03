@@ -136,12 +136,16 @@ async function createProfile(
   expect(res.status, `создание профиля ${name}`).toBe(200);
 }
 
-async function activateViaApi(page: Page, name: string): Promise<void> {
-  // сразу после отпускания ядро ещё занято перезапуском, слой — применением: эти 409 проходят
+async function activateViaApi(page: Page, name: string, restoring = false): Promise<void> {
+  // Сразу после отпускания ядро ещё занято перезапуском, слой — применением, а желание
+  // взятия в черновике сходит не мгновенно: эти 409 проходят. Для draft_open это верно
+  // только при возврате стенда; в сценариях ответ draft_open значит открытый черновик.
+  const transient = restoring
+    ? ['kernel_op_in_progress', 'apply_busy', 'draft_open']
+    : ['kernel_op_in_progress', 'apply_busy'];
   let res = await api(page, 'POST', '/api/mihomo/profiles/activate', { name });
   const busy = (r: typeof res) =>
-    r.status === 409 &&
-    ['kernel_op_in_progress', 'apply_busy'].includes(String(r.data?.code ?? ''));
+    r.status === 409 && transient.includes(String(r.data?.code ?? ''));
   for (let i = 0; i < 30 && busy(res); i++) {
     await page.waitForTimeout(2000);
     res = await api(page, 'POST', '/api/mihomo/profiles/activate', { name });
@@ -201,6 +205,7 @@ async function restoreStand(page: Page, before: Stand): Promise<void> {
   let cur = await standState(page);
   if (cur.taken && cur.returnTarget.startsWith(PREFIX)) {
     await releaseViaApi(page);
+    await settled(page);
     cur = await standState(page);
   }
   const names = await userProfiles(page);
@@ -208,7 +213,7 @@ async function restoreStand(page: Page, before: Stand): Promise<void> {
     if (!cur.taken) {
       const want = before.returnTarget;
       const park = names.includes(want) ? want : (names.find((n) => !n.startsWith(PREFIX)) ?? '');
-      if (park !== '' && cur.active !== park) await activateViaApi(page, park);
+      if (park !== '' && cur.active !== park) await activateViaApi(page, park, true);
       await ensurePanelOwns(page);
     }
     return;
@@ -221,7 +226,7 @@ async function restoreStand(page: Page, before: Stand): Promise<void> {
     cur = await standState(page);
   }
   if (before.active !== '' && !before.plain && cur.active !== before.active) {
-    await activateViaApi(page, before.active);
+    await activateViaApi(page, before.active, true);
   }
 }
 

@@ -224,6 +224,7 @@ export async function applyMihomoConfig({
       if (profile) {
         localStorage.setItem(UNDO_YAML_KEY, currentYAML);
         localStorage.setItem(UNDO_PROFILE_KEY, profile);
+        localStorage.setItem(UNDO_PATH_KEY, path);
       } else {
         clearUndoSnapshot();
       }
@@ -324,10 +325,13 @@ export async function applyMihomoConfig({
 
 const UNDO_YAML_KEY = 'xcp_prev_mihomo_yaml';
 const UNDO_PROFILE_KEY = 'xcp_prev_mihomo_profile';
+const UNDO_PATH_KEY = 'xcp_prev_mihomo_path';
+const DEFAULT_CONFIG_PATH = '/opt/etc/mihomo/config.yaml';
 
 function clearUndoSnapshot() {
   localStorage.removeItem(UNDO_YAML_KEY);
   localStorage.removeItem(UNDO_PROFILE_KEY);
+  localStorage.removeItem(UNDO_PATH_KEY);
 }
 
 // activeProfileName — имя профиля, в который пишет конструктор: активный профиль
@@ -348,13 +352,17 @@ async function activeProfileName(): Promise<string> {
 // undoAvailable — снимок Undo есть и взят из активного профиля. Снимок без имени
 // профиля или с чужим именем непригоден и удаляется: содержимое прежнего профиля
 // не должно попасть в новый активный.
-export async function undoAvailable(): Promise<boolean> {
+export async function undoAvailable(selectedFile = ''): Promise<boolean> {
   const yaml = localStorage.getItem(UNDO_YAML_KEY);
   const saved = localStorage.getItem(UNDO_PROFILE_KEY);
   if (!yaml || !saved) {
     if (yaml || saved) clearUndoSnapshot();
     return false;
   }
+  // Снимок взят с файла, который записывал конструктор: на другом файле он не
+  // предлагается (не стирается — после возврата к тому файлу отмена снова нужна).
+  const savedPath = localStorage.getItem(UNDO_PATH_KEY);
+  if (savedPath !== (selectedFile || DEFAULT_CONFIG_PATH)) return false;
   const active = await activeProfileName();
   if (!active) return false;
   if (saved !== active) {
@@ -368,7 +376,7 @@ export async function undoMihomoConfig(
   selectedFile: string,
   onPopulateFromYaml: (text: string) => void
 ): Promise<boolean> {
-  if (!(await undoAvailable())) return false;
+  if (!(await undoAvailable(selectedFile))) return false;
   const prevYAML = localStorage.getItem(UNDO_YAML_KEY);
   if (!prevYAML) return false;
   try {

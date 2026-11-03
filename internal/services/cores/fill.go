@@ -11,10 +11,10 @@ import (
 // черновик, маршрутизация (proxies, proxy-groups, rules, providers) и закреплённые
 // ключи не переносятся. Применяется обычным «Применить». Работает, только пока
 // панель управляет Mihomo (иначе section_not_managed); data — текст шаблона или
-// профиля, from — откуда взято (пустое имя — источник в секции не записывается:
-// значения становятся панельными сразу, сверка по md5 при применении не нужна).
+// профиля. Источник в секции не записывается: значения становятся панельными
+// сразу, сверка по md5 при применении не нужна.
 // Группа force-proxy из прежних секций сохраняется.
-func (s *Service) Fill(rev int64, data []byte, from configlayer.SourceFile) (configlayer.DraftEvent, error) {
+func (s *Service) Fill(rev int64, data []byte) (configlayer.DraftEvent, error) {
 	if !s.d.Installed().Has(configlayer.KernelMihomo) {
 		return configlayer.DraftEvent{}, errCode(codeKernelNotInstalled)
 	}
@@ -34,9 +34,6 @@ func (s *Service) Fill(rev int64, data []byte, from configlayer.SourceFile) (con
 				Managed:         true,
 				Value:           values[id],
 				ForceProxyGroup: prev[name].ForceProxyGroup,
-			}
-			if from.Name != "" {
-				cs.From = []configlayer.SourceFile{from}
 			}
 			raw, err := encodeSection(cs)
 			if err != nil {

@@ -562,6 +562,7 @@ func mihomoSwitchResult(view configlayer.ApplyView, name, prev string) profileAc
 	r := view.Result
 	if r == nil || !r.OK {
 		if r != nil {
+			out.Code = r.Code
 			res.RolledBack = r.RolledBack
 			res.Error = r.Message
 			if res.Error == "" {

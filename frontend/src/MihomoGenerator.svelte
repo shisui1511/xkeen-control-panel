@@ -66,7 +66,7 @@
 
   let canUndo = $state(false);
   async function checkUndo() {
-    canUndo = await undoAvailable();
+    canUndo = await undoAvailable(selectedFile);
   }
 
   // Preflight warnings & validation

@@ -140,7 +140,9 @@ func firstPort(port, fallback int) int {
 // listeners указанного типа. Второй результат — порт задан.
 func templatePort(top map[string]any, key, listenerType string) (int, bool) {
 	if v, ok := top[key]; ok {
-		return yamlInt(v), true
+		if n := yamlInt(v); n > 0 {
+			return n, true
+		}
 	}
 	list, _ := top["listeners"].([]any)
 	for _, item := range list {
@@ -149,7 +151,9 @@ func templatePort(top map[string]any, key, listenerType string) (int, bool) {
 			continue
 		}
 		if t, _ := m["type"].(string); t == listenerType {
-			return yamlInt(m["port"]), true
+			if n := yamlInt(m["port"]); n > 0 {
+				return n, true
+			}
 		}
 	}
 	return 0, false

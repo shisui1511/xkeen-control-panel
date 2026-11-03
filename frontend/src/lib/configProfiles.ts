@@ -43,6 +43,8 @@ export interface ActivationResult {
   restarted: boolean;
   rolled_back: boolean;
   error?: string;
+  /** Код отказа конвейера слоя (validation_failed, drift_blocked…). */
+  code?: string;
   /** Профиль записан, а ядро не перезапускалось (остановлено, неактивно, запущены оба). */
   outcome?: string;
   /** Имя копии, в которую переехал обычный config.yaml. */
@@ -198,7 +200,11 @@ export function switchOutcomeToast(res: ActivationResult, name: string): void {
     return;
   }
   if (res.error) {
-    showToast('error', tr('profiles.invalid', { error: res.error }), 10000);
+    // «Не прошёл проверку ядром» — только для отказа проверки; прочие отказы
+    // конвейера (дрейф, занятый замок) называют свою причину.
+    const key =
+      !res.code || res.code === 'validation_failed' ? 'profiles.invalid' : 'cfg.prof.switch_failed';
+    showToast('error', tr(key, { error: res.error }), 10000);
     return;
   }
   if (

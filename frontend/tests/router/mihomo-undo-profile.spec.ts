@@ -11,6 +11,8 @@ import { T } from './lib/env';
 
 const KEY_YAML = 'xcp_prev_mihomo_yaml';
 const KEY_PROFILE = 'xcp_prev_mihomo_profile';
+const KEY_PATH = 'xcp_prev_mihomo_path';
+const CONFIG_PATH = '/opt/etc/mihomo/config.yaml';
 const SNAPSHOT = 'mixed-port: 7890\nmode: rule\n';
 const UNDO = '[data-testid="mihomo-undo"]';
 
@@ -47,11 +49,12 @@ test.describe('undo', () => {
     const guard = attachConsoleGuard(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.addInitScript(
-      ([yamlKey, profileKey, snapshot]) => {
+      ([yamlKey, profileKey, pathKey, snapshot, configPath]) => {
         localStorage.setItem(yamlKey, snapshot);
         localStorage.setItem(profileKey, 'rt-undo-other');
+        localStorage.setItem(pathKey, configPath);
       },
-      [KEY_YAML, KEY_PROFILE, SNAPSHOT]
+      [KEY_YAML, KEY_PROFILE, KEY_PATH, SNAPSHOT, CONFIG_PATH]
     );
 
     await page.goto('/#/mihomo-gen');
@@ -67,17 +70,43 @@ test.describe('undo', () => {
     await guard.assertClean();
   });
 
+  test('undo: снимок другого файла не предлагается и не стирается', async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const active = await activeProfile(page);
+    expect(active).not.toBe('');
+    // профиль тот же, а записанный файл — другой: отмена записала бы чужой YAML в этот файл
+    await page.addInitScript(
+      ([yamlKey, profileKey, pathKey, snapshot, profile]) => {
+        localStorage.setItem(yamlKey, snapshot);
+        localStorage.setItem(profileKey, profile);
+        localStorage.setItem(pathKey, '/opt/etc/mihomo/profiles/rt-undo-other.yaml');
+      },
+      [KEY_YAML, KEY_PROFILE, KEY_PATH, SNAPSHOT, active]
+    );
+
+    await page.goto('/#/mihomo-gen');
+    await constructorReady(page);
+
+    await expect(page.locator(UNDO)).toHaveCount(0);
+    // снимок остаётся: после возврата к тому файлу отмена снова нужна
+    expect(await page.evaluate((k) => localStorage.getItem(k), KEY_YAML)).toBe(SNAPSHOT);
+
+    await guard.assertClean();
+  });
+
   test('undo: снимок активного профиля доступен', async ({ page }) => {
     const guard = attachConsoleGuard(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     const active = await activeProfile(page);
     expect(active).not.toBe('');
     await page.addInitScript(
-      ([yamlKey, profileKey, snapshot, profile]) => {
+      ([yamlKey, profileKey, pathKey, snapshot, profile, configPath]) => {
         localStorage.setItem(yamlKey, snapshot);
         localStorage.setItem(profileKey, profile);
+        localStorage.setItem(pathKey, configPath);
       },
-      [KEY_YAML, KEY_PROFILE, SNAPSHOT, active]
+      [KEY_YAML, KEY_PROFILE, KEY_PATH, SNAPSHOT, active, CONFIG_PATH]
     );
 
     await page.goto('/#/mihomo-gen');

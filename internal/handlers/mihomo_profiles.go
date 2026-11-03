@@ -158,6 +158,9 @@ func (a *API) mihomoRunningPID() int {
 type profileActivationResponse struct {
 	*services.ActivationResult
 	Outcome string `json:"outcome,omitempty"`
+	// Code — код отказа конвейера (validation_failed, drift_blocked…): по нему
+	// интерфейс отличает отказ проверки ядром от прочих.
+	Code string `json:"code,omitempty"`
 }
 
 // profileActivationResult дополняет результат активации исходом применения.
