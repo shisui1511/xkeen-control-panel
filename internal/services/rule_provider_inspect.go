@@ -66,6 +66,11 @@ type RuleProviderProbe struct {
 	StatusCode int    `json:"status_code,omitempty"`
 	DelayMs    int    `json:"delay_ms,omitempty"`
 	Error      string `json:"error,omitempty"`
+	// ErrorCode — стабильный код причины отказа пробы через ядро (proxy_not_found,
+	// core_503, core_504, core_status, core_timeout); интерфейс переводит его сам,
+	// Error остаётся английским текстом для журнала. ErrorStatus — код ответа ядра.
+	ErrorCode   string `json:"error_code,omitempty"`
+	ErrorStatus int    `json:"error_status,omitempty"`
 }
 
 // ProxyProbe checks rawURL through the named proxy or group of the running
@@ -110,7 +115,9 @@ func (s *RouteTracerService) ListRuleProviders() ([]RuleProviderInfo, error) {
 		if info.Type == "inline" {
 			info.Inline = len(def.Payload)
 			info.FileExists = true
-		} else if path := store.providerPath(def); path != "" {
+		} else if path := store.providerPath(def); path != "" && strings.HasPrefix(path, filepath.Clean(store.homeDir)+string(filepath.Separator)) {
+			// Путь вне каталога Mihomo не раскрывается: как и entries, список его не читает,
+			// иначе ручка стала бы оракулом существования произвольных файлов.
 			if rel, err := filepath.Rel(store.homeDir, path); err == nil {
 				info.Path = rel
 			}
@@ -207,7 +214,8 @@ func (s *RouteTracerService) CheckRuleProviderURL(ctx context.Context, name stri
 		if err == nil {
 			res.ViaProxy = &RuleProviderProbe{OK: true, DelayMs: delay}
 		} else {
-			res.ViaProxy = &RuleProviderProbe{Error: proxyProbeErrorText(err)}
+			text, code, status := proxyProbeError(err)
+			res.ViaProxy = &RuleProviderProbe{Error: text, ErrorCode: code, ErrorStatus: status}
 			res.Direct = directProviderProbe(ctx, def.URL)
 		}
 	}
@@ -253,25 +261,26 @@ func probeErrorText(err error) string {
 	return err.Error()
 }
 
-// proxyProbeErrorText turns a failure of the probe through the core into a
-// text without URLs, by the status of the core's answer.
-func proxyProbeErrorText(err error) string {
+// proxyProbeError turns a failure of the probe through the core into a text
+// without URLs, a stable reason code and the core's status, by the status of
+// the core's answer.
+func proxyProbeError(err error) (text, code string, status int) {
 	var st *ClashStatusError
 	if errors.As(err, &st) {
 		switch st.Status {
 		case http.StatusNotFound:
-			return "прокси нет в запущенном ядре"
+			return "proxy is not in the running core", "proxy_not_found", st.Status
 		case http.StatusServiceUnavailable:
-			return "ядро: 503, проверка через прокси не прошла"
+			return "core: 503, the probe through the proxy failed", "core_503", st.Status
 		case http.StatusGatewayTimeout:
-			return "ядро: 504, прокси не ответил за отведённое время"
+			return "core: 504, the proxy did not answer in time", "core_504", st.Status
 		}
-		return "ядро ответило кодом " + strconv.Itoa(st.Status)
+		return "core answered with code " + strconv.Itoa(st.Status), "core_status", st.Status
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return "ядро не ответило за отведённое время"
+		return "core did not answer in time", "core_timeout", 0
 	}
-	return probeErrorText(err)
+	return probeErrorText(err), "", 0
 }
 
 func redactProviderURL(raw string) string {

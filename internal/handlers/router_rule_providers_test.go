@@ -71,7 +71,20 @@ func TestRouterRuleProvidersStopped(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "rules"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(rtRpProfile), 0o644); err != nil {
+	// Провайдер с абсолютным путём вне каталога Mihomo: список не раскрывает ни
+	// существование файла, ни размер, ни время (WR-06 ревью).
+	outDir, err := os.MkdirTemp(tg.WorkDir, "rp-outside-")
+	if err != nil {
+		t.Fatalf("каталог теста: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(outDir) })
+	outFile := filepath.Join(outDir, "outside.txt")
+	if err := os.WriteFile(outFile, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	profile := strings.Replace(rtRpProfile, "rules:\n  - MATCH,DIRECT\n",
+		"  rt-outside:\n    type: file\n    behavior: domain\n    format: text\n    path: "+outFile+"\nrules:\n  - MATCH,DIRECT\n", 1)
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(profile), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	body := "+.example.com\nfull.example.org\n"
@@ -97,8 +110,11 @@ func TestRouterRuleProvidersStopped(t *testing.T) {
 	for _, it := range list {
 		byName[it.Name] = it
 	}
-	if len(byName) != 5 {
-		t.Fatalf("провайдеров %d, нужно 5", len(byName))
+	if len(byName) != 6 {
+		t.Fatalf("провайдеров %d, нужно 6", len(byName))
+	}
+	if o := byName["rt-outside"]; o.FileExists || o.FileSize != 0 || o.FileMtime != 0 || o.Path != "" {
+		t.Errorf("rt-outside: путь вне каталога Mihomo раскрыт: файл %v, размер %d, дата %d, путь %q", o.FileExists, o.FileSize, o.FileMtime, o.Path)
 	}
 
 	a := byName["rt-http-file"]
@@ -340,8 +356,8 @@ func TestRouterRuleProviderCheckURL(t *testing.T) {
 
 	t.Run("ProxyAbsentInCore", func(t *testing.T) {
 		res := check("rt-via-absent", real)
-		if res.ViaProxy == nil || res.ViaProxy.OK || !strings.Contains(res.ViaProxy.Error, "нет в запущенном") {
-			t.Errorf("прокси вне ядра: проба %+v (ожидался текст «нет в запущенном ядре»)", res.ViaProxy)
+		if res.ViaProxy == nil || res.ViaProxy.OK || res.ViaProxy.ErrorCode != "proxy_not_found" {
+			t.Errorf("прокси вне ядра: проба %+v (ожидался код proxy_not_found)", res.ViaProxy)
 		}
 		if res.Direct == nil {
 			t.Error("прокси вне ядра: прямая проба не выполнена")

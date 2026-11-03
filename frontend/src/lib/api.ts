@@ -351,6 +351,9 @@ export interface RuleProviderProbe {
   delay_ms?: number;
   status_code?: number;
   error?: string;
+  /** Код причины отказа пробы через ядро; переводится в интерфейсе. */
+  error_code?: string;
+  error_status?: number;
 }
 
 export interface RuleProviderURLCheck {

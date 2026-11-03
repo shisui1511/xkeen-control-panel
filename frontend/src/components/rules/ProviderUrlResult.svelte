@@ -43,10 +43,19 @@
       : $t('rules.url_direct_fail', { reason: p.error ?? '' });
   }
 
+  const PROBE_CODES = ['proxy_not_found', 'core_503', 'core_504', 'core_status', 'core_timeout'];
+
+  function viaReason(p: RuleProviderProbe): string {
+    if (p.error_code && PROBE_CODES.includes(p.error_code)) {
+      return $t(`rules.probe_${p.error_code}`, { status: String(p.error_status ?? '') });
+    }
+    return p.error ?? '';
+  }
+
   function viaText(p: RuleProviderProbe): string {
     return p.ok
       ? $t('rules.url_via_proxy_ok', { proxy: viaName, ms: String(p.delay_ms ?? 0) })
-      : $t('rules.url_via_proxy_fail', { proxy: viaName, reason: p.error ?? '' });
+      : $t('rules.url_via_proxy_fail', { proxy: viaName, reason: viaReason(p) });
   }
 </script>
 
