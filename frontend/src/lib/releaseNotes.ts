@@ -18,12 +18,23 @@ export interface NoteSection {
   kind: NoteKind;
   title: string;
   items: NoteItem[];
+  /** Сколько строк не вошло в раздел: хвост «…и ещё N» из gen_notes.py (capped). */
+  more: number;
+}
+
+export interface ParsedRelease {
+  /** Строки «## Что вошло»: о чём релиз, словами человека. */
+  summary: string[];
+  sections: NoteSection[];
 }
 
 export interface InlineSegment {
   text: string;
   code: boolean;
 }
+
+// Хвост длинного раздела: «…и ещё 4 — полный список по ссылке внизу» (ссылка — на странице GitHub)
+const MORE_TAIL = /^(?:…|\.\.\.)\s*(?:и ещё|and)\s+(\d+)/i;
 
 const COMMIT_LINK = /\s*\[`([0-9a-f]{7,40})`\]\((https:\/\/github\.com\/[^\s)]+)\)\s*$/;
 
@@ -40,25 +51,43 @@ function cleanTitle(title: string): string {
 }
 
 /**
- * Возвращает разделы «### …» со списками «- …». Шапка (баннер RC, описание
- * панели) и всё после первого «---» или «## » (установка, скачивание) опускаются.
+ * Возвращает строки «## Что вошло» и разделы «### …» со списками «- …». Прочая
+ * шапка (баннер пре-релиза, описание панели) и всё после первого «---» или «## »
+ * за разделами (установка, скачивание) опускаются.
  */
-export function parseReleaseNotes(body: string): NoteSection[] {
+export function parseRelease(body: string): ParsedRelease {
+  const summary: string[] = [];
   const sections: NoteSection[] = [];
   let current: NoteSection | null = null;
+  let inSummary = false;
 
   for (const raw of (body || '').split(/\r?\n/)) {
     const line = raw.trim();
     if (line.startsWith('### ')) {
       const title = line.slice(4).trim();
-      current = { kind: sectionKind(title), title: cleanTitle(title), items: [] };
+      current = { kind: sectionKind(title), title: cleanTitle(title), items: [], more: 0 };
       sections.push(current);
+      inSummary = false;
       continue;
     }
     if (sections.length > 0 && (line === '---' || line.startsWith('## '))) break;
-    if (!current || !line.startsWith('- ')) continue;
+    if (line.startsWith('## ')) {
+      inSummary = true;
+      continue;
+    }
+    if (line === '---') inSummary = false;
+    if (!line.startsWith('- ')) continue;
 
     const text = line.slice(2).trim();
+    if (!current) {
+      if (inSummary && text) summary.push(text);
+      continue;
+    }
+    const tail = text.match(MORE_TAIL);
+    if (tail) {
+      current.more += Number(tail[1]);
+      continue;
+    }
     const item: NoteItem = { text };
     const m = text.match(COMMIT_LINK);
     if (m) {
@@ -68,7 +97,12 @@ export function parseReleaseNotes(body: string): NoteSection[] {
     if (item.text) current.items.push(item);
   }
 
-  return sections.filter((s) => s.items.length > 0);
+  return { summary, sections: sections.filter((s) => s.items.length > 0) };
+}
+
+/** Только разделы: см. parseRelease. */
+export function parseReleaseNotes(body: string): NoteSection[] {
+  return parseRelease(body).sections;
 }
 
 /** Делит текст по `обратным кавычкам` на обычные фрагменты и код. */
