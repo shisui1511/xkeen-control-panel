@@ -118,7 +118,7 @@ function expectSwitched(
   res: { status: number; data: Record<string, unknown> | null },
   what: string
 ) {
-  expect(res.status, what).toBe(200);
+  expect(res.status, `${what}: код ${String(res.data?.code ?? '')}`).toBe(200);
   expect(res.data?.error, `${what}: ошибка в ответе`).toBeUndefined();
 }
 
@@ -137,7 +137,15 @@ async function createProfile(
 }
 
 async function activateViaApi(page: Page, name: string): Promise<void> {
-  const res = await api(page, 'POST', '/api/mihomo/profiles/activate', { name });
+  // сразу после отпускания ядро ещё занято перезапуском, слой — применением: эти 409 проходят
+  let res = await api(page, 'POST', '/api/mihomo/profiles/activate', { name });
+  const busy = (r: typeof res) =>
+    r.status === 409 &&
+    ['kernel_op_in_progress', 'apply_busy'].includes(String(r.data?.code ?? ''));
+  for (let i = 0; i < 30 && busy(res); i++) {
+    await page.waitForTimeout(2000);
+    res = await api(page, 'POST', '/api/mihomo/profiles/activate', { name });
+  }
   expectSwitched(res, `активация профиля ${name}`);
 }
 
@@ -207,6 +215,9 @@ async function restoreStand(page: Page, before: Stand): Promise<void> {
   }
   if (cur.taken) {
     await releaseViaApi(page);
+    // слой держит желание взятия, пока не закончилась сборка после отпускания: иначе
+    // «Сделать активным» отвечает 409 draft_open
+    await settled(page);
     cur = await standState(page);
   }
   if (before.active !== '' && !before.plain && cur.active !== before.active) {
