@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/x509"
 	"encoding/pem"
@@ -15,6 +16,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -134,7 +136,7 @@ func (a *API) SystemStats(w http.ResponseWriter, r *http.Request) {
 	stats.Hostname, _ = os.Hostname()
 	stats.WANStatus, stats.DefaultGateway = getWANStats()
 	stats.DNSServers = getDNSServers()
-	stats.DNSResolving = testDNSResolving()
+	stats.DNSResolving = dnsResolvingCached()
 	stats.InvalidConfig = a.checkActiveConfigsInvalid()
 
 	// Extended system info for reference-matching UI
@@ -323,6 +325,44 @@ func testDNSResolving() bool {
 	r := &net.Resolver{}
 	addrs, err := r.LookupHost(ctx, "cloudflare.com")
 	return err == nil && len(addrs) > 0
+}
+
+// dnsCheckTTL — как долго держится результат проверки DNS. Опрос статистики
+// идёт раз в 5 с; настоящий запрос имени чаще раза в 30 с не нужен.
+const dnsCheckTTL = 30 * time.Second
+
+var (
+	dnsCheckMu         sync.Mutex
+	dnsCheckOK         bool
+	dnsCheckAt         time.Time
+	dnsCheckRefreshing bool
+)
+
+// dnsResolvingCached отдаёт последний результат testDNSResolving. Первый вызов
+// ждёт проверку, дальше устаревший результат обновляется в фоне: ответ
+// /api/system/stats не задерживается на время запроса DNS (до 2 с).
+func dnsResolvingCached() bool {
+	dnsCheckMu.Lock()
+	if dnsCheckAt.IsZero() {
+		dnsCheckMu.Unlock()
+		ok := testDNSResolving()
+		dnsCheckMu.Lock()
+		dnsCheckOK, dnsCheckAt = ok, time.Now()
+		dnsCheckMu.Unlock()
+		return ok
+	}
+	ok := dnsCheckOK
+	if time.Since(dnsCheckAt) >= dnsCheckTTL && !dnsCheckRefreshing {
+		dnsCheckRefreshing = true
+		go func() {
+			res := testDNSResolving()
+			dnsCheckMu.Lock()
+			dnsCheckOK, dnsCheckAt, dnsCheckRefreshing = res, time.Now(), false
+			dnsCheckMu.Unlock()
+		}()
+	}
+	dnsCheckMu.Unlock()
+	return ok
 }
 
 func (a *API) checkActiveConfigsInvalid() bool {
@@ -528,6 +568,21 @@ func getUTCOffset() string {
 	return fmt.Sprintf("UTC%d", hours)
 }
 
+// lineCountEntry — число строк файла, запомненное по размеру и времени изменения.
+type lineCountEntry struct {
+	size  int64
+	mtime time.Time
+	lines int
+}
+
+var (
+	lineCountMu    sync.Mutex
+	lineCountCache = map[string]lineCountEntry{}
+)
+
+// countDirLines считает строки файлов каталога. Дашборд запрашивает статистику
+// раз в 5 с, а в каталоге Mihomo лежат rule-set'ы на мегабайты: файл читается
+// с флеша заново, только если изменились его размер или время изменения.
 func countDirLines(dir string) int {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -538,17 +593,29 @@ func countDirLines(dir string) int {
 		if e.IsDir() {
 			continue
 		}
-		data, err := os.ReadFile(dir + "/" + e.Name())
-		if err != nil {
+		info, err := e.Info()
+		if err != nil || info.Size() == 0 {
 			continue
 		}
-		if len(data) == 0 {
+		path := filepath.Join(dir, e.Name())
+		lineCountMu.Lock()
+		c, ok := lineCountCache[path]
+		lineCountMu.Unlock()
+		if ok && c.size == info.Size() && c.mtime.Equal(info.ModTime()) {
+			total += c.lines
 			continue
 		}
-		lines := strings.Count(string(data), "\n")
-		if !strings.HasSuffix(string(data), "\n") {
+		data, err := os.ReadFile(path)
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		lines := bytes.Count(data, []byte{'\n'})
+		if data[len(data)-1] != '\n' {
 			lines++
 		}
+		lineCountMu.Lock()
+		lineCountCache[path] = lineCountEntry{size: info.Size(), mtime: info.ModTime(), lines: lines}
+		lineCountMu.Unlock()
 		total += lines
 	}
 	return total
