@@ -461,7 +461,7 @@ func (s *MihomoProfileService) CopyPanelProfile(name string) (err error) {
 	// Защита от traversal/absolute path injection: имя профиля должно быть
 	// одним компонентом пути.
 	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
-		return ErrProfileNameInvalid
+		return ErrProfileInvalidName
 	}
 
 	dst, err := s.profilePath(name)
