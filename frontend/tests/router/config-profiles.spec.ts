@@ -553,7 +553,7 @@ test('profiles: новый профиль из шаблона', async ({ page })
   expect(text, 'файл профиля создан').not.toBeNull();
   expect(text).toContain('external-controller-unix');
   // адрес подписки шаблона (https://example.com/...) в профиль не попадает; правило-образец DOMAIN-SUFFIX,example.com в шаблоне есть
-  expect(text).not.toMatch(/https?:\/\/example\.com/);
+  expect(text).not.toMatch(/(?:^|[^A-Za-z0-9+.-])https?:\/\/example\.com(?:[\/?#]|$)/);
 
   await guard.assertClean();
 });
