@@ -48,6 +48,22 @@ func (a *API) SetMihomoProfileService(svc *services.MihomoProfileService) {
 			return services.ErrRestartSkipped
 		}
 	}
+	// Откат после отказа запуска: ядро уронила сама активация, поэтому его
+	// поднимают без решения по статусу (KernelApplier.RestartLocked).
+	svc.RollbackRestart = func() error {
+		if a.kernelApplier == nil {
+			return errors.New("kernel applier is not configured")
+		}
+		res := a.kernelApplier.RestartLocked("mihomo")
+		switch res.Outcome {
+		case services.ApplyRestarted:
+			return nil
+		case services.ApplyRestartFailed:
+			return errors.New(res.Error)
+		default:
+			return services.ErrRestartSkipped
+		}
+	}
 	// Успех запуска — только новый процесс: PID берётся до перезапуска, процесс со
 	// старым PID не засчитывается, один PID должен продержаться RestartStableWindow
 	// (то же подтверждение, что у конвейера «Применить»).

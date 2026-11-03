@@ -128,6 +128,10 @@ type MihomoProfileService struct {
 	// Restart restarts the running core. It may return ErrRestartSkipped when
 	// the core turned out not to need a restart at that moment.
 	Restart func() error
+	// RollbackRestart поднимает ядро после отката активации: процесс, который
+	// не запустился с новым профилем, остановлен не пользователем, поэтому
+	// решение «остановлено — не запускать» не применяется. Не задан — Restart.
+	RollbackRestart func() error
 	// RunningPID returns the PID of the running Mihomo process, 0 when it is
 	// not running. Activate reads it before the restart.
 	RunningPID func() int
@@ -803,7 +807,13 @@ func (s *MihomoProfileService) restartConfirmed(res *ActivationResult, previous 
 	if err := undo(); err != nil {
 		return res, fmt.Errorf("rollback failed: %w", err)
 	}
-	_ = s.Restart()
+	restart := s.Restart
+	if s.RollbackRestart != nil {
+		restart = s.RollbackRestart
+	}
+	if err := restart(); err != nil && !errors.Is(err, ErrRestartSkipped) {
+		res.Error += "; " + err.Error()
+	}
 	return res, nil
 }
 
