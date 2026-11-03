@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -499,6 +500,19 @@ func (s *MihomoProfileService) CopyPanelProfile(name string) (err error) {
 			return err
 		}
 		target := filepath.Join(listDir, name+"-"+list+".txt")
+		// Имя <профиль>-<список> неоднозначно (профиль a со списком b-c и профиль a-b
+		// со списком c дают один файл), поэтому чужой файл не затирается и при откате
+		// не удаляется: совпавший по содержимому остаётся как есть.
+		if have, rerr := os.ReadFile(target); rerr == nil {
+			if !bytes.Equal(have, body) {
+				err = fmt.Errorf("%w: файл списка %s занят", ErrProfileExists, filepath.Base(target))
+				return err
+			}
+			continue
+		} else if !errors.Is(rerr, os.ErrNotExist) {
+			err = rerr
+			return err
+		}
 		if err = utils.AtomicWriteFile(target, body, 0o600); err != nil {
 			return err
 		}

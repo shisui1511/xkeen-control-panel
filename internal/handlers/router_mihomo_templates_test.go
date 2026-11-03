@@ -498,6 +498,29 @@ func TestRouterProfileCopyPanel(t *testing.T) {
 		t.Errorf("отказ ядра оставил копий списков: %d", len(left))
 	}
 
+	// Имя <профиль>-<список> неоднозначно: уже лежащий чужой файл с другим содержимым
+	// не затирается копией и не удаляется при её откате (CR-01 ревью фазы).
+	for list := range originals {
+		foreign := filepath.Join(rtRtMihomoDir, "rule_providers", rtCpBad+"-"+list+".txt")
+		foreignBody := []byte("rt-foreign.example\n")
+		if err := os.WriteFile(foreign, foreignBody, 0o600); err != nil {
+			t.Fatalf("чужой файл списка не записан: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Remove(foreign) })
+		clash := e.callSlow(http.MethodPost, "/api/mihomo/profiles/create", map[string]string{"name": rtCpBad, "from": "xcp-main"})
+		if clash.Status != http.StatusConflict || clash.Code != "profile_exists" {
+			t.Errorf("копия поверх чужого файла списка: %d %q, ожидалось 409 profile_exists", clash.Status, clash.Code)
+		}
+		if have, rerr := os.ReadFile(foreign); rerr != nil || !bytes.Equal(have, foreignBody) {
+			t.Error("копия затёрла или удалила чужой файл списка")
+		}
+		if rtCpExists(rtTplProfilePath(rtCpBad)) {
+			t.Error("отказ из-за занятого имени списка оставил файл профиля")
+		}
+		_ = os.Remove(foreign)
+		break
+	}
+
 	// Отпустить и применить: файлы списков панели удалены, копия самостоятельна.
 	if !m.rtCoresLiveRelease(t) {
 		t.FailNow()
