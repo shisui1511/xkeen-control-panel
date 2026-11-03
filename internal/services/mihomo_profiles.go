@@ -195,6 +195,11 @@ func (s *MihomoProfileService) profilePath(name string) (string, error) {
 	if !profileNameRe.MatchString(name) || strings.Contains(name, "..") {
 		return "", ErrProfileInvalidName
 	}
+	// config.yaml в списке — обычный файл XKeen, а имя с суффиксом .yaml/.yml дало бы
+	// profiles/x.yaml.yaml: оба вида путаются с файлами каталога Mihomo.
+	if name == plainConfigName || strings.HasSuffix(strings.ToLower(name), ".yaml") || strings.HasSuffix(strings.ToLower(name), ".yml") {
+		return "", ErrProfileInvalidName
+	}
 	return filepath.Join(s.profilesDir(), name+".yaml"), nil
 }
 
@@ -335,6 +340,10 @@ func (s *MihomoProfileService) Create(name, from string, empty bool) error {
 			return err
 		}
 	default:
+		// Профили xcp-* принадлежат панели: ReadProfile и предпросмотр копии их отвергают.
+		if isReservedProfileName(from) {
+			return ErrProfileReserved
+		}
 		src, err := s.profilePath(from)
 		if err != nil {
 			return err

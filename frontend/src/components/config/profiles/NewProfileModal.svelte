@@ -93,9 +93,9 @@
   // Ошибка имени показывается после первого символа: формат, префикс панели, дубликат
   const nameError = $derived.by(() => {
     if (name === '') return '';
-    if (!NAME_RE.test(name)) return $t('profiles.name_rules');
+    if (!NAME_RE.test(name) || /\.ya?ml$/i.test(name)) return $t('profiles.name_rules');
     if (/^xcp-/i.test(name)) return $t('cfg.prof.err_reserved');
-    if (userNames.includes(name) || (plainPresent && name === PLAIN_NAME)) {
+    if (userNames.includes(name) || name === PLAIN_NAME) {
       return $t('cfg.prof.err_exists', { name });
     }
     return serverNameError;

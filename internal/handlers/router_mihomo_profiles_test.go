@@ -524,6 +524,18 @@ func TestRouterProfileNames(t *testing.T) {
 	e.rtRtExpect("delete XCP-rt", post("delete", map[string]any{"name": "XCP-rt"}), http.StatusBadRequest, "profile_reserved")
 	r := e.callSlow(http.MethodPost, rtPrfActivate, map[string]string{"name": "xcp-main"})
 	e.rtRtExpect("activate xcp-main", r, http.StatusBadRequest, "profile_reserved")
+	// Имя обычного файла XKeen и имена с суффиксом .yaml/.yml сервер не принимает
+	// (WR-01 ревью): профиль profiles/config.yaml.yaml путался бы с обычным файлом.
+	for _, name := range []string{"config.yaml", rtNamesA + ".yaml", rtNamesA + ".YML"} {
+		if got := post("create", map[string]any{"name": name, "from": rtNamesA}); got.Status != http.StatusBadRequest {
+			t.Errorf("create %q: %d %q, ожидалось 400", name, got.Status, got.Code)
+		}
+	}
+	// Источник копии с префиксом xcp- — профиль панели, читать его нельзя (IN-02).
+	e.rtRtExpect("create из xcp-orphan", post("create", map[string]any{"name": rtNamesA + "-copy", "from": "xcp-rt-orphan"}), http.StatusBadRequest, "profile_reserved")
+	if _, err := os.Stat(s.profile(rtNamesA + "-copy")); err == nil {
+		t.Error("копия из профиля панели создана")
+	}
 	if _, err := os.Stat(s.profile("xcp-rt")); err == nil {
 		t.Error("профиль xcp-rt создан")
 	}
