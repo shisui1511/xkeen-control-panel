@@ -1,4 +1,5 @@
 [
+  "action_invalid",
   "apply_busy",
   "catalog_unavailable",
   "country_unavailable",
@@ -16,5 +17,6 @@
   "nothing_to_reclaim",
   "preset_unknown",
   "profile_unknown",
-  "rule_not_found"
+  "rule_not_found",
+  "scope_invalid"
 ]

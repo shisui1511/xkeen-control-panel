@@ -138,6 +138,8 @@
   "configlayer.routing.group_cycle": "Группы образуют цикл вложенности",
   "configlayer.routing.group_referenced": "На группу есть ссылки: выберите, что с ними сделать",
   "configlayer.routing.final_requires_redirect": "На группу ссылается «Остальное»: выберите для него другую цель",
+  "configlayer.routing.scope_invalid": "Область не распознана: допустимы xray, mihomo и all.",
+  "configlayer.routing.action_invalid": "Действие не распознано.",
   "configlayer.routing.invalid_input": "Недопустимое значение в настройках маршрутизации",
   "configlayer.routing.draft_conflict": "Черновик изменён в другой вкладке",
   "configlayer.routing.foreign_mixed": "Файл содержит не только маршрутизацию: его решает только «Отпустить»",
@@ -191,5 +193,6 @@
   "profiles.err_invalid": "Ядро отвергло профиль, файл не создан.",
   "profiles.err_template_unknown": "Такого шаблона нет.",
   "profiles.err_panel_absent": "Файла xcp-main.yaml сейчас нет: копировать нечего.",
-  "profiles.err_draft_open": "Есть неприменённые изменения. Примените или сбросьте их, затем повторите."
+  "profiles.err_draft_open": "Есть неприменённые изменения. Примените или сбросьте их, затем повторите.",
+  "xray.access_log_layer_enabled": "Конфигурацией управляет слой: включайте access-лог в «Конфигурация → Секции»."
 }
