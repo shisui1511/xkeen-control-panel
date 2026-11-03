@@ -160,7 +160,7 @@
       <span class="header-title">{$t('rules.tab_providers')}</span>
       <span class="header-badge">{providers.length}</span>
       {#if offline}
-        <span class="badge badge-info" data-testid="rules-offline-badge"
+        <span class="badge badge-info offline-badge" data-testid="rules-offline-badge"
           >{offlineLabel(offline)}</span
         >
       {/if}
@@ -386,6 +386,11 @@
 {/if}
 
 <style>
+  /* Светлая тема: акцентный текст на подложке бейджа даёт 4,0:1, нужно 4,5:1. */
+  .offline-badge {
+    color: color-mix(in srgb, var(--accent-text, var(--accent)) 65%, var(--fg-primary));
+  }
+
   .header-warning {
     font-size: var(--font-size-xs);
     font-weight: 600;

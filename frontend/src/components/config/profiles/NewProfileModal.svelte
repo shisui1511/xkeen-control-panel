@@ -503,6 +503,11 @@
     overflow-wrap: anywhere;
   }
 
+  /* На подсвеченном фоне выбранной карточки вторичный цвет не дотягивает до 4,5:1. */
+  .np-tpl.selected .np-tpl-desc {
+    color: var(--fg-primary);
+  }
+
   .np-summary {
     display: flex;
     flex-direction: column;
