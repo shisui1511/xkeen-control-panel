@@ -123,6 +123,7 @@ func New(cfg *Config, version string, web fs.FS) (*Server, error) {
 
 	// Serve static files with strict cache control for index.html and long-term cache for assets
 	fileServer := http.FileServer(http.FS(web))
+	gz := &staticGzip{web: web}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		// An unknown API route must fail loudly: answering with the SPA page
@@ -151,6 +152,9 @@ func New(cfg *Config, version string, web fs.FS) (*Server, error) {
 			// Манифест и иконки лежат по постоянным адресам: без явного
 			// no-cache браузер держал старый знак во вкладке и в ярлыке приложения.
 			w.Header().Set("Cache-Control", "no-cache")
+		}
+		if gz.serve(w, r) {
+			return
 		}
 		fileServer.ServeHTTP(w, r)
 	})

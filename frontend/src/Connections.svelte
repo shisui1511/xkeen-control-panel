@@ -167,6 +167,8 @@
   }
 
   async function loadClients() {
+    // Скрытая вкладка не опрашивает роутер; при возврате список обновится сам.
+    if (typeof document !== 'undefined' && document.hidden) return;
     try {
       const res = await apiFetch('/api/system/clients');
       if (res.ok) {
@@ -422,10 +424,10 @@
 
   // Filtered connections list
   let filteredConnections = $derived.by(() => {
+    const q = searchQuery ? searchQuery.toLowerCase() : '';
     let list = connections.filter((conn) => {
       // Search query
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
+      if (q) {
         const endpoint = formatEndpoint(conn).toLowerCase();
         const host = getHost(conn).toLowerCase();
         const destIP = (conn.metadata.destinationIP || '').toLowerCase();
@@ -465,15 +467,20 @@
       return true;
     });
 
-    // Sorting
+    // Sorting. Время начала разбирается один раз на соединение, а не в каждом
+    // сравнении: сортировка идёт на каждом сообщении потока (раз в секунду),
+    // и при сотнях соединений Date-парсинг в компараторе занимал заметную долю кадра.
+    const now = Date.now();
+    const startAge = new Map<string, number>();
+    if (sortKey === 'start') {
+      for (const c of list) startAge.set(c.id, now - (new Date(c.start).getTime() || now));
+    }
     list.sort((a, b) => {
       let valA = 0;
       let valB = 0;
       if (sortKey === 'start') {
-        const timeA = new Date(a.start).getTime() || Date.now();
-        const timeB = new Date(b.start).getTime() || Date.now();
-        valA = Date.now() - timeA;
-        valB = Date.now() - timeB;
+        valA = startAge.get(a.id) ?? 0;
+        valB = startAge.get(b.id) ?? 0;
       } else if (sortKey === 'upload') {
         valA = a.upload;
         valB = b.upload;
@@ -560,6 +567,7 @@
   function handleVisibilityChange() {
     if (document.visibilityState === 'visible') {
       trafficHistory.clear();
+      void loadClients();
     }
   }
 
