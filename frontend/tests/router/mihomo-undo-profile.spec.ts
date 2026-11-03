@@ -23,9 +23,19 @@ async function activeProfile(page: Page): Promise<string> {
   return state.managed ? (state.active ?? '') : 'config.yaml';
 }
 
-/** Конструктор отрисован: схема загружена, сценарии на месте. */
+/**
+ * Конструктор Mihomo отрисован: схема загружена, сценарии на месте. При активном Xray
+ * экран открывается на конструкторе Xray, вкладка Mihomo выбирается кнопкой (это только
+ * переключение вида, запись на роутер не идёт).
+ */
 async function constructorReady(page: Page): Promise<void> {
   const workspace = page.locator('.main-content');
+  const mihomoTab = workspace.getByRole('button', { name: 'Mihomo', exact: true });
+  await expect(mihomoTab).toBeVisible({ timeout: T.page });
+  if ((await mihomoTab.getAttribute('aria-pressed')) !== 'true') {
+    await mihomoTab.click();
+    await expect(mihomoTab).toHaveAttribute('aria-pressed', 'true');
+  }
   await expect(workspace.locator('.loading-state-block')).toHaveCount(0, { timeout: T.page });
   await expect(workspace.locator('.gen-layout button[data-scenario-id]').first()).toBeAttached({
     timeout: T.page
