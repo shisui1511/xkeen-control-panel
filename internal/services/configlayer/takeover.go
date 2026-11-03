@@ -117,7 +117,20 @@ func checkMihomoTarget(root, rel string) *BuildIssue {
 	if _, ok := mihomoTargetFile(rel); !ok || root == "" {
 		return issue
 	}
-	fi, err := os.Lstat(filepath.Join(root, filepath.FromSlash(rel)))
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return issue
+	}
+	target := filepath.Join(absRoot, filepath.FromSlash(rel))
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		return issue
+	}
+	relToRoot, err := filepath.Rel(absRoot, absTarget)
+	if err != nil || relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(os.PathSeparator)) {
+		return issue
+	}
+	fi, err := os.Lstat(absTarget)
 	if err != nil || !fi.Mode().IsRegular() {
 		return issue
 	}
