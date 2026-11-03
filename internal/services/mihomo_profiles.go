@@ -457,6 +457,13 @@ func panelRuleListPaths(data []byte) ([]string, error) {
 func (s *MihomoProfileService) CopyPanelProfile(name string) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Защита от traversal/absolute path injection: имя профиля должно быть
+	// одним компонентом пути.
+	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
+		return ErrProfileNameInvalid
+	}
+
 	dst, err := s.profilePath(name)
 	if err != nil {
 		return err
