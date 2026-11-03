@@ -1513,6 +1513,10 @@ type SectionLiveRun struct {
 	// в черновике, возвращает новое; другие ключи секции и другие секции черновика
 	// остаются как есть. nil — черновик не меняется.
 	MergeDraft func(name string, draft json.RawMessage) (json.RawMessage, error)
+	// Guard проверяет состояние слоя под замком применения, до сборки: решение,
+	// принятое вызывающим раньше (секция у панели), могло устареть, пока замок ждали.
+	// Ошибка Guard отменяет запуск; nil — проверки нет.
+	Guard func(st StateView) error
 }
 
 // RunSectionLive — запуск конвейера поверх применённого состояния с подменой
@@ -1545,6 +1549,15 @@ func (l *Layer) RunSectionLive(ctx context.Context, run SectionLiveRun) (ApplyVi
 		return ApplyView{}, l.mapBusy(err)
 	}
 	defer release()
+	if run.Guard != nil {
+		st, err := l.ReadState()
+		if err == nil {
+			err = run.Guard(st)
+		}
+		if err != nil {
+			return ApplyView{}, err
+		}
+	}
 	req := ApplyRequest{
 		Trigger: run.Trigger, Source: SourceApplied, Kernel: run.Kernel,
 		SectionsOverlay: run.Sections.Clone(), MergeDraft: run.MergeDraft,

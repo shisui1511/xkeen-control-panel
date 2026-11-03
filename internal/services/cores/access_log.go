@@ -255,6 +255,15 @@ func (s *Service) setPanelAccess(ctx context.Context, applied configlayer.CoreSe
 		MergeDraft: func(_ string, draft json.RawMessage) (json.RawMessage, error) {
 			return mergeAccessDraft(draft, path)
 		},
+		// Пока ждали замок применения, другая вкладка могла отпустить секцию: тогда
+		// устаревшая копия applied вернула бы её в Applied управляемой.
+		Guard: func(st configlayer.StateView) error {
+			cur, _ := configlayer.ParseCoreSection(st.Applied[configlayer.SectionXrayLog])
+			if !cur.Managed {
+				return configlayer.ErrDraftConflict
+			}
+			return nil
+		},
 	})
 }
 

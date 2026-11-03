@@ -5,6 +5,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -296,6 +297,13 @@ func TestRouterAccessLogEnable(t *testing.T) {
 		t.Fatalf("take log: %d %s", take.Status, take.Code)
 	}
 	e.rtRtApplyOK("взятие секции log Xray")
+
+	// Старый маршрут при включённом слое не правит файл Xray в обход слоя (WR-03 ревью).
+	beforeToggle := rtCoresDirSums(t)
+	e.rtRtExpect("старый toggle при слое", e.call(http.MethodPost, "/api/xray/access-log/toggle", map[string]any{"enabled": true}), http.StatusConflict, "config_layer_enabled")
+	if !maps.Equal(beforeToggle, rtCoresDirSums(t)) {
+		t.Error("старый toggle изменил файлы Xray при включённом слое")
+	}
 	sec := rtCoresSection(e.rtCoresView("xray"), "log")
 	form, _ := sec["form"].(map[string]any)
 	if form == nil {

@@ -100,6 +100,12 @@ func (a *API) XrayAccessLogToggle(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	// При включённом слое секцией log владеет слой: правка файла в обход него дала бы
+	// дрейф, который следующее «Применить» тихо перезапишет.
+	if a.configLayer != nil && a.configLayer.Enabled() {
+		JSONErrorCode(w, http.StatusConflict, "config_layer_enabled", a.t(r, "xray.access_log_layer_enabled"))
+		return
+	}
 	status, err := a.xrayAccessLogSvc.SetEnabled(req.Enabled)
 	if errors.Is(err, services.ErrXrayLogConfigNotFound) {
 		JSONError(w, http.StatusNotFound, err.Error())
