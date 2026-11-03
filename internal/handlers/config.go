@@ -223,10 +223,11 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 	// Файл профиля (в том числе активный, config.yaml → profiles/x.yaml) пишется под
 	// замком записи профиля; обычный config.yaml — под замком Mihomo. Замки не
 	// накладываются: активный профиль берёт только lockProfileWrite.
-	switch {
-	case a.isMihomoProfilePath(cleanPath):
-		defer a.lockProfileWrite()()
-	case a.isActiveMihomoConfig(cleanPath):
+	// Проверка ядром файла профиля идёт до записи и без замков (mihomo -t держит до
+	// 45 с, а под замком встали бы список профилей, «Сделать активным» и подписки):
+	// замок записи берётся только вокруг самой записи на диск.
+	profilePath := a.isMihomoProfilePath(cleanPath)
+	if !profilePath && a.isActiveMihomoConfig(cleanPath) {
 		defer a.lockMihomoFiles()()
 	}
 
@@ -248,6 +249,14 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 		}
 		a.errorResponse(w, a.t(r, "config.write_error"), http.StatusInternalServerError)
 		return
+	}
+
+	if profilePath {
+		if msg := a.validateConfigContent(r, cleanPath, data); msg != "" {
+			a.errorResponse(w, msg, http.StatusUnprocessableEntity)
+			return
+		}
+		defer a.lockProfileWrite()()
 	}
 
 	var backupData []byte
@@ -276,9 +285,11 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if errStr := a.validateConfigAndRollback(r, cleanPath, data, backupExists, backupData); errStr != "" {
-		a.errorResponse(w, errStr, http.StatusUnprocessableEntity)
-		return
+	if !profilePath {
+		if errStr := a.validateConfigAndRollback(r, cleanPath, data, backupExists, backupData); errStr != "" {
+			a.errorResponse(w, errStr, http.StatusUnprocessableEntity)
+			return
+		}
 	}
 
 	kernelType := detectKernelFromPath(cleanPath)
@@ -842,6 +853,23 @@ func (a *API) runConfigValidator(ctx context.Context, cleanPath, content string)
 }
 
 func (a *API) validateConfigAndRollback(r *http.Request, cleanPath string, data []byte, backupExists bool, backupData []byte) string {
+	msg := a.validateConfigContent(r, cleanPath, data)
+	if msg == "" {
+		return ""
+	}
+	// Rollback!
+	if backupExists {
+		_ = utils.AtomicWriteFile(cleanPath, backupData, 0644)
+	} else {
+		_ = os.Remove(cleanPath)
+	}
+	return msg
+}
+
+// validateConfigContent проверяет содержимое ядром во временном каталоге, файл на
+// диске не трогает. Пустая строка — проверка прошла или её нельзя выполнить; иначе
+// текст отказа для ответа.
+func (a *API) validateConfigContent(r *http.Request, cleanPath string, data []byte) string {
 	if a.getBinaryPath(detectKernelFromPath(cleanPath)) == "" {
 		return ""
 	}
@@ -870,15 +898,7 @@ func (a *API) validateConfigAndRollback(r *http.Request, cleanPath string, data 
 		return ""
 	}
 
-	// Rollback!
-	if backupExists {
-		_ = utils.AtomicWriteFile(cleanPath, backupData, 0644)
-	} else {
-		_ = os.Remove(cleanPath)
-	}
-
-	// Пустое сообщение обработчик принял бы за успешное сохранение, хотя файл
-	// уже откачен
+	// Пустое сообщение обработчик принял бы за успешное сохранение
 	msg := strings.TrimSpace(out)
 	if timedOut {
 		msg = fmt.Sprintf(a.t(r, "config.validation_timeout"), int(configValidateTimeout.Seconds()))
