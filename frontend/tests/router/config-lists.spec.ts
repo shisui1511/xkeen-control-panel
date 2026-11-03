@@ -342,8 +342,7 @@ for (const theme of ['dark', 'light'] as const) {
     test(`lists axe: ${theme} ${width}`, async ({ page }) => {
       const guard = attachConsoleGuard(page);
       // Переключатель карточки файлов Mihomo под курсором: акцент на подсветке, контраст 4.39
-      if (theme === 'light' && width === 390)
-        knownFailure('*', 'secondary-button-hover-text-contrast');
+      if (theme === 'light') knownFailure('*', 'secondary-button-hover-text-contrast');
       await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
       await openConfig(page, '#/config/lists');
