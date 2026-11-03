@@ -292,6 +292,9 @@ func (s *MihomoProfileService) listLocked() (*MihomoProfilesState, error) {
 func (s *MihomoProfileService) Adopt(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if isReservedProfileName(name) {
+		return ErrProfileReserved
+	}
 	if _, err := s.activeProfile(); err == nil {
 		return nil
 	}

@@ -524,6 +524,11 @@ func TestRouterProfileNames(t *testing.T) {
 	e.rtRtExpect("delete XCP-rt", post("delete", map[string]any{"name": "XCP-rt"}), http.StatusBadRequest, "profile_reserved")
 	r := e.callSlow(http.MethodPost, rtPrfActivate, map[string]string{"name": "xcp-main"})
 	e.rtRtExpect("activate xcp-main", r, http.StatusBadRequest, "profile_reserved")
+	// adopt с именем панели отвергается так же, как create (T-147.1-27): перенос config.yaml
+	// в profiles/xcp-*.yaml отдал бы файл слою как сироту.
+	for _, name := range []string{"xcp-rt", "XCP-rt"} {
+		e.rtRtExpect("adopt "+name, post("adopt", map[string]any{"name": name}), http.StatusBadRequest, "profile_reserved")
+	}
 	// Имя обычного файла XKeen и имена с суффиксом .yaml/.yml сервер не принимает
 	// (WR-01 ревью): профиль profiles/config.yaml.yaml путался бы с обычным файлом.
 	for _, name := range []string{"config.yaml", rtNamesA + ".yaml", rtNamesA + ".YML"} {
