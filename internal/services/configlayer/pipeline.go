@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -90,6 +91,20 @@ type ApplyRequest struct {
 	// Restore.Applied, ключи Restore.Live фиксируются в State.Live, черновик не
 	// меняется, кроме секций Restore.ResetDraftSections без правки пользователя.
 	Restore *RestoreSpec
+	// LiveCommit — ключи живых данных, которые подставляются генераторам этого
+	// запуска (как LiveOverlay) и после успеха (и при пустом плане) фиксируются в
+	// State.Live той же записью, что манифест и Applied; JSON null удаляет ключ.
+	// Отказ запуска State.Live не меняет.
+	LiveCommit Sections
+	// BeforeWrite вызывается после проверки конфигурации обоими ядрами и до
+	// записи файлов, в том числе при пустом плане. Ошибка отменяет запуск без
+	// касания файлов (ResultBeforeWriteFailed). nil — хука нет.
+	BeforeWrite func(ctx context.Context) error
+	// BeforeRollback вызывается один раз в начале отката после того, как
+	// BeforeWrite уже отработал: при сбое записи, перезапуска (до повторного подъёма
+	// ядра на прежних файлах) и фиксации состояния. Паника хука откат не прерывает.
+	// nil — хука нет.
+	BeforeRollback func()
 }
 
 // RestoreSpec — снимок, к которому возвращается применённое состояние.
@@ -118,13 +133,43 @@ func (r ApplyRequest) restoreActive() bool {
 }
 
 // runLive — живые данные, из которых собираются файлы запуска: State.Live с
-// оверлеем кандидата и ключами снимка отката. Ключ со значением JSON null
-// во входе генераторов отсутствует, как и после фиксации.
+// оверлеем кандидата, ключами снимка отката и ключами LiveCommit. Ключ со
+// значением JSON null во входе генераторов отсутствует, как и после фиксации.
 func (r ApplyRequest) runLive(live Sections) Sections {
 	out := liveWithOverlay(live, r.LiveOverlay)
 	if r.restoreActive() {
 		overlayLive(out, r.Restore.Live)
 	}
+	overlayLive(out, r.LiveCommit)
+	return out
+}
+
+// commitLiveKeys фиксирует ключи LiveCommit запуска в st.Live (внутри Store.Update):
+// значение заменяет текущее, JSON null удаляет ключ.
+func commitLiveKeys(st *State, keys Sections) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	if st.Live == nil {
+		st.Live = Sections{}
+	}
+	names := sortedSectionNames(keys)
+	for _, k := range names {
+		old, had := st.Live[k]
+		if _, err := settleValue(st.Live, k, cloneRaw(keys[k]), old, had); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sortedSectionNames — отсортированные имена ключей карты секций.
+func sortedSectionNames(s Sections) []string {
+	out := make([]string, 0, len(s))
+	for k := range s {
+		out = append(out, k)
+	}
+	sort.Strings(out)
 	return out
 }
 
@@ -214,6 +259,9 @@ const (
 	// файлы на диске не менялись, возвращать нечего.
 	ResultStateWriteFailed = "state_write_failed"
 	ResultDriftBlocked     = "drift_blocked"
+	// ResultBeforeWriteFailed — хук ApplyRequest.BeforeWrite вернул ошибку после
+	// проверки ядрами: запуск отменён, файлы не тронуты.
+	ResultBeforeWriteFailed = "before_write_failed"
 )
 
 // ResultView — итог запуска.
@@ -290,6 +338,27 @@ type Pipeline struct {
 	// commitLive — хуки фиксации живых данных (PipelineDeps.CommitLive) в порядке
 	// регистрации, под mu: слой добавляет их после создания конвейера.
 	commitLive []LiveCommitFunc
+	// beforeRollback — хук ApplyRequest.BeforeRollback текущего запуска, под mu:
+	// взводится в begin, снимается первым вызовом fireBeforeRollback и в finish.
+	beforeRollback func()
+}
+
+// fireBeforeRollback вызывает хук BeforeRollback текущего запуска не больше одного
+// раза; паника хука журналируется и откат не прерывает.
+func (p *Pipeline) fireBeforeRollback() {
+	p.mu.Lock()
+	fn := p.beforeRollback
+	p.beforeRollback = nil
+	p.mu.Unlock()
+	if fn == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("configlayer: хук до отката: паника: %v", r)
+		}
+	}()
+	fn()
 }
 
 // NewPipeline создаёт конвейер; WriteFile и Now имеют значения по умолчанию
@@ -363,6 +432,7 @@ func (p *Pipeline) begin(req ApplyRequest) {
 			{ID: StepRestart, State: StepPending},
 		},
 	}
+	p.beforeRollback = req.BeforeRollback
 	p.mu.Unlock()
 }
 
@@ -394,6 +464,7 @@ func (p *Pipeline) finish(res ResultView) ApplyView {
 	p.mu.Lock()
 	p.view.Running = false
 	p.view.Result = &res
+	p.beforeRollback = nil
 	out := p.view.clone()
 	p.mu.Unlock()
 	p.tail.Store(true)
@@ -537,10 +608,22 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		return p.finish(res)
 	}
 
+	// Хук «до записи» (порядок D-01: проверка ядрами → действие вызывающего →
+	// запись): отказ проверки до него не доходит, его ошибка файлов не трогает.
+	if req.BeforeWrite != nil {
+		if err := req.BeforeWrite(ctx); err != nil {
+			p.setStep(StepWrite, StepFailed, "", err.Error())
+			return p.finish(ResultView{Code: ResultBeforeWriteFailed, Message: err.Error()})
+		}
+	}
+
 	if plan.Empty() {
 		p.setStep(StepWrite, StepSkipped, NoteNoChanges, "")
 		p.setStep(StepRestart, StepSkipped, NoteNoChanges, "")
 		if err := p.syncApplied(snap, src, req, used); err != nil {
+			// Файлы не менялись, но BeforeWrite уже отработал: его действие
+			// возвращает хук отката.
+			p.fireBeforeRollback()
 			return p.finish(ResultView{Code: ResultStateWriteFailed, Message: err.Error()})
 		}
 		return p.finish(ResultView{OK: true, Code: ResultNothingToApply})
@@ -549,6 +632,9 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	p.setStep(StepWrite, StepRunning, "", "")
 	out, err := p.writePlan(plan, req.Trigger)
 	if err != nil {
+		// Ядро не перезапускалось, файлы writePlan уже вернул; действие BeforeWrite
+		// возвращает хук отката.
+		p.fireBeforeRollback()
 		p.setStep(StepWrite, StepFailed, "", err.Error())
 		if out.RollbackErr != nil {
 			return p.finish(ResultView{Code: ResultRollbackFailed, Message: err.Error()})
@@ -592,6 +678,8 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 // перезапускает на прежних файлах ядра, которые к этому моменту уже работали на
 // новых; итог отражает, что из этого удалось.
 func (p *Pipeline) rollbackAfterCommitFailure(ctx context.Context, set *BackupSet, views []RestartView, cause error) ResultView {
+	// Хук до отката — первым, раньше отката файлов и повторного подъёма ядер.
+	p.fireBeforeRollback()
 	p.setStep(StepWrite, StepFailed, "", cause.Error())
 	rbErr := p.rollback(set)
 	if !filesRestored(rbErr) {
@@ -707,7 +795,8 @@ func (p *Pipeline) syncApplied(snap State, src Sections, req ApplyRequest, used 
 	hook := p.liveCommitter()
 	overlay := req.overlayActive()
 	restore := req.restoreActive()
-	if !syncDraft && !overlay && !restore && hook == nil {
+	liveCommit := len(req.LiveCommit) > 0
+	if !syncDraft && !overlay && !restore && !liveCommit && hook == nil {
 		return nil
 	}
 	return p.d.Store.Update(func(st *State) error {
@@ -727,6 +816,9 @@ func (p *Pipeline) syncApplied(snap State, src Sections, req ApplyRequest, used 
 			if err := applyRestore(st, req.Restore); err != nil {
 				return err
 			}
+		}
+		if err := commitLiveKeys(st, req.LiveCommit); err != nil {
+			return err
 		}
 		if hook != nil {
 			return hook(st, req, used)
@@ -823,16 +915,8 @@ func applyRestore(st *State, spec *RestoreSpec) error {
 		draftChanged = draftChanged || changed
 	}
 	st.Applied = next
-	keys := make([]string, 0, len(spec.Live))
-	for k := range spec.Live {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		old, had := st.Live[k]
-		if _, err := settleValue(st.Live, k, cloneRaw(spec.Live[k]), old, had); err != nil {
-			return err
-		}
+	if err := commitLiveKeys(st, spec.Live); err != nil {
+		return err
 	}
 	if draftChanged {
 		st.DraftRevision++
@@ -888,6 +972,10 @@ func (p *Pipeline) commitState(plan Plan, src Sections, req ApplyRequest, used I
 			if err := applyRestore(st, req.Restore); err != nil {
 				return err
 			}
+		}
+		// Живые данные запуска — той же записью, что манифест и Applied.
+		if err := commitLiveKeys(st, req.LiveCommit); err != nil {
+			return err
 		}
 		if plan.Routing != nil {
 			st.Routing = plan.Routing.Next.clone()

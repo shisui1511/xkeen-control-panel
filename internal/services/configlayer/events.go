@@ -20,6 +20,8 @@ const (
 	EventRouting = "routing"
 	// EventGeodata — состояние менеджера geodata: счётчик событий и держатель замка.
 	EventGeodata = "geodata"
+	// EventDNS — состояние перехвата DNS изменилось: счётчик событий службы.
+	EventDNS = "dns"
 )
 
 const (
@@ -66,6 +68,12 @@ type RoutingEvent struct {
 type GeodataEvent struct {
 	Seq    uint64 `json:"seq"`
 	Holder string `json:"holder,omitempty"`
+}
+
+// DNSEvent — данные события dns: счётчик событий службы перехвата. Само состояние
+// перехвата через шину слоя не идёт: клиент по счётчику перечитывает его.
+type DNSEvent struct {
+	Seq uint64 `json:"seq"`
 }
 
 // Broker — шина событий слоя для SSE-подписчиков.
