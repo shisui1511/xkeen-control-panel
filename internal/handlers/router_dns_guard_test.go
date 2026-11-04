@@ -246,6 +246,9 @@ const (
 	rtDNSReconcileOverrideWait = 60 * time.Second
 	// rtDNSReconcileAction — запись истории действий: сверка на старте.
 	rtDNSReconcileAction = "dns_takeover_reconcile"
+	// rtDNSReconcileRecordWait — сколько ждать записи истории о снятии лишнего override
+	// после того, как override снят.
+	rtDNSReconcileRecordWait = 15 * time.Second
 	// rtDNSReconcileOverrideAction — запись истории действий: лишний override снят.
 	rtDNSReconcileOverrideAction = "dns_takeover_reconcile_override"
 )
@@ -394,8 +397,14 @@ func TestRouterDNSStartReconcile(t *testing.T) {
 		if got := dnstakeover.PortOwner(); got.Kind != dnstakeover.OwnerFirmware {
 			t.Errorf("после снятия override порт 53 держит %q/%q, ожидалась прошивка", got.Kind, got.Kernel)
 		}
-		if !e.rtDNSActionSince(rtDNSReconcileOverrideAction, since) {
-			t.Errorf("в истории действий нет успешной записи %s после старта панели", rtDNSReconcileOverrideAction)
+		// Запись истории ставится сразу после снятия override, а не одновременно с ним.
+		recorded := time.Now().Add(rtDNSReconcileRecordWait)
+		for !e.rtDNSActionSince(rtDNSReconcileOverrideAction, since) {
+			if time.Now().After(recorded) {
+				t.Errorf("в истории действий нет успешной записи %s после старта панели", rtDNSReconcileOverrideAction)
+				break
+			}
+			time.Sleep(time.Second)
 		}
 	})
 }
