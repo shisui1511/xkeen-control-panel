@@ -2,12 +2,15 @@
   import { tick } from 'svelte';
   import Select from '../../../Select.svelte';
   import { t } from '../../../../i18n';
+  import Icon from '../../../../lib/components/Icon.svelte';
   import type {
     CoreKernel,
     ForceProxyView,
     KeyIssue,
+    PinnedValue,
     SectionView
   } from '../../../../lib/configCores';
+  import { dnsTakeover } from '../../../../lib/configDns';
   import AdvancedBlock from '../AdvancedBlock.svelte';
   import MihomoField, { describedBy } from '../MihomoField.svelte';
   import MihomoToggle from '../MihomoToggle.svelte';
@@ -19,7 +22,10 @@
   // fake-ip и исключения fake-ip-filter. nameserver-policy полем формы не стал: свои записи
   // правятся в «Дополнительно», а то, что панель пишет сама при перехвате DNS, показывает
   // «Закреплено». Чужая секция (readonly) показывает действующие значения полями только
-  // для чтения.
+  // для чтения. При перехвате DNS на Mihomo (D-19) «Адрес слушателя» держит панель: поле
+  // уходит из формы, значение приходит строкой «Закреплено» с сервера, как и сводка
+  // nameserver-policy и автодобавленные зоны fake-ip-filter; выбор fake-ip сопровождается
+  // предупреждением (D-12) без блокировки сохранения.
   let {
     kernel,
     section,
@@ -85,6 +91,40 @@
   function str(path: string): string {
     const v = getPath(local, path);
     return v === undefined || v === null ? '' : String(v);
+  }
+
+  // Перехват DNS держит Mihomo: состояние и ядро считает сервер (стор dnsTakeover)
+  const TAKEOVER_STATES = ['on', 'window', 'applying'];
+  const takeover = $derived(
+    $dnsTakeover !== null &&
+      $dnsTakeover.kernel === 'mihomo' &&
+      TAKEOVER_STATES.includes($dnsTakeover.state)
+  );
+  // Адрес слушателя закреплён: строка listen пришла в «Закреплено» или перехват включён
+  const listenPinned = $derived(
+    !readonly && (takeover || section.pinned.some((p) => p.key === 'listen'))
+  );
+  const fakeIPWarn = $derived(takeover && !readonly && str('enhanced-mode') === 'fake-ip');
+  const fakeIPRange = $derived(str('fake-ip-range') || (defaults['fake-ip-range'] ?? ''));
+
+  // Сводка nameserver-policy приходит с сервера JSON-числами зон и direct-правил: в
+  // «Закреплено» она показывается фразой; прочие строки — как пришли
+  const pinned = $derived<PinnedValue[]>(section.pinned.map(pinnedRow));
+
+  function pinnedRow(item: PinnedValue): PinnedValue {
+    if (item.key !== 'nameserver-policy' || typeof item.value !== 'string') return item;
+    try {
+      const v = JSON.parse(item.value) as { zones?: unknown; direct?: unknown };
+      return {
+        key: item.key,
+        value: $t('cfg.dns.pinned_policy', {
+          zones: String(Number(v.zones) || 0),
+          direct: String(Number(v.direct) || 0)
+        })
+      };
+    } catch {
+      return item;
+    }
   }
 
   // Режим вне списка (значение, заданное в профиле вручную) остаётся выбираемым
@@ -242,6 +282,12 @@
           {/each}
         </Select>
       {/if}
+      {#if fakeIPWarn}
+        <p class="warning-text mdf-warn" data-testid="dns-fake-ip-warn">
+          <Icon name="warning" size={14} />
+          <span>{$t('cfg.sec.fake_ip_warn', { range: fakeIPRange })}</span>
+        </p>
+      {/if}
     </MihomoField>
 
     <MihomoToggle
@@ -254,7 +300,9 @@
       onchange={(v) => setField('ipv6', v)}
     />
 
-    {@render textField('listen', 'cfg.sec.f.listen', '')}
+    {#if !listenPinned}
+      {@render textField('listen', 'cfg.sec.f.listen', '')}
+    {/if}
     {@render listField(LISTS[0])}
     {@render listField(LISTS[1])}
     {@render listField(LISTS[2])}
@@ -262,7 +310,7 @@
     {@render listField(LISTS[3])}
   </div>
 
-  <PinnedValues {kernel} id={ID} items={section.pinned} />
+  <PinnedValues {kernel} id={ID} items={pinned} />
   <AdvancedBlock
     {kernel}
     id={ID}
@@ -404,6 +452,21 @@
     margin: 0;
     min-width: 0;
     overflow-wrap: anywhere;
+  }
+
+  .mdf-warn {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-2);
+    margin: 0;
+    min-width: 0;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+
+  .mdf-warn :global(svg) {
+    flex-shrink: 0;
+    margin-top: 2px;
   }
 
   .mdf-empty {
