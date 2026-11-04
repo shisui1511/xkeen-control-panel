@@ -168,6 +168,47 @@ func (a *API) configDNSView(w http.ResponseWriter, r *http.Request, act func(con
 	JSONSuccess(w, v)
 }
 
+// --- действия с ядром из обработчиков служб (D-14, D-15) ---------------------------
+//
+// Помощники живут здесь, а не в service.go: обработчики служб только вызывают их.
+// Служба перехвата не подключена или слой выключен — команда идёт как прежде.
+
+// dnsLive — служба перехвата подключена и слой включён.
+func (a *API) dnsLive() bool {
+	return a.dns != nil && a.configLayer != nil && a.configLayer.Enabled()
+}
+
+// dnsAroundStop выполняет остановку ядра kernel обёрткой службы перехвата:
+// ядро-перехватчик отпускает :53, DNS роутера возвращается прошивке, перехват
+// помнится желаемым. Вызывается под замком жизненного цикла обработчика. Ошибка
+// службы (*dnstakeover.Error, например busy) — остановка не выполнялась; иначе —
+// ошибка самой остановки.
+func (a *API) dnsAroundStop(kernel string, stop func() error) error {
+	if !a.dnsLive() {
+		return stop()
+	}
+	return a.dns.AroundKernelStop(context.Background(), kernel, stop)
+}
+
+// dnsAfterStart — ядро запущено из панели: желаемый перехват возвращается пробой
+// без окна подтверждения (в горутине службы, после снятия замка обработчика).
+func (a *API) dnsAfterStart() {
+	if a.dnsLive() {
+		a.dns.AfterKernelStart(context.Background())
+	}
+}
+
+// dnsRefused — служба перехвата отказала до действия с ядром: ответ с кодом
+// службы записан, true. Иначе (nil или ошибка самой команды) — false.
+func (a *API) dnsRefused(w http.ResponseWriter, r *http.Request, err error) bool {
+	var de *dnstakeover.Error
+	if !errors.As(err, &de) {
+		return false
+	}
+	a.writeDNSError(w, r, err)
+	return true
+}
+
 // configDNSCheck — POST /api/configlayer/dns/check {name?}: проверка резолва
 // через 127.0.0.1:53 (DNSCheckResult). Пустое имя — имя по умолчанию; не
 // доменное имя — 400 name_invalid; идёт другая проверка — 409 busy. Проверка

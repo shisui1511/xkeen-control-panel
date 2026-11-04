@@ -171,7 +171,15 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 			a.serviceStopKernel(w, r, stopKernel)
 			return
 		}
-		out, err = a.xkeenSvc.Stop()
+		// Ядро-перехватчик отпускает :53 — DNS роутера возвращается прошивке (D-14).
+		err = a.dnsAroundStop(a.activeKernelState().Kernel, func() error {
+			var serr error
+			out, serr = a.xkeenSvc.Stop()
+			return serr
+		})
+		if a.dnsRefused(w, r, err) {
+			return
+		}
 	case "restart":
 		out, err = a.xkeenSvc.Restart()
 	case "switch_kernel":
@@ -189,6 +197,10 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.errorResponse(w, out, http.StatusInternalServerError)
 		return
+	}
+	if action == "start" || action == "restart" {
+		// Желаемый перехват возвращается пробой без окна (D-14).
+		a.dnsAfterStart()
 	}
 
 	a.ClearCapabilitiesCache()
@@ -250,7 +262,15 @@ func (a *API) serviceStopKernel(w http.ResponseWriter, r *http.Request, kernel s
 	st := a.activeKernelState()
 
 	if !st.Conflict && len(st.Running) == 1 && st.Running[0] == kernel {
-		out, err := a.xkeenSvc.Stop()
+		var out string
+		err := a.dnsAroundStop(kernel, func() error {
+			var serr error
+			out, serr = a.xkeenSvc.Stop()
+			return serr
+		})
+		if a.dnsRefused(w, r, err) {
+			return
+		}
 		if err != nil {
 			a.errorResponse(w, out, http.StatusInternalServerError)
 			return
@@ -266,7 +286,15 @@ func (a *API) serviceStopKernel(w http.ResponseWriter, r *http.Request, kernel s
 		return
 	}
 
-	res, err := a.kernelSvc.StopKernelProcess(kernel)
+	var res services.KernelStopResult
+	err := a.dnsAroundStop(kernel, func() error {
+		var serr error
+		res, serr = a.kernelSvc.StopKernelProcess(kernel)
+		return serr
+	})
+	if a.dnsRefused(w, r, err) {
+		return
+	}
 	res.Method = services.KernelStopMethodSignal
 	summary := "kernel=" + kernel + " outcome=" + string(res.Outcome)
 	if err != nil {
