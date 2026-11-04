@@ -170,7 +170,7 @@ func (e *rtSrc) rtRstStartApply() map[string]any {
 	before := e.rtRstApplyView()
 	r := e.call(http.MethodPost, "/api/configlayer/apply", nil)
 	if r.Status != http.StatusOK {
-		e.t.Fatalf("POST /api/configlayer/apply: %d %s", r.Status, r.Code)
+		e.t.Fatalf("POST /api/configlayer/apply: %d %s %.600s", r.Status, r.Code, r.Data)
 	}
 	if started, _ := r.object(e.t)["started"].(bool); !started {
 		e.t.Fatalf("POST /api/configlayer/apply: started=false: %.200s", r.Data)
