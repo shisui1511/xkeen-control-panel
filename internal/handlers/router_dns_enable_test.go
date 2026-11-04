@@ -4,17 +4,25 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"sort"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
 	"gopkg.in/yaml.v3"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/dnstakeover"
@@ -78,19 +86,7 @@ func rtDNSKernelHasListener(kernel string) bool {
 		_, err := os.Stat(filepath.Join(rtRtXrayDir, rtDNSXrayListenerFile))
 		return err == nil
 	case configlayer.KernelMihomo:
-		data, err := os.ReadFile(filepath.Join(rtRtMihomoDir, rtRtPanelProfile))
-		if err != nil {
-			return false
-		}
-		var top struct {
-			DNS struct {
-				Listen string `yaml:"listen"`
-			} `yaml:"dns"`
-		}
-		if yaml.Unmarshal(data, &top) != nil {
-			return false
-		}
-		return strings.HasSuffix(strings.TrimSpace(top.DNS.Listen), ":53")
+		return rtDNSMihomoFileListens(filepath.Join(rtRtMihomoDir, rtRtPanelProfile))
 	}
 	return false
 }
@@ -437,9 +433,30 @@ func TestRouterDNSEnableDisable(t *testing.T) {
 		}
 	})
 
+	start := time.Now().Unix()
 	v := e.rtDNSEnableOK()
 	t.Cleanup(func() { e.with(t).rtDNSEnsureOff() })
 	e.rtDNSExpectOn(v, kernel)
+
+	// Одна запись истории на транзакцию, и последний запуск конвейера — завершающий
+	// проход включения, а не отменённый.
+	t.Run("one_record", func(t *testing.T) {
+		c := e.with(t)
+		ok, failed := c.rtDNSHistorySince(start)
+		if ok != 1 {
+			t.Errorf("успешных записей %s после включения %d, ожидалась одна", "dns_takeover_enable", ok)
+		}
+		if failed != 0 {
+			t.Errorf("неудачных записей dns_takeover* после включения %d, ожидалось 0", failed)
+		}
+		a := c.rtRstApplyView()
+		if trig, _ := a["trigger"].(string); trig != "dns_takeover" {
+			t.Errorf("apply.trigger %q, ожидалось dns_takeover", trig)
+		}
+		if res, _ := rtRstResult(a); !res {
+			t.Errorf("apply.result.ok=false: %s", rtRstDescribe(a))
+		}
+	})
 
 	t.Run("disable", func(t *testing.T) {
 		c := e.with(t)
@@ -461,6 +478,454 @@ func TestRouterDNSEnableDisable(t *testing.T) {
 		if !rtDNSResolves(dnstakeover.DefaultCheckName) {
 			t.Error("после выключения прошивка не отвечает через 127.0.0.1:53")
 		}
+	})
+
+	// D-33: включение из proxy_dns=on снимает второй механизм на :53 — правил XKeen
+	// с портом 53 нет, строка proxy_dns выключена.
+	t.Run("legacy_off", func(t *testing.T) {
+		c := e.with(t)
+		rtDNSLegacyOn(t, c)
+		c.rtDNSRequireClosedDraft()
+		c.rtDNSEnableOK()
+		t.Cleanup(func() { c.rtDNSEnsureOff() })
+		rtDNSWaitXKeenRules53(t, nil)
+		if rtDNSProxyOn(t) {
+			t.Error("после включения перехвата proxy_dns остался on")
+		}
+	})
+}
+
+// rtDNSHistorySince считает записи истории действий XKeen с меткой времени не
+// раньше since: ok — успешные dns_takeover_enable, failed — неудачные dns_takeover*.
+func (e *rtSrc) rtDNSHistorySince(since int64) (ok, failed int) {
+	e.t.Helper()
+	r := e.call(http.MethodGet, "/api/service/restart-log", nil)
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("GET /api/service/restart-log: %d", r.Status)
+	}
+	var entries []struct {
+		Timestamp int64  `json:"timestamp"`
+		Action    string `json:"action"`
+		Success   bool   `json:"success"`
+	}
+	if err := json.Unmarshal(r.Raw, &entries); err != nil {
+		e.t.Fatalf("история действий не разбирается: %v", err)
+	}
+	for _, en := range entries {
+		if en.Timestamp < since || !strings.HasPrefix(en.Action, "dns_takeover") {
+			continue
+		}
+		switch {
+		case !en.Success:
+			failed++
+		case en.Action == "dns_takeover_enable":
+			ok++
+		}
+	}
+	return ok, failed
+}
+
+// --- перехват XKeen с :53 и гашение процессов --------------------------------
+
+// rtDNSDport53Re — порт 53 в правиле: --dport 53 (и с !) или 53 в списке --dports.
+var rtDNSDport53Re = regexp.MustCompile(`--dports?\s+(?:\S*[,:])?53(?:[,:]\S*)?(?:\s|$)`)
+
+// rtDNSXKeenRules53 — правила XKeen с портом 53 (iptables -t nat и -t mangle,
+// строки с «xkeen»), с таблицей впереди, отсортированные.
+func rtDNSXKeenRules53(t *testing.T) []string {
+	t.Helper()
+	var out []string
+	for _, table := range []string{"nat", "mangle"} {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		stdout, stderr, code := routertest.Exec(ctx, "iptables", "-w", "-t", table, "-S")
+		cancel()
+		if code != 0 {
+			t.Fatalf("iptables -t %s: код %d %s", table, code, strings.TrimSpace(stderr))
+		}
+		for _, line := range strings.Split(stdout, "\n") {
+			if strings.Contains(line, "xkeen") && rtDNSDport53Re.MatchString(line) {
+				out = append(out, table+": "+strings.TrimSpace(line))
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// rtDNSWaitXKeenRules53 ждёт, пока набор правил XKeen с портом 53 совпадёт с want
+// (XKeen ставит правила уже после возврата запуска); не совпал — провал с обоими
+// наборами.
+func rtDNSWaitXKeenRules53(t *testing.T, want []string) {
+	t.Helper()
+	deadline := time.Now().Add(rtCoresLiveRulesWait)
+	for {
+		got := rtDNSXKeenRules53(t)
+		if slices.Equal(got, want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("правила XKeen с :53 за %v не совпали с ожидаемыми:\nесть %q\nожидалось %q", rtCoresLiveRulesWait, got, want)
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
+// rtDNSXKeen выполняет XKeen с аргументами-константами.
+func rtDNSXKeen(t *testing.T, args ...string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	_, stderr, code := routertest.Exec(ctx, config.Default().XKeenBinary, args...)
+	if code != 0 {
+		t.Fatalf("xkeen %s: код %d %s", strings.Join(args, " "), code, strings.TrimSpace(stderr))
+	}
+}
+
+// rtDNSLegacyOn включает старое перенаправление DNS XKeen (proxy_dns=on) и
+// перезапускает запущенное ядро через API панели: XKeen строит перехват с :53 при
+// старте ядра. baseline — правила XKeen с :53; пусто — находка стенда. t.Cleanup
+// возвращает строку и снова перезапускает ядро.
+func rtDNSLegacyOn(t *testing.T, e *rtSrc) (baseline []string) {
+	t.Helper()
+	before := rtDNSProxyOn(t)
+	rtDNSXKeen(t, "-dns", "on")
+	t.Cleanup(func() {
+		if before {
+			return
+		}
+		rtDNSXKeen(t, "-dns", "off")
+		e.with(t).rtDNSServiceControl("restart")
+		rtCoresLiveWaitStatus(t)
+	})
+	e.rtDNSServiceControl("restart")
+	rtCoresLiveWaitStatus(t)
+	deadline := time.Now().Add(rtCoresLiveRulesWait)
+	for {
+		baseline = rtDNSXKeenRules53(t)
+		if len(baseline) > 0 {
+			return baseline
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no_xkeen_dns_rules: XKeen за %v не построил перехват :53 при proxy_dns=on", rtCoresLiveRulesWait)
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
+// rtDNSKillWhile — горутина сценария: раз в 10 мс вызывает match и гасит
+// найденные PID сигналом SIGKILL (настоящий сбой на роутере: так же процесс
+// гасит нехватка памяти). killed — сколько процессов погашено. Горутина
+// останавливается в t.Cleanup раньше возврата стенда.
+func rtDNSKillWhile(t *testing.T, match func() []int) (killed func() int) {
+	t.Helper()
+	var n atomic.Int64
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		tick := time.NewTicker(10 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+			}
+			for _, pid := range match() {
+				if syscall.Kill(pid, syscall.SIGKILL) == nil {
+					n.Add(1)
+				}
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		wg.Wait()
+	})
+	return func() int { return int(n.Load()) }
+}
+
+// rtDNSProcArgs — argv процесса; процесса нет — nil.
+func rtDNSProcArgs(pid string) []string {
+	raw, err := os.ReadFile(filepath.Join("/proc", pid, "cmdline"))
+	if err != nil || len(raw) == 0 {
+		return nil
+	}
+	return strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")
+}
+
+// rtDNSArgAfter — значение аргумента после флага flag; нет — "".
+func rtDNSArgAfter(args []string, flag string) string {
+	for i := 1; i+1 < len(args); i++ {
+		if args[i] == flag {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+// rtDNSValidatePIDs — процессы проверки конфигурации ядром kernel (Xray —
+// «run -test -confdir», Mihomo — «-t -f»), в проверяемой копии которых есть
+// слушатель :53 панели: такой конфиг собирается только при включении перехвата.
+func rtDNSValidatePIDs(kernel string) []int {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	var out []int
+	for _, ent := range entries {
+		pid, err := strconv.Atoi(ent.Name())
+		if err != nil || !ent.IsDir() {
+			continue
+		}
+		args := rtDNSProcArgs(ent.Name())
+		if len(args) < 2 || filepath.Base(args[0]) != kernel {
+			continue
+		}
+		switch kernel {
+		case configlayer.KernelXray:
+			dir := rtDNSArgAfter(args, "-confdir")
+			if !slices.Contains(args, "-test") || dir == "" {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(dir, rtDNSXrayListenerFile)); err != nil {
+				continue
+			}
+		case configlayer.KernelMihomo:
+			file := rtDNSArgAfter(args, "-f")
+			if !slices.Contains(args, "-t") || file == "" || !rtDNSMihomoFileListens(file) {
+				continue
+			}
+		default:
+			continue
+		}
+		out = append(out, pid)
+	}
+	return out
+}
+
+// rtDNSMihomoFileListens — в профиле Mihomo dns.listen на :53.
+func rtDNSMihomoFileListens(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var top struct {
+		DNS struct {
+			Listen string `yaml:"listen"`
+		} `yaml:"dns"`
+	}
+	if yaml.Unmarshal(data, &top) != nil {
+		return false
+	}
+	return strings.HasSuffix(strings.TrimSpace(top.DNS.Listen), ":53")
+}
+
+// rtDNSKernelFiles — суммы файлов ядра: у Xray — файлы каталога конфигурации, у
+// Mihomo — профиль панели.
+func rtDNSKernelFiles(t *testing.T, kernel string) map[string]string {
+	t.Helper()
+	if kernel == configlayer.KernelXray {
+		return rtCoresDirSums(t)
+	}
+	data, err := os.ReadFile(filepath.Join(rtRtMihomoDir, rtRtPanelProfile))
+	if err != nil {
+		t.Fatalf("профиль панели Mihomo не читается: %v", err)
+	}
+	return map[string]string{"profile": rtRtSum(data)}
+}
+
+// rtDNSStepStatus — статус шага транзакции из вида ("" — шага нет).
+func rtDNSStepStatus(v map[string]any, id string) string {
+	steps, _ := v["steps"].([]any)
+	for _, it := range steps {
+		s, _ := it.(map[string]any)
+		if s["id"] == id {
+			st, _ := s["status"].(string)
+			return st
+		}
+	}
+	return ""
+}
+
+// rtDNSRequireClosedDraft — черновик закрыт (включение требует его, D-01).
+func (e *rtSrc) rtDNSRequireClosedDraft() {
+	e.t.Helper()
+	if n := e.rtRtDraftChanges(); n != 0 {
+		e.t.Fatalf("перед включением в черновике %d изменений, ожидался закрытый черновик", n)
+	}
+}
+
+// rtDNSEnableFails включает перехват и ждёт сбоя с кодом want (откат выполнен).
+func (e *rtSrc) rtDNSEnableFails(want string) map[string]any {
+	e.t.Helper()
+	e.rtDNSStart(rtDNSEnable)
+	v := e.rtDNSWaitDone()
+	code, detail := rtDNSFailure(v)
+	if st, _ := v["state"].(string); st != "off" || code != want {
+		e.t.Fatalf("включение со сбоем: state %q, код %q (%.300s), ожидалось off и %s; шаги %v", st, code, detail, want, v["steps"])
+	}
+	f, _ := v["failure"].(map[string]any)
+	if rb, _ := f["rolled_back"].(bool); !rb {
+		e.t.Errorf("сбой %s: rolled_back=false", want)
+	}
+	return v
+}
+
+// rtDNSExpectRestored — после отката: override как до включения, строка
+// proxy_dns on и прошивка отвечает. Набор правил XKeen с :53 сверяет сам подтест.
+func rtDNSExpectRestored(t *testing.T, overrideBefore bool) {
+	t.Helper()
+	if got := rtDNSOverrideOn(t); got != overrideBefore {
+		t.Errorf("после отката override=%v, до включения был %v", got, overrideBefore)
+	}
+	if !rtDNSProxyOn(t) {
+		t.Error("после отката proxy_dns не вернулся в on")
+	}
+	if !rtDNSResolves(dnstakeover.DefaultCheckName) {
+		t.Error("после отката DNS роутера не отвечает через 127.0.0.1:53")
+	}
+}
+
+// rtDNSDeadGroup — группа-цель с единственным мёртвым узлом (адрес loopback без
+// слушателя), применённая обычным «Применить» как группа перехвата. t.Cleanup
+// убирает группу, узел и параметры перехвата тем же «Применить».
+func (e *rtSrc) rtDNSDeadGroup(t *testing.T) {
+	t.Helper()
+	link := rtLinkText(t, "vless_ws")
+	re := regexp.MustCompile(`@[^:/?#]+:\d+`)
+	if !re.MatchString(link) {
+		t.Fatal("в ссылке фикстуры нет адреса с портом")
+	}
+	e.rtRstAddMyNode(re.ReplaceAllString(link, "@127.0.0.1:"+rtRpClosedPort(t)))
+	myID := ""
+	view := e.call(http.MethodGet, rtSourcesBase, nil)
+	srcs, _ := view.object(t)["sources"].([]any)
+	for _, it := range srcs {
+		src, _ := it.(map[string]any)
+		if src["kind"] == "my" {
+			myID, _ = src["id"].(string)
+		}
+	}
+	if myID == "" {
+		t.Fatal("источника «Мои узлы» нет после добавления узла")
+	}
+	save := e.call(http.MethodPost, rtRoutingBase+"/groups/save", map[string]any{
+		"revision": e.rtRtRevision(),
+		"group": map[string]any{
+			"name": "DNS мёртвая", "mode": "manual",
+			"sources": map[string]any{"all": false, "ids": []string{myID}},
+			"members": []map[string]string{},
+		},
+	})
+	if save.Status != http.StatusOK {
+		t.Fatalf("groups/save: %d %s", save.Status, save.Code)
+	}
+	gid, _ := save.object(t)["group"].(map[string]any)["id"].(string)
+	t.Cleanup(func() {
+		c := e.with(t)
+		c.rtRstIdle()
+		c.rtDNSDraft(map[string]any{"group": "", "zones": []string{}})
+		if r := c.call(http.MethodPost, rtRoutingBase+"/groups/delete", map[string]any{"revision": c.rtRtRevision(), "id": gid, "cascade": map[string]any{"mode": ""}}); r.Status != http.StatusOK {
+			t.Errorf("очистка: groups/delete: %d %s", r.Status, r.Code)
+		}
+		for id := c.rtRstMyEntry(); id != ""; id = c.rtRstMyEntry() {
+			c.rtRstDeleteMyNode(id)
+		}
+		c.rtRtApplyOK("очистка: мёртвая группа перехвата")
+	})
+	e.rtDNSDraft(map[string]any{"group": gid, "zones": []string{}})
+	e.rtRtApplyOK("мёртвая группа перехвата")
+}
+
+// Трасса: подготовка → proxy_dns=on и действующий перехват XKeen с :53 → три
+// сбоя включения при закрытом черновике, каждый достижим только под перехватом:
+// validate — гашение процесса проверки конфигурации со слушателем панели
+// (check_failed, прошивка не тронута); restart — гашение ядра, пока в его файлах
+// слушатель (restart_failed, ядро снова на прежних файлах); probe — группа-цель с
+// мёртвым узлом (probe_external, Applied — снимок). После каждого: override как
+// до включения, proxy_dns on, прежний перехват XKeen с :53. Метка ядра: сбой
+// вызывается на процессах активного ядра.
+func TestRouterDNSTxnRollback(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	kernel := tg.Core
+	e := rtNewSrc(t)
+	rtDNSPrepare(t, e, kernel)
+	baseline := rtDNSLegacyOn(t, e)
+
+	t.Run("validate", func(t *testing.T) {
+		c := e.with(t)
+		c.rtDNSRequireClosedDraft()
+		overrideBefore := rtDNSOverrideOn(t)
+		files := rtDNSKernelFiles(t, kernel)
+		killed := rtDNSKillWhile(t, func() []int { return rtDNSValidatePIDs(kernel) })
+		t.Cleanup(func() { c.rtDNSEnsureOff() })
+		v := c.rtDNSEnableFails("check_failed")
+		if killed() < 1 {
+			t.Error("процесс проверки конфигурации со слушателем панели не погашен")
+		}
+		for _, id := range []string{"write", "restart"} {
+			if st := rtDNSStepStatus(v, id); st != "pending" && st != "skipped" {
+				t.Errorf("шаг %s после отказа проверки: %q, ожидалось — не начинался", id, st)
+			}
+		}
+		if !rtCoresSumsEqual(files, rtDNSKernelFiles(t, kernel)) {
+			t.Error("файлы ядра изменились при отказе проверки")
+		}
+		rtDNSExpectRestored(t, overrideBefore)
+		rtDNSWaitXKeenRules53(t, baseline)
+	})
+
+	t.Run("restart", func(t *testing.T) {
+		c := e.with(t)
+		c.rtDNSRequireClosedDraft()
+		overrideBefore := rtDNSOverrideOn(t)
+		killed := rtDNSKillWhile(t, func() []int {
+			if !rtDNSKernelHasListener(kernel) {
+				return nil
+			}
+			pids, _ := rtRstKernelPIDs(kernel)
+			if !rtDNSKernelHasListener(kernel) {
+				return nil
+			}
+			return pids
+		})
+		t.Cleanup(func() { c.rtDNSEnsureOff() })
+		c.rtDNSEnableFails("restart_failed")
+		if killed() < 1 {
+			t.Error("ядро со слушателем панели не погашено")
+		}
+		if rtDNSKernelHasListener(kernel) {
+			t.Errorf("после отката в файлах %s остался слушатель :53", kernel)
+		}
+		rtRstHoldPID(t, kernel, rtRstKernelPID(t, kernel))
+		rtDNSExpectRestored(t, overrideBefore)
+		rtDNSWaitXKeenRules53(t, baseline)
+	})
+
+	t.Run("probe", func(t *testing.T) {
+		c := e.with(t)
+		c.rtDNSDeadGroup(t)
+		c.rtDNSRequireClosedDraft()
+		overrideBefore := rtDNSOverrideOn(t)
+		files := rtDNSKernelFiles(t, kernel)
+		t.Cleanup(func() { c.rtDNSEnsureOff() })
+		v := c.rtDNSEnableFails("probe_external")
+		if desired, _ := v["desired"].(bool); desired {
+			t.Error("после отката по пробе desired=true")
+		}
+		if n := c.rtRtDraftChanges(); n != 0 {
+			t.Errorf("после отката по пробе в черновике %d изменений", n)
+		}
+		if !rtCoresSumsEqual(files, rtDNSKernelFiles(t, kernel)) {
+			t.Error("файлы ядра после отката по пробе не равны снимку")
+		}
+		if got := dnstakeover.PortOwner(); got.Kind == dnstakeover.OwnerKernel {
+			t.Errorf("после отката по пробе порт 53 держит ядро %q", got.Kernel)
+		}
+		rtDNSExpectRestored(t, overrideBefore)
+		rtDNSWaitXKeenRules53(t, baseline)
 	})
 }
 

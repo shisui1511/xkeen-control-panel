@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/net/dns/dnsmessage"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/cores"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
@@ -348,12 +349,12 @@ func (s *Service) enablePreflight(ctx context.Context) (enablePlan, error) {
 func (s *Service) runEnable(ctx context.Context, pl enablePlan) {
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
-		s.finishEnable(ctx, pl, &Failure{Code: CodeGeneric, RolledBack: true, Detail: truncateDetail(err.Error())})
+		s.finishEnable(ctx, pl, &Failure{Code: CodeGeneric, RolledBack: true, Detail: truncateDetail(err.Error())}, rollbackPlan{})
 		return
 	}
 	sections, merge, err := s.enableSections(st, pl)
 	if err != nil {
-		s.finishEnable(ctx, pl, &Failure{Code: CodeGeneric, RolledBack: true, Detail: truncateDetail(err.Error())})
+		s.finishEnable(ctx, pl, &Failure{Code: CodeGeneric, RolledBack: true, Detail: truncateDetail(err.Error())}, rollbackPlan{})
 		return
 	}
 	var (
@@ -381,7 +382,7 @@ func (s *Service) runEnable(ctx context.Context, pl enablePlan) {
 		if len(undoErrs) > 0 {
 			fail.Detail = truncateDetail(strings.TrimSpace(fail.Detail + "\n" + strings.Join(undoErrs, "\n")))
 		}
-		s.finishEnable(ctx, pl, fail)
+		s.finishEnable(ctx, pl, fail, rollbackPlan{restarted: pipelineRestarted(view)})
 		return
 	}
 
@@ -389,16 +390,36 @@ func (s *Service) runEnable(ctx context.Context, pl enablePlan) {
 	res, fail := s.probeTakeover(ctx)
 	s.storeCheck(res)
 	if fail != nil {
-		s.finishEnable(ctx, pl, fail)
+		s.finishEnable(ctx, pl, fail, rollbackPlan{restarted: true, restore: true})
 		return
 	}
 	s.setStep(stepProbe, statusDone)
-	s.finishEnable(ctx, pl, nil)
+	s.finishEnable(ctx, pl, nil, rollbackPlan{})
+}
+
+// pipelineRestarted — проход дошёл до шага перезапуска: правила XKeen с тех пор
+// могли перестроиться по строке proxy_dns.
+func pipelineRestarted(view configlayer.ApplyView) bool {
+	for _, sv := range view.Steps {
+		if sv.ID == configlayer.StepRestart && sv.State != configlayer.StepPending && sv.State != configlayer.StepSkipped {
+			return true
+		}
+	}
+	return false
+}
+
+// rollbackPlan — что нужно отката сбою включения: restore — применение уже
+// зафиксировано (сбой пробы), откат идёт RunRestore к снимку; restarted — ядро
+// перезапускалось после смены строки proxy_dns.
+type rollbackPlan struct {
+	restore   bool
+	restarted bool
 }
 
 // finishEnable фиксирует итог включения: успех — desired, ядро и состояние on;
-// сбой — шаг в работе failed и failure. Одна запись истории на транзакцию.
-func (s *Service) finishEnable(_ context.Context, pl enablePlan, fail *Failure) {
+// сбой — шаг в работе failed, откат к снимку и failure. Одна запись истории на
+// транзакцию по её итогу.
+func (s *Service) finishEnable(ctx context.Context, pl enablePlan, fail *Failure, rb rollbackPlan) {
 	if fail == nil {
 		if err := s.update(func(p *persisted) {
 			p.Desired = true
@@ -412,7 +433,163 @@ func (s *Service) finishEnable(_ context.Context, pl enablePlan, fail *Failure) 
 	}
 	s.failRunning()
 	s.setFailure(fail)
+	s.rollbackEnable(ctx, pl, fail, rb)
+	s.setFailure(fail)
 	s.recordHistory(opEnable, pl.kernel, fail)
+}
+
+// rollbackEnable возвращает DNS роутера, строку proxy_dns и конфиг ядра к снимку
+// после сбоя включения (DNSF-03).
+//
+// Отказ проверки ядрами (check_failed): прошивка, файлы и строка не тронуты —
+// остаётся сверка. Сбой BeforeWrite (override_failed): файлы не записаны, ядро не
+// перезапускалось — сверка выключает override и возвращает строку. Сбой записи и
+// перезапуска: override и строку вернул BeforeRollback до повторного подъёма ядра
+// (runTakeover). Сбой пробы (restore): первым — DNS прошивке (Pitfall 2), вторым —
+// строка proxy_dns (до перезапуска отката), затем RunRestore к снимку: его
+// перезапуск запущенного ядра строит прежний перехват XKeen с :53.
+//
+// В конце при любом сбое — идемпотентная сверка: override и строка proxy_dns
+// равны снимку; если строку пришлось вернуть здесь, после перезапуска, а ядро
+// запущено, оно перезапускается KernelApplier.ApplyLocked под замком жизненного
+// цикла (остановленное не запускается, FND-05), чтобы XKeen перестроил перехват.
+// Откат удался — failure.rolled_back=true и снимок снимается; не удался —
+// rolled_back=false и код rollback_failed с причиной (прежний код — params.cause).
+func (s *Service) rollbackEnable(ctx context.Context, pl enablePlan, fail *Failure, rb rollbackPlan) {
+	hctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 4*hookTimeout)
+	defer cancel()
+	var errs []string
+	note := func(err error) {
+		if err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+	restarted := rb.restarted
+	if rb.restore {
+		if !pl.overrideBefore {
+			note(s.fw.SetOverride(hctx, false))
+		}
+		if pl.proxyDNSBefore {
+			note(s.fw.SetProxyDNS(hctx, true))
+		}
+		note(s.restoreSnapshot(hctx, pl))
+		restarted = true
+	}
+	proxyLate, err := s.reconcileFirmware(hctx, pl)
+	note(err)
+	if proxyLate && restarted {
+		note(s.rebuildXKeenRules(pl.kernel))
+	}
+
+	switch {
+	case len(errs) > 0:
+		if fail.Code != CodeRollbackFailed {
+			if fail.Params == nil {
+				fail.Params = map[string]string{}
+			}
+			fail.Params["cause"] = fail.Code
+		}
+		fail.Code = CodeRollbackFailed
+		fail.RolledBack = false
+		fail.Detail = truncateDetail(strings.TrimSpace(fail.Detail + "\n" + strings.Join(errs, "\n")))
+		log.Printf("dnstakeover: откат включения не удался: %s", strings.Join(errs, "; "))
+	case rb.restore:
+		fail.RolledBack = true
+	}
+	if !fail.RolledBack {
+		return
+	}
+	if err := s.update(func(p *persisted) { p.Snapshot = nil }); err != nil {
+		log.Printf("dnstakeover: %v", err)
+	}
+}
+
+// reconcileFirmware приводит override и строку proxy_dns к значениям до
+// включения; proxyLate — строку пришлось вернуть здесь.
+func (s *Service) reconcileFirmware(ctx context.Context, pl enablePlan) (proxyLate bool, err error) {
+	var errs []string
+	if !pl.overrideBefore {
+		on, rerr := s.fw.OverrideEnabled(ctx)
+		switch {
+		case rerr != nil:
+			errs = append(errs, rerr.Error())
+		case on:
+			if serr := s.fw.SetOverride(ctx, false); serr != nil {
+				errs = append(errs, serr.Error())
+			}
+		}
+	}
+	cur, rerr := ProxyDNS()
+	switch {
+	case rerr != nil:
+		errs = append(errs, "proxy_dns: "+rerr.Error())
+	case cur != pl.proxyDNSBefore:
+		if serr := s.fw.SetProxyDNS(ctx, pl.proxyDNSBefore); serr != nil {
+			errs = append(errs, serr.Error())
+		} else {
+			proxyLate = true
+		}
+	}
+	if len(errs) > 0 {
+		return proxyLate, errors.New(strings.Join(errs, "; "))
+	}
+	return proxyLate, nil
+}
+
+// rebuildXKeenRules перезапускает запущенное ядро через KernelApplier под
+// замком жизненного цикла: XKeen строит перехват по строке proxy_dns при старте
+// ядра. Остановленное ядро не запускается.
+func (s *Service) rebuildXKeenRules(kernel string) error {
+	if !s.kernelRunning(s.d.Kernel.ActiveState()) {
+		return nil
+	}
+	if s.d.Applier == nil {
+		return errors.New("перезапуск ядра: KernelApplier не задан")
+	}
+	s.d.Lifecycle.Lock()
+	res := s.d.Applier.ApplyLocked(kernel)
+	s.d.Lifecycle.Unlock()
+	if res.Outcome == services.ApplyRestartFailed {
+		return fmt.Errorf("перезапуск %s после возврата proxy_dns: %s", kernel, res.Error)
+	}
+	return nil
+}
+
+// restoreSnapshot возвращает применённое состояние и Live перехвата к снимку
+// включения (RunRestore с TriggerDNSRestore): секции DNS ядра и dns_takeover в
+// черновике возвращаются вместе с ним, если пользователь их не правил.
+func (s *Service) restoreSnapshot(ctx context.Context, pl enablePlan) error {
+	s.mu.Lock()
+	snap := s.st.Snapshot
+	s.mu.Unlock()
+	if snap == nil {
+		return errors.New("откат к снимку: снимка нет")
+	}
+	live := snap.Live
+	if len(live) == 0 {
+		live = json.RawMessage("null")
+	}
+	view, err := s.d.Layer.RunRestore(ctx, configlayer.RestoreRun{
+		Trigger: configlayer.TriggerDNSRestore,
+		Kernel:  pl.kernel,
+		Applied: snap.Applied,
+		Live:    configlayer.Sections{configlayer.LiveKeyDNSTakeover: live},
+		ResetDraftSections: []string{
+			configlayer.CoreSectionName(pl.kernel, "dns"),
+			configlayer.SectionDNSTakeover,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("откат к снимку: %w", err)
+	}
+	if view.Result == nil || !view.Result.OK {
+		code, msg := "", ""
+		if view.Result != nil {
+			code, msg = view.Result.Code, view.Result.Message
+		}
+		return fmt.Errorf("откат к снимку: %s: %s", code, msg)
+	}
+	return nil
 }
 
 // enableSections — подменяемые секции включения и их слияние в черновик: секция

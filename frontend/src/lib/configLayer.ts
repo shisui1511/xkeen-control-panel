@@ -48,7 +48,9 @@ export type LayerTrigger =
   | 'flag_on'
   | 'flag_off'
   | 'source_refresh'
-  | 'access_log';
+  | 'access_log'
+  | 'dns_takeover'
+  | 'dns_restore';
 
 export interface LayerStep {
   id: StepId;
