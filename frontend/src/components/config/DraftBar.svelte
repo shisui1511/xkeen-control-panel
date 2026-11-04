@@ -237,7 +237,8 @@
 <style>
   .draft-bar {
     position: sticky;
-    top: 0;
+    /* Под приклеенным баннером окна подтверждения DNS (--dns-banner-h, 0 без окна) */
+    top: calc(0px + var(--dns-banner-h, 0px));
     z-index: 5;
     display: flex;
     align-items: center;
@@ -327,7 +328,7 @@
     .draft-bar {
       flex-wrap: wrap;
       /* Липкая мобильная шапка (.mobile-header, 69 px + safe-area) иначе перекрыла бы полосу */
-      top: calc(var(--mhdr-h) + env(safe-area-inset-top));
+      top: calc(var(--mhdr-h) + env(safe-area-inset-top) + var(--dns-banner-h, 0px));
     }
 
     .draft-bar-status {
