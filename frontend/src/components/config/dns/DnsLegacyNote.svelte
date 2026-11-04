@@ -8,9 +8,10 @@
   // Стык со старым перенаправлением DNS XKeen (proxy_dns, D-33, D-35). До включения —
   // спокойная строка «будет выключено»: выключение входит в транзакцию включения. При
   // включённом перехвате proxy_dns, включённый мимо панели, — предупреждение с кнопкой;
-  // панель сама ничего не выключает. В «выключен» primary карточки — «Включить перехват»,
-  // а предупреждение бывает только в «Включён» и «Ожидает подтверждения», где своей
-  // primary у карточки нет.
+  // панель сама ничего не выключает. В «выключен» primary карточки — «Включить перехват»;
+  // в «Ожидает подтверждения» единственная primary на экране — «Оставить» в баннере, поэтому
+  // кнопка предупреждения там вторичная, а само предупреждение — role="status" (баннер уже
+  // role="alert"). В «Включён» — primary и role="alert".
   let {
     view,
     onaction
@@ -24,6 +25,7 @@
 
   const willOff = $derived(view.state === 'off' && view.legacy.proxy_dns);
   const drift = $derived((view.state === 'on' || view.state === 'window') && view.legacy.proxy_dns);
+  const inWindow = $derived(view.state === 'window');
 
   async function turnOff(): Promise<void> {
     if (pending) return;
@@ -48,12 +50,16 @@
     <span class="dns-legacy-text">{$t('cfg.dns.legacy_will_off')}</span>
   </p>
 {:else if drift}
-  <div class="alert alert-warning dns-legacy-drift" role="alert" data-testid="dns-legacy-drift">
+  <div
+    class="alert alert-warning dns-legacy-drift"
+    role={inWindow ? 'status' : 'alert'}
+    data-testid="dns-legacy-drift"
+  >
     <Icon name="warning" size={16} class="dns-legacy-icon" />
     <div class="dns-legacy-body">
       <span class="dns-legacy-text">{$t('cfg.dns.legacy_drift')}</span>
       <Button
-        variant="primary"
+        variant={inWindow ? 'secondary' : 'primary'}
         loading={pending}
         data-testid="dns-legacy-off"
         onclick={() => void turnOff()}

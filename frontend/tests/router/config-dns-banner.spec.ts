@@ -144,6 +144,12 @@ test(
     await expect(banner(page)).toHaveAttribute('data-kind', 'enable');
     await expect(banner(page)).toHaveAttribute('role', 'alert');
     await expect(page.getByTestId('dns-confirm-seconds')).toHaveAttribute('role', 'timer');
+    // В окне единственная основная кнопка на странице — «Оставить» в баннере: карточка
+    // своих кнопок не показывает, кнопка предупреждения о старом перенаправлении вторичная
+    const card = page.getByTestId('dns-takeover-card');
+    await expect(card).toBeVisible({ timeout: T.action });
+    await expect(card.locator('.btn-primary')).toHaveCount(0);
+    await expect(banner(page).locator('.btn-primary')).toHaveCount(1);
 
     // Отсчёт идёт по сроку сервера: число уменьшается
     const first = await bannerSeconds(page);

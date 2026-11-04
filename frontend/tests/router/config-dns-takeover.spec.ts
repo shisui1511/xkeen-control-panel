@@ -48,11 +48,13 @@ type Kernel = (typeof KERNELS)[number];
 
 // Строка состояния «выключен» в обоих языках панели
 const STATUS_FIRMWARE = /DNS роутера отвечает прошивка\.|Router DNS is served by the firmware\./;
+const RE_CHECK_NONE = /Проверка ещё не выполнялась\.|No check has been run yet\./;
 
 interface DnsState {
   state: string;
   owner: { kind: string };
   blocks: string[];
+  lastCheck: boolean;
 }
 
 /** Состояние перехвата по настоящему API службы. */
@@ -63,7 +65,8 @@ async function dnsState(page: Page): Promise<DnsState> {
   return {
     state: String(d.state ?? ''),
     owner: (d.owner ?? { kind: '' }) as { kind: string },
-    blocks: (d.blocks ?? []) as string[]
+    blocks: (d.blocks ?? []) as string[],
+    lastCheck: Boolean(d.last_check)
   };
 }
 
@@ -162,7 +165,15 @@ test('dns-card: выключенный перехват — DNS у прошив�
   if (st.owner.kind === 'firmware') {
     await expect(page.getByTestId('dns-row-owner')).toContainText('dns-proxy');
   }
-  await expect(page.getByTestId('dns-row-last-check')).toBeVisible();
+  // Итог последней проверки — один раз: блок проверки резолва под сеткой; строка сетки
+  // «Последняя проверка» — только пока проверки не было
+  if (st.lastCheck) {
+    await expect(page.getByTestId('dns-check-result')).toBeVisible();
+    await expect(page.getByTestId('dns-row-last-check')).toHaveCount(0);
+  } else {
+    await expect(page.getByTestId('dns-row-last-check')).toContainText(RE_CHECK_NONE);
+    await expect(page.getByTestId('dns-check-result')).toHaveCount(0);
+  }
 
   await guard.assertClean();
 });

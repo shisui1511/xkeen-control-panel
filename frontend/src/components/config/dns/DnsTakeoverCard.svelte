@@ -104,14 +104,6 @@
   // придёт сбой
   let awaitingDisable = $state(false);
 
-  /** Время сервера в локальных часах: «ЧЧ:ММ:СС». */
-  function clock(serverMs: number): string {
-    const d = new Date(serverMs - $dnsClockOffset);
-    return [d.getHours(), d.getMinutes(), d.getSeconds()]
-      .map((n) => String(n).padStart(2, '0'))
-      .join(':');
-  }
-
   const stateClass = $derived.by(() => {
     switch (dnsState) {
       case 'on':
@@ -281,20 +273,6 @@
         view.state === 'window' ||
         (view.state === 'off' && view.blocks.length === 0))
   );
-
-  // Последняя проверка: краткая строка (полный блок результата — в проверке резолва)
-  const lastCheck = $derived.by<{ ok: boolean; text: string; when: string } | null>(() => {
-    const lc = view?.last_check;
-    if (!lc) return null;
-    const failed = lc.groups.find((g) => !g.ok);
-    const text = lc.ok
-      ? $t('cfg.dns.check_ok')
-      : $t('cfg.dns.check_fail', { reason: failed?.reason || $t('cfg.dns.no_reason') });
-    const when = $t(lc.source === 'auto' ? 'cfg.dns.checked_auto' : 'cfg.dns.checked_manual', {
-      time: clock(lc.at_ms)
-    });
-    return { ok: lc.ok, text, when };
-  });
 
   // Ход транзакции. Набор шагов приходит с сервера: шаг возврата DNS прошивке есть только у
   // выключения
@@ -669,20 +647,14 @@
           <dt class="form-label">{$t('cfg.sec.f.ipv6')}</dt>
           <dd>{$t(view.ipv6 ? 'cfg.dns.ipv6_on' : 'cfg.dns.ipv6_off')}</dd>
         </div>
-        <div class="dns-row" data-testid="dns-row-last-check">
-          <dt class="form-label">{$t('cfg.dns.row_last_check')}</dt>
-          <dd>
-            {#if lastCheck}
-              <span class="dns-check" class:dns-check-fail={!lastCheck.ok}>
-                <Icon name={lastCheck.ok ? 'check' : 'warning'} size={14} class="dns-check-icon" />
-                {lastCheck.text}
-              </span>
-              <p class="dns-caption">{lastCheck.when}</p>
-            {:else}
-              {$t('cfg.dns.check_none')}
-            {/if}
-          </dd>
-        </div>
+        <!-- Итог последней проверки показывает блок проверки резолва сразу под сеткой; строка
+             сетки остаётся только для пустого состояния, чтобы итог и время не шли дважды -->
+        {#if !view.last_check}
+          <div class="dns-row" data-testid="dns-row-last-check">
+            <dt class="form-label">{$t('cfg.dns.row_last_check')}</dt>
+            <dd>{$t('cfg.dns.check_none')}</dd>
+          </div>
+        {/if}
       </dl>
 
       <DnsResolveCheck bind:this={checkRef} {view} />
@@ -994,21 +966,6 @@
     padding: 0;
     list-style: none;
     min-width: 0;
-  }
-
-  .dns-check {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--spacing-1);
-    color: var(--success);
-  }
-
-  .dns-check-fail {
-    color: var(--warning);
-  }
-
-  .dns-check :global(.dns-check-icon) {
-    flex-shrink: 0;
   }
 
   .dns-params {
