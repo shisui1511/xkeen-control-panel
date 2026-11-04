@@ -6,12 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/dnstakeover"
@@ -231,4 +233,169 @@ func TestRouterDNSGuardKernelChanged(t *testing.T) {
 	if !e.rtDNSOutcomeNoticeShown() {
 		t.Errorf("после смены ядра мимо панели в снимке слоя нет уведомления %s*", rtDNSOutcomeNotice)
 	}
+}
+
+// --- сверка на старте панели (D-16, R3, R8) -----------------------------------
+
+const (
+	// rtDNSReconcileRebootWait — сколько ждать возврата перехвата после старта
+	// панели в имитации загрузки роутера: сверка (файлы без слушателя, подъём
+	// ядра), пауза сторожа после старта и перезапуска ядра, возврат пробой.
+	rtDNSReconcileRebootWait = 240 * time.Second
+	// rtDNSReconcileOverrideWait — сколько ждать снятия лишнего override.
+	rtDNSReconcileOverrideWait = 60 * time.Second
+	// rtDNSReconcileAction — запись истории действий: сверка на старте.
+	rtDNSReconcileAction = "dns_takeover_reconcile"
+	// rtDNSReconcileOverrideAction — запись истории действий: лишний override снят.
+	rtDNSReconcileOverrideAction = "dns_takeover_reconcile_override"
+)
+
+// rtDNSPanelStop останавливает панель init-скриптом и ждёт выхода процесса old.
+func rtDNSPanelStop(t *testing.T, old int) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), rtPanelRestartLimit+30*time.Second)
+	defer cancel()
+	out, code := rtPanelInitCmd(ctx, "stop")
+	deadline := time.Now().Add(rtPanelRestartLimit)
+	for {
+		if _, err := os.Stat("/proc/" + strconv.Itoa(old)); err != nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("панель %d не вышла за %v после stop (init: код %d, %q)", old, rtPanelRestartLimit, code, out)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// rtDNSPanelStart запускает панель init-скриптом и ждёт новую панель, отвечающую
+// по прежней сессии.
+func rtDNSPanelStart(t *testing.T, e *rtSrc, old int) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	out, code := rtPanelInitCmd(ctx, "start")
+	if pid, last := rtPanelWaitUp(e.p, old, rtPanelUpTimeout); pid == 0 {
+		t.Fatalf("панель не поднялась за %v после start: %s (init: код %d, %q)", rtPanelUpTimeout, last, code, out)
+	}
+}
+
+// rtDNSRestoreOverride возвращает override прошивки к значению before.
+func rtDNSRestoreOverride(t *testing.T, before bool) {
+	t.Helper()
+	switch on := rtDNSOverrideOn(t); {
+	case on && !before:
+		rtDNSNdmc(t, "no "+rtDNSOverrideLine)
+	case !on && before:
+		rtDNSNdmc(t, rtDNSOverrideLine)
+	}
+}
+
+// Метка ядра: подтест reboot перезапускает активное ядро и ждёт его подъёма.
+func TestRouterDNSStartReconcile(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	kernel := tg.Core
+
+	// Трасса: подготовка → включение и «Оставить» → остановка панели
+	// init-скриптом → `no opkg dns-override` (override не пережил перезагрузку) →
+	// `xkeen -restart` (как загрузка роутера: ядро стартует с файлами, где слушатель
+	// :53, а прошивка держит порт) → запуск панели → в пределах 240 с state on, :53
+	// у ядра, ядро запущено, внешнее имя разрешается, в истории действий — сверка
+	// на старте. t.Cleanup: override исходный, панель запущена, перехват выключен.
+	t.Run("reboot", func(t *testing.T) {
+		e := rtNewSrc(t)
+		rtDNSPrepare(t, e, kernel)
+		overrideBefore := rtDNSOverrideOn(t)
+		e.rtDNSEnableOK()
+		t.Cleanup(func() {
+			c := e.with(t)
+			if pids, _ := rtRstKernelPIDs(kernel); len(pids) == 0 {
+				c.rtDNSServiceControl("start")
+				rtCoresLiveWaitStatus(t)
+			}
+			c.rtDNSEnsureOff()
+			rtDNSRestoreOverride(t, overrideBefore)
+		})
+		old := rtPanelCurrent(t, e.p)
+
+		rtDNSPanelStop(t, old)
+		if rtDNSOverrideOn(t) {
+			rtDNSNdmc(t, "no "+rtDNSOverrideLine)
+		}
+		func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			// Ядро с файлами слушателя :53 при занятом прошивкой порте может не
+			// подняться (Xray) — код XKeen здесь не вердикт.
+			_, stderr, code := routertest.Exec(ctx, config.Default().XKeenBinary, "-restart")
+			pids, _ := rtRstKernelPIDs(kernel)
+			t.Logf("xkeen -restart без override: код %d, процессов %s: %d %.200s", code, kernel, len(pids), strings.TrimSpace(stderr))
+		}()
+		since := time.Now().Unix()
+		rtDNSPanelStart(t, e, old)
+
+		deadline := time.Now().Add(rtDNSReconcileRebootWait)
+		var v map[string]any
+		for {
+			v = e.rtDNSView()
+			st, _ := v["state"].(string)
+			pids, _ := rtRstKernelPIDs(kernel)
+			owner := dnstakeover.PortOwner()
+			if st == "on" && len(pids) > 0 && owner.Kind == dnstakeover.OwnerKernel && owner.Kernel == kernel {
+				break
+			}
+			if time.Now().After(deadline) {
+				code, detail := rtDNSFailure(v)
+				t.Fatalf("перехват не вернулся за %v после старта панели: state %q (waiting_reason %v), процессов %s %d, :53 %v, сбой %q %.300s; шаги %v",
+					rtDNSReconcileRebootWait, st, v["waiting_reason"], kernel, len(pids), owner, code, detail, v["steps"])
+			}
+			time.Sleep(2 * time.Second)
+		}
+		e.rtDNSExpectOn(v, kernel)
+		if !rtDNSOverrideOn(t) {
+			t.Error("после возврата перехвата override выключен")
+		}
+		if !e.rtDNSActionSince(rtDNSReconcileAction, since) {
+			t.Errorf("в истории действий нет успешной записи %s после старта панели", rtDNSReconcileAction)
+		}
+	})
+
+	// Трасса: слой включён, перехват выключен → остановка панели → `opkg
+	// dns-override` из теста (override сохранён без панели, R3) → запуск панели →
+	// в пределах 60 с override выключен, :53 у прошивки, прошивка отвечает через
+	// 127.0.0.1:53, в истории действий — снятие override. t.Cleanup: override
+	// исходный, панель запущена.
+	t.Run("stale_override", func(t *testing.T) {
+		e := rtNewSrc(t)
+		e.enableLayer()
+		e.rtRstIdle()
+		e.rtDNSEnsureOff()
+		overrideBefore := rtDNSOverrideOn(t)
+		t.Cleanup(func() { rtDNSRestoreOverride(t, overrideBefore) })
+		old := rtPanelCurrent(t, e.p)
+
+		rtDNSPanelStop(t, old)
+		if !rtDNSOverrideOn(t) {
+			rtDNSNdmc(t, rtDNSOverrideLine)
+		}
+		since := time.Now().Unix()
+		rtDNSPanelStart(t, e, old)
+
+		deadline := time.Now().Add(rtDNSReconcileOverrideWait)
+		for rtDNSOverrideOn(t) {
+			if time.Now().After(deadline) {
+				t.Fatalf("лишний override не снят за %v после старта панели: :53 %v", rtDNSReconcileOverrideWait, dnstakeover.PortOwner())
+			}
+			time.Sleep(2 * time.Second)
+		}
+		if !rtDNSResolves(dnstakeover.DefaultCheckName) {
+			t.Error("после снятия override прошивка не отвечает через 127.0.0.1:53")
+		}
+		if got := dnstakeover.PortOwner(); got.Kind != dnstakeover.OwnerFirmware {
+			t.Errorf("после снятия override порт 53 держит %q/%q, ожидалась прошивка", got.Kind, got.Kernel)
+		}
+		if !e.rtDNSActionSince(rtDNSReconcileOverrideAction, since) {
+			t.Errorf("в истории действий нет успешной записи %s после старта панели", rtDNSReconcileOverrideAction)
+		}
+	})
 }

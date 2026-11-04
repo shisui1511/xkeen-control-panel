@@ -2,6 +2,7 @@ package dnstakeover
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strings"
 	"time"
@@ -112,7 +113,12 @@ func (s *Service) guardPaused(g *guardState) bool {
 	if !s.d.Layer.Enabled() {
 		return true
 	}
-	if s.d.XKeen.InRestart() || s.d.XKeen.IntentionalStop() {
+	if s.d.XKeen.InRestart() {
+		// Окно штатного перезапуска (Restart, SwitchKernel и перезапуск сторожем).
+		return true
+	}
+	if s.d.XKeen.IntentionalStop() {
+		// Ядро остановлено из панели: его отсутствие на :53 — не падение.
 		return true
 	}
 	now := s.now()
@@ -176,8 +182,45 @@ func (s *Service) guardTick(ctx context.Context, g *guardState) {
 	}
 }
 
-// guardRestore — ветка возврата перехвата (148-23, задача 2); здесь — без действия.
-func (s *Service) guardRestore(context.Context, *guardState) {}
+// guardRestore — ветка возврата перехвата (Claude's Discretion, D-16): перехват
+// желаем и ждёт (waiting), окна нет, активное ядро запущено, конфликта нет —
+// RestoreDesired (проба и включение без окна, 148-22). Не чаще
+// guardRearmMinInterval с прошлой попытки; при причине kernel_stopped — сразу, как
+// только запущенное ядро обнаружено после остановки. Провал — перехват остаётся в
+// waiting, следующая попытка не раньше guardRearmMinInterval.
+func (s *Service) guardRestore(ctx context.Context, g *guardState) {
+	s.mu.Lock()
+	desired, window, reason := s.st.Desired, s.st.Window != nil, s.st.WaitingReason
+	s.mu.Unlock()
+	if !desired || window || reason == "" {
+		return
+	}
+	active := s.d.Kernel.ActiveState()
+	if active.Conflict || !isKernelName(active.Kernel) {
+		return
+	}
+	if !s.kernelRunning(active) {
+		g.sawStopped = true
+		return
+	}
+	now := s.now()
+	immediate := reason == waitingKernelStopped && g.sawStopped
+	if !immediate && !g.lastRestore.IsZero() && now.Sub(g.lastRestore) < guardRearmMinInterval {
+		return
+	}
+	g.lastRestore = now
+	g.sawStopped = false
+	log.Printf("dnstakeover: сторож: возврат перехвата (причина ожидания %s)", reason)
+	if err := s.RestoreDesired(ctx); err != nil {
+		var de *Error
+		if errors.As(err, &de) && (de.Code == CodeBusy || de.Code == CodeKernelStopped) {
+			// Возврат не начинался: следующий шаг сторожа попробует снова.
+			g.lastRestore = time.Time{}
+			return
+		}
+		log.Printf("dnstakeover: сторож: перехват не вернулся: %v", err)
+	}
+}
 
 // guardKernelChanged — активное ядро не то, что ведёт перехват (сменили мимо
 // панели): DNS прошивке операцией службы, перехват не желаем, исход kernel_changed.
