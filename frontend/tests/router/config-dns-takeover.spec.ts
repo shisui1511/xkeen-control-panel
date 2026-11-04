@@ -23,7 +23,9 @@ import {
 // группой из одного узла без слушателя; маршрутизация, DNS-секция ядра и параметры
 // перехвата возвращаются в afterAll. Тесты `dns-params:` (148-17) правят группу-цель и свои
 // локальные зоны в раскрытии «Параметры перехвата» — только черновик, сброс после каждого
-// теста. Флаг слоя включается на время прогона и возвращается прежним.
+// теста. Тесты `dns-outcome:` (148-21) внутри `dns-flow` дают окну подтверждения истечь без
+// пользователя и проверяют строку исхода, уведомление слоя и однократный тост. Флаг слоя
+// включается на время прогона и возвращается прежним.
 
 const layer = layerFlag();
 
@@ -747,6 +749,11 @@ const RE_TOAST_DISABLED = /Перехват DNS выключен\.|DNS intercept
 const RE_PROBE_EXTERNAL = /не разрешилось через группу|did not resolve through the/;
 const RE_ROLLED_BACK =
   /возвращены к состоянию до включения|returned to their state before enabling/;
+const RE_TOAST_TIMEOUT =
+  /перехват не подтверждён за 60 секунд|interception was not confirmed within 60 seconds/;
+const RE_TOAST_OPEN = /^(К карточке|To the card)$/;
+const RE_OUTCOME_TIMEOUT =
+  /(Откачено: нет подтверждения|Rolled back: no confirmation), \d{2}:\d{2}:\d{2}\./;
 
 interface DnsParamsValue {
   group: string;
@@ -885,7 +892,8 @@ const flow = {
   myBefore: [] as string[],
   deadGroup: '',
   deadGroupName: '',
-  failureReady: false
+  failureReady: false,
+  outcomeReady: false
 };
 
 test.describe('dns-flow', () => {
@@ -1116,6 +1124,125 @@ test.describe('dns-flow', () => {
       await guard.assertClean();
     }
   );
+
+  // --- Исход без пользователя (148-21, D-28) ---------------------------------------------
+  //
+  // Включение через API без «Оставить», пользователь всё окно на странице без карточки: через
+  // 60 с бэкенд сам возвращает DNS прошивке. Строка исхода в карточке, уведомление слоя и
+  // однократный тост с переходом к карточке. Исход висит до следующего действия с карточкой
+  // (его снимает включение в тесте сбоя пробы), поэтому проверки доступности идут следом.
+  // Состояния с proxy_dns=on спек не готовит: команд стенда у Playwright нет, а старый
+  // маршрут при включённом слое закрыт (D-34); дрейф проверяет Go-сценарий бэкенда.
+
+  test(
+    'dns-outcome: откат без пользователя — строка в карточке, уведомление и один тост',
+    { tag: CORE_TAG },
+    async ({ page }) => {
+      test.setTimeout(T.save * 4 + 120_000);
+      test.skip(flow.skip !== '', flow.skip);
+      const guard = attachConsoleGuard(page);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await startPage(page);
+      test.skip((await dnsFull(page)).state !== 'off', 'перехват не выключен');
+
+      await page.goto('/#/services', { timeout: T.page, waitUntil: 'domcontentloaded' });
+      await expect(page.getByTestId('dns-takeover-card')).toHaveCount(0);
+      const started = await api(page, 'POST', '/api/configlayer/dns/enable', {});
+      expect(started.status, 'POST /api/configlayer/dns/enable').toBe(200);
+      const reached = await waitDnsState(page, ['window', 'on', 'off']);
+      test.skip(reached !== 'window', `окна подтверждения нет: ${reached}`);
+
+      // Окно истекает без пользователя: DNS у прошивки, исход timeout
+      await waitDnsState(page, ['off'], 120_000);
+      const outcome = await api(page, 'GET', '/api/configlayer/dns');
+      const o = (outcome.data?.outcome ?? {}) as { kind?: string; toast_pending?: boolean };
+      expect(o.kind, 'вид исхода').toBe('timeout');
+
+      // Тост показывается один раз на странице без карточки, с действием «К карточке»
+      const toast = page.locator('.toast').filter({ hasText: RE_TOAST_TIMEOUT });
+      await expect(toast).toHaveCount(1, { timeout: T.save });
+      const open = toast.locator('.toast__action');
+      await expect(open).toHaveText(RE_TOAST_OPEN);
+      await open.click();
+      await expect(page).toHaveURL(/#\/config\/cores/, { timeout: T.page });
+      await expect(page.getByTestId('dns-state')).toBeVisible({ timeout: T.page });
+
+      const note = page.locator('[data-testid="dns-outcome"][data-kind="timeout"]');
+      await expect(note).toBeVisible({ timeout: T.action });
+      await expect(note).toHaveAttribute('role', 'status');
+      await expect(note).toHaveClass(/alert-warning/);
+      await expect(note).toContainText(RE_OUTCOME_TIMEOUT);
+      await expect(page.locator('[data-notice="dns_outcome:timeout"]')).toContainText(
+        RE_OUTCOME_TIMEOUT
+      );
+
+      // Признак «тост показан» хранится на бэкенде: при следующей загрузке тоста нет, строка
+      // и уведомление остаются
+      await expect
+        .poll(
+          async () => {
+            const v = await api(page, 'GET', '/api/configlayer/dns');
+            return (v.data?.outcome as { toast_pending?: boolean } | undefined)?.toast_pending;
+          },
+          { timeout: T.action, intervals: [500] }
+        )
+        .toBe(false);
+      await openCores(page, flow.kernel);
+      await expect(note).toBeVisible({ timeout: T.action });
+      await page.waitForTimeout(2000);
+      await expect(page.locator('.toast').filter({ hasText: RE_TOAST_TIMEOUT })).toHaveCount(0);
+      flow.outcomeReady = true;
+
+      await guard.assertClean();
+    }
+  );
+
+  for (const theme of ['dark', 'light'] as const) {
+    test(
+      `dns-outcome: dns axe: строка исхода и уведомление, тема ${theme}`,
+      { tag: CORE_TAG },
+      async ({ page }) => {
+        test.setTimeout(T.save * 4);
+        test.skip(!flow.outcomeReady, 'исход без пользователя не воспроизведён');
+        const guard = attachConsoleGuard(page);
+        await page.setViewportSize({ width: 1280, height: 900 });
+        await startPage(page);
+
+        const problems: string[] = [];
+        for (const accent of ['indigo', 'steel', 'graphite']) {
+          await page.evaluate(
+            ([th, ac]) => {
+              localStorage.setItem('theme', th);
+              localStorage.setItem('accent', ac);
+            },
+            [theme, accent]
+          );
+          await openCores(page, flow.kernel);
+          await page.reload({ timeout: T.page, waitUntil: 'domcontentloaded' });
+          await expect(page.getByTestId('dns-state')).toBeVisible({ timeout: T.page });
+          await expect(
+            page.locator('[data-testid="dns-outcome"][data-kind="timeout"]')
+          ).toBeVisible({ timeout: T.action });
+
+          const look = await page.evaluate(() => [
+            document.documentElement.getAttribute('data-theme'),
+            document.documentElement.getAttribute('data-accent')
+          ]);
+          if (look[0] !== theme) problems.push(`тема применена ${look[0]}, ожидалась ${theme}`);
+          if (look[1] !== accent) problems.push(`акцент применён ${look[1]}, ожидался ${accent}`);
+          for (const scope of [
+            '[data-testid="dns-takeover-card"]',
+            '[data-testid="config-notices"]'
+          ]) {
+            for (const v of await axeSevere(page, scope)) problems.push(`${accent} axe ${v}`);
+          }
+        }
+        expect(problems, problems.join('\n')).toEqual([]);
+
+        await guard.assertClean();
+      }
+    );
+  }
 
   test(
     'dns-flow: сбой пробы — причина, откат, DNS у прошивки',
