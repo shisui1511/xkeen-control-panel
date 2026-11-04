@@ -107,6 +107,7 @@ func (d *DeviceInfo) applyNdmcVersion(text string) {
 	d.osName = "Keenetic OS"
 	if m := ndmcVendorRe.FindStringSubmatch(text); len(m) == 2 {
 		if vendor := modelUnsafeCharsRe.ReplaceAllString(m[1], ""); vendor != "" {
+			d.vendor = vendor
 			d.osName = vendor + " OS"
 		}
 	}
