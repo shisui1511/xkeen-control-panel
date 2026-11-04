@@ -21,8 +21,9 @@ import {
 // идут только в черновик и сбрасываются после каждого теста. Тесты `dns-flow:` (148-13)
 // включают перехват на активном ядре, проверяют резолв, выключают перехват и ломают пробу
 // группой из одного узла без слушателя; маршрутизация, DNS-секция ядра и параметры
-// перехвата возвращаются в afterAll. Флаг слоя включается на время прогона и возвращается
-// прежним.
+// перехвата возвращаются в afterAll. Тесты `dns-params:` (148-17) правят группу-цель и свои
+// локальные зоны в раскрытии «Параметры перехвата» — только черновик, сброс после каждого
+// теста. Флаг слоя включается на время прогона и возвращается прежним.
 
 const layer = layerFlag();
 
@@ -312,6 +313,425 @@ for (const theme of ['dark', 'light'] as const) {
   });
 }
 
+// --- Параметры перехвата: группа-цель и свои локальные зоны (148-17) ------------------------
+//
+// Группа и зоны — значения черновика (секция dns_takeover): правка в раскрытии «Параметры
+// перехвата» идёт настоящим маршрутом черновика, проверка — по GET /api/configlayer/dns.
+// Перехват не включается, черновик сбрасывается после каждого теста (afterEach).
+
+const RE_DRAFT_DIRTY = /Неприменённых изменений: \d+|Unapplied changes: \d+/;
+const RE_ZONE_FORMAT = /Зона — доменное имя без схемы и пути|A zone is a domain name without/;
+const RE_ZONES_EMPTY = /Своих зон нет\.|No custom zones\./;
+const RE_ZONES_REVERSE = /^(обратные зоны частных сетей|reverse zones of private networks)$/;
+const reDup = (zone: string): RegExp =>
+  new RegExp(`Зона «${zone}» уже есть|Zone “${zone}” is already`.replace(/\./g, '\\.'));
+const reGroupMissing = (name: string): RegExp =>
+  new RegExp(`Группа «${name}» удалена|The “${name}” group was deleted`);
+
+// Блокировки, при которых параметры перехвата не правятся (как у «Выключить перехват»)
+const PARAMS_LOCKS = ['conflict', 'busy', 'window'];
+
+/** Причина пропуска: раскрытия нет (перехват недоступен) или правка заблокирована. */
+async function paramsSkipReason(page: Page): Promise<string> {
+  const v = await dnsFull(page);
+  if (v.state === 'unavailable') return 'перехват недоступен на стенде';
+  if (v.state === 'applying') return 'идёт транзакция перехвата';
+  const locks = v.blocks.filter((b) => PARAMS_LOCKS.includes(b));
+  return locks.length > 0 ? `правка параметров заблокирована: ${locks.join(', ')}` : '';
+}
+
+/** Параметры перехвата в черновике по API службы. */
+async function draftParamsOf(page: Page): Promise<DnsParamsValue> {
+  const p = (await dnsFull(page)).draft_params;
+  return { group: p?.group ?? '', zones: p?.zones ?? [] };
+}
+
+/** Раскрывает «Параметры перехвата» кликом по заголовку; встроенные зоны видны. */
+async function openParams(page: Page): Promise<void> {
+  const details = page.getByTestId('dns-params');
+  await expect(details).toBeVisible({ timeout: T.action });
+  if (!(await details.evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await page.getByTestId('dns-params-summary').click();
+  }
+  await expect(page.getByTestId('dns-zones-builtin')).toBeVisible({ timeout: T.action });
+}
+
+/** Поля своих зон внутри раскрытия. */
+const zoneInputs = (page: Page) =>
+  page.getByTestId('dns-params').locator('input[data-testid^="dns-zone-"]');
+
+/** Добавляет строку зоны кнопкой «Добавить зону» и вписывает имя; возвращает индекс. */
+async function addZoneRow(page: Page, zone: string): Promise<number> {
+  const index = await zoneInputs(page).count();
+  await page.getByTestId('dns-zone-add').click();
+  const input = page.getByTestId(`dns-zone-${index}`);
+  await expect(input).toBeVisible({ timeout: T.action });
+  await expect(input).toBeFocused();
+  await input.fill(zone);
+  return index;
+}
+
+/** Ждёт, пока своя зона появится в черновике (или исчезнет при present=false). */
+async function waitDraftZone(page: Page, zone: string, present = true): Promise<void> {
+  await expect
+    .poll(async () => (await draftParamsOf(page)).zones.includes(zone), {
+      timeout: T.action,
+      intervals: [300, 500, 1000]
+    })
+    .toBe(present);
+}
+
+/** Группы маршрутизации черновика по API (id и имя). */
+async function routingGroups(page: Page): Promise<{ id: string; name: string }[]> {
+  const view = await api(page, 'GET', '/api/configlayer/routing');
+  expect(view.status, 'GET /api/configlayer/routing').toBe(200);
+  return ((view.data?.groups ?? []) as { id?: string; name?: string }[])
+    .map((g) => ({ id: String(g.id ?? ''), name: String(g.name ?? '') }))
+    .filter((g) => g.id !== '');
+}
+
+/** Точный текст элемента (имя зоны с точками). */
+const exactText = (s: string): RegExp =>
+  new RegExp(`^${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+
+/** Стартовая страница и ядро для вкладки; правка параметров невозможна — тест пропускается. */
+async function paramsSetup(page: Page): Promise<Kernel> {
+  await startPage(page);
+  const inst = await installed(page);
+  const kernel = KERNELS.find((k) => inst[k]);
+  test.skip(kernel === undefined, 'ядра не установлены');
+  const reason = await paramsSkipReason(page);
+  test.skip(reason !== '', reason);
+  return kernel as Kernel;
+}
+
+test('dns-params: раскрытие закрыто, встроенные зоны — бейджи, служебный домен с сервера', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const kernel = await paramsSetup(page);
+  const view = await dnsFull(page);
+  await openCores(page, kernel);
+
+  // По умолчанию закрыто: встроенных зон и полей не видно
+  const details = page.getByTestId('dns-params');
+  await expect(details).toBeVisible();
+  expect(await details.evaluate((el) => (el as HTMLDetailsElement).open), 'закрыто').toBe(false);
+  await expect(page.getByTestId('dns-zones-builtin')).toBeHidden();
+  await openParams(page);
+  expect(await details.evaluate((el) => (el as HTMLDetailsElement).open), 'открыто').toBe(true);
+
+  // Встроенные зоны с сервера: обычные — бейдж с именем, обратные — одна общая метка
+  const badges = page.getByTestId('dns-zones-builtin').locator('.badge');
+  const plain = view.zones_builtin.filter((z) => !z.endsWith('.arpa') || z === 'home.arpa');
+  const reverse = view.zones_builtin.some((z) => z.endsWith('.arpa') && z !== 'home.arpa');
+  await expect(badges).toHaveCount(plain.length + (reverse ? 1 : 0));
+  for (const z of plain) {
+    await expect(badges.filter({ hasText: exactText(z) })).toHaveCount(1);
+  }
+  if (reverse) await expect(badges.filter({ hasText: RE_ZONES_REVERSE })).toHaveCount(1);
+  for (const z of ['lan', 'local', 'home.arpa']) {
+    expect(view.zones_builtin, `встроенная зона ${z}`).toContain(z);
+  }
+  // Служебный домен роутера — только из ответа сервера, интерфейс его не придумывает
+  const service = plain.filter((z) => !['lan', 'local', 'home.arpa'].includes(z));
+  for (const z of service) {
+    await expect(badges.filter({ hasText: exactText(z) })).toBeVisible();
+  }
+  // Встроенные не редактируются: в ряду бейджей нет полей и кнопок
+  await expect(page.getByTestId('dns-zones-builtin').locator(':is(input, button, a)')).toHaveCount(
+    0
+  );
+
+  // Группа: стилизованный выбор с подписью, нативного выбора без обёртки нет
+  const select = page.getByTestId('dns-group-select');
+  await expect(select).toBeVisible();
+  const selectId = await select.getAttribute('id');
+  expect(selectId, 'у выбора группы есть id').toBeTruthy();
+  await expect(page.locator(`label[for="${selectId}"]`)).toHaveCount(1);
+  expect(
+    await select.evaluate((el) => el.parentElement?.classList.contains('xcp-select') ?? false),
+    'выбор группы в обёртке Select'
+  ).toBe(true);
+
+  // Повторный клик по заголовку закрывает раскрытие
+  await page.getByTestId('dns-params-summary').click();
+  await expect(page.getByTestId('dns-zones-builtin')).toBeHidden();
+
+  await guard.assertClean();
+});
+
+test('dns-params: своя зона попадает в черновик, DraftBar показывает изменение, сброс возвращает прежнее', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const kernel = await paramsSetup(page);
+  const before = await draftParamsOf(page);
+  const zone = before.zones.includes('office.lan') ? 'xcp-e2e-params.lan' : 'office.lan';
+  await openCores(page, kernel);
+  await openParams(page);
+
+  const rowsBefore = await zoneInputs(page).count();
+  expect(rowsBefore, 'строки своих зон — из черновика').toBe(before.zones.length);
+  const i = await addZoneRow(page, zone);
+  const input = page.getByTestId(`dns-zone-${i}`);
+  await expect(input).toHaveAttribute('spellcheck', 'false');
+  await expect(input).toHaveAttribute('autocomplete', 'off');
+  await expect(page.getByTestId(`dns-zone-remove-${i}`)).toBeVisible();
+
+  // Значение черновика: секция dns_takeover содержит зону, прежние зоны на месте
+  await waitDraftZone(page, zone);
+  const after = await draftParamsOf(page);
+  for (const z of before.zones) expect(after.zones, `прежняя зона ${z}`).toContain(z);
+  expect(after.group, 'группа не меняется правкой зон').toBe(before.group);
+  await expect(page.getByTestId('config-draftbar')).toContainText(RE_DRAFT_DIRTY, {
+    timeout: T.action
+  });
+  await expect(page.getByTestId('dns-params-changed')).toBeVisible({ timeout: T.action });
+  await expect(page.getByTestId(`dns-zone-error-${i}`)).toHaveCount(0);
+  // Раскрытие и ввод переживают обновление вида после записи
+  expect(
+    await page.getByTestId('dns-params').evaluate((el) => (el as HTMLDetailsElement).open),
+    'раскрытие осталось открытым'
+  ).toBe(true);
+  await expect(input).toHaveValue(zone);
+
+  // Сброс черновика возвращает прежние зоны и в API, и в строках раскрытия
+  await resetDraft(page);
+  await waitDraftZone(page, zone, false);
+  await expect(zoneInputs(page)).toHaveCount(before.zones.length, { timeout: T.action });
+  expect((await draftParamsOf(page)).zones).toEqual(before.zones);
+  await expect(page.getByTestId('dns-params-changed')).toHaveCount(0, { timeout: T.action });
+
+  await guard.assertClean();
+});
+
+test('dns-params: неверная зона и повтор встроенной — ошибка у строки, черновик не меняется', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const kernel = await paramsSetup(page);
+  const before = await draftParamsOf(page);
+  const revision = await draftRevision(page);
+  await openCores(page, kernel);
+  await openParams(page);
+
+  // Неверный формат: ошибка под полем, связанная с ним, поле помечено
+  const i = await addZoneRow(page, 'bad zone');
+  const input = page.getByTestId(`dns-zone-${i}`);
+  const err = page.getByTestId(`dns-zone-error-${i}`);
+  await expect(err).toHaveText(RE_ZONE_FORMAT, { timeout: T.action });
+  await expect(err).toHaveAttribute('role', 'alert');
+  await expect(err).toHaveClass(/error-text/);
+  await expect(input).toHaveClass(/input-error/);
+  await expect(input).toHaveAttribute('aria-invalid', 'true');
+  const errId = await err.getAttribute('id');
+  expect(errId, 'у ошибки есть id').toBeTruthy();
+  await expect(input).toHaveAttribute('aria-describedby', errId as string);
+  await input.blur();
+
+  // Повтор встроенной зоны
+  await input.fill('lan');
+  await expect(err).toHaveText(reDup('lan'), { timeout: T.action });
+
+  // Строка с ошибкой среди верных: ошибка только у неё, запись в черновик не идёт
+  const j = await addZoneRow(page, 'xcp-e2e-partial.lan');
+  await expect(page.getByTestId(`dns-zone-error-${j}`)).toHaveCount(0);
+  await expect(page.getByTestId(`dns-zone-${j}`)).not.toHaveClass(/input-error/);
+  await expect(err).toBeVisible();
+  await page.getByTestId(`dns-zone-${j}`).blur();
+  await page.waitForTimeout(1000);
+  expect(await draftRevision(page), 'ревизия черновика не меняется').toBe(revision);
+  expect(await draftParamsOf(page), 'параметры черновика прежние').toEqual(before);
+
+  // Повтор своей зоны: вторая строка с тем же именем — ошибка у неё
+  await input.fill('xcp-e2e-partial.lan');
+  await expect(page.getByTestId(`dns-zone-error-${j}`)).toHaveText(reDup('xcp-e2e-partial.lan'), {
+    timeout: T.action
+  });
+  await expect(err).toHaveCount(0);
+
+  // Ошибочная строка удалена — верная уходит в черновик
+  await page.getByTestId(`dns-zone-remove-${j}`).click();
+  await expect(page.getByTestId('dns-params').locator('.error-text')).toHaveCount(0);
+  await waitDraftZone(page, 'xcp-e2e-partial.lan');
+
+  await guard.assertClean();
+});
+
+test('dns-params: удалить можно и последнюю зону — «Своих зон нет»', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const kernel = await paramsSetup(page);
+  await openCores(page, kernel);
+  await openParams(page);
+
+  await addZoneRow(page, 'xcp-e2e-last.lan');
+  await waitDraftZone(page, 'xcp-e2e-last.lan');
+  await expect(page.getByTestId('dns-zones-empty')).toHaveCount(0);
+
+  // Строки удаляются по одной сверху, пока не останется ни одной
+  for (let n = await zoneInputs(page).count(); n > 0; n--) {
+    await page.getByTestId('dns-zone-remove-0').click();
+    await expect(zoneInputs(page)).toHaveCount(n - 1, { timeout: T.action });
+  }
+  await expect(page.getByTestId('dns-zones-empty')).toHaveText(RE_ZONES_EMPTY);
+  await expect
+    .poll(async () => (await draftParamsOf(page)).zones, { timeout: T.action })
+    .toEqual([]);
+  // Встроенные показаны всегда, «Добавить зону» на месте
+  await expect(page.getByTestId('dns-zones-builtin').locator('.badge').first()).toBeVisible();
+  await expect(page.getByTestId('dns-zone-add')).toBeEnabled();
+
+  await guard.assertClean();
+});
+
+test('dns-params: выбор группы — значение в черновике, удалённая группа — ошибка', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const kernel = await paramsSetup(page);
+  const before = await draftParamsOf(page);
+  const groups = await routingGroups(page);
+  await openCores(page, kernel);
+  await openParams(page);
+  const select = page.getByTestId('dns-group-select');
+
+  if (groups.length === 0) {
+    // Групп нет (маршрутизацию ведёт не панель): выбор неактивен, причина — постоянной строкой
+    await expect(select).toBeDisabled({ timeout: T.action });
+    await expect(page.getByTestId('dns-group-none')).toBeVisible();
+    await expect(page.getByTestId('dns-group-missing')).toHaveCount(0);
+    await guard.assertClean();
+    return;
+  }
+
+  await expect(select).toBeEnabled({ timeout: T.action });
+  // Список выбора — группы маршрутизации черновика
+  for (const g of groups) {
+    await expect(select.locator(`option[value="${g.id}"]`)).toHaveCount(1);
+  }
+  const current = await select.inputValue();
+  const target = groups.find((g) => g.id !== current) ?? groups[0];
+  await select.selectOption(target.id);
+  await expect
+    .poll(async () => (await draftParamsOf(page)).group, { timeout: T.action })
+    .toBe(target.id);
+  await expect(select).toHaveValue(target.id);
+  expect((await draftParamsOf(page)).zones, 'зоны не меняются выбором группы').toEqual(
+    before.zones
+  );
+  if (target.id !== before.group) {
+    await expect(page.getByTestId('config-draftbar')).toContainText(RE_DRAFT_DIRTY, {
+      timeout: T.action
+    });
+  }
+
+  // Группы из черновика нет среди групп маршрутизации — пустое значение и ошибка
+  const missingId = 'xcp-e2e-missing-group';
+  const edit = await api(page, 'POST', '/api/configlayer/draft', {
+    revision: await draftRevision(page),
+    section: 'dns_takeover',
+    value: { group: missingId, zones: before.zones }
+  });
+  expect(edit.status, 'правка черновика').toBe(200);
+  const missing = page.getByTestId('dns-group-missing');
+  await expect(missing).toBeVisible({ timeout: T.action });
+  await expect(missing).toHaveAttribute('role', 'alert');
+  await expect(missing).toHaveText(reGroupMissing(missingId));
+  await expect(select).toHaveValue('');
+  await expect(select).toHaveClass(/input-error/);
+
+  // Сброс черновика возвращает прежнюю группу
+  await resetDraft(page);
+  await expect
+    .poll(async () => (await draftParamsOf(page)).group, { timeout: T.action })
+    .toBe(before.group);
+  await expect(missing).toHaveCount(0, { timeout: T.action });
+  await expect(select).toHaveValue(current, { timeout: T.action });
+
+  await guard.assertClean();
+});
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`dns axe: параметры перехвата раскрыты, тема ${theme}`, async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const kernel = await paramsSetup(page);
+    await openCores(page, kernel);
+    await openParams(page);
+
+    // Своя зона (бейдж «Изменено») и строка с ошибкой попадают в проверку контраста
+    await addZoneRow(page, 'xcp-e2e-axe.lan');
+    await waitDraftZone(page, 'xcp-e2e-axe.lan');
+    await expect(page.getByTestId('dns-params-changed')).toBeVisible({ timeout: T.action });
+    const bad = await addZoneRow(page, 'bad zone');
+    await expect(page.getByTestId(`dns-zone-error-${bad}`)).toBeVisible({ timeout: T.action });
+
+    const problems: string[] = [];
+    const applied = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
+    if (applied !== theme) problems.push(`тема применена ${applied}, ожидалась ${theme}`);
+    for (const v of await axeSevere(page, '[data-testid="dns-params"]')) {
+      problems.push(`axe ${v}`);
+    }
+    expect(problems, problems.join('\n')).toEqual([]);
+
+    await guard.assertClean();
+  });
+}
+
+test('dns-params: 390 px — раскрытие без горизонтальной прокрутки, цели не меньше 44 px', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const kernel = await paramsSetup(page);
+  await openCores(page, kernel);
+  await openParams(page);
+
+  // Длинное имя зоны переносится, а не растягивает карточку
+  const long = 'a-very-long-subdomain-label-for-layout-check.another-long-label.xcp-e2e.lan';
+  const i = await addZoneRow(page, long);
+  await waitDraftZone(page, long);
+  await page.getByTestId(`dns-zone-${i}`).scrollIntoViewIfNeeded();
+
+  const pageScroll = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+  );
+  expect(pageScroll, 'горизонтальная прокрутка страницы').toBeLessThanOrEqual(0);
+  const details = page.getByTestId('dns-params');
+  const box = await details.boundingBox();
+  expect(box, 'раскрытие видно').toBeTruthy();
+  expect((box?.x ?? 0) + (box?.width ?? 0), 'раскрытие в пределах экрана').toBeLessThanOrEqual(390);
+
+  const targets = await details
+    .locator(':is(summary, button, a, input, select)')
+    .evaluateAll((els) =>
+      els
+        .filter((e) => (e as HTMLElement).offsetParent !== null)
+        .map((e) => {
+          const r = e.getBoundingClientRect();
+          return {
+            id: e.getAttribute('data-testid') ?? e.textContent?.trim() ?? e.tagName,
+            right: r.right,
+            height: r.height
+          };
+        })
+    );
+  expect(targets.length, 'цели нажатия найдены').toBeGreaterThan(0);
+  for (const b of targets) {
+    expect(b.right, `${b.id} в пределах экрана`).toBeLessThanOrEqual(390);
+    expect(b.height, `${b.id}: высота цели нажатия`).toBeGreaterThanOrEqual(44);
+  }
+
+  await guard.assertClean();
+});
+
 // --- Включение, проверка резолва, выключение, сбой пробы (148-13) --------------------------
 //
 // Перехват ведёт активное ядро, поэтому тесты помечены тегом ядра. Подготовка настоящими
@@ -339,6 +759,8 @@ interface DnsFull {
   owner: { kind: string; kernel?: string };
   default_name: string;
   zones_builtin: string[];
+  zones: string[];
+  params_changed: boolean;
   group?: { id: string; name: string; missing: boolean };
   failure?: { code: string; rolled_back: boolean };
   last_check?: { ok: boolean; source: string };
@@ -356,6 +778,8 @@ async function dnsFull(page: Page): Promise<DnsFull> {
     owner: d.owner ?? { kind: '' },
     default_name: String(d.default_name ?? ''),
     zones_builtin: d.zones_builtin ?? [],
+    zones: d.zones ?? [],
+    params_changed: d.params_changed === true,
     group: d.group,
     failure: d.failure,
     last_check: d.last_check,
