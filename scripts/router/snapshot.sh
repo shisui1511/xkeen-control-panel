@@ -9,19 +9,21 @@
 #   preflight   GNU tar на месте (выход 5), нет окна cron xkeen -ug (выход 6),
 #               нет снимка незавершённого прогона (выход 7)
 #   snapshot    остановить xcp, снять архив и md5 (до трёх попыток), записать
-#               версии и активное ядро, запустить xcp
-#   restore     вернуть файлы и ядро к снимку со строгой сверкой (выход 4 — не удалось);
-#               если файлы ядра и активное ядро равны снимку, ядро не перезапускается:
-#               возвращаются только файлы панели
-#   verify      сверка с снимком: 0 — равно, 1 — расхождение
+#               версии, активное ядро и флаг прошивки opkg dns-override, запустить xcp
+#   restore     вернуть файлы, ядро и dns-override к снимку со строгой сверкой (выход 4 —
+#               не удалось); если файлы ядра и активное ядро равны снимку, ядро не
+#               перезапускается: возвращаются только файлы панели; dns-override — последним
+#   verify      сверка с снимком (файлы, версии, ядро, dns-override): 0 — равно, 1 — расхождение
 #   classify    только чтение: пути со stdin → «класс <TAB> путь», класс — panel,
 #               core-runtime или core (тот же классификатор, что в restore); для разбора
 #               расхождений на стенде, снимок не нужен и не меняется
 #   cleanup     убрать снимок (после успешной сверки)
-#   status      версии, активное ядро, процессы, есть ли снимок
+#   status      версии, активное ядро, процессы, dns-override, proxy_dns, есть ли снимок
 #
 # Восстановление удаляет файлы только внутри /opt и только из фиксированного списка
-# SNAP_PATHS; всё вне /opt не затрагивается.
+# SNAP_PATHS; всё вне /opt не затрагивается. Исключение — флаг opkg dns-override
+# прошивки: он возвращается командой ndmc в running-config, сохранённая конфигурация
+# прошивки не меняется.
 
 PATH=/opt/sbin:/opt/bin:/opt/usr/sbin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
@@ -286,6 +288,24 @@ fw_override_set() {
     sleep 1
   done
   return 0
+}
+
+# proxy_dns из init-скрипта XKeen — разбор тот же, что у панели (IsDNSProxyingEnabled):
+# строки-комментарии пропускаются, ключ и значение без пробелов и кавычек; on — хотя бы
+# одна строка proxy_dns=on, off — строка есть, но не on, unknown — нет файла или строки
+proxy_dns_now() {
+  [ -f /opt/etc/init.d/S05xkeen ] || { say unknown; return 0; }
+  awk '
+    { l = $0; gsub(/\r/, "", l); sub(/^[ \t]+/, "", l); sub(/[ \t]+$/, "", l) }
+    l ~ /^#/ { next }
+    index(l, "proxy_dns") && index(l, "=") {
+      k = substr(l, 1, index(l, "=") - 1); v = substr(l, index(l, "=") + 1)
+      sub(/[ \t]+$/, "", k); sub(/^[ \t]+/, "", v)
+      gsub(/^["\047]+/, "", v); gsub(/["\047]+$/, "", v)
+      if (k == "proxy_dns") { found = 1; if (v == "on") on = 1 }
+    }
+    END { if (on) print "on"; else if (found) print "off"; else print "unknown" }
+  ' /opt/etc/init.d/S05xkeen
 }
 
 # значение из строки dns_override=… файла снимка firmware.txt
@@ -834,6 +854,8 @@ cmd_cleanup() {
 cmd_status() {
   versions_now
   say "core=$(active_core)"
+  say "dns_override=$(fw_override_now)"
+  say "proxy_dns=$(proxy_dns_now)"
   say "xcp_pid=$(pidof xcp 2>/dev/null)"
   say "time=$(date +%H:%M:%S)"
   if [ -f "$BASE/complete" ]; then
