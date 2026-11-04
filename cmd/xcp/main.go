@@ -28,6 +28,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/cores"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/dnstakeover"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/geodata"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
@@ -873,6 +874,30 @@ func main() {
 			}
 			coresSvc = nil
 		}
+		// Служба перехвата DNS роутера (фаза 148) создаётся только здесь: проверка
+		// параметров перехвата регистрируется до Start слоя. Сервис маршрутизации
+		// может быть nil — тогда имена из direct-правил идут по пути группы. Не
+		// создалась или не подключилась — маршруты /api/configlayer/dns* отвечают 404.
+		dnsSvc, dnsErr := dnstakeover.New(dnstakeover.Deps{
+			DataDir:   cfg.DataDir,
+			Layer:     configLayer,
+			XKeen:     api.XKeenService(),
+			Kernel:    kernelSvc,
+			Applier:   api.KernelApplier(),
+			Lifecycle: api.LifecycleLock(),
+			Device:    services.NewDeviceInfo(),
+			Routing:   routingSvc,
+		})
+		if dnsErr == nil {
+			dnsErr = configLayer.Register(dnsSvc.Hooks())
+		}
+		if dnsErr != nil {
+			log.Printf("Служба перехвата DNS не подключена к слою, маршруты /api/configlayer/dns* отвечают 404: %v", dnsErr)
+			if dnsSvc != nil {
+				dnsSvc.Stop()
+			}
+			dnsSvc = nil
+		}
 		configLayer.Start()
 		api.SetConfigLayer(configLayer)
 		defer stops.run("config-layer", configLayer.Stop)
@@ -914,6 +939,12 @@ func main() {
 			geoSvc.Start()
 			api.SetGeodataService(geoSvc, datIndex)
 			defer stops.run("geodata", geoSvc.Stop)
+		}
+		if dnsSvc != nil {
+			// Как и остальные сервисы: стартует после слоя, останавливается раньше него.
+			dnsSvc.Start()
+			api.SetDNSTakeoverService(dnsSvc)
+			defer stops.run("dns-takeover", dnsSvc.Stop)
 		}
 	}
 	srv.HandleProtected("/api/configlayer/state", api.ConfigLayerState)
@@ -970,6 +1001,8 @@ func main() {
 	srv.HandleProtected("/api/configlayer/cores/reclaim", api.ConfigCoresReclaim)
 	srv.HandleProtected("/api/configlayer/cores/access-log", api.ConfigCoresAccessLog)
 	srv.HandleProtected("/api/configlayer/cores/fill", api.ConfigCoresFill)
+	srv.HandleProtected("/api/configlayer/dns", api.ConfigDNS)
+	srv.HandleProtected("/api/configlayer/dns/", api.ConfigDNSAction)
 	srv.HandleProtected("/api/configlayer/geodata", api.ConfigGeodata)
 	srv.HandleProtected("/api/configlayer/geodata/output", api.ConfigGeodataOutput)
 	srv.HandleProtected("/api/configlayer/geodata/run", api.ConfigGeodataRun)
