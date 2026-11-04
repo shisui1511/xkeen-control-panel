@@ -377,6 +377,9 @@ func (s *Service) View() View {
 		v.Desired = true
 		v.Kernel = s.st.Kernel
 		waiting = s.st.WaitingReason
+		if s.st.DisableFailed {
+			waiting = waitingDisableFailed
+		}
 	}
 	if w := s.st.Window; w != nil && !s.winRolling {
 		v.Window = &Window{Kind: w.Kind, DeadlineMs: w.DeadlineUnixMs, TotalS: windowTotalS}

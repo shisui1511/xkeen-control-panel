@@ -118,7 +118,10 @@ const opFlagOff = "flag_off"
 // proxy_dns получает значение до включения перехвата, и если строка изменилась,
 // запущенное ядро перезапускается KernelApplier.ApplyLocked: XKeen строит прежний
 // перехват с :53 только при старте ядра. DNS прошивке возвращается первым и тогда,
-// когда шаг ядра не удался.
+// когда шаг ядра не удался. Сбой шагов выключения оставляет перехват желаемым
+// (disable_failed, runDisable): флаг остаётся включённым, и повторное выключение
+// флага снова возвращает DNS прошивке и строку proxy_dns, а не считает возврат
+// ненужным.
 func (s *Service) ReleaseForFlagOff(ctx context.Context) error {
 	pl, proxyBefore, needed, err := s.flagOffPlan()
 	if err != nil || !needed {
@@ -133,6 +136,8 @@ func (s *Service) ReleaseForFlagOff(ctx context.Context) error {
 	}
 	s.clearOutcome()
 	s.runDisable(ctx, pl)
+	// Окно закрывается и при сбое: откат окна заменён выключением, а override и
+	// proxy_dns до включения остались в состоянии службы вместе с desired.
 	s.closeFlagOffWindow()
 	if f := s.opFailure(); f != nil {
 		return &Error{Code: f.Code, Params: f.Params, Detail: f.Detail}

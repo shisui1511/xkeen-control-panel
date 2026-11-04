@@ -199,8 +199,10 @@ func (s *Service) guardTick(ctx context.Context, g *guardState) {
 func (s *Service) guardRestore(ctx context.Context, g *guardState) {
 	s.mu.Lock()
 	desired, window, reason := s.st.Desired, s.st.Window != nil, s.st.WaitingReason
+	disableFailed := s.st.DisableFailed
 	s.mu.Unlock()
-	if !desired || window || reason == "" {
+	// Неудавшееся выключение не возвращается: пользователь выключал перехват.
+	if !desired || window || reason == "" || disableFailed {
 		return
 	}
 	active := s.d.Kernel.ActiveState()
@@ -231,8 +233,8 @@ func (s *Service) guardRestore(ctx context.Context, g *guardState) {
 }
 
 // guardStaleListener — живые данные перехвата включены (слушатель :53 в файлах
-// ядра), а DNS роутера по состоянию службы у прошивки: перехват не желаем или
-// ждёт возврата, окна нет. Так бывает, когда на пути
+// ядра), а DNS роутера по состоянию службы у прошивки: перехват не желаем, ждёт
+// возврата или его выключение не удалось, окна нет. Так бывает, когда на пути
 // возврата DNS прошивке override снят, а запись файлов без слушателя не прошла
 // (сбой конвейера, отмена ожидания замков). Повтора у этих путей нет, а проба
 // слушателя здесь не помогает: через 127.0.0.1:53 отвечает прошивка или прежний
@@ -243,7 +245,7 @@ func (s *Service) guardRestore(ctx context.Context, g *guardState) {
 // запись выполнялась, проба слушателя на этом шаге не нужна.
 func (s *Service) guardStaleListener(ctx context.Context, g *guardState, kernel string) bool {
 	s.mu.Lock()
-	stale := s.st.Window == nil && (!s.st.Desired || s.st.WaitingReason != "")
+	stale := s.st.Window == nil && (!s.st.Desired || s.st.WaitingReason != "" || s.st.DisableFailed)
 	s.mu.Unlock()
 	if !stale {
 		return false

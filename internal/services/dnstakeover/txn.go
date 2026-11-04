@@ -434,6 +434,7 @@ func (s *Service) finishEnable(ctx context.Context, pl enablePlan, fail *Failure
 			p.Desired = true
 			p.Kernel = pl.kernel
 			p.KernelWasRunning = true
+			p.DisableFailed = false
 			snap = p.Snapshot
 		}); err != nil {
 			log.Printf("dnstakeover: %v", err)
@@ -680,8 +681,10 @@ type disablePlan struct {
 // синхронно, затем в горутине службы — apply (ядро отпускает :53: запись без
 // слушателя и перезапуск запущенного ядра, остановленное не запускается), release
 // (override к значению до включения из снимка), verify (прошивка отвечает через
-// 127.0.0.1:53). Сбой apply не мешает вернуть DNS прошивке. proxy_dns при
-// выключении не меняется: его возвращают откат (D-33) и выключение флага слоя (D-36).
+// 127.0.0.1:53). Сбой apply не мешает вернуть DNS прошивке. Сбой любого шага
+// оставляет перехват желаемым с причиной ожидания disable_failed: выключение
+// повторяется той же кнопкой. proxy_dns при выключении не меняется: его
+// возвращают откат (D-33) и выключение флага слоя (D-36).
 func (s *Service) Disable(ctx context.Context) error {
 	pl, err := s.disablePreflight(ctx)
 	if err != nil {
@@ -741,6 +744,10 @@ func (s *Service) disablePreflight(ctx context.Context) (disablePlan, error) {
 	return pl, nil
 }
 
+// waitingDisableFailed — причина ожидания: выключение перехвата не удалось, его
+// можно повторить (persisted.DisableFailed).
+const waitingDisableFailed = "disable_failed"
+
 // runDisable — транзакция выключения в горутине службы.
 func (s *Service) runDisable(ctx context.Context, pl disablePlan) {
 	var fail *Failure
@@ -786,14 +793,25 @@ func (s *Service) runDisable(ctx context.Context, pl disablePlan) {
 	}
 
 	if err := s.update(func(p *persisted) {
+		if fail != nil {
+			// Выключение не удалось: перехват остаётся желаемым, иначе повторить его
+			// нельзя (not_enabled), выключение флага слоя сочтёт возврат ненужным, а
+			// override, включённый панелью, не снимет уже никто. override и proxy_dns
+			// до включения сохраняются для повтора.
+			p.Desired = true
+			if pl.kernel != "" {
+				p.Kernel = pl.kernel
+			}
+			p.DisableFailed = true
+			return
+		}
 		p.Desired = false
 		p.Kernel = ""
 		p.KernelWasRunning = false
 		p.WaitingReason = ""
-		if fail == nil {
-			p.Snapshot = nil
-			p.OverrideBefore = false
-		}
+		p.DisableFailed = false
+		p.Snapshot = nil
+		p.OverrideBefore = false
 	}); err != nil {
 		log.Printf("dnstakeover: %v", err)
 	}

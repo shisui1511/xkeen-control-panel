@@ -288,10 +288,10 @@ func (s *Service) finishKernelStop(ctx context.Context, kernel string, w windowS
 // --- запуск ядра и возврат перехвата (D-14, D-16) ----------------------------------
 
 // wantsRestore — перехват желаем, а DNS у прошивки (state waiting): живые данные
-// перехвата выключены, окна нет.
+// перехвата выключены, окна нет, выключение не обрывалось сбоем (disable_failed).
 func (s *Service) wantsRestore() bool {
 	s.mu.Lock()
-	desired, window := s.st.Desired, s.st.Window != nil
+	desired, window := s.st.Desired && !s.st.DisableFailed, s.st.Window != nil
 	s.mu.Unlock()
 	if !desired || window {
 		return false
@@ -539,7 +539,7 @@ func (s *Service) TransferToKernel(ctx context.Context, from, to string) {
 		return
 	}
 	s.mu.Lock()
-	desired := s.st.Desired
+	desired := s.st.Desired && !s.st.DisableFailed
 	s.mu.Unlock()
 	if !desired {
 		return
@@ -581,7 +581,7 @@ func (s *Service) TransferToKernel(ctx context.Context, from, to string) {
 // живые данные перехвата включены (на prev).
 func (s *Service) runTransfer(ctx context.Context, prev string, on bool, to string) {
 	s.mu.Lock()
-	desired, overrideBefore := s.st.Desired, s.st.OverrideBefore
+	desired, overrideBefore := s.st.Desired && !s.st.DisableFailed, s.st.OverrideBefore
 	s.mu.Unlock()
 	if !desired {
 		return
