@@ -33,6 +33,7 @@
     enableDns,
     disableDns,
     saveDnsParams,
+    DEFAULT_DNS_GROUP_NAME,
     dnsActiveKernel,
     dnsErrorText,
     dnsRequestErrorText,
@@ -319,34 +320,31 @@
     return [];
   });
 
-  const selectedGroupId = $derived.by<string>(() => {
+  // Группа-цель черновика: пустой id — группа по умолчанию (D-09, DEFAULT_DNS_GROUP_NAME).
+  // Группа не найдена среди имеющихся — пустое значение и строка ошибки; групп нет вовсе
+  // (маршрутизацию ведёт не панель) — поле неактивно без ошибки, причину называет строка
+  // блокировки 7
+  const DEFAULT_GROUP_NAME = DEFAULT_DNS_GROUP_NAME;
+  const groupTarget = $derived.by<{ id: string; missing: string }>(() => {
+    if (availableGroups.length === 0) return { id: '', missing: '' };
+    // Пока список групп не загружен, «удалена» не показывается: в списке только группа
+    // применённого состояния
+    const loaded = $routingView !== null;
     if (rawDraftGroup !== '') {
-      return availableGroups.some((g) => g.id === rawDraftGroup) ? rawDraftGroup : '';
+      if (availableGroups.some((g) => g.id === rawDraftGroup)) {
+        return { id: rawDraftGroup, missing: '' };
+      }
+      const name = view?.group?.id === rawDraftGroup && view.group.name ? view.group.name : '';
+      return { id: '', missing: loaded ? name || rawDraftGroup : '' };
     }
-    const def =
-      (view?.group?.id ? availableGroups.find((g) => g.id === view.group?.id) : undefined) ??
-      (view?.group?.name ? availableGroups.find((g) => g.name === view.group?.name) : undefined) ??
-      availableGroups[0];
-    if (view?.group?.missing) return '';
-    return def?.id ?? '';
+    const def = availableGroups.find((g) => g.name === DEFAULT_GROUP_NAME);
+    if (def) return { id: def.id, missing: '' };
+    if (!loaded) return { id: availableGroups[0].id, missing: '' };
+    return { id: '', missing: DEFAULT_GROUP_NAME };
   });
-
-  const groupMissing = $derived.by<boolean>(() => {
-    if (rawDraftGroup !== '') {
-      if (availableGroups.some((g) => g.id === rawDraftGroup)) return false;
-      return availableGroups.length > 0 || (view?.group?.missing ?? false);
-    }
-    if (selectedGroupId !== '') return false;
-    return view?.group?.missing ?? false;
-  });
-
-  const missingGroupName = $derived.by<string>(() => {
-    if (rawDraftGroup !== '') {
-      if (view?.group?.id === rawDraftGroup && view.group.name) return view.group.name;
-      return rawDraftGroup;
-    }
-    return view?.group?.name || view?.group?.id || '?';
-  });
+  const selectedGroupId = $derived(groupTarget.id);
+  const groupMissing = $derived(groupTarget.missing !== '');
+  const noGroups = $derived($routingView !== null && availableGroups.length === 0);
 
   const paramsLocked = $derived(
     dnsState === 'applying' || (view?.blocks.some((b) => DISABLE_BLOCKS.has(b)) ?? false)
@@ -377,14 +375,30 @@
     }
   }
 
-  async function updateGroup(nextId: string): Promise<void> {
+  // Правки идут по очереди: вторая правка, сделанная до ответа на первую, строится от
+  // значения первой, а не от устаревшего вида (иначе выбор группы затёр бы новые зоны)
+  let queuedParams: DnsParams | null = null;
+  let saveChain: Promise<void> = Promise.resolve();
+
+  function enqueueParams(patch: Partial<DnsParams>): void {
     if (paramsLocked) return;
-    await saveParams({ group: nextId, zones: draftZones });
+    const base = queuedParams ?? { group: rawDraftGroup, zones: draftZones };
+    const next: DnsParams = { ...base, ...patch };
+    queuedParams = next;
+    saveChain = saveChain
+      .then(() => saveParams(next))
+      .then(() => {
+        if (queuedParams === next) queuedParams = null;
+      });
   }
 
-  async function updateZones(nextZones: string[]): Promise<void> {
-    if (paramsLocked) return;
-    await saveParams({ group: rawDraftGroup, zones: nextZones });
+  function updateGroup(nextId: string): void {
+    if (nextId === '') return;
+    enqueueParams({ group: nextId });
+  }
+
+  function updateZones(nextZones: string[]): void {
+    enqueueParams({ zones: nextZones });
   }
 
   function markFailureSeen(): void {
@@ -678,10 +692,10 @@
               value={selectedGroupId}
               disabled={paramsLocked || availableGroups.length === 0}
               data-testid="dns-group-select"
-              onchange={(e) => void updateGroup(e.currentTarget.value)}
+              onchange={(e) => updateGroup(e.currentTarget.value)}
             >
-              {#if groupMissing || selectedGroupId === ''}
-                <option value="" disabled>{missingGroupName}</option>
+              {#if selectedGroupId === ''}
+                <option value="" disabled></option>
               {/if}
               {#each availableGroups as g (g.id)}
                 <option value={g.id}>{g.name}</option>
@@ -694,7 +708,11 @@
                 role="alert"
                 data-testid="dns-group-missing"
               >
-                {$t('cfg.dns.group_missing', { name: missingGroupName })}
+                {$t('cfg.dns.group_missing', { name: groupTarget.missing })}
+              </p>
+            {:else if noGroups}
+              <p class="warning-text dns-field-error" data-testid="dns-group-none">
+                {$t('cfg.dns.block_group')}
               </p>
             {/if}
             <p class="dns-caption">
@@ -707,7 +725,7 @@
             builtin={view.zones_builtin}
             zones={draftZones}
             readonly={paramsLocked}
-            onchange={(zones) => void updateZones(zones)}
+            onchange={(zones) => updateZones(zones)}
           />
         </div>
       </details>

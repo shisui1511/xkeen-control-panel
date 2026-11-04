@@ -13,7 +13,7 @@
 </script>
 
 <script lang="ts">
-  import { onDestroy, tick } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import { t } from '../../../i18n';
   import Button from '../../Button.svelte';
 
@@ -93,29 +93,38 @@
     return items;
   });
 
-  const builtinSet = $derived(new Set(builtin.map((b) => normalizeZone(b)).filter(Boolean)));
+  // Встроенные имена после нормализации: словарь для проверки повторов
+  const builtinNames = $derived(
+    Object.fromEntries(
+      builtin.map((b) => normalizeZone(b)).flatMap((b) => (b === '' ? [] : [[b, true]]))
+    ) as Record<string, true>
+  );
 
-  // Синхронизация с серверным списком зон, когда он действительно изменился извне
+  // Синхронизация с серверным списком зон, когда он действительно изменился извне (другая
+  // вкладка, сброс черновика, отказ записи). Эффект зависит только от списка с сервера:
+  // собственная запись меняет syncedKey заранее и строки не перезаписывает
   $effect(() => {
-    const cleanProp = zones.map((z) => normalizeZone(z)).filter(Boolean);
-    const propKey = JSON.stringify(cleanProp);
-    if (draftState.syncedKey !== propKey) {
+    const propKey = JSON.stringify(zones.map((z) => normalizeZone(z)).filter(Boolean));
+    const source = zones;
+    untrack(() => {
+      if (draftState.syncedKey === propKey) return;
       draftState.syncedKey = propKey;
       draftState.lastSentKey = propKey;
-      draftState.rows = [...zones];
-    }
+      draftState.rows = [...source];
+    });
   });
 
   const rowErrors = $derived.by<Array<string | null>>(() => {
-    const seen = new Set<string>();
-    return draftState.rows.map((raw) => {
+    // Повторы среди своих строк: первая строка верна, следующие с тем же именем — ошибка
+    const firstIndex: Record<string, number> = {};
+    return draftState.rows.map((raw, i) => {
       const norm = normalizeZone(raw);
       if (norm === '') return null;
       if (!validZone(raw)) return $t('cfg.dns.err_zone_format');
-      if (builtinSet.has(norm) || seen.has(norm)) {
+      firstIndex[norm] ??= i;
+      if (builtinNames[norm] || firstIndex[norm] !== i) {
         return $t('cfg.dns.err_zone_dup', { zone: norm });
       }
-      seen.add(norm);
       return null;
     });
   });
@@ -129,16 +138,18 @@
     }
   }
 
-  onDestroy(clearDebounce);
+  // Отложенная запись не теряется при уходе со страницы или смене вкладки ядра
+  onDestroy(() => {
+    if (debounceTimer !== null) commitIfValid();
+  });
 
+  // Пустые строки (только что добавленные) в черновик не попадают и записи не держат;
+  // строка с ошибкой держит запись целиком, пока ошибка есть
   function commitIfValid(): void {
     clearDebounce();
     if (readonly) return;
-    const rows = draftState.rows;
-    for (let i = 0; i < rows.length; i++) {
-      if (normalizeZone(rows[i]) === '' || rowErrors[i] !== null) return;
-    }
-    const clean = rows.map((r) => normalizeZone(r));
+    if (rowErrors.some((e) => e !== null)) return;
+    const clean = draftState.rows.map((r) => normalizeZone(r)).filter((z) => z !== '');
     const nextKey = JSON.stringify(clean);
     if (nextKey === draftState.lastSentKey) return;
     draftState.lastSentKey = nextKey;
@@ -222,6 +233,9 @@
                 variant="secondary"
                 class="btn-sm"
                 disabled={readonly}
+                ariaLabel={row.trim() !== ''
+                  ? `${$t('cfg.dns.zone_remove')}: ${row.trim()}`
+                  : undefined}
                 data-testid="dns-zone-remove-{i}"
                 onclick={() => removeRow(i)}
               >

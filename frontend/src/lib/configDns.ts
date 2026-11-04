@@ -72,6 +72,13 @@ export interface DnsLegacy {
   proxy_dns: boolean;
 }
 
+/**
+ * Имя группы-цели по умолчанию (D-09): пустой id группы в параметрах означает группу с этим
+ * именем. Совпадает с DefaultDNSGroupName на сервере; менять только вместе. Это значение
+ * данных (имя группы маршрутизации), а не подпись интерфейса.
+ */
+export const DEFAULT_DNS_GROUP_NAME = 'Прокси';
+
 /** Параметры перехвата в черновике: id группы-цели и свои локальные зоны. */
 export interface DnsParams {
   group: string;
