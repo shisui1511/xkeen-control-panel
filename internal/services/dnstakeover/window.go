@@ -290,21 +290,9 @@ func (s *Service) rollbackWindow(ctx context.Context, w windowState, reason stri
 		}
 		s.stepResult(stepApply, len(errs) == 0)
 	case kindApply:
-		s.setStep(stepApply, statusRunning)
-		_, err := s.restoreWindowSnapshot(hctx, kernel, snap, false)
-		note(err)
-		s.stepResult(stepApply, err == nil)
-		s.setStep(stepProbe, statusRunning)
-		res, fail := s.probeTakeover(hctx)
-		s.storeCheck(res)
-		s.stepResult(stepProbe, fail == nil)
-		if fail != nil {
-			probeFail = fail
-			s.setStep(stepRelease, statusRunning)
-			rerr := s.releaseToFirmwareDNS(hctx, kernel, overrideBefore)
-			note(rerr)
-			s.stepResult(stepRelease, rerr == nil)
-		}
+		var applyErrs []string
+		probeFail, applyErrs = s.revertApply(hctx, kernel, snap, overrideBefore)
+		errs = append(errs, applyErrs...)
 	case kindKernelSwitch:
 		s.setStep(stepRelease, statusRunning)
 		if !overrideBefore {

@@ -21,6 +21,18 @@ const (
 	IssueSectionRequired  = "dns_section_required"
 )
 
+// Hooks — подключение службы к слою: регистрируется до configLayer.Start()
+// одним вызовом в main.go. Проверка черновика dns_check и хуки «Применить» при
+// включённом перехвате: снимок до применения (BeforeApply) и проба с окном или
+// откатом после него (AfterApply, apply_window.go).
+func (s *Service) Hooks() configlayer.Hooks {
+	return configlayer.Hooks{
+		Checker:     dnsChecker{serviceDomain: s.cachedServiceDomain},
+		BeforeApply: s.BeforeApply,
+		AfterApply:  s.AfterApply,
+	}
+}
+
 // dnsChecker — проверка параметров перехвата. Диск не читает: служебный домен
 // роутера приходит из кэша службы (serviceDomain), живые данные — из входа.
 type dnsChecker struct {
