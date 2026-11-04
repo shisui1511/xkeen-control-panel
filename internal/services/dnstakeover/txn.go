@@ -15,6 +15,7 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/cores"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 )
 
@@ -415,7 +416,10 @@ func (s *Service) finishEnable(_ context.Context, pl enablePlan, fail *Failure) 
 }
 
 // enableSections — подменяемые секции включения и их слияние в черновик: секция
-// dns_takeover без группы получает группу по умолчанию (D-09).
+// dns_takeover без группы получает группу по умолчанию (D-09), DNS-секция ядра —
+// недостающие умолчания перехвата (D-19, cores.DNSTakeoverDefaults). Черновик
+// закрыт (D-01), поэтому слияние пишет в него те же значения, что в Applied:
+// дописанное видно в форме секции.
 func (s *Service) enableSections(st configlayer.StateView, pl enablePlan) (configlayer.Sections, func(string, json.RawMessage) (json.RawMessage, error), error) {
 	p := appliedParams(st)
 	raw, err := takeoverParams(p, pl.groupID)
@@ -423,15 +427,41 @@ func (s *Service) enableSections(st configlayer.StateView, pl enablePlan) (confi
 		return nil, nil, err
 	}
 	sections := configlayer.Sections{configlayer.SectionDNSTakeover: raw}
-	merge := func(name string, draft json.RawMessage) (json.RawMessage, error) {
-		if name != configlayer.SectionDNSTakeover {
-			return draft, nil
-		}
-		dp, err := configlayer.ParseDNSTakeoverParams(draft)
+	dnsSection := configlayer.CoreSectionName(pl.kernel, "dns")
+	cs := configlayer.DesiredCores(st.Applied)[dnsSection]
+	value, filled, err := cores.DNSTakeoverDefaults(pl.kernel, cs)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(filled) > 0 {
+		cs.Value = value
+		enc, err := configlayer.EncodeCoreSection(cs)
 		if err != nil {
-			return draft, nil
+			return nil, nil, err
 		}
-		return takeoverParams(dp, pl.groupID)
+		sections[dnsSection] = enc
+	}
+	merge := func(name string, draft json.RawMessage) (json.RawMessage, error) {
+		switch name {
+		case configlayer.SectionDNSTakeover:
+			dp, err := configlayer.ParseDNSTakeoverParams(draft)
+			if err != nil {
+				return draft, nil
+			}
+			return takeoverParams(dp, pl.groupID)
+		case dnsSection:
+			dcs, err := configlayer.ParseCoreSection(draft)
+			if err != nil || !dcs.Managed {
+				return draft, nil
+			}
+			v, _, err := cores.DNSTakeoverDefaults(pl.kernel, dcs)
+			if err != nil {
+				return draft, nil
+			}
+			dcs.Value = v
+			return configlayer.EncodeCoreSection(dcs)
+		}
+		return draft, nil
 	}
 	return sections, merge, nil
 }
@@ -477,6 +507,160 @@ func (s *Service) takeSnapshot(pl enablePlan) error {
 		return fmt.Errorf("снимок: %w", err)
 	}
 	s.setStep(stepSnapshot, statusDone)
+	return nil
+}
+
+// --- выключение -------------------------------------------------------------
+
+// disableSteps — шаги выключения в фактическом порядке.
+var disableSteps = []string{stepApply, stepRelease, stepVerify}
+
+// disablePlan — итог предпроверок выключения.
+type disablePlan struct {
+	kernel         string
+	live           bool
+	overrideBefore bool
+}
+
+// Disable — выключение перехвата без окна подтверждения (D-08): предпроверки
+// синхронно, затем в горутине службы — apply (ядро отпускает :53: запись без
+// слушателя и перезапуск запущенного ядра, остановленное не запускается), release
+// (override к значению до включения из снимка), verify (прошивка отвечает через
+// 127.0.0.1:53). Сбой apply не мешает вернуть DNS прошивке. proxy_dns при
+// выключении не меняется: его возвращают откат (D-33) и выключение флага слоя (D-36).
+func (s *Service) Disable(ctx context.Context) error {
+	pl, err := s.disablePreflight(ctx)
+	if err != nil {
+		return err
+	}
+	if !s.beginOp(opDisable, disableSteps) {
+		return errCode(CodeBusy)
+	}
+	ctx = context.WithoutCancel(ctx)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer s.endOp()
+		s.runDisable(ctx, pl)
+	}()
+	return nil
+}
+
+// disablePreflight — предпроверки выключения: перехват включён или желаем
+// (not_enabled), прошивка доступна, нет конфликта ядер, не идёт применение или
+// операция службы.
+func (s *Service) disablePreflight(ctx context.Context) (disablePlan, error) {
+	st, err := s.d.Layer.ReadState()
+	if err != nil {
+		return disablePlan{}, err
+	}
+	live, on := configlayer.ParseDNSTakeoverLive(st.Live)
+	s.mu.Lock()
+	desired, kernel, snap := s.st.Desired, s.st.Kernel, s.st.Snapshot
+	s.mu.Unlock()
+	if !on && !desired {
+		return disablePlan{}, errCode(CodeNotEnabled)
+	}
+	if ok, reason := s.fw.Available(ctx); !ok {
+		return disablePlan{}, &Error{Code: CodeUnavailable, Detail: reason}
+	}
+	if s.d.Kernel.ActiveState().Conflict {
+		return disablePlan{}, errCode(CodeKernelConflict)
+	}
+	layer := s.d.Layer.Snapshot()
+	if layer.Apply.Running || layer.BusyHolder != "" || s.checking.Load() || s.opActive() {
+		return disablePlan{}, errCode(CodeBusy)
+	}
+	pl := disablePlan{kernel: kernel, live: on}
+	if on {
+		pl.kernel = live.Kernel
+	}
+	if snap != nil {
+		pl.overrideBefore = snap.OverrideBefore
+	}
+	return pl, nil
+}
+
+// runDisable — транзакция выключения в горутине службы.
+func (s *Service) runDisable(ctx context.Context, pl disablePlan) {
+	var fail *Failure
+	if pl.live {
+		s.setStep(stepApply, statusRunning)
+		raw, err := json.Marshal(configlayer.DNSTakeoverLive{Enabled: false, Kernel: pl.kernel})
+		var view configlayer.ApplyView
+		if err == nil {
+			view, err = s.d.Layer.RunSectionLive(ctx, configlayer.SectionLiveRun{
+				Trigger: configlayer.TriggerDNSTakeover,
+				Kernel:  pl.kernel,
+				Live:    configlayer.Sections{configlayer.LiveKeyDNSTakeover: raw},
+			})
+		}
+		if fail = takeoverFailure(view, err, nil); fail != nil {
+			s.setStep(stepApply, statusFailed)
+		} else {
+			s.setStep(stepApply, statusDone)
+		}
+	} else {
+		s.setStep(stepApply, statusSkipped)
+	}
+
+	// DNS роутера прошивке — и при сбое apply.
+	s.setStep(stepRelease, statusRunning)
+	hctx, cancel := context.WithTimeout(ctx, hookTimeout)
+	defer cancel()
+	var relErr error
+	if !pl.overrideBefore {
+		if on, err := s.fw.OverrideEnabled(hctx); err != nil || on {
+			relErr = s.fw.SetOverride(hctx, false)
+		}
+	}
+	if relErr != nil {
+		s.setStep(stepRelease, statusFailed)
+		if fail == nil {
+			fail = &Failure{Code: CodeOverrideFailed, Detail: truncateDetail(relErr.Error())}
+		}
+	} else {
+		s.setStep(stepRelease, statusDone)
+	}
+
+	s.setStep(stepVerify, statusRunning)
+	if err := s.verifyFirmwareDNS(hctx); err != nil {
+		s.setStep(stepVerify, statusFailed)
+		if fail == nil {
+			fail = &Failure{Code: CodeOverrideFailed, Detail: truncateDetail(err.Error())}
+		}
+	} else {
+		s.setStep(stepVerify, statusDone)
+	}
+
+	if err := s.update(func(p *persisted) {
+		p.Desired = false
+		p.Kernel = ""
+		p.KernelWasRunning = false
+		if fail == nil {
+			p.Snapshot = nil
+		}
+	}); err != nil {
+		log.Printf("dnstakeover: %v", err)
+	}
+	if fail != nil {
+		s.setFailure(fail)
+	}
+	s.recordHistory(opDisable, pl.kernel, fail)
+}
+
+// verifyFirmwareDNS ждёт до overrideSettle, пока прошивка ответит через
+// 127.0.0.1:53 (служебный домен; домен неизвестен — резолвер прошивки держит :53).
+func (s *Service) verifyFirmwareDNS(ctx context.Context) error {
+	deadline := s.now().Add(overrideSettle)
+	for !s.fw.port53Settled(ctx, false) {
+		if !s.now().Before(deadline) {
+			return fmt.Errorf("прошивка за %v не ответила через %s", overrideSettle, LoopbackDNS)
+		}
+		if err := sleepCtx(ctx, overridePoll); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

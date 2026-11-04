@@ -109,6 +109,8 @@ func (a *API) ConfigDNSAction(w http.ResponseWriter, r *http.Request) {
 		a.configDNSCheck(w, r)
 	case "enable":
 		a.configDNSTxn(w, r, a.dns.Enable)
+	case "disable":
+		a.configDNSTxn(w, r, a.dns.Disable)
 	default:
 		JSONErrorCode(w, http.StatusNotFound, "not_found", a.t(r, "error.not_found"))
 	}

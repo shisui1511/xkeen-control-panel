@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -318,16 +319,196 @@ func (e *rtSrc) rtDNSExpectOn(v map[string]any, kernel string) {
 	}
 }
 
-// Трасса: подготовка → POST enable {started} → state on → :53 у активного ядра,
-// внешнее имя отвечает через 127.0.0.1:53, проба auto по двум группам, слушатель
-// в файлах ядра. Метка ядра: перехват ведёт активное ядро.
+// rtDNSUserServer — сервер «значения пользователя» в подтесте умолчаний: DoH по
+// IP, не совпадающий с умолчаниями D-17.
+const rtDNSUserServer = "https://9.9.9.9/dns-query"
+
+// rtDNSDoH и rtDNSBootstrap — умолчания перехвата D-17/D-18 (cores.DNSTakeoverDefaults).
+var (
+	rtDNSDoH       = []string{"https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query"}
+	rtDNSBootstrap = []string{"1.1.1.1", "8.8.8.8"}
+)
+
+// rtDNSServersKey — ключ списка серверов DNS-секции ядра.
+func rtDNSServersKey(kernel string) string {
+	if kernel == configlayer.KernelMihomo {
+		return "nameserver"
+	}
+	return "servers"
+}
+
+// rtDNSSectionForm — форма DNS-секции ядра из вида секций.
+func (e *rtSrc) rtDNSSectionForm(kernel string) (form map[string]any, advanced string) {
+	e.t.Helper()
+	sec := rtCoresSection(e.rtCoresView(kernel), "dns")
+	if sec == nil {
+		e.t.Fatalf("в виде %s нет секции dns", kernel)
+	}
+	form, _ = sec["form"].(map[string]any)
+	if form == nil {
+		form = map[string]any{}
+	}
+	advanced, _ = sec["advanced"].(string)
+	return form, advanced
+}
+
+// rtDNSSetSection готовит DNS-секцию ядра к подтесту умолчаний и применяет:
+// preset — значения пресета (серверы — локальные адреса пресета), user — свой
+// сервер в списке серверов, остальные поля DNS через прокси убраны.
+func (e *rtSrc) rtDNSSetSection(kernel, run string) {
+	e.t.Helper()
+	switch run {
+	case "preset":
+		r := e.rtCoresPost("/preset", map[string]any{"kernel": kernel, "section": "dns"})
+		if r.Status != http.StatusOK {
+			e.t.Fatalf("preset dns (%s): %d %s", kernel, r.Status, r.Code)
+		}
+	case "user":
+		form, advanced := e.rtDNSSectionForm(kernel)
+		form[rtDNSServersKey(kernel)] = []string{rtDNSUserServer}
+		delete(form, "proxy-server-nameserver")
+		delete(form, "default-nameserver")
+		r := e.rtCoresPost("/save", map[string]any{"kernel": kernel, "section": "dns", "form": form, "advanced": advanced})
+		if r.Status != http.StatusOK {
+			e.t.Fatalf("save dns (%s): %d %s", kernel, r.Status, r.Code)
+		}
+	}
+	if e.rtRtDraftChanges() > 0 {
+		e.rtRtApplyOK("DNS-секция перед включением (" + run + ")")
+	}
+}
+
+// rtDNSExpectDefaults сверяет форму DNS-секции после включения: preset —
+// серверы D-17 (у Mihomo ещё proxy-server-nameserver, default-nameserver и
+// enhanced-mode redir-host); user — свой сервер не изменён, а пустой
+// proxy-server-nameserver Mihomo дополнен. Черновик закрыт: дописанное слито в него.
+func (e *rtSrc) rtDNSExpectDefaults(kernel, run string) {
+	e.t.Helper()
+	form, _ := e.rtDNSSectionForm(kernel)
+	servers := rtDNSMihomoStrings(form[rtDNSServersKey(kernel)])
+	switch run {
+	case "preset":
+		if !slices.Equal(servers, rtDNSDoH) {
+			e.t.Errorf("пресет: серверы после включения %v, ожидались умолчания %v", servers, rtDNSDoH)
+		}
+		if kernel == configlayer.KernelMihomo {
+			if got := rtDNSMihomoStrings(form["default-nameserver"]); !slices.Equal(got, rtDNSBootstrap) {
+				e.t.Errorf("пресет: default-nameserver %v, ожидалось %v", got, rtDNSBootstrap)
+			}
+			if got, _ := form["enhanced-mode"].(string); got != "redir-host" {
+				e.t.Errorf("пресет: enhanced-mode %q, ожидалось redir-host", got)
+			}
+		}
+	case "user":
+		if !slices.Equal(servers, []string{rtDNSUserServer}) {
+			e.t.Errorf("значение пользователя изменено включением: серверы %v", servers)
+		}
+	}
+	if kernel == configlayer.KernelMihomo {
+		if got := rtDNSMihomoStrings(form["proxy-server-nameserver"]); !slices.Equal(got, rtDNSDoH) {
+			e.t.Errorf("%s: proxy-server-nameserver %v, ожидалось %v", run, got, rtDNSDoH)
+		}
+	}
+	if n := e.rtRtDraftChanges(); n != 0 {
+		e.t.Errorf("%s: после включения в черновике %d изменений, ожидался закрытый черновик", run, n)
+	}
+}
+
+// Трасса: подготовка → умолчания секции DNS (пресет и значение пользователя:
+// включение → форма → выключение) → POST enable {started} → state on → :53 у
+// активного ядра, внешнее имя отвечает через 127.0.0.1:53, проба auto по двум
+// группам, слушатель в файлах ядра → выключение: :53 у прошивки, слушателя нет,
+// desired=false. Метка ядра: перехват ведёт активное ядро.
 func TestRouterDNSEnableDisable(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)
 	rtDNSPrepare(t, e, kernel)
 
+	t.Run("defaults", func(t *testing.T) {
+		for _, run := range []string{"preset", "user"} {
+			t.Run(run, func(t *testing.T) {
+				c := e.with(t)
+				c.rtDNSSetSection(kernel, run)
+				c.rtDNSEnableOK()
+				t.Cleanup(func() { c.rtDNSEnsureOff() })
+				c.rtDNSExpectDefaults(kernel, run)
+			})
+		}
+	})
+
 	v := e.rtDNSEnableOK()
 	t.Cleanup(func() { e.with(t).rtDNSEnsureOff() })
 	e.rtDNSExpectOn(v, kernel)
+
+	t.Run("disable", func(t *testing.T) {
+		c := e.with(t)
+		c.rtDNSStart(rtDNSDisable)
+		off := c.rtDNSWaitDone()
+		if st, _ := off["state"].(string); st != "off" {
+			code, detail := rtDNSFailure(off)
+			t.Fatalf("после выключения state %q, ожидалось off: сбой %q %.300s", st, code, detail)
+		}
+		if desired, _ := off["desired"].(bool); desired {
+			t.Error("после выключения desired=true")
+		}
+		if got := dnstakeover.PortOwner(); got.Kind != dnstakeover.OwnerFirmware {
+			t.Errorf("после выключения порт 53 держит %q/%q, ожидалась прошивка", got.Kind, got.Kernel)
+		}
+		if rtDNSKernelHasListener(kernel) {
+			t.Errorf("после выключения в файлах %s остался слушатель :53", kernel)
+		}
+		if !rtDNSResolves(dnstakeover.DefaultCheckName) {
+			t.Error("после выключения прошивка не отвечает через 127.0.0.1:53")
+		}
+	})
+}
+
+// rtDNSServiceControl — POST /api/service/control?action=<действие>; ответ не 200 — провал.
+func (e *rtSrc) rtDNSServiceControl(action string) {
+	e.t.Helper()
+	r := e.callSlow(http.MethodPost, "/api/service/control?action="+action, nil)
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("service/control %s: %d %s", action, r.Status, r.Code)
+	}
+}
+
+// Трасса: открытый черновик → 409 draft_open; ядро остановлено через API службы
+// → 409 kernel_stopped, и ядро после отказа не запущено (D-04). Ядро
+// возвращается запущенным в t.Cleanup. Метка ядра: ядро останавливается.
+func TestRouterDNSEnableRefused(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	kernel := tg.Core
+	e := rtNewSrc(t)
+	rtDNSPrepare(t, e, kernel)
+
+	t.Run("draft_open", func(t *testing.T) {
+		c := e.with(t)
+		c.rtDNSDraft(map[string]any{"group": "", "zones": []string{"xcp-rt.test"}})
+		t.Cleanup(func() { c.resetDraft() })
+		r := c.rtDNSPost(rtDNSEnable)
+		if r.Status != http.StatusConflict || r.Code != "draft_open" {
+			t.Errorf("включение при открытом черновике: %d %q, ожидалось 409 draft_open", r.Status, r.Code)
+		}
+	})
+
+	t.Run("kernel_stopped", func(t *testing.T) {
+		c := e.with(t)
+		c.rtDNSServiceControl("stop")
+		t.Cleanup(func() {
+			c.rtDNSServiceControl("start")
+			rtCoresLiveWaitStatus(t)
+		})
+		r := c.rtDNSPost(rtDNSEnable)
+		if r.Status != http.StatusConflict || r.Code != "kernel_stopped" {
+			t.Errorf("включение при остановленном ядре: %d %q, ожидалось 409 kernel_stopped", r.Status, r.Code)
+		}
+		time.Sleep(5 * time.Second)
+		if pids, _ := rtRstKernelPIDs(kernel); len(pids) != 0 {
+			t.Errorf("после отказа kernel_stopped процессов %s: %d, ядро не должно запускаться", kernel, len(pids))
+		}
+		if v := c.rtDNSView(); v["desired"] == true {
+			t.Error("после отказа kernel_stopped desired=true")
+		}
+	})
 }
