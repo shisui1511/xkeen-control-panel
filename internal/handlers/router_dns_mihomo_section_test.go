@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
-	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
 
 // DNSF-01: поля DNS через прокси формы секции DNS Mihomo (listen,
@@ -85,16 +84,16 @@ func TestRouterDNSMihomoSection(t *testing.T) {
 	if owner, _ := sec["owner"].(string); owner != "panel" {
 		t.Fatalf("секция dns после взятия маршрутизации: владелец %q, ожидался panel", owner)
 	}
-	origValue := sec["value"]
-	// Очистка до отпускания маршрутизации (t.Cleanup — в обратном порядке): прежнее
-	// значение секции уходит в черновик, «Применить» отпускания его применяет.
+	origForm, _ := sec["form"].(map[string]any)
+	origAdvanced, _ := sec["advanced"].(string)
+	// Очистка до отпускания маршрутизации (t.Cleanup — в обратном порядке): прежние
+	// форма и «Дополнительно» секции возвращаются тем же маршрутом, каким менялись, и
+	// уходят в черновик: «Применить» отпускания их применяет.
 	t.Cleanup(func() {
 		c := e.with(t)
 		c.rtRstIdle()
-		r := c.call(http.MethodPost, "/api/configlayer/draft", map[string]any{
-			"revision": c.revision(),
-			"section":  configlayer.CoreSectionName(configlayer.KernelMihomo, "dns"),
-			"value":    origValue,
+		r := c.rtCoresPost("/save", map[string]any{
+			"kernel": "mihomo", "section": "dns", "form": origForm, "advanced": origAdvanced,
 		})
 		if r.Status != http.StatusOK {
 			t.Errorf("очистка: возврат секции dns Mihomo: %d %s", r.Status, r.Code)
