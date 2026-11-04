@@ -857,7 +857,7 @@ func (e *rtSrc) rtDNSDeadGroup(t *testing.T) {
 	save := e.call(http.MethodPost, rtRoutingBase+"/groups/save", map[string]any{
 		"revision": e.rtRtRevision(),
 		"group": map[string]any{
-			"name": "DNS мёртвая", "mode": "manual",
+			"name": "DNS-мёртвая", "mode": "manual",
 			"sources": map[string]any{"all": false, "ids": []string{myID}},
 			"members": []map[string]string{},
 		},
@@ -924,6 +924,9 @@ func TestRouterDNSTxnRollback(t *testing.T) {
 		c := e.with(t)
 		c.rtDNSRequireClosedDraft()
 		overrideBefore := rtDNSOverrideOn(t)
+		// Гасится только процесс, поднятый перезапуском: прежний, убитый до шага
+		// перезапуска, конвейер считает остановленным ядром (FND-05) и не поднимает.
+		old, _ := rtRstKernelPIDs(kernel)
 		killed := rtDNSKillWhile(t, func() []int {
 			if !rtDNSKernelHasListener(kernel) {
 				return nil
@@ -932,7 +935,7 @@ func TestRouterDNSTxnRollback(t *testing.T) {
 			if !rtDNSKernelHasListener(kernel) {
 				return nil
 			}
-			return pids
+			return slices.DeleteFunc(pids, func(pid int) bool { return slices.Contains(old, pid) })
 		})
 		t.Cleanup(func() { c.rtDNSEnsureOff() })
 		c.rtDNSEnableFails("restart_failed")
