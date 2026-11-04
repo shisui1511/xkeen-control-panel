@@ -9,16 +9,17 @@
     SectionView
   } from '../../../../lib/configCores';
   import AdvancedBlock from '../AdvancedBlock.svelte';
-  import MihomoField from '../MihomoField.svelte';
+  import MihomoField, { describedBy } from '../MihomoField.svelte';
   import MihomoToggle from '../MihomoToggle.svelte';
   import PinnedValues from '../PinnedValues.svelte';
   import { KERNEL_DEFAULTS, commitSection, fieldTestId, getPath, setPath } from '../sectionForm';
 
-  // Базовая форма DNS Mihomo (D-09): «Включить DNS», режим, IPv6 и два списка серверов
-  // (nameserver, default-nameserver). Поля DNS через прокси (fake-ip-range,
-  // proxy-server-nameserver, nameserver-policy, listen) форма не рисует: они остаются в
-  // «Дополнительно», Phase 148 расширит эту же форму. Чужая секция (readonly) показывает
-  // действующие значения полями только для чтения.
+  // Форма DNS Mihomo (D-09, DNSF-01): «Включить DNS», режим, IPv6, адрес слушателя,
+  // списки серверов nameserver, default-nameserver и proxy-server-nameserver, диапазон
+  // fake-ip и исключения fake-ip-filter. nameserver-policy полем формы не стал: свои записи
+  // правятся в «Дополнительно», а то, что панель пишет сама при перехвате DNS, показывает
+  // «Закреплено». Чужая секция (readonly) показывает действующие значения полями только
+  // для чтения.
   let {
     kernel,
     section,
@@ -36,11 +37,26 @@
   const defaults = KERNEL_DEFAULTS['mihomo.dns'] ?? {};
   const MODES = ['fake-ip', 'redir-host', 'normal'];
 
+  const SERVER = { add: 'cfg.sec.f.add_server', remove: 'cfg.sec.f.remove_server' } as const;
   const LISTS = [
-    { path: 'nameserver', label: 'cfg.sec.f.nameserver' },
-    { path: 'default-nameserver', label: 'cfg.sec.f.default_nameserver' }
+    { path: 'nameserver', label: 'cfg.sec.f.nameserver', hint: '', ...SERVER },
+    { path: 'default-nameserver', label: 'cfg.sec.f.default_nameserver', hint: '', ...SERVER },
+    {
+      path: 'proxy-server-nameserver',
+      label: 'cfg.sec.f.proxy_server_ns',
+      hint: 'cfg.sec.f.proxy_server_ns_hint',
+      ...SERVER
+    },
+    {
+      path: 'fake-ip-filter',
+      label: 'cfg.sec.f.fake_ip_filter',
+      hint: 'cfg.sec.f.fake_ip_filter_hint',
+      add: 'cfg.sec.f.add_domain',
+      remove: 'cfg.sec.f.remove_domain'
+    }
   ] as const;
-  type ListPath = (typeof LISTS)[number]['path'];
+  type ListSpec = (typeof LISTS)[number];
+  type ListPath = ListSpec['path'];
 
   function formObject(): Record<string, unknown> {
     return section.form !== null && typeof section.form === 'object' && !Array.isArray(section.form)
@@ -58,9 +74,13 @@
   let local = $derived<Record<string, unknown>>(formObject());
   let lists = $derived<Record<ListPath, string[]>>({
     nameserver: stringsOf(formObject(), 'nameserver'),
-    'default-nameserver': stringsOf(formObject(), 'default-nameserver')
+    'default-nameserver': stringsOf(formObject(), 'default-nameserver'),
+    'proxy-server-nameserver': stringsOf(formObject(), 'proxy-server-nameserver'),
+    'fake-ip-filter': stringsOf(formObject(), 'fake-ip-filter')
   });
   let issues = $state<KeyIssue[]>([]);
+  // Неверный ввод текстового поля: текст остаётся в поле, в черновик не уходит
+  let bad = $state<Record<string, string>>({});
 
   function str(path: string): string {
     const v = getPath(local, path);
@@ -109,6 +129,75 @@
     setRows(path, rows, false);
     await tick();
     document.getElementById(`${uid}-${path}-${rows.length - 1}`)?.focus();
+  }
+
+  /** Подсказка текстового поля: постоянная подпись и «по умолчанию: …», пока ключа нет. */
+  function textHint(path: string, fixed: string): string {
+    return [fixed === '' ? '' : $t(fixed), hintOf(path)].filter((s) => s !== '').join(' ');
+  }
+
+  /** Порт адреса: целое 1–65535 без знака и ведущих нулей. */
+  function validPort(port: string): boolean {
+    if (!/^[1-9][0-9]{0,4}$/.test(port)) return false;
+    return Number(port) <= 65535;
+  }
+
+  /** Адрес слушателя: host:port, [IPv6]:port или :port. */
+  function validListen(text: string): boolean {
+    const m = /^\[([0-9A-Fa-f:.]+)\]:([^:]+)$/.exec(text);
+    if (m) return validIPv6(m[1]) && validPort(m[2]);
+    const at = text.lastIndexOf(':');
+    if (at < 0) return false;
+    const host = text.slice(0, at);
+    return /^[A-Za-z0-9._-]*$/.test(host) && validPort(text.slice(at + 1));
+  }
+
+  function validIPv4(addr: string): boolean {
+    const parts = addr.split('.');
+    return (
+      parts.length === 4 && parts.every((p) => /^(0|[1-9][0-9]{0,2})$/.test(p) && Number(p) <= 255)
+    );
+  }
+
+  function validIPv6(addr: string): boolean {
+    const halves = addr.split('::');
+    if (halves.length > 2) return false;
+    const groups = halves.flatMap((h) => (h === '' ? [] : h.split(':')));
+    const v4 = groups.length > 0 && groups[groups.length - 1].includes('.');
+    if (v4 && !validIPv4(groups.pop() ?? '')) return false;
+    if (!groups.every((g) => /^[0-9A-Fa-f]{1,4}$/.test(g))) return false;
+    const size = groups.length + (v4 ? 2 : 0);
+    return halves.length === 2 ? size < 8 : size === 8;
+  }
+
+  /** Диапазон: адрес IPv4 или IPv6 с маской сети. */
+  function validCIDR(text: string): boolean {
+    const m = /^([^/]+)\/(0|[1-9][0-9]{0,2})$/.exec(text);
+    if (!m) return false;
+    const bits = Number(m[2]);
+    if (m[1].includes(':')) return validIPv6(m[1]) && bits <= 128;
+    return validIPv4(m[1]) && bits <= 32;
+  }
+
+  const CHECKS: Record<string, { valid: (text: string) => boolean; error: string }> = {
+    listen: { valid: validListen, error: 'cfg.sec.err_listen' },
+    'fake-ip-range': { valid: validCIDR, error: 'cfg.sec.err_cidr' }
+  };
+
+  function errorOf(path: string): string {
+    const check = CHECKS[path];
+    return bad[path] === undefined || check === undefined ? '' : $t(check.error);
+  }
+
+  function setText(path: string, raw: string): void {
+    const text = raw.trim();
+    const check = CHECKS[path];
+    if (text !== '' && check !== undefined && !check.valid(text)) {
+      bad = { ...bad, [path]: raw };
+      return;
+    }
+    bad = Object.fromEntries(Object.entries(bad).filter(([key]) => key !== path));
+    setField(path, text === '' ? undefined : text);
   }
 
   async function saveAdvanced(text: string): Promise<void> {
@@ -165,65 +254,12 @@
       onchange={(v) => setField('ipv6', v)}
     />
 
-    {#each LISTS as list (list.path)}
-      {@const rows = lists[list.path]}
-      <MihomoField id="{uid}-{list.path}" label={$t(list.label)} group>
-        {#if rows.length === 0 && !readonly}
-          <span class="mdf-empty" data-testid="section-list-empty-mihomo-{ID}-{list.path}">
-            {$t('cfg.sec.list_empty')}
-          </span>
-        {/if}
-        {#each rows as row, i (i)}
-          <div class="mdf-row">
-            <input
-              id="{uid}-{list.path}-{i}"
-              class="input mdf-mono"
-              type="text"
-              spellcheck="false"
-              autocomplete="off"
-              {readonly}
-              aria-readonly={readonly ? 'true' : undefined}
-              aria-label="{$t(list.label)} {i + 1}"
-              data-testid="{fieldTestId(kernel, ID, list.path)}-{i}"
-              value={row}
-              onchange={(e) =>
-                setRows(
-                  list.path,
-                  rows.map((v, j) => (j === i ? e.currentTarget.value : v)),
-                  true
-                )}
-            />
-            {#if !readonly}
-              <button
-                type="button"
-                class="btn btn-secondary btn-sm mdf-btn"
-                data-testid="section-remove-mihomo-{ID}-{list.path}-{i}"
-                onclick={() =>
-                  setRows(
-                    list.path,
-                    rows.filter((_, j) => j !== i),
-                    true
-                  )}
-              >
-                {$t('cfg.sec.f.remove_server')}
-              </button>
-            {/if}
-          </div>
-        {/each}
-        {#if !readonly}
-          <div>
-            <button
-              type="button"
-              class="btn btn-secondary btn-sm mdf-btn"
-              data-testid="section-add-mihomo-{ID}-{list.path}"
-              onclick={() => addRow(list.path)}
-            >
-              {$t('cfg.sec.f.add_server')}
-            </button>
-          </div>
-        {/if}
-      </MihomoField>
-    {/each}
+    {@render textField('listen', 'cfg.sec.f.listen', '')}
+    {@render listField(LISTS[0])}
+    {@render listField(LISTS[1])}
+    {@render listField(LISTS[2])}
+    {@render textField('fake-ip-range', 'cfg.sec.f.fake_ip_range', 'cfg.sec.f.fake_ip_range_hint')}
+    {@render listField(LISTS[3])}
   </div>
 
   <PinnedValues {kernel} id={ID} items={section.pinned} />
@@ -236,6 +272,101 @@
     oncommit={saveAdvanced}
   />
 </div>
+
+{#snippet textField(path: string, label: string, fixed: string)}
+  {@const id = `${uid}-${path}`}
+  {@const hint = textHint(path, fixed)}
+  {@const error = errorOf(path)}
+  <MihomoField {id} label={$t(label)} {hint}>
+    <input
+      {id}
+      class="input mdf-mono"
+      class:input-error={error !== ''}
+      type="text"
+      spellcheck="false"
+      autocomplete="off"
+      {readonly}
+      aria-readonly={readonly ? 'true' : undefined}
+      aria-invalid={error !== '' ? 'true' : 'false'}
+      aria-describedby={describedBy(id, error, hint)}
+      data-testid={fieldTestId(kernel, ID, path)}
+      value={bad[path] ?? str(path)}
+      onchange={(e) => setText(path, e.currentTarget.value)}
+    />
+    {#if error !== ''}
+      <p
+        class="error-text mdf-error"
+        id="{id}-error"
+        role="alert"
+        data-testid="section-error-mihomo-{ID}-{path}"
+      >
+        {error}
+      </p>
+    {/if}
+  </MihomoField>
+{/snippet}
+
+{#snippet listField(list: ListSpec)}
+  {@const rows = lists[list.path]}
+  {@const hint = list.hint === '' ? '' : $t(list.hint)}
+  <MihomoField id="{uid}-{list.path}" label={$t(list.label)} {hint} group>
+    {#if rows.length === 0 && !readonly}
+      <span class="mdf-empty" data-testid="section-list-empty-mihomo-{ID}-{list.path}">
+        {$t('cfg.sec.list_empty')}
+      </span>
+    {/if}
+    {#each rows as row, i (i)}
+      <div class="mdf-row">
+        <input
+          id="{uid}-{list.path}-{i}"
+          class="input mdf-mono"
+          type="text"
+          spellcheck="false"
+          autocomplete="off"
+          {readonly}
+          aria-readonly={readonly ? 'true' : undefined}
+          aria-label="{$t(list.label)} {i + 1}"
+          aria-describedby={hint === '' ? undefined : `${uid}-${list.path}-hint`}
+          data-testid="{fieldTestId(kernel, ID, list.path)}-{i}"
+          value={row}
+          onchange={(e) =>
+            setRows(
+              list.path,
+              rows.map((v, j) => (j === i ? e.currentTarget.value : v)),
+              true
+            )}
+        />
+        {#if !readonly}
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm mdf-btn"
+            data-testid="section-remove-mihomo-{ID}-{list.path}-{i}"
+            onclick={() =>
+              setRows(
+                list.path,
+                rows.filter((_, j) => j !== i),
+                true
+              )}
+          >
+            {$t(list.remove)}
+          </button>
+        {/if}
+      </div>
+    {/each}
+    {#if !readonly}
+      <div>
+        <button
+          type="button"
+          class="btn btn-secondary btn-sm mdf-btn"
+          data-testid="section-add-mihomo-{ID}-{list.path}"
+          onclick={() => addRow(list.path)}
+        >
+          {$t(list.add)}
+        </button>
+      </div>
+    {/if}
+  </MihomoField>
+{/snippet}
 
 <style>
   .mdf {
@@ -261,10 +392,17 @@
 
   .mdf-row .input {
     flex: 1 1 12rem;
+    min-width: 0;
   }
 
   .mdf-mono {
     font-family: var(--font-family-mono);
+    overflow-wrap: anywhere;
+  }
+
+  .mdf-error {
+    margin: 0;
+    min-width: 0;
     overflow-wrap: anywhere;
   }
 

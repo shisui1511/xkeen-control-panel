@@ -4394,6 +4394,8 @@
   "cfg.sec.f.fake_ip_range_hint": "Applies in fake-ip mode.",
   "cfg.sec.f.fake_ip_filter": "fake-ip exceptions",
   "cfg.sec.f.fake_ip_filter_hint": "Domains from the list get real addresses. While interception is on, local zones are added here automatically.",
+  "cfg.sec.f.add_domain": "Add domain",
+  "cfg.sec.f.remove_domain": "Remove domain",
   "cfg.sec.f.servers_via_group": "While interception is on, all servers go through the “{group}” group.",
   "cfg.sec.fake_ip_warn": "In fake-ip mode clients get service addresses from the {range} range. Devices outside the XKeen policy and services that reach such addresses directly may lose connectivity.",
   "cfg.sec.err_listen": "The address is a host and a port, for example 0.0.0.0:53.",

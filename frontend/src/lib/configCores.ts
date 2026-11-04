@@ -171,7 +171,17 @@ export const FORM_KEYS: Record<string, readonly string[]> = {
     'log-level',
     'ipv6'
   ],
-  'mihomo.dns': ['enable', 'enhanced-mode', 'ipv6', 'nameserver', 'default-nameserver'],
+  'mihomo.dns': [
+    'enable',
+    'enhanced-mode',
+    'ipv6',
+    'listen',
+    'nameserver',
+    'default-nameserver',
+    'proxy-server-nameserver',
+    'fake-ip-range',
+    'fake-ip-filter'
+  ],
   'mihomo.inbounds': [
     'listeners[].name',
     'listeners[].type',

@@ -44,7 +44,10 @@ type MihomoSpec struct {
 // доступно через «сырой» блок. other формы не имеет.
 var MihomoFormKeys = map[string][]string{
 	mihomoMain: {"mixed-port", "port", "socks-port", "redir-port", "tproxy-port", "allow-lan", "bind-address", "mode", "log-level", "ipv6"},
-	mihomoDNS:  {"enable", "enhanced-mode", "ipv6", "nameserver", "default-nameserver"},
+	mihomoDNS: {
+		"enable", "enhanced-mode", "ipv6", "listen", "nameserver", "default-nameserver",
+		"proxy-server-nameserver", "fake-ip-range", "fake-ip-filter",
+	},
 	mihomoInbounds: {
 		"listeners[].name", "listeners[].type", "listeners[].listen", "listeners[].port",
 		"tun.enable", "tun.stack", "tun.auto-route",
