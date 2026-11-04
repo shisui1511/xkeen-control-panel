@@ -1,3 +1,16 @@
+<script module lang="ts">
+  import { dnsTakeover as dnsTakeoverStore } from '../../../lib/configDns';
+
+  // Отметка «сбой просмотрен» переживает перемонтирование карточки при смене ядра: ключ
+  // сбоя, после которого пользователь нажал действие карточки. Новая транзакция снимает её
+  // даже без открытой карточки: сбой новой транзакции показывается, даже если совпадает с
+  // прежним.
+  const failureSeen = $state({ key: '' });
+  dnsTakeoverStore.subscribe((v) => {
+    if (v?.state === 'applying' && failureSeen.key !== '') failureSeen.key = '';
+  });
+</script>
+
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { createSubscriber } from 'svelte/reactivity';
@@ -6,6 +19,8 @@
   import Button from '../../Button.svelte';
   import Skeleton from '../../Skeleton.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
+  import DnsTakeoverSteps from './DnsTakeoverSteps.svelte';
+  import DnsResolveCheck from './DnsResolveCheck.svelte';
   import {
     dnsTakeover,
     dnsLoadError,
@@ -25,8 +40,9 @@
   // Карточка «Перехват DNS роутера» (DNSF-02, D-02): одна на оба ядра, стоит перед карточкой
   // секции DNS выбранного ядра. Состояние, блокировки, апстримы и последняя проверка — из
   // общего стора dnsTakeover (вид считает бэкенд); переключение ядра карточку не
-  // перезагружает. Ход транзакции, проверка резолва, параметры перехвата, строки исходов и
-  // старого перенаправления добавляют следующие планы фазы.
+  // перезагружает. Ход транзакции (DnsTakeoverSteps) виден, пока идёт транзакция, и после
+  // сбоя до следующего действия; проверка резолва (DnsResolveCheck) — под сеткой. Параметры
+  // перехвата, строки исходов и старого перенаправления добавляют следующие планы фазы.
   let {
     currentKernel,
     onopenform
@@ -252,8 +268,29 @@
     return { ok: lc.ok, text, when };
   });
 
+  // Ход транзакции. Набор шагов приходит с сервера: шаг возврата DNS прошивке есть только у
+  // выключения
+  const stepsKind = $derived<'enable' | 'disable'>(
+    view?.steps.some((s) => s.id === 'release') ? 'disable' : 'enable'
+  );
+  const failureKey = $derived(view?.failure ? JSON.stringify(view.failure) : '');
+  // Сбой виден после транзакции, пока пользователь не нажал следующее действие карточки
+  const stepsFailure = $derived(
+    view?.failure && dnsState !== 'applying' && failureSeen.key !== failureKey
+      ? view.failure
+      : undefined
+  );
+  const showSteps = $derived(dnsState === 'applying' || stepsFailure !== undefined);
+
+  let checkRef = $state<ReturnType<typeof DnsResolveCheck>>();
+
+  function markFailureSeen(): void {
+    failureSeen.key = failureKey;
+  }
+
   async function enable(): Promise<void> {
     if (enableBlocked) return;
+    markFailureSeen();
     pending = true;
     try {
       await enableDns();
@@ -276,6 +313,7 @@
       variant: 'warning'
     });
     if (!ok) return;
+    markFailureSeen();
     pending = true;
     try {
       await disableDns();
@@ -404,6 +442,15 @@
       </ul>
     {/if}
 
+    {#if showSteps && view.state !== 'unavailable'}
+      <DnsTakeoverSteps
+        steps={view.steps}
+        failure={stepsFailure}
+        kind={stepsKind}
+        oncheck={() => checkRef?.focus()}
+      />
+    {/if}
+
     {#if view.state === 'unavailable'}
       <div class="dns-unavailable" data-testid="dns-unavailable">
         <Icon name="info" size={16} class="dns-note-icon" />
@@ -492,6 +539,8 @@
           </dd>
         </div>
       </dl>
+
+      <DnsResolveCheck bind:this={checkRef} {view} />
 
       <div class="dns-foot">
         {#if view.state === 'off'}
