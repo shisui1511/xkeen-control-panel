@@ -518,7 +518,11 @@ func (p *Pipeline) checkExpect(ctx context.Context, plan Plan, wait bool) error 
 // на прежних файлах; исход в RestartView и коды restartError отражают, что из
 // этого удалось (откат файлов, подъём ядра). Манифест, Applied и черновик не меняются (D-07). Пока идёт
 // откат, остальные ядра не перезапускаются: вызывающий прекращает обход.
+// Хук запуска BeforeRollback вызывается первым действием, до отката файлов и
+// повторного подъёма ядра: то, что вызывающий сделал в BeforeWrite (например,
+// DNS роутера), возвращается раньше медленного отката (RESEARCH Pitfall 2).
 func (p *Pipeline) rollbackAndRestart(ctx context.Context, kernel string, set *BackupSet, cause error) (RestartView, error) {
+	p.fireBeforeRollback()
 	p.setStep(StepRestart, StepRunning, NoteRestartFailedRolling, "")
 	view := RestartView{Kernel: kernel, Outcome: RestartOutcomeFailedRolledBack, NoteCode: NoteRestartFailedRolling}
 	re := &restartError{Kernel: kernel, Err: cause}
