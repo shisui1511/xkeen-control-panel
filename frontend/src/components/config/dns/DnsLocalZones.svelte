@@ -1,13 +1,20 @@
 <script module lang="ts">
   // Черновик строк своих зон переживает перемонтирование при переключении вкладки ядра и
-  // фоновое обновление вида, если серверный список зон не менялся.
+  // фоновое обновление вида, если серверный список зон не менялся. syncedKey — список зон,
+  // который строки уже отражают (последняя своя запись или последний список с сервера),
+  // syncedOwn — это своя запись, ответа на которую ещё не было; echoKeys — свои более ранние
+  // записи, ответ на которые ещё может прийти, пока следующая запись в пути: такой ответ
+  // строки не перезаписывает.
+  const MAX_ECHO_KEYS = 8;
   const draftState = $state<{
     syncedKey: string;
-    lastSentKey: string;
+    syncedOwn: boolean;
+    echoKeys: string[];
     rows: string[];
   }>({
     syncedKey: '',
-    lastSentKey: '',
+    syncedOwn: false,
+    echoKeys: [],
     rows: []
   });
 </script>
@@ -102,14 +109,21 @@
 
   // Синхронизация с серверным списком зон, когда он действительно изменился извне (другая
   // вкладка, сброс черновика, отказ записи). Эффект зависит только от списка с сервера:
-  // собственная запись меняет syncedKey заранее и строки не перезаписывает
+  // собственная запись меняет syncedKey заранее, а ответ на более раннюю свою запись
+  // (echoKeys) строки не перезаписывает
   $effect(() => {
     const propKey = JSON.stringify(zones.map((z) => normalizeZone(z)).filter(Boolean));
     const source = zones;
     untrack(() => {
-      if (draftState.syncedKey === propKey) return;
+      if (draftState.syncedKey === propKey) {
+        draftState.echoKeys = [];
+        draftState.syncedOwn = false;
+        return;
+      }
+      if (draftState.echoKeys.includes(propKey)) return;
       draftState.syncedKey = propKey;
-      draftState.lastSentKey = propKey;
+      draftState.syncedOwn = false;
+      draftState.echoKeys = [];
       draftState.rows = [...source];
     });
   });
@@ -151,9 +165,14 @@
     if (rowErrors.some((e) => e !== null)) return;
     const clean = draftState.rows.map((r) => normalizeZone(r)).filter((z) => z !== '');
     const nextKey = JSON.stringify(clean);
-    if (nextKey === draftState.lastSentKey) return;
-    draftState.lastSentKey = nextKey;
+    if (nextKey === draftState.syncedKey) return;
+    // Прежняя своя запись может быть ещё в пути: её ответ — эхо, а не правка извне. Список с
+    // сервера в эхо не попадает: его возврат (отказ записи, сброс) перезаписывает строки
+    if (draftState.syncedOwn) {
+      draftState.echoKeys = [...draftState.echoKeys, draftState.syncedKey].slice(-MAX_ECHO_KEYS);
+    }
     draftState.syncedKey = nextKey;
+    draftState.syncedOwn = true;
     onchange(clean);
   }
 
