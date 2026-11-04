@@ -726,6 +726,10 @@ func failReason(ans Answer, err error) string {
 	return "no_address"
 }
 
+// checkRouteTimeout — предел поиска домена по спискам direct-правил в ручной
+// проверке (как у поиска по каталогу геоданных).
+const checkRouteTimeout = 20 * time.Second
+
 // Check — ручная проверка резолва через 127.0.0.1:53 (D-03, D-30): пустое имя —
 // имя по умолчанию; не доменное имя — name_invalid; одновременно идёт одна
 // проверка (вторая — busy); на роутере без прошивки NDMS — unavailable. Итог
@@ -752,7 +756,12 @@ func (s *Service) Check(ctx context.Context, name string) (CheckResult, error) {
 	if err != nil {
 		return CheckResult{}, err
 	}
-	rt := s.routeOf(ctx, st, name)
+	// Поиск по спискам dat (D-21) ограничен: обработчик отдаёт контекст без
+	// дедлайна и отмены (проверка доводится до записи итога), а индекс большой.
+	// Не уложились — путь считается по группе, как при недоступном индексе.
+	routeCtx, cancelRoute := context.WithTimeout(ctx, checkRouteTimeout)
+	rt := s.routeOf(routeCtx, st, name)
+	cancelRoute()
 	ans, rerr := Resolve(ctx, name, dnsmessage.TypeA)
 	g := CheckGroup{
 		Label:     checkLabelManual,
