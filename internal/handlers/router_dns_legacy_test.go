@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/dnstakeover"
 )
 
@@ -218,7 +220,8 @@ func rtDNSStateFile(t *testing.T) (desired bool, window bool) {
 // POST /api/settings/config-layer {enabled:false} → 200, флаг снят; порт 53 у
 // прошивки и она отвечает через 127.0.0.1:53, override как до включения, строка
 // proxy_dns on (из снимка до включения), набор правил XKeen с :53 равен набору до
-// включения (старое перенаправление действует), слушателя панели в файлах ядра
+// включения, если dns.servers остался в файлах ядра, иначе правил с :53 нет
+// (старое перенаправление действует), слушателя панели в файлах ядра
 // нет, файлы панели перенесены, в файле состояния перехвата desired=false. Слой
 // включается обратно до возврата стенда; флаг и строка — прежние. Метка ядра:
 // возврат перезапускает активное ядро, правила XKeen строятся при его старте.
@@ -266,8 +269,15 @@ func TestRouterDNSFlagOff(t *testing.T) {
 	if !rtDNSProxyOn(t) {
 		t.Error("после выключения флага строка proxy_dns не вернулась в on")
 	}
-	// Старое перенаправление действует, а не только строка.
-	rtDNSWaitXKeenRules53(t, baseline)
+	// Старое перенаправление действует, а не только строка. XKeen строит правила с
+	// :53 только при наличии dns.servers в файлах Xray: если секция dns была
+	// файлом панели и ушла вместе с ним при выключении флага, правил с :53 нет, и
+	// это верный исход — перенаправлять DNS некуда.
+	wantRules := baseline
+	if kernel == configlayer.KernelXray && !rtDNSXrayHasDNSServers(t) {
+		wantRules = nil
+	}
+	rtDNSWaitXKeenRules53(t, wantRules)
 	if rtDNSKernelHasListener(kernel) {
 		t.Errorf("после выключения флага в файлах %s остался слушатель :53", kernel)
 	}
@@ -279,4 +289,36 @@ func TestRouterDNSFlagOff(t *testing.T) {
 	if desired, window := rtDNSStateFile(t); desired || window {
 		t.Errorf("после выключения флага в состоянии перехвата desired=%v, окно=%v", desired, window)
 	}
+}
+
+// rtDNSXrayHasDNSServers — в каталоге файлов Xray есть секция dns с servers: по
+// ней XKeen решает, строить ли правила перехвата с :53.
+func rtDNSXrayHasDNSServers(t *testing.T) bool {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(rtRtXrayDir, "*.json"))
+	if err != nil {
+		t.Fatalf("файлы Xray не перечислены: %v", err)
+	}
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		var doc struct {
+			DNS struct {
+				Servers json.RawMessage `json:"servers"`
+			} `json:"dns"`
+		}
+		if json.Unmarshal(data, &doc) == nil {
+			if n := len(doc.DNS.Servers); n > 0 && string(doc.DNS.Servers) != "null" {
+				return true
+			}
+			continue
+		}
+		// Файл с комментариями не разбирается как JSON: грубая проверка по тексту.
+		if bytes.Contains(data, []byte(`"dns"`)) && bytes.Contains(data, []byte(`"servers"`)) {
+			return true
+		}
+	}
+	return false
 }
