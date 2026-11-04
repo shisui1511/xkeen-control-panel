@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -103,7 +104,31 @@ func (a *API) ConfigDNSAction(w http.ResponseWriter, r *http.Request) {
 	}
 	action := strings.TrimPrefix(r.URL.Path, dnsActionPrefix)
 	switch action {
+	case "check":
+		a.configDNSCheck(w, r)
 	default:
 		JSONErrorCode(w, http.StatusNotFound, "not_found", a.t(r, "error.not_found"))
 	}
+}
+
+// configDNSCheck — POST /api/configlayer/dns/check {name?}: проверка резолва
+// через 127.0.0.1:53 (DNSCheckResult). Пустое имя — имя по умолчанию; не
+// доменное имя — 400 name_invalid; идёт другая проверка — 409 busy. Проверка
+// доводится до конца и при закрытой вкладке: итог станет последней проверкой.
+func (a *API) configDNSCheck(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	res, err := a.dns.Check(context.WithoutCancel(r.Context()), req.Name)
+	if err != nil {
+		a.writeDNSError(w, r, err)
+		return
+	}
+	JSONSuccess(w, res)
 }
