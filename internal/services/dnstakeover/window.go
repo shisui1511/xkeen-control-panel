@@ -469,11 +469,12 @@ func (s *Service) rebuildXKeenRules(kernel string) error {
 }
 
 // windowRolledBack — исход отката окна (D-28): timeout — таймер или старт панели
-// посреди окна, rolled_manual — «Откатить сейчас», probe_failed — проба после
-// отката «Применить» не прошла и DNS у прошивки.
+// посреди окна, rolled_manual — «Откатить сейчас», остановка или смена ядра
+// пользователем (lifecycle.go), probe_failed — проба после отката «Применить» не
+// прошла и DNS у прошивки.
 func (s *Service) windowRolledBack(w windowState, kernel, reason string, fail *Failure, probeFailed bool) {
 	kind := OutcomeRolledManual
-	if reason != reasonManual {
+	if reason != reasonManual && reason != reasonKernelStop && reason != reasonKernelSwitch {
 		kind = OutcomeTimeout
 	}
 	if probeFailed {

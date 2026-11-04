@@ -171,7 +171,15 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 			a.serviceStopKernel(w, r, stopKernel)
 			return
 		}
-		out, err = a.xkeenSvc.Stop()
+		// Ядро-перехватчик отпускает :53 — DNS роутера возвращается прошивке (D-14).
+		err = a.dnsAroundStop(a.activeKernelState().Kernel, func() error {
+			var serr error
+			out, serr = a.xkeenSvc.Stop()
+			return serr
+		})
+		if a.dnsRefused(w, r, err) {
+			return
+		}
 	case "restart":
 		out, err = a.xkeenSvc.Restart()
 	case "switch_kernel":
@@ -189,6 +197,10 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.errorResponse(w, out, http.StatusInternalServerError)
 		return
+	}
+	if action == "start" || action == "restart" {
+		// Желаемый перехват возвращается пробой без окна (D-14).
+		a.dnsAfterStart()
 	}
 
 	a.ClearCapabilitiesCache()
@@ -228,6 +240,10 @@ func (a *API) serviceSwitchKernel(w http.ResponseWriter, target, old string) {
 	}
 
 	res := a.kernelSwitcher.Await(old, target)
+	if res.Outcome == services.SwitchSwitched {
+		// Желаемый перехват DNS переносится на новое ядро (D-15).
+		a.dnsAfterSwitch(old, target)
+	}
 	res.Output = lastNonEmptyLines(utils.StripANSI(out), switchOutputLines)
 	log.Printf("switch_kernel: old=%s new=%s outcome=%s",
 		utils.SanitizeLogInput(res.Old), utils.SanitizeLogInput(res.New), utils.SanitizeLogInput(string(res.Outcome)))
@@ -250,7 +266,15 @@ func (a *API) serviceStopKernel(w http.ResponseWriter, r *http.Request, kernel s
 	st := a.activeKernelState()
 
 	if !st.Conflict && len(st.Running) == 1 && st.Running[0] == kernel {
-		out, err := a.xkeenSvc.Stop()
+		var out string
+		err := a.dnsAroundStop(kernel, func() error {
+			var serr error
+			out, serr = a.xkeenSvc.Stop()
+			return serr
+		})
+		if a.dnsRefused(w, r, err) {
+			return
+		}
 		if err != nil {
 			a.errorResponse(w, out, http.StatusInternalServerError)
 			return
@@ -266,7 +290,15 @@ func (a *API) serviceStopKernel(w http.ResponseWriter, r *http.Request, kernel s
 		return
 	}
 
-	res, err := a.kernelSvc.StopKernelProcess(kernel)
+	var res services.KernelStopResult
+	err := a.dnsAroundStop(kernel, func() error {
+		var serr error
+		res, serr = a.kernelSvc.StopKernelProcess(kernel)
+		return serr
+	})
+	if a.dnsRefused(w, r, err) {
+		return
+	}
 	res.Method = services.KernelStopMethodSignal
 	summary := "kernel=" + kernel + " outcome=" + string(res.Outcome)
 	if err != nil {
@@ -395,6 +427,13 @@ func (a *API) ServiceRestartLog(w http.ResponseWriter, r *http.Request) {
 func (a *API) ServiceDNSRedirect(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	// D-34: при включённом слое DNS роутера ведёт перехват слоя; старый
+	// переключатель отказывает до любого действия — без замка жизненного цикла и
+	// без перезапуска XKeen (остановленное ядро не запускается).
+	if a.configLayer != nil && a.configLayer.Enabled() {
+		JSONErrorCode(w, http.StatusConflict, "legacy_blocked", a.t(r, "configlayer.dns.legacy_blocked"))
 		return
 	}
 
