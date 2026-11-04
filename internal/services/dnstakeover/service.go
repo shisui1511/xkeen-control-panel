@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -98,6 +99,8 @@ type Service struct {
 	// проверка идёт (операция службы для блокировки busy).
 	checkMu  sync.Mutex
 	checking atomic.Bool
+	// domain — служебный домен роутера (string), прогретый в Start.
+	domain atomic.Value
 }
 
 // New проверяет обязательные зависимости и создаёт службу. Фоновой работы New
@@ -139,7 +142,9 @@ func (s *Service) Start() {
 	go func() {
 		defer s.wg.Done()
 		s.fw.Available(s.ctx)
-		_ = s.fw.ServiceDomain()
+		s.domain.Store(s.fw.ServiceDomain())
+		// Проверку черновика с известным уже служебным доменом нужно пересчитать.
+		s.d.Layer.InvalidateChecks()
 	}()
 }
 
@@ -153,7 +158,15 @@ func (s *Service) Stop() {
 
 // Hooks — подключение службы к слою: регистрируется до configLayer.Start().
 func (s *Service) Hooks() configlayer.Hooks {
-	return configlayer.Hooks{}
+	return configlayer.Hooks{Checker: dnsChecker{serviceDomain: s.cachedServiceDomain}}
+}
+
+// cachedServiceDomain — служебный домен роутера из кэша, без вызова ndmc: им
+// пользуется проверка слоя, которая обязана работать быстро. До прогрева в Start
+// — пусто.
+func (s *Service) cachedServiceDomain() string {
+	d, _ := s.domain.Load().(string)
+	return d
 }
 
 // View — состояние перехвата для GET /api/configlayer/dns и карточки
@@ -287,7 +300,7 @@ func (s *Service) View() View {
 	v := View{
 		State:        StateOff,
 		Upstreams:    []string{},
-		ZonesBuiltin: []string{},
+		ZonesBuiltin: configlayer.BuiltinLocalZones(s.fw.ServiceDomain()),
 		Zones:        []string{},
 		DefaultName:  DefaultCheckName,
 		Blocks:       []string{},
@@ -302,9 +315,19 @@ func (s *Service) View() View {
 	v.ActiveKernel = active.Label()
 	v.KernelRunning = s.kernelRunning(active)
 	if st, err := s.d.Layer.ReadState(); err == nil {
-		if live, on := configlayer.ParseDNSTakeoverLive(st.Live); on {
+		live, on := configlayer.ParseDNSTakeoverLive(st.Live)
+		if on {
 			v.Desired = true
 			v.Kernel = live.Kernel
+			v.IPv6 = live.IPv6
+		} else {
+			v.IPv6 = routerHasIPv6()
+		}
+		s.fillParams(&v, st)
+		kernel := interceptKernel(st, active)
+		v.Upstreams = upstreams(st, kernel)
+		if kernel != "" {
+			v.SectionOwner = s.sectionOwner(st, kernel)
 		}
 	}
 	proxy, err := ProxyDNS()
@@ -318,8 +341,175 @@ func (s *Service) View() View {
 		v.LastCheck = &lc
 	}
 	s.mu.Unlock()
+	v.Blocks = s.blocks(v, active)
 	v.ServerNowMs = s.now().UnixMilli()
 	return v
+}
+
+// Причины блокировки включения (UI-SPEC «Порядок блокировок»).
+const (
+	BlockConflict = "conflict"
+	BlockBusy     = "busy"
+	BlockWindow   = "window"
+	BlockDraft    = "draft"
+	BlockStopped  = "stopped"
+	BlockSection  = "section"
+	BlockGroup    = "group"
+)
+
+// blocks — причины блокировки в порядке приоритета UI-SPEC: конфликт ядер, идёт
+// применение слоя или операция службы, идёт окно подтверждения, открыт черновик
+// (D-01), ядро остановлено (D-04), DNS-секцию ядра ведёт не панель, группы-цели
+// нет. Порядок задаёт только этот список.
+func (s *Service) blocks(v View, active services.ActiveKernelState) []string {
+	snap := s.d.Layer.Snapshot()
+	ordered := []struct {
+		code string
+		on   bool
+	}{
+		{BlockConflict, active.Conflict},
+		{BlockBusy, snap.Apply.Running || snap.BusyHolder != "" || s.checking.Load()},
+		{BlockWindow, v.Window != nil},
+		{BlockDraft, snap.DraftChanges > 0},
+		{BlockStopped, !v.KernelRunning},
+		{BlockSection, v.SectionOwner != "" && v.SectionOwner != SectionOwnerPanel},
+		{BlockGroup, v.Group == nil || v.Group.Missing},
+	}
+	out := []string{}
+	for _, b := range ordered {
+		if b.on {
+			out = append(out, b.code)
+		}
+	}
+	return out
+}
+
+// SectionOwnerPanel — DNS-секцию ядра ведёт панель (применённое состояние).
+const SectionOwnerPanel = "panel"
+
+// fillParams заполняет зоны, группу-цель и параметры черновика: зоны и группа —
+// из применённой секции dns_takeover (группа по умолчанию — D-09), параметры
+// черновика и признак их отличия — из черновика.
+func (s *Service) fillParams(v *View, st configlayer.StateView) {
+	p := appliedParams(st)
+	v.Zones = append([]string{}, p.Zones...)
+	id, name, ok := targetGroup(st.Applied, p)
+	v.Group = &GroupRef{ID: id, Name: name, Missing: !ok}
+
+	key := configlayer.SectionDNSTakeover
+	dp, err := configlayer.ParseDNSTakeoverParams(st.Draft[key])
+	if err != nil {
+		dp = configlayer.DNSTakeoverParams{}
+	}
+	v.DraftParams = &Params{Group: dp.Group, Zones: append([]string{}, dp.Zones...)}
+	v.ParamsChanged = !configlayer.SectionEqual(st.Draft[key], st.Applied[key])
+}
+
+// defaultUpstreams — апстримы через группу-цель по умолчанию (D-17): DoH по IP.
+var defaultUpstreams = []string{"https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query"}
+
+// upstreams — серверы DNS-секции ядра из применённого состояния: у Xray
+// servers (строки или объекты с address), у Mihomo nameserver. Секции нет или
+// она пуста — умолчания D-17.
+func upstreams(st configlayer.StateView, kernel string) []string {
+	out := []string{}
+	cs := configlayer.DesiredCores(st.Applied)[configlayer.CoreSectionName(kernel, "dns")]
+	if kernel != "" && cs.Managed && len(cs.Value) > 0 {
+		if obj, err := configlayer.ParseOrderedObject(cs.Value); err == nil {
+			key := "nameserver"
+			if kernel == configlayer.KernelXray {
+				key = "servers"
+			}
+			if raw, ok := obj.Get(key); ok {
+				out = serverList(raw)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return append(out, defaultUpstreams...)
+	}
+	return out
+}
+
+// serverList разбирает список серверов: строки и объекты с полем address.
+func serverList(raw json.RawMessage) []string {
+	var items []json.RawMessage
+	if json.Unmarshal(raw, &items) != nil {
+		return []string{}
+	}
+	out := []string{}
+	for _, it := range items {
+		var str string
+		if json.Unmarshal(it, &str) == nil {
+			if str != "" {
+				out = append(out, str)
+			}
+			continue
+		}
+		var obj struct {
+			Address string `json:"address"`
+		}
+		if json.Unmarshal(it, &obj) == nil && obj.Address != "" {
+			out = append(out, obj.Address)
+		}
+	}
+	return out
+}
+
+// sectionOwner — владелец DNS-секции ядра: panel, если секция под панелью в
+// применённом состоянии; иначе у Xray — владелец по скану configs/ (xkeen,
+// user, none), у Mihomo — по активному профилю (config.yaml — xkeen, другой —
+// user, нет профиля — none).
+func (s *Service) sectionOwner(st configlayer.StateView, kernel string) string {
+	if configlayer.DesiredCores(st.Applied)[configlayer.CoreSectionName(kernel, "dns")].Managed {
+		return SectionOwnerPanel
+	}
+	switch kernel {
+	case configlayer.KernelXray:
+		scans, _, err := s.d.Layer.ScanXraySections()
+		if err != nil {
+			return configlayer.OwnerNone
+		}
+		if sc, ok := scans["dns"]; ok && sc.Owner != "" {
+			return sc.Owner
+		}
+		return configlayer.OwnerNone
+	case configlayer.KernelMihomo:
+		name, _, _, err := s.d.Layer.MihomoActiveProfile()
+		switch {
+		case err != nil:
+			return configlayer.OwnerNone
+		case name == "config.yaml":
+			return configlayer.OwnerXKeen
+		}
+		return configlayer.OwnerUser
+	}
+	return configlayer.OwnerNone
+}
+
+// routerHasIPv6 — у роутера есть глобальный (или уникальный локальный) адрес
+// IPv6 на поднятом интерфейсе (D-31).
+func routerHasIPv6() bool {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return false
+	}
+	for _, ifc := range ifaces {
+		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := ifc.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			ipn, ok := a.(*net.IPNet)
+			if ok && ipn.IP.To4() == nil && ipn.IP.IsGlobalUnicast() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // cloneCheck — глубокая копия результата проверки.
@@ -404,8 +594,9 @@ func targetGroup(sections configlayer.Sections, p configlayer.DNSTakeoverParams)
 }
 
 // routeOf определяет путь резолва имени по применённому состоянию: встроенная
-// или своя локальная зона, порт 53 у прошивки, иначе группа-цель.
-func (s *Service) routeOf(st configlayer.StateView, name string) route {
+// или своя локальная зона, порт 53 у прошивки, домен или список direct-правила
+// (D-21, через прошивку), иначе группа-цель.
+func (s *Service) routeOf(ctx context.Context, st configlayer.StateView, name string) route {
 	p := appliedParams(st)
 	zones := append(configlayer.BuiltinLocalZones(s.fw.ServiceDomain()), p.Zones...)
 	for _, z := range zones {
@@ -416,19 +607,22 @@ func (s *Service) routeOf(st configlayer.StateView, name string) route {
 	if PortOwner().Kind == OwnerFirmware {
 		return route{path: PathFirmware}
 	}
+	if s.d.Routing != nil && s.d.Routing.DNSDirectMatch(ctx, name) {
+		return route{path: PathFirmware}
+	}
 	_, group, _ := targetGroup(st.Applied, p)
 	return route{path: PathGroup, group: group}
 }
 
 // interceptKernel — ядро, чья DNS-секция действует: ядро-перехватчик, иначе
 // активное ядро (xray или mihomo); пусто — ядра нет или запущены оба.
-func (s *Service) interceptKernel(st configlayer.StateView) string {
+func interceptKernel(st configlayer.StateView, active services.ActiveKernelState) string {
 	if live, on := configlayer.ParseDNSTakeoverLive(st.Live); on {
 		return live.Kernel
 	}
-	switch k := s.d.Kernel.ActiveState().Kernel; k {
+	switch active.Kernel {
 	case configlayer.KernelXray, configlayer.KernelMihomo:
-		return k
+		return active.Kernel
 	}
 	return ""
 }
@@ -507,7 +701,7 @@ func (s *Service) Check(ctx context.Context, name string) (CheckResult, error) {
 	if err != nil {
 		return CheckResult{}, err
 	}
-	rt := s.routeOf(st, name)
+	rt := s.routeOf(ctx, st, name)
 	ans, rerr := Resolve(ctx, name, dnsmessage.TypeA)
 	g := CheckGroup{
 		Label:     checkLabelManual,
@@ -521,7 +715,7 @@ func (s *Service) Check(ctx context.Context, name string) (CheckResult, error) {
 	}
 	if rerr != nil {
 		g.Reason = failReason(ans, rerr)
-	} else if sectionIPv6(st, s.interceptKernel(st)) {
+	} else if sectionIPv6(st, interceptKernel(st, s.d.Kernel.ActiveState())) {
 		// AAAA — дополнение: пустой ответ на AAAA проверку не валит.
 		if a6, err := Query(ctx, LoopbackDNS, name, dnsmessage.TypeAAAA, probeAttempt); err == nil && a6.RCode == dnsmessage.RCodeSuccess {
 			g.Answers = append(g.Answers, a6.Addrs...)

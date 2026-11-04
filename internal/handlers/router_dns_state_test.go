@@ -58,8 +58,67 @@ func (e *rtSrc) rtDNSView() map[string]any {
 	return r.object(e.t)
 }
 
+// rtDNSBlockOrder — порядок блокировок UI-SPEC.
+var rtDNSBlockOrder = []string{"conflict", "busy", "window", "draft", "stopped", "section", "group"}
+
+// rtDNSBlocks — блокировки из состояния перехвата; порядок нарушен — ошибка.
+func (e *rtSrc) rtDNSBlocks() map[string]bool {
+	e.t.Helper()
+	list, _ := e.rtDNSView()["blocks"].([]any)
+	out := map[string]bool{}
+	pos := 0
+	for _, it := range list {
+		code, _ := it.(string)
+		out[code] = true
+		for pos < len(rtDNSBlockOrder) && rtDNSBlockOrder[pos] != code {
+			pos++
+		}
+		if pos == len(rtDNSBlockOrder) {
+			e.t.Errorf("блокировка %q вне порядка или неизвестна: %v", code, list)
+			return out
+		}
+	}
+	return out
+}
+
+// rtDNSDraft пишет секцию dns_takeover в черновик.
+func (e *rtSrc) rtDNSDraft(value any) {
+	e.t.Helper()
+	r := e.call(http.MethodPost, "/api/configlayer/draft", map[string]any{
+		"revision": e.revision(), "section": "dns_takeover", "value": value,
+	})
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("правка черновика dns_takeover: %d %s", r.Status, r.Code)
+	}
+}
+
+// rtDNSCoresOwner — владелец DNS-секции ядра по API секций ядер.
+func (e *rtSrc) rtDNSCoresOwner(kernel string) string {
+	e.t.Helper()
+	r := e.call(http.MethodGet, "/api/configlayer/cores?kernel="+kernel, nil)
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("GET /api/configlayer/cores?kernel=%s: %d %s", kernel, r.Status, r.Code)
+	}
+	var view struct {
+		Sections []struct {
+			ID    string `json:"id"`
+			Owner string `json:"owner"`
+		} `json:"sections"`
+	}
+	if err := json.Unmarshal(r.Data, &view); err != nil {
+		e.t.Fatalf("секции ядра %s: %v", kernel, err)
+	}
+	for _, sec := range view.Sections {
+		if sec.ID == "dns" {
+			return sec.Owner
+		}
+	}
+	e.t.Fatalf("у ядра %s нет секции dns", kernel)
+	return ""
+}
+
 func TestRouterDNSStateView(t *testing.T) {
-	routertest.CoreSpecific(t)
+	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
 
 	// Слой выключен: маршрут отвечает 404, как остальные /api/configlayer/*.
@@ -93,6 +152,31 @@ func TestRouterDNSStateView(t *testing.T) {
 			t.Errorf("%s: ожидался массив", key)
 		}
 	}
+
+	t.Run("blocks", func(t *testing.T) {
+		if e.rtDNSBlocks()["draft"] {
+			t.Error("черновик чистый, а блокировка draft есть")
+		}
+		// Открытый черновик блокирует включение (D-01); сброс снимает блокировку.
+		e.rtDNSDraft(map[string]any{"group": "", "zones": []string{"xcp-rt.test"}})
+		if !e.rtDNSBlocks()["draft"] {
+			t.Error("черновик открыт, а блокировки draft нет")
+		}
+		e.resetDraft()
+		if e.rtDNSBlocks()["draft"] {
+			t.Error("черновик сброшен, а блокировка draft осталась")
+		}
+		// DNS-секцию ядра ведёт не панель — блокировка section; ведёт панель — нет.
+		view := e.rtDNSView()
+		sectionOwner, _ := view["section_owner"].(string)
+		blocks := e.rtDNSBlocks()
+		if (sectionOwner == "panel") == blocks["section"] {
+			t.Errorf("section_owner = %q, блокировка section = %v", sectionOwner, blocks["section"])
+		}
+		if owner := e.rtDNSCoresOwner(tg.Core); owner != "panel" && !blocks["section"] {
+			t.Errorf("DNS-секцию %s ведёт %q, а блокировки section нет", tg.Core, owner)
+		}
+	})
 }
 
 func TestRouterDNSCheck(t *testing.T) {
@@ -144,5 +228,38 @@ func TestRouterDNSCheck(t *testing.T) {
 	}
 	if !reflect.DeepEqual(v["last_check"], want) {
 		t.Error("last_check в состоянии не совпадает с ответом проверки")
+	}
+}
+
+// Своя зона «bad zone» в черновике: «Применить» отказывает с проблемой
+// dns_zone_invalid проверки слоя. Черновик сбрасывается в t.Cleanup.
+func TestRouterDNSParamsCheck(t *testing.T) {
+	e := rtNewSrc(t)
+	e.enableLayer()
+	e.rtDNSDraft(map[string]any{"group": "", "zones": []string{"bad zone"}})
+	t.Cleanup(func() { e.resetDraft() })
+
+	r := e.call(http.MethodPost, "/api/configlayer/apply", map[string]any{})
+	if r.Status != http.StatusConflict || r.Code != "apply_blocked" {
+		t.Fatalf("«Применить» с неверной зоной: %d %q, ожидалось 409 apply_blocked", r.Status, r.Code)
+	}
+	var data struct {
+		Issues []struct {
+			Key    string            `json:"key"`
+			Code   string            `json:"code"`
+			Params map[string]string `json:"params"`
+		} `json:"issues"`
+	}
+	if err := json.Unmarshal(r.Data, &data); err != nil {
+		t.Fatalf("проблемы проверки: %v", err)
+	}
+	found := false
+	for _, is := range data.Issues {
+		if is.Code == "dns_zone_invalid" && is.Key == "dns_takeover" && is.Params["zone"] == "bad zone" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("нет проблемы dns_zone_invalid для зоны «bad zone» среди %d проблем", len(data.Issues))
 	}
 }
