@@ -4320,6 +4320,7 @@
   "cfg.dns.outcome_timeout": "Rolled back: no confirmation, {time}.",
   "cfg.dns.outcome_watchdog": "DNS returned to the firmware: the {kernel} core did not respond on 127.0.0.1:53, {time}.",
   "cfg.dns.outcome_kernel_changed": "DNS returned to the firmware: the core was changed outside the panel ({from} → {to}), {time}. Enable interception again.",
+  "cfg.dns.outcome_probe_failed": "DNS returned to the firmware: {reason}, {time}.",
   "cfg.dns.outcome_waiting": "Interception will come back on its own once the core starts and the resolution check passes, without a confirmation window.",
   "cfg.dns.status_firmware": "Router DNS is served by the firmware.",
   "cfg.dns.status_kernel": "Router DNS is served by {kernel}.",

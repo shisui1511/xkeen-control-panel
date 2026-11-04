@@ -4320,6 +4320,7 @@
   "cfg.dns.outcome_timeout": "Откачено: нет подтверждения, {time}.",
   "cfg.dns.outcome_watchdog": "DNS возвращён прошивке: ядро {kernel} не ответило на 127.0.0.1:53, {time}.",
   "cfg.dns.outcome_kernel_changed": "DNS возвращён прошивке: ядро сменили вне панели ({from} → {to}), {time}. Включите перехват заново.",
+  "cfg.dns.outcome_probe_failed": "DNS возвращён прошивке: {reason}, {time}.",
   "cfg.dns.outcome_waiting": "Перехват вернётся сам, когда ядро запустится и проверка резолва пройдёт, без окна подтверждения.",
   "cfg.dns.status_firmware": "DNS роутера отвечает прошивка.",
   "cfg.dns.status_kernel": "DNS роутера отвечает {kernel}.",

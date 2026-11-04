@@ -6,6 +6,10 @@
   // даже без открытой карточки: сбой новой транзакции показывается, даже если совпадает с
   // прежним.
   const failureSeen = $state({ key: '' });
+  // Отметка «исход просмотрен»: время исхода, после которого пользователь нажал действие
+  // карточки. Строка исхода скрывается сразу, не дожидаясь перечитывания вида (бэкенд
+  // снимает исход тем же действием)
+  const outcomeSeen = $state({ at: 0 });
   // Состояние раскрытия «Параметры перехвата» сохраняется при переключении вкладки ядра
   const paramsOpen = $state({ open: false });
   dnsTakeoverStore.subscribe((v) => {
@@ -25,6 +29,8 @@
   import DnsTakeoverSteps from './DnsTakeoverSteps.svelte';
   import DnsResolveCheck from './DnsResolveCheck.svelte';
   import DnsLocalZones from './DnsLocalZones.svelte';
+  import DnsOutcomeNote from './DnsOutcomeNote.svelte';
+  import DnsLegacyNote from './DnsLegacyNote.svelte';
   import {
     dnsTakeover,
     dnsLoadError,
@@ -51,7 +57,9 @@
   // общего стора dnsTakeover (вид считает бэкенд); переключение ядра карточку не
   // перезагружает. Ход транзакции (DnsTakeoverSteps) виден, пока идёт транзакция, и после
   // сбоя до следующего действия; проверка резолва (DnsResolveCheck) и параметры перехвата
-  // (группа и локальные зоны DnsLocalZones) — под сеткой.
+  // (группа и локальные зоны DnsLocalZones) — под сеткой. Уведомления (стык со старым
+  // перенаправлением DnsLegacyNote, исход без пользователя DnsOutcomeNote) идут под
+  // блокировками, перед ходом транзакции.
   let {
     currentKernel,
     onopenform
@@ -293,6 +301,11 @@
   );
   const showSteps = $derived(dnsState === 'applying' || stepsFailure !== undefined);
 
+  // Исход без пользователя виден до следующего действия пользователя с карточкой
+  const shownOutcome = $derived(
+    view?.outcome && outcomeSeen.at !== view.outcome.at_ms ? view.outcome : undefined
+  );
+
   let checkRef = $state<ReturnType<typeof DnsResolveCheck>>();
 
   // Параметры перехвата: группа для DNS-запросов и локальные зоны из черновика или
@@ -403,6 +416,7 @@
 
   function markFailureSeen(): void {
     failureSeen.key = failureKey;
+    if (view?.outcome) outcomeSeen.at = view.outcome.at_ms;
   }
 
   async function enable(): Promise<void> {
@@ -557,6 +571,11 @@
           </li>
         {/each}
       </ul>
+    {/if}
+
+    {#if view.state !== 'unavailable' && view.state !== 'applying'}
+      <DnsLegacyNote {view} onaction={markFailureSeen} />
+      <DnsOutcomeNote outcome={shownOutcome} state={view.state} kernel={view.kernel} />
     {/if}
 
     {#if showSteps && view.state !== 'unavailable'}
