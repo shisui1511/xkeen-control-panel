@@ -21,6 +21,8 @@ type DeviceInfo struct {
 	model     string
 	osName    string
 	osVersion string
+	// vendor — бренд прошивки из поля vendor (Keenetic, Netcraze); без ndmc пусто.
+	vendor string
 }
 
 // NewDeviceInfo создаёт DeviceInfo. Конструктор не выполняет ndmc —
@@ -64,6 +66,21 @@ func (d *DeviceInfo) Get() (model, osName, osVersion string) {
 		d.initialized = true
 	}
 	return d.model, d.osName, d.osVersion
+}
+
+// Vendor возвращает бренд прошивки (Keenetic, Netcraze) из поля vendor вывода
+// `ndmc -c "show version"` — тот же единственный вызов с кэшем, что у Get().
+// По бренду служба перехвата DNS выбирает служебный домен роутера (D-11);
+// без ndmc или без поля vendor — пустая строка, и домен не угадывается.
+func (d *DeviceInfo) Vendor() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if !d.initialized {
+		d.detect()
+		d.initialized = true
+	}
+	return d.vendor
 }
 
 func (d *DeviceInfo) detect() {
