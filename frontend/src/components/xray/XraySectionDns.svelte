@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from '../../i18n';
+  import { configLayerEnabled } from '../../stores';
   import Select from '../Select.svelte';
   import Icon from '../Icon.svelte';
   import type { DNSServer } from './XrayContext.svelte';
@@ -102,12 +103,14 @@
   }
 </script>
 
-<div class="sec-body">
-  {#if xkeenDns === false && dnsConfig.servers.length > 0}
+<div class="sec-body" data-testid="xray-section-dns">
+  <!-- При включённом слое «Конфигурация» перенаправление DNS ведёт слой: старого переключателя нет (D-34) -->
+  {#if !$configLayerEnabled && xkeenDns === false && dnsConfig.servers.length > 0}
     <div
       class="alert alert-warning"
       style="margin: 0 0 16px 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-start;"
       role="status"
+      data-testid="dns-legacy-redirect"
     >
       <div style="display: flex; gap: 8px; align-items: center;">
         <svg

@@ -273,14 +273,39 @@ export async function flushFakeIP(): Promise<void> {
   }
 }
 
-/** Turns XKeen's DNS redirection into the proxy core on or off. */
+/** Ответ старого перенаправления DNS: при включённом слое «Конфигурация» — код legacy_blocked. */
+export const DNS_REDIRECT_LEGACY_BLOCKED = 'legacy_blocked';
+
+/**
+ * Turns XKeen's DNS redirection into the proxy core on or off. При включённом слое
+ * «Конфигурация» сервер отвечает кодом legacy_blocked (D-34): ошибка несёт код и текст
+ * сервера, а не сырой JSON. Остальные отказы — прежний текст ответа.
+ */
 export async function setDNSRedirect(enabled: boolean): Promise<void> {
   const res = await apiFetch('/api/service/dns-redirect', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ enabled })
   });
-  if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+  if (res.ok) return;
+  const text = await res.text();
+  let payload: { error?: unknown; code?: unknown } | null = null;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    payload = null;
+  }
+  if (payload && payload.code === DNS_REDIRECT_LEGACY_BLOCKED) {
+    const message =
+      typeof payload.error === 'string' && payload.error !== ''
+        ? payload.error
+        : get(t)('cfg.dns.legacy_blocked');
+    const err: any = new Error(message);
+    err.status = res.status;
+    err.code = DNS_REDIRECT_LEGACY_BLOCKED;
+    throw err;
+  }
+  throw new Error(text || `HTTP ${res.status}`);
 }
 
 export async function flushDNSCache(): Promise<void> {

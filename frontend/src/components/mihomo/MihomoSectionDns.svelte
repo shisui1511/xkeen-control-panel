@@ -2,12 +2,22 @@
   import { DEFAULT_PROXY_SERVER_NAMESERVERS } from '../../lib/mihomoYaml';
   import Select from '../Select.svelte';
   import { t } from '../../i18n';
-  import { capabilities, showToast, fetchCapabilities } from '../../stores';
-  import { apiFetch } from '../../lib/api';
+  import { capabilities, showToast, fetchCapabilities, configLayerEnabled } from '../../stores';
+  import { apiFetch, DNS_REDIRECT_LEGACY_BLOCKED } from '../../lib/api';
   import { getMihomoContext } from './MihomoContext.svelte';
 
   let ctx = getMihomoContext();
   let dnsRedirectLoading = $state(false);
+
+  /** Машинный код из JSON-конверта ошибки; не JSON — пусто. */
+  function responseCode(text: string): string {
+    try {
+      const payload = JSON.parse(text);
+      return typeof payload?.code === 'string' ? payload.code : '';
+    } catch {
+      return '';
+    }
+  }
 
   async function enableDNSRedirect() {
     dnsRedirectLoading = true;
@@ -24,7 +34,12 @@
         await fetchCapabilities();
       } else {
         const text = await res.text();
-        showToast('error', text || $t('mihomo.dns_intercept_error'));
+        if (responseCode(text) === DNS_REDIRECT_LEGACY_BLOCKED) {
+          // Старая вкладка при включённом слое «Конфигурация» (D-34): понятный текст вместо JSON
+          showToast('error', $t('cfg.dns.legacy_blocked'));
+        } else {
+          showToast('error', text || $t('mihomo.dns_intercept_error'));
+        }
       }
     } catch (err: any) {
       if (err?.status === 401) return;
@@ -51,11 +66,13 @@
     </label>
   </div>
   {#if ctx.dns.enabled}
-    {#if $capabilities?.xkeen_dns === false}
+    <!-- При включённом слое «Конфигурация» перенаправление DNS ведёт слой: старого переключателя нет (D-34) -->
+    {#if !$configLayerEnabled && $capabilities?.xkeen_dns === false}
       <div
         class="alert alert-warning"
         style="margin: 0 0 16px 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-start;"
         role="status"
+        data-testid="dns-legacy-redirect"
       >
         <div style="display: flex; gap: 8px; align-items: center;">
           <span aria-hidden="true">⚠️</span>
