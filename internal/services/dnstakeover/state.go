@@ -47,9 +47,31 @@ type persisted struct {
 	Desired          bool   `json:"desired"`
 	Kernel           string `json:"kernel,omitempty"`
 	KernelWasRunning bool   `json:"kernel_was_running,omitempty"`
-	// Snapshot — снимок до включения: пишется до первой команды прошивки, снимается
-	// после успешного отката и выключения.
+	// Snapshot — снимок до включения: пишется до первой команды прошивки; после
+	// успешной пробы переходит в окно подтверждения, снимается откатом и выключением.
 	Snapshot *txnSnapshot `json:"snapshot,omitempty"`
+	// OverrideBefore — override прошивки до включения перехвата: окно и снимок
+	// закрыты, а выключение, откат по виду kernel_switch и возврат DNS прошивке
+	// возвращают его к этому значению.
+	OverrideBefore bool `json:"override_before,omitempty"`
+	// WaitingReason — перехват желаем, но DNS у прошивки (probe, kernel_stopped,
+	// watchdog): состояние waiting; пусто — не ждёт.
+	WaitingReason string `json:"waiting_reason,omitempty"`
+	// Window — окно подтверждения (D-05, D-07): вид, дедлайн и снимок, к которому
+	// возвращает откат. Переживает перезапуск панели только до её старта: Start
+	// откатывает неподтверждённый перехват сразу.
+	Window *windowState `json:"window,omitempty"`
+}
+
+// windowState — окно подтверждения на диске.
+type windowState struct {
+	// Kind — вид окна: enable, apply, kernel_switch.
+	Kind string `json:"kind"`
+	// DeadlineUnixMs — дедлайн окна, unix-время в миллисекундах.
+	DeadlineUnixMs int64 `json:"deadline_unix_ms"`
+	// Snapshot — состояние до действия, открывшего окно: Applied, Live перехвата,
+	// override и proxy_dns до него.
+	Snapshot txnSnapshot `json:"snapshot"`
 }
 
 // txnSnapshot — состояние до включения перехвата: к нему возвращает откат.

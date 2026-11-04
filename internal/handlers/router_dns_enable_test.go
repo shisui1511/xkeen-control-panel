@@ -40,8 +40,9 @@ import (
 // в журнал теста не попадают.
 
 const (
-	rtDNSEnable  = rtDNSBase + "/enable"
-	rtDNSDisable = rtDNSBase + "/disable"
+	rtDNSEnable   = rtDNSBase + "/enable"
+	rtDNSDisable  = rtDNSBase + "/disable"
+	rtDNSKeepPath = rtDNSBase + "/keep"
 	// rtDNSStateWait — сколько ждать конца транзакции перехвата.
 	rtDNSStateWait = 180 * time.Second
 	// rtDNSXrayListenerFile — файл слушателя :53 панели в каталоге Xray (148-11).
@@ -252,22 +253,64 @@ func rtDNSFailure(v map[string]any) (code, detail string) {
 	return code, detail
 }
 
-// rtDNSEnableOK включает перехват и ждёт состояния on; сбой — провал с кодом.
-func (e *rtSrc) rtDNSEnableOK() map[string]any {
+// rtDNSEnableWindow включает перехват и ждёт окна подтверждения (DNSF-05):
+// state window, window.kind=enable; сбой — провал с кодом.
+func (e *rtSrc) rtDNSEnableWindow() map[string]any {
 	e.t.Helper()
 	e.rtDNSStart(rtDNSEnable)
 	v := e.rtDNSWaitDone()
-	if st, _ := v["state"].(string); st != "on" {
+	if st, _ := v["state"].(string); st != "window" {
 		code, detail := rtDNSFailure(v)
-		e.t.Fatalf("после включения state %q, ожидалось on: сбой %q %.300s; шаги %v", st, code, detail, v["steps"])
+		e.t.Fatalf("после включения state %q, ожидалось window: сбой %q %.300s; шаги %v", st, code, detail, v["steps"])
+	}
+	if kind, _ := rtDNSWindow(v)["kind"].(string); kind != "enable" {
+		e.t.Fatalf("после включения window.kind %q, ожидалось enable: %v", kind, v["window"])
 	}
 	return v
 }
 
-// rtDNSEnsureOff выключает перехват, если он включён, и ждёт off.
+// rtDNSWindow — окно подтверждения из вида (nil — окна нет).
+func rtDNSWindow(v map[string]any) map[string]any {
+	w, _ := v["window"].(map[string]any)
+	return w
+}
+
+// rtDNSKeep — «Оставить»: 200 и state on; возвращает вид из ответа.
+func (e *rtSrc) rtDNSKeep() map[string]any {
+	e.t.Helper()
+	r := e.rtDNSPost(rtDNSKeepPath)
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("POST %s: %d %s %s", rtDNSKeepPath, r.Status, r.Code, r.Detail)
+	}
+	v := r.object(e.t)
+	if st, _ := v["state"].(string); st != "on" {
+		e.t.Fatalf("после «Оставить» state %q, ожидалось on", st)
+	}
+	if w := rtDNSWindow(v); w != nil {
+		e.t.Errorf("после «Оставить» окно осталось: %v", w)
+	}
+	return v
+}
+
+// rtDNSEnableOK включает перехват, ждёт окна подтверждения и подтверждает его
+// («Оставить»): итог — state on; сбой — провал с кодом.
+func (e *rtSrc) rtDNSEnableOK() map[string]any {
+	e.t.Helper()
+	e.rtDNSEnableWindow()
+	return e.rtDNSKeep()
+}
+
+// rtDNSEnsureOff выключает перехват, если он включён, и ждёт off. Открытое окно
+// подтверждения сначала подтверждается: выключение в окне — 409 window_active.
 func (e *rtSrc) rtDNSEnsureOff() {
 	e.t.Helper()
 	v := e.rtDNSWaitDone()
+	if st, _ := v["state"].(string); st == "window" {
+		if r := e.rtDNSPost(rtDNSKeepPath); r.Status != http.StatusOK && r.Code != "no_window" {
+			e.t.Errorf("подтверждение окна перед выключением: %d %s %s", r.Status, r.Code, r.Detail)
+		}
+		v = e.rtDNSWaitDone()
+	}
 	if desired, _ := v["desired"].(bool); !desired {
 		return
 	}

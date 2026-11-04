@@ -92,9 +92,13 @@ type Service struct {
 	wg       sync.WaitGroup
 	stopOnce sync.Once
 
-	// mu защищает st — состояние на диске (последняя проверка, история).
-	mu sync.Mutex
-	st persisted
+	// mu защищает st — состояние на диске (последняя проверка, история, окно) —
+	// и таймер окна: winStop — канал остановки идущей горутины-таймера (nil —
+	// таймера нет), winRolling — окно забрано под откат.
+	mu         sync.Mutex
+	st         persisted
+	winStop    chan struct{}
+	winRolling bool
 	// checkMu — одновременно идёт одна проверка резолва (T-148-17); checking —
 	// проверка идёт (операция службы для блокировки busy).
 	checkMu  sync.Mutex
@@ -344,6 +348,7 @@ func (s *Service) View() View {
 		log.Printf("dnstakeover: proxy_dns не прочитан: %v", err)
 	}
 	v.Legacy.ProxyDNS = proxy
+	waiting := ""
 	s.mu.Lock()
 	if s.st.LastCheck != nil {
 		lc := cloneCheck(*s.st.LastCheck)
@@ -352,9 +357,18 @@ func (s *Service) View() View {
 	if !on && s.st.Desired {
 		v.Desired = true
 		v.Kernel = s.st.Kernel
+		waiting = s.st.WaitingReason
 	}
+	if w := s.st.Window; w != nil && !s.winRolling {
+		v.Window = &Window{Kind: w.Kind, DeadlineMs: w.DeadlineUnixMs, TotalS: windowTotalS}
+	}
+	rolling := s.winRolling
 	s.mu.Unlock()
-	s.fillOp(&v, on)
+	s.fillOp(&v, on, waiting)
+	// Окно забрано под откат, а операция отката ещё не началась: уже applying.
+	if rolling && v.State != StateUnavailable {
+		v.State = StateApplying
+	}
 	v.Blocks = s.blocks(v, active)
 	v.ServerNowMs = s.now().UnixMilli()
 	return v
