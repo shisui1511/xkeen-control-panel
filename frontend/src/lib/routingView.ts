@@ -7,6 +7,7 @@ import { writable } from 'svelte/store';
 import type { GroupView, IssueView, KernelCounts, Member, Target } from './configRouting';
 import type { TFn } from './sourceErrors';
 import coresErrorCodes from './coresErrorCodes.json';
+import dnsErrorCodes from './dnsErrorCodes.json';
 
 // Состояние вкладок живёт на уровне модуля, а не компонента: вкладки раздела
 // «Конфигурация» размонтируются при смене, а раскрытые карточки должны её пережить.
@@ -129,21 +130,25 @@ const ISSUE_CODES = new Set([
  */
 const SECTION_ISSUE_CODES = new Set<string>(coresErrorCodes.issues);
 
+/** Коды проблем проверки параметров перехвата DNS (dnsErrorCodes.json, поле issues). */
+const DNS_ISSUE_CODES = new Set<string>(dnsErrorCodes.issues);
+
 /**
  * Ключ текста проблемы блокирующей проверки по коду: cfg.hint.<код> (тот же словарь, что у
- * хода применения), для кодов секций ядер — cfg.sec.issue.<код>; незнакомый код — общий
- * текст сбоя проверки.
+ * хода применения), для кодов секций ядер — cfg.sec.issue.<код>, для перехвата DNS —
+ * cfg.dns.issue.<код>; незнакомый код — общий текст сбоя проверки.
  */
 export function issueTextKey(code: string): string {
   if (ISSUE_CODES.has(code)) return `cfg.hint.${code}`;
   if (SECTION_ISSUE_CODES.has(code)) return `cfg.sec.issue.${code}`;
+  if (DNS_ISSUE_CODES.has(code)) return `cfg.dns.issue.${code}`;
   return 'cfg.hint.checker_failed';
 }
 
 /** Вид чипа проблемы: красный блокирует «Применить», жёлтый — предупреждение. */
 export type ChipKind = 'danger' | 'warning';
 
-const DANGER_CODES = new Set([...ISSUE_CODES, ...SECTION_ISSUE_CODES]);
+const DANGER_CODES = new Set([...ISSUE_CODES, ...SECTION_ISSUE_CODES, ...DNS_ISSUE_CODES]);
 
 /** Вид чипа по проблеме (issues — красный) или предупреждению (warnings — жёлтый). */
 export function chipKind(issue: Pick<IssueView, 'code'>, fromIssues = true): ChipKind {
