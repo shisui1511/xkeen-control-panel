@@ -23,8 +23,8 @@ const (
 	// поднимает версию без миграции: файл другой версии читается как чистое
 	// состояние.
 	stateSchemaVersion = 1
-	// maxHistory — сколько последних записей истории хранится.
-	maxHistory = 10
+	// historyLimit — сколько последних записей истории хранится.
+	historyLimit = 10
 )
 
 // HistoryEntry — запись истории действий перехвата.
@@ -47,9 +47,35 @@ type persisted struct {
 	Desired          bool   `json:"desired"`
 	Kernel           string `json:"kernel,omitempty"`
 	KernelWasRunning bool   `json:"kernel_was_running,omitempty"`
-	// Snapshot — снимок до включения: пишется до первой команды прошивки, снимается
-	// после успешного отката и выключения.
+	// Snapshot — снимок до включения: пишется до первой команды прошивки; после
+	// успешной пробы переходит в окно подтверждения, снимается откатом и выключением.
 	Snapshot *txnSnapshot `json:"snapshot,omitempty"`
+	// OverrideBefore — override прошивки до включения перехвата: окно и снимок
+	// закрыты, а выключение, откат по виду kernel_switch и возврат DNS прошивке
+	// возвращают его к этому значению.
+	OverrideBefore bool `json:"override_before,omitempty"`
+	// WaitingReason — перехват желаем, но DNS у прошивки (probe, kernel_stopped,
+	// watchdog): состояние waiting; пусто — не ждёт.
+	WaitingReason string `json:"waiting_reason,omitempty"`
+	// Window — окно подтверждения (D-05, D-07): вид, дедлайн и снимок, к которому
+	// возвращает откат. Переживает перезапуск панели только до её старта: Start
+	// откатывает неподтверждённый перехват сразу.
+	Window *windowState `json:"window,omitempty"`
+	// Outcome — исход, о котором пользователь ещё не знает или который висит
+	// строкой в карточке (D-28): откат окна, возврат DNS сторожем. Снимается
+	// следующим действием пользователя.
+	Outcome *Outcome `json:"outcome,omitempty"`
+}
+
+// windowState — окно подтверждения на диске.
+type windowState struct {
+	// Kind — вид окна: enable, apply, kernel_switch.
+	Kind string `json:"kind"`
+	// DeadlineUnixMs — дедлайн окна, unix-время в миллисекундах.
+	DeadlineUnixMs int64 `json:"deadline_unix_ms"`
+	// Snapshot — состояние до действия, открывшего окно: Applied, Live перехвата,
+	// override и proxy_dns до него.
+	Snapshot txnSnapshot `json:"snapshot"`
 }
 
 // txnSnapshot — состояние до включения перехвата: к нему возвращает откат.
@@ -103,11 +129,11 @@ func loadState(path string) persisted {
 }
 
 // saveState записывает состояние атомарно (0600); история урезается до
-// maxHistory последних записей.
+// historyLimit последних записей.
 func saveState(path string, p persisted) error {
 	p.SchemaVersion = stateSchemaVersion
-	if len(p.History) > maxHistory {
-		p.History = append([]HistoryEntry(nil), p.History[len(p.History)-maxHistory:]...)
+	if len(p.History) > historyLimit {
+		p.History = append([]HistoryEntry(nil), p.History[len(p.History)-historyLimit:]...)
 	}
 	if p.History == nil {
 		p.History = []HistoryEntry{}

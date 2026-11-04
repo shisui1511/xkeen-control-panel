@@ -92,9 +92,13 @@ type Service struct {
 	wg       sync.WaitGroup
 	stopOnce sync.Once
 
-	// mu защищает st — состояние на диске (последняя проверка, история).
-	mu sync.Mutex
-	st persisted
+	// mu защищает st — состояние на диске (последняя проверка, история, окно) —
+	// и таймер окна: winStop — канал остановки идущей горутины-таймера (nil —
+	// таймера нет), winRolling — окно забрано под откат.
+	mu         sync.Mutex
+	st         persisted
+	winStop    chan struct{}
+	winRolling bool
 	// checkMu — одновременно идёт одна проверка резолва (T-148-17); checking —
 	// проверка идёт (операция службы для блокировки busy).
 	checkMu  sync.Mutex
@@ -138,13 +142,19 @@ func New(d Deps) (*Service, error) {
 	}, nil
 }
 
-// Start читает состояние с диска и запускает фоновую работу службы: прогрев сведений о прошивке (ndmc
-// отвечает до 3 с, поэтому не на пути запроса и не на пути старта панели).
+// Start читает состояние с диска и запускает фоновую работу службы: прогрев
+// сведений о прошивке (ndmc отвечает до 3 с, поэтому не на пути запроса и не на
+// пути старта панели). Окно подтверждения в файле значит, что панель
+// перезапустилась посреди окна: неподтверждённый перехват откатывается сразу, без
+// ожидания дедлайна (D-07: продолжать окно после перезапуска не нужно).
 func (s *Service) Start() {
 	st := loadState(s.statePath())
 	s.mu.Lock()
 	s.st = st
 	s.mu.Unlock()
+	// Уведомления слоя живут в памяти: исход без пользователя возвращается в
+	// список после перезапуска панели (D-28).
+	s.d.Layer.SetNotices(noticePrefix, outcomeNotices(st.Outcome))
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -152,11 +162,16 @@ func (s *Service) Start() {
 		s.domain.Store(s.fw.ServiceDomain())
 		// Проверку черновика с известным уже служебным доменом нужно пересчитать.
 		s.d.Layer.InvalidateChecks()
+		if w, ok := s.claimWindow(nil); ok {
+			log.Printf("dnstakeover: окно подтверждения %s не закрыто до перезапуска панели — откат", w.Kind)
+			s.rollbackWindowInOp(w, reasonPanelRestart)
+		}
 	}()
 }
 
-// Stop отменяет контекст службы и ждёт фоновые горутины. Откатов не делает:
-// решения о DNS принимает старт панели, а не её остановка. Повторный вызов
+// Stop отменяет контекст службы — с ним таймер окна подтверждения — и ждёт
+// фоновые горутины. Откатов не делает: окно остаётся в файле состояния, и
+// решение о DNS принимает старт панели, а не её остановка. Повторный вызов
 // безопасен.
 func (s *Service) Stop() {
 	s.stopOnce.Do(s.cancel)
@@ -344,6 +359,7 @@ func (s *Service) View() View {
 		log.Printf("dnstakeover: proxy_dns не прочитан: %v", err)
 	}
 	v.Legacy.ProxyDNS = proxy
+	waiting := ""
 	s.mu.Lock()
 	if s.st.LastCheck != nil {
 		lc := cloneCheck(*s.st.LastCheck)
@@ -352,9 +368,22 @@ func (s *Service) View() View {
 	if !on && s.st.Desired {
 		v.Desired = true
 		v.Kernel = s.st.Kernel
+		waiting = s.st.WaitingReason
 	}
+	if w := s.st.Window; w != nil && !s.winRolling {
+		v.Window = &Window{Kind: w.Kind, DeadlineMs: w.DeadlineUnixMs, TotalS: windowTotalS}
+	}
+	if s.st.Outcome != nil {
+		o := *s.st.Outcome
+		v.Outcome = &o
+	}
+	rolling := s.winRolling
 	s.mu.Unlock()
-	s.fillOp(&v, on)
+	s.fillOp(&v, on, waiting)
+	// Окно забрано под откат, а операция отката ещё не началась: уже applying.
+	if rolling && v.State != StateUnavailable {
+		v.State = StateApplying
+	}
 	v.Blocks = s.blocks(v, active)
 	v.ServerNowMs = s.now().UnixMilli()
 	return v

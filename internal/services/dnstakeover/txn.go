@@ -14,7 +14,6 @@ import (
 
 	"golang.org/x/net/dns/dnsmessage"
 
-	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/cores"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
@@ -48,7 +47,7 @@ const (
 )
 
 // Шаги транзакций (DNSStep.id): включение — validate, snapshot, write, restart,
-// probe (окно подтверждения добавляет 148-16); выключение — apply, release, verify.
+// probe, window (окно подтверждения, window.go); выключение — apply, release, verify.
 const (
 	stepValidate = "validate"
 	stepSnapshot = "snapshot"
@@ -69,12 +68,12 @@ const (
 	statusSkipped = "skipped"
 )
 
-// Операции службы и действия истории XKeen (GET /api/service/restart-log).
+// Операции службы; действие истории XKeen (GET /api/service/restart-log) —
+// actionPrefix и вид записи: dns_takeover_enable, dns_takeover_keep и т. д.
 const (
-	opEnable      = "enable"
-	opDisable     = "disable"
-	actionEnable  = "dns_takeover_enable"
-	actionDisable = "dns_takeover_disable"
+	opEnable     = "enable"
+	opDisable    = "disable"
+	actionPrefix = "dns_takeover_"
 )
 
 const (
@@ -88,7 +87,7 @@ const (
 )
 
 // enableSteps — шаги включения в порядке показа.
-var enableSteps = []string{stepValidate, stepSnapshot, stepWrite, stepRestart, stepProbe}
+var enableSteps = []string{stepValidate, stepSnapshot, stepWrite, stepRestart, stepProbe, stepWindow}
 
 // truncateDetail оставляет не больше maxDetail последних байт, не разрезая
 // UTF-8-символ.
@@ -187,8 +186,9 @@ func (s *Service) setFailure(f *Failure) {
 }
 
 // fillOp заполняет ход и итог транзакции и состояние перехвата: идёт операция —
-// applying; перехват включён — on; иначе остаётся off или unavailable.
-func (s *Service) fillOp(v *View, on bool) {
+// applying; открыто окно подтверждения — window; перехват включён — on; перехват
+// желаем, а DNS у прошивки — waiting с причиной; иначе остаётся off или unavailable.
+func (s *Service) fillOp(v *View, on bool, waiting string) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	v.Steps = append([]Step{}, s.steps...)
@@ -207,8 +207,13 @@ func (s *Service) fillOp(v *View, on bool) {
 	case s.op != "":
 		v.State = StateApplying
 	case v.State == StateUnavailable:
+	case v.Window != nil:
+		v.State = StateWindow
 	case on:
 		v.State = StateOn
+	case waiting != "":
+		v.State = StateWaiting
+		v.WaitingReason = waiting
 	}
 }
 
@@ -221,13 +226,11 @@ func (s *Service) update(fn func(p *persisted)) error {
 	return saveState(s.statePath(), snapshot)
 }
 
-// recordHistory пишет одну запись истории на транзакцию: в историю действий
-// XKeen (RecordAction, GET /api/service/restart-log) и в History файла состояния.
+// recordHistory пишет одну запись истории на транзакцию или действие окна: в
+// историю действий XKeen (RecordAction, GET /api/service/restart-log) с действием
+// dns_takeover_<op> и в History файла состояния.
 func (s *Service) recordHistory(op, kernel string, fail *Failure) {
-	action := actionEnable
-	if op == opDisable {
-		action = actionDisable
-	}
+	action := actionPrefix + op
 	var err error
 	code, detail := "", ""
 	if fail != nil {
@@ -272,6 +275,7 @@ func (s *Service) Enable(ctx context.Context) error {
 	if !s.beginOp(opEnable, enableSteps) {
 		return errCode(CodeBusy)
 	}
+	s.clearOutcome()
 	ctx = context.WithoutCancel(ctx)
 	s.wg.Add(1)
 	go func() {
@@ -305,6 +309,9 @@ func (s *Service) enablePreflight(ctx context.Context) (enablePlan, error) {
 		return enablePlan{}, errCode(CodeKernelConflict)
 	case snap.Apply.Running || snap.BusyHolder != "" || s.checking.Load() || s.opActive():
 		return enablePlan{}, errCode(CodeBusy)
+	}
+	if s.windowOpen() {
+		return enablePlan{}, errCode(CodeWindowActive)
 	}
 	if _, on := configlayer.ParseDNSTakeoverLive(st.Live); on {
 		return enablePlan{}, &Error{Code: CodeBusy, Detail: "перехват уже включён"}
@@ -416,19 +423,31 @@ type rollbackPlan struct {
 	restarted bool
 }
 
-// finishEnable фиксирует итог включения: успех — desired, ядро и состояние on;
-// сбой — шаг в работе failed, откат к снимку и failure. Одна запись истории на
-// транзакцию по её итогу.
+// finishEnable фиксирует итог включения: успех — desired и ядро, затем окно
+// подтверждения 60 с со снимком включения (DNSF-05: состояние window до
+// «Оставить»); сбой — шаг в работе failed, откат к снимку и failure. Одна запись
+// истории на транзакцию по её итогу.
 func (s *Service) finishEnable(ctx context.Context, pl enablePlan, fail *Failure, rb rollbackPlan) {
 	if fail == nil {
+		var snap *txnSnapshot
 		if err := s.update(func(p *persisted) {
 			p.Desired = true
 			p.Kernel = pl.kernel
 			p.KernelWasRunning = true
+			snap = p.Snapshot
 		}); err != nil {
 			log.Printf("dnstakeover: %v", err)
 		}
 		s.recordHistory(opEnable, pl.kernel, nil)
+		if snap == nil {
+			// Без снимка откатывать не к чему: перехват остаётся включённым без окна.
+			log.Printf("dnstakeover: снимка включения нет, окно подтверждения не открыто")
+			s.setStep(stepWindow, statusSkipped)
+			return
+		}
+		if err := s.openWindow(kindEnable, *snap); err != nil {
+			log.Printf("dnstakeover: окно подтверждения не открыто: %v", err)
+		}
 		return
 	}
 	s.failRunning()
@@ -536,25 +555,6 @@ func (s *Service) reconcileFirmware(ctx context.Context, pl enablePlan) (proxyLa
 	return proxyLate, nil
 }
 
-// rebuildXKeenRules перезапускает запущенное ядро через KernelApplier под
-// замком жизненного цикла: XKeen строит перехват по строке proxy_dns при старте
-// ядра. Остановленное ядро не запускается.
-func (s *Service) rebuildXKeenRules(kernel string) error {
-	if !s.kernelRunning(s.d.Kernel.ActiveState()) {
-		return nil
-	}
-	if s.d.Applier == nil {
-		return errors.New("перезапуск ядра: KernelApplier не задан")
-	}
-	s.d.Lifecycle.Lock()
-	res := s.d.Applier.ApplyLocked(kernel)
-	s.d.Lifecycle.Unlock()
-	if res.Outcome == services.ApplyRestartFailed {
-		return fmt.Errorf("перезапуск %s после возврата proxy_dns: %s", kernel, res.Error)
-	}
-	return nil
-}
-
 // restoreSnapshot возвращает применённое состояние и Live перехвата к снимку
 // включения (RunRestore с TriggerDNSRestore): секции DNS ядра и dns_takeover в
 // черновике возвращаются вместе с ним, если пользователь их не правил.
@@ -565,31 +565,8 @@ func (s *Service) restoreSnapshot(ctx context.Context, pl enablePlan) error {
 	if snap == nil {
 		return errors.New("откат к снимку: снимка нет")
 	}
-	live := snap.Live
-	if len(live) == 0 {
-		live = json.RawMessage("null")
-	}
-	view, err := s.d.Layer.RunRestore(ctx, configlayer.RestoreRun{
-		Trigger: configlayer.TriggerDNSRestore,
-		Kernel:  pl.kernel,
-		Applied: snap.Applied,
-		Live:    configlayer.Sections{configlayer.LiveKeyDNSTakeover: live},
-		ResetDraftSections: []string{
-			configlayer.CoreSectionName(pl.kernel, "dns"),
-			configlayer.SectionDNSTakeover,
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("откат к снимку: %w", err)
-	}
-	if view.Result == nil || !view.Result.OK {
-		code, msg := "", ""
-		if view.Result != nil {
-			code, msg = view.Result.Code, view.Result.Message
-		}
-		return fmt.Errorf("откат к снимку: %s: %s", code, msg)
-	}
-	return nil
+	_, err := s.restoreWindowSnapshot(ctx, pl.kernel, *snap, true)
+	return err
 }
 
 // enableSections — подменяемые секции включения и их слияние в черновик: секция
@@ -713,6 +690,7 @@ func (s *Service) Disable(ctx context.Context) error {
 	if !s.beginOp(opDisable, disableSteps) {
 		return errCode(CodeBusy)
 	}
+	s.clearOutcome()
 	ctx = context.WithoutCancel(ctx)
 	s.wg.Add(1)
 	go func() {
@@ -733,10 +711,15 @@ func (s *Service) disablePreflight(ctx context.Context) (disablePlan, error) {
 	}
 	live, on := configlayer.ParseDNSTakeoverLive(st.Live)
 	s.mu.Lock()
-	desired, kernel, snap := s.st.Desired, s.st.Kernel, s.st.Snapshot
+	desired, kernel, snap, overrideBefore := s.st.Desired, s.st.Kernel, s.st.Snapshot, s.st.OverrideBefore
+	window := s.st.Window != nil
 	s.mu.Unlock()
 	if !on && !desired {
 		return disablePlan{}, errCode(CodeNotEnabled)
+	}
+	// Окно подтверждения закрывают «Оставить» или «Откатить сейчас».
+	if window {
+		return disablePlan{}, errCode(CodeWindowActive)
 	}
 	if ok, reason := s.fw.Available(ctx); !ok {
 		return disablePlan{}, &Error{Code: CodeUnavailable, Detail: reason}
@@ -748,7 +731,7 @@ func (s *Service) disablePreflight(ctx context.Context) (disablePlan, error) {
 	if layer.Apply.Running || layer.BusyHolder != "" || s.checking.Load() || s.opActive() {
 		return disablePlan{}, errCode(CodeBusy)
 	}
-	pl := disablePlan{kernel: kernel, live: on}
+	pl := disablePlan{kernel: kernel, live: on, overrideBefore: overrideBefore}
 	if on {
 		pl.kernel = live.Kernel
 	}
@@ -814,8 +797,10 @@ func (s *Service) runDisable(ctx context.Context, pl disablePlan) {
 		p.Desired = false
 		p.Kernel = ""
 		p.KernelWasRunning = false
+		p.WaitingReason = ""
 		if fail == nil {
 			p.Snapshot = nil
+			p.OverrideBefore = false
 		}
 	}); err != nil {
 		log.Printf("dnstakeover: %v", err)
