@@ -1,0 +1,96 @@
+{
+  "DNSCheckGroup": {
+    "required": ["label", "name", "ok", "latency_ms", "path", "answers"],
+    "optional": ["zone", "group", "reason"],
+    "children": {}
+  },
+  "DNSCheckResult": {
+    "required": ["ok", "source", "at_ms", "groups"],
+    "optional": [],
+    "children": {
+      "groups": "DNSCheckGroup[]"
+    }
+  },
+  "DNSFailure": {
+    "required": ["code", "rolled_back"],
+    "optional": ["params", "detail"],
+    "children": {}
+  },
+  "DNSGroupRef": {
+    "required": ["id", "name", "missing"],
+    "optional": [],
+    "children": {}
+  },
+  "DNSLegacy": {
+    "required": ["proxy_dns"],
+    "optional": [],
+    "children": {}
+  },
+  "DNSOutcome": {
+    "required": ["kind", "at_ms", "toast_pending"],
+    "optional": ["from", "to", "kernel", "reason"],
+    "children": {}
+  },
+  "DNSOwner": {
+    "required": ["kind"],
+    "optional": ["kernel", "process", "addr"],
+    "children": {}
+  },
+  "DNSParams": {
+    "required": ["group", "zones"],
+    "optional": [],
+    "children": {}
+  },
+  "DNSStep": {
+    "required": ["id", "status"],
+    "optional": [],
+    "children": {}
+  },
+  "DNSView": {
+    "required": [
+      "state",
+      "desired",
+      "kernel",
+      "active_kernel",
+      "kernel_running",
+      "owner",
+      "upstreams",
+      "zones_builtin",
+      "zones",
+      "ipv6",
+      "default_name",
+      "blocks",
+      "steps",
+      "legacy",
+      "server_now_ms"
+    ],
+    "optional": [
+      "group",
+      "last_check",
+      "window",
+      "failure",
+      "outcome",
+      "unavailable_reason",
+      "waiting_reason",
+      "section_owner",
+      "draft_params",
+      "params_changed"
+    ],
+    "children": {
+      "owner": "DNSOwner",
+      "group": "DNSGroupRef",
+      "last_check": "DNSCheckResult",
+      "window": "DNSWindow",
+      "steps": "DNSStep[]",
+      "failure": "DNSFailure",
+      "outcome": "DNSOutcome",
+      "legacy": "DNSLegacy",
+      "draft_params": "DNSParams"
+    }
+  },
+  "DNSWindow": {
+    "required": ["kind", "deadline_ms", "total_s"],
+    "optional": [],
+    "children": {}
+  }
+}
