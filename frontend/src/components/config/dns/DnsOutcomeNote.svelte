@@ -65,13 +65,13 @@
     data-testid="dns-outcome"
     data-kind={outcome.kind}
   >
-    <Icon name="warning" size={16} class="dns-outcome-icon" />
+    <Icon name="warning" size={16} class="icon-first-line" />
     <span class="dns-outcome-text">{text}</span>
   </div>
 {/if}
 {#if state === 'waiting'}
   <p class="dns-outcome-wait" role="status" data-testid="dns-outcome" data-kind="waiting">
-    <Icon name="info" size={14} class="dns-outcome-icon" />
+    <Icon name="info" size={14} class="icon-first-line" />
     <span class="dns-outcome-text">{$t('cfg.dns.outcome_waiting')}</span>
   </p>
 {/if}
@@ -92,15 +92,9 @@
     gap: var(--spacing-1);
     margin: 0;
     min-width: 0;
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--fg-secondary);
-  }
-
-  .dns-outcome :global(.dns-outcome-icon),
-  .dns-outcome-wait :global(.dns-outcome-icon) {
-    flex-shrink: 0;
-    margin-top: 2px;
   }
 
   .dns-outcome-text {

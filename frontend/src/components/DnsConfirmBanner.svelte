@@ -2,7 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import { createSubscriber } from 'svelte/reactivity';
   import { t } from '../i18n';
-  import Warning from '../lib/components/icons/Warning.svelte';
+  import Icon from '../lib/components/Icon.svelte';
   import Button from './Button.svelte';
   import { showToast } from '../stores';
   import { motion } from '../lib/motion.svelte';
@@ -256,8 +256,8 @@
     data-kind={win.kind}
     bind:offsetHeight={height}
   >
-    <span class="dns-banner__icon" aria-hidden="true">
-      <Warning size={18} />
+    <span class="dns-banner__icon icon-first-line" aria-hidden="true">
+      <Icon name="warning" size={18} />
     </span>
     <div class="dns-banner__main">
       <strong>{$t('cfg.dns.banner_title')}</strong>
@@ -320,20 +320,22 @@
     position: sticky;
     top: 0;
     z-index: 6;
-    margin: 12px 16px 0;
-    padding: 12px 16px;
+    margin: var(--spacing-2) var(--spacing-4) 0;
+    padding: var(--spacing-2) var(--spacing-4);
     justify-content: space-between;
     align-items: flex-start;
-    gap: 16px;
+    gap: var(--spacing-4);
     /* Под полупрозрачным градиентом .alert-warning — непрозрачная подложка: содержимое
        страницы при прокрутке не просвечивает сквозь приклеенный баннер */
     background-color: var(--bg-card);
   }
 
+  /* Иконка по первой строке заголовка (Heading 16/1.2): высота .icon-first-line — 1lh */
   .dns-banner__icon {
     display: inline-flex;
     flex: none;
-    margin-top: 2px;
+    font-size: var(--font-size-lg);
+    line-height: 1.2;
   }
 
   .dns-banner__main {
@@ -341,7 +343,7 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .dns-banner__main strong {
@@ -363,14 +365,14 @@
   .dns-banner__countdown {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--spacing-2);
     min-width: 0;
   }
 
   .dns-banner__track {
     flex: 1;
     min-width: 0;
-    height: 4px;
+    height: var(--spacing-1);
     border-radius: var(--radius-sm);
     background: var(--border);
     overflow: hidden;
@@ -403,7 +405,7 @@
     display: flex;
     flex: none;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: var(--spacing-2);
     align-items: center;
   }
 

@@ -167,7 +167,7 @@
 
   {#if transportError}
     <p class="dns-check-transport" role="status" data-testid="dns-check-transport">
-      <Icon name="warning" size={14} class="dns-check-icon" />
+      <Icon name="warning" size={14} class="icon-first-line" />
       <span>{transportError}</span>
     </p>
   {/if}
@@ -190,7 +190,7 @@
             <p class="dns-check-group-title">{groupTitle(g)}</p>
           {/if}
           <p class={['dns-check-outcome', { 'dns-check-outcome-fail': !g.ok }]}>
-            <Icon name={g.ok ? 'check' : 'warning'} size={14} class="dns-check-icon" />
+            <Icon name={g.ok ? 'check' : 'warning'} size={14} class="icon-first-line" />
             <span data-testid="dns-check-outcome">{outcomeText(g)}</span>
           </p>
           <dl class="dns-check-lines">
@@ -281,14 +281,21 @@
     align-items: flex-start;
     gap: var(--spacing-1);
     margin: 0;
-    font-size: var(--font-size-sm);
-    font-weight: 600;
-    line-height: 1.4;
     min-width: 0;
     overflow-wrap: anywhere;
   }
 
+  .dns-check-outcome {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
+  /* Транспортный сбой — подпись-сообщение: Caption 12/400 в --warning */
   .dns-check-transport {
+    font-size: var(--font-size-xs);
+    font-weight: 400;
+    line-height: 1.5;
     color: var(--warning);
   }
 
@@ -298,11 +305,6 @@
 
   .dns-check-outcome-fail {
     color: var(--warning);
-  }
-
-  .dns-check-block :global(.dns-check-icon) {
-    flex-shrink: 0;
-    margin-top: 2px;
   }
 
   .dns-check-result {

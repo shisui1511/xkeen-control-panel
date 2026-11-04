@@ -500,7 +500,7 @@
 
   {#if view === null && $dnsLoadError}
     <div class="alert alert-error dns-alert" role="alert" data-testid="dns-load-error">
-      <Icon name="warning" size={16} class="dns-alert-icon" />
+      <Icon name="warning" size={16} class="icon-first-line" />
       <div class="dns-alert-body">
         <span>{$t('cfg.dns.load_error')}</span>
         <Button variant="secondary" data-testid="dns-load-retry" onclick={() => void loadDns()}>
@@ -537,7 +537,7 @@
       <ul class="dns-blocks">
         {#each blocks as b (b)}
           <li class="warning-text dns-block" id={blockId(b)} data-testid="dns-block-{b}">
-            <Icon name="warning" size={14} class="dns-block-icon" />
+            <Icon name="warning" size={14} class="icon-first-line" />
             <span class="dns-block-text">
               {blockText(b, view)}
               {#if b === 'section' && onopenform}
@@ -576,7 +576,7 @@
 
     {#if view.state === 'unavailable'}
       <div class="dns-unavailable" data-testid="dns-unavailable">
-        <Icon name="info" size={16} class="dns-note-icon" />
+        <Icon name="info" size={16} class="icon-first-line" />
         <div class="dns-unavailable-text">
           <p class="dns-body">{$t('cfg.dns.unavailable_body')}</p>
           {#if view.unavailable_reason}
@@ -679,7 +679,7 @@
         <div class="dns-params-body">
           {#if showEditWindowHint}
             <p class="warning-text dns-params-warn" data-testid="dns-params-window-hint">
-              <Icon name="warning" size={14} class="dns-block-icon" />
+              <Icon name="warning" size={14} class="icon-first-line" />
               <span>{$t('cfg.dns.edit_window_hint', { seconds: String($dnsWindowSeconds) })}</span>
             </p>
           {/if}
@@ -759,11 +759,11 @@
           </div>
         {/if}
         <p class="dns-note">
-          <Icon name="info" size={14} class="dns-note-icon" />
+          <Icon name="info" size={14} class="icon-first-line" />
           <span>{$t('cfg.dns.firmware_note')}</span>
         </p>
         <p class="dns-note">
-          <Icon name="info" size={14} class="dns-note-icon" />
+          <Icon name="info" size={14} class="icon-first-line" />
           <span>{$t('cfg.dns.scope_note')}</span>
         </p>
       </div>
@@ -839,19 +839,14 @@
     gap: var(--spacing-2);
   }
 
+  /* Текст в .alert — Body 14/400 (у .alert проекта 13px) */
   .dns-alert {
     margin: 0;
     min-width: 0;
     gap: var(--spacing-2);
     padding: var(--spacing-2) var(--spacing-4);
+    font-size: var(--font-size-base);
     line-height: 1.5;
-  }
-
-  .dns-alert :global(.dns-alert-icon),
-  .dns-unavailable :global(.dns-note-icon),
-  .dns-note :global(.dns-note-icon) {
-    flex-shrink: 0;
-    margin-top: 2px;
   }
 
   .dns-alert-body {
@@ -877,11 +872,6 @@
     gap: var(--spacing-1);
     margin: 0;
     line-height: 1.5;
-  }
-
-  .dns-block :global(.dns-block-icon) {
-    flex-shrink: 0;
-    margin-top: 3px;
   }
 
   .dns-block-text {
@@ -917,11 +907,12 @@
     min-width: 0;
   }
 
+  /* Между заголовочной частью и сеткой — lg 24px: зазор карточки 16 + 8 */
   .dns-grid {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-4);
-    margin: 0;
+    margin: var(--spacing-2) 0 0;
     min-width: 0;
   }
 
@@ -1000,11 +991,6 @@
     line-height: 1.5;
     min-width: 0;
     overflow-wrap: anywhere;
-  }
-
-  .dns-params-warn :global(.dns-block-icon) {
-    flex-shrink: 0;
-    margin-top: 3px;
   }
 
   .dns-field {

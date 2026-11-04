@@ -54,7 +54,7 @@
 <div class="dns-steps-wrap">
   {#if failure}
     <div class="alert alert-error dns-fail" role="alert" data-testid="dns-fail">
-      <Icon name="warning" size={16} class="dns-fail-icon" />
+      <Icon name="warning" size={16} class="icon-first-line" />
       <div class="dns-fail-body">
         <p class="dns-fail-title" data-testid="dns-fail-title">
           {$t(kind === 'enable' ? 'cfg.dns.fail_title' : 'cfg.dns.fail_title_disable')}
@@ -127,11 +127,6 @@
     line-height: 1.5;
   }
 
-  .dns-fail :global(.dns-fail-icon) {
-    flex-shrink: 0;
-    margin-top: 2px;
-  }
-
   .dns-fail-body {
     display: flex;
     flex-direction: column;
@@ -141,11 +136,12 @@
     overflow-wrap: anywhere;
   }
 
+  /* Заголовок сбоя — Heading 16/600/1.2, как заголовок баннера */
   .dns-fail-title {
     margin: 0;
-    font-size: var(--font-size-base);
+    font-size: var(--font-size-lg);
     font-weight: 600;
-    line-height: 1.5;
+    line-height: 1.2;
   }
 
   .dns-fail-text {

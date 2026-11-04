@@ -46,7 +46,7 @@
 
 {#if willOff}
   <p class="dns-legacy-note" data-testid="dns-legacy-note">
-    <Icon name="info" size={14} class="dns-legacy-icon" />
+    <Icon name="info" size={14} class="icon-first-line" />
     <span class="dns-legacy-text">{$t('cfg.dns.legacy_will_off')}</span>
   </p>
 {:else if drift}
@@ -55,7 +55,7 @@
     role={inWindow ? 'status' : 'alert'}
     data-testid="dns-legacy-drift"
   >
-    <Icon name="warning" size={16} class="dns-legacy-icon" />
+    <Icon name="warning" size={16} class="icon-first-line" />
     <div class="dns-legacy-body">
       <span class="dns-legacy-text">{$t('cfg.dns.legacy_drift')}</span>
       <Button
@@ -77,7 +77,7 @@
     gap: var(--spacing-1);
     margin: 0;
     min-width: 0;
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--fg-secondary);
   }
@@ -89,12 +89,6 @@
     padding: var(--spacing-2) var(--spacing-4);
     font-size: var(--font-size-base);
     line-height: 1.5;
-  }
-
-  .dns-legacy-note :global(.dns-legacy-icon),
-  .dns-legacy-drift :global(.dns-legacy-icon) {
-    flex-shrink: 0;
-    margin-top: 2px;
   }
 
   .dns-legacy-body {

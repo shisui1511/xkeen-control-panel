@@ -10,7 +10,7 @@
 </script>
 
 <div class="warning-text dns-flag-note" data-testid="dns-flag-off-note">
-  <Icon name="warning" size={14} />
+  <Icon name="warning" size={14} class="icon-first-line" />
   <span>{$t('cfg.dns.flag_off_note')}</span>
 </div>
 <DependentProfilesNote all={profilesAll} />
@@ -19,14 +19,9 @@
   .dns-flag-note {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
+    gap: var(--spacing-2);
     margin-top: 0;
     line-height: 1.4;
     overflow-wrap: anywhere;
-  }
-
-  .dns-flag-note :global(svg) {
-    flex-shrink: 0;
-    margin-top: 2px;
   }
 </style>
