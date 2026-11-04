@@ -393,6 +393,9 @@ func (s *Service) restoreWindowSnapshot(ctx context.Context, kernel string, snap
 		Kernel:  kernel,
 		Applied: snap.Applied,
 		Live:    configlayer.Sections{configlayer.LiveKeyDNSTakeover: live},
+		// Откат включения возвращает строку proxy_dns: правила XKeen с :53
+		// пересобираются только полным перезапуском ядра, не горячей перезагрузкой.
+		ForceFullRestart: reset && snap.ProxyDNSBefore,
 	}
 	if reset {
 		run.ResetDraftSections = []string{configlayer.CoreSectionName(kernel, "dns"), configlayer.SectionDNSTakeover}

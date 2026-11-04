@@ -1648,6 +1648,8 @@ type RestoreRun struct {
 	// ResetDraftSections — секции черновика, которые возвращаются к снимку, если
 	// пользователь их не правил; остальной черновик не меняется (D-27).
 	ResetDraftSections []string
+	// ForceFullRestart — см. ApplyRequest.ForceFullRestart.
+	ForceFullRestart bool
 	// Guard проверяет состояние слоя под замком применения, до сборки; ошибка
 	// отменяет запуск. nil — проверки нет.
 	Guard func(st StateView) error
@@ -1701,7 +1703,8 @@ func (l *Layer) RunRestore(ctx context.Context, run RestoreRun) (ApplyView, erro
 			Live:               run.Live.Clone(),
 			ResetDraftSections: append([]string(nil), run.ResetDraftSections...),
 		},
-		BeforeWrite: run.BeforeWrite, BeforeRollback: run.BeforeRollback,
+		ForceFullRestart: run.ForceFullRestart,
+		BeforeWrite:      run.BeforeWrite, BeforeRollback: run.BeforeRollback,
 	}
 	view := l.runPipeline(req)
 	release()
