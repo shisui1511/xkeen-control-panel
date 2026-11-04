@@ -53,6 +53,15 @@
  *    цикла), а клиент не импортируется вне Config.svelte и components/config/ (при
  *    выключенном флаге запросов секций нет).
  *
+ * 11. Перехват DNS (план 148-09): интерфейсы configDns.ts (Dns*) совпадают по ключам с
+ *    dnsContract.json (DNS*); configLayer.ts слушает событие dns в одном SSE-потоке, знает
+ *    префикс уведомлений dns_ и не импортирует configDns.ts; клиент подписан на dns и draft
+ *    с дебаунсом 300 мс и подключается только из components/config/**,
+ *    components/DnsConfirmBanner.svelte, Dashboard.svelte и Settings.svelte; у каждого кода
+ *    из dnsErrorCodes.json (codes) есть cfg.dns.err.<код>, у каждой проблемы (issues) —
+ *    cfg.dns.issue.<код> в ru и en, routingView.ts переводит проблемы в cfg.dns.issue.*; в
+ *    components/config/dns/*.svelte нет {@html} и нестилизованного нативного выбора.
+ *
  * Usage: node scripts/check-config-ui.js [--root <каталог>]
  */
 const fs = require("fs");
@@ -1530,6 +1539,169 @@ for (const lang of ["ru", "en"]) {
   expect(
     ru.length === en.length && ru.every((k, i) => k === en[i]),
     "ru.json и en.json: наборы ключей cfg.sec.* различаются",
+  );
+}
+
+// --- 11. Перехват DNS: клиент, контракт, событие, словари (план 148-09) -------
+
+const DNS_TS = `${SRC}/lib/configDns.ts`;
+const DNS_CONTRACT = `${SRC}/lib/dnsContract.json`;
+const DNS_CODES = `${SRC}/lib/dnsErrorCodes.json`;
+const DNS_DIR = `${SRC}/components/config/dns`;
+
+// Типы ответов против dnsContract.json: контрактное DNSView ↔ интерфейс DnsView
+const dnsTs = read(DNS_TS);
+let dnsContract = {};
+try {
+  dnsContract = JSON.parse(read(DNS_CONTRACT));
+} catch (e) {
+  errors.push(`${DNS_CONTRACT}: не разбирается как JSON: ${e.message}`);
+}
+const dnsTsName = (type) => type.replace(/^DNS/, "Dns");
+for (const [type, spec] of Object.entries(dnsContract)) {
+  const tsName = dnsTsName(type);
+  const keys = interfaceKeys(dnsTs, tsName);
+  if (!keys) {
+    errors.push(`${DNS_TS}: нет интерфейса ${tsName} (контракт ${type})`);
+    continue;
+  }
+  for (const k of spec.required) {
+    if (!keys.has(k)) errors.push(`${tsName}: нет обязательного ключа "${k}"`);
+    else if (keys.get(k))
+      errors.push(
+        `${tsName}: ключ "${k}" обязателен в контракте, но объявлен как необязательный`,
+      );
+  }
+  for (const k of spec.optional) {
+    if (!keys.has(k)) errors.push(`${tsName}: нет необязательного ключа "${k}"`);
+    else if (!keys.get(k))
+      errors.push(
+        `${tsName}: ключ "${k}" необязателен в контракте, но объявлен как обязательный`,
+      );
+  }
+  const allowed = new Set([...spec.required, ...spec.optional]);
+  for (const k of keys.keys()) {
+    if (!allowed.has(k)) errors.push(`${tsName}: лишний ключ "${k}" вне контракта`);
+  }
+  for (const [field, child] of Object.entries(spec.children || {})) {
+    const childType = child.replace(/(\[\]|\{\})$/, "");
+    expect(
+      Object.prototype.hasOwnProperty.call(dnsContract, childType),
+      `${DNS_CONTRACT}: тип ${childType} (поле ${field} типа ${type}) не описан в контракте`,
+    );
+  }
+}
+
+// Событие dns: один SSE-поток, обработчик только оповещает подписчиков; префикс dns_
+expect(
+  /EVENT_NAMES\s*=\s*\[[^\]]*'dns'/.test(layerTs),
+  `${LAYER_TS}: 'dns' нет в EVENT_NAMES`,
+);
+expect(
+  /type HandlerEvent\s*=[^;]*'dns'/.test(layerTs),
+  `${LAYER_TS}: onLayerEvent не принимает событие 'dns'`,
+);
+expect(
+  /NOTICE_PREFIXES\s*=\s*\[[^\]]*'dns_'/.test(layerTs),
+  `${LAYER_TS}: нет префикса уведомлений 'dns_' в NOTICE_PREFIXES`,
+);
+expect(
+  !/from '\.\/configDns'/.test(layerTs),
+  `${LAYER_TS}: импортирует configDns (цикл импортов)`,
+);
+for (const ev of ["dns", "draft"]) {
+  expect(
+    new RegExp(`onLayerEvent\\('${ev}'`).test(dnsTs),
+    `${DNS_TS}: нет подписки onLayerEvent('${ev}', …)`,
+  );
+}
+expect(
+  /DNS_DEBOUNCE_MS\s*=\s*300/.test(dnsTs),
+  `${DNS_TS}: дебаунс перечитывания не 300 мс`,
+);
+expect(!/EventSource/.test(dnsTs), `${DNS_TS}: открывает собственный поток событий`);
+expect(
+  /export async function loadDns\(/.test(dnsTs) &&
+    dnsTs.includes("/api/configlayer/dns") &&
+    /get\(configLayerEnabled\)/.test(dnsTs),
+  `${DNS_TS}: нет loadDns, адреса /api/configlayer/dns или проверки флага слоя`,
+);
+expect(
+  /export const dnsTakeover\b/.test(dnsTs) &&
+    /export const dnsWindowActive\b/.test(dnsTs) &&
+    /export const dnsBusy\b/.test(dnsTs) &&
+    /export function dnsErrorText\(/.test(dnsTs),
+  `${DNS_TS}: нет стора dnsTakeover, производных dnsWindowActive/dnsBusy или dnsErrorText`,
+);
+expect(
+  /section:\s*'dns_takeover'/.test(dnsTs),
+  `${DNS_TS}: параметры перехвата пишутся не в секцию черновика dns_takeover`,
+);
+
+// Клиент перехвата подключают только раздел «Конфигурация», баннер окна, оболочка и
+// настройки: иначе при выключенном флаге слоя пошли бы запросы /api/configlayer/dns
+const DNS_CLIENT_EXTRA = new Set([
+  `${SRC}/components/DnsConfirmBanner.svelte`,
+  `${SRC}/Dashboard.svelte`,
+  `${SRC}/Settings.svelte`,
+]);
+for (const file of walk(SRC, [])) {
+  if (file === DNS_TS || DNS_CLIENT_EXTRA.has(file)) continue;
+  if (file.startsWith(`${SRC}/components/config/`)) continue;
+  if (/^\s*import(?!\s+type\b)[^;]*?from '[^']*\/configDns'/m.test(read(file))) {
+    errors.push(
+      `${file}: импортирует configDns вне components/config/, DnsConfirmBanner, Dashboard и Settings (запросы перехвата при выключенном флаге)`,
+    );
+  }
+}
+
+// Компоненты перехвата: только текстовые узлы (T-148-19) и стилизованный Select.svelte
+if (fs.existsSync(path.join(root, DNS_DIR))) {
+  for (const file of walk(DNS_DIR, [])) {
+    if (!file.endsWith(".svelte")) continue;
+    const text = read(file);
+    expect(
+      !/\{@html/.test(text),
+      `${file}: {@html} запрещён в компонентах перехвата DNS (XSS)`,
+    );
+    expect(
+      !/<select\b/.test(text),
+      `${file}: нестилизованный <select> — только components/Select.svelte`,
+    );
+  }
+} else {
+  errors.push(`${DNS_DIR}: нет каталога компонентов перехвата DNS`);
+}
+
+// Коды ошибок и проблем перехвата: тексты в обоих словарях, проблемы — в routingView.ts
+let dnsCodes = { codes: [], issues: [] };
+try {
+  dnsCodes = JSON.parse(read(DNS_CODES));
+} catch (e) {
+  errors.push(`${DNS_CODES}: не разбирается как JSON: ${e.message}`);
+}
+expect(
+  Array.isArray(dnsCodes.codes) &&
+    dnsCodes.codes.includes("generic") &&
+    Array.isArray(dnsCodes.issues) &&
+    dnsCodes.issues.length > 0,
+  `${DNS_CODES}: нужны список codes с generic и непустой список issues`,
+);
+for (const lang of ["ru", "en"]) {
+  const dict = JSON.parse(read(`${SRC}/locales/${lang}.json`));
+  const has = (k) => typeof dict[k] === "string" && dict[k].trim() !== "";
+  for (const code of dnsCodes.codes) {
+    expect(has(`cfg.dns.err.${code}`), `${lang}.json: нет cfg.dns.err.${code}`);
+  }
+  for (const code of dnsCodes.issues) {
+    expect(has(`cfg.dns.issue.${code}`), `${lang}.json: нет cfg.dns.issue.${code}`);
+  }
+}
+{
+  const rv = read(`${SRC}/lib/routingView.ts`);
+  expect(
+    /from '\.\/dnsErrorCodes\.json'/.test(rv) && rv.includes("cfg.dns.issue."),
+    `${SRC}/lib/routingView.ts: issueTextKey не переводит проблемы перехвата в cfg.dns.issue.<код>`,
   );
 }
 

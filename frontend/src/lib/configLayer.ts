@@ -244,7 +244,8 @@ const NOTICE_PREFIXES = [
   'geodata_update:',
   'geodata_cleanup:',
   'geodata_include:',
-  'geodata_delete:'
+  'geodata_delete:',
+  'dns_'
 ];
 
 /** Показывается ли уведомление: незнакомые идентификаторы не рисуются и в бейдж не попадают. */
@@ -445,23 +446,26 @@ const EVENT_NAMES = [
   'notices',
   'sources',
   'routing',
-  'geodata'
+  'geodata',
+  'dns'
 ] as const;
 const RETRY_MIN_MS = 3000;
 const RETRY_MAX_MS = 30000;
 
-// Обработчики событий sources, routing, geodata и draft: представления перечитывают клиенты
-// источников, маршрутизации и менеджера geodata (обработчики регистрируются при загрузке
-// модулей клиентов; configLayer их не импортирует — цикла нет). У каждого имени свой набор.
-type HandlerEvent = 'sources' | 'routing' | 'geodata' | 'draft';
+// Обработчики событий sources, routing, geodata, dns и draft: представления перечитывают
+// клиенты источников, маршрутизации, менеджера geodata и перехвата DNS (обработчики
+// регистрируются при загрузке модулей клиентов; configLayer их не импортирует — цикла нет).
+// У каждого имени свой набор.
+type HandlerEvent = 'sources' | 'routing' | 'geodata' | 'dns' | 'draft';
 const layerHandlers: Record<HandlerEvent, Set<() => void>> = {
   sources: new Set(),
   routing: new Set(),
   geodata: new Set(),
+  dns: new Set(),
   draft: new Set()
 };
 
-/** Подписка на событие SSE `sources`, `routing`, `geodata` или `draft`; возвращает функцию отписки. */
+/** Подписка на событие SSE `sources`, `routing`, `geodata`, `dns` или `draft`; возвращает функцию отписки. */
 export function onLayerEvent(name: HandlerEvent, fn: () => void): () => void {
   const set = layerHandlers[name];
   if (!set) return () => {};
@@ -525,6 +529,12 @@ function applyEvent(name: string, data: unknown): void {
     // снимок менеджера перечитывает клиент менеджера по подписке
     geodataHolder.set(isObject(data) && typeof data.holder === 'string' ? data.holder : '');
     notifyHandlers('geodata');
+    return;
+  }
+  if (name === 'dns') {
+    // Событие несёт только счётчик службы перехвата: снимок слоя не меняется, состояние
+    // перехвата перечитывает его клиент по подписке
+    notifyHandlers('dns');
     return;
   }
   eventSeq++;
@@ -603,8 +613,9 @@ function connect(): void {
     // Пока связи не было, события могли пройти мимо — читаем состояние целиком (D-06)
     if (wasLost) {
       void refetchLayerState();
-      // События менеджера баз за время обрыва тоже могли пройти мимо
+      // События менеджера баз и перехвата DNS за время обрыва тоже могли пройти мимо
       notifyHandlers('geodata');
+      notifyHandlers('dns');
     }
   };
   es.onerror = () => {

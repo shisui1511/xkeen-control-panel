@@ -4272,6 +4272,7 @@
   "cfg.dns.owner_kernel": "Ядро {kernel} ({addr})",
   "cfg.dns.owner_firmware": "Прошивка (dns-proxy)",
   "cfg.dns.owner_other": "Другая служба ({process})",
+  "cfg.dns.owner_none": "Порт свободен",
   "cfg.dns.row_kernel": "Активное ядро",
   "cfg.dns.row_group": "Группа-цель",
   "cfg.dns.row_upstreams": "Апстримы",

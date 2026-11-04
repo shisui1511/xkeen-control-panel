@@ -4272,6 +4272,7 @@
   "cfg.dns.owner_kernel": "{kernel} core ({addr})",
   "cfg.dns.owner_firmware": "Firmware (dns-proxy)",
   "cfg.dns.owner_other": "Another service ({process})",
+  "cfg.dns.owner_none": "Port is free",
   "cfg.dns.row_kernel": "Active core",
   "cfg.dns.row_group": "Target group",
   "cfg.dns.row_upstreams": "Upstreams",
