@@ -1572,6 +1572,82 @@ func (l *Layer) RunSectionLive(ctx context.Context, run SectionLiveRun) (ApplyVi
 	return view, nil
 }
 
+// RestoreRun — параметры отката уже зафиксированного применения к снимку
+// (RunRestore).
+type RestoreRun struct {
+	// Trigger — что запустило откат (TriggerDNSRestore).
+	Trigger Trigger
+	// Kernel ограничивает запуск одним ядром; пусто — все установленные.
+	Kernel string
+	// Applied — применённое состояние снимка целиком: после успеха Applied равно
+	// ему посекционно, секций вне снимка в Applied не остаётся.
+	Applied Sections
+	// Live — ключи живых данных снимка; JSON null удаляет ключ.
+	Live Sections
+	// ResetDraftSections — секции черновика, которые возвращаются к снимку, если
+	// пользователь их не правил; остальной черновик не меняется (D-27).
+	ResetDraftSections []string
+	// Guard проверяет состояние слоя под замком применения, до сборки; ошибка
+	// отменяет запуск. nil — проверки нет.
+	Guard func(st StateView) error
+}
+
+// RunRestore возвращает прежнее применённое состояние через тот же конвейер:
+// сборка из снимка, проверки до записи, проверка обоими ядрами, запись с набором
+// копий, перезапуск только запущенного ядра, коммит одной записью (Applied,
+// ключи Live снимка, манифест). Черновик и его ревизия не меняются, кроме секций
+// run.ResetDraftSections без правки пользователя. Идущее применение откат ждёт, а
+// не отказывает (откат по таймеру не должен проваливаться из-за занятости).
+// Нерешённый дрейф — ErrDriftBlocked. Вызов синхронный; после снятия замка идут
+// afterRun и хуки AddAfterApply.
+func (l *Layer) RunRestore(ctx context.Context, run RestoreRun) (ApplyView, error) {
+	if !l.Enabled() {
+		return ApplyView{}, ErrDisabled
+	}
+	if run.Trigger == "" {
+		return ApplyView{}, errors.New("configlayer: не задан триггер запуска")
+	}
+	l.mu.Lock()
+	stopped := l.stopped
+	l.mu.Unlock()
+	if stopped {
+		return ApplyView{}, ErrStopped
+	}
+	release, err := l.pipeline.TryBegin(ctx, false)
+	if err != nil {
+		if l.ctx.Err() != nil {
+			return ApplyView{}, ErrStopped
+		}
+		return ApplyView{}, err
+	}
+	defer release()
+	if run.Guard != nil {
+		st, err := l.ReadState()
+		if err == nil {
+			err = run.Guard(st)
+		}
+		if err != nil {
+			return ApplyView{}, err
+		}
+	}
+	req := ApplyRequest{
+		Trigger: run.Trigger, Source: SourceApplied, Kernel: run.Kernel,
+		Restore: &RestoreSpec{
+			Applied:            run.Applied.Clone(),
+			Live:               run.Live.Clone(),
+			ResetDraftSections: append([]string(nil), run.ResetDraftSections...),
+		},
+	}
+	view := l.runPipeline(req)
+	release()
+	l.afterRun()
+	l.fireAfterApply(req, view)
+	if view.Result != nil && view.Result.Code == ResultDriftBlocked {
+		return view, ErrDriftBlocked
+	}
+	return view, nil
+}
+
 // RunSourceRefresh — фоновое обновление источника: RunLive с триггером
 // TriggerSourceRefresh (его зовёт сервис источников).
 func (l *Layer) RunSourceRefresh(ctx context.Context, overlay Sections) (ApplyView, error) {

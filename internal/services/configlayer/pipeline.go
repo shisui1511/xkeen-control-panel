@@ -1,6 +1,7 @@
 package configlayer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -39,6 +40,13 @@ const (
 	// Переключатель access-лога: запуск поверх применённого состояния с подменой
 	// секции (SectionsOverlay), чужие правки черновика не применяются.
 	TriggerAccessLog Trigger = "access_log"
+	// TriggerDNSTakeover — транзакция перехвата DNS (включение, перенос, возврат):
+	// запуск поверх применённого состояния с подменой секций и фиксацией живых
+	// данных перехвата, черновик не трогается.
+	TriggerDNSTakeover Trigger = "dns_takeover"
+	// TriggerDNSRestore — откат перехвата DNS к снимку (RunRestore): применённое
+	// состояние и живые данные перехвата возвращаются к значениям до транзакции.
+	TriggerDNSRestore Trigger = "dns_restore"
 )
 
 // SourceKind — из какого состояния собираются файлы.
@@ -75,12 +83,65 @@ type ApplyRequest struct {
 	// ревизия на запуск. Ошибка отменяет всю запись (файлы возвращаются). nil —
 	// черновик не меняется.
 	MergeDraft func(name string, draft json.RawMessage) (json.RawMessage, error)
+	// Restore — откат уже зафиксированного применения (RunRestore): только при
+	// Source == SourceApplied. Файлы собираются из Restore.Applied целиком (не
+	// поверх текущего Applied), SectionsOverlay при этом не действует. После
+	// успеха (и при пустом плане) одной записью с манифестом Applied становится
+	// Restore.Applied, ключи Restore.Live фиксируются в State.Live, черновик не
+	// меняется, кроме секций Restore.ResetDraftSections без правки пользователя.
+	Restore *RestoreSpec
+}
+
+// RestoreSpec — снимок, к которому возвращается применённое состояние.
+type RestoreSpec struct {
+	// Applied — применённое состояние снимка целиком: секций, которых в нём нет,
+	// после отката в Applied не будет.
+	Applied Sections
+	// Live — ключи живых данных снимка: значение заменяет текущее, JSON null
+	// удаляет ключ. Ключи вне карты не меняются.
+	Live Sections
+	// ResetDraftSections — секции черновика, которые возвращаются к снимку, если
+	// пользователь их не правил (черновик совпадает с текущим Applied); правка
+	// пользователя остаётся (D-27).
+	ResetDraftSections []string
 }
 
 // overlayActive — у запуска есть подмена секций, которая действует: только
-// поверх применённого состояния.
+// поверх применённого состояния и не при откате к снимку.
 func (r ApplyRequest) overlayActive() bool {
-	return r.Source == SourceApplied && len(r.SectionsOverlay) > 0
+	return r.Source == SourceApplied && r.Restore == nil && len(r.SectionsOverlay) > 0
+}
+
+// restoreActive — запуск возвращает применённое состояние к снимку.
+func (r ApplyRequest) restoreActive() bool {
+	return r.Source == SourceApplied && r.Restore != nil
+}
+
+// runLive — живые данные, из которых собираются файлы запуска: State.Live с
+// оверлеем кандидата и ключами снимка отката. Ключ со значением JSON null
+// во входе генераторов отсутствует, как и после фиксации.
+func (r ApplyRequest) runLive(live Sections) Sections {
+	out := liveWithOverlay(live, r.LiveOverlay)
+	if r.restoreActive() {
+		overlayLive(out, r.Restore.Live)
+	}
+	return out
+}
+
+// overlayLive кладёт ключи src в dst: JSON null (и пустое значение) удаляет ключ.
+func overlayLive(dst, src Sections) {
+	for k, v := range src {
+		if isNullRaw(v) {
+			delete(dst, k)
+			continue
+		}
+		dst[k] = cloneRaw(v)
+	}
+}
+
+// isNullRaw — значение пустое или JSON null.
+func isNullRaw(v json.RawMessage) bool {
+	return len(bytes.TrimSpace(v)) == 0 || bytes.Equal(bytes.TrimSpace(v), []byte("null"))
 }
 
 // StepID — шаг конвейера.
@@ -368,7 +429,12 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	src := snap.Draft
 	if req.Source == SourceApplied {
 		src = snap.Applied
-		if req.overlayActive() {
+		switch {
+		case req.restoreActive():
+			// Откат к снимку: файлы собираются из прежнего Applied целиком, секции,
+			// которых в нём не было, во вход не попадают.
+			src = req.Restore.Applied.Clone()
+		case req.overlayActive():
 			src = liveWithOverlay(src, req.SectionsOverlay)
 		}
 	}
@@ -404,7 +470,7 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 			return p.finish(ResultView{Code: ResultDriftBlocked, Message: ErrDriftBlocked.Error()})
 		}
 	}
-	used := Input{Sections: src, Live: liveWithOverlay(snap.Live, req.LiveOverlay), Mode: req.Source, Routing: routingFacts(p.d.Roots, snap.Routing)}
+	used := Input{Sections: src, Live: req.runLive(snap.Live), Mode: req.Source, Routing: routingFacts(p.d.Roots, snap.Routing)}
 	files, err := p.d.Registry.Build(used, installed)
 	if err == nil {
 		files = filesOfScope(files, req.Kernel)
@@ -640,7 +706,8 @@ func (p *Pipeline) syncApplied(snap State, src Sections, req ApplyRequest, used 
 		draftChanges(State{Draft: src, Applied: snap.Applied}) != 0
 	hook := p.liveCommitter()
 	overlay := req.overlayActive()
-	if !syncDraft && !overlay && hook == nil {
+	restore := req.restoreActive()
+	if !syncDraft && !overlay && !restore && hook == nil {
 		return nil
 	}
 	return p.d.Store.Update(func(st *State) error {
@@ -651,6 +718,13 @@ func (p *Pipeline) syncApplied(snap State, src Sections, req ApplyRequest, used 
 		// (D-15): значение фиксируется в Applied и Draft, последний путь не теряется.
 		if overlay {
 			if err := applySectionsOverlay(st, req); err != nil {
+				return err
+			}
+		}
+		// Откат к снимку с тем же файлом: Applied и живые данные снимка всё равно
+		// фиксируются, иначе панельные поля снимка потерялись бы.
+		if restore {
+			if err := applyRestore(st, req.Restore); err != nil {
 				return err
 			}
 		}
@@ -715,6 +789,57 @@ func applySectionsOverlay(st *State, req ApplyRequest) error {
 	return nil
 }
 
+// applyRestore фиксирует откат к снимку в st (вызывается внутри Store.Update):
+// Applied становится снимком целиком, ключи живых данных снимка заменяют текущие
+// (JSON null удаляет ключ). Черновик не меняется (D-27), кроме секций из
+// ResetDraftSections, которые пользователь не правил: их черновик совпадает с
+// текущим Applied до замены и получает значение снимка (секции нет в снимке —
+// удаляется и из черновика). Если черновик изменился, ревизия растёт один раз.
+func applyRestore(st *State, spec *RestoreSpec) error {
+	if st.Draft == nil {
+		st.Draft = Sections{}
+	}
+	if st.Live == nil {
+		st.Live = Sections{}
+	}
+	next := spec.Applied.Clone()
+	names := append([]string(nil), spec.ResetDraftSections...)
+	sort.Strings(names)
+	draftChanged := false
+	for i, name := range names {
+		if i > 0 && names[i-1] == name {
+			continue
+		}
+		draft, hadDraft := st.Draft[name]
+		applied, hadApplied := st.Applied[name]
+		untouched := hadDraft == hadApplied && (!hadDraft || SectionEqual(draft, applied))
+		if !untouched {
+			continue
+		}
+		changed, err := settleValue(st.Draft, name, cloneRaw(next[name]), draft, hadDraft)
+		if err != nil {
+			return err
+		}
+		draftChanged = draftChanged || changed
+	}
+	st.Applied = next
+	keys := make([]string, 0, len(spec.Live))
+	for k := range spec.Live {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		old, had := st.Live[k]
+		if _, err := settleValue(st.Live, k, cloneRaw(spec.Live[k]), old, had); err != nil {
+			return err
+		}
+	}
+	if draftChanged {
+		st.DraftRevision++
+	}
+	return nil
+}
+
 // afterValidation отражает итог проверки в шаге; failed=true — применение
 // отменено, ResultView готов.
 func (p *Pipeline) afterValidation(id StepID, r ValidationResult) (ResultView, bool) {
@@ -738,6 +863,7 @@ func (p *Pipeline) commitState(plan Plan, src Sections, req ApplyRequest, used I
 	hook := p.liveCommitter()
 	applyDraft := req.Source == SourceDraft && len(req.Only) == 0
 	overlay := req.overlayActive()
+	restore := req.restoreActive()
 	return p.d.Store.Update(func(st *State) error {
 		for _, fp := range plan.Files {
 			switch fp.Action {
@@ -755,6 +881,11 @@ func (p *Pipeline) commitState(plan Plan, src Sections, req ApplyRequest, used I
 		}
 		if overlay {
 			if err := applySectionsOverlay(st, req); err != nil {
+				return err
+			}
+		}
+		if restore {
+			if err := applyRestore(st, req.Restore); err != nil {
 				return err
 			}
 		}
