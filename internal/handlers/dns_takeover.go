@@ -198,6 +198,15 @@ func (a *API) dnsAfterStart() {
 	}
 }
 
+// dnsAfterSwitch — ядро сменено из панели (переключение подтверждено по
+// процессам): желаемый перехват переносится на новое ядро с пробой и окном
+// kernel_switch (в горутине службы, после снятия замка обработчика).
+func (a *API) dnsAfterSwitch(from, to string) {
+	if a.dnsLive() {
+		a.dns.TransferToKernel(context.Background(), from, to)
+	}
+}
+
 // dnsRefused — служба перехвата отказала до действия с ядром: ответ с кодом
 // службы записан, true. Иначе (nil или ошибка самой команды) — false.
 func (a *API) dnsRefused(w http.ResponseWriter, r *http.Request, err error) bool {

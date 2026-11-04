@@ -14,9 +14,10 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 )
 
-// Жизнь перехвата при действиях с ядром из панели (D-14): остановка ядра-
+// Жизнь перехвата при действиях с ядром из панели (D-14, D-15): остановка ядра-
 // перехватчика возвращает DNS роутера прошивке и помнит перехват желаемым, запуск
-// возвращает его пробой без окна подтверждения.
+// возвращает его пробой без окна подтверждения, смена ядра переносит перехват на
+// новое ядро с пробой и окном kernel_switch.
 //
 // Обработчики служб держат замок жизненного цикла ядра, пока выполняют команду, а
 // конвейер слоя берёт его сам после замка применения (порядок applyMu →
@@ -511,4 +512,280 @@ func (s *Service) runRestore(ctx context.Context, pl enablePlan) *Failure {
 	}
 	s.recordHistory(opRestore, pl.kernel, nil)
 	return nil
+}
+
+// --- смена ядра из панели (D-15) ---------------------------------------------------
+
+const (
+	// opTransfer — операция и вид записи истории: перенос перехвата на новое ядро.
+	opTransfer = "transfer"
+	// reasonKernelSwitch — причина отката окна: ядро сменено пользователем.
+	reasonKernelSwitch = "kernel_switch"
+)
+
+// transferSteps — шаги переноса перехвата: как у включения, с окном переноса.
+var transferSteps = []string{stepValidate, stepSnapshot, stepWrite, stepRestart, stepProbe, stepWindow}
+
+// TransferToKernel — ядро сменено из панели (switch_kernel, переключение
+// подтверждено по процессам): желаемый перехват переносится на новое ядро to в
+// горутине службы, после того как обработчик отпустит замок жизненного цикла.
+// Операцией службы (сторож на паузе): файлы прежнего ядра — без слушателя;
+// DNS-секцию нового ядра ведёт не панель или группы-цели нет — DNS прошивке сразу,
+// desired=false, сбой с кодом; иначе снимок (Applied, Live, override, proxy_dns) →
+// runTakeover для нового ядра (общий путь 148-12: живые данные нового ядра
+// собираются заново, адрес резолвера прошивки — свежим чтением по D-01) → проба
+// D-29 → окно kernel_switch 60 с. Сбой прохода или пробы — DNS прошивке, ядро
+// остаётся новым (как откат окна kernel_switch). Перехват не желаем — ничего.
+func (s *Service) TransferToKernel(ctx context.Context, from, to string) {
+	if (to != configlayer.KernelXray && to != configlayer.KernelMihomo) || s.ctx.Err() != nil {
+		return
+	}
+	s.mu.Lock()
+	desired := s.st.Desired
+	s.mu.Unlock()
+	if !desired {
+		return
+	}
+	ctx = context.WithoutCancel(ctx)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		if err := s.awaitLifecycle(); err != nil {
+			return
+		}
+		prev, on := s.takeoverLive()
+		if !on {
+			s.mu.Lock()
+			prev = s.st.Kernel
+			s.mu.Unlock()
+		}
+		if prev == "" {
+			prev = from
+		}
+		if prev == to {
+			// Ядро «сменено» на то же: файлы прежние; ждущий перехват возвращается.
+			if err := s.restoreDesired(ctx); err != nil {
+				log.Printf("dnstakeover: возврат перехвата после смены ядра на то же: %v", err)
+			}
+			return
+		}
+		for !s.beginOp(opTransfer, transferSteps) {
+			if sleepCtx(s.ctx, time.Second) != nil {
+				return
+			}
+		}
+		defer s.endOp()
+		s.runTransfer(ctx, prev, on, to)
+	}()
+}
+
+// runTransfer — перенос перехвата с ядра prev на to внутри операции службы; on —
+// живые данные перехвата включены (на prev).
+func (s *Service) runTransfer(ctx context.Context, prev string, on bool, to string) {
+	s.mu.Lock()
+	desired, overrideBefore := s.st.Desired, s.st.OverrideBefore
+	s.mu.Unlock()
+	if !desired {
+		return
+	}
+	s.clearOutcome()
+	if w, ok := s.claimWindow(nil); ok {
+		switch w.Kind {
+		case kindEnable, kindKernelSwitch:
+			// Неподтверждённый перехват не переносится: откат по виду окна.
+			s.replaceSteps(rollbackSteps(w.Kind))
+			s.rollbackWindow(ctx, w, reasonKernelSwitch)
+			return
+		default:
+			// Окно «Применить» заменяет окно переноса: подтверждение нового ядра
+			// подтверждает и применение.
+			if err := s.update(func(p *persisted) { p.Window = nil }); err != nil {
+				log.Printf("dnstakeover: %v", err)
+			}
+			s.releaseClaim()
+		}
+	}
+
+	st, err := s.d.Layer.ReadState()
+	if err != nil {
+		s.dropTransfer(ctx, prev, on, to, overrideBefore, &Failure{Code: CodeGeneric, Detail: truncateDetail(err.Error())})
+		return
+	}
+	id, name, err := takeoverTarget(st, to)
+	if err != nil {
+		fail := &Failure{Code: CodeGeneric, Detail: truncateDetail(err.Error())}
+		var de *Error
+		if errors.As(err, &de) {
+			fail = &Failure{Code: de.Code, Params: de.Params, Detail: de.Detail}
+		}
+		s.dropTransfer(ctx, prev, on, to, overrideBefore, fail)
+		return
+	}
+	proxy, err := ProxyDNS()
+	if err != nil {
+		s.dropTransfer(ctx, prev, on, to, overrideBefore, &Failure{Code: CodeUnavailable, Detail: "proxy_dns: " + err.Error()})
+		return
+	}
+	pl := enablePlan{kernel: to, groupID: id, groupName: name, overrideBefore: overrideBefore, proxyDNSBefore: proxy}
+	var prevLive json.RawMessage
+	if raw, ok := st.Live[configlayer.LiveKeyDNSTakeover]; ok {
+		prevLive = append(json.RawMessage(nil), raw...)
+	}
+	snap := txnSnapshot{
+		AtMs:           s.now().UnixMilli(),
+		Kernel:         to,
+		Applied:        st.Applied,
+		Live:           prevLive,
+		OverrideBefore: overrideBefore,
+		ProxyDNSBefore: proxy,
+	}
+
+	// Прежнее ядро остановлено: его файлы — без слушателя, иначе следующий его
+	// запуск без перехвата занял бы :53 рядом с прошивкой.
+	if on {
+		if err := s.writeOffWaiting(ctx, prev); err != nil {
+			log.Printf("dnstakeover: файлы %s без слушателя при переносе: %v", prev, err)
+		}
+		if st, err = s.d.Layer.ReadState(); err != nil {
+			s.dropTransfer(ctx, prev, false, to, overrideBefore, &Failure{Code: CodeGeneric, Detail: truncateDetail(err.Error())})
+			return
+		}
+	}
+	sections, merge, err := s.enableSections(st, pl)
+	if err != nil {
+		s.dropTransfer(ctx, prev, false, to, overrideBefore, &Failure{Code: CodeGeneric, Detail: truncateDetail(err.Error())})
+		return
+	}
+	var (
+		view     configlayer.ApplyView
+		undoMu   sync.Mutex
+		undoErrs []string
+	)
+	for attempt := 1; ; attempt++ {
+		if err = s.awaitLifecycle(); err != nil {
+			return
+		}
+		view, err = s.runTakeover(ctx, takeoverRun{
+			Kernel:         to,
+			Sections:       sections,
+			MergeDraft:     merge,
+			OverrideBefore: overrideBefore,
+			ProxyDNSBefore: proxy,
+			BeforeOverride: func(context.Context) error {
+				s.setStep(stepSnapshot, statusDone)
+				return nil
+			},
+			OnUndoError: func(err error) {
+				undoMu.Lock()
+				undoErrs = append(undoErrs, err.Error())
+				undoMu.Unlock()
+			},
+		})
+		if !lockBusy(err) || attempt >= lifecycleAttempts {
+			break
+		}
+	}
+	if fail := takeoverFailure(view, err, nil); fail != nil {
+		if len(undoErrs) > 0 {
+			fail.Detail = truncateDetail(strings.TrimSpace(fail.Detail + "\n" + strings.Join(undoErrs, "\n")))
+		}
+		s.failRunning()
+		s.rollbackTransfer(ctx, to, overrideBefore, fail)
+		return
+	}
+
+	s.setStep(stepProbe, statusRunning)
+	res, fail := s.probeTakeover(ctx)
+	s.storeCheck(res)
+	if fail != nil {
+		s.failRunning()
+		s.rollbackTransfer(ctx, to, overrideBefore, fail)
+		return
+	}
+	s.setStep(stepProbe, statusDone)
+	if err := s.update(func(p *persisted) {
+		p.Desired = true
+		p.Kernel = to
+		p.KernelWasRunning = true
+		p.WaitingReason = ""
+	}); err != nil {
+		log.Printf("dnstakeover: %v", err)
+	}
+	s.recordHistory(opTransfer, to, nil)
+	if err := s.openWindow(kindKernelSwitch, snap); err != nil {
+		log.Printf("dnstakeover: окно подтверждения переноса не открыто: %v", err)
+		s.setStep(stepWindow, statusSkipped)
+	}
+}
+
+// dropTransfer — перенос невозможен (DNS-секцию нового ядра ведёт не панель,
+// группы-цели нет): DNS роутера прошивке (override к значению до включения, файлы
+// прежнего ядра без слушателя, если живые данные перехвата ещё включены), перехват
+// не желаем, сбой с кодом.
+func (s *Service) dropTransfer(ctx context.Context, prev string, on bool, to string, overrideBefore bool, fail *Failure) {
+	s.replaceSteps([]string{stepRelease, stepApply})
+	hctx, cancel := context.WithTimeout(ctx, 4*hookTimeout)
+	defer cancel()
+	var errs []string
+	s.setStep(stepRelease, statusRunning)
+	if !overrideBefore {
+		if err := s.fw.SetOverride(hctx, false); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+	s.stepResult(stepRelease, len(errs) == 0)
+	if on {
+		s.setStep(stepApply, statusRunning)
+		err := s.writeOffWaiting(hctx, prev)
+		s.stepResult(stepApply, err == nil)
+		if err != nil {
+			errs = append(errs, err.Error())
+		}
+	} else {
+		s.setStep(stepApply, statusSkipped)
+	}
+	s.endTransfer(to, fail, errs)
+}
+
+// rollbackTransfer — сбой прохода или пробы переноса: DNS роутера прошивке и
+// файлы нового ядра без слушателя, ядро остаётся новым (D-15) — те же шаги, что
+// у отката окна kernel_switch.
+func (s *Service) rollbackTransfer(ctx context.Context, to string, overrideBefore bool, fail *Failure) {
+	hctx, cancel := context.WithTimeout(ctx, 4*hookTimeout)
+	defer cancel()
+	var errs []string
+	if err := s.releaseToFirmwareDNS(hctx, to, overrideBefore); err != nil {
+		errs = append(errs, err.Error())
+	}
+	s.endTransfer(to, fail, errs)
+}
+
+// endTransfer фиксирует неудачный перенос: перехват не желаем, окна нет, сбой
+// (rolled_back — DNS вернулся прошивке; ошибки возврата — rollback_failed с
+// причиной), запись истории.
+func (s *Service) endTransfer(to string, fail *Failure, errs []string) {
+	if len(errs) > 0 {
+		if fail.Params == nil {
+			fail.Params = map[string]string{}
+		}
+		fail.Params["cause"] = fail.Code
+		fail.Code = CodeRollbackFailed
+		fail.RolledBack = false
+		fail.Detail = truncateDetail(strings.TrimSpace(fail.Detail + "\n" + strings.Join(errs, "\n")))
+		log.Printf("dnstakeover: возврат DNS прошивке после переноса на %s не удался: %s", to, strings.Join(errs, "; "))
+	} else {
+		fail.RolledBack = true
+	}
+	if err := s.update(func(p *persisted) {
+		p.Desired = false
+		p.Kernel = ""
+		p.KernelWasRunning = false
+		p.WaitingReason = ""
+		p.OverrideBefore = false
+		p.Snapshot = nil
+	}); err != nil {
+		log.Printf("dnstakeover: %v", err)
+	}
+	s.setFailure(fail)
+	s.recordHistory(opTransfer, to, fail)
 }

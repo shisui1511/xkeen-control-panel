@@ -240,6 +240,10 @@ func (a *API) serviceSwitchKernel(w http.ResponseWriter, target, old string) {
 	}
 
 	res := a.kernelSwitcher.Await(old, target)
+	if res.Outcome == services.SwitchSwitched {
+		// Желаемый перехват DNS переносится на новое ядро (D-15).
+		a.dnsAfterSwitch(old, target)
+	}
 	res.Output = lastNonEmptyLines(utils.StripANSI(out), switchOutputLines)
 	log.Printf("switch_kernel: old=%s new=%s outcome=%s",
 		utils.SanitizeLogInput(res.Old), utils.SanitizeLogInput(res.New), utils.SanitizeLogInput(string(res.Outcome)))
