@@ -38,6 +38,8 @@ const (
 	rtdxExtDead  = "www.example.com."
 	// rtdxDirectName — домен правила с целью direct (D-21).
 	rtdxDirectName = "www.example.org"
+	// rtdxNodeName — имя сервера узла, заданного доменом (D-18).
+	rtdxNodeName = "example.org"
 	// rtdxZone — своя локальная зона перехвата.
 	rtdxZone = "rt-zone.test"
 	// rtdxFirmware — резолвер прошивки без override.
@@ -66,7 +68,9 @@ func rtdxNewSetup(t *testing.T) *rtdxSetup {
 	rtNeedBins(t, rtXrayBin)
 	nodePort, accessLog := rtStartNode(t)
 	e := rtNewEnv(t, rtWithKernels(rtXrayOnly))
-	e.addMyRaw(t, "socks5://127.0.0.1:"+strconv.Itoa(nodePort)+"#rt-node")
+	// Второй узел задан доменным именем (D-18): в группу он не входит, но его имя
+	// резолвится мимо группы.
+	e.addMyRaw(t, "socks5://127.0.0.1:"+strconv.Itoa(nodePort)+"#rt-node", "socks5://"+rtdxNodeName+":1#rt-named")
 	ref := ""
 	for _, n := range e.catalog(t).Xray {
 		if n.Node.Name == "rt-node" {
@@ -349,7 +353,7 @@ func TestRouterDNSXrayPaths(t *testing.T) {
 		t.Errorf("правило пользователя на месте %d, правила DNS должны стоять раньше", userAt)
 	}
 
-	// Объект dns: тег запросов, сервер зон первым, умолчания вместо петли.
+	// Объект dns: тег запросов, сервер локальных зон, умолчания вместо петли.
 	dns, servers := rtdxDNSServers(t, files)
 	if dns["tag"] != TagDNSQuery || dns["queryStrategy"] != "UseIPv4" {
 		t.Errorf("объект dns: tag=%v queryStrategy=%v", dns["tag"], dns["queryStrategy"])
@@ -460,6 +464,47 @@ func TestRouterDNSXrayPaths(t *testing.T) {
 		t.Logf("служебный домен при мёртвой группе: %s", rtxYesNo(local.resolved()))
 		if !local.resolved() {
 			t.Errorf("служебный домен при мёртвой группе не разрешился: %s", local.code())
+		}
+	})
+
+	t.Run("nodes", func(t *testing.T) {
+		// Имя узла: сначала DoH по IP напрямую, затем прошивка с finalQuery.
+		name := "full:" + rtdxNodeName
+		var doh, fw map[string]any
+		for _, x := range servers {
+			obj, ok := x.(map[string]any)
+			if !ok || !slices.Contains(rtxStrings(obj["domains"]), name) {
+				continue
+			}
+			if doh == nil {
+				doh = obj
+			} else if fw == nil {
+				fw = obj
+			}
+		}
+		if doh == nil || doh["address"] != "https://1.1.1.1/dns-query" || doh["tag"] != TagDNSDirect || doh["skipFallback"] != true {
+			t.Errorf("сервер DoH для имён узлов: %v", doh)
+		}
+		if fw == nil || fw["address"] != "127.0.0.1" || fw["tag"] != TagDNSDirect || fw["finalQuery"] != true {
+			t.Errorf("запасной сервер прошивки для имён узлов: %v", fw)
+		}
+		r := rtdsResolveWait(core.addr, rtdxNodeName+".", 15*time.Second)
+		t.Logf("имя узла при мёртвой группе: %s", rtxYesNo(r.resolved()))
+		if !r.resolved() {
+			t.Errorf("имя узла не разрешилось при мёртвой группе: %s", r.code())
+		}
+	})
+
+	t.Run("direct_rules", func(t *testing.T) {
+		// Домен direct-правила: прошивка без finalQuery — запас через группу.
+		srv := rtdxServerWith(servers, "domain:"+rtdxDirectName)
+		if srv == nil || srv["address"] != "127.0.0.1" || srv["tag"] != TagDNSDirect || srv["finalQuery"] != nil || srv["skipFallback"] != true {
+			t.Errorf("сервер direct-доменов: %v", srv)
+		}
+		r := rtdsResolveWait(core.addr, rtdxDirectName+".", 15*time.Second)
+		t.Logf("домен direct-правила при мёртвой группе: %s", rtxYesNo(r.resolved()))
+		if !r.resolved() {
+			t.Errorf("домен direct-правила не разрешился через прошивку при мёртвой группе: %s", r.code())
 		}
 	})
 }

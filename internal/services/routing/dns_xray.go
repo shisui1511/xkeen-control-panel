@@ -26,8 +26,13 @@ const (
 	xdnsErrResolver        = "dns_firmware_resolver_invalid"
 )
 
-// xdnsPort — порт слушателя перехвата.
-const xdnsPort = 53
+const (
+	// xdnsPort — порт слушателя перехвата.
+	xdnsPort = 53
+	// xdnsDoHDirect — публичный DoH по IP для имён узлов: идёт напрямую (тег
+	// TagDNSDirect), загрузочный резолвер не нужен.
+	xdnsDoHDirect = "https://1.1.1.1/dns-query"
+)
 
 // xrayDNSParts — что перехват добавляет в файлы Xray.
 type xrayDNSParts struct {
@@ -83,7 +88,10 @@ func (b *xrayBuild) dnsTakeover() (*xrayDNSParts, error) {
 		map[string]any{"inboundTag": []string{TagDNSQuery}, field: tag},
 	}
 
-	front := b.dnsFront(live, params, fwHost, fwPort)
+	front, err := b.dnsFront(live, params, fwHost, fwPort)
+	if err != nil {
+		return nil, err
+	}
 	dnsFile, err := cores.XrayDNSFileWithTakeover(cs.Value, cores.XrayDNSOverlay{Tag: TagDNSQuery, Front: front})
 	if err != nil {
 		return nil, err
@@ -159,15 +167,69 @@ func xdnsInbounds(live configlayer.DNSTakeoverLive) ([]map[string]any, []string)
 	return inbounds, tags
 }
 
-// dnsFront — серверы, которые встают в начало объекта dns: локальные зоны
-// (встроенные D-11 и свои) — резолвер прошивки с finalQuery, без запаса через
-// группу (D-22).
-func (b *xrayBuild) dnsFront(live configlayer.DNSTakeoverLive, params configlayer.DNSTakeoverParams, fwHost string, fwPort int) []map[string]any {
+// dnsFront — серверы, которые встают в начало объекта dns (у Xray серверы с
+// совпавшими domains опрашиваются первыми, по порядку):
+//   - имена узлов каталога (D-18): сначала публичный DoH по IP напрямую, затем
+//     резолвер прошивки с finalQuery — петли «адрес узла через свой туннель» нет;
+//   - локальные зоны (встроенные D-11 и свои): резолвер прошивки с finalQuery,
+//     без запаса через группу (D-22);
+//   - домены и списки direct-правил (D-21): резолвер прошивки без finalQuery —
+//     неответ прошивки уходит к серверам группы по порядку (D-23).
+//
+// Пустой список — сервер не выпускается.
+func (b *xrayBuild) dnsFront(live configlayer.DNSTakeoverLive, params configlayer.DNSTakeoverParams, fwHost string, fwPort int) ([]map[string]any, error) {
 	var front []map[string]any
+	if names := b.nodeNameDomains(); len(names) > 0 {
+		front = append(front,
+			map[string]any{
+				"address":      xdnsDoHDirect,
+				"domains":      names,
+				"tag":          TagDNSDirect,
+				"skipFallback": true,
+			},
+			xdnsFirmwareServer(fwHost, fwPort, names, true),
+		)
+	}
 	if zones := xdnsZoneDomains(live.ServiceDomain, params.Zones); len(zones) > 0 {
 		front = append(front, xdnsFirmwareServer(fwHost, fwPort, zones, true))
 	}
-	return front
+	domains, refs, err := DirectDNSRules(b.sections)
+	if err != nil {
+		return nil, err
+	}
+	direct := make([]string, 0, len(domains)+len(refs))
+	for _, d := range domains {
+		direct = append(direct, xrayDomain(d))
+	}
+	for _, l := range refs {
+		// Списки — в той же записи, что у правил Xray (ext:<файл>:<тег>).
+		direct = append(direct, "ext:"+l.File+":"+l.Tag)
+	}
+	if len(direct) > 0 {
+		front = append(front, xdnsFirmwareServer(fwHost, fwPort, direct, false))
+	}
+	return front, nil
+}
+
+// nodeNameDomains — имена серверов узлов каталога Xray, заданные доменом (не
+// IP), в записи domains Xray («full:<имя>»): без повторов, по алфавиту.
+func (b *xrayBuild) nodeNameDomains() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, n := range b.catalog {
+		host := strings.Trim(strings.TrimSpace(n.Node.Host), "[]")
+		if host == "" || net.ParseIP(host) != nil {
+			continue
+		}
+		name, ok := xdnsASCII(host)
+		if !ok || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, "full:"+name)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // xdnsFirmwareServer — сервер резолвера прошивки для списка доменов: тег
