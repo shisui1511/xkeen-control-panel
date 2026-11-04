@@ -94,11 +94,14 @@ type Service struct {
 
 	// mu защищает st — состояние на диске (последняя проверка, история, окно) —
 	// и таймер окна: winStop — канал остановки идущей горутины-таймера (nil —
-	// таймера нет), winRolling — окно забрано под откат.
-	mu         sync.Mutex
-	st         persisted
-	winStop    chan struct{}
-	winRolling bool
+	// таймера нет), winRolling — окно забрано под откат; pendingApply — снимок до
+	// пользовательского «Применить» при включённом перехвате (BeforeApply, nil —
+	// снимка нет), его забирает AfterApply.
+	mu           sync.Mutex
+	st           persisted
+	winStop      chan struct{}
+	winRolling   bool
+	pendingApply *pendingApply
 	// checkMu — одновременно идёт одна проверка резолва (T-148-17); checking —
 	// проверка идёт (операция службы для блокировки busy).
 	checkMu  sync.Mutex
@@ -176,11 +179,6 @@ func (s *Service) Start() {
 func (s *Service) Stop() {
 	s.stopOnce.Do(s.cancel)
 	s.wg.Wait()
-}
-
-// Hooks — подключение службы к слою: регистрируется до configLayer.Start().
-func (s *Service) Hooks() configlayer.Hooks {
-	return configlayer.Hooks{Checker: dnsChecker{serviceDomain: s.cachedServiceDomain}}
 }
 
 // cachedServiceDomain — служебный домен роутера из кэша, без вызова ndmc: им
