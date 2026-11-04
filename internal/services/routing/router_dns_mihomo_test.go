@@ -16,6 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
 )
 
 // Пути DNS профиля Mihomo под перехватом (148-10): генератор получает
@@ -39,6 +40,10 @@ const (
 	rtdmDoHSeen2 = "8.8.8.8:443"
 	// rtdmUserDoH — свой сервер пользователя.
 	rtdmUserDoH = "https://1.0.0.1/dns-query"
+	// rtdmDirectDomain и rtdmDirectFull — домен (с поддоменами) и точное имя
+	// direct-правила: их резолвит прошивка.
+	rtdmDirectDomain = "example.org"
+	rtdmDirectFull   = "www.example.org"
 )
 
 // rtdmLive — живые данные перехвата Mihomo.
@@ -204,6 +209,24 @@ func rtdmRestoreSection(t *testing.T, e *rtEnv) {
 	})
 }
 
+// rtdmPolicyKeys — ключи nameserver-policy профиля в порядке записи.
+func rtdmPolicyKeys(t *testing.T, data []byte) []string {
+	t.Helper()
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil || len(doc.Content) != 1 {
+		t.Fatalf("профиль не YAML: %v", err)
+	}
+	policy := yMapGet(yMapGet(doc.Content[0], "dns"), "nameserver-policy")
+	if policy == nil {
+		return nil
+	}
+	var keys []string
+	for i := 0; i+1 < len(policy.Content); i += 2 {
+		keys = append(keys, policy.Content[i].Value)
+	}
+	return keys
+}
+
 // rtdmEqual — равенство списков строк по порядку.
 func rtdmEqual(a, b []string) bool {
 	return strings.Join(a, "\n") == strings.Join(b, "\n")
@@ -215,7 +238,8 @@ func TestRouterDNSMihomoPaths(t *testing.T) {
 		t.Fatal("резолвер прошивки не отвечает на 127.0.0.1:53 до теста")
 	}
 	nodePort, nodeLog := rtStartNode(t)
-	e := rtNewEnv(t, rtWithKernels(rtMihomoOnly))
+	ix := lists.NewIndex("")
+	e := rtNewEnv(t, rtWithKernels(rtMihomoOnly), rtWithDeps(func(d *Deps) { d.Lists = ix }))
 	e.writeUserProfile(t)
 	e.addMyRaw(t, "socks5://127.0.0.1:"+strconv.Itoa(nodePort)+"#rt-node")
 	proxyG, ok := rtGroupByName(e.groups(t), defaultProxyGroupName)
@@ -263,6 +287,14 @@ func TestRouterDNSMihomoPaths(t *testing.T) {
 	_, dns6 := rtdmProfile(t, rtdmMustGen(t, e, rtdmLive(svc, rtdmFirmware, true)))
 	if dns6["listen"] != mihomoDNSListen6 {
 		t.Errorf("dns.listen с IPv6 — не %s", mihomoDNSListen6)
+	}
+	// D-31: ключ ipv6 секции при IPv6 у роутера не меняется (AAAA по полю).
+	if dns6["ipv6"] != plainDNS["ipv6"] {
+		t.Error("ключ ipv6 секции изменён перехватом")
+	}
+	// D-12: пустой enhanced-mode под перехватом — redir-host.
+	if dns["enhanced-mode"] != mihomoEnhancedRedirHost {
+		t.Errorf("enhanced-mode при пустом значении секции — не %s", mihomoEnhancedRedirHost)
 	}
 	// D-18 race: пара DoH по IP и в конце резолвер прошивки из Live.
 	psn := rtmStrings(dns["proxy-server-nameserver"])
@@ -330,6 +362,58 @@ func TestRouterDNSMihomoPaths(t *testing.T) {
 		rtdmCheck(t, rtdmDir(t, e, altFiles))
 	})
 
+	// D-12: при fake-ip локальные зоны дописываются в fake-ip-filter к значениям
+	// пользователя без повторов; профиль принимает mihomo -t.
+	t.Run("fake_ip", func(t *testing.T) {
+		rtdmRestoreSection(t, e)
+		rtdmSection(t, e, `{"enable":true,"ipv6":false,"enhanced-mode":"fake-ip",`+
+			`"fake-ip-range":"198.18.0.1/16","fake-ip-filter":["+.user.example","+.lan"]}`)
+		fakeFiles := rtdmMustGen(t, e, rtdmLive(svc, rtdmFirmware, false))
+		_, fd := rtdmProfile(t, fakeFiles)
+		filter := rtmStrings(fd["fake-ip-filter"])
+		count := map[string]int{}
+		for _, f := range filter {
+			count[f]++
+		}
+		zones := dnsTakeoverZones(strings.TrimSuffix(svc, "."), nil)
+		all, dup := true, false
+		for _, z := range zones {
+			all = all && count["+."+z] == 1
+		}
+		for _, n := range count {
+			dup = dup || n > 1
+		}
+		userFirst := len(filter) > 1 && filter[0] == "+.user.example" && filter[1] == "+.lan"
+		t.Logf("fake-ip-filter: %d записей, зоны на месте: %s, повторы: %s, записи пользователя первыми: %s",
+			len(filter), rtxYesNo(all), rtxYesNo(dup), rtxYesNo(userFirst))
+		if fd["enhanced-mode"] != mihomoEnhancedFakeIP || !all || dup || !userFirst {
+			t.Error("fake-ip-filter под перехватом: зоны не дописаны, есть повторы или записи пользователя потеряны")
+		}
+		rtdmCheck(t, rtdmDir(t, e, fakeFiles))
+	})
+
+	// D-24, D-19: запись пользователя nameserver-policy с ключом встроенной зоны
+	// сохраняет его значение, свои записи идут первыми, ключи панели — после них.
+	t.Run("user_policy", func(t *testing.T) {
+		rtdmRestoreSection(t, e)
+		rtdmSection(t, e, `{"enable":true,"ipv6":false,"nameserver-policy":{`+
+			`"+.corp.example":"udp://127.0.0.1:53","+.lan":"`+rtdmUserDoH+`"}}`)
+		polFiles := rtdmMustGen(t, e, rtdmLive(svc, rtdmFirmware, false))
+		data, pd := rtdmProfile(t, polFiles)
+		policy := rtdmPolicy(pd)
+		userKept := rtdmEqual(policy["+.lan"], []string{rtdmUserDoH}) &&
+			rtdmEqual(policy["+.corp.example"], []string{"udp://" + rtdmFirmware})
+		panelAdded := rtdmEqual(policy["+.local"], []string{"udp://" + rtdmFirmware})
+		keys := rtdmPolicyKeys(t, data)
+		order := len(keys) > 2 && keys[0] == "+.corp.example" && keys[1] == "+.lan"
+		t.Logf("записи пользователя сохранены: %s, ключи панели добавлены: %s, порядок пользователя первым: %s",
+			rtxYesNo(userKept), rtxYesNo(panelAdded), rtxYesNo(order))
+		if !userKept || !panelAdded || !order {
+			t.Error("nameserver-policy: запись пользователя перезаписана, ключи панели не добавлены или порядок нарушен")
+		}
+		rtdmCheck(t, rtdmDir(t, e, polFiles))
+	})
+
 	// D-10: запасного direct нет — при мёртвой группе внешнее имя не разрешается,
 	// служебный домен идёт через прошивку. Процесс перезапускается (пустой кеш).
 	t.Run("dead_group", func(t *testing.T) {
@@ -352,6 +436,68 @@ func TestRouterDNSMihomoPaths(t *testing.T) {
 			if !local.resolved() {
 				t.Error("служебный домен не разрешился при мёртвой группе")
 			}
+		}
+	})
+	// D-21: домены и списки geosite явных direct-правил идут на резолвер
+	// прошивки (решение R5 a: одна запись без запаса через группу); домен из
+	// правила разрешается при мёртвом узле, прочее внешнее имя — нет.
+	t.Run("direct_rules", func(t *testing.T) {
+		rtdsStopNode(nodeLog)
+		site, _ := rtmDatRefs(ix)
+		if _, _, err := e.svc.SaveRule(e.rev(t), Rule{
+			Enabled: true, Target: Target{Kind: KindDirect},
+			Conds: []Cond{{Type: CondDomain, Values: []string{rtdmDirectDomain, "full:" + rtdmDirectFull}}},
+		}); err != nil {
+			t.Fatalf("SaveRule (домен → direct): %v", err)
+		}
+		var wantSets []string
+		if site != nil {
+			cat, err := ix.Extract(site.File, site.Tag)
+			if err != nil {
+				t.Fatalf("список geosite стенда: %v", err)
+			}
+			if _, _, err := e.svc.SaveRule(e.rev(t), Rule{
+				Enabled: true, Target: Target{Kind: KindDirect},
+				Conds: []Cond{{Type: CondGeosite, Lists: []lists.ListRef{*site}}},
+			}); err != nil {
+				t.Fatalf("SaveRule (geosite → direct): %v", err)
+			}
+			if len(cat.Domains) > 0 {
+				wantSets = append(wantSets, "rule-set:"+ProviderName(site.File, site.Tag, listPartDomain))
+			}
+			if len(cat.Classical) > 0 {
+				wantSets = append(wantSets, "rule-set:"+ProviderName(site.File, site.Tag, listPartClassical))
+			}
+		}
+		directFiles := rtdmMustGen(t, e, rtdmLive(svc, rtdmFirmware, false))
+		_, dd := rtdmProfile(t, directFiles)
+		policy := rtdmPolicy(dd)
+		fw := []string{"udp://" + rtdmFirmware}
+		domainOK := rtdmEqual(policy["+."+rtdmDirectDomain], fw) && rtdmEqual(policy[rtdmDirectFull], fw)
+		setsOK := true
+		for _, k := range wantSets {
+			setsOK = setsOK && rtdmEqual(policy[k], fw)
+		}
+		t.Logf("ключи direct-доменов на прошивку: %s; списков geosite: %d, ключи rule-set на прошивку: %s",
+			rtxYesNo(domainOK), len(wantSets), rtxYesNo(setsOK))
+		if !domainOK || !setsOK {
+			t.Error("nameserver-policy: direct-домены или списки geosite не ведут на резолвер прошивки")
+		}
+		if site == nil {
+			t.Log("в каталоге dat стенда нет подходящего списка geosite: ключ rule-set не проверен")
+		}
+		dir := rtdmDir(t, e, directFiles)
+		rtdmCheck(t, dir)
+		_, daddr := rtdmStart(t, dir)
+		time.Sleep(time.Second)
+		direct := rtdsResolveWait(daddr, rtdmDirectDomain+".", 10*time.Second)
+		dead := rtdsQuery(daddr, rtdsExtDead, dnsmessage.TypeA, 6*time.Second)
+		t.Logf("при мёртвом узле: direct-домен разрешился %s, внешнее имя %s", rtxYesNo(direct.resolved()), dead.code())
+		if !direct.resolved() {
+			t.Error("домен direct-правила не разрешился через резолвер прошивки при мёртвом узле")
+		}
+		if dead.resolved() {
+			t.Error("внешнее имя разрешилось при мёртвом узле: запрос ушёл мимо туннеля")
 		}
 	})
 }

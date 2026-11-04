@@ -38,6 +38,10 @@ const (
 	// решения — новая правка генератора.
 	mihomoDNSListen4 = "0.0.0.0:53"
 	mihomoDNSListen6 = "[::]:53"
+	// mihomoEnhancedRedirHost и mihomoEnhancedFakeIP — значения enhanced-mode
+	// (D-12): пустой режим под перехватом — redir-host.
+	mihomoEnhancedRedirHost = "redir-host"
+	mihomoEnhancedFakeIP    = "fake-ip"
 	// mihomoDNSScheme — схема адреса резолвера прошивки в записях Mihomo.
 	mihomoDNSScheme = "udp://"
 	// mihomoSystemDNS — запись «системный резолвер»: под перехватом это сам
@@ -86,6 +90,8 @@ func (b *mihomoBuild) takeoverDNS(parts []*yaml.Node) error {
 		listen = mihomoDNSListen6
 	}
 	yMapSet(dns, "listen", yStr(listen))
+	// Ключ ipv6 секции не меняется и при IPv6 у роутера: ответы AAAA задаёт он
+	// (умолчание false, D-31), слушатель на [::] этого не решает.
 
 	// D-20: все серверы «Серверы» идут в группу-цель, вписанные пользователем
 	// тоже; записи, ведущие на сам роутер, убираются (петля, Pitfall 3). Пусто
@@ -104,9 +110,13 @@ func (b *mihomoBuild) takeoverDNS(parts []*yaml.Node) error {
 		}
 	}
 
-	if len(yStrings(yMapGet(dns, "default-nameserver"))) == 0 {
-		yMapSet(dns, "default-nameserver", ySeq(dnsDefaultBootstrap, false))
+	// default-nameserver резолвит имена самих серверов: записи на сам роутер
+	// замкнули бы его на свой слушатель; пусто — IP по умолчанию.
+	boot := dnsLoopFree(yStrings(yMapGet(dns, "default-nameserver")), false)
+	if len(boot) == 0 {
+		boot = dnsDefaultBootstrap
 	}
+	yMapSet(dns, "default-nameserver", ySeq(boot, false))
 
 	// D-18: имена узлов резолвятся до туннеля — серверы секции как есть (без
 	// суффикса: прямое соединение с меткой 255), пусто — пара DoH по IP. Решение
@@ -124,14 +134,22 @@ func (b *mihomoBuild) takeoverDNS(parts []*yaml.Node) error {
 	}
 	yMapSet(dns, "proxy-server-nameserver", ySeq(psn, false))
 
+	// Адреса прошивки в Live нет (живые данные неполны) — записей на прошивку
+	// нет: локальные имена идут общим путём через группу, мимо туннеля ничего не
+	// уходит.
 	zones := dnsTakeoverZones(live.ServiceDomain, params.Zones)
 	if firmware != "" {
 		keys := make([]string, 0, len(zones))
 		for _, z := range zones {
 			keys = append(keys, "+."+z)
 		}
-		mihomoPolicyAdd(dns, keys, firmware)
+		direct, err := b.directPolicyKeys()
+		if err != nil {
+			return err
+		}
+		mihomoPolicyAdd(dns, append(keys, direct...), firmware)
 	}
+	mihomoFakeIPFilter(dns, zones)
 	return nil
 }
 
@@ -154,6 +172,49 @@ func (b *mihomoBuild) dnsGroupName(p configlayer.DNSTakeoverParams) (string, err
 		return "", genErr(genErrDNSGroupNameInvalid, name)
 	}
 	return name, nil
+}
+
+// directPolicyKeys — ключи nameserver-policy для явных direct-правил (D-21):
+// имя резолвится тем же путём, что его трафик. Домен без префикса — `+.<домен>`
+// (с поддоменами), full: — точное имя; keyword: и regexp: в ключах политики
+// Mihomo не выражаются и идут общим путём через группу (мимо туннеля не уходят).
+// Списки geosite — `rule-set:<провайдер>` по провайдерам, которые профиль уже
+// выпустил для этих списков (доменная и classical-часть). Финальное правило не
+// входит (DirectDNSRules). Профиль собирается целиком при каждом «Применить»,
+// поэтому смена правил сразу меняет и политику.
+func (b *mihomoBuild) directPolicyKeys() ([]string, error) {
+	domains, refs, err := DirectDNSRules(b.sections)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, d := range domains {
+		low := strings.ToLower(d)
+		switch {
+		case strings.HasPrefix(low, "keyword:"), strings.HasPrefix(low, "regexp:"):
+			continue
+		case strings.HasPrefix(low, "full:"):
+			if name := dnsZoneName(d[len("full:"):]); name != "" {
+				out = append(out, name)
+			}
+		default:
+			if name := dnsZoneName(d); name != "" {
+				out = append(out, "+."+name)
+			}
+		}
+	}
+	for _, r := range refs {
+		l := b.lists[listKey(r.File, r.Tag)]
+		if l == nil {
+			continue
+		}
+		for _, part := range []string{listPartDomain, listPartClassical} {
+			if name := l.name(part); name != "" {
+				out = append(out, "rule-set:"+name)
+			}
+		}
+	}
+	return out, nil
 }
 
 // mihomoPolicyAdd дописывает в nameserver-policy ключи панели с одним
@@ -184,6 +245,37 @@ func mihomoPolicyAdd(dns *yaml.Node, keys []string, firmware string) {
 	if len(policy.Content) > 0 {
 		yMapSet(dns, "nameserver-policy", policy)
 	}
+}
+
+// mihomoFakeIPFilter — D-12: при enhanced-mode fake-ip локальные зоны
+// дописываются в fake-ip-filter к значениям пользователя без повторов (иначе
+// локальные имена получили бы адреса из пула fake-ip); пустой режим под
+// перехватом — redir-host, фильтр тогда не нужен.
+func mihomoFakeIPFilter(dns *yaml.Node, zones []string) {
+	mode := ""
+	if n := yMapGet(dns, "enhanced-mode"); n != nil && n.Kind == yaml.ScalarNode {
+		mode = strings.TrimSpace(n.Value)
+	}
+	if mode == "" {
+		yMapSet(dns, "enhanced-mode", yStr(mihomoEnhancedRedirHost))
+		return
+	}
+	if mode != mihomoEnhancedFakeIP {
+		return
+	}
+	filter := yStrings(yMapGet(dns, "fake-ip-filter"))
+	seen := map[string]bool{}
+	for _, f := range filter {
+		seen[strings.ToLower(f)] = true
+	}
+	for _, z := range zones {
+		k := "+." + z
+		if !seen[k] {
+			seen[k] = true
+			filter = append(filter, k)
+		}
+	}
+	yMapSet(dns, "fake-ip-filter", ySeq(filter, false))
 }
 
 // dnsTakeoverZones — встроенные локальные зоны и служебный домен (D-11) и свои
