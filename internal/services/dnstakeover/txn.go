@@ -275,6 +275,7 @@ func (s *Service) Enable(ctx context.Context) error {
 	if !s.beginOp(opEnable, enableSteps) {
 		return errCode(CodeBusy)
 	}
+	s.clearOutcome()
 	ctx = context.WithoutCancel(ctx)
 	s.wg.Add(1)
 	go func() {
@@ -689,6 +690,7 @@ func (s *Service) Disable(ctx context.Context) error {
 	if !s.beginOp(opDisable, disableSteps) {
 		return errCode(CodeBusy)
 	}
+	s.clearOutcome()
 	ctx = context.WithoutCancel(ctx)
 	s.wg.Add(1)
 	go func() {

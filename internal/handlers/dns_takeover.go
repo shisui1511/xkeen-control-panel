@@ -100,7 +100,8 @@ func (a *API) ConfigDNS(w http.ResponseWriter, r *http.Request) {
 // ConfigDNSAction — POST /api/configlayer/dns/<действие>: check, enable, disable,
 // keep («Оставить»: вид; повтор при подтверждённом перехвате — тот же вид, без окна
 // — 409 no_window), rollback («Откатить сейчас»: {started:true}; без окна — 409
-// no_window). Неизвестное действие — 404 not_found.
+// no_window), outcome-seen (тост об исходе без пользователя показан: вид).
+// Неизвестное действие — 404 not_found.
 func (a *API) ConfigDNSAction(w http.ResponseWriter, r *http.Request) {
 	if !a.requireDNS(w, r) {
 		return
@@ -117,6 +118,8 @@ func (a *API) ConfigDNSAction(w http.ResponseWriter, r *http.Request) {
 		a.configDNSView(w, r, a.dns.Keep)
 	case "rollback":
 		a.configDNSTxn(w, r, a.dns.Rollback)
+	case "outcome-seen":
+		a.configDNSView(w, r, a.dns.OutcomeSeen)
 	default:
 		JSONErrorCode(w, http.StatusNotFound, "not_found", a.t(r, "error.not_found"))
 	}
@@ -142,7 +145,7 @@ func (a *API) configDNSTxn(w http.ResponseWriter, r *http.Request, start func(co
 	JSONSuccess(w, map[string]bool{"started": true})
 }
 
-// configDNSView — POST /api/configlayer/dns/<keep> с телом {}: действие службы,
+// configDNSView — POST /api/configlayer/dns/<keep|outcome-seen> с телом {}: действие службы,
 // которое отвечает новым видом (DNSView). Действие доводится до конца и при
 // закрытой вкладке.
 func (a *API) configDNSView(w http.ResponseWriter, r *http.Request, act func(context.Context) (dnstakeover.View, error)) {

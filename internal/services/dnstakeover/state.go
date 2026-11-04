@@ -23,8 +23,8 @@ const (
 	// поднимает версию без миграции: файл другой версии читается как чистое
 	// состояние.
 	stateSchemaVersion = 1
-	// maxHistory — сколько последних записей истории хранится.
-	maxHistory = 10
+	// historyLimit — сколько последних записей истории хранится.
+	historyLimit = 10
 )
 
 // HistoryEntry — запись истории действий перехвата.
@@ -61,6 +61,10 @@ type persisted struct {
 	// возвращает откат. Переживает перезапуск панели только до её старта: Start
 	// откатывает неподтверждённый перехват сразу.
 	Window *windowState `json:"window,omitempty"`
+	// Outcome — исход, о котором пользователь ещё не знает или который висит
+	// строкой в карточке (D-28): откат окна, возврат DNS сторожем. Снимается
+	// следующим действием пользователя.
+	Outcome *Outcome `json:"outcome,omitempty"`
 }
 
 // windowState — окно подтверждения на диске.
@@ -125,11 +129,11 @@ func loadState(path string) persisted {
 }
 
 // saveState записывает состояние атомарно (0600); история урезается до
-// maxHistory последних записей.
+// historyLimit последних записей.
 func saveState(path string, p persisted) error {
 	p.SchemaVersion = stateSchemaVersion
-	if len(p.History) > maxHistory {
-		p.History = append([]HistoryEntry(nil), p.History[len(p.History)-maxHistory:]...)
+	if len(p.History) > historyLimit {
+		p.History = append([]HistoryEntry(nil), p.History[len(p.History)-historyLimit:]...)
 	}
 	if p.History == nil {
 		p.History = []HistoryEntry{}

@@ -152,6 +152,9 @@ func (s *Service) Start() {
 	s.mu.Lock()
 	s.st = st
 	s.mu.Unlock()
+	// Уведомления слоя живут в памяти: исход без пользователя возвращается в
+	// список после перезапуска панели (D-28).
+	s.d.Layer.SetNotices(noticePrefix, outcomeNotices(st.Outcome))
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -369,6 +372,10 @@ func (s *Service) View() View {
 	}
 	if w := s.st.Window; w != nil && !s.winRolling {
 		v.Window = &Window{Kind: w.Kind, DeadlineMs: w.DeadlineUnixMs, TotalS: windowTotalS}
+	}
+	if s.st.Outcome != nil {
+		o := *s.st.Outcome
+		v.Outcome = &o
 	}
 	rolling := s.winRolling
 	s.mu.Unlock()

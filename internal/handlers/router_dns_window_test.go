@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +26,10 @@ import (
 // файле слоя. Стенд готовит и возвращает rtDNSPrepare (router_dns_enable_test.go).
 
 const (
-	rtDNSRollbackPath = rtDNSBase + "/rollback"
+	rtDNSRollbackPath    = rtDNSBase + "/rollback"
+	rtDNSOutcomeSeenPath = rtDNSBase + "/outcome-seen"
+	// rtDNSOutcomeNotice — префикс уведомления слоя об исходе без пользователя.
+	rtDNSOutcomeNotice = "dns_outcome:"
 	// rtDNSWindowS — длительность окна подтверждения (D-05).
 	rtDNSWindowS = 60
 	// rtDNSTimeoutWait — сколько ждать автоотката: окно плюс откат с перезапуском ядра.
@@ -86,6 +90,41 @@ func rtDNSAppliedDiff(a, b map[string]json.RawMessage) []string {
 		}
 	}
 	return out
+}
+
+// rtDNSOutcome — исход из вида (nil — исхода нет).
+func rtDNSOutcome(v map[string]any) map[string]any {
+	o, _ := v["outcome"].(map[string]any)
+	return o
+}
+
+// rtDNSExpectTimeoutOutcome — исход автоотката: kind timeout, toast_pending=true.
+func (e *rtSrc) rtDNSExpectTimeoutOutcome(v map[string]any) {
+	e.t.Helper()
+	o := rtDNSOutcome(v)
+	if kind, _ := o["kind"].(string); kind != "timeout" {
+		e.t.Errorf("исход после автоотката %v, ожидался kind=timeout", o)
+	}
+	if pending, _ := o["toast_pending"].(bool); !pending {
+		e.t.Errorf("исход после автоотката без toast_pending: %v", o)
+	}
+}
+
+// rtDNSOutcomeNoticeShown — в снимке слоя есть уведомление об исходе перехвата.
+func (e *rtSrc) rtDNSOutcomeNoticeShown() bool {
+	e.t.Helper()
+	r := e.call(http.MethodGet, "/api/configlayer/state", nil)
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("GET /api/configlayer/state: %d %s", r.Status, r.Code)
+	}
+	list, _ := r.object(e.t)["notices"].([]any)
+	for _, it := range list {
+		n, _ := it.(map[string]any)
+		if id, _ := n["id"].(string); strings.HasPrefix(id, rtDNSOutcomeNotice) {
+			return true
+		}
+	}
+	return false
 }
 
 // rtDNSExpectRolledBack — после отката окна включения: state off, desired=false,
@@ -165,7 +204,8 @@ func TestRouterDNSWindowKeep(t *testing.T) {
 // включение → state window → ожидание без «Оставить» → откат по таймеру не раньше
 // дедлайна: state off, :53 у прошивки, override как до включения, файлы ядра без
 // слушателя и равны снимку, Applied слоя равен снимку до включения, черновик
-// закрыт. Метка ядра: откат перезапускает активное ядро.
+// закрыт → исход timeout, уведомление, outcome-seen, следующее включение снимает
+// исход. Метка ядра: откат перезапускает активное ядро.
 func TestRouterDNSWindowTimeout(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
@@ -194,6 +234,36 @@ func TestRouterDNSWindowTimeout(t *testing.T) {
 	if diff := rtDNSAppliedDiff(applied, rtDNSLayerApplied(t)); len(diff) > 0 {
 		t.Errorf("Applied слоя после автооткатa отличается от снимка до включения секциями %v", diff)
 	}
+
+	// D-28: исход без пользователя — строка в карточке, уведомление слоя dns_,
+	// однократный тост (outcome-seen снимает toast_pending); следующее включение
+	// снимает исход и уведомление.
+	t.Run("outcome", func(t *testing.T) {
+		c := e.with(t)
+		c.rtDNSExpectTimeoutOutcome(off)
+		if !c.rtDNSOutcomeNoticeShown() {
+			t.Errorf("после автоотката в снимке слоя нет уведомления %s*", rtDNSOutcomeNotice)
+		}
+		r := c.rtDNSPost(rtDNSOutcomeSeenPath)
+		if r.Status != http.StatusOK {
+			t.Fatalf("POST %s: %d %s", rtDNSOutcomeSeenPath, r.Status, r.Code)
+		}
+		o := rtDNSOutcome(r.object(t))
+		if kind, _ := o["kind"].(string); kind != "timeout" {
+			t.Errorf("после outcome-seen исход %v, ожидалось — остался timeout", o)
+		}
+		if pending, _ := o["toast_pending"].(bool); pending {
+			t.Error("после outcome-seen toast_pending=true")
+		}
+		v := c.rtDNSEnableWindow()
+		if o := rtDNSOutcome(v); o != nil {
+			t.Errorf("после следующего включения исход остался: %v", o)
+		}
+		if c.rtDNSOutcomeNoticeShown() {
+			t.Errorf("после следующего включения уведомление %s* осталось", rtDNSOutcomeNotice)
+		}
+		c.rtDNSEnsureOff()
+	})
 }
 
 // Трасса: подготовка → включение → state window → «Откатить сейчас» →
@@ -230,8 +300,9 @@ func TestRouterDNSWindowRollbackNow(t *testing.T) {
 // init-скриптом посреди окна (rtPanelRestart: новая панель отвечает по прежней
 // сессии) → старт панели откатывает неподтверждённый перехват сразу, не дожидаясь
 // дедлайна (D-07): state off в пределах 60 с после подъёма, :53 у прошивки,
-// override как до включения, файлы ядра без слушателя. Метка ядра: откат
-// перезапускает активное ядро.
+// override как до включения, файлы ядра без слушателя, исход timeout с
+// toast_pending и уведомление слоя (открытая вкладка после переподключения видит
+// «Откачено: нет подтверждения»). Метка ядра: откат перезапускает активное ядро.
 func TestRouterDNSWindowPanelRestart(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
@@ -247,4 +318,8 @@ func TestRouterDNSWindowPanelRestart(t *testing.T) {
 	rtPanelRestartVerdict(t, old, res, "перезапуск посреди окна подтверждения DNS")
 	off := e.rtDNSWaitState("off", rtDNSWindowS*time.Second)
 	e.rtDNSExpectRolledBack(off, kernel, overrideBefore)
+	e.rtDNSExpectTimeoutOutcome(off)
+	if !e.rtDNSOutcomeNoticeShown() {
+		t.Errorf("после отката на старте панели в снимке слоя нет уведомления %s*", rtDNSOutcomeNotice)
+	}
 }

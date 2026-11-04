@@ -174,6 +174,7 @@ func (s *Service) Keep(ctx context.Context) (View, error) {
 	if err := saveState(s.statePath(), saved); err != nil {
 		log.Printf("dnstakeover: %v", err)
 	}
+	s.clearOutcome()
 	s.setStep(stepWindow, statusDone)
 	s.recordHistory(opKeep, w.Snapshot.Kernel, nil)
 	s.d.Layer.PublishDNS()
@@ -181,13 +182,14 @@ func (s *Service) Keep(ctx context.Context) (View, error) {
 }
 
 // Rollback — «Откатить сейчас» (D-06): окна нет — no_window; иначе окно
-// забирается сразу (повтор — no_window), откат идёт в горутине службы под ctx без
-// отмены — тот же, что по таймеру.
+// забирается сразу (повтор — no_window), откат идёт в горутине службы — тот же,
+// что по таймеру; закрытая вкладка его не обрывает.
 func (s *Service) Rollback(ctx context.Context) error {
 	w, ok := s.claimWindow(nil)
 	if !ok {
 		return errCode(CodeNoWindow)
 	}
+	s.clearOutcome()
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -476,11 +478,129 @@ func (s *Service) rebuildXKeenRules(kernel string) error {
 	return nil
 }
 
-// windowRolledBack — след отката окна: запись истории (одна на откат).
+// windowRolledBack — исход отката окна (D-28): timeout — таймер или старт панели
+// посреди окна, rolled_manual — «Откатить сейчас», probe_failed — проба после
+// отката «Применить» не прошла и DNS у прошивки.
 func (s *Service) windowRolledBack(w windowState, kernel, reason string, fail *Failure, probeFailed bool) {
-	op := opRollback
+	kind := OutcomeRolledManual
 	if reason != reasonManual {
-		op = reasonTimeout
+		kind = OutcomeTimeout
 	}
-	s.recordHistory(op, kernel, fail)
+	if probeFailed {
+		kind = OutcomeProbeFailed
+	}
+	s.recordOutcome(Outcome{Kind: kind, Kernel: kernel, Reason: reason}, fail)
+}
+
+// --- исходы без пользователя (D-28) -------------------------------------------
+
+// Виды исхода (DNSOutcome.kind). watchdog и kernel_changed пишет сторож (148-23)
+// тем же recordOutcome.
+const (
+	OutcomeTimeout       = "timeout"
+	OutcomeRolledManual  = "rolled_manual"
+	OutcomeProbeFailed   = "probe_failed"
+	OutcomeWatchdog      = "watchdog"
+	OutcomeKernelChanged = "kernel_changed"
+)
+
+const (
+	// noticePrefix — префикс уведомлений службы в слое (Layer.SetNotices).
+	noticePrefix = "dns_"
+	// noticeOutcome — уведомление об исходе: dns_outcome:<вид>.
+	noticeOutcome = noticePrefix + "outcome:"
+)
+
+// unattended — исход случился без пользователя: таймер, старт панели, сторож,
+// смена ядра вне панели. О нём сообщают уведомление слоя и однократный тост.
+func unattended(o Outcome) bool {
+	switch o.Kind {
+	case OutcomeTimeout, OutcomeWatchdog, OutcomeKernelChanged:
+		return true
+	case OutcomeProbeFailed:
+		return o.Reason != reasonManual
+	}
+	return false
+}
+
+// recordOutcome фиксирует исход: строка в карточке (outcome в файле состояния и
+// виде) до следующего действия пользователя, toast_pending — только у исхода без
+// пользователя, уведомление слоя dns_outcome:<вид> (тоже только без
+// пользователя), запись в истории действий XKeen и в History файла (не больше
+// historyLimit), событие dns.
+func (s *Service) recordOutcome(o Outcome, fail *Failure) {
+	o.AtMs = s.now().UnixMilli()
+	o.ToastPending = unattended(o)
+	var err error
+	code, detail := "", ""
+	if fail != nil {
+		code, detail = fail.Code, fail.Detail
+		err = errors.New(fail.Code)
+	}
+	s.d.XKeen.RecordAction(actionPrefix+o.Kind, detail, err)
+	entry := HistoryEntry{Kind: o.Kind, AtMs: o.AtMs, OK: fail == nil, Code: code, Kernel: o.Kernel}
+	stored := o
+	if uerr := s.update(func(p *persisted) {
+		p.Outcome = &stored
+		p.History = append(p.History, entry)
+	}); uerr != nil {
+		log.Printf("dnstakeover: %v", uerr)
+	}
+	s.d.Layer.SetNotices("dns_", outcomeNotices(&stored))
+	s.d.Layer.PublishDNS()
+}
+
+// outcomeNotices — уведомление слоя об исходе без пользователя; иначе пусто.
+// Params: time — локальное время роутера ЧЧ:ММ:СС, from и to — ядра (смена ядра
+// вне панели).
+func outcomeNotices(o *Outcome) []configlayer.NoticeView {
+	if o == nil || !unattended(*o) {
+		return nil
+	}
+	params := map[string]string{"time": time.UnixMilli(o.AtMs).Format("15:04:05")}
+	if o.From != "" {
+		params["from"] = o.From
+	}
+	if o.To != "" {
+		params["to"] = o.To
+	}
+	return []configlayer.NoticeView{{ID: noticeOutcome + o.Kind, Kind: "warning", Kernel: o.Kernel, Params: params}}
+}
+
+// clearOutcome снимает исход и его уведомление: следующее действие пользователя
+// (включение, выключение, «Оставить», «Откатить сейчас», выключение старого
+// перенаправления) закрывает строку в карточке.
+func (s *Service) clearOutcome() {
+	s.mu.Lock()
+	had := s.st.Outcome != nil
+	s.mu.Unlock()
+	if !had {
+		return
+	}
+	if err := s.update(func(p *persisted) { p.Outcome = nil }); err != nil {
+		log.Printf("dnstakeover: %v", err)
+	}
+	s.d.Layer.SetNotices(noticePrefix, nil)
+	s.d.Layer.PublishDNS()
+}
+
+// OutcomeSeen — тост об исходе показан (POST outcome-seen): toast_pending=false,
+// строка в карточке и уведомление остаются. Ответ — вид.
+func (s *Service) OutcomeSeen(ctx context.Context) (View, error) {
+	s.mu.Lock()
+	pending := s.st.Outcome != nil && s.st.Outcome.ToastPending
+	s.mu.Unlock()
+	if pending {
+		if err := s.update(func(p *persisted) {
+			if p.Outcome != nil {
+				o := *p.Outcome
+				o.ToastPending = false
+				p.Outcome = &o
+			}
+		}); err != nil {
+			log.Printf("dnstakeover: %v", err)
+		}
+		s.d.Layer.PublishDNS()
+	}
+	return s.View(), nil
 }
