@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -146,33 +145,6 @@ func disabledLive(kernel string) (json.RawMessage, error) {
 	return json.Marshal(configlayer.DNSTakeoverLive{Enabled: false, Kernel: kernel})
 }
 
-// writeOffWaiting записывает файлы ядра без слушателя :53 панели, как
-// writeWithoutListener, но сначала ждёт замок жизненного цикла и повторяет запуск,
-// если замок перехватили: вызывается сразу после команды обработчика служб.
-func (s *Service) writeOffWaiting(ctx context.Context, kernel string) error {
-	raw, err := disabledLive(kernel)
-	if err != nil {
-		return err
-	}
-	for attempt := 1; ; attempt++ {
-		if err := s.awaitLifecycle(); err != nil {
-			return err
-		}
-		view, err := s.d.Layer.RunSectionLive(ctx, configlayer.SectionLiveRun{
-			Trigger: configlayer.TriggerDNSTakeover,
-			Kernel:  kernel,
-			Live:    configlayer.Sections{configlayer.LiveKeyDNSTakeover: raw},
-		})
-		if lockBusy(err) && attempt < lifecycleAttempts {
-			continue
-		}
-		if fail := takeoverFailure(view, err, nil); fail != nil {
-			return fmt.Errorf("запись без слушателя: %s: %s", fail.Code, fail.Detail)
-		}
-		return nil
-	}
-}
-
 // --- остановка ядра (D-14) -------------------------------------------------------
 
 // AroundKernelStop — явная остановка ядра из панели (action stop, stop с kernel).
@@ -283,7 +255,7 @@ func (s *Service) finishKernelStop(ctx context.Context, kernel string, w windowS
 			_, werr = s.restoreWindowSnapshot(hctx, kernel, snap, false)
 		}
 	} else {
-		werr = s.writeOffWaiting(hctx, kernel)
+		werr = s.writeWithoutListener(hctx, kernel)
 	}
 	s.stepResult(stepApply, werr == nil)
 	if werr != nil {
@@ -669,7 +641,7 @@ func (s *Service) runTransfer(ctx context.Context, prev string, on bool, to stri
 	// Прежнее ядро остановлено: его файлы — без слушателя, иначе следующий его
 	// запуск без перехвата занял бы :53 рядом с прошивкой.
 	if on {
-		if err := s.writeOffWaiting(ctx, prev); err != nil {
+		if err := s.writeWithoutListener(ctx, prev); err != nil {
 			log.Printf("dnstakeover: файлы %s без слушателя при переносе: %v", prev, err)
 		}
 		if st, err = s.d.Layer.ReadState(); err != nil {
@@ -762,7 +734,7 @@ func (s *Service) dropTransfer(ctx context.Context, prev string, on bool, to str
 	s.stepResult(stepRelease, len(errs) == 0)
 	if on {
 		s.setStep(stepApply, statusRunning)
-		err := s.writeOffWaiting(hctx, prev)
+		err := s.writeWithoutListener(hctx, prev)
 		s.stepResult(stepApply, err == nil)
 		if err != nil {
 			errs = append(errs, err.Error())

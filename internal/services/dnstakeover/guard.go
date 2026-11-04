@@ -70,6 +70,8 @@ var (
 	guardRestartSteps = []string{stepRestart, stepProbe}
 	// guardReleaseSteps — шаги возврата DNS прошивке сторожем.
 	guardReleaseSteps = []string{stepRelease, stepApply}
+	// guardStaleSteps — шаги повторной записи файлов без слушателя сторожем.
+	guardStaleSteps = []string{stepApply}
 )
 
 // guardState — память цикла сторожа; живёт только в его горутине.
@@ -82,6 +84,8 @@ type guardState struct {
 	lastRestore time.Time
 	// sawStopped — после последней попытки возврата ядро было остановлено.
 	sawStopped bool
+	// lastStale — последняя сверка файлов со слушателем :53 при DNS у прошивки.
+	lastStale time.Time
 }
 
 // isKernelName — xray или mihomo.
@@ -166,6 +170,10 @@ func (s *Service) guardTick(ctx context.Context, g *guardState) {
 		s.guardKernelChanged(ctx, kernel, active.Kernel)
 		return
 	}
+	if s.guardStaleListener(ctx, g, kernel) {
+		g.misses = 0
+		return
+	}
 	if Alive(ctx, LoopbackDNS, guardProbeName) {
 		g.misses = 0
 		return
@@ -220,6 +228,48 @@ func (s *Service) guardRestore(ctx context.Context, g *guardState) {
 		}
 		log.Printf("dnstakeover: сторож: перехват не вернулся: %v", err)
 	}
+}
+
+// guardStaleListener — живые данные перехвата включены (слушатель :53 в файлах
+// ядра), а DNS роутера по состоянию службы у прошивки: перехват не желаем или
+// ждёт возврата, окна нет. Так бывает, когда на пути
+// возврата DNS прошивке override снят, а запись файлов без слушателя не прошла
+// (сбой конвейера, отмена ожидания замков). Повтора у этих путей нет, а проба
+// слушателя здесь не помогает: через 127.0.0.1:53 отвечает прошивка или прежний
+// процесс ядра, а следующий запуск ядра на этих файлах наткнётся на занятый :53.
+// Поэтому не чаще guardRearmMinInterval override читается заново и, если он снят,
+// файлы ядра kernel пишутся без слушателя операцией службы (запущенное ядро
+// перезапускается). Override включён — :53 нужен ядру, ничего не меняется. true —
+// запись выполнялась, проба слушателя на этом шаге не нужна.
+func (s *Service) guardStaleListener(ctx context.Context, g *guardState, kernel string) bool {
+	s.mu.Lock()
+	stale := s.st.Window == nil && (!s.st.Desired || s.st.WaitingReason != "")
+	s.mu.Unlock()
+	if !stale {
+		return false
+	}
+	now := s.now()
+	if !g.lastStale.IsZero() && now.Sub(g.lastStale) < guardRearmMinInterval {
+		return false
+	}
+	g.lastStale = now
+	hctx, cancel := context.WithTimeout(ctx, 4*hookTimeout)
+	defer cancel()
+	if on, err := s.fw.OverrideEnabled(hctx); err != nil || on {
+		return false
+	}
+	if !s.beginOp(opGuard, guardStaleSteps) {
+		return false
+	}
+	defer s.endOp()
+	log.Printf("dnstakeover: сторож: override снят, а в файлах %s слушатель :53 — запись без слушателя", kernel)
+	s.setStep(stepApply, statusRunning)
+	err := s.writeWithoutListener(hctx, kernel)
+	s.stepResult(stepApply, err == nil)
+	if err != nil {
+		log.Printf("dnstakeover: сторож: файлы %s без слушателя не записаны: %v", kernel, err)
+	}
+	return true
 }
 
 // guardKernelChanged — активное ядро не то, что ведёт перехват (сменили мимо
@@ -347,7 +397,7 @@ func (s *Service) releaseToFirmware(ctx context.Context, kernel, reason, to stri
 			_, werr = s.restoreWindowSnapshot(hctx, kernel, snap, false)
 		}
 	} else {
-		werr = s.writeOffWaiting(hctx, kernel)
+		werr = s.writeWithoutListener(hctx, kernel)
 	}
 	s.stepResult(stepApply, werr == nil)
 	if werr != nil {

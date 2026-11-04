@@ -1575,6 +1575,12 @@ type SectionLiveRun struct {
 	// BeforeWrite и BeforeRollback — хуки запуска (см. ApplyRequest).
 	BeforeWrite    func(ctx context.Context) error
 	BeforeRollback func()
+	// Wait — ждать замки применения и жизненного цикла, как фоновый запуск
+	// (TryBegin с user=false), пока их не отпустят или не отменят ctx. Без Wait
+	// занятый замок сразу даёт ErrApplyBusy или ErrKernelBusy, как у «Применить» по
+	// кнопке. Нужен путям возврата DNS роутера прошивке: их запись не должна
+	// теряться из-за идущего применения или операции над ядром.
+	Wait bool
 }
 
 // RunSectionLive — запуск конвейера поверх применённого состояния с подменой
@@ -1583,7 +1589,7 @@ type SectionLiveRun struct {
 // записью с манифестом в Applied, а в Draft сливается функцией run.MergeDraft;
 // остальные правки черновика не применяются и остаются в нём. Владение
 // маршрутизацией и секциями не меняется. Занятость как у StartApply по кнопке
-// (user=true). Отказ проверки или перезапуска — ни Applied, ни Draft, ни файлы не
+// (user=true), с run.Wait — ожидание обоих замков. Отказ проверки или перезапуска — ни Applied, ни Draft, ни файлы не
 // меняются; нерешённый дрейф — ErrDriftBlocked. Ключи run.Live фиксируются в
 // State.Live той же записью; запуск допустим и только с ними, без секций. Вызов
 // синхронный; после снятия замка идут afterRun и хуки AddAfterApply.
@@ -1603,7 +1609,7 @@ func (l *Layer) RunSectionLive(ctx context.Context, run SectionLiveRun) (ApplyVi
 	if stopped {
 		return ApplyView{}, ErrStopped
 	}
-	release, err := l.pipeline.TryBegin(ctx, true)
+	release, err := l.pipeline.TryBegin(ctx, !run.Wait)
 	if err != nil {
 		return ApplyView{}, l.mapBusy(err)
 	}

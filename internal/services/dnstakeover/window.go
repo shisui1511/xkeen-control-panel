@@ -433,18 +433,37 @@ func (s *Service) releaseToFirmwareDNS(ctx context.Context, kernel string, overr
 	return nil
 }
 
-// writeWithoutListener записывает файлы ядра без слушателя :53 панели
-// (RunSectionLive с Live.enabled=false).
-func (s *Service) writeWithoutListener(ctx context.Context, kernel string) error {
-	raw, err := json.Marshal(configlayer.DNSTakeoverLive{Enabled: false, Kernel: kernel})
+// lockWaitLimit — сколько запись без слушателя ждёт замки применения и жизненного
+// цикла (идущее применение, операция над ядром из обработчика служб).
+const lockWaitLimit = 4 * hookTimeout
+
+// runWithoutListener — проход конвейера с файлами ядра kernel без слушателя :53
+// панели (RunSectionLive с Live.enabled=false). Это запись на путях возврата DNS
+// роутера прошивке, поэтому замки применения и жизненного цикла ждутся (Wait), а
+// не дают отказ занятости: обычно override к этому моменту уже снят, и потерянная
+// запись оставила бы слушатель :53 в файлах ядра. Ожидание ограничено ctx,
+// lockWaitLimit и остановкой службы.
+func (s *Service) runWithoutListener(ctx context.Context, kernel string) (configlayer.ApplyView, error) {
+	raw, err := disabledLive(kernel)
 	if err != nil {
-		return err
+		return configlayer.ApplyView{}, err
 	}
-	view, err := s.d.Layer.RunSectionLive(ctx, configlayer.SectionLiveRun{
+	wctx, cancel := context.WithTimeout(ctx, lockWaitLimit)
+	defer cancel()
+	stop := context.AfterFunc(s.ctx, cancel)
+	defer stop()
+	return s.d.Layer.RunSectionLive(wctx, configlayer.SectionLiveRun{
 		Trigger: configlayer.TriggerDNSTakeover,
 		Kernel:  kernel,
 		Live:    configlayer.Sections{configlayer.LiveKeyDNSTakeover: raw},
+		Wait:    true,
 	})
+}
+
+// writeWithoutListener записывает файлы ядра без слушателя :53 панели
+// (runWithoutListener); сбой прохода — ошибка с кодом.
+func (s *Service) writeWithoutListener(ctx context.Context, kernel string) error {
+	view, err := s.runWithoutListener(ctx, kernel)
 	if fail := takeoverFailure(view, err, nil); fail != nil {
 		return fmt.Errorf("запись без слушателя: %s: %s", fail.Code, fail.Detail)
 	}

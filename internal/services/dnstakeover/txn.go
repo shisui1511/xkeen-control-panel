@@ -746,15 +746,7 @@ func (s *Service) runDisable(ctx context.Context, pl disablePlan) {
 	var fail *Failure
 	if pl.live {
 		s.setStep(stepApply, statusRunning)
-		raw, err := json.Marshal(configlayer.DNSTakeoverLive{Enabled: false, Kernel: pl.kernel})
-		var view configlayer.ApplyView
-		if err == nil {
-			view, err = s.d.Layer.RunSectionLive(ctx, configlayer.SectionLiveRun{
-				Trigger: configlayer.TriggerDNSTakeover,
-				Kernel:  pl.kernel,
-				Live:    configlayer.Sections{configlayer.LiveKeyDNSTakeover: raw},
-			})
-		}
+		view, err := s.runWithoutListener(ctx, pl.kernel)
 		if fail = takeoverFailure(view, err, nil); fail != nil {
 			s.setStep(stepApply, statusFailed)
 		} else {

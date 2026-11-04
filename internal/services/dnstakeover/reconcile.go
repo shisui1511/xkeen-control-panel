@@ -92,7 +92,7 @@ func (s *Service) reconcileReboot(ctx context.Context, kernel string) {
 	code := CodeGeneric
 
 	s.setStep(stepApply, statusRunning)
-	werr := s.writeOffWaiting(hctx, kernel)
+	werr := s.writeWithoutListener(hctx, kernel)
 	s.stepResult(stepApply, werr == nil)
 	if werr != nil {
 		errs = append(errs, werr.Error())
