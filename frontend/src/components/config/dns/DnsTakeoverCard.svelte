@@ -6,6 +6,8 @@
   // даже без открытой карточки: сбой новой транзакции показывается, даже если совпадает с
   // прежним.
   const failureSeen = $state({ key: '' });
+  // Состояние раскрытия «Параметры перехвата» сохраняется при переключении вкладки ядра
+  const paramsOpen = $state({ open: false });
   dnsTakeoverStore.subscribe((v) => {
     if (v?.state === 'applying' && failureSeen.key !== '') failureSeen.key = '';
   });
@@ -17,10 +19,12 @@
   import { t } from '../../../i18n';
   import { showConfirm, showToast } from '../../../stores';
   import Button from '../../Button.svelte';
+  import Select from '../../Select.svelte';
   import Skeleton from '../../Skeleton.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
   import DnsTakeoverSteps from './DnsTakeoverSteps.svelte';
   import DnsResolveCheck from './DnsResolveCheck.svelte';
+  import DnsLocalZones from './DnsLocalZones.svelte';
   import {
     dnsTakeover,
     dnsLoadError,
@@ -28,21 +32,25 @@
     loadDns,
     enableDns,
     disableDns,
+    saveDnsParams,
     dnsActiveKernel,
     dnsErrorText,
     dnsRequestErrorText,
     type DnsBlock,
+    type DnsParams,
     type DnsState,
     type DnsView
   } from '../../../lib/configDns';
+  import { currentRevision, refetchLayerState } from '../../../lib/configLayer';
+  import { routingView, loadRouting } from '../../../lib/configRouting';
   import type { CoreKernel } from '../../../lib/configCores';
 
   // Карточка «Перехват DNS роутера» (DNSF-02, D-02): одна на оба ядра, стоит перед карточкой
   // секции DNS выбранного ядра. Состояние, блокировки, апстримы и последняя проверка — из
   // общего стора dnsTakeover (вид считает бэкенд); переключение ядра карточку не
   // перезагружает. Ход транзакции (DnsTakeoverSteps) виден, пока идёт транзакция, и после
-  // сбоя до следующего действия; проверка резолва (DnsResolveCheck) — под сеткой. Параметры
-  // перехвата, строки исходов и старого перенаправления добавляют следующие планы фазы.
+  // сбоя до следующего действия; проверка резолва (DnsResolveCheck) и параметры перехвата
+  // (группа и локальные зоны DnsLocalZones) — под сеткой.
   let {
     currentKernel,
     onopenform
@@ -55,6 +63,8 @@
 
   const uid = $props.id();
   const titleId = `${uid}-title`;
+  const groupSelectId = `${uid}-group`;
+  const groupErrorId = `${uid}-group-error`;
 
   // Порядок блокировок (UI-SPEC «Порядок блокировок»): первая причина идёт первой
   const BLOCK_ORDER: readonly DnsBlock[] = [
@@ -283,6 +293,99 @@
   const showSteps = $derived(dnsState === 'applying' || stepsFailure !== undefined);
 
   let checkRef = $state<ReturnType<typeof DnsResolveCheck>>();
+
+  // Параметры перехвата: группа для DNS-запросов и локальные зоны из черновика или
+  // применённого состояния
+  const draftParams = $derived<DnsParams>(
+    view?.draft_params ?? { group: '', zones: view?.zones ?? [] }
+  );
+  const draftZones = $derived(draftParams.zones ?? []);
+  const rawDraftGroup = $derived(draftParams.group ?? '');
+
+  // Список групп загружается при первом раскрытии параметров, если вкладка «Группы» ещё
+  // не открывалась
+  $effect(() => {
+    if (paramsOpen.open && $routingView === null) {
+      void loadRouting();
+    }
+  });
+
+  const availableGroups = $derived.by<Array<{ id: string; name: string }>>(() => {
+    const list = $routingView?.groups ?? [];
+    if (list.length > 0) return list.map((g) => ({ id: g.id, name: g.name }));
+    if ($routingView === null && view?.group && !view.group.missing && view.group.id) {
+      return [{ id: view.group.id, name: view.group.name || view.group.id }];
+    }
+    return [];
+  });
+
+  const selectedGroupId = $derived.by<string>(() => {
+    if (rawDraftGroup !== '') {
+      return availableGroups.some((g) => g.id === rawDraftGroup) ? rawDraftGroup : '';
+    }
+    const def =
+      (view?.group?.id ? availableGroups.find((g) => g.id === view.group?.id) : undefined) ??
+      (view?.group?.name ? availableGroups.find((g) => g.name === view.group?.name) : undefined) ??
+      availableGroups[0];
+    if (view?.group?.missing) return '';
+    return def?.id ?? '';
+  });
+
+  const groupMissing = $derived.by<boolean>(() => {
+    if (rawDraftGroup !== '') {
+      if (availableGroups.some((g) => g.id === rawDraftGroup)) return false;
+      return availableGroups.length > 0 || (view?.group?.missing ?? false);
+    }
+    if (selectedGroupId !== '') return false;
+    return view?.group?.missing ?? false;
+  });
+
+  const missingGroupName = $derived.by<string>(() => {
+    if (rawDraftGroup !== '') {
+      if (view?.group?.id === rawDraftGroup && view.group.name) return view.group.name;
+      return rawDraftGroup;
+    }
+    return view?.group?.name || view?.group?.id || '?';
+  });
+
+  const paramsLocked = $derived(
+    dnsState === 'applying' || (view?.blocks.some((b) => DISABLE_BLOCKS.has(b)) ?? false)
+  );
+  const showEditWindowHint = $derived(
+    Boolean(
+      view?.params_changed &&
+      (view.state === 'on' || view.state === 'window' || view.state === 'waiting')
+    )
+  );
+
+  async function saveParams(next: DnsParams): Promise<void> {
+    try {
+      try {
+        await saveDnsParams(currentRevision(), next);
+      } catch (err) {
+        if ((err as { code?: string })?.code === 'draft_conflict') {
+          await refetchLayerState();
+          await saveDnsParams(currentRevision(), next);
+        } else {
+          throw err;
+        }
+      }
+      await loadDns();
+    } catch (err) {
+      showToast('error', dnsRequestErrorText(err), 8000);
+      void loadDns();
+    }
+  }
+
+  async function updateGroup(nextId: string): Promise<void> {
+    if (paramsLocked) return;
+    await saveParams({ group: nextId, zones: draftZones });
+  }
+
+  async function updateZones(nextZones: string[]): Promise<void> {
+    if (paramsLocked) return;
+    await saveParams({ group: rawDraftGroup, zones: nextZones });
+  }
 
   function markFailureSeen(): void {
     failureSeen.key = failureKey;
@@ -542,6 +645,73 @@
 
       <DnsResolveCheck bind:this={checkRef} {view} />
 
+      <details
+        class="dns-params"
+        data-testid="dns-params"
+        open={paramsOpen.open}
+        ontoggle={(e) => {
+          paramsOpen.open = e.currentTarget.open;
+        }}
+      >
+        <summary class="dns-params-summary" data-testid="dns-params-summary">
+          <span>{$t('cfg.dns.params')}</span>
+          {#if view.params_changed}
+            <span class="badge badge-warning" data-testid="dns-params-changed">
+              {$t('cfg.dns.changed_badge')}
+            </span>
+          {/if}
+        </summary>
+
+        <div class="dns-params-body">
+          {#if showEditWindowHint}
+            <p class="warning-text dns-params-warn" data-testid="dns-params-window-hint">
+              <Icon name="warning" size={14} class="dns-block-icon" />
+              <span>{$t('cfg.dns.edit_window_hint')}</span>
+            </p>
+          {/if}
+
+          <div class="dns-field">
+            <label class="form-label" for={groupSelectId}>{$t('cfg.dns.group_label')}</label>
+            <Select
+              id={groupSelectId}
+              class={groupMissing ? 'input input-error' : 'input'}
+              value={selectedGroupId}
+              disabled={paramsLocked || availableGroups.length === 0}
+              data-testid="dns-group-select"
+              onchange={(e) => void updateGroup(e.currentTarget.value)}
+            >
+              {#if groupMissing || selectedGroupId === ''}
+                <option value="" disabled>{missingGroupName}</option>
+              {/if}
+              {#each availableGroups as g (g.id)}
+                <option value={g.id}>{g.name}</option>
+              {/each}
+            </Select>
+            {#if groupMissing}
+              <p
+                class="error-text dns-field-error"
+                id={groupErrorId}
+                role="alert"
+                data-testid="dns-group-missing"
+              >
+                {$t('cfg.dns.group_missing', { name: missingGroupName })}
+              </p>
+            {/if}
+            <p class="dns-caption">
+              {$t('cfg.dns.group_hint')}
+              <a class="dns-link" href="#/config/groups">{$t('cfg.dns.open_groups')}</a>
+            </p>
+          </div>
+
+          <DnsLocalZones
+            builtin={view.zones_builtin}
+            zones={draftZones}
+            readonly={paramsLocked}
+            onchange={(zones) => void updateZones(zones)}
+          />
+        </div>
+      </details>
+
       <div class="dns-foot">
         {#if view.state === 'off'}
           <div class="dns-actions">
@@ -795,6 +965,58 @@
     flex-shrink: 0;
   }
 
+  .dns-params {
+    min-width: 0;
+  }
+
+  .dns-params-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--spacing-2);
+    min-height: 32px;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--fg-secondary);
+    cursor: pointer;
+  }
+
+  .dns-params-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-4);
+    padding-top: var(--spacing-2);
+    min-width: 0;
+  }
+
+  .dns-params-warn {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-1);
+    margin: 0;
+    line-height: 1.5;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .dns-params-warn :global(.dns-block-icon) {
+    flex-shrink: 0;
+    margin-top: 3px;
+  }
+
+  .dns-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+    min-width: 0;
+  }
+
+  .dns-field-error {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
   .dns-foot {
     display: flex;
     flex-direction: column;
@@ -835,6 +1057,11 @@
     }
 
     .dns-alert-body :global(.btn) {
+      min-height: 44px;
+    }
+
+    .dns-params-summary,
+    .dns-params :global(.input) {
       min-height: 44px;
     }
 
