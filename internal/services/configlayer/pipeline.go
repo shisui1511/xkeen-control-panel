@@ -96,6 +96,9 @@ type ApplyRequest struct {
 	// State.Live той же записью, что манифест и Applied; JSON null удаляет ключ.
 	// Отказ запуска State.Live не меняет.
 	LiveCommit Sections
+	// ForceFullRestart — запущенное ядро перезапускается целиком, без горячей
+	// перезагрузки Mihomo (правила XKeen пересобираются только полным перезапуском).
+	ForceFullRestart bool
 	// BeforeWrite вызывается после проверки конфигурации обоими ядрами и до
 	// записи файлов, в том числе при пустом плане. Ошибка отменяет запуск без
 	// касания файлов (ResultBeforeWriteFailed). nil — хука нет.
@@ -584,6 +587,12 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		// сравнивается значение по ту сторону перехода (G-147-3).
 		base := restartBase(p.d.Roots, snap, src, installed, p.d.ForeignOwned)
 		plan.FullRestart = fullRestartOf(RestartReasons(snap.Applied, src, base))
+	}
+	if err == nil && req.ForceFullRestart {
+		if plan.FullRestart == nil {
+			plan.FullRestart = map[string]string{}
+		}
+		plan.FullRestart[KernelMihomo] = RestartReasonFirmwareDNS
 	}
 	if err != nil {
 		p.setStep(StepBuild, StepFailed, "", err.Error())

@@ -1570,6 +1570,8 @@ type SectionLiveRun struct {
 	// Live — ключи живых данных запуска: подставляются генераторам и после успеха
 	// фиксируются в State.Live одной записью с манифестом (ApplyRequest.LiveCommit).
 	Live Sections
+	// ForceFullRestart — см. ApplyRequest.ForceFullRestart.
+	ForceFullRestart bool
 	// BeforeWrite и BeforeRollback — хуки запуска (см. ApplyRequest).
 	BeforeWrite    func(ctx context.Context) error
 	BeforeRollback func()
@@ -1618,7 +1620,8 @@ func (l *Layer) RunSectionLive(ctx context.Context, run SectionLiveRun) (ApplyVi
 	req := ApplyRequest{
 		Trigger: run.Trigger, Source: SourceApplied, Kernel: run.Kernel,
 		SectionsOverlay: run.Sections.Clone(), MergeDraft: run.MergeDraft,
-		LiveCommit: run.Live.Clone(), BeforeWrite: run.BeforeWrite, BeforeRollback: run.BeforeRollback,
+		LiveCommit: run.Live.Clone(), ForceFullRestart: run.ForceFullRestart,
+		BeforeWrite: run.BeforeWrite, BeforeRollback: run.BeforeRollback,
 	}
 	view := l.runPipeline(req)
 	release()

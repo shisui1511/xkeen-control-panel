@@ -893,6 +893,9 @@ func (s *Service) runTakeover(ctx context.Context, tr takeoverRun) (configlayer.
 		Sections:   tr.Sections,
 		MergeDraft: tr.MergeDraft,
 		Live:       configlayer.Sections{configlayer.LiveKeyDNSTakeover: live},
+		// Старое перенаправление XKeen (proxy_dns) снимается этим же запуском: его
+		// правила с :53 пересобираются только полным перезапуском ядра.
+		ForceFullRestart: tr.ProxyDNSBefore,
 		// Пока ждали замок применения, секцию могли отпустить, а черновик — открыть.
 		Guard: func(st configlayer.StateView) error {
 			if !configlayer.DesiredCores(st.Applied)[section].Managed {

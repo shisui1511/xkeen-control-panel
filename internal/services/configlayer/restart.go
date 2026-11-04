@@ -113,6 +113,9 @@ const (
 	// NoteFullRestartProfile — Mihomo перезапущен целиком: config.yaml переведён на
 	// другой профиль решением по Mihomo, PUT /configs контроллер не переключает.
 	NoteFullRestartProfile = "full_restart_profile"
+	// NoteFullRestartFirmwareDNS — ядро перезапущено целиком: перехват DNS снял
+	// старое перенаправление XKeen (proxy_dns), горячая перезагрузка правил не пересобирает.
+	NoteFullRestartFirmwareDNS = "full_restart_firmware_dns"
 )
 
 // errInterrupted — запуск прерван отменой контекста (остановка панели). Откат и
@@ -326,6 +329,8 @@ func fullRestartNote(reason string) string {
 		return NoteFullRestartPort
 	case RestartReasonProfile:
 		return NoteFullRestartProfile
+	case RestartReasonFirmwareDNS:
+		return NoteFullRestartFirmwareDNS
 	}
 	return ""
 }
