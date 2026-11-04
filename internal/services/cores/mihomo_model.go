@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"strconv"
+	"strings"
+
+	"golang.org/x/net/idna"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
@@ -220,4 +223,81 @@ func MihomoPinned(id string) []configlayer.PinnedValue {
 		{Key: "external-controller-unix", Value: services.DefaultMihomoSocketPath},
 		{Key: "profile.store-selected", Value: "true"},
 	}
+}
+
+// Значения части dns профиля, которые генератор маршрутизации ставит под
+// перехватом DNS на Mihomo (routing/dns_mihomo.go; пакет routing импортирует
+// cores, обратный импорт невозможен): менять только вместе.
+const (
+	mihomoDNSListen4     = "0.0.0.0:53"
+	mihomoDNSListen6     = "[::]:53"
+	mihomoEnhancedFakeIP = "fake-ip"
+)
+
+// mihomoDNSZoneName приводит имя зоны к виду ключа Mihomo так же, как
+// генератор (dnsZoneName): нижний регистр, без точки в конце, в ASCII; пусто —
+// имя не годится для ключа.
+func mihomoDNSZoneName(name string) string {
+	n := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), "."))
+	if n == "" || strings.ContainsAny(n, " \t\r\n,:#/") {
+		return ""
+	}
+	if ascii, err := idna.Punycode.ToASCII(n); err == nil {
+		n = ascii
+	}
+	return n
+}
+
+// mihomoDNSZones — локальные зоны перехвата в том же составе и порядке, что у
+// генератора (dnsTakeoverZones): встроенные со служебным доменом (D-11), затем
+// свои зоны пользователя (D-22); недопустимые свои пропускаются, без повторов.
+func mihomoDNSZones(serviceDomain string, own []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(z string) {
+		if name := mihomoDNSZoneName(z); name != "" && !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	for _, z := range configlayer.BuiltinLocalZones(serviceDomain) {
+		add(z)
+	}
+	for _, z := range own {
+		if configlayer.ValidZone(z) == nil {
+			add(z)
+		}
+	}
+	return out
+}
+
+// MihomoDNSTakeoverPinned возвращает закреплённые значения секции DNS Mihomo
+// при включённом перехвате DNS на Mihomo (D-19, DNSF-01): listen на :53;
+// nameserver-policy — JSON {"zones":N,"direct":M} с числом локальных зон и
+// direct-правил, ключи которых панель пишет в политику (только при известном
+// адресе резолвера прошивки: без него генератор политику не пишет); при
+// enhanced-mode fake-ip — зоны, которые генератор дописывает в fake-ip-filter.
+// Значения считаются из тех же живых данных и параметров, что у генератора.
+func MihomoDNSTakeoverPinned(live configlayer.DNSTakeoverLive, params configlayer.DNSTakeoverParams, enhancedMode string, directSets int) []configlayer.PinnedValue {
+	listen := mihomoDNSListen4
+	if live.IPv6 {
+		listen = mihomoDNSListen6
+	}
+	out := []configlayer.PinnedValue{{Key: "listen", Value: listen}}
+	zones := mihomoDNSZones(live.ServiceDomain, params.Zones)
+	if strings.TrimSpace(live.FirmwareResolver) != "" {
+		policy := mihomoJSON(struct {
+			Zones  int `json:"zones"`
+			Direct int `json:"direct"`
+		}{Zones: len(zones), Direct: max(directSets, 0)})
+		out = append(out, configlayer.PinnedValue{Key: "nameserver-policy", Value: string(policy)})
+	}
+	if strings.TrimSpace(enhancedMode) == mihomoEnhancedFakeIP && len(zones) > 0 {
+		filters := make([]string, 0, len(zones))
+		for _, z := range zones {
+			filters = append(filters, "+."+z)
+		}
+		out = append(out, configlayer.PinnedValue{Key: "fake-ip-filter", Value: strings.Join(filters, ", ")})
+	}
+	return out
 }
