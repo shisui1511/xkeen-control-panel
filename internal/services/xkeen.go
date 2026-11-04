@@ -485,6 +485,18 @@ func probeRouterDNS(ctx context.Context) error {
 	return err
 }
 
+// SetProxyDNSLine меняет только строку proxy_dns init-скрипта XKeen
+// (`xkeen -dns on|off`): ядро не перезапускается, правила перехвата XKeen
+// перестраиваются при следующем старте ядра. Отмена ctx прерывает команду.
+// Истории не пишет: её ведёт вызывающий (транзакция перехвата DNS).
+func (s *XKeenService) SetProxyDNSLine(ctx context.Context, enabled bool) (string, error) {
+	arg := "off"
+	if enabled {
+		arg = "on"
+	}
+	return s.runArgs(ctx, 30*time.Second, "-dns", arg)
+}
+
 // SetDNSProxying switches XKeen's DNS redirection into the proxy core. When
 // switching it on, the router must still resolve names afterwards;
 // otherwise redirection is switched off again and ErrDNSRolledBack returned,
