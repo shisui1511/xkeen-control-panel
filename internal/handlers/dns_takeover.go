@@ -36,8 +36,9 @@ var dnsErrorStatus = map[string]int{
 	"not_enabled":        http.StatusConflict,
 	"port_busy":          http.StatusConflict,
 	"section_foreign":    http.StatusConflict,
-	"unavailable":        http.StatusConflict,
 	"window_active":      http.StatusConflict,
+	// Прошивка недоступна или резолвер прошивки не найден.
+	"unavailable": http.StatusServiceUnavailable,
 	// Транзакция не прошла: конфиг ядра, прошивка, проба.
 	"check_failed":      http.StatusUnprocessableEntity,
 	"probe_external":    http.StatusUnprocessableEntity,
@@ -106,9 +107,31 @@ func (a *API) ConfigDNSAction(w http.ResponseWriter, r *http.Request) {
 	switch action {
 	case "check":
 		a.configDNSCheck(w, r)
+	case "enable":
+		a.configDNSTxn(w, r, a.dns.Enable)
 	default:
 		JSONErrorCode(w, http.StatusNotFound, "not_found", a.t(r, "error.not_found"))
 	}
+}
+
+// configDNSTxn — POST /api/configlayer/dns/<enable|disable> с телом {}:
+// предпроверки службы синхронно (отказ — 409 для блокировок, 503 для
+// unavailable), транзакция — в горутине службы и не обрывается закрытием
+// вкладки; ответ {started: true}, ход и итог — в GET /api/configlayer/dns и
+// событиях dns.
+func (a *API) configDNSTxn(w http.ResponseWriter, r *http.Request, start func(context.Context) error) {
+	if !a.requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var req struct{}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	if err := start(context.WithoutCancel(r.Context())); err != nil {
+		a.writeDNSError(w, r, err)
+		return
+	}
+	JSONSuccess(w, map[string]bool{"started": true})
 }
 
 // configDNSCheck — POST /api/configlayer/dns/check {name?}: проверка резолва

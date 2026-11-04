@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -40,6 +41,29 @@ type persisted struct {
 	SchemaVersion int            `json:"schema_version"`
 	LastCheck     *CheckResult   `json:"last_check,omitempty"`
 	History       []HistoryEntry `json:"history"`
+	// Desired — пользователь хочет перехват (включение прошло, выключения не было);
+	// Kernel — ядро-перехватчик; KernelWasRunning — ядро работало при включении.
+	// Их читает возврат перехвата после перезагрузки и остановки ядра (148-22).
+	Desired          bool   `json:"desired"`
+	Kernel           string `json:"kernel,omitempty"`
+	KernelWasRunning bool   `json:"kernel_was_running,omitempty"`
+	// Snapshot — снимок до включения: пишется до первой команды прошивки, снимается
+	// после успешного отката и выключения.
+	Snapshot *txnSnapshot `json:"snapshot,omitempty"`
+}
+
+// txnSnapshot — состояние до включения перехвата: к нему возвращает откат.
+type txnSnapshot struct {
+	AtMs   int64  `json:"at_ms"`
+	Kernel string `json:"kernel"`
+	// Applied — применённое состояние слоя целиком до включения.
+	Applied configlayer.Sections `json:"applied"`
+	// Live — прежнее значение Live[dns_takeover]; пусто — ключа не было.
+	Live json.RawMessage `json:"live,omitempty"`
+	// OverrideBefore — override прошивки до включения.
+	OverrideBefore bool `json:"override_before"`
+	// ProxyDNSBefore — строка proxy_dns XKeen до включения (D-33).
+	ProxyDNSBefore bool `json:"proxy_dns_before"`
 }
 
 // cleanState — состояние без записей.

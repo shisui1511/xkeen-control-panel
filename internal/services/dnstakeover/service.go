@@ -101,6 +101,13 @@ type Service struct {
 	checking atomic.Bool
 	// domain — служебный домен роутера (string), прогретый в Start.
 	domain atomic.Value
+
+	// opMu защищает op, steps и failure — ход транзакции службы (включение,
+	// выключение) для View. op — идущая операция ("" — нет): она же блокировка busy.
+	opMu    sync.Mutex
+	op      string
+	steps   []Step
+	failure *Failure
 }
 
 // New проверяет обязательные зависимости и создаёт службу. Фоновой работы New
@@ -123,7 +130,7 @@ func New(d Deps) (*Service, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Service{
 		d:      d,
-		fw:     newFirmware(d.Device),
+		fw:     newFirmware(d.Device, d.XKeen),
 		now:    time.Now,
 		ctx:    ctx,
 		cancel: cancel,
@@ -314,8 +321,10 @@ func (s *Service) View() View {
 	active := s.d.Kernel.ActiveState()
 	v.ActiveKernel = active.Label()
 	v.KernelRunning = s.kernelRunning(active)
+	on := false
 	if st, err := s.d.Layer.ReadState(); err == nil {
-		live, on := configlayer.ParseDNSTakeoverLive(st.Live)
+		var live configlayer.DNSTakeoverLive
+		live, on = configlayer.ParseDNSTakeoverLive(st.Live)
 		if on {
 			v.Desired = true
 			v.Kernel = live.Kernel
@@ -340,7 +349,12 @@ func (s *Service) View() View {
 		lc := cloneCheck(*s.st.LastCheck)
 		v.LastCheck = &lc
 	}
+	if !on && s.st.Desired {
+		v.Desired = true
+		v.Kernel = s.st.Kernel
+	}
 	s.mu.Unlock()
+	s.fillOp(&v, on)
 	v.Blocks = s.blocks(v, active)
 	v.ServerNowMs = s.now().UnixMilli()
 	return v
@@ -368,7 +382,7 @@ func (s *Service) blocks(v View, active services.ActiveKernelState) []string {
 		on   bool
 	}{
 		{BlockConflict, active.Conflict},
-		{BlockBusy, snap.Apply.Running || snap.BusyHolder != "" || s.checking.Load()},
+		{BlockBusy, snap.Apply.Running || snap.BusyHolder != "" || s.checking.Load() || s.opActive()},
 		{BlockWindow, v.Window != nil},
 		{BlockDraft, snap.DraftChanges > 0},
 		{BlockStopped, !v.KernelRunning},
@@ -544,10 +558,10 @@ const (
 	PathGroup    = "group"
 )
 
-// Источники проверки.
+// Источники проверки: ручная проверка и проба транзакции включения (D-29).
 const (
 	SourceManual = "manual"
-	SourceProbe  = "probe"
+	SourceAuto   = "auto"
 )
 
 // checkLabelManual — подпись единственной группы строк ручной проверки.
