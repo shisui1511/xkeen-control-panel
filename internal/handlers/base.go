@@ -16,6 +16,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services/assets"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/cores"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/dnstakeover"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/geodata"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
@@ -91,6 +92,9 @@ type API struct {
 	// cores — сервис секций ядер (владение, форма и «Дополнительно», пресеты); nil,
 	// пока main.go его не подключил: маршруты /api/configlayer/cores* отвечают 404.
 	cores *cores.Service
+	// dns — служба перехвата DNS роутера; nil, пока main.go её не подключил:
+	// маршруты /api/configlayer/dns* отвечают 404.
+	dns *dnstakeover.Service
 	// geodata — менеджер geodata XKeen (источники, обновление баз, расписание); nil,
 	// пока main.go его не подключил: маршруты /api/configlayer/geodata* отвечают 404.
 	geodata *geodata.Service
@@ -318,6 +322,17 @@ func (a *API) SetRoutingService(s *routing.Service) {
 // останавливается в main.go.
 func (a *API) SetCoresService(s *cores.Service) {
 	a.cores = s
+}
+
+// SetDNSTakeoverService подключает службу перехвата DNS; создаётся, запускается
+// и останавливается в main.go.
+func (a *API) SetDNSTakeoverService(s *dnstakeover.Service) {
+	a.dns = s
+}
+
+// DNSTakeoverService возвращает службу перехвата DNS (nil, пока не подключена).
+func (a *API) DNSTakeoverService() *dnstakeover.Service {
+	return a.dns
 }
 
 // SetGeodataService подключает менеджер geodata и индекс dat-файлов; создаются,

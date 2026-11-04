@@ -1,0 +1,134 @@
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strings"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services/dnstakeover"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
+)
+
+// Перехват DNS роутера (фаза 148): GET /api/configlayer/dns — состояние для
+// карточки, POST /api/configlayer/dns/<действие> — действия службы. Маршруты
+// под сессией (HandleProtected), изменяющие — с X-CSRF-Token; выключенный слой и
+// неподключённая служба отвечают 404, как остальные /api/configlayer/*.
+
+// dnsActionPrefix — префикс маршрута действий службы перехвата.
+const dnsActionPrefix = "/api/configlayer/dns/"
+
+// dnsErrorStatus — код ответа по коду ошибки службы (коды совпадают с разделом
+// codes в frontend/src/lib/dnsErrorCodes.json). Код вне таблицы — 500.
+var dnsErrorStatus = map[string]int{
+	// Неверный ввод.
+	"name_invalid": http.StatusBadRequest,
+	// Состояние не позволяет действие.
+	"busy":               http.StatusConflict,
+	"draft_open":         http.StatusConflict,
+	"group_missing":      http.StatusConflict,
+	"group_name_invalid": http.StatusConflict,
+	"kernel_conflict":    http.StatusConflict,
+	"kernel_stopped":     http.StatusConflict,
+	"legacy_blocked":     http.StatusConflict,
+	"no_window":          http.StatusConflict,
+	"not_enabled":        http.StatusConflict,
+	"port_busy":          http.StatusConflict,
+	"section_foreign":    http.StatusConflict,
+	"unavailable":        http.StatusConflict,
+	"window_active":      http.StatusConflict,
+	// Транзакция не прошла: конфиг ядра, прошивка, проба.
+	"check_failed":      http.StatusUnprocessableEntity,
+	"probe_external":    http.StatusUnprocessableEntity,
+	"probe_local":       http.StatusUnprocessableEntity,
+	"restart_failed":    http.StatusUnprocessableEntity,
+	"override_failed":   http.StatusBadGateway,
+	"legacy_off_failed": http.StatusBadGateway,
+	"rollback_failed":   http.StatusInternalServerError,
+	"generic":           http.StatusInternalServerError,
+}
+
+// requireDNS — requireLayer плюс подключённая служба перехвата: без службы
+// маршруты отвечают 404 not_found.
+func (a *API) requireDNS(w http.ResponseWriter, r *http.Request) bool {
+	if !a.requireLayer(w, r) {
+		return false
+	}
+	if a.dns == nil {
+		JSONErrorCode(w, http.StatusNotFound, "not_found", a.t(r, "error.not_found"))
+		return false
+	}
+	return true
+}
+
+// writeDNSError переводит ошибку службы перехвата в HTTP-ответ со стабильным
+// кодом и текстом configlayer.dns.<код>. Параметры — имена зон и групп, без
+// адресов и значений секций. Ошибки слоя идут по его таблице.
+func (a *API) writeDNSError(w http.ResponseWriter, r *http.Request, err error) {
+	var de *dnstakeover.Error
+	if !errors.As(err, &de) {
+		a.writeLayerError(w, r, err)
+		return
+	}
+	status, ok := dnsErrorStatus[de.Code]
+	if !ok {
+		status = http.StatusInternalServerError
+	}
+	// Деталь — технический текст (вывод команды прошивки или ядра) без
+	// ANSI-последовательностей и адресов со схемой.
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(APIResponse{
+		Success: false,
+		Error:   a.t(r, "configlayer.dns."+de.Code),
+		Code:    de.Code,
+		Detail:  maskURLsInText(utils.StripANSI(de.Detail)),
+		Params:  de.Params,
+	})
+}
+
+// ConfigDNS — GET /api/configlayer/dns: состояние перехвата (DNSView).
+func (a *API) ConfigDNS(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireDNS(w, r) {
+		return
+	}
+	JSONSuccess(w, a.dns.View())
+}
+
+// ConfigDNSAction — POST /api/configlayer/dns/<действие>. Неизвестное действие —
+// 404 not_found.
+func (a *API) ConfigDNSAction(w http.ResponseWriter, r *http.Request) {
+	if !a.requireDNS(w, r) {
+		return
+	}
+	action := strings.TrimPrefix(r.URL.Path, dnsActionPrefix)
+	switch action {
+	case "check":
+		a.configDNSCheck(w, r)
+	default:
+		JSONErrorCode(w, http.StatusNotFound, "not_found", a.t(r, "error.not_found"))
+	}
+}
+
+// configDNSCheck — POST /api/configlayer/dns/check {name?}: проверка резолва
+// через 127.0.0.1:53 (DNSCheckResult). Пустое имя — имя по умолчанию; не
+// доменное имя — 400 name_invalid; идёт другая проверка — 409 busy. Проверка
+// доводится до конца и при закрытой вкладке: итог станет последней проверкой.
+func (a *API) configDNSCheck(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	res, err := a.dns.Check(context.WithoutCancel(r.Context()), req.Name)
+	if err != nil {
+		a.writeDNSError(w, r, err)
+		return
+	}
+	JSONSuccess(w, res)
+}
