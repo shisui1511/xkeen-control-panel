@@ -54,6 +54,10 @@ type persisted struct {
 	// закрыты, а выключение, откат по виду kernel_switch и возврат DNS прошивке
 	// возвращают его к этому значению.
 	OverrideBefore bool `json:"override_before,omitempty"`
+	// ProxyDNSBefore — строка proxy_dns XKeen до включения перехвата: окно и
+	// снимок закрыты, а выключение флага слоя возвращает строку к этому значению
+	// (D-36).
+	ProxyDNSBefore bool `json:"proxy_dns_before,omitempty"`
 	// WaitingReason — перехват желаем, но DNS у прошивки (probe, kernel_stopped,
 	// watchdog): состояние waiting; пусто — не ждёт.
 	WaitingReason string `json:"waiting_reason,omitempty"`

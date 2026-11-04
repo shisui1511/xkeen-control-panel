@@ -3,9 +3,13 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/dnstakeover"
 )
@@ -171,4 +175,108 @@ func TestRouterDNSLegacyProxyDNS(t *testing.T) {
 			t.Errorf("повторный legacy-off при строке off перезапустил %s: PID %d -> %d", kernel, pid, got)
 		}
 	})
+}
+
+// rtDNSPanelFiles — пути файлов панели из снимка слоя (owner panel).
+func (e *rtSrc) rtDNSPanelFiles() []string {
+	e.t.Helper()
+	r := e.call(http.MethodGet, "/api/configlayer/state", nil)
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("GET /api/configlayer/state: %d %s", r.Status, r.Code)
+	}
+	files, _ := r.object(e.t)["files"].([]any)
+	var out []string
+	for _, it := range files {
+		f, _ := it.(map[string]any)
+		if p, _ := f["path"].(string); p != "" && f["owner"] == "panel" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// rtDNSStateFile — файл состояния службы перехвата в каталоге данных панели:
+// читается и при выключенном слое, когда GET /api/configlayer/dns отвечает 404.
+func rtDNSStateFile(t *testing.T) (desired bool, window bool) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(config.Default().DataDir, "dns_takeover.json"))
+	if err != nil {
+		t.Fatalf("файл состояния перехвата не читается: %v", err)
+	}
+	var st struct {
+		Desired bool            `json:"desired"`
+		Window  json.RawMessage `json:"window"`
+	}
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatalf("файл состояния перехвата не разбирается: %v", err)
+	}
+	return st.Desired, len(st.Window) > 0 && string(st.Window) != "null"
+}
+
+// Трасса: подготовка → proxy_dns=on и действующий перехват XKeen с :53 (набор до
+// включения) → включение и «Оставить» → строка off, правил XKeen с :53 нет →
+// POST /api/settings/config-layer {enabled:false} → 200, флаг снят; порт 53 у
+// прошивки и она отвечает через 127.0.0.1:53, override как до включения, строка
+// proxy_dns on (из снимка до включения), набор правил XKeen с :53 равен набору до
+// включения (старое перенаправление действует), слушателя панели в файлах ядра
+// нет, файлы панели перенесены, в файле состояния перехвата desired=false. Слой
+// включается обратно до возврата стенда; флаг и строка — прежние. Метка ядра:
+// возврат перезапускает активное ядро, правила XKeen строятся при его старте.
+func TestRouterDNSFlagOff(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	kernel := tg.Core
+	e := rtNewSrc(t)
+	rtDNSPrepare(t, e, kernel)
+	rtDNSRestoreProxyLine(t, e, rtDNSProxyOn(t))
+	// Возврат стенда rtDNSPrepare идёт через API слоя: слой включается раньше него.
+	t.Cleanup(func() {
+		c := e.with(t)
+		c.setLayer(true)
+		c.rtRstIdle()
+	})
+	baseline := rtDNSLegacyOn(t, e)
+	overrideBefore := rtDNSOverrideOn(t)
+	e.rtDNSRequireClosedDraft()
+	e.rtDNSEnableOK()
+	if rtDNSProxyOn(t) {
+		t.Error("после включения перехвата строка proxy_dns осталась on")
+	}
+	rtDNSWaitXKeenRules53(t, nil)
+	panelFiles := e.rtDNSPanelFiles()
+	if len(panelFiles) == 0 {
+		t.Fatal("в снимке слоя нет файлов панели: переносить при выключении нечего")
+	}
+
+	r := e.callSlow(http.MethodPost, "/api/settings/config-layer", map[string]bool{"enabled": false})
+	if r.Status != http.StatusOK {
+		t.Fatalf("выключение флага слоя при включённом перехвате: %d %s %.300s", r.Status, r.Code, r.Detail)
+	}
+	if e.layerFlag() {
+		t.Fatal("после выключения флаг слоя остался включён")
+	}
+	if got := dnstakeover.PortOwner(); got.Kind != dnstakeover.OwnerFirmware {
+		t.Errorf("после выключения флага порт 53 держит %q/%q, ожидалась прошивка", got.Kind, got.Kernel)
+	}
+	if !rtDNSResolves(dnstakeover.DefaultCheckName) {
+		t.Error("после выключения флага прошивка не отвечает через 127.0.0.1:53")
+	}
+	if got := rtDNSOverrideOn(t); got != overrideBefore {
+		t.Errorf("после выключения флага override=%v, до включения был %v", got, overrideBefore)
+	}
+	if !rtDNSProxyOn(t) {
+		t.Error("после выключения флага строка proxy_dns не вернулась в on")
+	}
+	// Старое перенаправление действует, а не только строка.
+	rtDNSWaitXKeenRules53(t, baseline)
+	if rtDNSKernelHasListener(kernel) {
+		t.Errorf("после выключения флага в файлах %s остался слушатель :53", kernel)
+	}
+	for _, p := range panelFiles {
+		if rtRstExists(p) {
+			t.Errorf("после выключения флага файл панели %s остался на месте", filepath.Base(p))
+		}
+	}
+	if desired, window := rtDNSStateFile(t); desired || window {
+		t.Errorf("после выключения флага в состоянии перехвата desired=%v, окно=%v", desired, window)
+	}
 }

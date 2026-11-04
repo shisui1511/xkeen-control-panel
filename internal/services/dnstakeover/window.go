@@ -71,9 +71,11 @@ func (s *Service) openWindow(kind string, snap txnSnapshot) error {
 	}
 	if kind == kindEnable {
 		// Снимок включения переходит в окно целиком; override до включения
-		// остаётся для выключения после «Оставить».
+		// остаётся для выключения после «Оставить», proxy_dns до включения — для
+		// выключения флага слоя (D-36).
 		s.st.Snapshot = nil
 		s.st.OverrideBefore = snap.OverrideBefore
+		s.st.ProxyDNSBefore = snap.ProxyDNSBefore
 	}
 	s.st.WaitingReason = ""
 	saved := s.st
