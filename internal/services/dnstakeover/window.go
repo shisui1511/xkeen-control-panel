@@ -241,7 +241,8 @@ func (s *Service) releaseClaim() {
 //     KernelApplier.ApplyLocked; desired=false;
 //   - apply — откат к прежнему Applied без сброса черновика (D-27: правки
 //     остаются в нём), перехват остаётся; затем проба D-29, её провал — DNS
-//     прошивке, состояние waiting с причиной probe (D-26);
+//     прошивке, состояние waiting с причиной probe (D-26). DNS уже у прошивки
+//     (причина ожидания задана) — откат к снимку без слушателя и без пробы;
 //   - kernel_switch — DNS прошивке, файлы нового ядра без слушателя, ядро
 //     остаётся новым (D-15); desired=false.
 //
@@ -291,6 +292,25 @@ func (s *Service) rollbackWindow(ctx context.Context, w windowState, reason stri
 		}
 		s.stepResult(stepApply, len(errs) == 0)
 	case kindApply:
+		s.mu.Lock()
+		released := s.st.WaitingReason != ""
+		s.mu.Unlock()
+		if released {
+			// DNS роутера уже у прошивки: повторная проба после «Применить» в окне
+			// не прошла, и rollbackApply снял override, пока таймер окна ждал конца
+			// его операции. Live снимка — перехват со слушателем :53, поэтому снимок
+			// возвращается без слушателя и без пробы, перехват ждёт возврата.
+			s.setStep(stepApply, statusRunning)
+			var err error
+			if snap.Live, err = disabledLive(kernel); err == nil {
+				_, err = s.restoreWindowSnapshot(hctx, kernel, snap, false)
+			}
+			note(err)
+			s.stepResult(stepApply, err == nil)
+			s.setStep(stepProbe, statusSkipped)
+			s.setStep(stepRelease, statusSkipped)
+			break
+		}
 		var applyErrs []string
 		probeFail, applyErrs = s.revertApply(hctx, kernel, snap, overrideBefore)
 		errs = append(errs, applyErrs...)
