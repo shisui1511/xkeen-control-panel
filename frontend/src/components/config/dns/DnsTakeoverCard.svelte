@@ -13,6 +13,7 @@
     loadDns,
     enableDns,
     disableDns,
+    dnsActiveKernel,
     dnsErrorText,
     dnsRequestErrorText,
     type DnsBlock,
@@ -218,7 +219,7 @@
 
   const kernelText = $derived.by(() => {
     if (!view) return '';
-    const k = view.active_kernel;
+    const k = dnsActiveKernel(view);
     if (k === 'none' || k === '') return $t('cfg.dns.kernel_none');
     const name = k === 'both' ? 'Xray, Mihomo' : kernelTitle(k);
     return $t(view.kernel_running ? 'cfg.dns.kernel_running' : 'cfg.dns.kernel_stopped', {

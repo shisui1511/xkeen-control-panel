@@ -381,6 +381,11 @@ const KNOWN_CODES = new Set(DNS_ERROR_CODES);
 // «{detail}» в интерфейсе.
 const ERROR_PARAMS = ['detail', 'reason', 'name', 'group', 'owner', 'zone', 'kernel'];
 
+/** Активное ядро из ответа перехвата DNS (поле сервера dns, а не capabilities): xray, mihomo, both или none. */
+export function dnsActiveKernel(view: DnsView): string {
+  return view.active_kernel;
+}
+
 /**
  * Текст ошибки по коду: cfg.dns.err.<код> для кодов из dnsErrorCodes.json, иначе
  * cfg.dns.err.generic с причиной (reason) из ответа.
