@@ -1,7 +1,12 @@
 <script lang="ts">
   import { t } from '../../../i18n';
   import Icon from '../../../lib/components/Icon.svelte';
-  import { dnsClockOffset, type DnsOutcome, type DnsState } from '../../../lib/configDns';
+  import {
+    dnsClockOffset,
+    dnsKernelTitle,
+    type DnsOutcome,
+    type DnsState
+  } from '../../../lib/configDns';
 
   // Строки исхода без пользователя в карточке перехвата (D-28): откат по таймеру, возврат
   // сторожем, смена ядра вне панели, непрошедшая проба после отката. Строка висит до
@@ -19,12 +24,6 @@
     /** Ядро-перехватчик из вида: подставляется, если в исходе ядро не пришло. */
     kernel?: string;
   } = $props();
-
-  function kernelTitle(k: string | undefined): string {
-    if (k === 'xray') return 'Xray';
-    if (k === 'mihomo') return 'Mihomo';
-    return k || '?';
-  }
 
   /** Время сервера в локальных часах: «ЧЧ:ММ:СС». */
   function clock(serverMs: number): string {
@@ -46,11 +45,11 @@
       case 'probe_failed':
         return $t('cfg.dns.outcome_probe_failed', { reason: $t('cfg.dns.reason_probe'), time });
       case 'watchdog':
-        return $t('cfg.dns.outcome_watchdog', { kernel: kernelTitle(o.kernel || kernel), time });
+        return $t('cfg.dns.outcome_watchdog', { kernel: dnsKernelTitle(o.kernel || kernel), time });
       case 'kernel_changed':
         return $t('cfg.dns.outcome_kernel_changed', {
-          from: kernelTitle(o.from),
-          to: kernelTitle(o.to),
+          from: dnsKernelTitle(o.from),
+          to: dnsKernelTitle(o.to),
           time
         });
       default:

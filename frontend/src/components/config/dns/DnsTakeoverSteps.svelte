@@ -2,7 +2,12 @@
   import { t } from '../../../i18n';
   import Button from '../../Button.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
-  import { dnsErrorText, type DnsFailure, type DnsStep } from '../../../lib/configDns';
+  import {
+    dnsFailureReason,
+    dnsFailureText,
+    type DnsFailure,
+    type DnsStep
+  } from '../../../lib/configDns';
 
   // Ход транзакции перехвата DNS (DNSF-03): шаги приходят с сервера (id, status), подписи —
   // cfg.dns.step.<id>; интерфейс шаги не придумывает. Сбой — блок над списком: причина по
@@ -41,10 +46,9 @@
     }
   }
 
-  const reason = $derived(failure ? dnsErrorText(failure.code, failure.params) : '');
-  const rollbackReason = $derived(
-    failure ? failure.params?.reason || failure.detail || failure.code || '?' : '?'
-  );
+  // Причина — по коду с деталью сервера в параметрах; полный вывод ядра — в раскрытии
+  const reason = $derived(failure ? dnsFailureText(failure) : '');
+  const rollbackReason = $derived(failure ? dnsFailureReason(failure) : '');
 </script>
 
 <div class="dns-steps-wrap">
@@ -52,9 +56,9 @@
     <div class="alert alert-error dns-fail" role="alert" data-testid="dns-fail">
       <Icon name="warning" size={16} class="dns-fail-icon" />
       <div class="dns-fail-body">
-        {#if kind === 'enable'}
-          <p class="dns-fail-title">{$t('cfg.dns.fail_title')}</p>
-        {/if}
+        <p class="dns-fail-title" data-testid="dns-fail-title">
+          {$t(kind === 'enable' ? 'cfg.dns.fail_title' : 'cfg.dns.fail_title_disable')}
+        </p>
         <p class="dns-fail-text" data-testid="dns-fail-reason">{reason}</p>
         {#if failure.rolled_back}
           {#if kind === 'enable'}

@@ -41,8 +41,10 @@
     saveDnsParams,
     DEFAULT_DNS_GROUP_NAME,
     dnsActiveKernel,
-    dnsErrorText,
+    dnsFailureText,
+    dnsKernelTitle,
     dnsRequestErrorText,
+    dnsWindowSeconds,
     type DnsBlock,
     type DnsParams,
     type DnsState,
@@ -102,12 +104,6 @@
   // придёт сбой
   let awaitingDisable = $state(false);
 
-  function kernelTitle(k: string | undefined): string {
-    if (k === 'xray') return 'Xray';
-    if (k === 'mihomo') return 'Mihomo';
-    return k ?? '';
-  }
-
   /** Время сервера в локальных часах: «ЧЧ:ММ:СС». */
   function clock(serverMs: number): string {
     const d = new Date(serverMs - $dnsClockOffset);
@@ -153,7 +149,8 @@
       case 'probe':
         return $t(`cfg.dns.reason_${code}`);
       default:
-        return code ?? '?';
+        // Причина, которой нет в словаре, сырым кодом не показывается
+        return $t('cfg.dns.no_reason');
     }
   }
 
@@ -170,7 +167,7 @@
       case 'window':
         return $t('cfg.dns.status_window', { n: windowLeft });
       case 'on':
-        return $t('cfg.dns.status_kernel', { kernel: kernelTitle(view.kernel) });
+        return $t('cfg.dns.status_kernel', { kernel: dnsKernelTitle(view.kernel) });
       case 'waiting':
         return $t('cfg.dns.status_waiting', { reason: waitingReason(view.waiting_reason) });
       default:
@@ -198,7 +195,7 @@
       case 'none':
         return $t('cfg.sec.owner_none');
       default:
-        return owner ?? '?';
+        return $t('cfg.dns.owner_unknown');
     }
   }
 
@@ -238,14 +235,25 @@
     const o = view.owner;
     switch (o.kind) {
       case 'kernel':
+        if (!o.addr) {
+          return {
+            text: $t('cfg.dns.owner_kernel_noaddr', { kernel: dnsKernelTitle(o.kernel) }),
+            addr: ''
+          };
+        }
         return {
-          text: $t('cfg.dns.owner_kernel', { kernel: kernelTitle(o.kernel), addr: ADDR_TOKEN }),
-          addr: o.addr ?? '?'
+          text: $t('cfg.dns.owner_kernel', { kernel: dnsKernelTitle(o.kernel), addr: ADDR_TOKEN }),
+          addr: o.addr
         };
       case 'firmware':
         return { text: $t('cfg.dns.owner_firmware'), addr: '' };
       case 'other':
-        return { text: $t('cfg.dns.owner_other', { process: o.process ?? '?' }), addr: '' };
+        return {
+          text: o.process
+            ? $t('cfg.dns.owner_other', { process: o.process })
+            : $t('cfg.dns.owner_other_noname'),
+          addr: ''
+        };
       default:
         return { text: $t('cfg.dns.owner_none'), addr: '' };
     }
@@ -256,9 +264,10 @@
     if (!view) return '';
     const k = dnsActiveKernel(view);
     if (k === 'none' || k === '') return $t('cfg.dns.kernel_none');
-    const name = k === 'both' ? 'Xray, Mihomo' : kernelTitle(k);
+    // Оба ядра запущены (конфликт ядер)
+    if (k === 'both') return $t('cfg.dns.kernel_both_running');
     return $t(view.kernel_running ? 'cfg.dns.kernel_running' : 'cfg.dns.kernel_stopped', {
-      kernel: name
+      kernel: dnsKernelTitle(k)
     });
   });
 
@@ -280,7 +289,7 @@
     const failed = lc.groups.find((g) => !g.ok);
     const text = lc.ok
       ? $t('cfg.dns.check_ok')
-      : $t('cfg.dns.check_fail', { reason: failed?.reason || failed?.name || '?' });
+      : $t('cfg.dns.check_fail', { reason: failed?.reason || $t('cfg.dns.no_reason') });
     const when = $t(lc.source === 'auto' ? 'cfg.dns.checked_auto' : 'cfg.dns.checked_manual', {
       time: clock(lc.at_ms)
     });
@@ -480,7 +489,7 @@
       if (!awaitingDisable || !v) return;
       if (v.failure) {
         finish();
-        showToast('error', dnsErrorText(v.failure.code, v.failure.params), 8000);
+        showToast('error', dnsFailureText(v.failure), 8000);
       } else if (v.state === 'off') {
         finish();
         showToast('success', $t('cfg.dns.toast_disabled'));
@@ -504,7 +513,7 @@
         </span>
         {#if showKernelBadge}
           <span class="badge badge-type" data-testid="dns-kernel-badge">
-            {kernelTitle(view.kernel)}
+            {dnsKernelTitle(view.kernel)}
           </span>
         {/if}
       </div>
@@ -530,8 +539,8 @@
     {#if otherKernel}
       <p class="dns-caption" role="status" data-testid="dns-other-kernel">
         {$t('cfg.dns.other_kernel', {
-          kernel: kernelTitle(view.kernel),
-          current: kernelTitle(currentKernel)
+          kernel: dnsKernelTitle(view.kernel),
+          current: dnsKernelTitle(currentKernel)
         })}
       </p>
     {/if}
@@ -642,11 +651,11 @@
               {#if upstreamsMore > 0}
                 <p class="dns-caption">{$t('cfg.dns.and_more', { n: upstreamsMore })}</p>
               {/if}
-              <p class="dns-caption">
-                {$t('cfg.dns.upstreams_via', {
-                  group: view.group?.name || view.group?.id || '?'
-                })}
-              </p>
+              {#if view.group && !view.group.missing && (view.group.name || view.group.id)}
+                <p class="dns-caption">
+                  {$t('cfg.dns.upstreams_via', { group: view.group.name || view.group.id })}
+                </p>
+              {/if}
             </dd>
           </div>
         {/if}
@@ -657,7 +666,7 @@
           </div>
         {/if}
         <div class="dns-row" data-testid="dns-row-ipv6">
-          <dt class="form-label">IPv6</dt>
+          <dt class="form-label">{$t('cfg.sec.f.ipv6')}</dt>
           <dd>{$t(view.ipv6 ? 'cfg.dns.ipv6_on' : 'cfg.dns.ipv6_off')}</dd>
         </div>
         <div class="dns-row" data-testid="dns-row-last-check">
@@ -699,7 +708,7 @@
           {#if showEditWindowHint}
             <p class="warning-text dns-params-warn" data-testid="dns-params-window-hint">
               <Icon name="warning" size={14} class="dns-block-icon" />
-              <span>{$t('cfg.dns.edit_window_hint')}</span>
+              <span>{$t('cfg.dns.edit_window_hint', { seconds: String($dnsWindowSeconds) })}</span>
             </p>
           {/if}
 

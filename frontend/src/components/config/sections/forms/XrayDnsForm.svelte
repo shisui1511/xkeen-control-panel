@@ -9,7 +9,7 @@
     type PinnedValue,
     type SectionView
   } from '../../../../lib/configCores';
-  import { dnsTakeover } from '../../../../lib/configDns';
+  import { dnsTakeover, DEFAULT_DNS_GROUP_NAME } from '../../../../lib/configDns';
   import Select from '../../../Select.svelte';
   import AdvancedBlock from '../AdvancedBlock.svelte';
   import PinnedValues from '../PinnedValues.svelte';
@@ -92,7 +92,8 @@
       $dnsTakeover.kernel === 'xray' &&
       TAKEOVER_STATES.includes($dnsTakeover.state)
   );
-  const takeoverGroup = $derived($dnsTakeover?.group?.name || $dnsTakeover?.default_name || '');
+  // Группа не пришла — группа-цель по умолчанию (D-09); default_name — имя пробы резолва, не группа
+  const takeoverGroup = $derived($dnsTakeover?.group?.name || DEFAULT_DNS_GROUP_NAME);
 
   // Ключи-коды закреплённых строк показываются подписями; прочие — как пришли
   const PINNED_LABELS: Record<string, string> = {
@@ -176,8 +177,7 @@
             <li class="xf-item">
               <input
                 id="{uid}-server-{row.key}"
-                class="input xf-mono"
-                class:input-error={byField.has('servers')}
+                class={['input xf-mono', { 'input-error': byField.has('servers') }]}
                 type="text"
                 spellcheck="false"
                 autocomplete="off"

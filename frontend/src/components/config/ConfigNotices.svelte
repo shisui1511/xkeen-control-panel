@@ -207,12 +207,13 @@
 
   // Перехват DNS (фаза 148, D-28): исход без пользователя dns_outcome:<вид> — те же тексты,
   // что строка в карточке; время — локальное время роутера из params.time. Прочие dns_ —
-  // общий текст с идентификатором вместо причины
+  // событие уже случилось: общая строка со ссылкой на карточку, без сырого идентификатора
   function describeDns(n: LayerNotice): Described | null {
     if (!n.id.startsWith('dns_')) return null;
     const p = n.params ?? {};
-    const time = p.time ?? '?';
-    const kernelName = (k: string | undefined): string => (k ? (KERNEL_LABELS[k] ?? k) : '?');
+    const time = p.time || $t('cfg.dns.value_unknown');
+    const kernelName = (k: string | undefined): string =>
+      k ? (KERNEL_LABELS[k] ?? k) : $t('cfg.dns.kernel_unknown');
     switch (n.id) {
       case 'dns_outcome:timeout':
         return { notice: n, tone: 'warning', text: $t('cfg.dns.outcome_timeout', { time }) };
@@ -242,11 +243,7 @@
           })
         };
       default:
-        return {
-          notice: n,
-          tone: 'warning',
-          text: $t('cfg.dns.err.generic', { reason: n.reason || n.id })
-        };
+        return { notice: n, tone: 'warning', text: $t('cfg.dns.notice_event') };
     }
   }
 

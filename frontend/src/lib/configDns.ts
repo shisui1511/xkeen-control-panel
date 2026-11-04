@@ -150,6 +150,14 @@ export interface DnsStarted {
 export const dnsTakeover = writable<DnsView | null>(null);
 /** Первая загрузка состояния не удалась (прежний вид при сбое перечитывания остаётся). */
 export const dnsLoadError = writable(false);
+
+/**
+ * Длина окна подтверждения по умолчанию, секунды: совпадает с windowDuration на сервере
+ * и подставляется, пока окна в этой вкладке ещё не было.
+ */
+export const DEFAULT_DNS_WINDOW_S = 60;
+/** Длина окна подтверждения из последнего пришедшего окна (total_s), секунды. */
+export const dnsWindowSeconds = writable(DEFAULT_DNS_WINDOW_S);
 /**
  * Смещение часов: время сервера минус локальное время при получении ответа. Отсчёт окна
  * подтверждения считается от него, а не от локальных часов ПК (148-14).
@@ -199,6 +207,7 @@ function setView(raw: DnsView): DnsView {
   if (typeof view.server_now_ms === 'number' && view.server_now_ms > 0) {
     dnsClockOffset.set(view.server_now_ms - Date.now());
   }
+  if (view.window && view.window.total_s > 0) dnsWindowSeconds.set(view.window.total_s);
   loadSeq++;
   dnsTakeover.set(view);
   dnsLoadError.set(false);
@@ -384,13 +393,58 @@ export const DNS_ISSUE_CODES: string[] = dnsErrorCodes.issues;
 
 const KNOWN_CODES = new Set(DNS_ERROR_CODES);
 
-// Параметры текстов ошибок: не пришедший параметр заменяется на «?», а не остаётся голым
-// «{detail}» в интерфейсе.
-const ERROR_PARAMS = ['detail', 'reason', 'name', 'group', 'owner', 'zone', 'kernel'];
+// Параметры текстов ошибок и их замена, если параметр не пришёл: вместо голого «{detail}»
+// или «?» в интерфейсе — фраза словаря
+const ERROR_PARAM_FALLBACK: Record<string, string> = {
+  detail: 'cfg.dns.no_reason',
+  reason: 'cfg.dns.no_reason',
+  kernel: 'cfg.dns.kernel_unknown',
+  owner: 'cfg.dns.owner_unknown',
+  name: 'cfg.dns.value_unknown',
+  group: 'cfg.dns.value_unknown',
+  zone: 'cfg.dns.value_unknown'
+};
+// Однострочная причина из вывода ядра или прошивки: полный вывод — в раскрытии «Вывод ядра»
+const REASON_MAX = 200;
+// Коды владельца секции → подписи (как в строке блокировки)
+const OWNER_LABELS: Record<string, string> = {
+  xkeen: 'cfg.sec.owner_xkeen',
+  user: 'cfg.sec.owner_user',
+  none: 'cfg.sec.owner_none'
+};
 
 /** Активное ядро из ответа перехвата DNS (поле сервера dns, а не capabilities): xray, mihomo, both или none. */
 export function dnsActiveKernel(view: DnsView): string {
   return view.active_kernel;
+}
+
+/** Подпись ядра: xray → Xray, mihomo → Mihomo; пусто — «(не определено)». */
+export function dnsKernelTitle(k: string | undefined): string {
+  if (k === 'xray') return 'Xray';
+  if (k === 'mihomo') return 'Mihomo';
+  return k ? k : get(t)('cfg.dns.kernel_unknown');
+}
+
+/** Первая непустая строка текста, не длиннее REASON_MAX. */
+function firstLine(s: string | undefined): string {
+  const line = (s ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l !== '');
+  if (!line) return '';
+  return line.length > REASON_MAX ? `${line.slice(0, REASON_MAX - 1)}…` : line;
+}
+
+function errorText(key: string, params?: Record<string, string>): string {
+  const tr = get(t);
+  const p: Record<string, string> = {};
+  for (const [name, fallback] of Object.entries(ERROR_PARAM_FALLBACK)) p[name] = tr(fallback);
+  for (const [k, v] of Object.entries(params ?? {})) {
+    if (typeof v === 'string' && v !== '') p[k] = v;
+  }
+  if (params?.kernel) p.kernel = dnsKernelTitle(params.kernel);
+  if (params?.owner && OWNER_LABELS[params.owner]) p.owner = tr(OWNER_LABELS[params.owner]);
+  return tr(key, p);
 }
 
 /**
@@ -400,30 +454,67 @@ export function dnsActiveKernel(view: DnsView): string {
 export function dnsErrorText(code: string | undefined, params?: Record<string, string>): string {
   const key =
     code !== undefined && KNOWN_CODES.has(code) ? `cfg.dns.err.${code}` : 'cfg.dns.err.generic';
-  const p: Record<string, string> = {};
-  for (const name of ERROR_PARAMS) p[name] = '?';
-  for (const [k, v] of Object.entries(params ?? {})) {
-    if (typeof v === 'string' && v !== '') p[k] = v;
-  }
-  return get(t)(key, p);
+  return errorText(key, params);
+}
+
+/**
+ * Причина сбоя транзакции из вида: reason или cause из параметров, иначе первая строка
+ * вывода ядра (detail); ничего нет — «причина не сообщена».
+ */
+export function dnsFailureReason(f: DnsFailure): string {
+  return f.params?.reason || f.params?.cause || firstLine(f.detail) || get(t)('cfg.dns.no_reason');
+}
+
+/**
+ * Текст сбоя транзакции из вида (view.failure): деталь сервера попадает в {detail} и
+ * {reason} шаблона. Общий сбой — без «Ничего не изменилось»: транзакция могла успеть
+ * что-то поменять, итог отката показывается отдельной строкой.
+ */
+export function dnsFailureText(f: DnsFailure): string {
+  const p: Record<string, string> = { ...(f.params ?? {}) };
+  const detail = firstLine(f.detail);
+  if (detail && !p.detail) p.detail = detail;
+  if (!p.reason) p.reason = dnsFailureReason(f);
+  if (!KNOWN_CODES.has(f.code) || f.code === 'generic') return errorText('cfg.dns.fail_generic', p);
+  return errorText(`cfg.dns.err.${f.code}`, p);
+}
+
+type RequestError = { code?: unknown; params?: unknown; detail?: unknown; message?: unknown };
+
+function asRequestError(err: unknown): RequestError {
+  return (typeof err === 'object' && err !== null ? err : {}) as RequestError;
+}
+
+/** Ошибка запроса несёт известный код ответа (не generic): у неё свой текст. */
+export function dnsRequestHasCode(err: unknown): boolean {
+  const code = asRequestError(err).code;
+  return typeof code === 'string' && code !== 'generic' && KNOWN_CODES.has(code);
+}
+
+/**
+ * Короткая причина ошибки запроса для подстановки в {reason}: деталь или сообщение
+ * сервера; запрос не дошёл до панели (fetch отклонён) — «панель не отвечает по сети».
+ */
+export function dnsRequestReason(err: unknown): string {
+  const e = asRequestError(err);
+  if (typeof e.detail === 'string' && firstLine(e.detail) !== '') return firstLine(e.detail);
+  if (err instanceof TypeError) return get(t)('cfg.dns.reason_network');
+  const message = typeof e.message === 'string' ? e.message : String(err);
+  return firstLine(message) || get(t)('cfg.dns.no_reason');
 }
 
 /** Текст ошибки запроса: код и параметры ответа, деталь и сообщение сервера — в параметры. */
 export function dnsRequestErrorText(err: unknown): string {
-  const e = (typeof err === 'object' && err !== null ? err : {}) as {
-    code?: unknown;
-    params?: unknown;
-    detail?: unknown;
-    message?: unknown;
-  };
+  const e = asRequestError(err);
   const params: Record<string, string> = {};
   if (typeof e.params === 'object' && e.params !== null) {
     for (const [k, v] of Object.entries(e.params as Record<string, unknown>)) {
       if (typeof v === 'string') params[k] = v;
     }
   }
-  const message = typeof e.message === 'string' ? e.message : String(err);
-  if (typeof e.detail === 'string' && e.detail !== '' && !params.detail) params.detail = e.detail;
-  if (!params.reason) params.reason = params.detail || message;
+  if (typeof e.detail === 'string' && e.detail !== '' && !params.detail) {
+    params.detail = firstLine(e.detail);
+  }
+  if (!params.reason) params.reason = dnsRequestReason(err);
   return dnsErrorText(typeof e.code === 'string' ? e.code : undefined, params);
 }

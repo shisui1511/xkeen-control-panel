@@ -17,6 +17,10 @@
     rollbackDns,
     outcomeSeenDns,
     dnsRequestErrorText,
+    dnsRequestHasCode,
+    dnsRequestReason,
+    dnsKernelTitle,
+    dnsWindowSeconds,
     type DnsOutcome,
     type DnsView,
     type DnsWindow
@@ -73,7 +77,7 @@
   const rawLeftMs = $derived(win ? remainingMs(win, now()) : 0);
   const leftMs = $derived(Math.max(0, rawLeftMs));
   const seconds = $derived(Math.ceil(leftMs / 1000));
-  const totalMs = $derived(win && win.total_s > 0 ? win.total_s * 1000 : 60000);
+  const totalMs = $derived((win && win.total_s > 0 ? win.total_s : $dnsWindowSeconds) * 1000);
   const fraction = $derived(Math.min(1, (motion.reduced ? seconds * 1000 : leftMs) / totalMs));
   const expired = $derived(win !== null && leftMs <= 0);
   const busy = $derived(keeping || rolling || expired);
@@ -101,15 +105,9 @@
     return '';
   });
 
-  function kernelTitle(k: string | undefined): string {
-    if (k === 'xray') return 'Xray';
-    if (k === 'mihomo') return 'Mihomo';
-    return k ?? '';
-  }
-
   const bodyText = $derived.by(() => {
     if (!win) return '';
-    const params = { kernel: kernelTitle(view?.kernel), seconds: String(bodySeconds) };
+    const params = { kernel: dnsKernelTitle(view?.kernel), seconds: String(bodySeconds) };
     if (win.kind === 'apply') return $t('cfg.dns.banner_apply', params);
     if (win.kind === 'kernel_switch') return $t('cfg.dns.banner_switch', params);
     return $t('cfg.dns.banner_enable', params);
@@ -140,8 +138,12 @@
       await keepDns();
       showToast('success', $t('cfg.dns.toast_kept'));
     } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      error = { deadline, text: $t('cfg.dns.keep_error', { reason }) };
+      // Ответ с кодом (окна уже нет, идёт другая операция) — свой текст; сеть и прочие
+      // сбои — «Не удалось подтвердить: {причина}. Окно продолжается.»
+      const text = dnsRequestHasCode(err)
+        ? dnsRequestErrorText(err)
+        : $t('cfg.dns.keep_error', { reason: dnsRequestReason(err) });
+      error = { deadline, text };
     } finally {
       keeping = false;
     }
@@ -204,16 +206,16 @@
     switch (o.kind) {
       case 'timeout':
       case 'probe_failed':
-        return $t('cfg.dns.toast_timeout');
+        return $t('cfg.dns.toast_timeout', { seconds: String($dnsWindowSeconds) });
       case 'watchdog':
         return $t('cfg.dns.outcome_watchdog', {
-          kernel: kernelTitle(o.kernel ?? view?.kernel),
+          kernel: dnsKernelTitle(o.kernel || view?.kernel),
           time: clock(o.at_ms)
         });
       case 'kernel_changed':
         return $t('cfg.dns.outcome_kernel_changed', {
-          from: kernelTitle(o.from) || '?',
-          to: kernelTitle(o.to) || '?',
+          from: dnsKernelTitle(o.from),
+          to: dnsKernelTitle(o.to),
           time: clock(o.at_ms)
         });
       default:
@@ -269,8 +271,7 @@
       <div class="dns-banner__countdown">
         <div class="dns-banner__track" role="presentation">
           <div
-            class="dns-banner__fill"
-            class:dns-banner__fill--smooth={!motion.reduced}
+            class={['dns-banner__fill', { 'dns-banner__fill--smooth': !motion.reduced }]}
             style:width="{fraction * 100}%"
           ></div>
         </div>

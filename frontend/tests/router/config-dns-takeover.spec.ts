@@ -747,10 +747,12 @@ const RE_RESOLVED = /^(Разрешилось|Resolved)$/;
 const RE_DISABLE_BTN = /^(Выключить перехват|Disable interception)$/;
 const RE_TOAST_DISABLED = /Перехват DNS выключен\.|DNS interception disabled\./;
 const RE_PROBE_EXTERNAL = /не разрешилось через группу|did not resolve through the/;
+const RE_FAIL_TITLE_ENABLE = /^(Перехват не включён\.|Interception was not enabled\.)$/;
 const RE_ROLLED_BACK =
   /возвращены к состоянию до включения|returned to their state before enabling/;
+// длительность в тексте — длина окна с сервера (total_s), а не зашитые 60 секунд
 const RE_TOAST_TIMEOUT =
-  /перехват не подтверждён за 60 секунд|interception was not confirmed within 60 seconds/;
+  /перехват не подтверждён за \d+ с\.|interception was not confirmed within \d+ s\./;
 const RE_TOAST_OPEN = /^(К карточке|To the card)$/;
 const RE_OUTCOME_TIMEOUT =
   /(Откачено: нет подтверждения|Rolled back: no confirmation), \d{2}:\d{2}:\d{2}\./;
@@ -1302,6 +1304,11 @@ test.describe('dns-flow', () => {
       await expect(fail).toContainText(RE_PROBE_EXTERNAL);
       await expect(fail).toContainText(flow.deadGroupName);
       await expect(fail).toContainText(RE_ROLLED_BACK);
+      await expect(page.getByTestId('dns-fail-title')).toHaveText(RE_FAIL_TITLE_ENABLE);
+      // причина собрана из параметров сбоя, без заглушки «?» вместо значения (WR-05)
+      const reason = page.getByTestId('dns-fail-reason');
+      await expect(reason).not.toContainText('«?»');
+      await expect(reason).not.toHaveText(/:\s*\?(\.|$)/);
       // пройденные шаги — готово, упавший — сбой, список больше не «идёт»
       await expect(page.getByTestId('dns-step-probe')).toHaveAttribute('data-status', 'failed');
       await expect(page.getByTestId('dns-step-restart')).toHaveAttribute('data-status', 'done');

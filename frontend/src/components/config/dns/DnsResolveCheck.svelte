@@ -107,18 +107,22 @@
   function pathText(g: DnsCheckGroup): string {
     switch (g.path) {
       case 'group':
-        return $t('cfg.dns.path_group', { group: g.group || '?' });
+        return g.group
+          ? $t('cfg.dns.path_group', { group: g.group })
+          : $t('cfg.dns.path_group_unnamed');
       case 'firmware':
         return $t('cfg.dns.path_firmware');
       case 'zone':
-        return $t('cfg.dns.path_zone', { zone: g.zone || '?' });
+        return g.zone ? $t('cfg.dns.path_zone', { zone: g.zone }) : $t('cfg.dns.path_zone_unnamed');
       default:
         return '';
     }
   }
 
   function outcomeText(g: DnsCheckGroup): string {
-    return g.ok ? $t('cfg.dns.check_ok') : $t('cfg.dns.check_fail', { reason: g.reason || '?' });
+    return g.ok
+      ? $t('cfg.dns.check_ok')
+      : $t('cfg.dns.check_fail', { reason: g.reason || $t('cfg.dns.no_reason') });
   }
 </script>
 
@@ -185,7 +189,7 @@
           {#if grouped}
             <p class="dns-check-group-title">{groupTitle(g)}</p>
           {/if}
-          <p class="dns-check-outcome" class:dns-check-outcome-fail={!g.ok}>
+          <p class={['dns-check-outcome', { 'dns-check-outcome-fail': !g.ok }]}>
             <Icon name={g.ok ? 'check' : 'warning'} size={14} class="dns-check-icon" />
             <span data-testid="dns-check-outcome">{outcomeText(g)}</span>
           </p>

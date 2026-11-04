@@ -428,7 +428,6 @@ interface TakeoverSection {
 async function dnsView(page: Page): Promise<{
   state: string;
   blocks: string[];
-  default_name: string;
   group?: { name: string };
 }> {
   const res = await api(page, 'GET', '/api/configlayer/dns');
@@ -437,7 +436,6 @@ async function dnsView(page: Page): Promise<{
   return {
     state: String(d.state ?? ''),
     blocks: (d.blocks ?? []) as string[],
-    default_name: String(d.default_name ?? ''),
     group: d.group as { name: string } | undefined
   };
 }
@@ -758,9 +756,10 @@ test.describe('dns-forms-takeover', () => {
       const inbounds = (await readKernelFile(page, XRAY_DNS_INBOUNDS)) ?? '';
       expect(inbounds, 'входящий xcp-dns-in в файле Xray').toContain('"xcp-dns-in"');
 
-      // подпись под серверами называет группу-цель (D-20)
+      // подпись под серверами называет группу-цель (D-20); группы в виде нет — группа по
+      // умолчанию «Прокси» (D-09), а не имя пробы резолва
       const view = await dnsView(page);
-      const group = view.group?.name || view.default_name;
+      const group = view.group?.name || 'Прокси';
       await expect(page.getByTestId('section-field-xray-dns-servers-via-group')).toContainText(
         group
       );
