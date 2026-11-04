@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 )
@@ -82,6 +83,31 @@ func (s *Service) awaitLifecycle() error {
 		}
 	}
 	s.d.Lifecycle.Unlock()
+	return nil
+}
+
+// restartConfirmed перезапускает запущенное ядро через KernelApplier под замком
+// жизненного цикла и ждёт, пока новый процесс не продержится устойчивое окно:
+// xkeen -restart без терминала уходит в фон и возвращается раньше, чем ядро
+// поднялось, а вызывающему после него нужен действующий слушатель или правила
+// XKeen. Остановленное ядро не запускается (ApplyLocked). Ошибка — перезапуск не
+// удался или ядро не поднялось устойчиво.
+func (s *Service) restartConfirmed(ctx context.Context, kernel string) error {
+	s.d.Lifecycle.Lock()
+	defer s.d.Lifecycle.Unlock()
+	oldPID := 0
+	for _, st := range s.d.Kernel.ProcessStates() {
+		if st.Name == kernel && st.Status == "running" {
+			oldPID = st.PID
+		}
+	}
+	res := s.d.Applier.ApplyLocked(kernel)
+	switch res.Outcome {
+	case services.ApplyRestartFailed:
+		return errors.New(res.Error)
+	case services.ApplyRestarted:
+		return configlayer.ConfirmRestarted(context.WithoutCancel(ctx), s.d.Kernel.ProcessStates, kernel, oldPID)
+	}
 	return nil
 }
 

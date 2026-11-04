@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
 
@@ -462,11 +461,8 @@ func (s *Service) rebuildXKeenRules(kernel string) error {
 	if s.d.Applier == nil {
 		return errors.New("перезапуск ядра: KernelApplier не задан")
 	}
-	s.d.Lifecycle.Lock()
-	res := s.d.Applier.ApplyLocked(kernel)
-	s.d.Lifecycle.Unlock()
-	if res.Outcome == services.ApplyRestartFailed {
-		return fmt.Errorf("перезапуск %s после возврата proxy_dns: %s", kernel, res.Error)
+	if err := s.restartConfirmed(context.Background(), kernel); err != nil {
+		return fmt.Errorf("перезапуск %s после возврата proxy_dns: %w", kernel, err)
 	}
 	return nil
 }

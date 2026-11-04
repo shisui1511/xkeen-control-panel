@@ -8,7 +8,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
 
@@ -67,11 +66,8 @@ func (s *Service) LegacyOff(ctx context.Context) (View, error) {
 			return &Failure{Code: CodeLegacyOffFailed, Params: map[string]string{"reason": msg}, Detail: msg}
 		}
 		// XKeen перестраивает правила только при старте ядра.
-		s.d.Lifecycle.Lock()
-		res := s.d.Applier.ApplyLocked(kernel)
-		s.d.Lifecycle.Unlock()
-		if res.Outcome == services.ApplyRestartFailed {
-			msg := fmt.Sprintf("перезапуск %s после xkeen -dns off: %s", kernel, res.Error)
+		if err := s.restartConfirmed(ctx, kernel); err != nil {
+			msg := fmt.Sprintf("перезапуск %s после xkeen -dns off: %v", kernel, err)
 			return &Failure{Code: CodeLegacyOffFailed, Params: map[string]string{"reason": legacyReason(msg)}, Detail: truncateDetail(msg)}
 		}
 		return nil
@@ -149,11 +145,8 @@ func (s *Service) ReleaseForFlagOff(ctx context.Context) error {
 		if s.d.Applier == nil {
 			return s.flagOffFailed(CodeRestartFailed, kernelParam(kernel), errors.New("перезапуск ядра: KernelApplier не задан"))
 		}
-		s.d.Lifecycle.Lock()
-		res := s.d.Applier.ApplyLocked(kernel)
-		s.d.Lifecycle.Unlock()
-		if res.Outcome == services.ApplyRestartFailed {
-			return s.flagOffFailed(CodeRestartFailed, kernelParam(kernel), fmt.Errorf("перезапуск %s после возврата proxy_dns: %s", kernel, res.Error))
+		if err := s.restartConfirmed(ctx, kernel); err != nil {
+			return s.flagOffFailed(CodeRestartFailed, kernelParam(kernel), fmt.Errorf("перезапуск %s после возврата proxy_dns: %w", kernel, err))
 		}
 	}
 	if err := s.update(func(p *persisted) { p.ProxyDNSBefore = false }); err != nil {
