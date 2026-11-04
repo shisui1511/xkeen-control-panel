@@ -9,19 +9,21 @@
 #   preflight   GNU tar на месте (выход 5), нет окна cron xkeen -ug (выход 6),
 #               нет снимка незавершённого прогона (выход 7)
 #   snapshot    остановить xcp, снять архив и md5 (до трёх попыток), записать
-#               версии и активное ядро, запустить xcp
-#   restore     вернуть файлы и ядро к снимку со строгой сверкой (выход 4 — не удалось);
-#               если файлы ядра и активное ядро равны снимку, ядро не перезапускается:
-#               возвращаются только файлы панели
-#   verify      сверка с снимком: 0 — равно, 1 — расхождение
+#               версии, активное ядро и флаг прошивки opkg dns-override, запустить xcp
+#   restore     вернуть файлы, ядро и dns-override к снимку со строгой сверкой (выход 4 —
+#               не удалось); если файлы ядра и активное ядро равны снимку, ядро не
+#               перезапускается: возвращаются только файлы панели; dns-override — последним
+#   verify      сверка с снимком (файлы, версии, ядро, dns-override): 0 — равно, 1 — расхождение
 #   classify    только чтение: пути со stdin → «класс <TAB> путь», класс — panel,
 #               core-runtime или core (тот же классификатор, что в restore); для разбора
 #               расхождений на стенде, снимок не нужен и не меняется
 #   cleanup     убрать снимок (после успешной сверки)
-#   status      версии, активное ядро, процессы, есть ли снимок
+#   status      версии, активное ядро, процессы, dns-override, proxy_dns, есть ли снимок
 #
 # Восстановление удаляет файлы только внутри /opt и только из фиксированного списка
-# SNAP_PATHS; всё вне /opt не затрагивается.
+# SNAP_PATHS; всё вне /opt не затрагивается. Исключение — флаг opkg dns-override
+# прошивки: он возвращается командой ndmc в running-config, сохранённая конфигурация
+# прошивки не меняется.
 
 PATH=/opt/sbin:/opt/bin:/opt/usr/sbin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
@@ -252,6 +254,104 @@ active_core() {
 
 base_core() { grep '^core=' "$BASE/kernel.txt" | head -1 | cut -d= -f2; }
 
+# ---------- прошивка: opkg dns-override ----------
+
+# Флаг прошивки лежит вне /opt и вне SNAP_PATHS: тест перехвата DNS, упавший посреди
+# сценария, оставил бы стенд без DNS. Команды ndmc — только константные строки; снимок
+# читает и возвращает только running-config, сохранённую конфигурацию прошивки не трогает.
+
+# on — в running-config есть строка «opkg dns-override» (без «no»), off — нет;
+# na — на устройстве нет ndmc; err — ndmc не ответил
+fw_override_now() {
+  command -v ndmc >/dev/null 2>&1 || { say na; return 0; }
+  fw_cfg=$(ndmc -c "show running-config" 2>/dev/null | tr -d '\r')
+  if [ -z "$fw_cfg" ]; then
+    say err
+  elif printf '%s\n' "$fw_cfg" | grep -Eq '^[[:space:]]*opkg dns-override[[:space:]]*$'; then
+    say on
+  else
+    say off
+  fi
+}
+
+# включить (on) или выключить (off) override и дождаться нужного значения до 30 с
+fw_override_set() {
+  case "$1" in
+    on) ndmc -c "opkg dns-override" >/dev/null 2>&1 ;;
+    off) ndmc -c "no opkg dns-override" >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+  fw_i=0
+  while [ "$(fw_override_now)" != "$1" ]; do
+    fw_i=$((fw_i + 1))
+    [ "$fw_i" -ge 30 ] && return 1
+    sleep 1
+  done
+  return 0
+}
+
+# proxy_dns из init-скрипта XKeen — разбор тот же, что у панели (IsDNSProxyingEnabled):
+# строки-комментарии пропускаются, ключ и значение без пробелов и кавычек; on — хотя бы
+# одна строка proxy_dns=on, off — строка есть, но не on, unknown — нет файла или строки
+proxy_dns_now() {
+  [ -f /opt/etc/init.d/S05xkeen ] || { say unknown; return 0; }
+  awk '
+    { l = $0; gsub(/\r/, "", l); sub(/^[ \t]+/, "", l); sub(/[ \t]+$/, "", l) }
+    l ~ /^#/ { next }
+    index(l, "proxy_dns") && index(l, "=") {
+      k = substr(l, 1, index(l, "=") - 1); v = substr(l, index(l, "=") + 1)
+      sub(/[ \t]+$/, "", k); sub(/^[ \t]+/, "", v)
+      gsub(/^["\047]+/, "", v); gsub(/["\047]+$/, "", v)
+      if (k == "proxy_dns") { found = 1; if (v == "on") on = 1 }
+    }
+    END { if (on) print "on"; else if (found) print "off"; else print "unknown" }
+  ' /opt/etc/init.d/S05xkeen
+}
+
+# значение из строки dns_override=… файла снимка firmware.txt
+base_fw() { grep '^dns_override=' "$BASE/firmware.txt" 2>/dev/null | head -1 | cut -d= -f2; }
+
+# Возврат override к снимку. Вызывается после возврата файлов и ядра: ядро уже на файлах
+# снимка и отпустило :53, прошивка снова его занимает. Выход 1 — не удалось.
+restore_fw() {
+  if [ ! -f "$BASE/firmware.txt" ]; then
+    say "прошивка: в снимке нет firmware.txt (снимок прежнего формата) — dns-override не возвращаю"
+    return 0
+  fi
+  fw_want=$(base_fw)
+  case "$fw_want" in
+    on | off) ;;
+    *)
+      say "прошивка: dns-override в снимке $fw_want — не возвращаю"
+      return 0
+      ;;
+  esac
+  fw_now=$(fw_override_now)
+  if [ "$fw_now" = "$fw_want" ]; then
+    say "прошивка: dns-override $fw_now — совпадает со снимком"
+    return 0
+  fi
+  if ! fw_override_set "$fw_want"; then
+    say "ОШИБКА: прошивка: dns-override $(fw_override_now), вернуть к $fw_want за 30 с не удалось"
+    return 1
+  fi
+  say "прошивка: dns-override возвращён к $fw_want"
+}
+
+# Возврат файлов или ядра не удался: если в снимке DNS был у прошивки, а override включён,
+# DNS возвращается прошивке всё равно — иначе стенд остался бы без DNS. Включать override
+# при сбое не безопасно (ядро могло не подняться), поэтому только в сторону off.
+release_fw_on_fail() {
+  [ -f "$BASE/firmware.txt" ] || return 0
+  [ "$(base_fw)" = off ] || return 0
+  [ "$(fw_override_now)" = on ] || return 0
+  if fw_override_set off; then
+    say "прошивка: возврат не удался, dns-override выключен — DNS у прошивки, как в снимке"
+  else
+    say "ОШИБКА: прошивка: возврат не удался, и dns-override выключить не удалось"
+  fi
+}
+
 wait_core_gone() {
   i=0
   while [ -n "$(pidof xray 2>/dev/null)$(pidof mihomo 2>/dev/null)" ]; do
@@ -469,6 +569,8 @@ cmd_snapshot() {
     say "xcp=$xcp_was"
     say "xkeen=$("$XKEEN" -status 2>/dev/null | strip_ansi | head -1 | tr -s ' ')"
   } >"$BASE/kernel.txt"
+  # состояние прошивки: dns_override=on|off|na|err (xcp уже остановлен и флаг не меняет)
+  say "dns_override=$(fw_override_now)" >"$BASE/firmware.txt"
   chmod 600 "$BASE"/* 2>/dev/null
   : >"$BASE/complete"
 
@@ -476,10 +578,19 @@ cmd_snapshot() {
     start_xcp || return 1
   fi
   say "снимок: файлов $(wc -l <"$BASE/files.txt"), каталогов $(wc -l <"$BASE/dirs.txt"), tar $(du -k "$BASE/baseline.tar.gz" | cut -f1) КБ"
-  cat "$BASE/versions.txt" "$BASE/kernel.txt"
+  cat "$BASE/versions.txt" "$BASE/kernel.txt" "$BASE/firmware.txt"
 }
 
+# Возврат: файлы и ядро (restore_state), затем override прошивки. При отказе возврата
+# DNS всё равно отдаётся прошивке, если так было в снимке (release_fw_on_fail).
 cmd_restore() {
+  restore_state
+  rrc=$?
+  [ "$rrc" = 0 ] || release_fw_on_fail
+  return $rrc
+}
+
+restore_state() {
   [ -f "$BASE/complete" ] || { say "ОШИБКА: нет завершённого снимка"; return 4; }
   n=$(wc -l <"$BASE/files.txt" 2>/dev/null || echo 0)
   [ "$n" -ge 10 ] || { say "ОШИБКА: files.txt слишком короткий ($n строк)"; return 4; }
@@ -656,6 +767,11 @@ cmd_restore() {
   fi
 
   rm -f "$WORK/diff.all" "$WORK/diff.panel" "$WORK/diff.corert" "$WORK/diff.core" "$WORK/dirs.extra" "$WORK/dirs.missing"
+
+  # прошивка — последней: файлы и ядро уже как в снимке, ядро отпустило :53; панель ещё
+  # остановлена и override не перехватит
+  restore_fw || return 4
+
   if [ "$want_xcp" = yes ]; then
     start_xcp || return 4
   fi
@@ -702,6 +818,18 @@ cmd_verify() {
       rc=1
     fi
   fi
+  if [ -f "$BASE/firmware.txt" ]; then
+    fw_now=$(fw_override_now)
+    fw_want=$(base_fw)
+    if [ "$fw_now" = "$fw_want" ]; then
+      say "прошивка: dns-override $fw_now — совпадает"
+    else
+      say "ОШИБКА: dns-override $fw_now, в снимке $fw_want"
+      rc=1
+    fi
+  else
+    say "прошивка: в снимке нет firmware.txt (снимок прежнего формата) — dns-override не сверяю"
+  fi
   if [ -s "$WORK/diff.vol" ]; then
     say "изменены после запуска (изменчивые, на код не влияют): $(wc -l <"$WORK/diff.vol")"
   fi
@@ -726,6 +854,8 @@ cmd_cleanup() {
 cmd_status() {
   versions_now
   say "core=$(active_core)"
+  say "dns_override=$(fw_override_now)"
+  say "proxy_dns=$(proxy_dns_now)"
   say "xcp_pid=$(pidof xcp 2>/dev/null)"
   say "time=$(date +%H:%M:%S)"
   if [ -f "$BASE/complete" ]; then
