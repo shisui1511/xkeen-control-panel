@@ -27,6 +27,9 @@
   import PageHeader from './PageHeader.svelte';
   import UpdatesPanel from './components/settings/UpdatesPanel.svelte';
   import DependentProfilesNote from './components/config/profiles/DependentProfilesNote.svelte';
+  import DnsFlagOffNote from './components/config/dns/DnsFlagOffNote.svelte';
+  import { loadDns, dnsTakeover } from './lib/configDns';
+  import { get } from 'svelte/store';
   import Tabs, { type TabItem } from './components/Tabs.svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import SegmentedControl, { type SegmentItem } from './components/SegmentedControl.svelte';
@@ -127,6 +130,18 @@
   // Переключатель слоя «Конфигурация» (D-01, D-04): на время запроса заблокирован
   let configLayerPending = $state(false);
 
+  /**
+   * Перехват DNS включён или желаем (D-36): тогда подтверждение выключения флага слоя
+   * предупреждает о возврате DNS прошивке. Сбой чтения (404 без службы, сеть) — абзаца нет,
+   * выключение не блокируется.
+   */
+  async function dnsTakeoverActive(): Promise<boolean> {
+    await loadDns();
+    const view = get(dnsTakeover);
+    if (!view) return false;
+    return view.desired || (view.state !== 'off' && view.state !== 'unavailable');
+  }
+
   async function onToggleConfigLayer(e: Event) {
     const input = e.currentTarget as HTMLInputElement;
     const enable = input.checked;
@@ -136,7 +151,9 @@
         title: $t('settings.config_layer_off_title'),
         message: $t('settings.config_layer_off_message'),
         consequence: $t('settings.config_layer_off_consequence'),
-        extra: { component: DependentProfilesNote, props: { all: true } },
+        extra: (await dnsTakeoverActive())
+          ? { component: DnsFlagOffNote, props: { profilesAll: true } }
+          : { component: DependentProfilesNote, props: { all: true } },
         confirmLabel: $t('settings.config_layer_off_ok')
       });
       if (!confirmed) {
@@ -147,6 +164,8 @@
     configLayerPending = true;
     try {
       await setConfigLayerEnabled(enable);
+      // Вид перехвата, прочитанный для подтверждения, при выключенном слое недействителен
+      if (!enable) dnsTakeover.set(null);
       showToast(
         'success',
         $t(enable ? 'settings.config_layer_on_toast' : 'settings.config_layer_off_toast')
