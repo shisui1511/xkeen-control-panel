@@ -115,7 +115,7 @@ func (s *Service) armWindowTimer(deadline time.Time) {
 		if !ok {
 			return
 		}
-		s.runWindowRollback(w, reasonTimeout)
+		s.rollbackWindowInOp(w, reasonTimeout)
 	}()
 }
 
@@ -191,7 +191,7 @@ func (s *Service) Rollback(ctx context.Context) error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.runWindowRollback(w, reasonManual)
+		s.rollbackWindowInOp(w, reasonManual)
 	}()
 	return nil
 }
@@ -205,11 +205,11 @@ func rollbackSteps(kind string) []string {
 	return []string{stepRelease, stepApply}
 }
 
-// runWindowRollback — откат забранного окна операцией службы: ждёт конца идущей
+// rollbackWindowInOp — откат забранного окна операцией службы: ждёт конца идущей
 // операции (откат не отказывает из-за занятости), выполняет откат по виду и
 // закрывает операцию. Остановка службы прерывает ожидание и откат: окно остаётся
 // в файле, и старт панели откатит его заново.
-func (s *Service) runWindowRollback(w windowState, reason string) {
+func (s *Service) rollbackWindowInOp(w windowState, reason string) {
 	for !s.beginOp(opRollback, rollbackSteps(w.Kind)) {
 		if err := sleepCtx(s.ctx, time.Second); err != nil {
 			s.releaseClaim()

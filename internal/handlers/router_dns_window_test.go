@@ -225,3 +225,26 @@ func TestRouterDNSWindowRollbackNow(t *testing.T) {
 		}
 	})
 }
+
+// Трасса: подготовка → включение → state window → перезапуск панели
+// init-скриптом посреди окна (rtPanelRestart: новая панель отвечает по прежней
+// сессии) → старт панели откатывает неподтверждённый перехват сразу, не дожидаясь
+// дедлайна (D-07): state off в пределах 60 с после подъёма, :53 у прошивки,
+// override как до включения, файлы ядра без слушателя. Метка ядра: откат
+// перезапускает активное ядро.
+func TestRouterDNSWindowPanelRestart(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	kernel := tg.Core
+	e := rtNewSrc(t)
+	rtDNSPrepare(t, e, kernel)
+	old := rtPanelCurrent(t, e.p)
+
+	overrideBefore := rtDNSOverrideOn(t)
+	e.rtDNSEnableWindow()
+	t.Cleanup(func() { e.with(t).rtDNSEnsureOff() })
+
+	res := rtPanelRestart(t, e.p, old, nil)
+	rtPanelRestartVerdict(t, old, res, "перезапуск посреди окна подтверждения DNS")
+	off := e.rtDNSWaitState("off", rtDNSWindowS*time.Second)
+	e.rtDNSExpectRolledBack(off, kernel, overrideBefore)
+}
