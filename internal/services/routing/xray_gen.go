@@ -29,6 +29,13 @@ const (
 	xrayRoutingFile = "99_xcp-routing.json"
 	// xrayObservatoryFile — burstObservatory; файл есть только при balancer.
 	xrayObservatoryFile = "99_xcp-observatory.json"
+	// xrayDNSInboundsFile — слушатель перехвата DNS роутера (файл есть только при
+	// перехвате на Xray). Входящие сливаются по тегу, XKeen такой входящий не
+	// берёт: у него нет флага прозрачного перенаправления.
+	xrayDNSInboundsFile = "03_inbounds.xcp-dns.json"
+	// xrayDNSFile — объект dns при перехвате: заменяет dns чужих файлов целиком,
+	// поэтому серверы перехвата входят в него, а не в отдельный фрагмент.
+	xrayDNSFile = configlayer.PanelXrayDNSFile
 	// defaultXrayAPIPort — порт API Xray, когда настройка панели не задана.
 	defaultXrayAPIPort = 10085
 )
@@ -40,6 +47,21 @@ const (
 	TagDirect = "xcp-direct"
 	// TagBlock — blackhole: соединение закрывается.
 	TagBlock = "xcp-block"
+	// Теги перехвата DNS роутера — в пространстве панели: Xray сливает входящие и
+	// исходящие фрагментов -confdir по тегу, и тег без префикса панели совпал бы с
+	// одноимённым тегом чужого файла (исходящий DNS в типовых шаблонах назван без
+	// префикса) — фрагмент панели молча удалился бы или заменил чужой.
+	// TagDNSIn и TagDNSIn6 — входящие слушателя :53 (второй — только при втором
+	// адресе слушателя), TagDNSOut — исходящий dns.
+	TagDNSIn  = "xcp-dns-in"
+	TagDNSIn6 = "xcp-dns-in6"
+	TagDNSOut = "xcp-dns-out"
+	// TagDNSQuery — тег объекта dns: запросы DNS-модуля к серверам без своего
+	// тега идут с ним, правило ведёт их в группу-цель (D-20).
+	TagDNSQuery = "xcp-dns"
+	// TagDNSDirect — тег серверов, которые идут напрямую: локальные зоны, имена
+	// узлов, домены direct-правил.
+	TagDNSDirect = "xcp-dns-direct"
 	// loopbackTagPrefix — префикс inboundTag loopback ручной группы.
 	loopbackTagPrefix = "xcp-lb-"
 )
@@ -183,6 +205,12 @@ type xrayBuild struct {
 	// (FeatureXrayHotSwapAPI); apiPort — порт API из настроек панели.
 	foreignAPI, foreignObservatory, apiOK bool
 	apiPort                               int
+	// sections — секции входа (параметры перехвата DNS, секция DNS Xray, правила
+	// для direct-доменов); dnsLive и dnsOn — живые данные перехвата DNS роутера и
+	// признак, что его ведёт Xray (cores.XrayDNSTakeover).
+	sections configlayer.Sections
+	dnsLive  configlayer.DNSTakeoverLive
+	dnsOn    bool
 
 	byID      map[string]*Group
 	nodeByRef map[string]sources.CatalogNode
@@ -370,6 +398,10 @@ func (b *xrayBuild) build() ([]configlayer.GeneratedFile, error) {
 	if err := b.checkSelectors(); err != nil {
 		return nil, err
 	}
+	dns, err := b.dnsTakeover()
+	if err != nil {
+		return nil, err
+	}
 
 	outbounds := []map[string]any{freedomOutbound(TagDirect), blackholeOutbound(TagBlock)}
 	for _, g := range b.groups {
@@ -377,15 +409,25 @@ func (b *xrayBuild) build() ([]configlayer.GeneratedFile, error) {
 			outbounds = append(outbounds, b.groupOutbound(g))
 		}
 	}
+	if dns != nil {
+		// Исходящий dns — в конце файла .tail: исходящим по умолчанию он не станет.
+		outbounds = append(outbounds, dns.outbound)
+	}
 	groupsJSON, err := xrayJSON(map[string]any{"outbounds": outbounds})
 	if err != nil {
 		return nil, err
 	}
 
-	rules := make([]any, 0, len(b.rules.Items)+len(b.loopRules)+2)
+	rules := make([]any, 0, len(b.rules.Items)+len(b.loopRules)+5)
 	if b.apiInbound {
 		// D-43: правило api первым, входящий api остаётся в чужом файле.
 		rules = append(rules, map[string]any{"inboundTag": []string{"api"}, "outboundTag": "api"})
+	}
+	if dns != nil {
+		// Правила перехвата DNS — сразу после api, раньше force-proxy и правил
+		// пользователя: соединение DoH к IP апстрима не должно попасть под
+		// пользовательское правило.
+		rules = append(rules, dns.rules...)
 	}
 	if len(b.forceTags) > 0 && b.forceGroup != nil {
 		// D-12: входящие force-proxy* XKeen идут в выбранную группу раньше правил
@@ -471,6 +513,16 @@ func (b *xrayBuild) build() ([]configlayer.GeneratedFile, error) {
 		files = append(files, configlayer.GeneratedFile{
 			Kernel: configlayer.KernelXray, RelPath: configlayer.PanelXrayAPIFile, Kind: configlayer.KindXrayJSON, Content: apiJSON,
 		})
+	}
+	if dns != nil {
+		inJSON, err := xrayJSON(map[string]any{"inbounds": dns.inbounds})
+		if err != nil {
+			return nil, err
+		}
+		files = append(files,
+			configlayer.GeneratedFile{Kernel: configlayer.KernelXray, RelPath: xrayDNSInboundsFile, Kind: configlayer.KindXrayJSON, Content: inJSON},
+			configlayer.GeneratedFile{Kernel: configlayer.KernelXray, RelPath: xrayDNSFile, Kind: configlayer.KindXrayJSON, Content: dns.dnsFile},
+		)
 	}
 	return files, nil
 }
@@ -680,6 +732,11 @@ func (s *Service) generateXray(in configlayer.Input, installed configlayer.Insta
 		string(in.Sections[GroupsSection]), string(in.Sections[RulesSection]), string(in.Sections[ProbeSection]),
 		string(in.Live[LiveKeySelection]),
 		strings.Join(forceTags, ","), forceGroupID(forceGroup),
+		// Перехват DNS: живые данные, параметры и секция DNS Xray (её значение —
+		// часть объекта dns при перехвате). Смена любого пересобирает файлы.
+		string(in.Live[configlayer.LiveKeyDNSTakeover]),
+		string(in.Sections[configlayer.SectionDNSTakeover]),
+		string(in.Sections[configlayer.SectionXrayDNS]),
 	}
 	for _, n := range cat.Xray {
 		parts = append(parts, n.Ref, n.XrayTag, n.Node.Name, n.Node.Text)
@@ -689,6 +746,7 @@ func (s *Service) generateXray(in configlayer.Input, installed configlayer.Insta
 		return slices.Clone(files), nil
 	}
 
+	dnsLive, dnsOn := cores.XrayDNSTakeover(in)
 	b := newXrayBuild(xrayBuild{
 		groups: groups.Items, rules: rules, probe: probe, catalog: cat.Xray,
 		live: liveSelection(in.Live), autoOK: autoOK, fallbackOK: fallbackOK,
@@ -696,6 +754,7 @@ func (s *Service) generateXray(in configlayer.Input, installed configlayer.Insta
 		forceTags:  forceTags, forceGroup: forceGroup,
 		foreignAPI: in.Routing.XrayForeignAPI, foreignObservatory: in.Routing.XrayObservatory,
 		apiOK: apiOK, apiPort: apiPort,
+		sections: in.Sections, dnsLive: dnsLive, dnsOn: dnsOn,
 	})
 	files, err := b.build()
 	if err != nil {
