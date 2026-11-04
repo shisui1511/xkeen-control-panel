@@ -85,6 +85,9 @@ type mihomoBuild struct {
 	// sections — секции черновика или применённого состояния: из них профиль
 	// берёт ключи секций Mihomo (основное, sniffer, dns, входящие, прочие ключи).
 	sections configlayer.Sections
+	// live — живые данные входа: из Live[dns_takeover] часть dns узнаёт, что
+	// перехват DNS роутера включён и где резолвер прошивки (takeoverDNS).
+	live configlayer.Sections
 	// forceNames — имена listeners force-proxy* (D-12); forceGroup — группа, в
 	// которую их ведут строки IN-NAME первыми. Пусто или nil — строк нет.
 	forceNames []string
@@ -705,6 +708,11 @@ func (b *mihomoBuild) profile() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Перехват DNS роутера (фаза 148): слушатель :53, серверы через группу-цель,
+	// имена узлов и локальные зоны до туннеля. Без перехвата часть dns не меняется.
+	if err := b.takeoverDNS(parts); err != nil {
+		return nil, err
+	}
 	root := &yaml.Node{Kind: yaml.MappingNode}
 	for _, part := range parts {
 		root.Content = append(root.Content, part.Content...)
@@ -770,7 +778,7 @@ func (s *Service) generateMihomo(in configlayer.Input, installed configlayer.Ins
 	b := newMihomoBuild(mihomoBuild{
 		groups: groups.Items, rules: rules, probe: probe, catalog: cat.Mihomo,
 		ports: in.Routing.Mihomo, groupsOK: s.mihomoGroupsAvailable(),
-		sections:   in.Sections,
+		sections: in.Sections, live: in.Live,
 		forceNames: forceNames, forceGroup: forceGroup,
 	})
 	if err := b.collectLists(s.d.Lists); err != nil {
