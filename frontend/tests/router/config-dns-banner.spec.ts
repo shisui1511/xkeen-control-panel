@@ -123,11 +123,12 @@ async function gotoRoute(page: Page, route: string): Promise<void> {
 }
 
 /**
- * Переход на страницу оболочки с заменой сборщика консоли: уход со страницы обрывает опросы
- * её запросов (ERR_ABORTED без ответа), это не нарушение страницы, которую покидают.
+ * Переход на страницу оболочки с заменой сборщика консоли: собранные нарушения проверяются
+ * до перехода (assertClean затем отключает сборщики), а уход со страницы обрывает опросы её
+ * запросов (ERR_ABORTED без ответа), это не нарушение страницы, которую покидают.
  */
 async function gotoGuarded(page: Page, guard: ConsoleGuard, route: string): Promise<ConsoleGuard> {
-  guard.detach();
+  await guard.assertClean();
   await gotoRoute(page, route);
   return attachConsoleGuard(page);
 }
