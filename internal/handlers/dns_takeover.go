@@ -37,6 +37,7 @@ var dnsErrorStatus = map[string]int{
 	"port_busy":           http.StatusConflict,
 	"routing_not_managed": http.StatusConflict,
 	"section_foreign":     http.StatusConflict,
+	"self_server":         http.StatusConflict,
 	"window_active":       http.StatusConflict,
 	// Прошивка недоступна или резолвер прошивки не найден.
 	"unavailable": http.StatusServiceUnavailable,
