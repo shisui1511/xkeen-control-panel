@@ -467,6 +467,15 @@ func (s *Service) rollbackWindow(ctx context.Context, w windowState, reason stri
 			p.WaitingReason = ""
 			// Снимок прохода, прерванного остановкой панели (rollbackPendingTxn), откачен.
 			p.Snapshot = nil
+			if w.Kind == kindEnable && len(errs) == 0 && reason != reasonTxnInterrupted {
+				// Строка proxy_dns возвращена к значению до включения: запись окна о нём
+				// устарела, и выключение флага слоя не должно возвращать строку, которую
+				// пользователь потом выключил сам (flagOffPlan, lineOnly). Откат
+				// прерванного прохода запись не трогает: при возврате перехвата она
+				// относится к первому включению и нужна выключению флага.
+				p.ProxyDNSBefore = false
+				p.ProxyRestartPending = false
+			}
 		}
 	}); err != nil {
 		log.Printf("dnstakeover: %v", err)

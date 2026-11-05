@@ -75,6 +75,16 @@ func (s *Service) LegacyOff(ctx context.Context) (View, error) {
 	if fail != nil {
 		s.setFailure(fail)
 	}
+	if fail == nil {
+		// Пользователь сам выключил строку: возвращать её к значению до включения
+		// перехвата (выключение флага слоя, сторож, сверка) больше не нужно.
+		if err := s.update(func(p *persisted) {
+			p.ProxyDNSBefore = false
+			p.ProxyRestartPending = false
+		}); err != nil {
+			log.Printf("dnstakeover: %v", err)
+		}
+	}
 	s.recordHistory(opLegacyOff, kernel, fail)
 	s.endOp()
 	if fail != nil {
