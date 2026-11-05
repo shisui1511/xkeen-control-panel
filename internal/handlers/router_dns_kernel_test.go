@@ -156,21 +156,15 @@ func (e *rtSrc) rtDNSExpectSwitchWindow(to string, before int64) map[string]any 
 	return v
 }
 
-// Трасса: подготовка (оба ядра установлены, DNS-секции обоих у панели) →
-// включение и «Оставить» на активном ядре → смена ядра через API служб → state
-// window, window.kind=kernel_switch, kernel — новое, проба переноса по двум группам
-// → «Оставить» → :53 у нового ядра, в файлах прежнего нет слушателя → обратная
-// смена → окно переноса → без «Оставить» откат по таймеру: state off, :53 у
-// прошивки, активным осталось переключённое ядро. Стенд возвращает исходное ядро
-// и выключает перехват. Метка ядра: сценарий меняет активное ядро.
-func TestRouterDNSKernelSwitch(t *testing.T) {
-	tg := routertest.CoreSpecific(t)
-	kernel := tg.Core
+// rtDNSKernelSwitchPrepare готовит стенд к смене ядра с перехватом: подготовка перехвата на
+// активном ядре, второе ядро установлено, его DNS-секция у панели; очистка возвращает
+// исходное ядро и выключает перехват. Возвращает второе ядро; второго нет — Skip.
+func rtDNSKernelSwitchPrepare(t *testing.T, e *rtSrc, kernel string) string {
+	t.Helper()
 	other := map[string]string{configlayer.KernelXray: configlayer.KernelMihomo, configlayer.KernelMihomo: configlayer.KernelXray}[kernel]
 	if other == "" {
 		t.Fatalf("неизвестное ядро цели %q", kernel)
 	}
-	e := rtNewSrc(t)
 	rtDNSPrepare(t, e, kernel)
 	if installed, _ := e.rtCoresView(other)["installed"].(bool); !installed {
 		t.Skipf("%s не установлен на стенде: перехват некуда переносить", other)
@@ -207,7 +201,21 @@ func TestRouterDNSKernelSwitch(t *testing.T) {
 		}
 		c.rtDNSEnsureOff()
 	})
+	return other
+}
 
+// Трасса: подготовка (оба ядра установлены, DNS-секции обоих у панели) →
+// включение и «Оставить» на активном ядре → смена ядра через API служб → state
+// window, window.kind=kernel_switch, kernel — новое, проба переноса по двум группам
+// → «Оставить» → :53 у нового ядра, в файлах прежнего нет слушателя → обратная
+// смена → окно переноса → без «Оставить» откат по таймеру: state off, :53 у
+// прошивки, активным осталось переключённое ядро. Стенд возвращает исходное ядро
+// и выключает перехват. Метка ядра: сценарий меняет активное ядро.
+func TestRouterDNSKernelSwitch(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	kernel := tg.Core
+	e := rtNewSrc(t)
+	other := rtDNSKernelSwitchPrepare(t, e, kernel)
 	on := e.rtDNSEnableOK()
 	e.rtDNSSwitchKernel(other)
 	e.rtDNSExpectSwitchWindow(other, rtDNSLastCheckAt(on))
@@ -235,4 +243,104 @@ func TestRouterDNSKernelSwitch(t *testing.T) {
 	if _, last := rtSwitchRaceSettled(kernel, other, 30*time.Second); last != "" {
 		t.Errorf("после отката окна переноса активным должно остаться %s: %s", kernel, last)
 	}
+}
+
+// Трасса: подготовка (оба ядра установлены, DNS-секции обоих у панели) → включение и
+// «Оставить» на активном ядре → смена ядра через API служб → шаг probe переноса running
+// (окна ещё нет) → перезапуск панели init-скриптом → старт панели откатывает прерванный
+// перенос (D-15): state off, desired=false, окна и открытого черновика нет, override как
+// до включения, :53 у прошивки, слушателя нет в файлах ни одного ядра, активным остаётся
+// новое ядро (смену ядра откат DNS не отменяет). Метка ядра: сценарий меняет активное ядро.
+func TestRouterDNSKernelSwitchPanelRestart(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	kernel := tg.Core
+	e := rtNewSrc(t)
+	other := rtDNSKernelSwitchPrepare(t, e, kernel)
+	overrideBefore := rtDNSOverrideOn(t)
+	e.rtDNSEnableOK()
+	old := rtPanelCurrent(t, e.p)
+
+	e.rtDNSSwitchKernel(other)
+	e.rtDNSWaitStep("probe", "running", rtDNSStateWait)
+	res := rtPanelRestart(t, e.p, old, nil)
+	rtPanelRestartVerdict(t, old, res, "перезапуск посреди пробы переноса перехвата DNS")
+
+	off := e.rtDNSWaitState("off", rtDNSWindowS*time.Second)
+	e.rtDNSExpectRolledBack(off, other, overrideBefore)
+	if rtDNSKernelHasListener(kernel) {
+		t.Errorf("после отката переноса в файлах прежнего ядра %s слушатель :53", kernel)
+	}
+	if _, last := rtSwitchRaceSettled(other, kernel, 30*time.Second); last != "" {
+		t.Errorf("после отката переноса активным должно остаться %s: %s", other, last)
+	}
+}
+
+// Трасса: подготовка → включение и «Оставить» → остановка ядра через API служб (state
+// waiting, kernel_stopped) → запуск ядра → шаг restart возврата running (проба возврата короче
+// шага опроса, перезапуск ядра идёт секунды; путь отката прерванного прохода один для
+// любого шага) → перезапуск панели init-скриптом → старт панели откатывает прерванный проход возврата (D-14, D-16): DNS
+// у прошивки (override как до включения, слушателя в файлах ядра нет), перехват остаётся
+// желаемым с причиной ожидания probe → сторож возвращает его без окна подтверждения:
+// state on, :53 у ядра. Метка ядра: сценарий останавливает и запускает активное ядро.
+func TestRouterDNSRestorePanelRestart(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	kernel := tg.Core
+	e := rtNewSrc(t)
+	rtDNSPrepare(t, e, kernel)
+	overrideBefore := rtDNSOverrideOn(t)
+	e.rtDNSEnableOK()
+	t.Cleanup(func() {
+		c := e.with(t)
+		if pids, _ := rtRstKernelPIDs(kernel); len(pids) == 0 {
+			c.rtDNSServiceControl("start")
+			rtCoresLiveWaitStatus(t)
+		}
+		c.rtDNSEnsureOff()
+	})
+	e.rtDNSServiceControl("stop")
+	e.rtDNSExpectKernelStopped(kernel, overrideBefore)
+	old := rtPanelCurrent(t, e.p)
+
+	e.rtDNSServiceControl("start")
+	e.rtDNSWaitStep("restart", "running", rtDNSStateWait)
+	res := rtPanelRestart(t, e.p, old, nil)
+	rtPanelRestartVerdict(t, old, res, "перезапуск посреди прохода возврата перехвата DNS")
+
+	deadline := time.Now().Add(rtDNSRestoreWait)
+	sawWaiting, sawWindow := false, false
+	var v map[string]any
+	for {
+		v = e.rtDNSView()
+		st, _ := v["state"].(string)
+		if st == "window" {
+			sawWindow = true
+		}
+		if st == "waiting" && !sawWaiting {
+			sawWaiting = true
+			if reason, _ := v["waiting_reason"].(string); reason != "probe" {
+				t.Errorf("после отката возврата waiting_reason %q, ожидалось probe", reason)
+			}
+			if desired, _ := v["desired"].(bool); !desired {
+				t.Error("после отката возврата desired=false, перехват должен остаться желаемым")
+			}
+			if got := rtDNSOverrideOn(t); got != overrideBefore {
+				t.Errorf("после отката возврата override=%v, до включения был %v", got, overrideBefore)
+			}
+		}
+		if st == "on" {
+			break
+		}
+		if time.Now().After(deadline) {
+			code, detail := rtDNSFailure(v)
+			t.Fatalf("сторож не вернул перехват за %v: state %q, сбой %q %.300s", rtDNSRestoreWait, st, code, detail)
+		}
+		time.Sleep(time.Second)
+	}
+	if !sawWaiting {
+		t.Error("после перезапуска панели перехват вернулся без ожидания: прерывание не попало на проход возврата")
+	}
+	if sawWindow {
+		t.Error("возврат перехвата прошёл через окно подтверждения")
+	}
+	e.rtDNSExpectOn(v, kernel)
 }
