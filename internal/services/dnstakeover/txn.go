@@ -700,6 +700,9 @@ type disablePlan struct {
 	kernel         string
 	live           bool
 	overrideBefore bool
+	// lineOnly — перехвата нет, возвращать нужно только строку proxy_dns: шаги
+	// выключения (runDisable) пропускаются.
+	lineOnly bool
 }
 
 // Disable — выключение перехвата без окна подтверждения (D-08): предпроверки

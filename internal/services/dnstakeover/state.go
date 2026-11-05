@@ -61,6 +61,10 @@ type persisted struct {
 	// снимок закрыты, а выключение флага слоя возвращает строку к этому значению
 	// (D-36).
 	ProxyDNSBefore bool `json:"proxy_dns_before,omitempty"`
+	// ProxyRestartPending — выключение флага слоя вернуло строку proxy_dns, а
+	// перезапуск ядра, который пересобирает правила XKeen, не удался: повтор
+	// выключения флага перезапускает ядро, даже когда строка уже возвращена.
+	ProxyRestartPending bool `json:"proxy_restart_pending,omitempty"`
 	// WaitingReason — перехват желаем, но DNS у прошивки (probe, kernel_stopped,
 	// watchdog): состояние waiting; пусто — не ждёт.
 	WaitingReason string `json:"waiting_reason,omitempty"`

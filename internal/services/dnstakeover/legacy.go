@@ -127,26 +127,42 @@ func (s *Service) ReleaseForFlagOff(ctx context.Context) error {
 	if err != nil || !needed {
 		return err
 	}
-	if !s.beginOp(opFlagOff, disableSteps) {
+	steps := disableSteps
+	if pl.lineOnly {
+		steps = nil
+	}
+	if !s.beginOp(opFlagOff, steps) {
 		return errCode(CodeBusy)
 	}
 	defer s.endOp()
-	if !s.claimFlagOffWindow() {
-		return &Error{Code: CodeBusy, Detail: "идёт откат окна подтверждения"}
-	}
-	s.clearOutcome()
-	s.runDisable(ctx, pl)
-	// Окно закрывается и при сбое: откат окна заменён выключением, а override и
-	// proxy_dns до включения остались в состоянии службы вместе с desired.
-	s.closeFlagOffWindow()
-	if f := s.opFailure(); f != nil {
-		return &Error{Code: f.Code, Params: f.Params, Detail: f.Detail}
+	if !pl.lineOnly {
+		if !s.claimFlagOffWindow() {
+			return &Error{Code: CodeBusy, Detail: "идёт откат окна подтверждения"}
+		}
+		s.clearOutcome()
+		s.runDisable(ctx, pl)
+		// Окно закрывается и при сбое: откат окна заменён выключением, а override и
+		// proxy_dns до включения остались в состоянии службы вместе с desired.
+		s.closeFlagOffWindow()
+		if f := s.opFailure(); f != nil {
+			return &Error{Code: f.Code, Params: f.Params, Detail: f.Detail}
+		}
 	}
 	changed, err := s.restoreProxyLine(ctx, proxyBefore)
 	if err != nil {
 		return s.flagOffFailed(CodeGeneric, nil, err)
 	}
-	if kernel := s.d.Kernel.ActiveState().Kernel; changed && (kernel == configlayer.KernelXray || kernel == configlayer.KernelMihomo) {
+	if changed {
+		// Строка возвращена, перезапуск ещё впереди: сбой между ними не должен
+		// потеряться при повторном выключении флага.
+		if err := s.update(func(p *persisted) { p.ProxyRestartPending = true }); err != nil {
+			log.Printf("dnstakeover: %v", err)
+		}
+	}
+	s.mu.Lock()
+	restart := changed || s.st.ProxyRestartPending
+	s.mu.Unlock()
+	if kernel := s.d.Kernel.ActiveState().Kernel; restart && (kernel == configlayer.KernelXray || kernel == configlayer.KernelMihomo) {
 		if s.d.Applier == nil {
 			return s.flagOffFailed(CodeRestartFailed, kernelParam(kernel), errors.New("перезапуск ядра: KernelApplier не задан"))
 		}
@@ -154,7 +170,10 @@ func (s *Service) ReleaseForFlagOff(ctx context.Context) error {
 			return s.flagOffFailed(CodeRestartFailed, kernelParam(kernel), fmt.Errorf("перезапуск %s после возврата proxy_dns: %w", kernel, err))
 		}
 	}
-	if err := s.update(func(p *persisted) { p.ProxyDNSBefore = false }); err != nil {
+	if err := s.update(func(p *persisted) {
+		p.ProxyDNSBefore = false
+		p.ProxyRestartPending = false
+	}); err != nil {
 		log.Printf("dnstakeover: %v", err)
 	}
 	return nil
@@ -162,16 +181,23 @@ func (s *Service) ReleaseForFlagOff(ctx context.Context) error {
 
 // flagOffPlan — что возвращать при выключении флага слоя: план шагов выключения,
 // proxy_dns до включения перехвата (из окна включения, снимка или состояния) и
-// нужен ли возврат вообще.
+// нужен ли возврат вообще. Перехвата нет, а строка не возвращена (или не
+// перезапущено ядро после возврата) — план lineOnly.
 func (s *Service) flagOffPlan() (pl disablePlan, proxyBefore, needed bool, err error) {
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
 		return disablePlan{}, false, false, err
 	}
 	live, on := configlayer.ParseDNSTakeoverLive(st.Live)
+	cur, curErr := ProxyDNS()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !on && !s.st.Desired && s.st.Window == nil {
+		// Перехвата нет, но предыдущий возврат мог не довести строку proxy_dns или
+		// перезапуск ядра до конца: тогда выключение флага доделывает только их.
+		if s.st.ProxyDNSBefore && curErr == nil && (!cur || s.st.ProxyRestartPending) {
+			return disablePlan{lineOnly: true}, true, true, nil
+		}
 		return disablePlan{}, false, false, nil
 	}
 	pl = disablePlan{kernel: s.st.Kernel, live: on, overrideBefore: s.st.OverrideBefore}
