@@ -1,8 +1,14 @@
 // e2e-pages: config/cores
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
-import { attachConsoleGuard } from './lib/console';
+import { attachConsoleGuard, type ConsoleGuard } from './lib/console';
 import { T } from './lib/env';
+import {
+  emptyDnsTargetPrep,
+  ensureDnsTarget,
+  releaseDnsTarget,
+  type DnsTargetPrep
+} from './lib/dns-target';
 import { CORE_TAG } from './lib/known';
 import { api, layerFlag, resetDraft, withPanel } from './lib/nodes-api';
 
@@ -81,9 +87,15 @@ async function restoreAll(browser: Browser): Promise<void> {
   });
 }
 
+// Секция DNS, маршрутизация и группа-цель: без них включение заблокировано, и тесты пропускаются
+const target: DnsTargetPrep = emptyDnsTargetPrep();
+
 test.beforeAll(async ({ browser }) => {
   await layer.enable(browser);
   await restoreAll(browser);
+  await withPanel(browser, async (page) => {
+    await ensureDnsTarget(page, target);
+  });
 });
 
 test.afterEach(async ({ browser }) => {
@@ -92,6 +104,9 @@ test.afterEach(async ({ browser }) => {
 
 test.afterAll(async ({ browser }) => {
   await restoreAll(browser);
+  await withPanel(browser, async (page) => {
+    await releaseDnsTarget(page, target);
+  });
   await layer.restore(browser);
 });
 
@@ -105,6 +120,16 @@ async function startPage(page: Page): Promise<void> {
 async function gotoRoute(page: Page, route: string): Promise<void> {
   await page.goto(`/#/${route}`, { timeout: T.page, waitUntil: 'domcontentloaded' });
   await page.locator('.main-content').first().waitFor({ state: 'visible', timeout: T.page });
+}
+
+/**
+ * Переход на страницу оболочки с заменой сборщика консоли: уход со страницы обрывает опросы
+ * её запросов (ERR_ABORTED без ответа), это не нарушение страницы, которую покидают.
+ */
+async function gotoGuarded(page: Page, guard: ConsoleGuard, route: string): Promise<ConsoleGuard> {
+  guard.detach();
+  await gotoRoute(page, route);
+  return attachConsoleGuard(page);
 }
 
 /**
@@ -134,12 +159,12 @@ test(
   { tag: CORE_TAG },
   async ({ page }) => {
     test.setTimeout(TEST_TIMEOUT);
-    const guard = attachConsoleGuard(page);
+    let guard = attachConsoleGuard(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     await startPage(page);
     await openWindow(page);
 
-    await gotoRoute(page, 'config/cores');
+    guard = await gotoGuarded(page, guard, 'config/cores');
     await expect(banner(page)).toBeVisible({ timeout: T.action });
     await expect(banner(page)).toHaveAttribute('data-kind', 'enable');
     await expect(banner(page)).toHaveAttribute('role', 'alert');
@@ -167,12 +192,12 @@ test(
 
     // Баннер в оболочке, а не на странице карточки
     for (const route of ['services', 'logs']) {
-      await gotoRoute(page, route);
+      guard = await gotoGuarded(page, guard, route);
       await expect(banner(page), `баннер на #/${route}`).toBeVisible({ timeout: T.action });
       await expect(banner(page)).toHaveCount(1);
     }
 
-    await gotoRoute(page, 'config/cores');
+    guard = await gotoGuarded(page, guard, 'config/cores');
     await expect(banner(page)).toBeVisible({ timeout: T.action });
     await page.getByTestId('dns-confirm-keep').click();
     await expect(banner(page)).toHaveCount(0, { timeout: T.action });

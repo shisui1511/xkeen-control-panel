@@ -1,6 +1,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
+import { ensureDnsTarget, releaseDnsTarget } from './lib/dns-target';
 import { CORE_TAG, knownFailure } from './lib/known';
 import { api, installedKernels, resetDraft, withPanel, type Installed } from './lib/nodes-api';
 
@@ -165,7 +166,6 @@ for (const kernel of KERNELS) {
 // --- D-36: подтверждение выключения флага слоя при перехвате ---
 
 const FLAG_NOTE = /Перехват DNS будет выключен|DNS interception will be disabled/;
-const DEFAULT_GROUP = 'Прокси';
 const ACTIVE_STATES = ['on', 'window', 'waiting'];
 
 /** Что спек сам поменял на стенде ради перехвата (убирается в afterAll). */
@@ -198,43 +198,6 @@ async function dnsView(page: Page): Promise<DnsBrief> {
 
 const takeoverActive = (v: DnsBrief): boolean => v.desired || ACTIVE_STATES.includes(v.state);
 
-/** Ревизия черновика из снимка слоя. */
-async function draftRevision(page: Page): Promise<number> {
-  const st = await api(page, 'GET', '/api/configlayer/state');
-  expect(st.status, 'GET /api/configlayer/state').toBe(200);
-  return Number(st.data?.draft_revision ?? 0);
-}
-
-/** Запускает применение и ждёт его конца: применение не идёт, черновик пуст. */
-async function applyAndWait(page: Page): Promise<void> {
-  const start = await api(page, 'POST', '/api/configlayer/apply', {});
-  expect(start.status, `запуск применения: ${JSON.stringify(start.data)}`).toBe(200);
-  await expect
-    .poll(
-      async () => {
-        const st = await api(page, 'GET', '/api/configlayer/state');
-        const apply = (st.data?.apply ?? {}) as { running?: boolean };
-        return apply.running === false && Number(st.data?.draft_changes ?? -1) === 0;
-      },
-      { timeout: T.save * 3, intervals: [2000] }
-    )
-    .toBe(true);
-}
-
-/** Ревизия и признак «маршрутизацию ведёт панель». */
-async function routingInfo(
-  page: Page
-): Promise<{ revision: number; desired: boolean; groupNames: string[] }> {
-  const view = await api(page, 'GET', '/api/configlayer/routing');
-  expect(view.status, 'GET /api/configlayer/routing').toBe(200);
-  const groups = Array.isArray(view.data?.groups) ? (view.data.groups as { name?: string }[]) : [];
-  return {
-    revision: Number(view.data?.revision ?? 0),
-    desired: view.data?.desired === true,
-    groupNames: groups.map((g) => String(g?.name ?? ''))
-  };
-}
-
 /**
  * Включает перехват настоящими маршрутами. Возвращает причину пропуска, если стенд не может
  * держать перехват (служба недоступна, ядро остановлено или конфликт ядер), иначе null.
@@ -251,55 +214,7 @@ async function enableTakeover(page: Page): Promise<string | null> {
   }
   if (v.blocks.includes('draft')) await resetDraft(page);
 
-  let changed = false;
-  // Секции Mihomo берутся только вместе с профилем (mihomo_with_profile): DNS-секция приходит
-  // со взятием маршрутизации ниже.
-  const mihomoSection = v.activeKernel === 'mihomo' && v.blocks.includes('section');
-  if (v.blocks.includes('section') && !mihomoSection) {
-    const take = await api(page, 'POST', '/api/configlayer/cores/take', {
-      revision: await draftRevision(page),
-      kernel: v.activeKernel,
-      sections: ['dns'],
-      ack_comments: true
-    });
-    expect(take.status, `взятие секции DNS ${v.activeKernel}: ${JSON.stringify(take.data)}`).toBe(
-      200
-    );
-    prep.sectionKernel = v.activeKernel;
-    changed = true;
-  }
-  if (v.blocks.includes('group') || v.blocks.includes('routing') || mihomoSection) {
-    if (!(await routingInfo(page)).desired) {
-      const take = await api(page, 'POST', '/api/configlayer/routing/take', {
-        revision: (await routingInfo(page)).revision
-      });
-      expect(take.status, `взятие маршрутизации: ${JSON.stringify(take.data)}`).toBe(200);
-      prep.routingTaken = true;
-    }
-    // Группа «Прокси» уже может быть в слое (штатная или от другого сценария): тогда она и
-    // служит целью, а уборка её не трогает — prep.groupId остаётся пустым.
-    if (!(await routingInfo(page)).groupNames.includes(DEFAULT_GROUP)) {
-      const saved = await api(page, 'POST', '/api/configlayer/routing/groups/save', {
-        revision: (await routingInfo(page)).revision,
-        group: {
-          id: '',
-          name: DEFAULT_GROUP,
-          mode: 'manual',
-          sources: { all: true, ids: [] },
-          include: [],
-          exclude: [],
-          regex: false,
-          picks: [],
-          members: [{ kind: 'direct' }],
-          reserve: ''
-        }
-      });
-      expect(saved.status, `группа-цель перехвата: ${JSON.stringify(saved.data)}`).toBe(200);
-      prep.groupId = String((saved.data?.group as { id?: string } | undefined)?.id ?? '');
-    }
-    changed = true;
-  }
-  if (changed) await applyAndWait(page);
+  await ensureDnsTarget(page, prep);
 
   v = await dnsView(page);
   expect(v.blocks, 'блокировки включения после подготовки').toEqual([]);
@@ -333,35 +248,8 @@ async function cleanupTakeover(page: Page): Promise<void> {
       .poll(async () => (await dnsView(page)).state, { timeout: T.save * 4, intervals: [2000] })
       .toBe('off');
   }
-  if (prep.groupId) {
-    const del = await api(page, 'POST', '/api/configlayer/routing/groups/delete', {
-      revision: (await routingInfo(page)).revision,
-      id: prep.groupId,
-      cascade: { mode: '' }
-    });
-    expect(del.status, 'удаление группы-цели').toBe(200);
-  }
-  if (prep.routingTaken) {
-    const rel = await api(page, 'POST', '/api/configlayer/routing/release', {
-      revision: (await routingInfo(page)).revision
-    });
-    expect(rel.status, 'возврат маршрутизации').toBe(200);
-  }
-  if (prep.sectionKernel) {
-    const rel = await api(page, 'POST', '/api/configlayer/cores/release', {
-      revision: await draftRevision(page),
-      kernel: prep.sectionKernel,
-      section: 'dns'
-    });
-    expect(rel.status, 'возврат секции DNS').toBe(200);
-  }
-  const st = await api(page, 'GET', '/api/configlayer/state');
-  if (Number(st.data?.draft_changes ?? 0) > 0) await applyAndWait(page);
-  await resetDraft(page);
+  await releaseDnsTarget(page, prep);
   prep.enabled = false;
-  prep.groupId = '';
-  prep.routingTaken = false;
-  prep.sectionKernel = '';
 }
 
 /** Открывает Настройки и снимает флаг слоя: диалог подтверждения на экране. */

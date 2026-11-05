@@ -3,6 +3,12 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
+import {
+  emptyDnsTargetPrep,
+  ensureDnsTarget,
+  releaseDnsTarget,
+  type DnsTargetPrep
+} from './lib/dns-target';
 import { CORE_TAG, knownFailure } from './lib/known';
 import {
   addToDraft,
@@ -904,14 +910,6 @@ async function runningKernel(page: Page): Promise<Kernel | ''> {
   return running.length === 1 ? running[0] : '';
 }
 
-/** Владелец DNS-секции ядра: panel, xkeen, user или none. */
-async function dnsSectionOwner(page: Page, kernel: Kernel): Promise<string> {
-  const view = await api(page, 'GET', `/api/configlayer/cores?kernel=${kernel}`);
-  expect(view.status, `GET /api/configlayer/cores?kernel=${kernel}`).toBe(200);
-  const sections = (view.data?.sections ?? []) as { id?: string; owner?: string }[];
-  return String(sections.find((s) => s.id === 'dns')?.owner ?? '');
-}
-
 /** Идентификаторы записей «Моих узлов» в черновике. */
 async function myEntryIds(page: Page): Promise<string[]> {
   const view = await api(page, 'GET', '/api/configlayer/sources');
@@ -937,8 +935,7 @@ const flow = {
   skip: 'подготовка не выполнялась',
   prepared: false,
   kernel: 'xray' as Kernel,
-  routingWasDesired: false,
-  sectionWasPanel: false,
+  target: emptyDnsTargetPrep() as DnsTargetPrep,
   params: { group: '', zones: [] } as DnsParamsValue,
   myBefore: [] as string[],
   deadGroup: '',
@@ -965,31 +962,8 @@ test.describe('dns-flow', () => {
       }
       flow.params = first.draft_params ?? { group: '', zones: [] };
       flow.myBefore = await myEntryIds(page);
-      flow.routingWasDesired = (await routingState(page)).desired;
-      flow.sectionWasPanel = (await dnsSectionOwner(page, kernel)) === 'panel';
       flow.prepared = true;
-
-      if (!flow.routingWasDesired) {
-        const take = await api(page, 'POST', '/api/configlayer/routing/take', {
-          revision: (await routingState(page)).revision
-        });
-        if (take.status !== 200) {
-          flow.skip = `маршрутизация не берётся в панель: ${take.status} ${take.data?.code ?? ''}`;
-          return;
-        }
-      }
-      if (!flow.sectionWasPanel) {
-        const take = await api(page, 'POST', '/api/configlayer/cores/take', {
-          revision: (await layerProbe(page)).revision,
-          kernel,
-          sections: ['dns'],
-          ack_comments: true
-        });
-        if (take.status !== 200) {
-          flow.skip = `DNS-секция ядра не берётся в панель: ${take.status} ${take.data?.code ?? ''}`;
-          return;
-        }
-      }
+      await ensureDnsTarget(page, flow.target);
       if ((await layerProbe(page)).changes > 0) await applyAndWait(page);
 
       const ready = await dnsFull(page);
@@ -1027,18 +1001,7 @@ test.describe('dns-flow', () => {
           entry_id: entryId
         });
       }
-      if (!flow.sectionWasPanel && (await dnsSectionOwner(page, flow.kernel)) === 'panel') {
-        await api(page, 'POST', '/api/configlayer/cores/release', {
-          revision: (await layerProbe(page)).revision,
-          kernel: flow.kernel,
-          section: 'dns'
-        });
-      }
-      if (!flow.routingWasDesired) {
-        await api(page, 'POST', '/api/configlayer/routing/release', {
-          revision: (await routingState(page)).revision
-        });
-      }
+      await releaseDnsTarget(page, flow.target);
       if ((await layerProbe(page)).changes > 0) await applyAndWait(page);
       await resetDraft(page);
     });

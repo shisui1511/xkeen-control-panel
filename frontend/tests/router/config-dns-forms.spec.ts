@@ -3,6 +3,12 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
+import {
+  emptyDnsTargetPrep,
+  ensureDnsTarget,
+  releaseDnsTarget,
+  type DnsTargetPrep
+} from './lib/dns-target';
 import { CORE_TAG } from './lib/known';
 import { api, layerFlag, randomPort, resetDraft, withPanel } from './lib/nodes-api';
 
@@ -480,12 +486,6 @@ async function applyDraft(page: Page): Promise<void> {
     .toBe(true);
 }
 
-async function routingView(page: Page): Promise<{ revision: number; desired: boolean }> {
-  const view = await api(page, 'GET', '/api/configlayer/routing');
-  expect(view.status, 'GET /api/configlayer/routing').toBe(200);
-  return { revision: Number(view.data?.revision ?? 0), desired: view.data?.desired === true };
-}
-
 /** Единственное запущенное ядро; оба или ни одного — пусто. */
 async function onlyRunning(page: Page): Promise<Kernel | ''> {
   const caps = await api(page, 'GET', '/api/capabilities');
@@ -559,8 +559,7 @@ async function unfold(page: Page, kernel: Kernel): Promise<void> {
 const takeover = {
   skip: 'подготовка не выполнялась',
   kernel: 'xray' as Kernel,
-  routingTaken: false,
-  sectionTaken: false
+  target: emptyDnsTargetPrep() as DnsTargetPrep
 };
 
 test.describe('dns-forms-takeover', () => {
@@ -578,30 +577,7 @@ test.describe('dns-forms-takeover', () => {
         takeover.skip = `перехват в состоянии ${(await dnsView(page)).state}`;
         return;
       }
-      if (!(await routingView(page)).desired) {
-        const take = await api(page, 'POST', '/api/configlayer/routing/take', {
-          revision: (await routingView(page)).revision
-        });
-        if (take.status !== 200) {
-          takeover.skip = 'маршрутизация не берётся в панель';
-          return;
-        }
-        takeover.routingTaken = true;
-      }
-      if (kernel === 'xray' && (await takeoverSection(page, kernel)).owner !== 'panel') {
-        const st = await api(page, 'GET', '/api/configlayer/state');
-        const take = await api(page, 'POST', '/api/configlayer/cores/take', {
-          revision: Number(st.data?.draft_revision ?? 0),
-          kernel,
-          sections: [SEC],
-          ack_comments: true
-        });
-        if (take.status !== 200) {
-          takeover.skip = 'DNS-секция Xray не берётся в панель';
-          return;
-        }
-        takeover.sectionTaken = true;
-      }
+      await ensureDnsTarget(page, takeover.target);
       if ((await draftState(page)).changes > 0) await applyDraft(page);
 
       const ready = await dnsView(page);
@@ -629,19 +605,7 @@ test.describe('dns-forms-takeover', () => {
     await withPanel(browser, async (page) => {
       await takeoverOff(page);
       await resetDraft(page);
-      if (takeover.sectionTaken && (await takeoverSection(page, 'xray')).owner === 'panel') {
-        const st = await api(page, 'GET', '/api/configlayer/state');
-        await api(page, 'POST', '/api/configlayer/cores/release', {
-          revision: Number(st.data?.draft_revision ?? 0),
-          kernel: 'xray',
-          section: SEC
-        });
-      }
-      if (takeover.routingTaken) {
-        await api(page, 'POST', '/api/configlayer/routing/release', {
-          revision: (await routingView(page)).revision
-        });
-      }
+      await releaseDnsTarget(page, takeover.target);
       if ((await draftState(page)).changes > 0) await applyDraft(page);
       await resetDraft(page);
     });
