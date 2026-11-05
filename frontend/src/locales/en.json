@@ -4372,6 +4372,7 @@
   "cfg.dns.fail_rollback_failed": "Rollback did not complete: {reason}. Router DNS may not respond as expected. Check resolution and disable interception if needed.",
   "cfg.dns.fail_output": "Core output",
   "cfg.dns.load_error": "Could not load the interception state. Check the connection to the router and try again.",
+  "cfg.dns.stale_error": "Could not refresh the interception state: showing the last one received.",
   "cfg.dns.group_label": "Group for DNS queries",
   "cfg.dns.group_hint": "All DNS servers go through this group, including the ones you added. If the group does not respond, DNS stays silent: queries never go out directly.",
   "cfg.dns.group_missing": "The “{name}” group was deleted: choose another one.",

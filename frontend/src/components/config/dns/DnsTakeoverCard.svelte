@@ -1,5 +1,11 @@
 <script module lang="ts">
-  import { dnsTakeover as dnsTakeoverStore } from '../../../lib/configDns';
+  import { get } from 'svelte/store';
+  import { t as i18n } from '../../../i18n';
+  import { showToast as toast } from '../../../stores';
+  import {
+    dnsTakeover as dnsTakeoverStore,
+    dnsFailureText as failureText
+  } from '../../../lib/configDns';
 
   // Отметка «сбой просмотрен» переживает перемонтирование карточки при смене ядра: ключ
   // сбоя, после которого пользователь нажал действие карточки. Новая транзакция снимает её
@@ -15,10 +21,45 @@
   dnsTakeoverStore.subscribe((v) => {
     if (v?.state === 'applying' && failureSeen.key !== '') failureSeen.key = '';
   });
+
+  // Выключение идёт в фоне: итог (тост) показывается, когда состояние станет off или придёт
+  // сбой. Слежение живёт в модуле: смена вкладки ядра или уход со страницы (карточка
+  // размонтирована) тост не теряют. Вид, бывший в сторе до запроса, итогом не считается;
+  // вид сброшен (слежение за перехватом снято) — итог неизвестен, тоста нет
+  const disableWatch = $state({ awaiting: false });
+  let offDisable: (() => void) | null = null;
+
+  function watchDisable(): void {
+    offDisable?.();
+    disableWatch.awaiting = true;
+    let first = true;
+    const finish = (): void => {
+      disableWatch.awaiting = false;
+      queueMicrotask(() => {
+        offDisable?.();
+        offDisable = null;
+      });
+    };
+    offDisable = dnsTakeoverStore.subscribe((v) => {
+      if (first) {
+        first = false;
+        return;
+      }
+      if (!disableWatch.awaiting) return;
+      if (v === null) {
+        finish();
+      } else if (v.failure) {
+        finish();
+        toast('error', failureText(v.failure), 8000);
+      } else if (v.state === 'off') {
+        finish();
+        toast('success', get(i18n)('cfg.dns.toast_disabled'));
+      }
+    });
+  }
 </script>
 
 <script lang="ts">
-  import { onDestroy } from 'svelte';
   import { createSubscriber } from 'svelte/reactivity';
   import { t } from '../../../i18n';
   import { showConfirm, showToast } from '../../../stores';
@@ -34,6 +75,7 @@
   import {
     dnsTakeover,
     dnsLoadError,
+    dnsStale,
     dnsClockOffset,
     loadDns,
     enableDns,
@@ -41,7 +83,6 @@
     saveDnsParams,
     DEFAULT_DNS_GROUP_NAME,
     dnsActiveKernel,
-    dnsFailureText,
     dnsKernelTitle,
     dnsRequestErrorText,
     dnsWindowSeconds,
@@ -102,9 +143,6 @@
   const dnsState = $derived<DnsState | null>(view?.state ?? null);
 
   let pending = $state(false);
-  // Выключение идёт в фоне: итог (тост) показывается, когда состояние станет off или
-  // придёт сбой
-  let awaitingDisable = $state(false);
 
   const stateClass = $derived.by(() => {
     switch (dnsState) {
@@ -209,7 +247,7 @@
 
   const enableBlocked = $derived(pending || (view?.blocks.length ?? 1) > 0);
   const disableBlocked = $derived(
-    pending || awaitingDisable || (view?.blocks.some((b) => DISABLE_BLOCKS.has(b)) ?? true)
+    pending || disableWatch.awaiting || (view?.blocks.some((b) => DISABLE_BLOCKS.has(b)) ?? true)
   );
 
   const showKernelBadge = $derived(
@@ -452,39 +490,6 @@
       pending = false;
     }
   }
-
-  // Итог выключения: состояние off — тост успеха, сбой — текст по коду. Вид, бывший в сторе
-  // до запроса, итогом не считается
-  let offDisable: (() => void) | null = null;
-
-  function watchDisable(): void {
-    offDisable?.();
-    awaitingDisable = true;
-    let first = true;
-    const finish = (): void => {
-      awaitingDisable = false;
-      queueMicrotask(() => {
-        offDisable?.();
-        offDisable = null;
-      });
-    };
-    offDisable = dnsTakeover.subscribe((v) => {
-      if (first) {
-        first = false;
-        return;
-      }
-      if (!awaitingDisable || !v) return;
-      if (v.failure) {
-        finish();
-        showToast('error', dnsFailureText(v.failure), 8000);
-      } else if (v.state === 'off') {
-        finish();
-        showToast('success', $t('cfg.dns.toast_disabled'));
-      }
-    });
-  }
-
-  onDestroy(() => offDisable?.());
 </script>
 
 <section class="card dns-card" aria-labelledby={titleId} data-testid="dns-takeover-card">
@@ -523,6 +528,22 @@
       <Skeleton type="rect" height="56px" />
     </div>
   {:else}
+    {#if $dnsStale}
+      <p class="warning-text dns-stale" role="status" data-testid="dns-stale">
+        <Icon name="warning" size={14} class="icon-first-line" />
+        <span>
+          {$t('cfg.dns.stale_error')}
+          <button
+            type="button"
+            class="dns-link"
+            data-testid="dns-stale-retry"
+            onclick={() => void loadDns()}
+          >
+            {$t('cfg.load_error_retry')}
+          </button>
+        </span>
+      </p>
+    {/if}
     {#if otherKernel}
       <p class="dns-caption" role="status" data-testid="dns-other-kernel">
         {$t('cfg.dns.other_kernel', {
@@ -886,6 +907,16 @@
   }
 
   .dns-block-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .dns-stale {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-1);
+    margin: 0;
+    line-height: 1.5;
     min-width: 0;
     overflow-wrap: anywhere;
   }

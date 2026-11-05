@@ -150,6 +150,8 @@ export interface DnsStarted {
 export const dnsTakeover = writable<DnsView | null>(null);
 /** Первая загрузка состояния не удалась (прежний вид при сбое перечитывания остаётся). */
 export const dnsLoadError = writable(false);
+/** Перечитывание не удалось при уже загруженном виде: на экране последнее полученное. */
+export const dnsStale = writable(false);
 
 /**
  * Длина окна подтверждения по умолчанию, секунды: совпадает с windowDuration на сервере
@@ -211,6 +213,7 @@ function setView(raw: DnsView): DnsView {
   loadSeq++;
   dnsTakeover.set(view);
   dnsLoadError.set(false);
+  dnsStale.set(false);
   return view;
 }
 
@@ -224,8 +227,10 @@ export async function loadDns(): Promise<void> {
     setView(raw);
   } catch {
     if (mine !== loadSeq) return;
-    // Прежний вид остаётся на экране; ошибка видна, только пока вида ещё нет
+    // Прежний вид остаётся на экране: без вида — ошибка загрузки, с видом — признак, что
+    // показано последнее полученное
     if (get(dnsTakeover) === null) dnsLoadError.set(true);
+    else dnsStale.set(true);
   }
 }
 
@@ -349,6 +354,7 @@ function resetState(): void {
   loadSeq++;
   dnsTakeover.set(null);
   dnsLoadError.set(false);
+  dnsStale.set(false);
 }
 
 /**
