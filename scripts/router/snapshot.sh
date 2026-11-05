@@ -260,14 +260,15 @@ base_core() { grep '^core=' "$BASE/kernel.txt" | head -1 | cut -d= -f2; }
 # сценария, оставил бы стенд без DNS. Команды ndmc — только константные строки; снимок
 # читает и возвращает только running-config, сохранённую конфигурацию прошивки не трогает.
 
-# on — в running-config есть строка «opkg dns-override» (без «no»), off — нет;
+# on — в running-config есть строка «opkg dns-override» или «dns-override» внутри
+# раздела opkg (без «no»; те же две формы читает панель), off — нет;
 # na — на устройстве нет ndmc; err — ndmc не ответил
 fw_override_now() {
   command -v ndmc >/dev/null 2>&1 || { say na; return 0; }
   fw_cfg=$(ndmc -c "show running-config" 2>/dev/null | tr -d '\r')
   if [ -z "$fw_cfg" ]; then
     say err
-  elif printf '%s\n' "$fw_cfg" | grep -Eq '^[[:space:]]*opkg dns-override[[:space:]]*$'; then
+  elif printf '%s\n' "$fw_cfg" | grep -Eq '^[[:space:]]*(opkg[[:space:]]+)?dns-override[[:space:]]*$'; then
     say on
   else
     say off
