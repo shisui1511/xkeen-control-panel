@@ -91,6 +91,10 @@ type Service struct {
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 	stopOnce sync.Once
+	// stopMu согласует wg.Add из обработчиков и хуков с Stop → wg.Wait: после
+	// Stop новые горутины не принимаются (spawn).
+	stopMu   sync.Mutex
+	stopping bool
 
 	// mu защищает st — состояние на диске (последняя проверка, история, окно) —
 	// и таймер окна: winStop — канал остановки идущей горутины-таймера (nil —
@@ -195,8 +199,36 @@ func (s *Service) Start() {
 // решение о DNS принимает старт панели, а не её остановка. Повторный вызов
 // безопасен.
 func (s *Service) Stop() {
-	s.stopOnce.Do(s.cancel)
+	s.stopOnce.Do(func() {
+		s.stopMu.Lock()
+		s.stopping = true
+		s.stopMu.Unlock()
+		s.cancel()
+	})
 	s.wg.Wait()
+}
+
+// spawn запускает горутину службы под wg. false — служба останавливается: горутина
+// не запущена, вызывающий снимает всё, что успел занять. Add и Stop сериализованы
+// stopMu, поэтому Add не гоняется с Wait.
+func (s *Service) spawn(fn func()) bool {
+	s.stopMu.Lock()
+	if s.stopping {
+		s.stopMu.Unlock()
+		return false
+	}
+	s.wg.Add(1)
+	s.stopMu.Unlock()
+	go func() {
+		defer s.wg.Done()
+		fn()
+	}()
+	return true
+}
+
+// errStopping — служба останавливается, действие не принято.
+func errStopping() error {
+	return &Error{Code: CodeBusy, Detail: "служба останавливается"}
 }
 
 // cachedServiceDomain — служебный домен роутера из кэша, без вызова ndmc: им

@@ -117,9 +117,9 @@ func (s *Service) armWindowTimer(deadline time.Time) {
 	}
 	s.winStop = stop
 	s.mu.Unlock()
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	// Служба останавливается — таймер не нужен: окно остаётся в файле, старт
+	// панели откатит его.
+	s.spawn(func() {
 		t := time.NewTimer(max(deadline.Sub(s.now()), 0))
 		defer t.Stop()
 		select {
@@ -134,7 +134,7 @@ func (s *Service) armWindowTimer(deadline time.Time) {
 			return
 		}
 		s.rollbackWindowInOp(w, reasonTimeout)
-	}()
+	})
 }
 
 // claimWindow забирает открытое окно под откат: флаг отката ставится, таймер
@@ -215,11 +215,10 @@ func (s *Service) Rollback(ctx context.Context) error {
 		return errCode(CodeNoWindow)
 	}
 	s.clearOutcome()
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.rollbackWindowInOp(w, reasonManual)
-	}()
+	if !s.spawn(func() { s.rollbackWindowInOp(w, reasonManual) }) {
+		s.releaseClaim()
+		return errStopping()
+	}
 	return nil
 }
 

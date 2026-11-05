@@ -284,12 +284,13 @@ func (s *Service) Enable(ctx context.Context) error {
 	}
 	s.clearOutcome()
 	ctx = context.WithoutCancel(ctx)
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	if !s.spawn(func() {
 		defer s.endOp()
 		s.runEnable(ctx, pl)
-	}()
+	}) {
+		s.endOp()
+		return errStopping()
+	}
 	return nil
 }
 
@@ -730,12 +731,13 @@ func (s *Service) Disable(ctx context.Context) error {
 	}
 	s.clearOutcome()
 	ctx = context.WithoutCancel(ctx)
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	if !s.spawn(func() {
 		defer s.endOp()
 		s.runDisable(ctx, pl)
-	}()
+	}) {
+		s.endOp()
+		return errStopping()
+	}
 	return nil
 }
 

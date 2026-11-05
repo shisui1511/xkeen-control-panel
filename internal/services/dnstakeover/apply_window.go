@@ -145,11 +145,7 @@ func (s *Service) AfterApply(_ context.Context, info configlayer.AfterApplyInfo)
 		return
 	}
 	post := st.Applied
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.checkApply(*p, post)
-	}()
+	s.spawn(func() { s.checkApply(*p, post) })
 }
 
 // checkApply — проба D-29 после «Применить» операцией службы apply_check:

@@ -209,12 +209,16 @@ func (s *Service) AroundKernelStop(ctx context.Context, kernel string, stop func
 	s.stepResult(stepRelease, relErr == nil)
 
 	handed = true
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	if !s.spawn(func() {
 		defer s.endOp()
 		s.finishKernelStop(context.WithoutCancel(ctx), liveKernel, w, hasWindow, relErr)
-	}()
+	}) {
+		// Служба останавливается: окно остаётся в файле, старт панели откатит его.
+		handed = false
+		if hasWindow {
+			s.releaseClaim()
+		}
+	}
 	return nil
 }
 
@@ -309,9 +313,7 @@ func (s *Service) AfterKernelStart(ctx context.Context) {
 		return
 	}
 	ctx = context.WithoutCancel(ctx)
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.spawn(func() {
 		if err := s.awaitLifecycle(); err != nil {
 			return
 		}
@@ -322,7 +324,7 @@ func (s *Service) AfterKernelStart(ctx context.Context) {
 		if err := s.restoreDesired(ctx); err != nil {
 			log.Printf("dnstakeover: возврат перехвата после запуска ядра: %v", err)
 		}
-	}()
+	})
 }
 
 // RestoreDesired — возврат желаемого перехвата (сторож и сверка на старте, 148-23,
@@ -552,9 +554,7 @@ func (s *Service) TransferToKernel(ctx context.Context, from, to string) {
 		return
 	}
 	ctx = context.WithoutCancel(ctx)
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.spawn(func() {
 		if err := s.awaitLifecycle(); err != nil {
 			return
 		}
@@ -581,7 +581,7 @@ func (s *Service) TransferToKernel(ctx context.Context, from, to string) {
 		}
 		defer s.endOp()
 		s.runTransfer(ctx, prev, on, to)
-	}()
+	})
 }
 
 // runTransfer — перенос перехвата с ядра prev на to внутри операции службы; on —
