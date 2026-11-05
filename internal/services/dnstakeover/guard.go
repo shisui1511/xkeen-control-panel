@@ -71,8 +71,10 @@ var (
 	guardRestartSteps = []string{stepRestart, stepProbe}
 	// guardReleaseSteps — шаги возврата DNS прошивке сторожем.
 	guardReleaseSteps = []string{stepRelease, stepApply}
-	// guardStaleSteps — шаги повторной записи файлов без слушателя сторожем.
-	guardStaleSteps = []string{stepApply}
+	// guardStaleSteps — шаги повторной записи файлов без слушателя сторожем. Шаг
+	// release нужен карточке: по нему она показывает возврат DNS прошивке, а не
+	// включение. Override к этому моменту уже снят, шаг сразу done.
+	guardStaleSteps = []string{stepRelease, stepApply}
 )
 
 // guardState — память цикла сторожа; живёт только в его горутине.
@@ -266,6 +268,7 @@ func (s *Service) guardStaleListener(ctx context.Context, g *guardState, kernel 
 	}
 	defer s.endOp()
 	log.Printf("dnstakeover: сторож: override снят, а в файлах %s слушатель :53 — запись без слушателя", kernel)
+	s.setStep(stepRelease, statusDone)
 	s.setStep(stepApply, statusRunning)
 	err := s.writeWithoutListener(hctx, kernel)
 	s.stepResult(stepApply, err == nil)
