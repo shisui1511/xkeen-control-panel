@@ -168,6 +168,16 @@ func (s *Service) Start() {
 	// Уведомления слоя живут в памяти: исход без пользователя возвращается в
 	// список после перезапуска панели (D-28).
 	s.d.Layer.SetNotices(noticePrefix, outcomeNotices(st.Outcome))
+	// Окно и прерванный проход забираются сразу, до прогрева прошивки (ndmc отвечает
+	// до 3 с): обработчики уже подключены, и за это время «Оставить» подтвердило бы
+	// окно, которое по D-07 должно откатиться, а новое включение — записало бы
+	// снимок, который старт принял бы за прерванный.
+	w, hasWindow := s.claimWindow(nil)
+	var pend pendingTxn
+	hasPend := false
+	if !hasWindow {
+		pend, hasPend = s.claimPendingTxn()
+	}
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -175,13 +185,17 @@ func (s *Service) Start() {
 		s.domain.Store(s.fw.ServiceDomain())
 		// Проверку черновика с известным уже служебным доменом нужно пересчитать.
 		s.d.Layer.InvalidateChecks()
-		if w, ok := s.claimWindow(nil); ok {
+		if hasWindow {
 			log.Printf("dnstakeover: окно подтверждения %s не закрыто до перезапуска панели — откат", w.Kind)
 			s.rollbackWindowInOp(w, reasonPanelRestart)
 		}
 		// Проход включения, возврата или переноса, прерванный остановкой панели до
 		// окна (обычно посреди пробы), не подтверждён: откат как у окна (D-07).
-		s.rollbackPendingTxn()
+		if hasPend {
+			s.runPendingTxn(pend)
+		} else {
+			s.rollbackPendingTxn()
+		}
 		// Сверка прошивки и состояния (D-16, R3) — после отката окна, до сторожа.
 		s.reconcileOnStart(s.ctx)
 		if s.ctx.Err() != nil {

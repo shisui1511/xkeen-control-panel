@@ -256,33 +256,54 @@ func (s *Service) rollbackWindowInOp(w windowState, reason string) {
 // слушателя), перенос — как окно kernel_switch. Перехват, желаемый до прохода
 // (возврат или включение из ожидания), остаётся желаемым и ждёт (probe).
 func (s *Service) rollbackPendingTxn() {
+	if p, ok := s.claimPendingTxn(); ok {
+		s.runPendingTxn(p)
+	}
+}
+
+// pendingTxn — забранный под откат прерванный проход.
+type pendingTxn struct {
+	snap txnSnapshot
+	// kind — вид отката: kindEnable или kindKernelSwitch.
+	kind string
+	// wasDesired — перехват был желаем до прохода (возврат, включение из ожидания).
+	wasDesired bool
+}
+
+// claimPendingTxn забирает снимок прерванного прохода под откат (winRolling);
+// false — откатывать нечего или идёт откат окна.
+func (s *Service) claimPendingTxn() (pendingTxn, bool) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.st.Snapshot == nil || !s.st.Snapshot.InFlight || s.st.Window != nil || s.winRolling {
-		s.mu.Unlock()
-		return
+		return pendingTxn{}, false
 	}
 	snap := *s.st.Snapshot
 	snap.InFlight = false
-	wasDesired := s.st.Desired && snap.Kind != kindKernelSwitch
-	s.winRolling = true
-	s.mu.Unlock()
-	kind := kindEnable
+	p := pendingTxn{snap: snap, kind: kindEnable, wasDesired: s.st.Desired && snap.Kind != kindKernelSwitch}
 	if snap.Kind == kindKernelSwitch {
-		kind = kindKernelSwitch
+		p.kind = kindKernelSwitch
 	}
-	log.Printf("dnstakeover: проход перехвата (%s) прерван остановкой панели до окна подтверждения — откат", kind)
-	s.rollbackWindowInOp(windowState{Kind: kind, Snapshot: snap}, reasonPanelRestart)
-	if s.ctx.Err() != nil || !wasDesired {
+	s.winRolling = true
+	return p, true
+}
+
+// runPendingTxn откатывает забранный проход (claimPendingTxn).
+func (s *Service) runPendingTxn(p pendingTxn) {
+	snap := p.snap
+	log.Printf("dnstakeover: проход перехвата (%s) прерван остановкой панели до окна подтверждения — откат", p.kind)
+	s.rollbackWindowInOp(windowState{Kind: p.kind, Snapshot: snap}, reasonPanelRestart)
+	if s.ctx.Err() != nil || !p.wasDesired {
 		return
 	}
-	if err := s.update(func(p *persisted) {
-		if p.Desired {
+	if err := s.update(func(p2 *persisted) {
+		if p2.Desired {
 			return
 		}
-		p.Desired = true
-		p.Kernel = snap.Kernel
-		p.OverrideBefore = snap.OverrideBefore
-		p.WaitingReason = waitingProbe
+		p2.Desired = true
+		p2.Kernel = snap.Kernel
+		p2.OverrideBefore = snap.OverrideBefore
+		p2.WaitingReason = waitingProbe
 	}); err != nil {
 		log.Printf("dnstakeover: %v", err)
 	}
