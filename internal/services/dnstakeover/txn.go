@@ -1133,7 +1133,7 @@ func kernelParam(kernel string) map[string]string {
 // portBusy — в выводе ядра признак занятого адреса.
 func portBusy(msg string) bool {
 	low := strings.ToLower(msg)
-	return strings.Contains(low, "address already in use") || strings.Contains(low, "bind")
+	return strings.Contains(low, "address already in use") || strings.Contains(low, "bind: address")
 }
 
 // --- проба ------------------------------------------------------------------
