@@ -333,7 +333,9 @@ func (s *Service) releaseClaim() {
 //     прошивке, состояние waiting с причиной probe (D-26). DNS уже у прошивки
 //     (причина ожидания задана) — откат к снимку без слушателя и без пробы;
 //   - kernel_switch — DNS прошивке, файлы нового ядра без слушателя, ядро
-//     остаётся новым (D-15); desired=false.
+//     остаётся новым (D-15), затем строка proxy_dns к значению до включения с
+//     перезапуском запущенного ядра, если строка менялась (releaseProxyLine);
+//     desired=false.
 //
 // Ошибка любого шага — failure rollback_failed, но override всё равно
 // возвращается. Остановка службы посреди отката оставляет окно в файле.
@@ -411,6 +413,11 @@ func (s *Service) rollbackWindow(ctx context.Context, w windowState, reason stri
 		s.stepResult(stepRelease, len(errs) == 0)
 		s.setStep(stepApply, statusRunning)
 		aerr := s.writeWithoutListener(hctx, kernel)
+		if aerr == nil && len(errs) == 0 {
+			// Перехват больше не желаем: строка proxy_dns возвращается к значению до
+			// включения, иначе прежнее перенаправление XKeen пропадает без следа.
+			aerr = s.releaseProxyLine(hctx)
+		}
 		note(aerr)
 		s.stepResult(stepApply, aerr == nil)
 	default:

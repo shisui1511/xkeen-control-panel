@@ -745,8 +745,8 @@ func (s *Service) runTransfer(ctx context.Context, prev string, on bool, to stri
 
 // dropTransfer — перенос невозможен (DNS-секцию нового ядра ведёт не панель,
 // группы-цели нет): DNS роутера прошивке (override к значению до включения, файлы
-// прежнего ядра без слушателя, если живые данные перехвата ещё включены), перехват
-// не желаем, сбой с кодом.
+// прежнего ядра без слушателя, если живые данные перехвата ещё включены, строка
+// proxy_dns к значению до включения), перехват не желаем, сбой с кодом.
 func (s *Service) dropTransfer(ctx context.Context, prev string, on bool, to string, overrideBefore bool, fail *Failure) {
 	s.replaceSteps([]string{stepRelease, stepApply})
 	hctx, cancel := context.WithTimeout(ctx, 4*hookTimeout)
@@ -769,18 +769,31 @@ func (s *Service) dropTransfer(ctx context.Context, prev string, on bool, to str
 	} else {
 		s.setStep(stepApply, statusSkipped)
 	}
+	if len(errs) == 0 {
+		// Перехват не желаем: строка proxy_dns возвращается к значению до включения.
+		if err := s.releaseProxyLine(hctx); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
 	s.endTransfer(to, fail, errs)
 }
 
 // rollbackTransfer — сбой прохода или пробы переноса: DNS роутера прошивке и
-// файлы нового ядра без слушателя, ядро остаётся новым (D-15) — те же шаги, что
-// у отката окна kernel_switch.
+// файлы нового ядра без слушателя, ядро остаётся новым (D-15), затем строка
+// proxy_dns к значению до включения — те же шаги, что у отката окна kernel_switch.
 func (s *Service) rollbackTransfer(ctx context.Context, to string, overrideBefore bool, fail *Failure) {
 	hctx, cancel := context.WithTimeout(ctx, 4*hookTimeout)
 	defer cancel()
 	var errs []string
 	if err := s.releaseToFirmwareDNS(hctx, to, overrideBefore); err != nil {
 		errs = append(errs, err.Error())
+	}
+	if len(errs) == 0 {
+		// Перехват не желаем: строка proxy_dns возвращается к значению до включения
+		// (WR-04), иначе прежнее перенаправление XKeen пропадает без следа.
+		if err := s.releaseProxyLine(hctx); err != nil {
+			errs = append(errs, err.Error())
+		}
 	}
 	s.endTransfer(to, fail, errs)
 }

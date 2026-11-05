@@ -274,6 +274,17 @@ func (s *Service) guardStaleListener(ctx context.Context, g *guardState, kernel 
 	s.stepResult(stepApply, err == nil)
 	if err != nil {
 		log.Printf("dnstakeover: сторож: файлы %s без слушателя не записаны: %v", kernel, err)
+		return true
+	}
+	s.mu.Lock()
+	released := !s.st.Desired
+	s.mu.Unlock()
+	if released {
+		// Перехват не желаем, а строка proxy_dns осталась невозвращённой (откат
+		// прервался до неё): теперь, когда файлы без слушателя, она возвращается.
+		if err := s.releaseProxyLine(hctx); err != nil {
+			log.Printf("dnstakeover: сторож: строка proxy_dns не возвращена: %v", err)
+		}
 	}
 	return true
 }
@@ -373,7 +384,9 @@ func (s *Service) guardRecover(ctx context.Context, kernel string) (released boo
 // забирается: неподтверждённое включение или перенос не помнятся, неподтверждённое
 // «Применить» возвращается к снимку уже без слушателя. reasonWatchdog — перехват
 // остаётся желаемым, state waiting (watchdog); reasonKernelChanged — перехват не
-// желаем. Исход — recordOutcome (D-28): строка, уведомление dns_, история, тост.
+// желаем, а строка proxy_dns возвращается к значению до включения с перезапуском
+// запущенного ядра, если строка менялась (releaseProxyLine); так же при watchdog с
+// неподтверждённым окном включения или переноса. Исход — recordOutcome (D-28): строка, уведомление dns_, история, тост.
 func (s *Service) releaseToFirmware(ctx context.Context, kernel, reason, to string) {
 	hctx, cancel := context.WithTimeout(ctx, 4*hookTimeout)
 	defer cancel()
@@ -427,6 +440,14 @@ func (s *Service) releaseToFirmware(ctx context.Context, kernel, reason, to stri
 		p.Snapshot = nil
 	}); err != nil {
 		log.Printf("dnstakeover: %v", err)
+	}
+	if !keep && len(errs) == 0 {
+		// Перехват больше не желаем: строка proxy_dns возвращается к значению до
+		// включения (WR-04), иначе прежнее перенаправление XKeen пропадает без следа.
+		// Окно ещё забрано: новое действие над перехватом не вклинится в перезапуск.
+		if err := s.releaseProxyLine(hctx); err != nil {
+			errs = append(errs, err.Error())
+		}
 	}
 	if hasWindow {
 		s.releaseClaim()

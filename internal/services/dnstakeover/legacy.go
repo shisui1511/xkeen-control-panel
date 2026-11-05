@@ -148,9 +148,26 @@ func (s *Service) ReleaseForFlagOff(ctx context.Context) error {
 			return &Error{Code: f.Code, Params: f.Params, Detail: f.Detail}
 		}
 	}
-	changed, err := s.restoreProxyLine(ctx, proxyBefore)
+	if e := s.returnProxyLine(ctx, proxyBefore); e != nil {
+		return s.flagOffFailed(e.Code, e.Params, errors.New(e.Detail))
+	}
+	return nil
+}
+
+// returnProxyLine — общий помощник возврата строки proxy_dns: строка получает
+// значение want, и если она менялась (или прежний перезапуск не довели,
+// ProxyRestartPending), запущенное активное ядро перезапускается KernelApplier.
+// ApplyLocked: XKeen строит прежний перехват с :53 только при старте ядра,
+// остановленное ядро не запускается. Строка возвращена, перезапуск ещё впереди —
+// сбой между ними не теряется (ProxyRestartPending в файле). ProxyDNSBefore и
+// ProxyRestartPending снимаются только после успеха обоих шагов. Сбой — *Error:
+// generic (строка не прочитана или не записана) или restart_failed. Его зовут
+// выключение флага слоя и все пути, делающие перехват нежелаемым: откат переноса и
+// окна переноса, возврат DNS прошивке сторожем, сверка на старте.
+func (s *Service) returnProxyLine(ctx context.Context, want bool) *Error {
+	changed, err := s.restoreProxyLine(ctx, want)
 	if err != nil {
-		return s.flagOffFailed(CodeGeneric, nil, err)
+		return &Error{Code: CodeGeneric, Detail: truncateDetail(err.Error())}
 	}
 	if changed {
 		// Строка возвращена, перезапуск ещё впереди: сбой между ними не должен
@@ -164,10 +181,10 @@ func (s *Service) ReleaseForFlagOff(ctx context.Context) error {
 	s.mu.Unlock()
 	if kernel := s.d.Kernel.ActiveState().Kernel; restart && (kernel == configlayer.KernelXray || kernel == configlayer.KernelMihomo) {
 		if s.d.Applier == nil {
-			return s.flagOffFailed(CodeRestartFailed, kernelParam(kernel), errors.New("перезапуск ядра: KernelApplier не задан"))
+			return &Error{Code: CodeRestartFailed, Params: kernelParam(kernel), Detail: "перезапуск ядра: KernelApplier не задан"}
 		}
 		if err := s.restartConfirmed(ctx, kernel); err != nil {
-			return s.flagOffFailed(CodeRestartFailed, kernelParam(kernel), fmt.Errorf("перезапуск %s после возврата proxy_dns: %w", kernel, err))
+			return &Error{Code: CodeRestartFailed, Params: kernelParam(kernel), Detail: truncateDetail(fmt.Sprintf("перезапуск %s после возврата proxy_dns: %v", kernel, err))}
 		}
 	}
 	if err := s.update(func(p *persisted) {
@@ -175,6 +192,24 @@ func (s *Service) ReleaseForFlagOff(ctx context.Context) error {
 		p.ProxyRestartPending = false
 	}); err != nil {
 		log.Printf("dnstakeover: %v", err)
+	}
+	return nil
+}
+
+// releaseProxyLine возвращает строку proxy_dns к значению до включения перехвата
+// (ProxyDNSBefore из состояния службы), когда перехват становится нежелаемым вне
+// выключения флага слоя. Строка до включения не была включена — ничего. Вызывается
+// после того, как DNS у прошивки и файлы ядра без слушателя: перезапуск ядра строит
+// прежние правила XKeen с :53 только на таких файлах.
+func (s *Service) releaseProxyLine(ctx context.Context) error {
+	s.mu.Lock()
+	before := s.st.ProxyDNSBefore
+	s.mu.Unlock()
+	if !before {
+		return nil
+	}
+	if e := s.returnProxyLine(ctx, true); e != nil {
+		return errors.New(e.Detail)
 	}
 	return nil
 }

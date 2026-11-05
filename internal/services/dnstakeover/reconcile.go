@@ -113,7 +113,7 @@ func (s *Service) reconcileReboot(ctx context.Context, kernel string) {
 		// Ядро сменили мимо панели до её старта: DNS у прошивки (override уже
 		// снят), файлы прежнего ядра без слушателя; перехват не желаем.
 		s.setStep(stepRestart, statusSkipped)
-		s.reconcileKernelChanged(kernel, active.Kernel, errs)
+		s.reconcileKernelChanged(hctx, kernel, active.Kernel, errs)
 		return
 	case active.Conflict || s.kernelProcessRunning(kernel) || !wasRunning:
 		s.setStep(stepRestart, statusSkipped)
@@ -158,8 +158,10 @@ func (s *Service) reconcileReboot(ctx context.Context, kernel string) {
 }
 
 // reconcileKernelChanged — на старте панели активным оказалось другое ядро: DNS у
-// прошивки, перехват не желаем, исход kernel_changed (как у сторожа).
-func (s *Service) reconcileKernelChanged(from, to string, errs []string) {
+// прошивки, перехват не желаем, исход kernel_changed (как у сторожа); строка
+// proxy_dns возвращается к значению до включения, если файлы прежнего ядра
+// записаны без слушателя (releaseProxyLine).
+func (s *Service) reconcileKernelChanged(ctx context.Context, from, to string, errs []string) {
 	log.Printf("dnstakeover: сверка на старте: активное ядро %s вместо %s — перехват не возвращается", to, from)
 	if err := s.update(func(p *persisted) {
 		p.Desired = false
@@ -170,6 +172,11 @@ func (s *Service) reconcileKernelChanged(from, to string, errs []string) {
 		p.Snapshot = nil
 	}); err != nil {
 		log.Printf("dnstakeover: %v", err)
+	}
+	if len(errs) == 0 {
+		if err := s.releaseProxyLine(ctx); err != nil {
+			errs = append(errs, err.Error())
+		}
 	}
 	var fail *Failure
 	if len(errs) > 0 {
