@@ -146,12 +146,23 @@
     const input = e.currentTarget as HTMLInputElement;
     const enable = input.checked;
     if (!enable) {
+      // Чтение состояния перехвата — сетевой запрос: на это время переключатель неактивен
+      // и показывает спиннер, повторный клик не проходит
+      configLayerPending = true;
+      let dnsActive = false;
+      try {
+        dnsActive = await dnsTakeoverActive();
+      } catch {
+        dnsActive = false;
+      } finally {
+        configLayerPending = false;
+      }
       const confirmed = await showConfirm({
         variant: 'warning',
         title: $t('settings.config_layer_off_title'),
         message: $t('settings.config_layer_off_message'),
         consequence: $t('settings.config_layer_off_consequence'),
-        extra: (await dnsTakeoverActive())
+        extra: dnsActive
           ? { component: DnsFlagOffNote, props: { profilesAll: true } }
           : { component: DependentProfilesNote, props: { all: true } },
         confirmLabel: $t('settings.config_layer_off_ok')
