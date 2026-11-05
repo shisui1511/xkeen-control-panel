@@ -222,10 +222,17 @@ async function applyAndWait(page: Page): Promise<void> {
 }
 
 /** Ревизия и признак «маршрутизацию ведёт панель». */
-async function routingInfo(page: Page): Promise<{ revision: number; desired: boolean }> {
+async function routingInfo(
+  page: Page
+): Promise<{ revision: number; desired: boolean; groupNames: string[] }> {
   const view = await api(page, 'GET', '/api/configlayer/routing');
   expect(view.status, 'GET /api/configlayer/routing').toBe(200);
-  return { revision: Number(view.data?.revision ?? 0), desired: view.data?.desired === true };
+  const groups = Array.isArray(view.data?.groups) ? (view.data.groups as { name?: string }[]) : [];
+  return {
+    revision: Number(view.data?.revision ?? 0),
+    desired: view.data?.desired === true,
+    groupNames: groups.map((g) => String(g?.name ?? ''))
+  };
 }
 
 /**
@@ -269,23 +276,27 @@ async function enableTakeover(page: Page): Promise<string | null> {
       expect(take.status, `взятие маршрутизации: ${JSON.stringify(take.data)}`).toBe(200);
       prep.routingTaken = true;
     }
-    const saved = await api(page, 'POST', '/api/configlayer/routing/groups/save', {
-      revision: (await routingInfo(page)).revision,
-      group: {
-        id: '',
-        name: DEFAULT_GROUP,
-        mode: 'manual',
-        sources: { all: true, ids: [] },
-        include: [],
-        exclude: [],
-        regex: false,
-        picks: [],
-        members: [{ kind: 'direct' }],
-        reserve: ''
-      }
-    });
-    expect(saved.status, `группа-цель перехвата: ${JSON.stringify(saved.data)}`).toBe(200);
-    prep.groupId = String((saved.data?.group as { id?: string } | undefined)?.id ?? '');
+    // Группа «Прокси» уже может быть в слое (штатная или от другого сценария): тогда она и
+    // служит целью, а уборка её не трогает — prep.groupId остаётся пустым.
+    if (!(await routingInfo(page)).groupNames.includes(DEFAULT_GROUP)) {
+      const saved = await api(page, 'POST', '/api/configlayer/routing/groups/save', {
+        revision: (await routingInfo(page)).revision,
+        group: {
+          id: '',
+          name: DEFAULT_GROUP,
+          mode: 'manual',
+          sources: { all: true, ids: [] },
+          include: [],
+          exclude: [],
+          regex: false,
+          picks: [],
+          members: [{ kind: 'direct' }],
+          reserve: ''
+        }
+      });
+      expect(saved.status, `группа-цель перехвата: ${JSON.stringify(saved.data)}`).toBe(200);
+      prep.groupId = String((saved.data?.group as { id?: string } | undefined)?.id ?? '');
+    }
     changed = true;
   }
   if (changed) await applyAndWait(page);
