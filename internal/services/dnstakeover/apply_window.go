@@ -47,8 +47,8 @@ type pendingApply struct {
 // BeforeApply — хук слоя (Hooks.BeforeApply): вызывается синхронно под замком
 // применения в StartApply и ApplyEdit с копией состояния (черновик, который
 // сейчас применится, прежнее Applied, Live). Перехват включён — запоминается
-// снимок; выключен — прежний снимок снимается. Неуспешное применение снимок не
-// использует (AfterApply не вызывается), следующий вызов его заменяет. Открытое
+// снимок этого запуска (StateView.ApplySeq); выключен — снимка нет. Неуспешное
+// применение снимок не использует (AfterApply не вызывается), слот стареет. Открытое
 // окно этот хук не трогает: при повторном «Применить» в окне openWindow оставляет
 // снимок первого неподтверждённого применения.
 func (s *Service) BeforeApply(st configlayer.StateView) {
@@ -63,9 +63,24 @@ func (s *Service) BeforeApply(st configlayer.StateView) {
 		}
 	}
 	s.mu.Lock()
-	s.pendingApply = p
+	if s.pendingApply == nil {
+		s.pendingApply = map[int64]*pendingApply{}
+	}
+	// Слот привязан к запуску: два быстрых «Применить» не затирают снимок друг
+	// друга. Неуспешные запуски AfterApply не зовут — их слоты стареют и убираются.
+	for seq := range s.pendingApply {
+		if seq < st.ApplySeq-pendingApplyKeep {
+			delete(s.pendingApply, seq)
+		}
+	}
+	if p != nil {
+		s.pendingApply[st.ApplySeq] = p
+	}
 	s.mu.Unlock()
 }
+
+// pendingApplyKeep — сколько последних запусков хранят свои слоты снимков.
+const pendingApplyKeep = 16
 
 // applyTouchesDNS — черновик отличается от применённого в DNS-секции ядра
 // kernel, в секции dns_takeover или в элементе группы-цели секции groups.
@@ -118,8 +133,8 @@ func (s *Service) AfterApply(_ context.Context, info configlayer.AfterApplyInfo)
 		return
 	}
 	s.mu.Lock()
-	p := s.pendingApply
-	s.pendingApply = nil
+	p := s.pendingApply[info.ApplySeq]
+	delete(s.pendingApply, info.ApplySeq)
 	s.mu.Unlock()
 	if p == nil || s.ctx.Err() != nil {
 		return

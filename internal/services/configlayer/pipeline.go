@@ -64,6 +64,9 @@ type ApplyRequest struct {
 	Trigger Trigger
 	Source  SourceKind
 	Only    []string
+	// ApplySeq — номер запуска «Применить» из хуков BeforeApply (0 — хуки не
+	// вызывались); возвращается хукам AfterApply в AfterApplyInfo.
+	ApplySeq int64
 	// Kernel ограничивает запуск одним ядром (фоновая сборка после его установки):
 	// файлы, записи манифеста и сироты других ядер не участвуют в плане и не
 	// трогаются. Пусто — все установленные ядра.

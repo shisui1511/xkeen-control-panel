@@ -165,6 +165,9 @@ type Layer struct {
 	beforeApply []func(st StateView)
 	// dnsSeq — счётчик событий dns (PublishDNS).
 	dnsSeq atomic.Uint64
+	// applySeq — номер запуска, который получают хуки BeforeApply и AfterApply
+	// одного «Применить».
+	applySeq atomic.Int64
 	// holder — кто держит исключительный замок применения вне конвейера
 	// (BeginExclusive: HolderGeodata*); пусто — никто. Под mu.
 	holder string
@@ -972,6 +975,8 @@ func (l *Layer) UpdateLiveWith(fn func(view StateView) error) error {
 
 // StateView — копия секций слоя для сервисов-потребителей.
 type StateView struct {
+	// ApplySeq — номер запуска «Применить» (только в хуке BeforeApply).
+	ApplySeq      int64
 	DraftRevision int64
 	Draft         Sections
 	Applied       Sections
@@ -1032,6 +1037,9 @@ type AfterApplyInfo struct {
 	Source  SourceKind
 	Result  ResultView
 	Restart []RestartView
+	// ApplySeq — номер запуска, совпадающий с StateView.ApplySeq, который получил
+	// хук BeforeApply этого запуска; 0 — до запуска хуки BeforeApply не вызывались.
+	ApplySeq int64
 }
 
 // AddAfterApply добавляет хук, который слой вызывает асинхронно после каждого
@@ -1064,10 +1072,11 @@ func (l *Layer) fireAfterApply(req ApplyRequest, view ApplyView) {
 		return
 	}
 	info := AfterApplyInfo{
-		Trigger: req.Trigger,
-		Source:  req.Source,
-		Result:  *view.Result,
-		Restart: append([]RestartView(nil), view.Restart...),
+		Trigger:  req.Trigger,
+		Source:   req.Source,
+		Result:   *view.Result,
+		Restart:  append([]RestartView(nil), view.Restart...),
+		ApplySeq: req.ApplySeq,
 	}
 	for _, fn := range hooks {
 		l.spawn(func() { fn(l.ctx, info) })
@@ -1076,14 +1085,17 @@ func (l *Layer) fireAfterApply(req ApplyRequest, view ApplyView) {
 
 // fireBeforeApply вызывает хуки Hooks.BeforeApply по порядку регистрации, каждый
 // со своей копией состояния. Вызывается под замком применения до запуска
-// конвейера; паника хука журналируется, применение идёт дальше.
-func (l *Layer) fireBeforeApply() {
+// конвейера; паника хука журналируется, применение идёт дальше. Возвращает номер
+// запуска: он идёт в ApplyRequest.ApplySeq и в AfterApplyInfo, чтобы хук после
+// применения нашёл снимок именно своего запуска.
+func (l *Layer) fireBeforeApply() int64 {
+	seq := l.applySeq.Add(1)
 	l.mu.Lock()
 	hooks := append([]func(StateView){}, l.beforeApply...)
 	l.mu.Unlock()
 	for _, fn := range hooks {
 		st := l.store.Snapshot()
-		view := StateView{DraftRevision: st.DraftRevision, Draft: st.Draft, Applied: st.Applied, Live: st.Live}
+		view := StateView{ApplySeq: seq, DraftRevision: st.DraftRevision, Draft: st.Draft, Applied: st.Applied, Live: st.Live}
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -1093,6 +1105,7 @@ func (l *Layer) fireBeforeApply() {
 			fn(view)
 		}()
 	}
+	return seq
 }
 
 // RegisterChecker добавляет проверку до записи в реестр. Допустима только до
@@ -1288,10 +1301,10 @@ func (l *Layer) StartApply(user bool) error {
 	}
 	// Хуки до применения — под замком применения, после проверки дрейфа и до
 	// запуска конвейера (окно «Применить», D-08 фазы 148).
-	l.fireBeforeApply()
+	seq := l.fireBeforeApply()
 	if !l.spawn(func() {
 		defer release()
-		req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft}
+		req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft, ApplySeq: seq}
 		view := l.runPipeline(req)
 		release()
 		l.afterRun()
@@ -1340,8 +1353,8 @@ func (l *Layer) ApplyEdit(ctx context.Context, edit func(st StateView) (map[stri
 		return ApplyView{}, err
 	}
 	// Хуки до применения видят черновик с правкой, которая сейчас применится.
-	l.fireBeforeApply()
-	req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft}
+	seq := l.fireBeforeApply()
+	req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft, ApplySeq: seq}
 	view := l.runPipeline(req)
 	if view.Result == nil || !view.Result.OK {
 		l.discardEdit(ev.DraftRevision, st.Draft, sections)
