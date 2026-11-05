@@ -224,6 +224,10 @@ func (s *Service) update(fn func(p *persisted)) error {
 	defer s.saveMu.Unlock()
 	s.mu.Lock()
 	fn(&s.st)
+	if len(s.st.History) > historyLimit {
+		// История в памяти не растёт сверх предела файла (saveState урезает лишь копию).
+		s.st.History = append([]HistoryEntry(nil), s.st.History[len(s.st.History)-historyLimit:]...)
+	}
 	snapshot := s.st
 	s.mu.Unlock()
 	return saveState(s.statePath(), snapshot)
