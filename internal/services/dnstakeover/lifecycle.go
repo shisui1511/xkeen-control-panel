@@ -349,7 +349,7 @@ func (s *Service) restoreDesired(ctx context.Context) error {
 		return nil
 	case err != nil:
 		var de *Error
-		if errors.As(err, &de) && de.Code != CodeBusy && de.Code != CodeKernelStopped {
+		if errors.As(err, &de) && de.Code != CodeBusy && de.Code != CodeKernelStopped && de.Code != CodeDraftOpen {
 			s.setFailure(&Failure{Code: de.Code, Params: de.Params, Detail: de.Detail})
 		}
 		return err
@@ -386,6 +386,10 @@ func (s *Service) restorePreflight(ctx context.Context) (enablePlan, error) {
 		return enablePlan{}, errCode(CodeKernelConflict)
 	case snap.Apply.Running || snap.BusyHolder != "" || s.checking.Load() || s.opActive():
 		return enablePlan{}, errCode(CodeBusy)
+	case snap.DraftChanges > 0:
+		// Черновик открыт (D-01): Guard прохода отказал бы тем же кодом уже после
+		// снимка и отката, а сторож повторял бы это раз в интервал возврата.
+		return enablePlan{}, errCode(CodeDraftOpen)
 	}
 	kernel := active.Kernel
 	if (kernel != configlayer.KernelXray && kernel != configlayer.KernelMihomo) || !s.kernelRunning(active) {

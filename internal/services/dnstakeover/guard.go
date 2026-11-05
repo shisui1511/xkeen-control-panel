@@ -224,7 +224,7 @@ func (s *Service) guardRestore(ctx context.Context, g *guardState) {
 	log.Printf("dnstakeover: сторож: возврат перехвата (причина ожидания %s)", reason)
 	if err := s.RestoreDesired(ctx); err != nil {
 		var de *Error
-		if errors.As(err, &de) && (de.Code == CodeBusy || de.Code == CodeKernelStopped) {
+		if errors.As(err, &de) && (de.Code == CodeBusy || de.Code == CodeKernelStopped || de.Code == CodeDraftOpen) {
 			// Возврат не начинался: следующий шаг сторожа попробует снова.
 			g.lastRestore = time.Time{}
 			return
