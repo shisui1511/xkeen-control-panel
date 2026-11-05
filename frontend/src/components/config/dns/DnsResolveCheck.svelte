@@ -112,18 +112,28 @@
     }
   }
 
-  function pathText(g: DnsCheckGroup): string {
+  // Путь — фраза обычным шрифтом, mono только у имени группы или зоны внутри неё
+  const NAME_TOKEN = '\u0000name\u0000';
+  type PathParts = { before: string; name: string; after: string };
+
+  function pathParts(g: DnsCheckGroup): PathParts | null {
+    const split = (text: string, name: string): PathParts => {
+      const [before, after = ''] = text.split(NAME_TOKEN);
+      return { before, name, after };
+    };
     switch (g.path) {
       case 'group':
         return g.group
-          ? $t('cfg.dns.path_group', { group: g.group })
-          : $t('cfg.dns.path_group_unnamed');
+          ? split($t('cfg.dns.path_group', { group: NAME_TOKEN }), g.group)
+          : { before: $t('cfg.dns.path_group_unnamed'), name: '', after: '' };
       case 'firmware':
-        return $t('cfg.dns.path_firmware');
+        return { before: $t('cfg.dns.path_firmware'), name: '', after: '' };
       case 'zone':
-        return g.zone ? $t('cfg.dns.path_zone', { zone: g.zone }) : $t('cfg.dns.path_zone_unnamed');
+        return g.zone
+          ? split($t('cfg.dns.path_zone', { zone: NAME_TOKEN }), g.zone)
+          : { before: $t('cfg.dns.path_zone_unnamed'), name: '', after: '' };
       default:
-        return '';
+        return null;
     }
   }
 
@@ -203,7 +213,7 @@
       {#each shown.groups as g, i (i)}
         {@const answers = g.answers.slice(0, MAX_ANSWERS)}
         {@const more = Math.max(0, g.answers.length - MAX_ANSWERS)}
-        {@const path = pathText(g)}
+        {@const path = pathParts(g)}
         <div class="dns-check-group" data-testid="dns-check-group-{g.label}" data-ok={g.ok}>
           {#if grouped}
             <p class="dns-check-group-title">{groupTitle(g)}</p>
@@ -231,8 +241,9 @@
             {#if path}
               <div class="dns-check-line">
                 <dt>{$t('cfg.dns.res_path')}</dt>
-                <dd class="dns-check-mono" data-testid="dns-check-path" data-path={g.path}>
-                  {path}
+                <dd data-testid="dns-check-path" data-path={g.path}>
+                  {path.before}{#if path.name}<span class="dns-check-mono">{path.name}</span
+                    >{path.after}{/if}
                 </dd>
               </div>
             {/if}

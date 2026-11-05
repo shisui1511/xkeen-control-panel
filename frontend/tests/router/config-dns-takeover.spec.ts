@@ -1121,7 +1121,11 @@ test.describe('dns-flow', () => {
       await expect(result.getByTestId('dns-check-outcome').first()).toHaveText(RE_RESOLVED);
       const path = result.getByTestId('dns-check-path').first();
       await expect(path).toHaveAttribute('data-path', 'group');
-      if (view.group?.name) await expect(path).toContainText(view.group.name);
+      if (view.group?.name) {
+        await expect(path).toContainText(view.group.name);
+        // фраза пути обычным шрифтом, mono — только имя группы
+        await expect(path.locator('.dns-check-mono')).toHaveText(view.group.name);
+      }
 
       // Имя веб-интерфейса роутера в служебном домене: ответ из локальной зоны, мимо группы
       const zone =

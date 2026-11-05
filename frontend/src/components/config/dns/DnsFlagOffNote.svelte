@@ -21,7 +21,7 @@
     align-items: flex-start;
     gap: var(--spacing-2);
     margin-top: 0;
-    line-height: 1.4;
+    line-height: 1.5;
     overflow-wrap: anywhere;
   }
 </style>
