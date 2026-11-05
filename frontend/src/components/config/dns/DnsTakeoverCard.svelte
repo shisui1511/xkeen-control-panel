@@ -744,10 +744,12 @@
         }}
       >
         <summary class="dns-params-summary" data-testid="dns-params-summary">
-          <span class="dns-summary-chevron" aria-hidden="true">
-            <Icon name="chevron-right" size={14} />
+          <span class="dns-summary-label">
+            <span class="dns-summary-chevron" aria-hidden="true">
+              <Icon name="chevron-right" size={14} />
+            </span>
+            <span>{$t('cfg.dns.params')}</span>
           </span>
-          <span>{$t('cfg.dns.params')}</span>
           {#if view.params_changed}
             <span class="badge badge-warning" data-testid="dns-params-changed">
               {$t('cfg.dns.changed_badge')}
@@ -1064,6 +1066,7 @@
     min-height: var(--spacing-8);
     font-size: var(--font-size-sm);
     font-weight: 600;
+    line-height: 1.4;
     color: var(--fg-secondary);
     cursor: pointer;
     list-style: none;
@@ -1071,6 +1074,14 @@
 
   .dns-params-summary::-webkit-details-marker {
     display: none;
+  }
+
+  /* Шеврон и подпись — одна группа с зазором xs 4px (одинаково у всех раскрытий) */
+  .dns-summary-label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    min-width: 0;
   }
 
   .dns-summary-chevron {
@@ -1151,9 +1162,9 @@
   }
 
   @media (max-width: 768px) {
+    /* одна колонка: подпись → значение остаётся sm 8px, как на широком экране */
     .dns-row {
       grid-template-columns: minmax(0, 1fr);
-      gap: var(--spacing-1);
     }
   }
 

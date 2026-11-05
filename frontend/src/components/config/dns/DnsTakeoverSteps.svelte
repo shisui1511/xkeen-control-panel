@@ -81,10 +81,12 @@
         {#if failure.detail}
           <details class="dns-fail-output" data-testid="dns-fail-output">
             <summary>
-              <span class="dns-summary-chevron" aria-hidden="true">
-                <Icon name="chevron-right" size={14} />
+              <span class="dns-summary-label">
+                <span class="dns-summary-chevron" aria-hidden="true">
+                  <Icon name="chevron-right" size={14} />
+                </span>
+                <span>{$t('cfg.dns.fail_output')}</span>
               </span>
-              <span>{$t('cfg.dns.fail_output')}</span>
             </summary>
             <pre>{failure.detail}</pre>
           </details>
@@ -182,6 +184,14 @@
 
   .dns-fail-output summary::-webkit-details-marker {
     display: none;
+  }
+
+  /* Шеврон и подпись — одна группа с зазором xs 4px (одинаково у всех раскрытий) */
+  .dns-summary-label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    min-width: 0;
   }
 
   .dns-summary-chevron {
