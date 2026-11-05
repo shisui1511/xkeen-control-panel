@@ -90,10 +90,16 @@ func (s *Service) awaitLifecycle() error {
 // xkeen -restart без терминала уходит в фон и возвращается раньше, чем ядро
 // поднялось, а вызывающему после него нужен действующий слушатель или правила
 // XKeen. Остановленное ядро не запускается (ApplyLocked). Ошибка — перезапуск не
-// удался или ядро не поднялось устойчиво.
+// удался или ядро не поднялось устойчиво. Остановка службы прерывает ожидание
+// замка и подтверждение запуска, поэтому Stop не зависает на перезапуске.
 func (s *Service) restartConfirmed(ctx context.Context, kernel string) error {
-	s.d.Lifecycle.Lock()
+	if err := s.lockLifecycle(s.ctx); err != nil {
+		return err
+	}
 	defer s.d.Lifecycle.Unlock()
+	cctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancel()
+	defer context.AfterFunc(s.ctx, cancel)()
 	oldPID := 0
 	for _, st := range s.d.Kernel.ProcessStates() {
 		if st.Name == kernel && st.Status == "running" {
@@ -105,7 +111,7 @@ func (s *Service) restartConfirmed(ctx context.Context, kernel string) error {
 	case services.ApplyRestartFailed:
 		return errors.New(res.Error)
 	case services.ApplyRestarted:
-		return configlayer.ConfirmRestarted(context.WithoutCancel(ctx), s.d.Kernel.ProcessStates, kernel, oldPID)
+		return configlayer.ConfirmRestarted(cctx, s.d.Kernel.ProcessStates, kernel, oldPID)
 	}
 	return nil
 }
