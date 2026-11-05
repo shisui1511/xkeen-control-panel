@@ -428,7 +428,7 @@ interface TakeoverSection {
 async function dnsView(page: Page): Promise<{
   state: string;
   blocks: string[];
-  group?: { name: string };
+  group?: { name: string; missing?: boolean };
 }> {
   const res = await api(page, 'GET', '/api/configlayer/dns');
   expect(res.status, 'GET /api/configlayer/dns').toBe(200);
@@ -436,7 +436,7 @@ async function dnsView(page: Page): Promise<{
   return {
     state: String(d.state ?? ''),
     blocks: (d.blocks ?? []) as string[],
-    group: d.group as { name: string } | undefined
+    group: d.group as { name: string; missing?: boolean } | undefined
   };
 }
 
@@ -759,10 +759,13 @@ test.describe('dns-forms-takeover', () => {
       // подпись под серверами называет группу-цель (D-20); группы в виде нет — группа по
       // умолчанию «Прокси» (D-09), а не имя пробы резолва
       const view = await dnsView(page);
-      const group = view.group?.name || 'Прокси';
-      await expect(page.getByTestId('section-field-xray-dns-servers-via-group')).toContainText(
-        group
-      );
+      const viaGroup = page.getByTestId('section-field-xray-dns-servers-via-group');
+      if (view.group?.missing) {
+        // группа удалена — подпись не называет её (карточка пишет «Группа … удалена»)
+        await expect(viaGroup).toHaveCount(0);
+      } else {
+        await expect(viaGroup).toContainText(view.group?.name || 'Прокси');
+      }
 
       await guard.assertClean();
     }

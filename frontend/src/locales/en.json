@@ -4341,6 +4341,7 @@
   "cfg.dns.reason_probe": "the resolution check failed",
   "cfg.dns.no_reason": "no reason was given",
   "cfg.dns.reason_network": "the panel is not reachable over the network",
+  "cfg.dns.reason_server": "the panel could not complete the request",
   "cfg.dns.value_unknown": "(not specified)",
   "cfg.dns.kernel_running": "{kernel}, running",
   "cfg.dns.kernel_stopped": "{kernel}, stopped",

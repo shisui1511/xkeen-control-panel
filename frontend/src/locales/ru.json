@@ -4341,6 +4341,7 @@
   "cfg.dns.reason_probe": "проверка резолва не прошла",
   "cfg.dns.no_reason": "причина не сообщена",
   "cfg.dns.reason_network": "панель не отвечает по сети",
+  "cfg.dns.reason_server": "панель не выполнила запрос",
   "cfg.dns.value_unknown": "(не указано)",
   "cfg.dns.kernel_running": "{kernel}, запущено",
   "cfg.dns.kernel_stopped": "{kernel}, остановлено",

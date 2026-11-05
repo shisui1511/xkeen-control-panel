@@ -92,8 +92,14 @@
       $dnsTakeover.kernel === 'xray' &&
       TAKEOVER_STATES.includes($dnsTakeover.state)
   );
-  // Группа не пришла — группа-цель по умолчанию (D-09); default_name — имя пробы резолва, не группа
-  const takeoverGroup = $derived($dnsTakeover?.group?.name || DEFAULT_DNS_GROUP_NAME);
+  // Группа не пришла — группа-цель по умолчанию (D-09); default_name — имя пробы резолва, не
+  // группа. Группа удалена — подписи нет (карточка в это время пишет «Группа … удалена»)
+  const takeoverGroup = $derived.by(() => {
+    const g = $dnsTakeover?.group;
+    if (!g) return DEFAULT_DNS_GROUP_NAME;
+    if (g.missing) return '';
+    return g.name || g.id || DEFAULT_DNS_GROUP_NAME;
+  });
 
   // Ключи-коды закреплённых строк показываются подписями; прочие — как пришли
   const PINNED_LABELS: Record<string, string> = {

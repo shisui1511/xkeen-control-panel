@@ -211,9 +211,11 @@
   function describeDns(n: LayerNotice): Described | null {
     if (!n.id.startsWith('dns_')) return null;
     const p = n.params ?? {};
-    const time = p.time || $t('cfg.dns.value_unknown');
+    // Без времени фраза исхода («…, {время}.») не собирается — общая строка о событии
+    if (!p.time) return { notice: n, tone: 'warning', text: $t('cfg.dns.notice_event') };
+    const time = p.time;
     const kernelName = (k: string | undefined): string =>
-      k ? (KERNEL_LABELS[k] ?? k) : $t('cfg.dns.kernel_unknown');
+      (k ? KERNEL_LABELS[k] : undefined) ?? $t('cfg.dns.kernel_unknown');
     switch (n.id) {
       case 'dns_outcome:timeout':
         return { notice: n, tone: 'warning', text: $t('cfg.dns.outcome_timeout', { time }) };

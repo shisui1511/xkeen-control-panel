@@ -424,11 +424,11 @@ export function dnsActiveKernel(view: DnsView): string {
   return view.active_kernel;
 }
 
-/** Подпись ядра: xray → Xray, mihomo → Mihomo; пусто — «(не определено)». */
+/** Подпись ядра: xray → Xray, mihomo → Mihomo; пусто или другой код — «(не определено)». */
 export function dnsKernelTitle(k: string | undefined): string {
   if (k === 'xray') return 'Xray';
   if (k === 'mihomo') return 'Mihomo';
-  return k ? k : get(t)('cfg.dns.kernel_unknown');
+  return get(t)('cfg.dns.kernel_unknown');
 }
 
 /** Первая непустая строка текста, не длиннее REASON_MAX. */
@@ -498,15 +498,19 @@ export function dnsRequestHasCode(err: unknown): boolean {
 }
 
 /**
- * Короткая причина ошибки запроса для подстановки в {reason}: деталь или сообщение
- * сервера; запрос не дошёл до панели (fetch отклонён) — «панель не отвечает по сети».
+ * Короткая причина ошибки запроса для подстановки в {reason}: техническая деталь ответа,
+ * если она есть. Сырые «HTTP n» и текст ошибки сервера (payload.error, обычно не на языке
+ * интерфейса) не подставляются: запрос не дошёл до панели или шлюз не ответил (fetch
+ * отклонён, 502–504) — «панель не отвечает по сети», прочее — «панель не выполнила запрос».
  */
 export function dnsRequestReason(err: unknown): string {
-  const e = asRequestError(err);
+  const e = asRequestError(err) as RequestError & { status?: unknown };
   if (typeof e.detail === 'string' && firstLine(e.detail) !== '') return firstLine(e.detail);
-  if (err instanceof TypeError) return get(t)('cfg.dns.reason_network');
-  const message = typeof e.message === 'string' ? e.message : String(err);
-  return firstLine(message) || get(t)('cfg.dns.no_reason');
+  const status = typeof e.status === 'number' ? e.status : 0;
+  if (err instanceof TypeError || (status >= 502 && status <= 504)) {
+    return get(t)('cfg.dns.reason_network');
+  }
+  return get(t)('cfg.dns.reason_server');
 }
 
 /** Текст ошибки запроса: код и параметры ответа, деталь и сообщение сервера — в параметры. */
