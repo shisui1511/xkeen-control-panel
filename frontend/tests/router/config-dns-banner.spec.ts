@@ -155,11 +155,15 @@ test(
     expect(await banner(page).getAttribute('aria-label'), 'aria-label баннера').toBeNull();
     await expect(page.getByTestId('dns-state')).toHaveAttribute('aria-live', 'off');
 
-    // Отсчёт идёт по сроку сервера: число уменьшается
+    // Отсчёт идёт по сроку сервера: число уменьшается, а тело role="alert" остаётся прежним
+    // (иначе скринридер зачитывал бы его заново)
+    const body = banner(page).locator('.dns-banner__body');
+    const bodyBefore = await body.textContent();
     const first = await bannerSeconds(page);
     expect(first, 'остаток окна в секундах').toBeGreaterThan(0);
     expect(first, 'остаток окна не больше 60 с').toBeLessThanOrEqual(60);
     await expect.poll(() => bannerSeconds(page), { timeout: T.action }).toBeLessThan(first);
+    expect(await body.textContent(), 'тело баннера не меняется с отсчётом').toBe(bodyBefore);
 
     // Баннер в оболочке, а не на странице карточки
     for (const route of ['services', 'logs']) {

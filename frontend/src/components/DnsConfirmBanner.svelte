@@ -85,12 +85,18 @@
     error !== null && error.deadline === win?.deadline_ms ? error.text : ''
   );
 
-  // Тело баннера называет остаток на момент появления окна и дальше не меняется: иначе
-  // область role="alert" озвучивалась бы каждую секунду
+  // Примитивы окна: перечитывание вида посреди окна даёт новый объект window, но тот же
+  // срок и вид — производные от чисел и строк не пересчитываются, текст alert не меняется
+  const deadline = $derived(win?.deadline_ms ?? 0);
+  const kind = $derived(win?.kind ?? '');
+  const kernelName = $derived(win ? dnsKernelTitle(view?.kernel) : '');
+
+  // Тело баннера называет остаток на момент появления окна (по сроку) и дальше не меняется:
+  // иначе область role="alert" озвучивалась бы заново
   const bodySeconds = $derived.by(() => {
-    const w = win;
-    if (!w) return 0;
-    return untrack(() => Math.max(0, Math.ceil(remainingMs(w, Date.now()) / 1000)));
+    const d = deadline;
+    if (d === 0) return 0;
+    return untrack(() => Math.max(0, Math.ceil((d - (Date.now() + $dnsClockOffset)) / 1000)));
   });
 
   // Скрытая зона aria-live: «Осталось 30 с» и «Осталось 10 с» — только пороги, пройденные
@@ -106,10 +112,10 @@
   });
 
   const bodyText = $derived.by(() => {
-    if (!win) return '';
-    const params = { kernel: dnsKernelTitle(view?.kernel), seconds: String(bodySeconds) };
-    if (win.kind === 'apply') return $t('cfg.dns.banner_apply', params);
-    if (win.kind === 'kernel_switch') return $t('cfg.dns.banner_switch', params);
+    if (kind === '') return '';
+    const params = { kernel: kernelName, seconds: String(bodySeconds) };
+    if (kind === 'apply') return $t('cfg.dns.banner_apply', params);
+    if (kind === 'kernel_switch') return $t('cfg.dns.banner_switch', params);
     return $t('cfg.dns.banner_enable', params);
   });
 
