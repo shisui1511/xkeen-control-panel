@@ -504,7 +504,8 @@ func (s *Service) finishEnable(ctx context.Context, pl enablePlan, fail *Failure
 // запущено, оно перезапускается KernelApplier.ApplyLocked под замком жизненного
 // цикла (остановленное не запускается, FND-05), чтобы XKeen перестроил перехват.
 // Откат удался — failure.rolled_back=true и снимок снимается; не удался —
-// rolled_back=false и код rollback_failed с причиной (прежний код — params.cause).
+// rolled_back=false и код rollback_failed с причиной (прежний код — params.cause,
+// причина отката — params.rollback_reason).
 func (s *Service) rollbackEnable(ctx context.Context, pl enablePlan, fail *Failure, rb rollbackPlan) {
 	hctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 4*hookTimeout)
 	defer cancel()
@@ -542,6 +543,7 @@ func (s *Service) rollbackEnable(ctx context.Context, pl enablePlan, fail *Failu
 		fail.Code = CodeRollbackFailed
 		fail.RolledBack = false
 		fail.Detail = truncateDetail(strings.TrimSpace(fail.Detail + "\n" + strings.Join(errs, "\n")))
+		setRollbackReason(fail, errs)
 		log.Printf("dnstakeover: откат включения не удался: %s", strings.Join(errs, "; "))
 	case rb.restore:
 		fail.RolledBack = true
@@ -559,6 +561,20 @@ func (s *Service) rollbackEnable(ctx context.Context, pl enablePlan, fail *Failu
 	}); err != nil {
 		log.Printf("dnstakeover: %v", err)
 	}
+}
+
+// paramRollbackReason — ключ params сбоя rollback_failed: короткая причина самого
+// отката (ошибки возврата), отдельно от причины исходного сбоя. Detail такого сбоя —
+// исходная деталь и затем ошибки отката, а интерфейс по одной детали границы не
+// знает (строка «Откат не завершён: …» показала бы причину исходного сбоя).
+const paramRollbackReason = "rollback_reason"
+
+// setRollbackReason записывает в params сбоя причину отката по его ошибкам.
+func setRollbackReason(fail *Failure, errs []string) {
+	if fail.Params == nil {
+		fail.Params = map[string]string{}
+	}
+	fail.Params[paramRollbackReason] = legacyReason(strings.Join(errs, "; "))
 }
 
 // settleSnapshot помечает снимок завершённого прохода: он остаётся записью override и

@@ -465,12 +465,15 @@ export function dnsErrorText(code: string | undefined, params?: Record<string, s
 }
 
 /**
- * Причина сбоя транзакции из вида: reason из параметров, иначе первая строка вывода
- * ядра (detail), иначе переведённый текст исходного сбоя (cause у rollback_failed — код,
- * его не показывают сырым); ничего нет — «причина не сообщена».
+ * Причина сбоя транзакции из вида: rollback_reason (причина самого отката при
+ * rollback_failed: detail там начинается с исходного сбоя, и его первая строка была бы
+ * причиной не отката), reason из параметров, иначе первая строка вывода ядра (detail),
+ * иначе переведённый текст исходного сбоя (cause у rollback_failed — код, его не
+ * показывают сырым); ничего нет — «причина не сообщена».
  */
 export function dnsFailureReason(f: DnsFailure): string {
   return (
+    f.params?.rollback_reason ||
     f.params?.reason ||
     firstLine(f.detail) ||
     causeFailureText(f, f.params) ||
@@ -507,12 +510,15 @@ export function dnsFailureText(f: DnsFailure): string {
 /**
  * Заголовочная строка сбоя в карточке: при rollback_failed — что именно не удалось
  * (исходный сбой по cause), а итог отката идёт отдельной строкой с советом; иначе —
- * dnsFailureText. Так две строки подряд не повторяют «Откат не завершён: …».
+ * dnsFailureText. Так две строки подряд не повторяют «Откат не завершён: …». Причина
+ * исходного сбоя — первая строка detail, если она не совпала с причиной отката (при
+ * пустой исходной детали detail состоит из одних ошибок отката).
  */
 export function dnsFailureHeadline(f: DnsFailure): string {
   if (f.code === 'rollback_failed') {
     const p: Record<string, string> = { ...(f.params ?? {}) };
-    const detail = firstLine(f.detail);
+    const line = firstLine(f.detail);
+    const detail = line && line !== firstLine(p.rollback_reason) ? line : '';
     if (detail && !p.detail) p.detail = detail;
     if (!p.reason) p.reason = detail || get(t)('cfg.dns.no_reason');
     const text = causeFailureText(f, p);

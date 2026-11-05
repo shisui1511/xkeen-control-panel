@@ -824,6 +824,7 @@ func (s *Service) endTransfer(to string, fail *Failure, errs []string) {
 		fail.Code = CodeRollbackFailed
 		fail.RolledBack = false
 		fail.Detail = truncateDetail(strings.TrimSpace(fail.Detail + "\n" + strings.Join(errs, "\n")))
+		setRollbackReason(fail, errs)
 		log.Printf("dnstakeover: возврат DNS прошивке после переноса на %s не удался: %s", to, strings.Join(errs, "; "))
 	} else {
 		fail.RolledBack = true
