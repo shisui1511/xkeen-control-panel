@@ -1,9 +1,12 @@
 package routing
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/netip"
+	"sort"
 	"strings"
 
 	"golang.org/x/net/idna"
@@ -138,6 +141,9 @@ func (b *mihomoBuild) takeoverDNS(parts []*yaml.Node) error {
 	// нет: локальные имена идут общим путём через группу, мимо туннеля ничего не
 	// уходит.
 	zones := dnsTakeoverZones(live.ServiceDomain, params.Zones)
+	// Значения политики пользователя (D-24) проходят ту же чистую проверку на петлю,
+	// что и списки серверов: запись на сам роутер замкнула бы запрос на слушатель.
+	mihomoPolicyLoopFree(dns)
 	if firmware != "" {
 		keys := make([]string, 0, len(zones))
 		for _, z := range zones {
@@ -215,6 +221,33 @@ func (b *mihomoBuild) directPolicyKeys() ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// mihomoPolicyLoopFree убирает из значений nameserver-policy записи, ведущие на сам
+// роутер (dnsLoopFree, порт 53): запись без оставшихся значений удаляется целиком,
+// пустой nameserver-policy — ключ снимается. Остальные записи пользователя и их
+// порядок не меняются.
+func mihomoPolicyLoopFree(dns *yaml.Node) {
+	policy := yMapGet(dns, "nameserver-policy")
+	if policy == nil || policy.Kind != yaml.MappingNode {
+		return
+	}
+	content := make([]*yaml.Node, 0, len(policy.Content))
+	for i := 0; i+1 < len(policy.Content); i += 2 {
+		key, val := policy.Content[i], policy.Content[i+1]
+		values := yStrings(val)
+		kept := dnsLoopFree(values, false)
+		switch {
+		case len(values) == 0 || len(kept) == len(values):
+			content = append(content, key, val)
+		case len(kept) > 0:
+			content = append(content, key, ySeq(kept, false))
+		}
+	}
+	policy.Content = content
+	if len(policy.Content) == 0 {
+		yMapDel(dns, "nameserver-policy")
+	}
 }
 
 // mihomoPolicyAdd дописывает в nameserver-policy ключи панели с одним
@@ -350,6 +383,14 @@ func dnsLoopFree(servers []string, anyPort bool) []string {
 
 // dnsSelfServer сообщает, что запись сервера Mihomo ведёт на сам роутер.
 func dnsSelfServer(s string, anyPort bool) bool {
+	return dnsSelfServerOn(s, anyPort, nil)
+}
+
+// dnsSelfServerOn — dnsSelfServer с дополнительным признаком адреса роутера: isSelf
+// получает хост записи (адрес интерфейса роутера); nil — только loopback, «любой
+// адрес» и localhost. Генератор профиля вызывает её без isSelf: адреса интерфейсов
+// зависят от окружения и сделали бы сборку недетерминированной.
+func dnsSelfServerOn(s string, anyPort bool, isSelf func(host string) bool) bool {
 	low := strings.ToLower(s)
 	if low == mihomoSystemDNS || strings.HasPrefix(low, mihomoDHCPDNS) {
 		return true
@@ -365,7 +406,7 @@ func dnsSelfServer(s string, anyPort bool) bool {
 		host, port = h, p
 	}
 	host = strings.Trim(host, "[]")
-	if !dnsSelfHost(host) {
+	if !dnsSelfHost(host) && (isSelf == nil || !isSelf(host)) {
 		return false
 	}
 	if anyPort {
@@ -468,6 +509,63 @@ func yStrings(n *yaml.Node) []string {
 			}
 		}
 		return out
+	}
+	return nil
+}
+
+// MihomoDNSRouterServers — записи секции DNS Mihomo (JSON значения секции), которые
+// ведут на LAN-адрес самого роутера: isSelf сообщает, что хост — адрес интерфейса
+// роутера. Проверяются те же списки, что чистит генератор (nameserver, fallback,
+// default-nameserver, proxy-server-nameserver) и значения nameserver-policy, с теми же
+// правилами порта; записи на loopback, localhost и «любой адрес» сюда не попадают:
+// генератор убирает их сам. Функция чистая: адреса интерфейсов приходят параметром,
+// их читают проверка слоя и предпроверка включения (генератор их не знает).
+func MihomoDNSRouterServers(value json.RawMessage, isSelf func(host string) bool) []string {
+	if isSelf == nil || len(bytes.TrimSpace(value)) == 0 {
+		return nil
+	}
+	var dns map[string]json.RawMessage
+	if err := json.Unmarshal(value, &dns); err != nil {
+		return nil
+	}
+	var out []string
+	check := func(raw json.RawMessage, anyPort bool) {
+		for _, s := range jsonStrings(raw) {
+			s = strings.TrimSpace(s)
+			if s != "" && !dnsSelfServerOn(s, anyPort, nil) && dnsSelfServerOn(s, anyPort, isSelf) {
+				out = append(out, s)
+			}
+		}
+	}
+	for _, key := range []string{"nameserver", "fallback"} {
+		check(dns[key], true)
+	}
+	for _, key := range []string{"default-nameserver", "proxy-server-nameserver"} {
+		check(dns[key], false)
+	}
+	var policy map[string]json.RawMessage
+	if err := json.Unmarshal(dns["nameserver-policy"], &policy); err == nil {
+		keys := make([]string, 0, len(policy))
+		for k := range policy {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			check(policy[k], false)
+		}
+	}
+	return out
+}
+
+// jsonStrings — строки JSON-значения: строка или список строк; прочее — пусто.
+func jsonStrings(raw json.RawMessage) []string {
+	var one string
+	if err := json.Unmarshal(raw, &one); err == nil {
+		return []string{one}
+	}
+	var many []string
+	if err := json.Unmarshal(raw, &many); err == nil {
+		return many
 	}
 	return nil
 }

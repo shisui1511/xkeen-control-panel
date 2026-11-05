@@ -419,8 +419,9 @@ func (s *Service) restorePreflight(ctx context.Context) (enablePlan, error) {
 
 // takeoverTarget — DNS-секция ядра kernel и его маршрутизация у панели, группа-цель
 // перехвата есть (у Mihomo её имя годится для суффикса DoH): id и имя группы или
-// отказ section_foreign, routing_not_managed, group_missing, group_name_invalid —
-// единственное место правил предпроверок включения, возврата и переноса.
+// отказ section_foreign, routing_not_managed, self_server, group_missing,
+// group_name_invalid — единственное место правил предпроверок включения, возврата
+// и переноса.
 // Слушатель :53 выпускает генератор маршрутизации ядра (cores.XrayDNSTakeover,
 // профиль Mihomo): маршрутизация отпущена — override включился бы без слушателя.
 func takeoverTarget(st configlayer.StateView, kernel string) (id, name string, err error) {
@@ -429,6 +430,14 @@ func takeoverTarget(st configlayer.StateView, kernel string) (id, name string, e
 	}
 	if !configlayer.DesiredRouting(st.Applied).ManagedFor(kernel) {
 		return "", "", &Error{Code: CodeRoutingNotManaged, Params: map[string]string{"kernel": kernel}}
+	}
+	if kernel == configlayer.KernelMihomo {
+		// Сервер DNS-секции на LAN-адрес роутера замкнул бы запрос на слушатель: чистый
+		// генератор адресов интерфейсов не знает, поэтому сверка здесь (IN-08).
+		cs := configlayer.DesiredCores(st.Applied)[configlayer.CoreSectionName(kernel, "dns")]
+		if list := routing.MihomoDNSRouterServers(cs.Value, routerHostCheck()); len(list) > 0 {
+			return "", "", &Error{Code: CodeSelfServer, Params: map[string]string{"server": list[0]}}
+		}
 	}
 	p := appliedParams(st)
 	id, name, ok := targetGroup(st.Applied, p)

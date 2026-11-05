@@ -216,6 +216,7 @@
   "configlayer.dns.rollback_failed": "Rollback did not complete.",
   "configlayer.dns.routing_not_managed": "The core routing is not managed by the panel. Take it into the panel on the “Groups” and “Rules” tabs: the interception :53 listener is produced by the routing generator.",
   "configlayer.dns.section_foreign": "The DNS section is not managed by the panel. Take it into the panel: interception writes its own values into it.",
+  "configlayer.dns.self_server": "The Mihomo DNS section has a server with the router own address: the query would loop back to the interception listener. Remove it or replace it with an external one.",
   "configlayer.dns.unavailable": "Interception is unavailable on this router.",
   "configlayer.dns.window_active": "Confirm interception or roll it back in the banner at the top of the page."
 }

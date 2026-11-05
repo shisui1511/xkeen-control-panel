@@ -4444,12 +4444,14 @@
   "cfg.dns.err.rollback_failed": "Rollback did not complete: {reason}.",
   "cfg.dns.err.routing_not_managed": "The {kernel} routing is not managed by the panel. Take it into the panel on the “Groups” and “Rules” tabs: the interception :53 listener is produced by the routing generator.",
   "cfg.dns.err.section_foreign": "The {kernel} DNS section is not managed by the panel. Take it into the panel: interception writes its own values into it.",
+  "cfg.dns.err.self_server": "The server “{server}” in the Mihomo DNS section is the router itself: the query would loop back to the interception listener. Remove it or replace it with an external one.",
   "cfg.dns.err.unavailable": "Interception is unavailable on this router: {reason}.",
   "cfg.dns.err.window_active": "Confirm interception or roll it back in the banner at the top of the page.",
   "cfg.dns.issue.dns_group_missing": "The group for DNS queries was deleted: choose another one in the “Router DNS interception” card.",
   "cfg.dns.issue.dns_group_name_invalid": "The group name “{name}” cannot be passed to the core as a DNS target: it contains invalid characters. Rename the group.",
   "cfg.dns.issue.dns_routing_required": "While interception is on, the panel manages the {kernel} routing: disable interception, then release the routing.",
   "cfg.dns.issue.dns_section_required": "While interception is on, the panel manages the core DNS section: disable interception, then release the section.",
+  "cfg.dns.issue.dns_self_server": "The server “{server}” in the Mihomo DNS section is the router itself: with interception on, the query would loop back to the listener. Remove it or replace it with an external one.",
   "cfg.dns.issue.dns_zone_dup": "Zone “{zone}” is already among the built-in or custom zones.",
   "cfg.dns.issue.dns_zone_invalid": "Local zone “{zone}” is not a domain name."
 }

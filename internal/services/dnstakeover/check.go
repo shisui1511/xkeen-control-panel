@@ -20,6 +20,7 @@ const (
 	IssueGroupNameInvalid = "dns_group_name_invalid"
 	IssueSectionRequired  = "dns_section_required"
 	IssueRoutingRequired  = "dns_routing_required"
+	IssueSelfServer       = "dns_self_server"
 )
 
 // Hooks — подключение службы к слою: регистрируется до configLayer.Start()
@@ -53,7 +54,11 @@ func (dnsChecker) ID() string { return checkerID }
 //     (dns_section_required);
 //   - перехват включён, а маршрутизацию ядра-перехватчика черновик отпускает: слушатель
 //     :53 выпускает генератор маршрутизации ядра, без него override остался бы без
-//     слушателя и DNS LAN не отвечал бы (dns_routing_required).
+//     слушателя и DNS LAN не отвечал бы (dns_routing_required);
+//   - перехват ведёт mihomo, а в списках серверов DNS-секции (или значениях
+//     nameserver-policy) есть запись на LAN-адрес самого роутера: запрос замкнулся бы
+//     на слушатель (dns_self_server). Loopback и localhost чистый генератор убирает
+//     сам, адреса интерфейсов он не знает (routing.MihomoDNSRouterServers).
 func (c dnsChecker) Check(in configlayer.Input, _ configlayer.InstalledKernels) []configlayer.BuildIssue {
 	var out []configlayer.BuildIssue
 	key := configlayer.SectionDNSTakeover
@@ -106,6 +111,14 @@ func (c dnsChecker) Check(in configlayer.Input, _ configlayer.InstalledKernels) 
 	if section := configlayer.CoreSectionName(live.Kernel, "dns"); section != "" {
 		if !configlayer.DesiredCores(in.Sections)[section].Managed {
 			out = append(out, configlayer.BuildIssue{Key: section, Code: IssueSectionRequired})
+		}
+	}
+	if live.Kernel == configlayer.KernelMihomo {
+		section := configlayer.CoreSectionName(live.Kernel, "dns")
+		if cs := configlayer.DesiredCores(in.Sections)[section]; cs.Managed {
+			for _, srv := range routing.MihomoDNSRouterServers(cs.Value, routerHostCheck()) {
+				out = append(out, configlayer.BuildIssue{Key: section, Code: IssueSelfServer, Params: map[string]string{"server": srv}})
+			}
 		}
 	}
 	if isKernelName(live.Kernel) && !configlayer.DesiredRouting(in.Sections).ManagedFor(live.Kernel) {

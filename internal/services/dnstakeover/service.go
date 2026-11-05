@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -625,6 +626,34 @@ func routerHasIPv6() bool {
 		}
 	}
 	return false
+}
+
+// routerHostCheck — функция «хост — адрес интерфейса роутера»: IPv4 и IPv6 всех
+// интерфейсов (адреса читаются один раз на вызов). Loopback и «любой адрес» в неё не
+// входят: записи на них чистый генератор профиля убирает сам. Адреса интерфейсов
+// зависят от окружения, поэтому сверку делают проверка слоя и предпроверка
+// включения, а не генератор (IN-08).
+func routerHostCheck() func(host string) bool {
+	set := map[netip.Addr]bool{}
+	addrs, err := net.InterfaceAddrs()
+	if err == nil {
+		for _, a := range addrs {
+			ipn, ok := a.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			if ip, ok := netip.AddrFromSlice(ipn.IP); ok {
+				set[ip.Unmap().WithZone("")] = true
+			}
+		}
+	}
+	return func(host string) bool {
+		ip, err := netip.ParseAddr(host)
+		if err != nil {
+			return false
+		}
+		return set[ip.Unmap().WithZone("")]
+	}
 }
 
 // cloneCheck — глубокая копия результата проверки.

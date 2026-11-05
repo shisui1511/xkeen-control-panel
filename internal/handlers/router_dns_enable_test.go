@@ -5,6 +5,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -990,6 +991,22 @@ func TestRouterDNSTxnRollback(t *testing.T) {
 	})
 }
 
+// rtDNSRouterLANAddr — первый не loopback IPv4-адрес интерфейсов роутера (LAN).
+func rtDNSRouterLANAddr(t *testing.T) string {
+	t.Helper()
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		t.Fatalf("адреса интерфейсов роутера не прочитаны: %v", err)
+	}
+	for _, a := range addrs {
+		if ipn, ok := a.(*net.IPNet); ok && ipn.IP.To4() != nil && !ipn.IP.IsLoopback() {
+			return ipn.IP.String()
+		}
+	}
+	t.Skip("у роутера нет не loopback адреса IPv4")
+	return ""
+}
+
 // rtDNSServiceControl — POST /api/service/control?action=<действие>; ответ не 200 — провал.
 func (e *rtSrc) rtDNSServiceControl(action string) {
 	e.t.Helper()
@@ -1003,7 +1020,9 @@ func (e *rtSrc) rtDNSServiceControl(action string) {
 // → 409 kernel_stopped, и ядро после отказа не запущено (D-04); маршрутизация
 // Xray отпущена и применена → 409 routing_not_managed, в блокировках карточки
 // routing, override не включался (слушатель :53 выпускает генератор маршрутизации,
-// без него включение оставило бы DNS LAN без слушателя). Ядро возвращается
+// без него включение оставило бы DNS LAN без слушателя); у Mihomo сервер DNS-секции
+// с LAN-адресом самого роутера → 409 self_server, override не включался (IN-08).
+// Ядро возвращается
 // запущенным, маршрутизация — взятой в t.Cleanup. Метка ядра: ядро останавливается.
 func TestRouterDNSEnableRefused(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
@@ -1038,6 +1057,33 @@ func TestRouterDNSEnableRefused(t *testing.T) {
 		}
 		if v := c.rtDNSView(); v["desired"] == true {
 			t.Error("после отказа kernel_stopped desired=true")
+		}
+	})
+
+	t.Run("self_server", func(t *testing.T) {
+		if kernel != configlayer.KernelMihomo {
+			t.Skip("сверка серверов с адресами интерфейсов роутера — у DNS-секции Mihomo")
+		}
+		lan := rtDNSRouterLANAddr(t)
+		c := e.with(t)
+		form, advanced := c.rtDNSSectionForm(kernel)
+		form[rtDNSServersKey(kernel)] = []string{lan}
+		if r := c.rtCoresPost("/save", map[string]any{"kernel": kernel, "section": "dns", "form": form, "advanced": advanced}); r.Status != http.StatusOK {
+			t.Fatalf("save dns (%s): %d %s", kernel, r.Status, r.Code)
+		}
+		t.Cleanup(func() { c.rtDNSSetSection(kernel, "preset") })
+		c.rtRtApplyOK("DNS-секция Mihomo с адресом самого роутера")
+
+		overrideBefore := rtDNSOverrideOn(t)
+		r := c.rtDNSPost(rtDNSEnable)
+		if r.Status != http.StatusConflict || r.Code != "self_server" {
+			t.Errorf("включение с сервером %s в DNS-секции: %d %q, ожидалось 409 self_server", lan, r.Status, r.Code)
+		}
+		if now := rtDNSOverrideOn(t); now != overrideBefore {
+			t.Errorf("отказ self_server тронул override: было %v, стало %v", overrideBefore, now)
+		}
+		if v := c.rtDNSView(); v["desired"] == true {
+			t.Error("после отказа self_server desired=true")
 		}
 	})
 

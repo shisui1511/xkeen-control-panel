@@ -42,6 +42,7 @@ const (
 	CodeRestartFailed     = "restart_failed"
 	CodeRollbackFailed    = "rollback_failed"
 	CodeRoutingNotManaged = "routing_not_managed"
+	CodeSelfServer        = "self_server"
 	CodeSectionForeign    = "section_foreign"
 	CodeWindowActive      = "window_active"
 )
