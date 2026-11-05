@@ -515,7 +515,7 @@ func (s *Service) rollbackEnable(ctx context.Context, pl enablePlan, fail *Failu
 	restarted := rb.restarted
 	if rb.restore {
 		if !pl.overrideBefore {
-			note(s.fw.SetOverride(hctx, false))
+			note(s.releaseOverride(hctx))
 		}
 		if pl.proxyDNSBefore {
 			note(s.fw.SetProxyDNS(hctx, true))
@@ -581,9 +581,11 @@ func (s *Service) reconcileFirmware(ctx context.Context, pl enablePlan) (proxyLa
 		case rerr != nil:
 			errs = append(errs, rerr.Error())
 		case on:
-			if serr := s.fw.SetOverride(ctx, false); serr != nil {
+			if serr := s.releaseOverride(ctx); serr != nil {
 				errs = append(errs, serr.Error())
 			}
+		default:
+			s.setOverrideByPanel(false)
 		}
 	}
 	cur, rerr := ProxyDNS()
@@ -601,6 +603,31 @@ func (s *Service) reconcileFirmware(ctx context.Context, pl enablePlan) (proxyLa
 		return proxyLate, errors.New(strings.Join(errs, "; "))
 	}
 	return proxyLate, nil
+}
+
+// releaseOverride выключает override прошивки (`no opkg dns-override`) и после
+// успеха снимает признак OverrideSetByPanel: override возвращён, панельного больше
+// нет (WR-06). Все возвраты DNS прошивке идут через него.
+func (s *Service) releaseOverride(ctx context.Context) error {
+	if err := s.fw.SetOverride(ctx, false); err != nil {
+		return err
+	}
+	s.setOverrideByPanel(false)
+	return nil
+}
+
+// setOverrideByPanel меняет признак OverrideSetByPanel в файле состояния, только
+// если он меняется.
+func (s *Service) setOverrideByPanel(v bool) {
+	s.mu.Lock()
+	same := s.st.OverrideSetByPanel == v
+	s.mu.Unlock()
+	if same {
+		return
+	}
+	if err := s.update(func(p *persisted) { p.OverrideSetByPanel = v }); err != nil {
+		log.Printf("dnstakeover: %v", err)
+	}
 }
 
 // restoreSnapshot возвращает применённое состояние и Live перехвата к снимку
@@ -823,7 +850,9 @@ func (s *Service) runDisable(ctx context.Context, pl disablePlan) {
 	var relErr error
 	if !pl.overrideBefore {
 		if on, err := s.fw.OverrideEnabled(hctx); err != nil || on {
-			relErr = s.fw.SetOverride(hctx, false)
+			relErr = s.releaseOverride(hctx)
+		} else {
+			s.setOverrideByPanel(false)
 		}
 	}
 	if relErr != nil {
@@ -987,6 +1016,11 @@ func (s *Service) runTakeover(ctx context.Context, tr takeoverRun) (configlayer.
 			if err := s.fw.SetOverride(hctx, true); err != nil {
 				return err
 			}
+			if !tr.OverrideBefore {
+				// Override включила панель: сверка на старте снимет его, только если он
+				// остался от неё (WR-06).
+				s.setOverrideByPanel(true)
+			}
 			if tr.ProxyDNSBefore {
 				touchedProxy.Store(true)
 				if err := s.fw.SetProxyDNS(hctx, false); err != nil {
@@ -1002,7 +1036,7 @@ func (s *Service) runTakeover(ctx context.Context, tr takeoverRun) (configlayer.
 			hctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), hookTimeout)
 			defer cancel()
 			if touchedOverride.Load() && !tr.OverrideBefore {
-				if err := s.fw.SetOverride(hctx, false); err != nil {
+				if err := s.releaseOverride(hctx); err != nil {
 					report(err)
 				}
 			}

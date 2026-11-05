@@ -209,7 +209,7 @@ func (s *Service) AroundKernelStop(ctx context.Context, kernel string, stop func
 	var relErr error
 	if !overrideBefore {
 		hctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), hookTimeout)
-		relErr = s.fw.SetOverride(hctx, false)
+		relErr = s.releaseOverride(hctx)
 		cancel()
 	}
 	s.stepResult(stepRelease, relErr == nil)
@@ -754,7 +754,7 @@ func (s *Service) dropTransfer(ctx context.Context, prev string, on bool, to str
 	var errs []string
 	s.setStep(stepRelease, statusRunning)
 	if !overrideBefore {
-		if err := s.fw.SetOverride(hctx, false); err != nil {
+		if err := s.releaseOverride(hctx); err != nil {
 			errs = append(errs, err.Error())
 		}
 	}

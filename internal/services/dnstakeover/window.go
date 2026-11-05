@@ -362,7 +362,7 @@ func (s *Service) rollbackWindow(ctx context.Context, w windowState, reason stri
 	case kindEnable:
 		s.setStep(stepRelease, statusRunning)
 		if !overrideBefore {
-			note(s.fw.SetOverride(hctx, false))
+			note(s.releaseOverride(hctx))
 		}
 		proxyChanged := false
 		if snap.ProxyDNSBefore {
@@ -408,7 +408,7 @@ func (s *Service) rollbackWindow(ctx context.Context, w windowState, reason stri
 	case kindKernelSwitch:
 		s.setStep(stepRelease, statusRunning)
 		if !overrideBefore {
-			note(s.fw.SetOverride(hctx, false))
+			note(s.releaseOverride(hctx))
 		}
 		s.stepResult(stepRelease, len(errs) == 0)
 		s.setStep(stepApply, statusRunning)
@@ -538,7 +538,7 @@ func (s *Service) restoreWindowSnapshot(ctx context.Context, kernel string, snap
 func (s *Service) releaseToFirmwareDNS(ctx context.Context, kernel string, overrideBefore bool) error {
 	var errs []string
 	if !overrideBefore {
-		if err := s.fw.SetOverride(ctx, false); err != nil {
+		if err := s.releaseOverride(ctx); err != nil {
 			errs = append(errs, err.Error())
 		}
 	}

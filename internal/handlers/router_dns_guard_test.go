@@ -5,8 +5,10 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -244,6 +246,9 @@ const (
 	rtDNSReconcileRebootWait = 240 * time.Second
 	// rtDNSReconcileOverrideWait — сколько ждать снятия лишнего override.
 	rtDNSReconcileOverrideWait = 60 * time.Second
+	// rtDNSReconcileForeignWait — сколько ждать после старта панели, чтобы сверка на
+	// старте наверняка отработала (прогрев прошивки до 3 с) и не тронула чужой override.
+	rtDNSReconcileForeignWait = 20 * time.Second
 	// rtDNSReconcileAction — запись истории действий: сверка на старте.
 	rtDNSReconcileAction = "dns_takeover_reconcile"
 	// rtDNSReconcileRecordWait — сколько ждать записи истории о снятии лишнего override
@@ -363,11 +368,13 @@ func TestRouterDNSStartReconcile(t *testing.T) {
 		}
 	})
 
-	// Трасса: слой включён, перехват выключен → остановка панели → `opkg
-	// dns-override` из теста (override сохранён без панели, R3) → запуск панели →
-	// в пределах 60 с override выключен, :53 у прошивки, прошивка отвечает через
-	// 127.0.0.1:53, в истории действий — снятие override. t.Cleanup: override
-	// исходный, панель запущена.
+	// Трасса: слой включён, перехват выключен → остановка панели → в файле
+	// состояния признак «override поставила панель» (override_set_by_panel: так
+	// выглядит панель, остановленная или упавшая до возврата DNS прошивке) и
+	// `opkg dns-override` из теста (override сохранён без панели, R3) → запуск панели
+	// → в пределах 60 с override выключен, :53 у прошивки, прошивка отвечает через
+	// 127.0.0.1:53, в истории действий — снятие override, признак снят. t.Cleanup:
+	// override исходный, панель запущена.
 	t.Run("stale_override", func(t *testing.T) {
 		e := rtNewSrc(t)
 		e.enableLayer()
@@ -378,6 +385,7 @@ func TestRouterDNSStartReconcile(t *testing.T) {
 		old := rtPanelCurrent(t, e.p)
 
 		rtDNSPanelStop(t, old)
+		rtDNSStatePanelOverride(t, true)
 		if !rtDNSOverrideOn(t) {
 			rtDNSNdmc(t, rtDNSOverrideLine)
 		}
@@ -406,5 +414,86 @@ func TestRouterDNSStartReconcile(t *testing.T) {
 			}
 			time.Sleep(time.Second)
 		}
+		if rtDNSStatePanelOverrideSet(t) {
+			t.Error("после снятия override в файле состояния остался признак override_set_by_panel")
+		}
 	})
+
+	// Трасса: слой включён, перехват выключен → остановка панели → в файле состояния
+	// нет признака «override поставила панель» и `opkg dns-override` из теста
+	// (чужой override: вручную, без панели) → запуск панели → через
+	// rtDNSReconcileForeignWait override по-прежнему включён, в истории действий нет
+	// записи о снятии override. t.Cleanup: override исходный, панель запущена.
+	t.Run("foreign_override", func(t *testing.T) {
+		e := rtNewSrc(t)
+		e.enableLayer()
+		e.rtRstIdle()
+		e.rtDNSEnsureOff()
+		overrideBefore := rtDNSOverrideOn(t)
+		t.Cleanup(func() { rtDNSRestoreOverride(t, overrideBefore) })
+		old := rtPanelCurrent(t, e.p)
+
+		rtDNSPanelStop(t, old)
+		rtDNSStatePanelOverride(t, false)
+		if !rtDNSOverrideOn(t) {
+			rtDNSNdmc(t, rtDNSOverrideLine)
+		}
+		since := time.Now().Unix()
+		rtDNSPanelStart(t, e, old)
+
+		time.Sleep(rtDNSReconcileForeignWait)
+		if !rtDNSOverrideOn(t) {
+			t.Error("сверка на старте сняла override, который панель не ставила")
+		}
+		if e.rtDNSActionSince(rtDNSReconcileOverrideAction, since) {
+			t.Errorf("в истории действий есть запись %s для чужого override", rtDNSReconcileOverrideAction)
+		}
+	})
+}
+
+// rtDNSStatePanelOverride задаёт признак override_set_by_panel в файле состояния
+// службы перехвата (панель остановлена, иначе запись затрётся). Файла нет —
+// создаётся минимальный файл текущей версии схемы.
+func rtDNSStatePanelOverride(t *testing.T, on bool) {
+	t.Helper()
+	path := filepath.Join(config.Default().DataDir, "dns_takeover.json")
+	st := map[string]json.RawMessage{"schema_version": json.RawMessage("1"), "history": json.RawMessage("[]")}
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		if err := json.Unmarshal(data, &st); err != nil {
+			t.Fatalf("файл состояния перехвата не разбирается: %v", err)
+		}
+	case !errors.Is(err, os.ErrNotExist):
+		t.Fatalf("файл состояния перехвата не читается: %v", err)
+	}
+	if on {
+		st["override_set_by_panel"] = json.RawMessage("true")
+	} else {
+		delete(st, "override_set_by_panel")
+	}
+	out, err := json.Marshal(st)
+	if err != nil {
+		t.Fatalf("файл состояния перехвата не собирается: %v", err)
+	}
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		t.Fatalf("файл состояния перехвата не записан: %v", err)
+	}
+}
+
+// rtDNSStatePanelOverrideSet — в файле состояния службы перехвата стоит признак
+// override_set_by_panel.
+func rtDNSStatePanelOverrideSet(t *testing.T) bool {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(config.Default().DataDir, "dns_takeover.json"))
+	if err != nil {
+		t.Fatalf("файл состояния перехвата не читается: %v", err)
+	}
+	var st struct {
+		ByPanel bool `json:"override_set_by_panel"`
+	}
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatalf("файл состояния перехвата не разбирается: %v", err)
+	}
+	return st.ByPanel
 }

@@ -402,7 +402,7 @@ func (s *Service) releaseToFirmware(ctx context.Context, kernel, reason, to stri
 	code := CodeGeneric
 	s.setStep(stepRelease, statusRunning)
 	if !overrideBefore {
-		if err := s.fw.SetOverride(hctx, false); err != nil {
+		if err := s.releaseOverride(hctx); err != nil {
 			errs = append(errs, err.Error())
 			code = CodeOverrideFailed
 		}

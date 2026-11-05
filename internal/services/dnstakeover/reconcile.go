@@ -14,9 +14,11 @@ import (
 // обычно снят, а живые данные перехвата включены: файлы ядра со слушателем :53 при
 // занятом прошивкой порте не дают Xray подняться (факт xray_bind53_conflict),
 // Mihomo поднимается без DNS (mihomo_bind53_conflict). Обратный случай R3 —
-// override сохранён в стартовой конфигурации без панели, а перехвата нет: LAN
-// остаётся без DNS. Сверка снимает оба: первый — файлы без слушателя, подъём
-// упавшего ядра и ожидание возврата сторожем; второй — `no opkg dns-override`.
+// override, поставленный панелью, остался (панель остановили или она упала до
+// возврата DNS прошивке, override сохранён в стартовой конфигурации), а перехвата
+// нет: LAN остаётся без DNS. Сверка снимает оба: первый — файлы без слушателя,
+// подъём упавшего ядра и ожидание возврата сторожем; второй — `no opkg
+// dns-override`, только если его ставила панель (OverrideSetByPanel).
 
 const (
 	// opReconcile — операция службы и запись истории: сверка на старте панели.
@@ -49,9 +51,10 @@ var (
 //     возврат — веткой сторожа; нежелаемым перехват желаемым не становится
 //     (откат или выключение не дописали файлы ядра); активным
 //     стало другое ядро — DNS у прошивки, перехват не желаем (kernel_changed);
-//  2. перехват выключен, override включён, override до включения не был включён и
-//     порт 53 не держит ни ядро, ни другой процесс (R3) — `no opkg dns-override`
-//     и запись в истории;
+//  2. перехват выключен, override включён, его поставила панель (OverrideSetByPanel,
+//     WR-06) и порт 53 не держит ни ядро, ни другой процесс (R3) — `no opkg
+//     dns-override` и запись в истории; override, поставленный не панелью, не
+//     трогается;
 //  3. перехват включён и override включён — слушатель проверит сторож.
 //
 // Команда сохранения конфигурации прошивки не вызывается (D-16).
@@ -66,6 +69,12 @@ func (s *Service) reconcileOnStart(ctx context.Context) {
 	if err != nil {
 		log.Printf("dnstakeover: сверка на старте: override не прочитан: %v", err)
 		return
+	}
+	if !override {
+		// Override снят (перезагрузка роутера, снят вручную): признак «поставила
+		// панель» устарел и не должен распространиться на override, который
+		// пользователь включит позже.
+		s.setOverrideByPanel(false)
 	}
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
@@ -187,18 +196,19 @@ func (s *Service) reconcileKernelChanged(ctx context.Context, from, to string, e
 }
 
 // reconcileStaleOverride — случай 2 сверки (R3): перехват выключен, override
-// включён. Override снимается, если до включения перехвата его не было (снимок
-// включения или override_before ждущего перехвата) и порт 53 не держит ни ядро, ни
-// другой процесс: включённый override при свободном :53 оставляет LAN без DNS, а
-// занятый :53 значит, что DNS роутера сознательно отдан другому слушателю.
+// включён. Override снимается, если его поставила панель и не вернула
+// (OverrideSetByPanel) и порт 53 не держит ни ядро, ни другой процесс: включённый
+// override при свободном :53 оставляет LAN без DNS, а занятый :53 значит, что DNS
+// роутера сознательно отдан другому слушателю. Override без признака (поставлен
+// вручную, остался от прежнего формата файла) не трогается.
 func (s *Service) reconcileStaleOverride(ctx context.Context) {
 	s.mu.Lock()
-	before := s.st.Desired && s.st.OverrideBefore
-	if s.st.Snapshot != nil {
-		before = s.st.Snapshot.OverrideBefore
-	}
+	byPanel := s.st.OverrideSetByPanel
 	s.mu.Unlock()
-	if before {
+	if !byPanel {
+		// Override поставила не панель (вручную, при старте роутера, прошивкой): чужой
+		// override не трогается, даже когда :53 свободен.
+		log.Printf("dnstakeover: сверка на старте: override включён не панелью — не трогаем")
 		return
 	}
 	switch owner := PortOwner(); owner.Kind {
@@ -214,7 +224,7 @@ func (s *Service) reconcileStaleOverride(ctx context.Context) {
 	hctx, cancel := context.WithTimeout(ctx, hookTimeout)
 	defer cancel()
 	s.setStep(stepRelease, statusRunning)
-	err := s.fw.SetOverride(hctx, false)
+	err := s.releaseOverride(hctx)
 	s.stepResult(stepRelease, err == nil)
 	var fail *Failure
 	if err != nil {
