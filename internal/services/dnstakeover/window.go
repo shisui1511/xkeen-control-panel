@@ -58,13 +58,29 @@ const (
 // снимком и видом прежними (повторное «Применить» в окне).
 func (s *Service) openWindow(kind string, snap txnSnapshot) error {
 	deadline := s.now().Add(windowDuration)
+	if err := s.openWindowState(kind, snap, deadline); err != nil {
+		return err
+	}
+	s.armWindowTimer(deadline)
+	s.setStep(stepWindow, statusRunning)
+	s.d.Layer.PublishDNS()
+	return nil
+}
+
+// openWindowState — запись окна в состояние и файл под saveMu (openWindow).
+func (s *Service) openWindowState(kind string, snap txnSnapshot, deadline time.Time) error {
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
 	s.mu.Lock()
 	if s.winRolling {
 		s.mu.Unlock()
 		return &Error{Code: CodeBusy, Detail: "идёт откат окна подтверждения"}
 	}
 	if s.st.Window != nil {
-		s.st.Window.DeadlineUnixMs = deadline.UnixMilli()
+		// Окно копируется: указатель из прежней копии состояния не меняется на месте.
+		w := *s.st.Window
+		w.DeadlineUnixMs = deadline.UnixMilli()
+		s.st.Window = &w
 	} else {
 		s.st.Window = &windowState{Kind: kind, DeadlineUnixMs: deadline.UnixMilli(), Snapshot: snap}
 	}
@@ -88,9 +104,6 @@ func (s *Service) openWindow(kind string, snap txnSnapshot) error {
 		// записи, теряется только откат при старте панели.
 		log.Printf("dnstakeover: %v", err)
 	}
-	s.armWindowTimer(deadline)
-	s.setStep(stepWindow, statusRunning)
-	s.d.Layer.PublishDNS()
 	return nil
 }
 
@@ -158,15 +171,22 @@ func (s *Service) windowOpen() bool {
 // снимок снят, шаг window done, state on, запись истории); окна нет, а перехват
 // включён — тот же вид без изменений (повтор из второй вкладки); иначе no_window.
 func (s *Service) Keep(ctx context.Context) (View, error) {
+	s.saveMu.Lock()
 	s.mu.Lock()
 	w := s.st.Window
 	rolling := s.winRolling
-	if w != nil && !rolling {
+	closed := w != nil && !rolling
+	if closed {
 		s.stopWindowTimerLocked()
 		s.st.Window = nil
 	}
 	saved := s.st
 	s.mu.Unlock()
+	var saveErr error
+	if closed {
+		saveErr = saveState(s.statePath(), saved)
+	}
+	s.saveMu.Unlock()
 	switch {
 	case w != nil && rolling:
 		return View{}, &Error{Code: CodeNoWindow, Detail: "окно уже откатывается"}
@@ -176,8 +196,8 @@ func (s *Service) Keep(ctx context.Context) (View, error) {
 		}
 		return View{}, errCode(CodeNoWindow)
 	}
-	if err := saveState(s.statePath(), saved); err != nil {
-		log.Printf("dnstakeover: %v", err)
+	if saveErr != nil {
+		log.Printf("dnstakeover: %v", saveErr)
 	}
 	s.clearOutcome()
 	s.setStep(stepWindow, statusDone)

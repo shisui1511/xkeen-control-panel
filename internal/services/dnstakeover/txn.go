@@ -217,8 +217,11 @@ func (s *Service) fillOp(v *View, on bool, waiting string) {
 	}
 }
 
-// update меняет состояние службы под замком и записывает его на диск.
+// update меняет состояние службы под замком и записывает его на диск. fn не
+// вызывает update и не берёт saveMu: запись идёт под saveMu до конца.
 func (s *Service) update(fn func(p *persisted)) error {
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
 	s.mu.Lock()
 	fn(&s.st)
 	snapshot := s.st

@@ -102,6 +102,11 @@ type Service struct {
 	winStop      chan struct{}
 	winRolling   bool
 	pendingApply *pendingApply
+	// saveMu держится от изменения st до записи файла состояния: записи ложатся на
+	// диск в порядке изменений, а маршалинг не пересекается с правкой тех же
+	// указателей (окно, снимок). Порядок замков: saveMu, затем mu; любое изменение
+	// st идёт под обоими (update, openWindow, Keep, Check).
+	saveMu sync.Mutex
 	// checkMu — одновременно идёт одна проверка резолва (T-148-17); checking —
 	// проверка идёт (операция службы для блокировки busy).
 	checkMu  sync.Mutex
@@ -789,12 +794,15 @@ func (s *Service) Check(ctx context.Context, name string) (CheckResult, error) {
 	}
 	res := CheckResult{OK: g.OK, Source: SourceManual, AtMs: s.now().UnixMilli(), Groups: []CheckGroup{g}}
 
-	s.mu.Lock()
 	stored := cloneCheck(res)
+	s.saveMu.Lock()
+	s.mu.Lock()
 	s.st.LastCheck = &stored
 	snapshot := s.st
 	s.mu.Unlock()
-	if err := saveState(s.statePath(), snapshot); err != nil {
+	err = saveState(s.statePath(), snapshot)
+	s.saveMu.Unlock()
+	if err != nil {
 		log.Printf("dnstakeover: %v", err)
 	}
 	s.d.Layer.PublishDNS()
