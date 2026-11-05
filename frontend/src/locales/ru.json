@@ -4268,6 +4268,7 @@
   "cfg.dns.state.on": "Включён",
   "cfg.dns.state.waiting": "Ждёт ядро",
   "cfg.dns.state.unavailable": "Недоступен",
+  "cfg.dns.state.disable_failed": "Не выключен",
   "cfg.dns.row_owner": "Владелец порта 53",
   "cfg.dns.owner_kernel": "Ядро {kernel} ({addr})",
   "cfg.dns.owner_firmware": "Прошивка (dns-proxy)",

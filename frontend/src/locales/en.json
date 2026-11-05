@@ -4268,6 +4268,7 @@
   "cfg.dns.state.on": "On",
   "cfg.dns.state.waiting": "Waiting for the core",
   "cfg.dns.state.unavailable": "Unavailable",
+  "cfg.dns.state.disable_failed": "Not disabled",
   "cfg.dns.row_owner": "Port 53 owner",
   "cfg.dns.owner_kernel": "{kernel} core ({addr})",
   "cfg.dns.owner_firmware": "Firmware (dns-proxy)",

@@ -160,6 +160,14 @@
 
   let pending = $state(false);
 
+  // Ключ бейджа: состояние вида; ожидание после сбоя выключения — «Не выключен», а не
+  // «Ждёт ядро» (строка состояния просит повторить выключение)
+  const badgeKey = $derived(
+    dnsState === 'waiting' && view?.waiting_reason === 'disable_failed'
+      ? 'disable_failed'
+      : dnsState
+  );
+
   const stateClass = $derived.by(() => {
     switch (dnsState) {
       case 'on':
@@ -523,8 +531,8 @@
     </div>
     {#if view && dnsState}
       <div class="dns-badges">
-        <span class="badge {stateClass}" data-testid="dns-state-badge">
-          {$t(`cfg.dns.state.${dnsState}`)}
+        <span class="badge {stateClass}" data-testid="dns-state-badge" data-badge={badgeKey}>
+          {$t(`cfg.dns.state.${badgeKey}`)}
         </span>
         {#if showKernelBadge}
           <span class="badge badge-type" data-testid="dns-kernel-badge">
