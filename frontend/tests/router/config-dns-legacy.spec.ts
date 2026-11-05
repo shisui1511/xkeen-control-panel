@@ -54,7 +54,9 @@ async function setLayer(page: Page, on: boolean): Promise<void> {
   expect(settings.status, 'GET /api/settings').toBe(200);
   if ((settings.data?.config_layer === true) === on) return;
   const res = await api(page, 'POST', '/api/settings/config-layer', { enabled: on });
-  expect(res.status, `флаг слоя → ${on ? 'вкл' : 'выкл'}`).toBe(200);
+  expect(res.status, `флаг слоя → ${on ? 'вкл' : 'выкл'} (${String(res.data?.code ?? '')})`).toBe(
+    200
+  );
 }
 
 /** Признак xkeen_dns из настоящих capabilities панели. */

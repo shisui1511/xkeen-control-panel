@@ -860,11 +860,20 @@ async function applyAndWait(page: Page): Promise<void> {
     .poll(
       async () => {
         const s = await layerProbe(page);
-        return !s.running && s.changes === 0;
+        if (!s.running && s.changes === 0) return 'готово';
+        const st = await api(page, 'GET', '/api/configlayer/state');
+        const steps = ((
+          st.data?.apply as { steps?: { id: string; state: string; message?: string }[] }
+        )?.steps ?? []) as { id: string; state: string; message?: string }[];
+        const apply = steps
+          .filter((x) => x.state === 'failed')
+          .map((x) => `${x.id}: ${(x.message ?? '').slice(0, 700)}`)
+          .join(' | ');
+        return `применение ${s.running ? 'идёт' : 'закончено'}, изменений в черновике ${s.changes}: ${apply}`;
       },
       { timeout: T.save * 4, intervals: [2000] }
     )
-    .toBe(true);
+    .toBe('готово');
 }
 
 async function routingState(page: Page): Promise<{ revision: number; desired: boolean }> {
@@ -953,7 +962,7 @@ test.describe('dns-flow', () => {
           revision: (await routingState(page)).revision
         });
         if (take.status !== 200) {
-          flow.skip = 'маршрутизация не берётся в панель';
+          flow.skip = `маршрутизация не берётся в панель: ${take.status} ${take.data?.code ?? ''}`;
           return;
         }
       }
@@ -965,7 +974,7 @@ test.describe('dns-flow', () => {
           ack_comments: true
         });
         if (take.status !== 200) {
-          flow.skip = 'DNS-секция ядра не берётся в панель';
+          flow.skip = `DNS-секция ядра не берётся в панель: ${take.status} ${take.data?.code ?? ''}`;
           return;
         }
       }
