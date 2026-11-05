@@ -111,6 +111,13 @@ type ApplyRequest struct {
 	// ядра на прежних файлах) и фиксации состояния. Паника хука откат не прерывает.
 	// nil — хука нет.
 	BeforeRollback func()
+	// ReleaseListener — запуск снимает слушатель :53 перехвата DNS (живые данные
+	// перехвата выключаются, DNS роутера уже у прошивки). Ручная правка файлов
+	// панели такой запуск не блокирует: пишутся только файлы, чьё содержимое
+	// меняют живые данные перехвата, остальные файлы с дрейфом не перезаписываются
+	// (D-11). Иначе слушатель остался бы в файлах ядра при DNS у прошивки, и следующий
+	// запуск ядра упёрся бы в занятый :53. Не действует при TriggerRebuild.
+	ReleaseListener bool
 }
 
 // RestoreSpec — снимок, к которому возвращается применённое состояние.
@@ -523,6 +530,7 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	// фоновые запуски (установка ядра, включение слоя) идут мимо кнопки и иначе
 	// молча перезаписали бы ручную правку (D-11). «Пересобрать» дрейф разрешает сам.
 	manifest := manifestOfScope(snap.Manifest, installed, req.Kernel)
+	listenerOnly := false
 	if req.Trigger != TriggerRebuild {
 		drift := driftKeys
 		if req.Trigger == TriggerKernelInstalled {
@@ -542,7 +550,12 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		if !blocked {
 			blocked = sectionDriftBlocks(src, sectionsDrift(p.d.Roots, snap.Cores, installed, req.Kernel, p.d.ForeignOwned))
 		}
-		if blocked {
+		switch {
+		case blocked && req.ReleaseListener:
+			// Снятие слушателя :53 не ждёт, пока пользователь разрешит дрейф: план
+			// сужается до файлов, затронутых живыми данными перехвата.
+			listenerOnly = true
+		case blocked:
 			p.setStep(StepBuild, StepFailed, "", ErrDriftBlocked.Error())
 			return p.finish(ResultView{Code: ResultDriftBlocked, Message: ErrDriftBlocked.Error()})
 		}
@@ -567,19 +580,33 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		for _, k := range req.Only {
 			only[k] = true
 		}
-		// Записи манифеста неустановленного ядра не участвуют в плане: иначе при
-		// пустой генерации его файлы ушли бы в удаление. Они остаются нетронутыми.
-		plan, err = ComputePlan(p.d.Roots, files, manifest, only, p.d.ForeignOwned)
-		// Каталог неустановленного ядра (и ядра вне области запуска) так же не
-		// трогается: его сирот не убираем.
-		plan.Orphans = orphansOfScope(plan.Orphans, installed, req.Kernel)
+		skipPlan := false
+		if listenerOnly {
+			// Только файлы, затронутые живыми данными перехвата; их нет — писать нечего.
+			var keys []string
+			if keys, err = p.listenerFileKeys(used, snap, installed, req, files); err == nil {
+				for _, k := range keys {
+					only[k] = true
+				}
+				skipPlan = len(keys) == 0
+				req.Only = keys
+			}
+		}
+		if err == nil && !skipPlan {
+			// Записи манифеста неустановленного ядра не участвуют в плане: иначе при
+			// пустой генерации его файлы ушли бы в удаление. Они остаются нетронутыми.
+			plan, err = ComputePlan(p.d.Roots, files, manifest, only, p.d.ForeignOwned)
+			// Каталог неустановленного ядра (и ядра вне области запуска) так же не
+			// трогается: его сирот не убираем.
+			plan.Orphans = orphansOfScope(plan.Orphans, installed, req.Kernel)
+		}
 	}
-	if err == nil {
+	if err == nil && !listenerOnly {
 		// Взятие и возврат маршрутизации — часть этого же плана: проверка ядрами
 		// идёт на итоговой раскладке, запись и откат общие.
 		plan.Routing, err = p.planRouting(src, snap.Routing, installed, req)
 	}
-	if err == nil {
+	if err == nil && !listenerOnly {
 		// Секции Xray (взятие и возврат файлов, D-01) идут теми же операциями.
 		plan.Routing, err = p.planCores(src, snap.Cores, plan.Routing, installed, req)
 	}
@@ -684,6 +711,40 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	kept := p.d.Store.Snapshot()
 	_ = PruneBackups(p.d.DataDir, BackupRetention, append(kept.Routing.backupDirs(), kept.Cores.backupDirs()...)...)
 	return p.finish(ResultView{OK: true, Code: ResultApplied, Written: out.Written, OrphansRemoved: out.OrphansRemoved})
+}
+
+// listenerFileKeys — ключи файлов, чьё содержимое в этом запуске меняют живые данные
+// перехвата: файлы, собранные из тех же секций с прежними живыми данными, отличаются
+// от файлов запуска (или есть только с одной стороны). Файлы, которых слушатель не
+// касается, сюда не попадают, поэтому ручная правка в них не перезаписывается.
+func (p *Pipeline) listenerFileKeys(used Input, snap State, installed InstalledKernels, req ApplyRequest, files []GeneratedFile) ([]string, error) {
+	before := used
+	before.Live = snap.Live
+	prev, err := p.d.Registry.Build(before, installed)
+	if err != nil {
+		return nil, err
+	}
+	prev = filesOfScope(prev, req.Kernel)
+	old := make(map[string][]byte, len(prev))
+	for _, f := range prev {
+		old[f.Key()] = f.Content
+	}
+	seen := make(map[string]bool, len(files))
+	var keys []string
+	for _, f := range files {
+		key := f.Key()
+		seen[key] = true
+		if prevContent, ok := old[key]; !ok || !bytes.Equal(prevContent, f.Content) {
+			keys = append(keys, key)
+		}
+	}
+	for key := range old {
+		if !seen[key] {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys, nil
 }
 
 // rollbackAfterCommitFailure откатывает файлы после сбоя фиксации состояния и

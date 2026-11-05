@@ -560,7 +560,8 @@ const lockWaitLimit = 4 * hookTimeout
 // роутера прошивке, поэтому замки применения и жизненного цикла ждутся (Wait), а
 // не дают отказ занятости: обычно override к этому моменту уже снят, и потерянная
 // запись оставила бы слушатель :53 в файлах ядра. Ожидание ограничено ctx,
-// lockWaitLimit и остановкой службы.
+// lockWaitLimit и остановкой службы. Дрейф файлов запись не блокирует
+// (ReleaseListener): снимается слушатель, а ручные правки в прочих файлах остаются.
 func (s *Service) runWithoutListener(ctx context.Context, kernel string) (configlayer.ApplyView, error) {
 	raw, err := disabledLive(kernel)
 	if err != nil {
@@ -575,6 +576,10 @@ func (s *Service) runWithoutListener(ctx context.Context, kernel string) (config
 		Kernel:  kernel,
 		Live:    configlayer.Sections{configlayer.LiveKeyDNSTakeover: raw},
 		Wait:    true,
+		// Ручная правка файлов ядра не блокирует снятие слушателя: пишутся только
+		// файлы с живыми данными перехвата, остальные правки пользователя остаются
+		// (D-11, WR-13). Иначе слушатель остался бы в файлах при DNS у прошивки.
+		ReleaseListener: true,
 	})
 }
 

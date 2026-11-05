@@ -1588,6 +1588,10 @@ type SectionLiveRun struct {
 	// BeforeWrite и BeforeRollback — хуки запуска (см. ApplyRequest).
 	BeforeWrite    func(ctx context.Context) error
 	BeforeRollback func()
+	// ReleaseListener — запуск снимает слушатель :53 перехвата DNS: дрейф файлов не
+	// блокирует его, пишутся только файлы, затронутые живыми данными перехвата
+	// (см. ApplyRequest.ReleaseListener).
+	ReleaseListener bool
 	// Wait — ждать замки применения и жизненного цикла, как фоновый запуск
 	// (TryBegin с user=false), пока их не отпустят или не отменят ctx. Без Wait
 	// занятый замок сразу даёт ErrApplyBusy или ErrKernelBusy, как у «Применить» по
@@ -1641,6 +1645,7 @@ func (l *Layer) RunSectionLive(ctx context.Context, run SectionLiveRun) (ApplyVi
 		SectionsOverlay: run.Sections.Clone(), MergeDraft: run.MergeDraft,
 		LiveCommit: run.Live.Clone(), ForceFullRestart: run.ForceFullRestart,
 		BeforeWrite: run.BeforeWrite, BeforeRollback: run.BeforeRollback,
+		ReleaseListener: run.ReleaseListener,
 	}
 	view := l.runPipeline(req)
 	release()
