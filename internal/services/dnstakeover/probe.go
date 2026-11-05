@@ -173,11 +173,14 @@ func exchangeTCP(ctx context.Context, server string, packed []byte, id uint16) (
 	return resp, nil
 }
 
-// Alive сообщает, что слушатель server отвечает: любой RCODE, включая SERVFAIL,
-// значит «жив» (D-13).
+// Alive сообщает, что слушатель server отвечает на name окончательным ответом:
+// NOERROR, NXDOMAIN, REFUSED и прочие RCODE значат «жив» (D-13), SERVFAIL — нет.
+// Проба сторожа — имя во встроенной зоне, его разрешает прошивка; SERVFAIL на него
+// значит, что слушатель на :53 есть, а путь DNS роутера сломан: так отвечает ядро
+// с неподтверждённым перехватом, который не дошёл до пробы и окна.
 func Alive(ctx context.Context, server, name string) bool {
-	_, err := Query(ctx, server, name, dnsmessage.TypeA, probeAttempt)
-	return err == nil
+	ans, err := Query(ctx, server, name, dnsmessage.TypeA, probeAttempt)
+	return err == nil && ans.RCode != dnsmessage.RCodeServerFailure
 }
 
 // Resolve разрешает имя через 127.0.0.1:53 с повторами: попытка до 3 с, пауза
