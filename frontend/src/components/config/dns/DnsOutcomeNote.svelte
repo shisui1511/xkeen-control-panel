@@ -76,7 +76,7 @@
   </div>
 {/if}
 {#if state === 'waiting' && waitingReason !== 'disable_failed'}
-  <p class="dns-outcome-wait" role="status" data-testid="dns-outcome" data-kind="waiting">
+  <p class="dns-outcome-wait" role="status" data-testid="dns-outcome-waiting">
     <Icon name="info" size={14} class="icon-first-line" />
     <span class="dns-outcome-text">{$t('cfg.dns.outcome_waiting')}</span>
   </p>

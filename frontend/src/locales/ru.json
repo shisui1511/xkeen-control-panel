@@ -4378,6 +4378,7 @@
   "cfg.dns.group_label": "Группа для DNS-запросов",
   "cfg.dns.group_hint": "Все серверы DNS идут через эту группу, в том числе вписанные вами. Если группа не отвечает, DNS молчит: напрямую запросы не уходят.",
   "cfg.dns.group_missing": "Группа «{name}» удалена: выберите другую.",
+  "cfg.dns.group_none": "Групп маршрутизации нет.",
   "cfg.dns.open_groups": "Открыть «Группы»",
   "cfg.dns.open_dns_section": "Открыть секцию DNS",
   "cfg.dns.open_dns_form": "К форме DNS",

@@ -4378,6 +4378,7 @@
   "cfg.dns.group_label": "Group for DNS queries",
   "cfg.dns.group_hint": "All DNS servers go through this group, including the ones you added. If the group does not respond, DNS stays silent: queries never go out directly.",
   "cfg.dns.group_missing": "The “{name}” group was deleted: choose another one.",
+  "cfg.dns.group_none": "There are no routing groups.",
   "cfg.dns.open_groups": "Open “Groups”",
   "cfg.dns.open_dns_section": "Open the DNS section",
   "cfg.dns.open_dns_form": "To the DNS form",

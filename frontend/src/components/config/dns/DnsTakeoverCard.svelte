@@ -757,7 +757,7 @@
               </p>
             {:else if noGroups}
               <p class="warning-text dns-field-error" id={groupNoneId} data-testid="dns-group-none">
-                {$t('cfg.dns.block_group')}
+                {$t('cfg.dns.group_none')}
               </p>
             {/if}
             <p class="dns-caption" id={groupHintId} data-testid="dns-group-hint">
