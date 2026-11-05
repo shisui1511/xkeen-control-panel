@@ -50,24 +50,27 @@
     <span class="dns-legacy-text">{$t('cfg.dns.legacy_will_off')}</span>
   </p>
 {:else if drift}
-  <div
-    class="alert alert-warning dns-legacy-drift"
-    role={inWindow ? 'status' : 'alert'}
-    data-testid="dns-legacy-drift"
-  >
-    <Icon name="warning" size={16} class="icon-first-line" />
-    <div class="dns-legacy-body">
-      <span class="dns-legacy-text">{$t('cfg.dns.legacy_drift')}</span>
-      <Button
-        variant={inWindow ? 'secondary' : 'primary'}
-        loading={pending}
-        data-testid="dns-legacy-off"
-        onclick={() => void turnOff()}
-      >
-        {$t('cfg.dns.legacy_off_btn')}
-      </Button>
+  <!-- Роль на живом узле при смене window → on не озвучивается: узел пересоздаётся -->
+  {#key inWindow}
+    <div
+      class="alert alert-warning dns-legacy-drift"
+      role={inWindow ? 'status' : 'alert'}
+      data-testid="dns-legacy-drift"
+    >
+      <Icon name="warning" size={16} class="icon-first-line" />
+      <div class="dns-legacy-body">
+        <span class="dns-legacy-text">{$t('cfg.dns.legacy_drift')}</span>
+        <Button
+          variant={inWindow ? 'secondary' : 'primary'}
+          loading={pending}
+          data-testid="dns-legacy-off"
+          onclick={() => void turnOff()}
+        >
+          {$t('cfg.dns.legacy_off_btn')}
+        </Button>
+      </div>
     </div>
-  </div>
+  {/key}
 {/if}
 
 <style>
