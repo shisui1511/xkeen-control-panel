@@ -204,8 +204,9 @@ func (s *Service) checkApply(p pendingApply, post configlayer.Sections) {
 // шаги операции становятся шагами отката apply, применённое состояние и Live
 // перехвата возвращаются к снимку без сброса черновика (D-27: правки остаются в
 // нём, перехват остаётся включённым), затем повторная проба; её провал — DNS
-// прошивке, состояние waiting с причиной probe, исход probe_failed, а открытое
-// окно «Применить» закрывается без отката. Итог — сбой
+// прошивке, состояние waiting с причиной probe, исход probe_failed; открытое
+// окно «Применить» не закрывается: его откат вернёт первое неподтверждённое
+// применение. Итог — сбой
 // пробы с rolled_back=true (или rollback_failed с причиной) и запись истории.
 func (s *Service) rollbackApply(ctx context.Context, p pendingApply, probeFail *Failure) {
 	s.replaceSteps(rollbackSteps(kindApply))
@@ -236,23 +237,12 @@ func (s *Service) rollbackApply(ctx context.Context, p pendingApply, probeFail *
 		fail.RolledBack = true
 	}
 	if againFail != nil {
-		// DNS у прошивки: открытое окно «Применить» закрывается той же записью.
-		// Его откат по таймеру вернул бы Live снимка — перехват со слушателем :53
-		// при снятом override. Окно, которое таймер уже забрал, откатывается без
-		// слушателя (rollbackWindow).
-		closed := false
-		if err := s.update(func(st *persisted) {
-			st.WaitingReason = waitingProbe
-			if st.Window != nil && st.Window.Kind == kindApply && !s.winRolling {
-				s.stopWindowTimerLocked()
-				st.Window = nil
-				closed = true
-			}
-		}); err != nil {
+		// DNS у прошивки: перехват ждёт возврата пробой. Открытое окно «Применить»
+		// остаётся: его снимок хранит Applied до первого неподтверждённого
+		// применения, и откат по таймеру (rollbackWindow, ветка released при
+		// причине ожидания) вернёт его без слушателя :53 и без пробы.
+		if err := s.update(func(st *persisted) { st.WaitingReason = waitingProbe }); err != nil {
 			log.Printf("dnstakeover: %v", err)
-		}
-		if closed {
-			log.Printf("dnstakeover: DNS роутера у прошивки — окно «Применить» закрыто без отката")
 		}
 	}
 	s.setFailure(fail)
