@@ -4338,6 +4338,7 @@
   "cfg.dns.reason_reboot": "роутер перезагружен",
   "cfg.dns.reason_watchdog": "сторож вернул DNS",
   "cfg.dns.reason_probe": "проверка резолва не прошла",
+  "cfg.dns.reason_disable_failed": "выключение не завершилось, повторите «Выключить перехват»",
   "cfg.dns.no_reason": "причина не сообщена",
   "cfg.dns.reason_network": "панель не отвечает по сети",
   "cfg.dns.value_unknown": "(не указано)",

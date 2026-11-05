@@ -180,6 +180,7 @@
       case 'reboot':
       case 'watchdog':
       case 'probe':
+      case 'disable_failed':
         return $t(`cfg.dns.reason_${code}`);
       default:
         // Причина, которой нет в словаре, сырым кодом не показывается
