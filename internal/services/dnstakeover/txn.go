@@ -866,10 +866,12 @@ func (s *Service) runDisable(ctx context.Context, pl disablePlan) {
 }
 
 // verifyFirmwareDNS ждёт до overrideSettle, пока прошивка ответит через
-// 127.0.0.1:53 (служебный домен; домен неизвестен — резолвер прошивки держит :53).
+// 127.0.0.1:53 (служебный домен; домен неизвестен — резолвер прошивки держит :53)
+// и порт 53 не держит ядро: слушатель ядра пересылает служебный домен прошивке, и
+// один ответ не доказывает, что слушатель из файлов ушёл.
 func (s *Service) verifyFirmwareDNS(ctx context.Context) error {
 	deadline := s.now().Add(overrideSettle)
-	for !s.fw.port53Settled(ctx, false) {
+	for PortOwner().Kind == OwnerKernel || !s.fw.port53Settled(ctx, false) {
 		if !s.now().Before(deadline) {
 			return fmt.Errorf("прошивка за %v не ответила через %s", overrideSettle, LoopbackDNS)
 		}
