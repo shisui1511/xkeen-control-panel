@@ -40,7 +40,12 @@
   let name = $state(saved.name ?? untrack(() => view.default_name));
   let own = $state<DnsCheckResult | null>(saved.result);
   let checking = $state(false);
-  let transportError = $state('');
+  // Транспортный сбой относится к состоянию перехвата, при котором он случился: смена
+  // состояния его снимает
+  let transport = $state<{ state: DnsState; text: string } | null>(null);
+  const transportError = $derived(
+    transport !== null && transport.state === view.state ? transport.text : ''
+  );
   let inputEl: HTMLInputElement | null = null;
   const keepInput: Attachment<HTMLInputElement> = (el) => {
     inputEl = el;
@@ -78,9 +83,12 @@
       const res = await checkDns(name.trim());
       own = res;
       saved.result = res;
-      transportError = '';
+      transport = null;
     } catch (err) {
-      transportError = $t('cfg.dns.check_transport', { error: dnsRequestErrorText(err) });
+      transport = {
+        state: view.state,
+        text: $t('cfg.dns.check_transport', { error: dnsRequestErrorText(err) })
+      };
     } finally {
       checking = false;
     }
@@ -171,12 +179,17 @@
     {checking ? $t('cfg.dns.check_running') : ''}
   </p>
 
-  {#if transportError}
-    <p class="dns-check-transport" role="status" data-testid="dns-check-transport">
+  <!-- Зона сбоя стоит постоянно (пустая — sr-only), меняется только содержимое -->
+  <p
+    class={['dns-check-transport', { 'sr-only': transportError === '' }]}
+    role="status"
+    data-testid="dns-check-transport"
+  >
+    {#if transportError}
       <Icon name="warning" size={14} class="icon-first-line" />
       <span>{transportError}</span>
-    </p>
-  {/if}
+    {/if}
+  </p>
 
   {#if shown}
     <div

@@ -23,16 +23,21 @@
   });
 
   // Выключение идёт в фоне: итог (тост) показывается, когда состояние станет off или придёт
-  // сбой. Слежение живёт в модуле: смена вкладки ядра или уход со страницы (карточка
-  // размонтирована) тост не теряют. Вид, бывший в сторе до запроса, итогом не считается;
-  // вид сброшен (слежение за перехватом снято) — итог неизвестен, тоста нет
+  // сбой этого выключения. Слежение живёт в модуле: смена вкладки ядра или уход со страницы
+  // (карточка размонтирована) тост не теряют. Подписка ставится до запроса, итогом не
+  // считается вид на момент клика; сбой засчитывается, только если вид точно после начала
+  // выключения (видели applying или вид пришёл после ответа на запрос): прежний сбой в
+  // устаревшем виде итогом не станет. Вид сброшен (слежение снято) — итог неизвестен, тоста нет
   const disableWatch = $state({ awaiting: false });
   let offDisable: (() => void) | null = null;
 
-  function watchDisable(): void {
+  function watchDisable(): { started: () => void; cancel: () => void } {
     offDisable?.();
     disableWatch.awaiting = true;
-    let first = true;
+    const before = get(dnsTakeoverStore);
+    // Вид в сторе на момент ответа на запрос; undefined — ответа ещё нет
+    let atStart: typeof before | undefined = undefined;
+    let sawApplying = false;
     const finish = (): void => {
       disableWatch.awaiting = false;
       queueMicrotask(() => {
@@ -41,21 +46,32 @@
       });
     };
     offDisable = dnsTakeoverStore.subscribe((v) => {
-      if (first) {
-        first = false;
-        return;
-      }
-      if (!disableWatch.awaiting) return;
+      if (!disableWatch.awaiting || v === before) return;
       if (v === null) {
         finish();
-      } else if (v.failure) {
-        finish();
-        toast('error', failureText(v.failure), 8000);
-      } else if (v.state === 'off') {
+        return;
+      }
+      if (v.state === 'applying') {
+        sawApplying = true;
+        return;
+      }
+      const fresh = sawApplying || (atStart !== undefined && v !== atStart);
+      if (v.state === 'off') {
         finish();
         toast('success', get(i18n)('cfg.dns.toast_disabled'));
+      } else if (v.failure && fresh) {
+        finish();
+        toast('error', failureText(v.failure), 8000);
       }
     });
+    return {
+      started: () => {
+        atStart = get(dnsTakeoverStore);
+      },
+      cancel: () => {
+        if (disableWatch.awaiting) finish();
+      }
+    };
   }
 </script>
 
@@ -485,10 +501,12 @@
     if (!ok) return;
     markFailureSeen();
     pending = true;
+    const watch = watchDisable();
     try {
       await disableDns();
-      watchDisable();
+      watch.started();
     } catch (err) {
+      watch.cancel();
       showToast('error', dnsRequestErrorText(err), 8000);
       void loadDns();
     } finally {
@@ -533,8 +551,14 @@
       <Skeleton type="rect" height="56px" />
     </div>
   {:else}
-    {#if $dnsStale}
-      <p class="warning-text dns-stale" role="status" data-testid="dns-stale">
+    <!-- Зоны role="status" стоят постоянно, меняется только содержимое: область, вставленная
+         в DOM сразу с текстом, часть скринридеров не объявляет -->
+    <p
+      class={['warning-text dns-stale', { 'sr-only': !$dnsStale }]}
+      role="status"
+      data-testid="dns-stale"
+    >
+      {#if $dnsStale}
         <Icon name="warning" size={14} class="icon-first-line" />
         <span>
           {$t('cfg.dns.stale_error')}
@@ -547,16 +571,20 @@
             {$t('cfg.load_error_retry')}
           </button>
         </span>
-      </p>
-    {/if}
-    {#if otherKernel}
-      <p class="dns-caption" role="status" data-testid="dns-other-kernel">
-        {$t('cfg.dns.other_kernel', {
-          kernel: dnsKernelTitle(view.kernel),
-          current: dnsKernelTitle(currentKernel)
-        })}
-      </p>
-    {/if}
+      {/if}
+    </p>
+    <p
+      class={['dns-caption', { 'sr-only': !otherKernel }]}
+      role="status"
+      data-testid="dns-other-kernel"
+    >
+      {otherKernel
+        ? $t('cfg.dns.other_kernel', {
+            kernel: dnsKernelTitle(view.kernel),
+            current: dnsKernelTitle(currentKernel)
+          })
+        : ''}
+    </p>
 
     <p
       class="dns-status"

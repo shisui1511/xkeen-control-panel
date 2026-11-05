@@ -171,6 +171,10 @@ test('dns-card: выключенный перехват — DNS у прошив�
   await expect(page.getByTestId('dns-disable')).toHaveCount(0);
   // в карточке не больше одной основной кнопки
   await expect(page.getByTestId('dns-takeover-card').locator('.btn-primary')).toHaveCount(1);
+  // зоны role="status" стоят постоянно (пустые), чтобы появление текста озвучивалось
+  for (const id of ['dns-stale', 'dns-other-kernel', 'dns-check-transport']) {
+    await expect(page.getByTestId(id), `зона ${id}`).toHaveAttribute('role', 'status');
+  }
   if (st.owner.kind === 'firmware') {
     await expect(page.getByTestId('dns-row-owner')).toContainText('dns-proxy');
   }
