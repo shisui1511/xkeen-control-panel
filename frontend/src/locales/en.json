@@ -4324,6 +4324,7 @@
   "cfg.dns.toast_disabled": "DNS interception disabled.",
   "cfg.dns.toast_legacy_off": "The old DNS redirection is turned off.",
   "cfg.dns.outcome_timeout": "Rolled back: no confirmation, {time}.",
+  "cfg.dns.outcome_panel_restart": "Rolled back: the panel restarted before interception was confirmed, {time}.",
   "cfg.dns.outcome_watchdog": "DNS returned to the firmware: the {kernel} core did not respond on 127.0.0.1:53, {time}.",
   "cfg.dns.outcome_kernel_changed": "DNS returned to the firmware: the core was changed outside the panel ({from} → {to}), {time}. Enable interception again.",
   "cfg.dns.outcome_probe_failed": "DNS returned to the firmware: {reason}, {time}.",

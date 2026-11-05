@@ -38,6 +38,9 @@ const (
 	reasonTimeout      = "timeout"
 	reasonPanelRestart = "panel_restart"
 	reasonManual       = "manual"
+	// reasonTxnInterrupted — старт панели откатил проход, прерванный остановкой до
+	// окна подтверждения: окна не было, «окно истекло» пользователю не показывается.
+	reasonTxnInterrupted = "txn_interrupted"
 )
 
 // Коды отказа действий окна (frontend/src/lib/dnsErrorCodes.json).
@@ -292,7 +295,7 @@ func (s *Service) claimPendingTxn() (pendingTxn, bool) {
 func (s *Service) runPendingTxn(p pendingTxn) {
 	snap := p.snap
 	log.Printf("dnstakeover: проход перехвата (%s) прерван остановкой панели до окна подтверждения — откат", p.kind)
-	s.rollbackWindowInOp(windowState{Kind: p.kind, Snapshot: snap}, reasonPanelRestart)
+	s.rollbackWindowInOp(windowState{Kind: p.kind, Snapshot: snap}, reasonTxnInterrupted)
 	if s.ctx.Err() != nil || !p.wasDesired {
 		return
 	}
@@ -597,11 +600,15 @@ func (s *Service) rebuildXKeenRules(kernel string) error {
 // windowRolledBack — исход отката окна (D-28): timeout — таймер или старт панели
 // посреди окна, rolled_manual — «Откатить сейчас», остановка или смена ядра
 // пользователем (lifecycle.go), probe_failed — проба после отката «Применить» не
-// прошла и DNS у прошивки.
+// прошла и DNS у прошивки, panel_restart — старт панели откатил проход, прерванный
+// до окна подтверждения.
 func (s *Service) windowRolledBack(w windowState, kernel, reason string, fail *Failure, probeFailed bool) {
 	kind := OutcomeRolledManual
 	if reason != reasonManual && reason != reasonKernelStop && reason != reasonKernelSwitch {
 		kind = OutcomeTimeout
+	}
+	if reason == reasonTxnInterrupted {
+		kind = OutcomePanelRestart
 	}
 	if probeFailed {
 		kind = OutcomeProbeFailed
@@ -619,6 +626,7 @@ const (
 	OutcomeProbeFailed   = "probe_failed"
 	OutcomeWatchdog      = "watchdog"
 	OutcomeKernelChanged = "kernel_changed"
+	OutcomePanelRestart  = "panel_restart"
 )
 
 const (
@@ -632,7 +640,7 @@ const (
 // смена ядра вне панели. О нём сообщают уведомление слоя и однократный тост.
 func unattended(o Outcome) bool {
 	switch o.Kind {
-	case OutcomeTimeout, OutcomeWatchdog, OutcomeKernelChanged:
+	case OutcomeTimeout, OutcomeWatchdog, OutcomeKernelChanged, OutcomePanelRestart:
 		return true
 	case OutcomeProbeFailed:
 		return o.Reason != reasonManual

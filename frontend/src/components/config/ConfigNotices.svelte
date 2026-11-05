@@ -219,6 +219,8 @@
     switch (n.id) {
       case 'dns_outcome:timeout':
         return { notice: n, tone: 'warning', text: $t('cfg.dns.outcome_timeout', { time }) };
+      case 'dns_outcome:panel_restart':
+        return { notice: n, tone: 'warning', text: $t('cfg.dns.outcome_panel_restart', { time }) };
       case 'dns_outcome:probe_failed':
         return {
           notice: n,

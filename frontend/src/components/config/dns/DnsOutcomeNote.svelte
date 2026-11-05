@@ -48,6 +48,8 @@
     switch (o.kind) {
       case 'timeout':
         return $t('cfg.dns.outcome_timeout', { time });
+      case 'panel_restart':
+        return $t('cfg.dns.outcome_panel_restart', { time });
       case 'probe_failed':
         return $t('cfg.dns.outcome_probe_failed', { reason: $t('cfg.dns.reason_probe'), time });
       case 'watchdog':

@@ -213,6 +213,8 @@
       case 'timeout':
       case 'probe_failed':
         return $t('cfg.dns.toast_timeout', { seconds: String($dnsWindowSeconds) });
+      case 'panel_restart':
+        return $t('cfg.dns.outcome_panel_restart', { time: clock(o.at_ms) });
       case 'watchdog':
         return $t('cfg.dns.outcome_watchdog', {
           kernel: dnsKernelTitle(o.kernel || view?.kernel),

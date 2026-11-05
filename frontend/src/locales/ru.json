@@ -4324,6 +4324,7 @@
   "cfg.dns.toast_disabled": "Перехват DNS выключен.",
   "cfg.dns.toast_legacy_off": "Старое перенаправление DNS выключено.",
   "cfg.dns.outcome_timeout": "Откачено: нет подтверждения, {time}.",
+  "cfg.dns.outcome_panel_restart": "Откачено: панель перезапускалась, пока перехват не был подтверждён, {time}.",
   "cfg.dns.outcome_watchdog": "DNS возвращён прошивке: ядро {kernel} не ответило на 127.0.0.1:53, {time}.",
   "cfg.dns.outcome_kernel_changed": "DNS возвращён прошивке: ядро сменили вне панели ({from} → {to}), {time}. Включите перехват заново.",
   "cfg.dns.outcome_probe_failed": "DNS возвращён прошивке: {reason}, {time}.",
