@@ -394,7 +394,10 @@ func (s *Service) runEnable(ctx context.Context, pl enablePlan) {
 	}
 
 	s.setStep(stepProbe, statusRunning)
-	res, fail := s.probeTakeover(ctx)
+	res, fail, stopped := s.probeUntilStop(ctx)
+	if stopped {
+		return
+	}
 	s.storeCheck(res)
 	if fail != nil {
 		s.finishEnable(ctx, pl, fail, rollbackPlan{restarted: true, restore: true})
@@ -1130,6 +1133,24 @@ func (s *Service) probeTakeover(ctx context.Context) (CheckResult, *Failure) {
 		}
 	}
 	return CheckResult{OK: fail == nil, Source: SourceAuto, AtMs: s.now().UnixMilli(), Groups: groups}, fail
+}
+
+// probeUntilStop — проба включения, возврата или переноса перехвата (probeTakeover),
+// которую прерывает остановка службы. stopped — службу остановили посреди пробы:
+// итог не фиксируется, снимок прохода остаётся в файле состояния, и старт панели
+// откатывает проход (rollbackPendingTxn). Остановка панели поэтому не ждёт пробу
+// (до 40 с) дольше своего срока.
+func (s *Service) probeUntilStop(ctx context.Context) (CheckResult, *Failure, bool) {
+	pctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := context.AfterFunc(s.ctx, cancel)
+	defer stop()
+	res, fail := s.probeTakeover(pctx)
+	if s.ctx.Err() != nil {
+		log.Printf("dnstakeover: проба прервана остановкой службы — откат при старте панели")
+		return res, fail, true
+	}
+	return res, fail, false
 }
 
 // probeName разрешает имя через 127.0.0.1:53 с повторами (Resolve) и описывает

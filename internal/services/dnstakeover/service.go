@@ -170,6 +170,9 @@ func (s *Service) Start() {
 			log.Printf("dnstakeover: окно подтверждения %s не закрыто до перезапуска панели — откат", w.Kind)
 			s.rollbackWindowInOp(w, reasonPanelRestart)
 		}
+		// Проход включения, возврата или переноса, прерванный остановкой панели до
+		// окна (обычно посреди пробы), не подтверждён: откат как у окна (D-07).
+		s.rollbackPendingTxn()
 		// Сверка прошивки и состояния (D-16, R3) — после отката окна, до сторожа.
 		s.reconcileOnStart(s.ctx)
 		if s.ctx.Err() != nil {

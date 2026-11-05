@@ -493,7 +493,10 @@ func (s *Service) runRestore(ctx context.Context, pl enablePlan) *Failure {
 	}
 
 	s.setStep(stepProbe, statusRunning)
-	res, fail := s.probeTakeover(ctx)
+	res, fail, stopped := s.probeUntilStop(ctx)
+	if stopped {
+		return &Failure{Code: CodeGeneric, Detail: "остановка службы посреди пробы"}
+	}
 	s.storeCheck(res)
 	if fail != nil {
 		return finish(fail, rollbackPlan{restarted: true, restore: true})
@@ -654,6 +657,15 @@ func (s *Service) runTransfer(ctx context.Context, prev string, on bool, to stri
 		s.dropTransfer(ctx, prev, false, to, overrideBefore, &Failure{Code: CodeGeneric, Detail: truncateDetail(err.Error())})
 		return
 	}
+	// Снимок переноса — в файл до прохода: остановка панели посреди пробы, до
+	// окна kernel_switch, оставляет его, и старт откатывает перенос (rollbackPendingTxn).
+	snap.Kind = kindKernelSwitch
+	if err := s.update(func(p *persisted) {
+		pending := snap
+		p.Snapshot = &pending
+	}); err != nil {
+		log.Printf("dnstakeover: %v", err)
+	}
 	var (
 		view     configlayer.ApplyView
 		undoMu   sync.Mutex
@@ -693,7 +705,10 @@ func (s *Service) runTransfer(ctx context.Context, prev string, on bool, to stri
 	}
 
 	s.setStep(stepProbe, statusRunning)
-	res, fail := s.probeTakeover(ctx)
+	res, fail, stopped := s.probeUntilStop(ctx)
+	if stopped {
+		return
+	}
 	s.storeCheck(res)
 	if fail != nil {
 		s.failRunning()

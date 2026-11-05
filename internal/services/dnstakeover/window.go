@@ -76,6 +76,10 @@ func (s *Service) openWindow(kind string, snap txnSnapshot) error {
 		s.st.OverrideBefore = snap.OverrideBefore
 		s.st.ProxyDNSBefore = snap.ProxyDNSBefore
 	}
+	if kind == kindKernelSwitch {
+		// Снимок переноса тоже переходит в окно той же записью.
+		s.st.Snapshot = nil
+	}
 	s.st.WaitingReason = ""
 	saved := s.st
 	s.mu.Unlock()
@@ -223,6 +227,45 @@ func (s *Service) rollbackWindowInOp(w windowState, reason string) {
 	s.rollbackWindow(s.ctx, w, reason)
 }
 
+// rollbackPendingTxn — откат на старте панели прохода, прерванного остановкой до
+// окна подтверждения: в файле состояния снимок (persisted.Snapshot), а окна нет.
+// Обычно панель остановили посреди пробы, когда Live перехвата уже включён, а
+// подтверждения не было (D-07). Включение и возврат перехвата откатываются как
+// окно enable (DNS прошивке, строка proxy_dns, Applied и Live к снимку — файлы без
+// слушателя), перенос — как окно kernel_switch. Перехват, желаемый до прохода
+// (возврат или включение из ожидания), остаётся желаемым и ждёт (probe).
+func (s *Service) rollbackPendingTxn() {
+	s.mu.Lock()
+	if s.st.Snapshot == nil || s.st.Window != nil || s.winRolling {
+		s.mu.Unlock()
+		return
+	}
+	snap := *s.st.Snapshot
+	wasDesired := s.st.Desired && snap.Kind != kindKernelSwitch
+	s.winRolling = true
+	s.mu.Unlock()
+	kind := kindEnable
+	if snap.Kind == kindKernelSwitch {
+		kind = kindKernelSwitch
+	}
+	log.Printf("dnstakeover: проход перехвата (%s) прерван остановкой панели до окна подтверждения — откат", kind)
+	s.rollbackWindowInOp(windowState{Kind: kind, Snapshot: snap}, reasonPanelRestart)
+	if s.ctx.Err() != nil || !wasDesired {
+		return
+	}
+	if err := s.update(func(p *persisted) {
+		if p.Desired {
+			return
+		}
+		p.Desired = true
+		p.Kernel = snap.Kernel
+		p.OverrideBefore = snap.OverrideBefore
+		p.WaitingReason = waitingProbe
+	}); err != nil {
+		log.Printf("dnstakeover: %v", err)
+	}
+}
+
 // releaseClaim снимает флаг отката, не закрывая окно (откат прерван остановкой).
 func (s *Service) releaseClaim() {
 	s.mu.Lock()
@@ -358,6 +401,8 @@ func (s *Service) rollbackWindow(ctx context.Context, w windowState, reason stri
 			p.KernelWasRunning = false
 			p.OverrideBefore = false
 			p.WaitingReason = ""
+			// Снимок прохода, прерванного остановкой панели (rollbackPendingTxn), откачен.
+			p.Snapshot = nil
 		}
 	}); err != nil {
 		log.Printf("dnstakeover: %v", err)

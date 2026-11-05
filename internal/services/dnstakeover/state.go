@@ -47,8 +47,11 @@ type persisted struct {
 	Desired          bool   `json:"desired"`
 	Kernel           string `json:"kernel,omitempty"`
 	KernelWasRunning bool   `json:"kernel_was_running,omitempty"`
-	// Snapshot — снимок до включения: пишется до первой команды прошивки; после
-	// успешной пробы переходит в окно подтверждения, снимается откатом и выключением.
+	// Snapshot — снимок до включения, возврата или переноса перехвата: пишется до
+	// первой команды прошивки; после успешной пробы переходит в окно
+	// подтверждения, снимается откатом и выключением. Снимок без окна на старте
+	// панели — проход, прерванный остановкой (обычно посреди пробы): старт его
+	// откатывает (rollbackPendingTxn).
 	Snapshot *txnSnapshot `json:"snapshot,omitempty"`
 	// OverrideBefore — override прошивки до включения перехвата: окно и снимок
 	// закрыты, а выключение, откат по виду kernel_switch и возврат DNS прошивке
@@ -91,6 +94,10 @@ type windowState struct {
 type txnSnapshot struct {
 	AtMs   int64  `json:"at_ms"`
 	Kernel string `json:"kernel"`
+	// Kind — вид прохода, для которого снят снимок вне окна (persisted.Snapshot):
+	// пусто — включение или возврат перехвата, kernel_switch — перенос на другое
+	// ядро. Старт панели откатывает незавершённый проход по этому виду.
+	Kind string `json:"kind,omitempty"`
 	// Applied — применённое состояние слоя целиком до включения.
 	Applied configlayer.Sections `json:"applied"`
 	// Live — прежнее значение Live[dns_takeover]; пусто — ключа не было.
