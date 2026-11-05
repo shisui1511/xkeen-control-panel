@@ -15,12 +15,18 @@
   let {
     outcome,
     state,
+    waitingReason,
     kernel = ''
   }: {
     /** Исход из вида перехвата; undefined — строки исхода нет. */
     outcome: DnsOutcome | undefined;
     /** Состояние перехвата: в «Ждёт ядро» показывается строка ожидания. */
     state: DnsState;
+    /**
+     * Причина ожидания: у disable_failed (выключение оборвалось сбоем) строки «вернётся
+     * сам» нет — строка состояния и блок сбоя просят повторить выключение.
+     */
+    waitingReason?: string;
     /** Ядро-перехватчик из вида: подставляется, если в исходе ядро не пришло. */
     kernel?: string;
   } = $props();
@@ -69,7 +75,7 @@
     <span class="dns-outcome-text">{text}</span>
   </div>
 {/if}
-{#if state === 'waiting'}
+{#if state === 'waiting' && waitingReason !== 'disable_failed'}
   <p class="dns-outcome-wait" role="status" data-testid="dns-outcome" data-kind="waiting">
     <Icon name="info" size={14} class="icon-first-line" />
     <span class="dns-outcome-text">{$t('cfg.dns.outcome_waiting')}</span>

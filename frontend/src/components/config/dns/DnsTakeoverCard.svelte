@@ -180,7 +180,6 @@
       case 'reboot':
       case 'watchdog':
       case 'probe':
-      case 'disable_failed':
         return $t(`cfg.dns.reason_${code}`);
       default:
         // Причина, которой нет в словаре, сырым кодом не показывается
@@ -203,6 +202,9 @@
       case 'on':
         return $t('cfg.dns.status_kernel', { kernel: dnsKernelTitle(view.kernel) });
       case 'waiting':
+        // Выключение оборвалось сбоем: перехват остаётся желаемым, но это не «ожидание ядра» —
+        // своя фраза с призывом повторить выключение
+        if (view.waiting_reason === 'disable_failed') return $t('cfg.dns.status_disable_failed');
         return $t('cfg.dns.status_waiting', { reason: waitingReason(view.waiting_reason) });
       default:
         return $t('cfg.dns.status_firmware');
@@ -470,7 +472,9 @@
 
   async function disable(): Promise<void> {
     if (disableBlocked || !view) return;
-    const waiting = view.state === 'waiting';
+    // «Отменить восстановление» — только для ожидания ядра; повтор неудавшегося выключения
+    // подтверждается обычным текстом выключения
+    const waiting = view.state === 'waiting' && view.waiting_reason !== 'disable_failed';
     const ok = await showConfirm({
       title: $t(waiting ? 'cfg.dns.cancel_wait_title' : 'cfg.dns.disable_title'),
       message: $t(waiting ? 'cfg.dns.cancel_wait_body' : 'cfg.dns.disable_body'),
@@ -593,7 +597,12 @@
 
     {#if view.state !== 'unavailable' && view.state !== 'applying'}
       <DnsLegacyNote {view} onaction={markFailureSeen} />
-      <DnsOutcomeNote outcome={shownOutcome} state={view.state} kernel={view.kernel} />
+      <DnsOutcomeNote
+        outcome={shownOutcome}
+        state={view.state}
+        waitingReason={view.waiting_reason}
+        kernel={view.kernel}
+      />
     {/if}
 
     {#if showSteps && view.state !== 'unavailable'}
