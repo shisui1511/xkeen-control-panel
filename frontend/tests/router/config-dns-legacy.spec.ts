@@ -256,7 +256,7 @@ async function enableTakeover(page: Page): Promise<string | null> {
     prep.sectionKernel = v.activeKernel;
     changed = true;
   }
-  if (v.blocks.includes('group')) {
+  if (v.blocks.includes('group') || v.blocks.includes('routing')) {
     if (!(await routingInfo(page)).desired) {
       const take = await api(page, 'POST', '/api/configlayer/routing/take', {
         revision: (await routingInfo(page)).revision

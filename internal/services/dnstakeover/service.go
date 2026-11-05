@@ -399,6 +399,7 @@ func (s *Service) View() View {
 	v.ActiveKernel = active.Label()
 	v.KernelRunning = s.kernelRunning(active)
 	on := false
+	routingFree := false
 	if st, err := s.d.Layer.ReadState(); err == nil {
 		var live configlayer.DNSTakeoverLive
 		live, on = configlayer.ParseDNSTakeoverLive(st.Live)
@@ -414,6 +415,9 @@ func (s *Service) View() View {
 		v.Upstreams = upstreams(st, kernel)
 		if kernel != "" {
 			v.SectionOwner = s.sectionOwner(st, kernel)
+			// Слушатель :53 выпускает генератор маршрутизации ядра: отпущенная
+			// маршрутизация оставила бы override без слушателя.
+			routingFree = !configlayer.DesiredRouting(st.Applied).ManagedFor(kernel)
 		}
 	}
 	proxy, err := ProxyDNS()
@@ -449,7 +453,7 @@ func (s *Service) View() View {
 	if rolling && v.State != StateUnavailable {
 		v.State = StateApplying
 	}
-	v.Blocks = s.blocks(v, active)
+	v.Blocks = s.blocks(v, active, routingFree)
 	v.ServerNowMs = s.now().UnixMilli()
 	return v
 }
@@ -462,14 +466,16 @@ const (
 	BlockDraft    = "draft"
 	BlockStopped  = "stopped"
 	BlockSection  = "section"
+	BlockRouting  = "routing"
 	BlockGroup    = "group"
 )
 
 // blocks — причины блокировки в порядке приоритета UI-SPEC: конфликт ядер, идёт
 // применение слоя или операция службы, идёт окно подтверждения, открыт черновик
-// (D-01), ядро остановлено (D-04), DNS-секцию ядра ведёт не панель, группы-цели
-// нет. Порядок задаёт только этот список.
-func (s *Service) blocks(v View, active services.ActiveKernelState) []string {
+// (D-01), ядро остановлено (D-04), DNS-секцию ядра ведёт не панель, маршрутизацию
+// ядра панель отпустила (routingFree), группы-цели нет. Порядок задаёт только этот
+// список.
+func (s *Service) blocks(v View, active services.ActiveKernelState, routingFree bool) []string {
 	snap := s.d.Layer.Snapshot()
 	ordered := []struct {
 		code string
@@ -481,6 +487,7 @@ func (s *Service) blocks(v View, active services.ActiveKernelState) []string {
 		{BlockDraft, snap.DraftChanges > 0},
 		{BlockStopped, !v.KernelRunning},
 		{BlockSection, v.SectionOwner != "" && v.SectionOwner != SectionOwnerPanel},
+		{BlockRouting, routingFree},
 		{BlockGroup, v.Group == nil || v.Group.Missing},
 	}
 	out := []string{}

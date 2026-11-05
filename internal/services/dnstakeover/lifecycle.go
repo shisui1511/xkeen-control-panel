@@ -417,13 +417,18 @@ func (s *Service) restorePreflight(ctx context.Context) (enablePlan, error) {
 	return enablePlan{kernel: kernel, groupID: id, groupName: name, overrideBefore: overrideBefore, proxyDNSBefore: proxy}, nil
 }
 
-// takeoverTarget — DNS-секция ядра kernel у панели и группа-цель перехвата есть
-// (у Mihomo её имя годится для суффикса DoH): id и имя группы или отказ
-// section_foreign, group_missing, group_name_invalid — те же правила, что у
-// предпроверки включения.
+// takeoverTarget — DNS-секция ядра kernel и его маршрутизация у панели, группа-цель
+// перехвата есть (у Mihomo её имя годится для суффикса DoH): id и имя группы или
+// отказ section_foreign, routing_not_managed, group_missing, group_name_invalid —
+// единственное место правил предпроверок включения, возврата и переноса.
+// Слушатель :53 выпускает генератор маршрутизации ядра (cores.XrayDNSTakeover,
+// профиль Mihomo): маршрутизация отпущена — override включился бы без слушателя.
 func takeoverTarget(st configlayer.StateView, kernel string) (id, name string, err error) {
 	if !configlayer.DesiredCores(st.Applied)[configlayer.CoreSectionName(kernel, "dns")].Managed {
 		return "", "", &Error{Code: CodeSectionForeign, Params: map[string]string{"kernel": kernel}}
+	}
+	if !configlayer.DesiredRouting(st.Applied).ManagedFor(kernel) {
+		return "", "", &Error{Code: CodeRoutingNotManaged, Params: map[string]string{"kernel": kernel}}
 	}
 	p := appliedParams(st)
 	id, name, ok := targetGroup(st.Applied, p)

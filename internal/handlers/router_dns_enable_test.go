@@ -1000,8 +1000,11 @@ func (e *rtSrc) rtDNSServiceControl(action string) {
 }
 
 // Трасса: открытый черновик → 409 draft_open; ядро остановлено через API службы
-// → 409 kernel_stopped, и ядро после отказа не запущено (D-04). Ядро
-// возвращается запущенным в t.Cleanup. Метка ядра: ядро останавливается.
+// → 409 kernel_stopped, и ядро после отказа не запущено (D-04); маршрутизация
+// Xray отпущена и применена → 409 routing_not_managed, в блокировках карточки
+// routing, override не включался (слушатель :53 выпускает генератор маршрутизации,
+// без него включение оставило бы DNS LAN без слушателя). Ядро возвращается
+// запущенным, маршрутизация — взятой в t.Cleanup. Метка ядра: ядро останавливается.
 func TestRouterDNSEnableRefused(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
@@ -1035,6 +1038,41 @@ func TestRouterDNSEnableRefused(t *testing.T) {
 		}
 		if v := c.rtDNSView(); v["desired"] == true {
 			t.Error("после отказа kernel_stopped desired=true")
+		}
+	})
+
+	t.Run("routing_not_managed", func(t *testing.T) {
+		if kernel != configlayer.KernelXray {
+			t.Skip("маршрутизацию Mihomo отпускает вместе с DNS-секцией профиля: до проверки маршрутизации включение отказывает section_foreign")
+		}
+		c := e.with(t)
+		overrideBefore := rtDNSOverrideOn(t)
+		rel := c.call(http.MethodPost, rtRoutingBase+"/release", map[string]int64{"revision": c.rtRtRevision()})
+		if rel.Status != http.StatusOK {
+			t.Fatalf("routing/release: %d %s", rel.Status, rel.Code)
+		}
+		t.Cleanup(func() {
+			if take := c.call(http.MethodPost, rtRoutingBase+"/take", map[string]int64{"revision": c.rtRtRevision()}); take.Status != http.StatusOK {
+				t.Errorf("очистка: routing/take: %d %s", take.Status, take.Code)
+			}
+			if c.rtRtDraftChanges() > 0 {
+				c.rtRtApplyOK("очистка: маршрутизация возвращена панели")
+			}
+		})
+		c.rtRtApplyOK("маршрутизация отпущена до включения перехвата")
+
+		if !c.rtDNSBlocks()["routing"] {
+			t.Errorf("при отпущенной маршрутизации блокировки включения %v без routing", c.rtDNSView()["blocks"])
+		}
+		r := c.rtDNSPost(rtDNSEnable)
+		if r.Status != http.StatusConflict || r.Code != "routing_not_managed" {
+			t.Errorf("включение при отпущенной маршрутизации: %d %q, ожидалось 409 routing_not_managed", r.Status, r.Code)
+		}
+		if now := rtDNSOverrideOn(t); now != overrideBefore {
+			t.Errorf("отказ routing_not_managed тронул override: было %v, стало %v", overrideBefore, now)
+		}
+		if v := c.rtDNSView(); v["desired"] == true {
+			t.Error("после отказа routing_not_managed desired=true")
 		}
 	})
 }

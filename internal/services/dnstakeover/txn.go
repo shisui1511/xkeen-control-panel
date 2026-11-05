@@ -16,7 +16,6 @@ import (
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/cores"
-	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 )
 
 // Транзакция включения перехвата DNS роутера (DNSF-02, D-01, RESEARCH Pattern 3):
@@ -29,21 +28,22 @@ import (
 
 // Коды отказа и сбоя транзакций (frontend/src/lib/dnsErrorCodes.json).
 const (
-	CodeCheckFailed      = "check_failed"
-	CodeDraftOpen        = "draft_open"
-	CodeGroupMissing     = "group_missing"
-	CodeGroupNameInvalid = "group_name_invalid"
-	CodeKernelConflict   = "kernel_conflict"
-	CodeKernelStopped    = "kernel_stopped"
-	CodeNotEnabled       = "not_enabled"
-	CodeOverrideFailed   = "override_failed"
-	CodePortBusy         = "port_busy"
-	CodeProbeExternal    = "probe_external"
-	CodeProbeLocal       = "probe_local"
-	CodeRestartFailed    = "restart_failed"
-	CodeRollbackFailed   = "rollback_failed"
-	CodeSectionForeign   = "section_foreign"
-	CodeWindowActive     = "window_active"
+	CodeCheckFailed       = "check_failed"
+	CodeDraftOpen         = "draft_open"
+	CodeGroupMissing      = "group_missing"
+	CodeGroupNameInvalid  = "group_name_invalid"
+	CodeKernelConflict    = "kernel_conflict"
+	CodeKernelStopped     = "kernel_stopped"
+	CodeNotEnabled        = "not_enabled"
+	CodeOverrideFailed    = "override_failed"
+	CodePortBusy          = "port_busy"
+	CodeProbeExternal     = "probe_external"
+	CodeProbeLocal        = "probe_local"
+	CodeRestartFailed     = "restart_failed"
+	CodeRollbackFailed    = "rollback_failed"
+	CodeRoutingNotManaged = "routing_not_managed"
+	CodeSectionForeign    = "section_foreign"
+	CodeWindowActive      = "window_active"
 )
 
 // Шаги транзакций (DNSStep.id): включение — validate, snapshot, write, restart,
@@ -297,9 +297,11 @@ func (s *Service) Enable(ctx context.Context) error {
 // enablePreflight — предпроверки включения в порядке блокировок UI-SPEC:
 // прошивка доступна, конфликт ядер, идёт применение или операция службы,
 // открыт черновик (D-01), ядро остановлено (D-04: не запускается), DNS-секцию
-// ядра ведёт не панель, группы-цели нет (D-09) или её имя нельзя поставить в
-// суффикс DoH Mihomo (routing.DNSGroupNameURLSafe — то же правило, что у
-// генератора и проверки слоя), резолвер прошивки не найден (fact-closed: адрес
+// ядра ведёт не панель, маршрутизацией ядра панель не управляет (слушатель :53
+// выпускает генератор маршрутизации), группы-цели нет (D-09) или её имя нельзя
+// поставить в суффикс DoH Mihomo (routing.DNSGroupNameURLSafe — то же правило, что
+// у генератора и проверки слоя; всё это — takeoverTarget), резолвер прошивки не
+// найден (fact-closed: адрес
 // только чтением, прошивка не тронута). Здесь же читаются override и proxy_dns
 // до включения.
 func (s *Service) enablePreflight(ctx context.Context) (enablePlan, error) {
@@ -331,20 +333,9 @@ func (s *Service) enablePreflight(ctx context.Context) (enablePlan, error) {
 	if (kernel != configlayer.KernelXray && kernel != configlayer.KernelMihomo) || !s.kernelRunning(active) {
 		return enablePlan{}, errCode(CodeKernelStopped)
 	}
-	if !configlayer.DesiredCores(st.Applied)[configlayer.CoreSectionName(kernel, "dns")].Managed {
-		return enablePlan{}, &Error{Code: CodeSectionForeign, Params: map[string]string{"kernel": kernel}}
-	}
-	p := appliedParams(st)
-	id, name, ok := targetGroup(st.Applied, p)
-	if !ok {
-		ref := name
-		if ref == "" {
-			ref = p.Group
-		}
-		return enablePlan{}, &Error{Code: CodeGroupMissing, Params: map[string]string{"group": ref}}
-	}
-	if kernel == configlayer.KernelMihomo && !routing.DNSGroupNameURLSafe(name) {
-		return enablePlan{}, &Error{Code: CodeGroupNameInvalid, Params: map[string]string{"name": name}}
+	id, name, err := takeoverTarget(st, kernel)
+	if err != nil {
+		return enablePlan{}, err
 	}
 	if _, err := s.fw.ResolverAddr(ctx); err != nil {
 		return enablePlan{}, &Error{Code: CodeUnavailable, Detail: err.Error()}

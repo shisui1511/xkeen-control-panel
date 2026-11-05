@@ -59,7 +59,7 @@ func (e *rtSrc) rtDNSView() map[string]any {
 }
 
 // rtDNSBlockOrder — порядок блокировок UI-SPEC.
-var rtDNSBlockOrder = []string{"conflict", "busy", "window", "draft", "stopped", "section", "group"}
+var rtDNSBlockOrder = []string{"conflict", "busy", "window", "draft", "stopped", "section", "routing", "group"}
 
 // rtDNSBlocks — блокировки из состояния перехвата; порядок нарушен — ошибка.
 func (e *rtSrc) rtDNSBlocks() map[string]bool {

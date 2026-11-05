@@ -19,6 +19,7 @@ const (
 	IssueGroupMissing     = "dns_group_missing"
 	IssueGroupNameInvalid = "dns_group_name_invalid"
 	IssueSectionRequired  = "dns_section_required"
+	IssueRoutingRequired  = "dns_routing_required"
 )
 
 // Hooks — подключение службы к слою: регистрируется до configLayer.Start()
@@ -49,7 +50,10 @@ func (dnsChecker) ID() string { return checkerID }
 //     (dns_group_name_invalid; то же правило, что у генератора и предпроверки
 //     включения — routing.DNSGroupNameURLSafe; у Xray имя в URL не попадает);
 //   - перехват включён, а DNS-секцию ядра-перехватчика черновик отпускает
-//     (dns_section_required).
+//     (dns_section_required);
+//   - перехват включён, а маршрутизацию ядра-перехватчика черновик отпускает: слушатель
+//     :53 выпускает генератор маршрутизации ядра, без него override остался бы без
+//     слушателя и DNS LAN не отвечал бы (dns_routing_required).
 func (c dnsChecker) Check(in configlayer.Input, _ configlayer.InstalledKernels) []configlayer.BuildIssue {
 	var out []configlayer.BuildIssue
 	key := configlayer.SectionDNSTakeover
@@ -103,6 +107,9 @@ func (c dnsChecker) Check(in configlayer.Input, _ configlayer.InstalledKernels) 
 		if !configlayer.DesiredCores(in.Sections)[section].Managed {
 			out = append(out, configlayer.BuildIssue{Key: section, Code: IssueSectionRequired})
 		}
+	}
+	if isKernelName(live.Kernel) && !configlayer.DesiredRouting(in.Sections).ManagedFor(live.Kernel) {
+		out = append(out, configlayer.BuildIssue{Key: configlayer.RoutingSection, Code: IssueRoutingRequired, Params: kernelParam(live.Kernel)})
 	}
 	return out
 }

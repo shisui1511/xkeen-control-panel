@@ -144,6 +144,7 @@
     'draft',
     'stopped',
     'section',
+    'routing',
     'group'
   ];
   // «Выключить перехват» блокируют только строки 1–3: выключение безопасно
@@ -620,7 +621,7 @@
                 >
                   {$t('cfg.dns.open_dns_form')}
                 </button>
-              {:else if b === 'group'}
+              {:else if b === 'group' || b === 'routing'}
                 <a class="dns-link" href="#/config/groups" data-testid="dns-open-groups">
                   {$t('cfg.dns.open_groups')}
                 </a>

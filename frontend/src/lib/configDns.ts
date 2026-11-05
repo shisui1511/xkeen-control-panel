@@ -18,7 +18,8 @@ import dnsErrorCodes from './dnsErrorCodes.json';
 export type DnsState = 'off' | 'applying' | 'window' | 'on' | 'waiting' | 'unavailable';
 
 /** Причина блокировки действий карточки (порядок приоритета задаёт сервер). */
-export type DnsBlock = 'conflict' | 'busy' | 'window' | 'draft' | 'stopped' | 'section' | 'group';
+export type DnsBlock =
+  'conflict' | 'busy' | 'window' | 'draft' | 'stopped' | 'section' | 'routing' | 'group';
 
 /** Кто держит порт 53: ядро, прошивка, другая служба или никто. */
 export interface DnsOwner {
