@@ -362,3 +362,29 @@ func TestRouterDNSApplyReleaseWindow(t *testing.T) {
 		t.Errorf("после возврата DNS прошивке порт 53 держит %q/%q, ожидалась прошивка", got.Kind, got.Kernel)
 	}
 }
+
+// Трасса: подготовка → группа-цель перехвата с единственным мёртвым узлом (проба
+// внешнего имени идёт до 20 с) → «Включить» → шаг probe running (Live перехвата уже
+// включён, окна ещё нет) → перезапуск панели init-скриптом → остановка уложилась в
+// срок, старт панели откатывает неподтверждённый перехват (D-07): state off,
+// desired=false, окна нет, override как до включения, :53 у прошивки, слушателя
+// панели в файлах ядра нет, черновик закрыт. Метка ядра: откат перезапускает
+// активное ядро, слушатель — в его файлах.
+func TestRouterDNSEnablePanelRestart(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	kernel := tg.Core
+	e := rtNewSrc(t)
+	rtDNSPrepare(t, e, kernel)
+	e.rtDNSDeadGroup(t)
+	e.rtDNSRequireClosedDraft()
+	overrideBefore := rtDNSOverrideOn(t)
+	old := rtPanelCurrent(t, e.p)
+	t.Cleanup(func() { e.with(t).rtDNSEnsureOff() })
+
+	e.rtDNSStart(rtDNSEnable)
+	e.rtDNSWaitStep("probe", "running", rtDNSStateWait)
+	res := rtPanelRestart(t, e.p, old, nil)
+	rtPanelRestartVerdict(t, old, res, "перезапуск посреди пробы включения перехвата DNS")
+	off := e.rtDNSWaitState("off", rtDNSWindowS*time.Second)
+	e.rtDNSExpectRolledBack(off, kernel, overrideBefore)
+}
