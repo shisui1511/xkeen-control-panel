@@ -208,7 +208,7 @@ async function draftRevision(page: Page): Promise<number> {
 /** Запускает применение и ждёт его конца: применение не идёт, черновик пуст. */
 async function applyAndWait(page: Page): Promise<void> {
   const start = await api(page, 'POST', '/api/configlayer/apply', {});
-  expect(start.status, 'запуск применения').toBe(200);
+  expect(start.status, `запуск применения: ${JSON.stringify(start.data)}`).toBe(200);
   await expect
     .poll(
       async () => {
@@ -245,18 +245,23 @@ async function enableTakeover(page: Page): Promise<string | null> {
   if (v.blocks.includes('draft')) await resetDraft(page);
 
   let changed = false;
-  if (v.blocks.includes('section')) {
+  // Секции Mihomo берутся только вместе с профилем (mihomo_with_profile): DNS-секция приходит
+  // со взятием маршрутизации ниже.
+  const mihomoSection = v.activeKernel === 'mihomo' && v.blocks.includes('section');
+  if (v.blocks.includes('section') && !mihomoSection) {
     const take = await api(page, 'POST', '/api/configlayer/cores/take', {
       revision: await draftRevision(page),
       kernel: v.activeKernel,
       sections: ['dns'],
       ack_comments: true
     });
-    expect(take.status, `взятие секции DNS ${v.activeKernel}`).toBe(200);
+    expect(take.status, `взятие секции DNS ${v.activeKernel}: ${JSON.stringify(take.data)}`).toBe(
+      200
+    );
     prep.sectionKernel = v.activeKernel;
     changed = true;
   }
-  if (v.blocks.includes('group') || v.blocks.includes('routing')) {
+  if (v.blocks.includes('group') || v.blocks.includes('routing') || mihomoSection) {
     if (!(await routingInfo(page)).desired) {
       const take = await api(page, 'POST', '/api/configlayer/routing/take', {
         revision: (await routingInfo(page)).revision

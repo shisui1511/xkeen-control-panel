@@ -867,7 +867,7 @@ async function layerProbe(
 /** Применяет черновик настоящим маршрутом и ждёт конца: применение не идёт, изменений нет. */
 async function applyAndWait(page: Page): Promise<void> {
   const start = await api(page, 'POST', '/api/configlayer/apply', {});
-  expect(start.status, 'запуск применения').toBe(200);
+  expect(start.status, `запуск применения: ${JSON.stringify(start.data)}`).toBe(200);
   await expect
     .poll(
       async () => {
