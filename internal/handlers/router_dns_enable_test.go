@@ -991,7 +991,8 @@ func TestRouterDNSTxnRollback(t *testing.T) {
 	})
 }
 
-// rtDNSRouterLANAddr — первый не loopback IPv4-адрес интерфейсов роутера (LAN).
+// rtDNSRouterLANAddr — первый не loopback IPv4-адрес интерфейсов роутера (LAN). Адрес
+// стенда в сообщения тестов не выводится: отчёты и PR его не содержат.
 func rtDNSRouterLANAddr(t *testing.T) string {
 	t.Helper()
 	addrs, err := net.InterfaceAddrs()
@@ -1077,7 +1078,7 @@ func TestRouterDNSEnableRefused(t *testing.T) {
 		overrideBefore := rtDNSOverrideOn(t)
 		r := c.rtDNSPost(rtDNSEnable)
 		if r.Status != http.StatusConflict || r.Code != "self_server" {
-			t.Errorf("включение с сервером %s в DNS-секции: %d %q, ожидалось 409 self_server", lan, r.Status, r.Code)
+			t.Errorf("включение с LAN-адресом роутера в DNS-секции: %d %q, ожидалось 409 self_server", r.Status, r.Code)
 		}
 		if now := rtDNSOverrideOn(t); now != overrideBefore {
 			t.Errorf("отказ self_server тронул override: было %v, стало %v", overrideBefore, now)
