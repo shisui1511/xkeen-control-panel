@@ -212,7 +212,7 @@
     <span class="form-label">{$t('cfg.dns.zones_builtin')}</span>
     <div class="dlz-builtin" data-testid="dns-zones-builtin">
       {#each builtinBadges as item (item.key)}
-        <span class="badge dlz-badge" class:dlz-mono={item.mono}>{item.text}</span>
+        <span class={['badge dlz-badge', { 'dlz-mono': item.mono }]}>{item.text}</span>
       {/each}
     </div>
   </div>
@@ -236,8 +236,7 @@
               <input
                 id={inputId}
                 type="text"
-                class="input dlz-input dlz-mono"
-                class:input-error={err !== null}
+                class={['input dlz-input dlz-mono', { 'input-error': err !== null }]}
                 value={row}
                 disabled={readonly}
                 spellcheck="false"
@@ -305,6 +304,11 @@
     flex-direction: column;
     gap: var(--spacing-2);
     min-width: 0;
+  }
+
+  /* Подпись ↔ содержимое — sm 8px зазором колонки, без margin-bottom .form-label */
+  .dlz-group .form-label {
+    margin: 0;
   }
 
   .dlz-builtin {

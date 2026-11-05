@@ -1077,6 +1077,11 @@
     min-width: 0;
   }
 
+  /* Подпись ↔ поле — sm 8px зазором колонки, как у поля проверки резолва */
+  .dns-field .form-label {
+    margin: 0;
+  }
+
   .dns-field-error {
     margin: 0;
     min-width: 0;
