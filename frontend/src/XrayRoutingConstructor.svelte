@@ -376,7 +376,21 @@
 
   async function loadXrayConfig() {
     const geoLoaded = loadGeoAvailability();
-    const promises = XRAY_FILES.map(async (name) => {
+    // Читаем только файлы, которые есть в каталоге: запрос отсутствующего файла (например
+    // 02_dns.json, когда секцию DNS держит панель) оставлял бы 404 в журнале при каждом
+    // открытии. Список не получен — читаем все, как раньше.
+    let present: Set<string> | null = null;
+    try {
+      const listRes = await apiFetch(`/api/config/list?dir=${encodeURIComponent(XRAY_DIR)}`);
+      if (listRes.ok) {
+        const files: { name: string }[] = await listRes.json();
+        present = new Set(files.map((f) => f.name));
+      }
+    } catch {
+      present = null;
+    }
+    const names = present ? XRAY_FILES.filter((name) => present.has(name)) : XRAY_FILES;
+    const promises = names.map(async (name) => {
       try {
         const path = `${XRAY_DIR}/${name}`;
         const res = await apiFetch(`/api/config/read?path=${encodeURIComponent(path)}`);
