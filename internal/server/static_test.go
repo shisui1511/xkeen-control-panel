@@ -13,7 +13,7 @@ import (
 	"testing/fstest"
 )
 
-func TestStaticGzip(t *testing.T) {
+func TestRouterStaticGzip(t *testing.T) {
 	big := strings.Repeat("console.log('xkeen');\n", 200)
 	web := fstest.MapFS{
 		"index.html":      {Data: []byte("<html>" + strings.Repeat("a", 2000) + "</html>")},
