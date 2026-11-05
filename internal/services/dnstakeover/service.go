@@ -454,7 +454,7 @@ func (s *Service) View() View {
 	if rolling && v.State != StateUnavailable {
 		v.State = StateApplying
 	}
-	v.Blocks = s.blocks(v, active, routingFree)
+	v.Blocks = s.blocks(v, active, routingFree, rolling)
 	v.ServerNowMs = s.now().UnixMilli()
 	return v
 }
@@ -472,18 +472,19 @@ const (
 )
 
 // blocks — причины блокировки в порядке приоритета UI-SPEC: конфликт ядер, идёт
-// применение слоя или операция службы, идёт окно подтверждения, открыт черновик
+// применение слоя, операция службы или откат забранного окна и прерванного прохода
+// (rolling), идёт окно подтверждения, открыт черновик
 // (D-01), ядро остановлено (D-04), DNS-секцию ядра ведёт не панель, маршрутизацию
 // ядра панель отпустила (routingFree), группы-цели нет. Порядок задаёт только этот
 // список.
-func (s *Service) blocks(v View, active services.ActiveKernelState, routingFree bool) []string {
+func (s *Service) blocks(v View, active services.ActiveKernelState, routingFree, rolling bool) []string {
 	snap := s.d.Layer.Snapshot()
 	ordered := []struct {
 		code string
 		on   bool
 	}{
 		{BlockConflict, active.Conflict},
-		{BlockBusy, snap.Apply.Running || snap.BusyHolder != "" || s.checking.Load() || s.opActive()},
+		{BlockBusy, snap.Apply.Running || snap.BusyHolder != "" || s.checking.Load() || s.opActive() || rolling},
 		{BlockWindow, v.Window != nil},
 		{BlockDraft, snap.DraftChanges > 0},
 		{BlockStopped, !v.KernelRunning},

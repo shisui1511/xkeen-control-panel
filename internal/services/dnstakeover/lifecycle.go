@@ -392,7 +392,7 @@ func (s *Service) restorePreflight(ctx context.Context) (enablePlan, error) {
 	switch {
 	case active.Conflict:
 		return enablePlan{}, errCode(CodeKernelConflict)
-	case snap.Apply.Running || snap.BusyHolder != "" || s.checking.Load() || s.opActive():
+	case snap.Apply.Running || snap.BusyHolder != "" || s.checking.Load() || s.opActive() || s.rollingClaim():
 		return enablePlan{}, errCode(CodeBusy)
 	case snap.DraftChanges > 0:
 		// Черновик открыт (D-01): Guard прохода отказал бы тем же кодом уже после

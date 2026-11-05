@@ -163,6 +163,17 @@ func (s *Service) stopWindowTimerLocked() {
 	}
 }
 
+// rollingClaim — окно или прерванный проход забраны под откат (winRolling), а
+// операция отката могла ещё не начаться (ждёт прогрева прошивки или конца идущей
+// операции): opActive это не видит. Предпроверки включения, выключения и возврата
+// считают такой промежуток занятостью (busy): иначе новый проход записал бы снимок,
+// который откат забранного прохода затёр бы своим старым.
+func (s *Service) rollingClaim() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.winRolling
+}
+
 // windowOpen — окно подтверждения открыто и не откатывается.
 func (s *Service) windowOpen() bool {
 	s.mu.Lock()

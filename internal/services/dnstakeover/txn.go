@@ -318,7 +318,7 @@ func (s *Service) enablePreflight(ctx context.Context) (enablePlan, error) {
 	switch {
 	case active.Conflict:
 		return enablePlan{}, errCode(CodeKernelConflict)
-	case snap.Apply.Running || snap.BusyHolder != "" || s.checking.Load() || s.opActive():
+	case snap.Apply.Running || snap.BusyHolder != "" || s.checking.Load() || s.opActive() || s.rollingClaim():
 		return enablePlan{}, errCode(CodeBusy)
 	}
 	if s.windowOpen() {
@@ -803,7 +803,7 @@ func (s *Service) disablePreflight(ctx context.Context) (disablePlan, error) {
 		return disablePlan{}, errCode(CodeKernelConflict)
 	}
 	layer := s.d.Layer.Snapshot()
-	if layer.Apply.Running || layer.BusyHolder != "" || s.checking.Load() || s.opActive() {
+	if layer.Apply.Running || layer.BusyHolder != "" || s.checking.Load() || s.opActive() || s.rollingClaim() {
 		return disablePlan{}, errCode(CodeBusy)
 	}
 	pl := disablePlan{kernel: kernel, live: on, overrideBefore: overrideBefore}
