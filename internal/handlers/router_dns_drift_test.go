@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"crypto/sha256"
 	"os"
 	"path/filepath"
 	"testing"
@@ -19,8 +20,9 @@ import (
 // прошивка отвечает через 127.0.0.1:53, слушателя в файлах ядра нет, правка
 // пользователя на месте (панель её не перезаписала, D-11). t.Cleanup: исходное
 // содержимое файла возвращено до очистки стенда. Только Xray: у Mihomo слушатель
-// лежит в единственном файле панели, не затронутых перехватом файлов нет. Метка
-// ядра: цель привязана к активному ядру.
+// лежит в единственном файле панели, не затронутых перехватом файлов нет. Правится
+// файл, содержимое которого не меняется от включения (хэши до и после), иначе перехват
+// законно переписал бы его сам. Метка ядра: цель привязана к активному ядру.
 func TestRouterDNSDisableDrift(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
@@ -29,17 +31,22 @@ func TestRouterDNSDisableDrift(t *testing.T) {
 	}
 	e := rtNewSrc(t)
 	rtDNSPrepare(t, e, kernel)
+	// Хэши файлов панели до включения: правке подходит только файл, который включение
+	// не меняет, — а значит, не меняет и выключение (его перепишет только перехват).
+	before := rtDNSPanelHashes(e)
 	e.rtDNSEnableOK()
 
 	var victim string
-	for _, p := range e.rtDNSPanelFiles() {
-		if filepath.Base(p) != rtDNSXrayListenerFile && filepath.Ext(p) == ".json" && rtRstExists(p) {
+	for p, h := range rtDNSPanelHashes(e) {
+		if filepath.Base(p) == rtDNSXrayListenerFile {
+			continue
+		}
+		if prev, ok := before[p]; ok && prev == h && (victim == "" || p < victim) {
 			victim = p
-			break
 		}
 	}
 	if victim == "" {
-		t.Skip("в снимке слоя нет файла панели без слушателя :53: править нечего")
+		t.Skip("в снимке слоя нет файла панели, не затронутого перехватом: править нечего")
 	}
 	orig, err := os.ReadFile(victim)
 	if err != nil {
@@ -77,4 +84,23 @@ func TestRouterDNSDisableDrift(t *testing.T) {
 	if string(got) != string(edited) {
 		t.Errorf("панель перезаписала правку пользователя в %s", filepath.Base(victim))
 	}
+}
+
+// rtDNSPanelHashes — хэши содержимого json-файлов панели из снимка слоя, которые есть на
+// диске сейчас (файл, появляющийся или исчезающий с перехватом, виден только с одной
+// стороны сравнения).
+func rtDNSPanelHashes(e *rtSrc) map[string][sha256.Size]byte {
+	e.t.Helper()
+	out := map[string][sha256.Size]byte{}
+	for _, p := range e.rtDNSPanelFiles() {
+		if filepath.Ext(p) != ".json" {
+			continue
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		out[p] = sha256.Sum256(data)
+	}
+	return out
 }
