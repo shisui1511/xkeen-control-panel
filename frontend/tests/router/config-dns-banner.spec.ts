@@ -91,6 +91,9 @@ async function restoreAll(browser: Browser): Promise<void> {
 const target: DnsTargetPrep = emptyDnsTargetPrep();
 
 test.beforeAll(async ({ browser }) => {
+  // Хук работает под собственным таймаутом: на чистом стенде ensureDnsTarget берёт
+  // секцию и маршрутизацию, создаёт группу и применяет (перезапуск ядра, опрос до T.save * 3)
+  test.setTimeout(T.save * 8);
   await layer.enable(browser);
   await restoreAll(browser);
   await withPanel(browser, async (page) => {
@@ -103,6 +106,8 @@ test.afterEach(async ({ browser }) => {
 });
 
 test.afterAll(async ({ browser }) => {
+  // Уборка: откат окна, выключение перехвата, возврат подготовки (снова применение) и флага слоя
+  test.setTimeout(T.save * 10);
   await restoreAll(browser);
   await withPanel(browser, async (page) => {
     await releaseDnsTarget(page, target);
