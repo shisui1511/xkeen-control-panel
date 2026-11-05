@@ -122,6 +122,21 @@ func rtDNSPrepare(t *testing.T, e *rtSrc, kernel string) *rtDNSStand {
 	e.enableLayer()
 	e.rtRstIdle()
 	e.rtRtPurge()
+	// Подписка, оставшаяся от прерванного прогона, не даёт группам по умолчанию
+	// появиться вместе с подпиской стенда: они создаются только с первым источником.
+	for i := 0; i < 5; i++ {
+		id := e.rtDNSSubscriptionID()
+		if id == "" {
+			break
+		}
+		t.Logf("подготовка перехвата: удаляется подписка, оставшаяся от прежнего прогона")
+		if r := e.call(http.MethodPost, rtSourcesBase+"/delete", map[string]any{"revision": e.revision(), "id": id}); r.Status != http.StatusOK {
+			t.Fatalf("удаление оставшейся подписки: %d %s", r.Status, r.Code)
+		}
+	}
+	if e.rtRtDraftChanges() > 0 {
+		e.rtRtApplyOK("подготовка перехвата: оставшаяся подписка")
+	}
 	s := &rtDNSStand{e: e, kernel: kernel, overrideBefore: rtDNSOverrideOn(t)}
 	t.Cleanup(func() { s.cleanup(t) })
 
