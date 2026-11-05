@@ -357,6 +357,14 @@ func (s *Service) enablePreflight(ctx context.Context) (enablePlan, error) {
 	if err != nil {
 		return enablePlan{}, &Error{Code: CodeUnavailable, Detail: "proxy_dns: " + err.Error()}
 	}
+	s.mu.Lock()
+	if s.st.DisableFailed {
+		// Выключение не удалось, и override с выключенной строкой proxy_dns остались
+		// от самой панели: значения «до включения» берутся из состояния, а не из
+		// прошивки, иначе следующее выключение их уже не вернёт.
+		over, proxy = s.st.OverrideBefore, s.st.ProxyDNSBefore
+	}
+	s.mu.Unlock()
 	return enablePlan{kernel: kernel, groupID: id, groupName: name, overrideBefore: over, proxyDNSBefore: proxy}, nil
 }
 
