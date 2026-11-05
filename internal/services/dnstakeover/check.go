@@ -46,7 +46,7 @@ func (dnsChecker) ID() string { return checkerID }
 // Check отдаёт блокирующие проблемы:
 //   - своя зона — не доменное имя (dns_zone_invalid) или повтор среди встроенных и
 //     своих (dns_zone_dup);
-//   - заданная группа-цель удалена (dns_group_missing);
+//   - перехват включён, а заданная группа-цель удалена (dns_group_missing);
 //   - перехват ведёт mihomo, а имя группы-цели нельзя поставить в суффикс # DoH
 //     (dns_group_name_invalid; то же правило, что у генератора и предпроверки
 //     включения — routing.DNSGroupNameURLSafe; у Xray имя в URL не попадает);
@@ -94,15 +94,18 @@ func (c dnsChecker) Check(in configlayer.Input, _ configlayer.InstalledKernels) 
 		seen[n] = true
 	}
 
+	if !on {
+		return out
+	}
+
+	// Удалённая группа-цель мешает только действующему перехвату: при выключенном перехвате
+	// ссылка на неё безвредна, а включение само отказывает group_missing (предпроверка).
 	if p.Group != "" {
 		if _, ok := configlayer.DNSTargetGroupName(in.Sections, p.Group); !ok {
 			out = append(out, configlayer.BuildIssue{Key: key, Code: IssueGroupMissing, Params: map[string]string{"group": p.Group}})
 		}
 	}
 
-	if !on {
-		return out
-	}
 	if live.Kernel == configlayer.KernelMihomo {
 		if _, name, ok := targetGroup(in.Sections, p); ok && !routing.DNSGroupNameURLSafe(name) {
 			out = append(out, configlayer.BuildIssue{Key: key, Code: IssueGroupNameInvalid, Params: map[string]string{"name": name}})
