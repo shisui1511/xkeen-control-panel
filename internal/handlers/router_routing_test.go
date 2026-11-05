@@ -173,7 +173,7 @@ func (e *rtSrc) rtRtDraftChanges() int {
 }
 
 // rtRtPurge убирает следы маршрутизации и узлов: удаляет узлы «Моих узлов» и
-// секции groups, rules, probe и routing, затем применяет, если черновик отличается
+// секции dns_takeover, groups, rules, probe и routing, затем применяет, если черновик отличается
 // от применённого. Состояние стенда после этого — как до первого узла: группы по
 // умолчанию создадутся заново вместе с первым источником.
 func (e *rtSrc) rtRtPurge() {
@@ -181,7 +181,10 @@ func (e *rtSrc) rtRtPurge() {
 	for id := e.rtRstMyEntry(); id != ""; id = e.rtRstMyEntry() {
 		e.rtRstDeleteMyNode(id)
 	}
-	for _, section := range []string{"groups", "rules", "probe", "routing"} {
+	// Секция dns_takeover ссылается на группу-цель по id: без неё удаление групп
+	// оставляет осиротевшую ссылку, и проверка слоя отвергает «Применить» очистки
+	// (dns_group_missing), например после прохода Playwright с перехватом.
+	for _, section := range []string{"dns_takeover", "groups", "rules", "probe", "routing"} {
 		r := e.call(http.MethodPost, "/api/configlayer/draft", map[string]any{"revision": e.revision(), "section": section, "value": nil})
 		if r.Status != http.StatusOK {
 			e.t.Fatalf("удаление секции №%d черновика: %d %s", len(section), r.Status, r.Code)
