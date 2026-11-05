@@ -1,6 +1,6 @@
 // e2e-pages: config/cores
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
 import { CORE_TAG } from './lib/known';
@@ -68,6 +68,15 @@ async function dnsState(page: Page): Promise<DnsState> {
     blocks: (d.blocks ?? []) as string[],
     lastCheck: Boolean(d.last_check)
   };
+}
+
+/** Поле связано через aria-describedby с элементом target (по его id). */
+async function expectDescribedBy(field: Locator, target: Locator): Promise<void> {
+  const id = await target.getAttribute('id');
+  expect(id, 'у связанного элемента есть id').toBeTruthy();
+  await expect
+    .poll(async () => ((await field.getAttribute('aria-describedby')) ?? '').split(' '))
+    .toContain(id);
 }
 
 /** Установленные ядра по виду секций. */
@@ -619,11 +628,15 @@ test('dns-params: выбор группы — значение в чернови
     await expect(select).toBeDisabled({ timeout: T.action });
     await expect(page.getByTestId('dns-group-none')).toBeVisible();
     await expect(page.getByTestId('dns-group-missing')).toHaveCount(0);
+    await expectDescribedBy(select, page.getByTestId('dns-group-none'));
     await guard.assertClean();
     return;
   }
 
   await expect(select).toBeEnabled({ timeout: T.action });
+  // Поле связано с постоянной подсказкой и не помечено ошибочным
+  await expectDescribedBy(select, page.getByTestId('dns-group-hint'));
+  await expect(select).not.toHaveAttribute('aria-invalid', 'true');
   // Список выбора — группы маршрутизации черновика
   for (const g of groups) {
     await expect(select.locator(`option[value="${g.id}"]`)).toHaveCount(1);
@@ -658,6 +671,9 @@ test('dns-params: выбор группы — значение в чернови
   await expect(missing).toHaveText(reGroupMissing(missingId));
   await expect(select).toHaveValue('');
   await expect(select).toHaveClass(/input-error/);
+  // Ошибка связана с полем: скринридер называет значение неверным и читает причину
+  await expect(select).toHaveAttribute('aria-invalid', 'true');
+  await expectDescribedBy(select, missing);
 
   // Сброс черновика возвращает прежнюю группу
   await resetDraft(page);
@@ -666,6 +682,7 @@ test('dns-params: выбор группы — значение в чернови
     .toBe(before.group);
   await expect(missing).toHaveCount(0, { timeout: T.action });
   await expect(select).toHaveValue(current, { timeout: T.action });
+  await expect(select).not.toHaveAttribute('aria-invalid', 'true');
 
   await guard.assertClean();
 });

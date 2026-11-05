@@ -76,6 +76,8 @@
   const titleId = `${uid}-title`;
   const groupSelectId = `${uid}-group`;
   const groupErrorId = `${uid}-group-error`;
+  const groupNoneId = `${uid}-group-none`;
+  const groupHintId = `${uid}-group-hint`;
 
   // Порядок блокировок (UI-SPEC «Порядок блокировок»): первая причина идёт первой
   const BLOCK_ORDER: readonly DnsBlock[] = [
@@ -345,6 +347,12 @@
   const selectedGroupId = $derived(groupTarget.id);
   const groupMissing = $derived(groupTarget.missing !== '');
   const noGroups = $derived($routingView !== null && availableGroups.length === 0);
+  // Поле группы связано с ошибкой (или строкой «групп нет») и с постоянной подсказкой
+  const groupDescribedBy = $derived(
+    [groupMissing ? groupErrorId : noGroups ? groupNoneId : '', groupHintId]
+      .filter(Boolean)
+      .join(' ')
+  );
 
   const paramsLocked = $derived(
     dnsState === 'applying' || (view?.blocks.some((b) => DISABLE_BLOCKS.has(b)) ?? false)
@@ -691,6 +699,8 @@
               class={groupMissing ? 'input input-error' : 'input'}
               value={selectedGroupId}
               disabled={paramsLocked || availableGroups.length === 0}
+              ariaDescribedby={groupDescribedBy}
+              ariaInvalid={groupMissing}
               data-testid="dns-group-select"
               onchange={(e) => updateGroup(e.currentTarget.value)}
             >
@@ -711,11 +721,11 @@
                 {$t('cfg.dns.group_missing', { name: groupTarget.missing })}
               </p>
             {:else if noGroups}
-              <p class="warning-text dns-field-error" data-testid="dns-group-none">
+              <p class="warning-text dns-field-error" id={groupNoneId} data-testid="dns-group-none">
                 {$t('cfg.dns.block_group')}
               </p>
             {/if}
-            <p class="dns-caption">
+            <p class="dns-caption" id={groupHintId} data-testid="dns-group-hint">
               {$t('cfg.dns.group_hint')}
               <a class="dns-link" href="#/config/groups">{$t('cfg.dns.open_groups')}</a>
             </p>

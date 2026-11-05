@@ -18,6 +18,10 @@
     title?: string;
     name?: string;
     ariaLabel?: string;
+    /** id подсказки или ошибки под полем (через пробел). */
+    ariaDescribedby?: string;
+    /** Значение поля неверно: скринридер называет поле ошибочным. */
+    ariaInvalid?: boolean;
     'data-testid'?: string;
     onchange?: (event: Event & { currentTarget: HTMLSelectElement }) => void;
     options?: Option[];
@@ -34,6 +38,8 @@
     title,
     name,
     ariaLabel,
+    ariaDescribedby,
+    ariaInvalid = false,
     'data-testid': testId,
     onchange,
     options,
@@ -57,6 +63,8 @@
     {disabled}
     {title}
     aria-label={ariaLabel || title || undefined}
+    aria-describedby={ariaDescribedby || undefined}
+    aria-invalid={ariaInvalid ? 'true' : undefined}
     data-testid={testId}
     bind:value
     {onchange}
