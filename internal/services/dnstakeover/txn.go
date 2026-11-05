@@ -447,6 +447,12 @@ func (s *Service) finishEnable(ctx context.Context, pl enablePlan, fail *Failure
 			p.KernelWasRunning = true
 			p.DisableFailed = false
 			snap = p.Snapshot
+			if snap == nil {
+				// Без снимка окно не открывается и OverrideBefore с ProxyDNSBefore сам
+				// openWindow не запишет: выключение и сверка берут их из состояния.
+				p.OverrideBefore = pl.overrideBefore
+				p.ProxyDNSBefore = pl.proxyDNSBefore
+			}
 		}); err != nil {
 			log.Printf("dnstakeover: %v", err)
 		}
