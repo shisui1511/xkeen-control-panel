@@ -161,7 +161,13 @@
       {$t('cfg.dns.check_off_hint')}
     </p>
   {/if}
-  <p class="dns-check-caption" aria-live="polite" data-testid="dns-check-running">
+  <!-- Зона «Проверяем…» всегда в дереве доступности: без текста она визуально скрыта
+       (sr-only), а не display: none — иначе скринридер пропускает появление текста -->
+  <p
+    class={['dns-check-caption', { 'sr-only': !checking }]}
+    aria-live="polite"
+    data-testid="dns-check-running"
+  >
     {checking ? $t('cfg.dns.check_running') : ''}
   </p>
 
@@ -269,10 +275,6 @@
     line-height: 1.5;
     color: var(--fg-secondary);
     overflow-wrap: anywhere;
-  }
-
-  .dns-check-caption:empty {
-    display: none;
   }
 
   .dns-check-transport,

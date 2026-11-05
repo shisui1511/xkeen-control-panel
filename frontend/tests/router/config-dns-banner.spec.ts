@@ -150,6 +150,10 @@ test(
     await expect(card).toBeVisible({ timeout: T.action });
     await expect(card.locator('.btn-primary')).toHaveCount(0);
     await expect(banner(page).locator('.btn-primary')).toHaveCount(1);
+    // Озвучивание: у alert баннера нет aria-label (иначе часть скринридеров читает только
+    // имя без тела), строка состояния карточки в окне не дублирует отсчёт баннера
+    expect(await banner(page).getAttribute('aria-label'), 'aria-label баннера').toBeNull();
+    await expect(page.getByTestId('dns-state')).toHaveAttribute('aria-live', 'off');
 
     // Отсчёт идёт по сроку сервера: число уменьшается
     const first = await bannerSeconds(page);

@@ -250,7 +250,6 @@
   <div
     class="alert alert-warning dns-banner"
     role="alert"
-    aria-label={$t('cfg.dns.banner_title')}
     aria-busy={expired}
     data-testid="dns-confirm-banner"
     data-kind={win.kind}

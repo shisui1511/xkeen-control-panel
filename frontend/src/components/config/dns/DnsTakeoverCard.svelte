@@ -120,7 +120,8 @@
     }
   });
 
-  // Остаток окна подтверждения для строки состояния
+  // Остаток окна подтверждения для строки состояния. В окне строка не озвучивается
+  // (aria-live="off"): отсчёт для скринридера объявляет только баннер на 30 и 10 с
   const subscribeTick = createSubscriber((update) => {
     const id = setInterval(update, WINDOW_TICK_MS);
     return () => clearInterval(id);
@@ -534,7 +535,7 @@
     <p
       class="dns-status"
       role="status"
-      aria-live="polite"
+      aria-live={view.state === 'window' ? 'off' : 'polite'}
       data-testid="dns-state"
       data-state={view.state}
     >
