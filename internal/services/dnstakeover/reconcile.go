@@ -144,7 +144,9 @@ func (s *Service) reconcileReboot(ctx context.Context, kernel string) {
 		}
 	}
 
+	desired := false
 	if err := s.update(func(p *persisted) {
+		desired = p.Desired
 		if !p.Desired {
 			// Перехват не желаем (откат или выключение не дописали файлы ядра):
 			// файлы без слушателя записаны — и всё. Желаемым он не становится,
@@ -156,6 +158,15 @@ func (s *Service) reconcileReboot(ctx context.Context, kernel string) {
 		p.WaitingReason = waitingReboot
 	}); err != nil {
 		log.Printf("dnstakeover: %v", err)
+	}
+	if !desired && len(errs) == 0 {
+		// Файлы без слушателя дописаны, а откат до строки proxy_dns не дошёл: сторож
+		// (guardStaleListener) после этого Live уже не сработает, и строка осталась бы
+		// выключенной. Возвращается к значению до включения, как на остальных путях,
+		// делающих перехват нежелаемым.
+		if err := s.releaseProxyLine(hctx); err != nil {
+			errs = append(errs, err.Error())
+		}
 	}
 	var fail *Failure
 	if len(errs) > 0 {
