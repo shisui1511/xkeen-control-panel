@@ -4368,6 +4368,7 @@
   "cfg.dns.step_done": "done",
   "cfg.dns.step_failed": "failed",
   "cfg.dns.step_pending": "not started",
+  "cfg.dns.step_skipped": "skipped",
   "cfg.dns.fail_title": "Interception was not enabled.",
   "cfg.dns.fail_title_disable": "Interception was not disabled.",
   "cfg.dns.fail_generic": "Could not perform the action: {reason}.",

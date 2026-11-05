@@ -41,6 +41,8 @@
         return $t('cfg.dns.step_done');
       case 'failed':
         return $t('cfg.dns.step_failed');
+      case 'skipped':
+        return $t('cfg.dns.step_skipped');
       default:
         return $t('cfg.dns.step_pending');
     }
@@ -106,6 +108,8 @@
               <Icon name="check" size={16} />
             {:else if step.status === 'failed'}
               <Icon name="warning" size={16} />
+            {:else if step.status === 'skipped'}
+              <span class="dns-step-dash">–</span>
             {:else}
               <span class="dns-step-ring"></span>
             {/if}
@@ -273,6 +277,15 @@
 
   .dns-step-failed {
     color: var(--warning);
+  }
+
+  .dns-step-skipped {
+    color: var(--fg-dim);
+  }
+
+  .dns-step-dash {
+    font-size: var(--font-size-base);
+    line-height: 1;
   }
 
   .dns-step-ring {

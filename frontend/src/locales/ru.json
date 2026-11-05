@@ -4368,6 +4368,7 @@
   "cfg.dns.step_done": "готово",
   "cfg.dns.step_failed": "сбой",
   "cfg.dns.step_pending": "не начат",
+  "cfg.dns.step_skipped": "пропущен",
   "cfg.dns.fail_title": "Перехват не включён.",
   "cfg.dns.fail_title_disable": "Перехват не выключен.",
   "cfg.dns.fail_generic": "Не удалось выполнить действие: {reason}.",

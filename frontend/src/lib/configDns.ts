@@ -45,7 +45,7 @@ export interface DnsWindow {
 /** Шаг транзакции включения или выключения. */
 export interface DnsStep {
   id: string;
-  status: 'pending' | 'running' | 'done' | 'failed';
+  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
 }
 
 /** Сбой транзакции: код текста, выполнен ли откат, параметры и вывод ядра. */
