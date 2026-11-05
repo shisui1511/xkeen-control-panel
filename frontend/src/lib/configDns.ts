@@ -464,11 +464,29 @@ export function dnsErrorText(code: string | undefined, params?: Record<string, s
 }
 
 /**
- * Причина сбоя транзакции из вида: reason или cause из параметров, иначе первая строка
- * вывода ядра (detail); ничего нет — «причина не сообщена».
+ * Причина сбоя транзакции из вида: reason из параметров, иначе первая строка вывода
+ * ядра (detail), иначе переведённый текст исходного сбоя (cause у rollback_failed — код,
+ * его не показывают сырым); ничего нет — «причина не сообщена».
  */
 export function dnsFailureReason(f: DnsFailure): string {
-  return f.params?.reason || f.params?.cause || firstLine(f.detail) || get(t)('cfg.dns.no_reason');
+  return (
+    f.params?.reason ||
+    firstLine(f.detail) ||
+    causeFailureText(f, f.params) ||
+    get(t)('cfg.dns.no_reason')
+  );
+}
+
+/** Код исходного сбоя при rollback_failed: известный код, отличный от самого rollback_failed. */
+function failureCause(f: DnsFailure): string {
+  const cause = f.params?.cause;
+  return cause && cause !== f.code && KNOWN_CODES.has(cause) ? cause : '';
+}
+
+/** Текст исходного сбоя по cause; пусто, если cause нет или он неизвестен. */
+function causeFailureText(f: DnsFailure, params?: Record<string, string>): string {
+  const cause = failureCause(f);
+  return cause ? errorText(`cfg.dns.err.${cause}`, params) : '';
 }
 
 /**
@@ -483,6 +501,23 @@ export function dnsFailureText(f: DnsFailure): string {
   if (!p.reason) p.reason = dnsFailureReason(f);
   if (!KNOWN_CODES.has(f.code) || f.code === 'generic') return errorText('cfg.dns.fail_generic', p);
   return errorText(`cfg.dns.err.${f.code}`, p);
+}
+
+/**
+ * Заголовочная строка сбоя в карточке: при rollback_failed — что именно не удалось
+ * (исходный сбой по cause), а итог отката идёт отдельной строкой с советом; иначе —
+ * dnsFailureText. Так две строки подряд не повторяют «Откат не завершён: …».
+ */
+export function dnsFailureHeadline(f: DnsFailure): string {
+  if (f.code === 'rollback_failed') {
+    const p: Record<string, string> = { ...(f.params ?? {}) };
+    const detail = firstLine(f.detail);
+    if (detail && !p.detail) p.detail = detail;
+    if (!p.reason) p.reason = detail || get(t)('cfg.dns.no_reason');
+    const text = causeFailureText(f, p);
+    if (text) return text;
+  }
+  return dnsFailureText(f);
 }
 
 type RequestError = { code?: unknown; params?: unknown; detail?: unknown; message?: unknown };

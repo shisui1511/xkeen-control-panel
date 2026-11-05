@@ -4,7 +4,7 @@
   import Icon from '../../../lib/components/Icon.svelte';
   import {
     dnsFailureReason,
-    dnsFailureText,
+    dnsFailureHeadline,
     type DnsFailure,
     type DnsStep
   } from '../../../lib/configDns';
@@ -47,7 +47,7 @@
   }
 
   // Причина — по коду с деталью сервера в параметрах; полный вывод ядра — в раскрытии
-  const reason = $derived(failure ? dnsFailureText(failure) : '');
+  const reason = $derived(failure ? dnsFailureHeadline(failure) : '');
   const rollbackReason = $derived(failure ? dnsFailureReason(failure) : '');
 </script>
 
