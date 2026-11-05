@@ -266,7 +266,7 @@ async function enableTakeover(page: Page): Promise<string | null> {
       const take = await api(page, 'POST', '/api/configlayer/routing/take', {
         revision: (await routingInfo(page)).revision
       });
-      expect(take.status, 'взятие маршрутизации').toBe(200);
+      expect(take.status, `взятие маршрутизации: ${JSON.stringify(take.data)}`).toBe(200);
       prep.routingTaken = true;
     }
     const saved = await api(page, 'POST', '/api/configlayer/routing/groups/save', {
@@ -284,7 +284,7 @@ async function enableTakeover(page: Page): Promise<string | null> {
         reserve: ''
       }
     });
-    expect(saved.status, 'группа-цель перехвата').toBe(200);
+    expect(saved.status, `группа-цель перехвата: ${JSON.stringify(saved.data)}`).toBe(200);
     prep.groupId = String((saved.data?.group as { id?: string } | undefined)?.id ?? '');
     changed = true;
   }
