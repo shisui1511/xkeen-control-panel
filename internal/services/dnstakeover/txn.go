@@ -449,8 +449,11 @@ func (s *Service) finishEnable(ctx context.Context, pl enablePlan, fail *Failure
 			s.setStep(stepWindow, statusSkipped)
 			return
 		}
-		if err := s.openWindow(kindEnable, *snap); err != nil {
+		win := *snap
+		win.InFlight = false
+		if err := s.openWindow(kindEnable, win); err != nil {
 			log.Printf("dnstakeover: окно подтверждения не открыто: %v", err)
+			s.settleSnapshot()
 		}
 		return
 	}
@@ -519,10 +522,28 @@ func (s *Service) rollbackEnable(ctx context.Context, pl enablePlan, fail *Failu
 	case rb.restore:
 		fail.RolledBack = true
 	}
-	if !fail.RolledBack {
-		return
+	if err := s.update(func(p *persisted) {
+		if fail.RolledBack {
+			p.Snapshot = nil
+		} else if p.Snapshot != nil {
+			// Откат не удался: снимок остаётся записью override и proxy_dns до
+			// включения (сверка на старте, выключение флага слоя), но проход
+			// завершён — откатывать по нему на старте панели нельзя (CR-04).
+			p.Snapshot.InFlight = false
+		}
+	}); err != nil {
+		log.Printf("dnstakeover: %v", err)
 	}
-	if err := s.update(func(p *persisted) { p.Snapshot = nil }); err != nil {
+}
+
+// settleSnapshot помечает снимок завершённого прохода: он остаётся записью override и
+// proxy_dns до включения, но старт панели по нему ничего не откатывает (CR-04).
+func (s *Service) settleSnapshot() {
+	if err := s.update(func(p *persisted) {
+		if p.Snapshot != nil {
+			p.Snapshot.InFlight = false
+		}
+	}); err != nil {
 		log.Printf("dnstakeover: %v", err)
 	}
 }
@@ -656,6 +677,7 @@ func (s *Service) takeSnapshot(pl enablePlan) error {
 	snap := &txnSnapshot{
 		AtMs:           s.now().UnixMilli(),
 		Kernel:         pl.kernel,
+		InFlight:       true,
 		Applied:        st.Applied,
 		Live:           prevLive,
 		OverrideBefore: pl.overrideBefore,

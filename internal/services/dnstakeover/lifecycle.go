@@ -662,6 +662,7 @@ func (s *Service) runTransfer(ctx context.Context, prev string, on bool, to stri
 	snap.Kind = kindKernelSwitch
 	if err := s.update(func(p *persisted) {
 		pending := snap
+		pending.InFlight = true
 		p.Snapshot = &pending
 	}); err != nil {
 		log.Printf("dnstakeover: %v", err)
@@ -728,6 +729,7 @@ func (s *Service) runTransfer(ctx context.Context, prev string, on bool, to stri
 	if err := s.openWindow(kindKernelSwitch, snap); err != nil {
 		log.Printf("dnstakeover: окно подтверждения переноса не открыто: %v", err)
 		s.setStep(stepWindow, statusSkipped)
+		s.settleSnapshot()
 	}
 }
 

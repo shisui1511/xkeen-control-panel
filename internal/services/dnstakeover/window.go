@@ -228,7 +228,9 @@ func (s *Service) rollbackWindowInOp(w windowState, reason string) {
 }
 
 // rollbackPendingTxn — откат на старте панели прохода, прерванного остановкой до
-// окна подтверждения: в файле состояния снимок (persisted.Snapshot), а окна нет.
+// окна подтверждения: в файле состояния снимок с InFlight (persisted.Snapshot), а
+// окна нет. Снимок завершённого прохода (откат не удался, окно не открылось)
+// не откатывается: он затёр бы всё применённое с тех пор.
 // Обычно панель остановили посреди пробы, когда Live перехвата уже включён, а
 // подтверждения не было (D-07). Включение и возврат перехвата откатываются как
 // окно enable (DNS прошивке, строка proxy_dns, Applied и Live к снимку — файлы без
@@ -236,11 +238,12 @@ func (s *Service) rollbackWindowInOp(w windowState, reason string) {
 // (возврат или включение из ожидания), остаётся желаемым и ждёт (probe).
 func (s *Service) rollbackPendingTxn() {
 	s.mu.Lock()
-	if s.st.Snapshot == nil || s.st.Window != nil || s.winRolling {
+	if s.st.Snapshot == nil || !s.st.Snapshot.InFlight || s.st.Window != nil || s.winRolling {
 		s.mu.Unlock()
 		return
 	}
 	snap := *s.st.Snapshot
+	snap.InFlight = false
 	wasDesired := s.st.Desired && snap.Kind != kindKernelSwitch
 	s.winRolling = true
 	s.mu.Unlock()
