@@ -533,8 +533,9 @@ func (s *Service) rollbackEnable(ctx context.Context, pl enablePlan, fail *Failu
 	if err := s.update(func(p *persisted) {
 		if fail.RolledBack {
 			p.Snapshot = nil
-		} else if p.Snapshot != nil {
-			// Откат не удался: снимок остаётся записью override и proxy_dns до
+		} else if p.Snapshot != nil && s.ctx.Err() == nil {
+			// Откат не удался (не из-за остановки службы — тогда старт панели
+			// откатит снимок заново): снимок остаётся записью override и proxy_dns до
 			// включения (сверка на старте, выключение флага слоя), но проход
 			// завершён — откатывать по нему на старте панели нельзя (CR-04).
 			p.Snapshot.InFlight = false
