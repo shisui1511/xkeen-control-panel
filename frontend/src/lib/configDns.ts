@@ -506,7 +506,9 @@ export function dnsRequestHasCode(err: unknown): boolean {
 export function dnsRequestReason(err: unknown): string {
   const e = asRequestError(err) as RequestError & { status?: unknown };
   if (typeof e.detail === 'string' && firstLine(e.detail) !== '') return firstLine(e.detail);
-  const status = typeof e.status === 'number' ? e.status : 0;
+  // Ответ без JSON-тела (шлюз, прокси) приходит ошибкой «HTTP n» без поля status
+  const fromMessage = typeof e.message === 'string' ? /^HTTP (\d{3})$/.exec(e.message) : null;
+  const status = typeof e.status === 'number' ? e.status : fromMessage ? Number(fromMessage[1]) : 0;
   if (err instanceof TypeError || (status >= 502 && status <= 504)) {
     return get(t)('cfg.dns.reason_network');
   }
