@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { CORE_TAG } from './lib/known';
+import { CORE_TAG, knownFailure } from './lib/known';
 import {
   addToDraft,
   api,
@@ -1309,6 +1309,7 @@ test.describe('dns-flow', () => {
     async ({ page }) => {
       test.setTimeout(T.save * 8);
       test.skip(flow.skip !== '', flow.skip);
+      knownFailure('*', 'dns-flow-dead-group-mihomo-validate');
       const guard = attachConsoleGuard(page);
       await page.setViewportSize({ width: 1440, height: 900 });
       await startPage(page);

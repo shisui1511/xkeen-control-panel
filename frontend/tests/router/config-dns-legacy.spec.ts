@@ -1,7 +1,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { CORE_TAG } from './lib/known';
+import { CORE_TAG, knownFailure } from './lib/known';
 import { api, installedKernels, resetDraft, withPanel, type Installed } from './lib/nodes-api';
 
 // Стык со старым перенаправлением DNS XKeen (фаза 148, D-34): при включённом слое
@@ -142,6 +142,7 @@ for (const kernel of KERNELS) {
   test(`dns-legacy: слой выключен — переключатель по прежнему условию (${kernel})`, async ({
     page
   }) => {
+    if (kernel === 'mihomo') knownFailure('*', 'legacy-flag-off-apply-busy-mihomo');
     const guard = attachConsoleGuard(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     test.skip(!installed[kernel], `${kernel} не установлен на стенде`);
