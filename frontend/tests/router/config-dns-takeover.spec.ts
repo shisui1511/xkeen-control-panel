@@ -477,9 +477,17 @@ test('dns-params: раскрытие закрыто, встроенные зон
     'выбор группы в обёртке Select'
   ).toBe(true);
 
-  // Повторный клик по заголовку закрывает раскрытие
+  // Признак раскрытия — шеврон в заголовке: при открытом раскрытии повёрнут
+  const chevron = page.getByTestId('dns-params-summary').locator('.dns-summary-chevron');
+  await expect(chevron).toBeVisible();
+  await expect(chevron).toHaveAttribute('aria-hidden', 'true');
+  const turned = () => chevron.evaluate((el) => getComputedStyle(el).transform);
+  await expect.poll(turned).not.toBe('none');
+
+  // Повторный клик по заголовку закрывает раскрытие, шеврон возвращается
   await page.getByTestId('dns-params-summary').click();
   await expect(page.getByTestId('dns-zones-builtin')).toBeHidden();
+  await expect.poll(turned).toBe('none');
 
   await guard.assertClean();
 });

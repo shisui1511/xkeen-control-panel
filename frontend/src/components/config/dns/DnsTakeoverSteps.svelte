@@ -80,7 +80,12 @@
         {/if}
         {#if failure.detail}
           <details class="dns-fail-output" data-testid="dns-fail-output">
-            <summary>{$t('cfg.dns.fail_output')}</summary>
+            <summary>
+              <span class="dns-summary-chevron" aria-hidden="true">
+                <Icon name="chevron-right" size={14} />
+              </span>
+              <span>{$t('cfg.dns.fail_output')}</span>
+            </summary>
             <pre>{failure.detail}</pre>
           </details>
         {/if}
@@ -162,11 +167,36 @@
     min-width: 0;
   }
 
+  /* Признак раскрытия — свой шеврон на всех ширинах (штатный маркер у display: flex
+     пропадает), повёрнутый при [open] */
   .dns-fail-output summary {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-1);
     cursor: pointer;
+    list-style: none;
     font-size: var(--font-size-sm);
     font-weight: 600;
     line-height: 1.4;
+  }
+
+  .dns-fail-output summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .dns-summary-chevron {
+    display: inline-flex;
+    flex: none;
+  }
+
+  .dns-fail-output[open] .dns-summary-chevron {
+    transform: rotate(90deg);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .dns-summary-chevron {
+      transition: transform var(--transition-fast);
+    }
   }
 
   .dns-fail-output pre {
@@ -258,8 +288,6 @@
     }
 
     .dns-fail-output summary {
-      display: flex;
-      align-items: center;
       min-height: 44px;
     }
   }

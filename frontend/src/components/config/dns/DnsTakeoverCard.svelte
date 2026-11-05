@@ -708,6 +708,9 @@
         }}
       >
         <summary class="dns-params-summary" data-testid="dns-params-summary">
+          <span class="dns-summary-chevron" aria-hidden="true">
+            <Icon name="chevron-right" size={14} />
+          </span>
           <span>{$t('cfg.dns.params')}</span>
           {#if view.params_changed}
             <span class="badge badge-warning" data-testid="dns-params-changed">
@@ -1015,16 +1018,38 @@
     min-width: 0;
   }
 
+  /* У summary с display: flex штатного маркера нет: признак раскрытия — свой шеврон,
+     повёрнутый при [open]; маркер WebKit скрыт, чтобы не было двух */
   .dns-params-summary {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: var(--spacing-2);
-    min-height: 32px;
+    min-height: var(--spacing-8);
     font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-secondary);
     cursor: pointer;
+    list-style: none;
+  }
+
+  .dns-params-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .dns-summary-chevron {
+    display: inline-flex;
+    flex: none;
+  }
+
+  .dns-params[open] .dns-summary-chevron {
+    transform: rotate(90deg);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .dns-summary-chevron {
+      transition: transform var(--transition-fast);
+    }
   }
 
   .dns-params-body {
