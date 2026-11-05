@@ -40,12 +40,14 @@
   let name = $state(saved.name ?? untrack(() => view.default_name));
   let own = $state<DnsCheckResult | null>(saved.result);
   let checking = $state(false);
-  // Транспортный сбой относится к состоянию перехвата, при котором он случился: смена
-  // состояния его снимает
-  let transport = $state<{ state: DnsState; text: string } | null>(null);
-  const transportError = $derived(
-    transport !== null && transport.state === view.state ? transport.text : ''
-  );
+  // Транспортный сбой сбрасывается сменой состояния перехвата: производное от примитива
+  // состояния пересчитывается (и обнуляет текст) только при его смене, а не при каждом
+  // перечитывании вида; запись сбоя — присваивание этому производному
+  const viewState = $derived<DnsState>(view.state);
+  let transportError = $derived.by<string>(() => {
+    void viewState;
+    return '';
+  });
   let inputEl: HTMLInputElement | null = null;
   const keepInput: Attachment<HTMLInputElement> = (el) => {
     inputEl = el;
@@ -83,12 +85,9 @@
       const res = await checkDns(name.trim());
       own = res;
       saved.result = res;
-      transport = null;
+      transportError = '';
     } catch (err) {
-      transport = {
-        state: view.state,
-        text: $t('cfg.dns.check_transport', { error: dnsRequestErrorText(err) })
-      };
+      transportError = $t('cfg.dns.check_transport', { error: dnsRequestErrorText(err) });
     } finally {
       checking = false;
     }
@@ -201,66 +200,74 @@
     {/if}
   </p>
 
-  {#if shown}
-    <div
-      class="dns-check-result"
-      role="status"
-      aria-live="polite"
-      data-testid="dns-check-result"
-      data-ok={shown.ok}
-      data-source={shown.source}
-    >
-      {#each shown.groups as g, i (i)}
-        {@const answers = g.answers.slice(0, MAX_ANSWERS)}
-        {@const more = Math.max(0, g.answers.length - MAX_ANSWERS)}
-        {@const path = pathParts(g)}
-        <div class="dns-check-group" data-testid="dns-check-group-{g.label}" data-ok={g.ok}>
-          {#if grouped}
-            <p class="dns-check-group-title">{groupTitle(g)}</p>
-          {/if}
-          <p class={['dns-check-outcome', { 'dns-check-outcome-fail': !g.ok }]}>
-            <Icon name={g.ok ? 'check' : 'warning'} size={14} class="icon-first-line" />
-            <span data-testid="dns-check-outcome">{outcomeText(g)}</span>
-          </p>
-          <dl class="dns-check-lines">
-            <div class="dns-check-line">
-              <dt>{$t('cfg.dns.res_name')}</dt>
-              <dd class="dns-check-mono">{g.name}</dd>
-            </div>
-            {#if answers.length > 0}
-              <div class="dns-check-line">
-                <dt>{$t('cfg.dns.res_answer')}</dt>
-                <dd>
-                  <span class="dns-check-mono">{answers.join(', ')}</span>
-                  {#if more > 0}
-                    <span class="dns-check-more">{$t('cfg.dns.and_more', { n: more })}</span>
-                  {/if}
-                </dd>
-              </div>
+  <!-- Зона role="status" стоит постоянно (пока результата нет — sr-only), внутри меняется
+       только блок результата: область, вставленная сразу с текстом, часть скринридеров не
+       объявляет -->
+  <div
+    class={['dns-check-live', { 'sr-only': !shown }]}
+    role="status"
+    aria-live="polite"
+    data-testid="dns-check-live"
+  >
+    {#if shown}
+      <div
+        class="dns-check-result"
+        data-testid="dns-check-result"
+        data-ok={shown.ok}
+        data-source={shown.source}
+      >
+        {#each shown.groups as g, i (i)}
+          {@const answers = g.answers.slice(0, MAX_ANSWERS)}
+          {@const more = Math.max(0, g.answers.length - MAX_ANSWERS)}
+          {@const path = pathParts(g)}
+          <div class="dns-check-group" data-testid="dns-check-group-{g.label}" data-ok={g.ok}>
+            {#if grouped}
+              <p class="dns-check-group-title">{groupTitle(g)}</p>
             {/if}
-            {#if path}
+            <p class={['dns-check-outcome', { 'dns-check-outcome-fail': !g.ok }]}>
+              <Icon name={g.ok ? 'check' : 'warning'} size={14} class="icon-first-line" />
+              <span data-testid="dns-check-outcome">{outcomeText(g)}</span>
+            </p>
+            <dl class="dns-check-lines">
               <div class="dns-check-line">
-                <dt>{$t('cfg.dns.res_path')}</dt>
-                <dd data-testid="dns-check-path" data-path={g.path}>
-                  {path.before}{#if path.name}<span class="dns-check-mono">{path.name}</span
-                    >{path.after}{/if}
-                </dd>
+                <dt>{$t('cfg.dns.res_name')}</dt>
+                <dd class="dns-check-mono">{g.name}</dd>
               </div>
-            {/if}
-            <div class="dns-check-line">
-              <dt>{$t('cfg.dns.res_latency')}</dt>
-              <dd>{g.latency_ms} {$t('app.ms')}</dd>
-            </div>
-          </dl>
-        </div>
-      {/each}
-      <p class="dns-check-caption" data-testid="dns-check-when">
-        {$t(shown.source === 'auto' ? 'cfg.dns.checked_auto' : 'cfg.dns.checked_manual', {
-          time: clock(shown.at_ms)
-        })}
-      </p>
-    </div>
-  {/if}
+              {#if answers.length > 0}
+                <div class="dns-check-line">
+                  <dt>{$t('cfg.dns.res_answer')}</dt>
+                  <dd>
+                    <span class="dns-check-mono">{answers.join(', ')}</span>
+                    {#if more > 0}
+                      <span class="dns-check-more">{$t('cfg.dns.and_more', { n: more })}</span>
+                    {/if}
+                  </dd>
+                </div>
+              {/if}
+              {#if path}
+                <div class="dns-check-line">
+                  <dt>{$t('cfg.dns.res_path')}</dt>
+                  <dd data-testid="dns-check-path" data-path={g.path}>
+                    {path.before}{#if path.name}<span class="dns-check-mono">{path.name}</span
+                      >{path.after}{/if}
+                  </dd>
+                </div>
+              {/if}
+              <div class="dns-check-line">
+                <dt>{$t('cfg.dns.res_latency')}</dt>
+                <dd>{g.latency_ms} {$t('app.ms')}</dd>
+              </div>
+            </dl>
+          </div>
+        {/each}
+        <p class="dns-check-caption" data-testid="dns-check-when">
+          {$t(shown.source === 'auto' ? 'cfg.dns.checked_auto' : 'cfg.dns.checked_manual', {
+            time: clock(shown.at_ms)
+          })}
+        </p>
+      </div>
+    {/if}
+  </div>
 </div>
 
 <style>

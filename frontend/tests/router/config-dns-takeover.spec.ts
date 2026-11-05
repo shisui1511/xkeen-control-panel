@@ -172,7 +172,7 @@ test('dns-card: выключенный перехват — DNS у прошив�
   // в карточке не больше одной основной кнопки
   await expect(page.getByTestId('dns-takeover-card').locator('.btn-primary')).toHaveCount(1);
   // зоны role="status" стоят постоянно (пустые), чтобы появление текста озвучивалось
-  for (const id of ['dns-stale', 'dns-other-kernel', 'dns-check-transport']) {
+  for (const id of ['dns-stale', 'dns-other-kernel', 'dns-check-transport', 'dns-check-live']) {
     await expect(page.getByTestId(id), `зона ${id}`).toHaveAttribute('role', 'status');
   }
   if (st.owner.kind === 'firmware') {
@@ -1116,7 +1116,11 @@ test.describe('dns-flow', () => {
 
       const result = page.getByTestId('dns-check-result');
       await expect(result).toHaveAttribute('data-source', 'manual', { timeout: T.save });
-      await expect(result).toHaveAttribute('role', 'status');
+      // результат вставляется внутрь постоянной зоны role="status", а не вместе с ней
+      await expect(page.getByTestId('dns-check-live')).toHaveAttribute('role', 'status');
+      await expect(page.getByTestId('dns-check-live').getByTestId('dns-check-result')).toHaveCount(
+        1
+      );
       await expect(result).toContainText(view.default_name);
       await expect(result.getByTestId('dns-check-outcome').first()).toHaveText(RE_RESOLVED);
       const path = result.getByTestId('dns-check-path').first();
