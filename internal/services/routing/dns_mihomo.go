@@ -143,7 +143,7 @@ func (b *mihomoBuild) takeoverDNS(parts []*yaml.Node) error {
 	zones := dnsTakeoverZones(live.ServiceDomain, params.Zones)
 	// Значения политики пользователя (D-24) проходят ту же чистую проверку на петлю,
 	// что и списки серверов: запись на сам роутер замкнула бы запрос на слушатель.
-	mihomoPolicyLoopFree(dns)
+	mihomoPolicyLoopFree(dns, firmware)
 	if firmware != "" {
 		keys := make([]string, 0, len(zones))
 		for _, z := range zones {
@@ -226,8 +226,9 @@ func (b *mihomoBuild) directPolicyKeys() ([]string, error) {
 // mihomoPolicyLoopFree убирает из значений nameserver-policy записи, ведущие на сам
 // роутер (dnsLoopFree, порт 53): запись без оставшихся значений удаляется целиком,
 // пустой nameserver-policy — ключ снимается. Остальные записи пользователя и их
-// порядок не меняются.
-func mihomoPolicyLoopFree(dns *yaml.Node) {
+// порядок не меняются. Значение, равное резолверу прошивки (firmware), остаётся: это
+// тот самый резолвер, на который панель сама ведёт локальные зоны, а не петля.
+func mihomoPolicyLoopFree(dns *yaml.Node, firmware string) {
 	policy := yMapGet(dns, "nameserver-policy")
 	if policy == nil || policy.Kind != yaml.MappingNode {
 		return
@@ -236,7 +237,12 @@ func mihomoPolicyLoopFree(dns *yaml.Node) {
 	for i := 0; i+1 < len(policy.Content); i += 2 {
 		key, val := policy.Content[i], policy.Content[i+1]
 		values := yStrings(val)
-		kept := dnsLoopFree(values, false)
+		kept := make([]string, 0, len(values))
+		for _, v := range values {
+			if len(dnsLoopFree([]string{v}, false)) > 0 || (firmware != "" && dnsHasServer([]string{v}, firmware)) {
+				kept = append(kept, v)
+			}
+		}
 		switch {
 		case len(values) == 0 || len(kept) == len(values):
 			content = append(content, key, val)
