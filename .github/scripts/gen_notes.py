@@ -16,8 +16,9 @@ xcp-release block the panels read (contract: .github/scripts/auto_release.sh); a
 malformed RELEASE_MARKER is written as {"urgent":false,"hold":true}, so a fresh release never goes
 to auto-install on an unread stop. For beta and stable the notes then open with the pre-release banner (beta only: X.Y.0 stable after the hold and a green stand
 smoke, X.Y.Z with Z>0 right after the smoke), then the panel description and a "## Что вошло"
-list (titles of merged PRs of the prev..tag range that contain user-facing feat/fix/perf/refactor/
-revert commits, dependency bumps skipped; omitted when there are none). The architecture table is
+list (titles of merged PRs of the prev..tag range that contain at least two user-facing feat/fix/
+perf/refactor/revert lines, dependency bumps skipped; a PR with a single such line is not repeated
+by its title; omitted when there are none). The architecture table is
 followed by a note that MIPS is experimental.
 
 The range: a stable release lists everything since the previous stable (the "Основной" channel
@@ -214,7 +215,9 @@ def included_list(range_spec):
         if not title:
             continue
         inner = git("log", "--no-merges", "--format=%s", f"{merge}^1..{merge}^2").split("\n")
-        if not any(WORTHY.search(s) and entry_text(s)[1] for s in inner if s):
+        shown = {entry_text(s)[1].lower() for s in inner if s and WORTHY.search(s) and entry_text(s)[1]}
+        # Одна строка в списках ниже уже говорит то же самое: заголовок PR её только повторил бы
+        if len(shown) < 2:
             continue
         title = capitalize(REVIEW_CODES.sub("", clean_title(title)).strip())
         if title and not DEPS_TITLE.match(title) and not SERVICE_SUBJECT.search(title) \
