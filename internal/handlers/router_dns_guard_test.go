@@ -349,7 +349,9 @@ func TestRouterDNSStartReconcile(t *testing.T) {
 			st, _ := v["state"].(string)
 			pids, _ := rtRstKernelPIDs(kernel)
 			owner := dnstakeover.PortOwner()
-			if st == "on" && len(pids) > 0 && owner.Kind == dnstakeover.OwnerKernel && owner.Kernel == kernel {
+			// Override входит в условие: сразу после старта панели ядро с файлами слушателя
+			// может уже держать :53 (прошивка порт ещё не заняла), а сверка ещё не началась.
+			if st == "on" && len(pids) > 0 && owner.Kind == dnstakeover.OwnerKernel && owner.Kernel == kernel && rtDNSOverrideOn(t) {
 				break
 			}
 			if time.Now().After(deadline) {
