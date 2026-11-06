@@ -970,8 +970,10 @@
       >
       {$t('svc.refresh_status')}
     </Button>
+    <!-- Пока XKeen не установлен, главное действие страницы — установка в карточке ниже,
+         и проверка обновлений не перетягивает внимание заливкой -->
     <Button
-      variant="primary"
+      variant={installerShown ? 'secondary' : 'primary'}
       loading={$isKernelChecking || isAnyKernelChecking}
       disabled={$isKernelChecking || isAnyKernelChecking}
       title={$t('svc.check_updates')}
@@ -1018,6 +1020,9 @@
             <span data-testid="status-xkeen-unknown">
               <StatusBadge variant="idle" label={$t('kernel.status.unknown')} />
             </span>
+          {:else if !isRunning && (xkeenInstalled === false || $capabilities?.xkeen_installed === false)}
+            <!-- Нечего «останавливать»: XKeen ещё не поставлен — нейтральный бейдж, не красный -->
+            <StatusBadge variant="idle" label={$t('kernel.status.not_installed')} />
           {:else}
             <StatusBadge
               variant={isRunning ? 'running' : 'stopped'}
@@ -2282,6 +2287,9 @@
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+
+  .update-version > span:first-child {
     font-family: var(--font-family-mono);
   }
 

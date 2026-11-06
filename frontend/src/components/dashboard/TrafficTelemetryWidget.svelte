@@ -40,7 +40,9 @@
     {#snippet meta()}
       <div class="telemetry-status">
         <span class="live-dot" class:live-dot-active={traffic.connected} aria-hidden="true"></span>
-        <span class="status-lbl">{traffic.connected ? 'Live' : 'Offline'}</span>
+        <span class="status-lbl"
+          >{traffic.connected ? $t('traffic.live_badge') : $t('traffic.offline_badge')}</span
+        >
       </div>
     {/snippet}
 

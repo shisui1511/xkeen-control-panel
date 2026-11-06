@@ -50,12 +50,12 @@
       <div class="info-rows">
         <div class="info-row">
           <div class="lbl">{$t('dash.info_version')}</div>
-          <div class="val mono" title={versionText}>{versionText}</div>
+          <div class="val" title={versionText}>{versionText}</div>
         </div>
 
         <div class="info-row">
           <div class="lbl">{$t('dash.info_version_panel')}</div>
-          <div class="val mono" title={panelVersion}>{panelVersion}</div>
+          <div class="val" title={panelVersion}>{panelVersion}</div>
         </div>
 
         <div class="info-row">
@@ -65,7 +65,7 @@
 
         <div class="info-row">
           <div class="lbl">{$t('dash.info_kernel')}</div>
-          <div class="val mono" title={systemStats?.kernel_version || '—'}>
+          <div class="val" title={systemStats?.kernel_version || '—'}>
             {systemStats?.kernel_version || '—'}
           </div>
         </div>
@@ -77,7 +77,7 @@
 
         <div class="info-row">
           <div class="lbl">{$t('dash.info_ip')}</div>
-          <div class="val mono" title={systemStats?.ip_interface || '—'}>
+          <div class="val" title={systemStats?.ip_interface || '—'}>
             {systemStats?.ip_interface || '—'}
           </div>
         </div>
@@ -185,6 +185,7 @@
     color: var(--fg-primary);
     font-weight: 500;
     text-align: right;
+    font-variant-numeric: tabular-nums;
     word-break: break-word;
     overflow-wrap: anywhere;
     min-width: 0;

@@ -34,17 +34,23 @@
 
   const kernelName = $derived(kernel === 'mihomo' ? 'Mihomo' : kernel === 'xray' ? 'Xray' : '');
 
-  type Tone = 'ok' | 'warn' | 'bad' | 'idle';
+  // setup — настройка не завершена (нет XKeen или ядра): не авария, акцентный тон как у
+  // баннера «Следующий шаг» на десктопе
+  type Tone = 'ok' | 'warn' | 'bad' | 'idle' | 'setup';
   const pulse = $derived.by((): { tone: Tone; title: string; sub: string } => {
     if (!xkeenInstalled) {
-      return { tone: 'bad', title: $t('dash.pulse.no_xkeen'), sub: $t('dash.pulse.no_xkeen_sub') };
+      return {
+        tone: 'setup',
+        title: $t('dash.pulse.no_xkeen'),
+        sub: $t('dash.pulse.no_xkeen_sub')
+      };
     }
     if (kernelStatus === 'loading') {
       return { tone: 'idle', title: $t('dash.pulse.checking'), sub: '' };
     }
     if (!kernelName || kernelStatus === 'not_installed') {
       return {
-        tone: 'bad',
+        tone: 'setup',
         title: $t('dash.pulse.no_kernel'),
         sub: $t('dash.pulse.no_kernel_sub')
       };
@@ -66,6 +72,10 @@
   const running = $derived(pulse.tone === 'ok' || pulse.tone === 'warn');
 
   const action = $derived.by(() => {
+    // Та же подпись, что у кнопки следующего шага на десктопе
+    if (!xkeenInstalled) return { label: $t('dash.problems.xkeen_missing_cta'), tab: 'services' };
+    if (pulse.tone === 'setup')
+      return { label: $t('dash.problems.kernel_missing_cta'), tab: 'services' };
     if (!running) return { label: $t('dash.pulse.open_services'), tab: 'services' };
     return kernel === 'mihomo'
       ? { label: $t('dash.pulse.open_proxies'), tab: 'proxies' }
@@ -148,6 +158,10 @@
 
   .pulse-idle {
     --tone: var(--fg-dim);
+  }
+
+  .pulse-setup {
+    --tone: var(--accent);
   }
 
   .pulse-head {

@@ -6,6 +6,7 @@
   import Modal from '../Modal.svelte';
   import SegmentedControl from '../SegmentedControl.svelte';
   import Terminal from '../Terminal.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
 
   interface Props {
     /** Панель может поставить XKeen (на роутере есть Entware) */
@@ -96,7 +97,7 @@
     title={$t('xkinst.title')}
     description={$t(incomplete ? 'xkinst.desc_incomplete' : 'xkinst.desc')}
   >
-    <div class="card install-card" data-testid="xkeen-install-card">
+    <div class="card install-card" class:is-blocked={!available} data-testid="xkeen-install-card">
       {#if available}
         <div class="install-row">
           <span class="install-lbl">{$t('xkinst.channel')}</span>
@@ -118,7 +119,10 @@
           <p class="install-hint" data-testid="xkeen-install-stable-hint">{stableHint}</p>
         {/if}
       {:else}
-        <p class="install-hint warn">{$t('xkinst.no_entware')}</p>
+        <p class="install-hint warn">
+          <Icon name="warning" size={16} color="var(--warning)" />
+          <span>{$t('xkinst.no_entware')}</span>
+        </p>
       {/if}
     </div>
   </Section>
@@ -185,8 +189,23 @@
     font-size: var(--font-size-sm);
   }
 
+  /* Установка из панели недоступна: рамка и значок в тоне предупреждения, текст основным
+     цветом — акцентная рамка вокруг жёлтого текста смешивала два разных сигнала */
+  .install-card.is-blocked {
+    border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+    background: color-mix(in srgb, var(--warning) 6%, var(--bg-card));
+  }
+
   .install-hint.warn {
-    color: var(--warning);
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-2);
+    color: var(--fg-primary);
+  }
+
+  .install-hint.warn > :global(svg) {
+    flex-shrink: 0;
+    margin-top: 1px;
   }
 
   .install-modal {

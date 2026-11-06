@@ -73,7 +73,7 @@
 
   interface Problem {
     key: string;
-    tone: 'error' | 'warning';
+    tone: 'error' | 'warning' | 'step';
     title: string;
     desc: string;
     /** Подпись «Следующий шаг» над заголовком. */
@@ -91,7 +91,7 @@
       case 'install_xkeen':
         return {
           key: 'step',
-          tone: 'error',
+          tone: 'step',
           title: $t('dash.problems.xkeen_missing_title'),
           desc: $t('dash.problems.xkeen_missing_desc'),
           cta: { label: $t('dash.problems.xkeen_missing_cta'), primary: true, run: services },
@@ -101,7 +101,7 @@
       case 'finish_xkeen_setup':
         return {
           key: 'step',
-          tone: 'warning',
+          tone: 'step',
           title: $t('dash.problems.xkeen_incomplete_title'),
           desc: $t('dash.problems.xkeen_incomplete_desc'),
           cta: { label: $t('dash.problems.xkeen_incomplete_cta'), primary: true, run: services }
@@ -109,7 +109,7 @@
       case 'install_kernel':
         return {
           key: 'step',
-          tone: 'error',
+          tone: 'step',
           title: $t('dash.problems.kernel_missing_title'),
           desc: $t('dash.problems.kernel_missing_desc'),
           cta: { label: $t('dash.problems.kernel_missing_cta'), primary: true, run: services },
@@ -118,7 +118,7 @@
       case 'configure':
         return {
           key: 'step',
-          tone: 'warning',
+          tone: 'step',
           title: $t('dash.problems.configure_title'),
           desc: $t('dash.problems.configure_desc', { kernel: nextStepKernelName }),
           cta: { label: $t('dash.problems.configure_cta'), primary: true, run: openConstructor }
@@ -126,7 +126,7 @@
       case 'start':
         return {
           key: 'step',
-          tone: 'warning',
+          tone: 'step',
           title: $t('dash.problems.start_title'),
           desc: $t('dash.problems.start_desc'),
           cta: { label: $t('dash.problems.start_cta'), primary: true, run: services },
@@ -248,12 +248,15 @@
         <div
           class="problem-item"
           class:alert-error={p.tone === 'error'}
+          class:alert-step={p.tone === 'step'}
           class:in-pulse={p.inPulse}
           data-testid={p.testid}
           data-step={p.dataStep}
         >
           <div class="problem-content">
-            <span class="problem-icon"><Icon name="warning" size={16} /></span>
+            <span class="problem-icon"
+              ><Icon name={p.tone === 'step' ? 'arrow-right' : 'warning'} size={16} /></span
+            >
             <div>
               {#if p.step}
                 <span class="problem-step-label">{$t('dash.next_step_label')}</span>
@@ -303,6 +306,11 @@
 
   .problem-item.alert-error {
     --tone: var(--danger);
+  }
+
+  /* Следующий шаг настройки — не авария: акцентный тон и стрелка вместо красного треугольника */
+  .problem-item.alert-step {
+    --tone: var(--accent);
   }
 
   .problem-content {

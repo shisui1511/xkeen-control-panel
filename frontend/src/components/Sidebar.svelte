@@ -54,10 +54,15 @@
       if (!item) return;
       const navRect = nav.getBoundingClientRect();
       const itemRect = item.getBoundingClientRect();
-      if (itemRect.top < navRect.top) {
-        nav.scrollTop -= navRect.top - itemRect.top;
-      } else if (itemRect.bottom > navRect.bottom) {
-        nav.scrollTop += itemRect.bottom - navRect.bottom;
+      // У краёв списка пункты растворяются маской (см. nav-edge-fade): докручиваем с
+      // запасом на её высоту, иначе открытый пункт оказывается в бледной зоне и
+      // выглядит неактивным. Прокрутка до конца списка маску снизу снимает целиком.
+      const fadeTop = 24;
+      const fadeBottom = 36;
+      if (itemRect.top < navRect.top + fadeTop) {
+        nav.scrollTop -= navRect.top + fadeTop - itemRect.top;
+      } else if (itemRect.bottom > navRect.bottom - fadeBottom) {
+        nav.scrollTop += itemRect.bottom - (navRect.bottom - fadeBottom);
       }
     };
     reveal();
@@ -626,9 +631,9 @@
     onclick={onToggleTheme}
     title={$isSidebarCollapsed
       ? undefined
-      : theme === 'dark'
-        ? $t('nav.theme_light')
-        : $t('nav.theme_dark')}
+      : $t('nav.theme_toggle_hint', {
+          label: theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')
+        })}
     data-label={theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
   >
     <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />

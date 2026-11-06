@@ -14,6 +14,7 @@
     isInsecureLan = false,
     startDisabledReason = '',
     mutationBlockedReason = '',
+    showInstallLink = true,
     onRestart,
     onStart,
     onStop,
@@ -30,6 +31,8 @@
     startDisabledReason?: string;
     /** Причина блокировки запуска и перезапуска, например конфликт ядер; пусто — доступны. */
     mutationBlockedReason?: string;
+    /** Ссылка «Установить» в строке; скрыта, когда ту же установку уже предлагает баннер следующего шага. */
+    showInstallLink?: boolean;
     onRestart?: () => Promise<void> | void;
     onStart?: () => Promise<void> | void;
     onStop?: () => Promise<void> | void;
@@ -167,12 +170,14 @@
 
   <div class="svc-actions" class:has-touch-menu={!isNotInstalled && (onRestart || onStop)}>
     {#if isNotInstalled}
-      <a href="#/services" class="install-link">
-        {serviceId === 'xkeen'
-          ? $t('dash.problems.xkeen_missing_cta')
-          : $t('dash.problems.kernel_missing_cta')}
-        <Icon name="chevron-right" size={14} />
-      </a>
+      {#if showInstallLink}
+        <a href="#/services" class="install-link">
+          {serviceId === 'xkeen'
+            ? $t('dash.problems.xkeen_missing_cta')
+            : $t('dash.problems.kernel_missing_cta')}
+          <Icon name="chevron-right" size={14} />
+        </a>
+      {/if}
     {:else}
       {#if onRestart}
         <Button

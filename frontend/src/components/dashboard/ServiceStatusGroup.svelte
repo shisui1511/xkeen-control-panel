@@ -144,6 +144,10 @@
     capabilities?.kernels?.xray?.installed ?? serviceStatus.xray !== 'not_installed'
   );
 
+  // XKeen не установлен — установку (вместе с ядрами) предлагает баннер следующего шага;
+  // одинаковые ссылки «Установить» в каждой строке только дублировали бы его.
+  const showInstallLinks = $derived(capabilities?.xkeen_installed !== false);
+
   const mutationBlockedReason = $derived($isConflict ? $t('kernel.conflict_blocked') : '');
 </script>
 
@@ -201,6 +205,7 @@
             ? $t('svc.start_disabled_no_kernel')
             : undefined}
           {mutationBlockedReason}
+          showInstallLink={showInstallLinks}
           onRestart={restartXkeen}
           onStart={startXkeen}
           onStop={stopXkeen}
@@ -216,6 +221,7 @@
           isInstalled={isMihomoInstalled}
           isInsecureLan={Boolean(capabilities?.mihomo?.is_insecure_lan)}
           {mutationBlockedReason}
+          showInstallLink={showInstallLinks}
           onRestart={() => restartKernel('mihomo')}
           onStart={() => startKernel('mihomo')}
           onStop={() => stopKernel('mihomo')}
@@ -231,6 +237,7 @@
           isActiveKernel={$activeKernelName === 'xray'}
           isInstalled={isXrayInstalled}
           {mutationBlockedReason}
+          showInstallLink={showInstallLinks}
           onRestart={() => restartKernel('xray')}
           onStart={() => startKernel('xray')}
           onStop={() => stopKernel('xray')}
