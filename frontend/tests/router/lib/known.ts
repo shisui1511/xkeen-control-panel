@@ -56,3 +56,14 @@ export function knownFailure(selector: string, slug: string): void {
   // pw-parse.js ищет именно эту аннотацию: по ней KNOWN отличается от обычного ожидаемого падения
   test.info().annotations.push({ type: 'known-failure', description: slug });
 }
+
+// Карантин (D-17): нестабильный тест (прошёл на подтверждающем перепрогоне) продолжает
+// идти, исход виден в отчёте как QPASS или QFAIL, но на итог прогона не влияет. Вызов
+// quarantine('<slug todo>') внутри теста; test.fail не ставится — поведение теста не
+// меняется, статус выводит pw-parse.js по аннотации quarantine. Slug — строковый литерал:
+// его ищет scripts/router/check-known.sh (todo в pending со сроком until). Устойчивое
+// падение продукта размечается не карантином, а knownFailure.
+export function quarantine(slug: string): void {
+  if (collected) return;
+  test.info().annotations.push({ type: 'quarantine', description: slug });
+}

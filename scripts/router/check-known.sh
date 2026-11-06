@@ -12,6 +12,7 @@
 #   internal/**/*_test.go                         routertest.Known("<селектор>", "<slug>")
 #                                                 routertest.Quarantine(t, "<slug>") — карантин (D-17)
 #   frontend/tests/router/**/*.ts                 knownFailure('<селектор>', '<slug>')
+#                                                 quarantine('<slug>') — карантин (D-17)
 # Вызовы могут быть перенесены на другую строку (prettier, gofmt), поэтому файл перед
 # поиском склеивается в одну строку; строки-комментарии в поиске не участвуют.
 #
@@ -118,12 +119,14 @@ if [ -f "$KF" ]; then
 fi
 
 # 2. и 3. вызовы в Go и Playwright. Файл склеивается в одну строку (без строк-комментариев),
-# затем выбираются вызовы с двумя строковыми аргументами и берётся второй — slug.
+# затем выбираются вызовы меток и из каждого берётся slug (у Known и knownFailure — второй
+# строковый аргумент, у карантина — единственный строковый).
 scan_calls() {
   # scan_calls <каталог> <маска файлов> — выводит «файл<TAB>slug»
   [ -d "$1" ] || return 0
-  grep -rlE 'routertest\.Known|knownFailure|routertest\.Quarantine' --include="$2" "$1" 2>/dev/null | while IFS= read -r _file; do
-    _flat=$(grep -vE '^[[:space:]]*(//|/\*|\*)' "$_file" | tr '\n' ' ')
+  grep -rlE 'routertest\.Known|knownFailure|routertest\.Quarantine|quarantine\(' --include="$2" "$1" 2>/dev/null | while IFS= read -r _file; do
+    # пробел в начале: вызов quarantine в самом начале файла тоже предварён «не буквой»
+    _flat=" $(grep -vE '^[[:space:]]*(//|/\*|\*)' "$_file" | tr '\n' ' ')"
     {
       # метки известного падения: два строковых аргумента, slug — второй
       printf '%s\n' "$_flat" |
@@ -133,6 +136,11 @@ scan_calls() {
       printf '%s\n' "$_flat" |
         grep -oE "routertest\.Quarantine\([[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*,[[:space:]]*\"[a-z0-9][a-z0-9-]*\"" |
         sed -E 's/.*"([a-z0-9-]+)"$/\1/'
+      # карантин Playwright: quarantine('<slug>') — один строковый литерал; перед именем не
+      # буква, не цифра и не «_», чтобы не путать со словами в других именах
+      printf '%s\n' "$_flat" |
+        grep -oE "[^A-Za-z0-9_\$]quarantine\([[:space:]]*[\"'][a-z0-9][a-z0-9-]*[\"']" |
+        sed -E "s/.*[\"']([a-z0-9-]+)[\"']\$/\1/"
     } | while IFS= read -r _slug; do
       printf '%s\t%s\n' "${_file#"$ROOT"/}" "$_slug"
     done
