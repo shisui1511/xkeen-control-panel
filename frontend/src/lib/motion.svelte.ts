@@ -68,6 +68,17 @@ export function setAnimationsEnabled(enabled: boolean) {
 /** Общий easing появления: быстрый старт, мягкая посадка. */
 export const easeOut = cubicOut;
 
+/**
+ * Шкала длительностей для переходов Svelte (мс) — та же, что токены --duration-* в
+ * styles/global.css: появление и уход одного элемента в CSS и в скрипте идут в одном темпе.
+ */
+export const DURATION = {
+  fast: 140,
+  exit: 160,
+  enter: 200,
+  move: 260
+} as const;
+
 function still<T extends object>(params: T): T {
   return motion.reduced ? { ...params, duration: 0, delay: 0 } : params;
 }
@@ -103,7 +114,7 @@ export function flip(
  */
 export function pageIn(
   node: Element,
-  { duration = 220, y = 6 }: { duration?: number; y?: number } = {}
+  { duration = DURATION.enter, y = 6 }: { duration?: number; y?: number } = {}
 ): TransitionConfig {
   if (motion.reduced) return { duration: 0 };
   return {

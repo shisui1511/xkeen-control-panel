@@ -371,7 +371,7 @@
     color: var(--fg-primary);
     font-size: var(--font-size-base);
     box-sizing: border-box;
-    transition: border-color var(--transition-fast, 0.15s ease);
+    transition: border-color var(--transition-fast);
   }
 
   .diagnostic-input:focus {

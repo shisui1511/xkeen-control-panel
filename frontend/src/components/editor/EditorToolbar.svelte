@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { fade } from '../../lib/motion.svelte';
+  import { fade, DURATION } from '../../lib/motion.svelte';
   import { t } from '../../i18n';
   import Icon from '../../lib/components/Icon.svelte';
   import EditorTabs, { type EditorTab } from './EditorTabs.svelte';
@@ -147,7 +147,7 @@
           </svg>
         </button>
         {#if showKebabMenu}
-          <div class="kebab-dropdown" transition:fade={{ duration: 100 }}>
+          <div class="kebab-dropdown" transition:fade={{ duration: DURATION.fast }}>
             <button class="kebab-item" onclick={() => onDownloadFile?.()}>
               <Icon name="download" size={14} />
               {$t('editor.download_file')}
@@ -233,8 +233,8 @@
     color: var(--fg-dim);
     cursor: pointer;
     transition:
-      color 0.15s,
-      background 0.15s;
+      color var(--transition-fast),
+      background var(--transition-fast);
     flex-shrink: 0;
   }
 
@@ -292,8 +292,8 @@
     color: var(--fg-dim);
     cursor: pointer;
     transition:
-      color 0.15s,
-      background 0.15s;
+      color var(--transition-fast),
+      background var(--transition-fast);
   }
 
   .btn-kebab:hover {
@@ -328,7 +328,7 @@
     font-size: var(--font-size-xs);
     color: var(--fg-primary);
     text-align: left;
-    transition: background 0.15s;
+    transition: background var(--transition-fast);
   }
 
   .kebab-item:hover:not(:disabled) {

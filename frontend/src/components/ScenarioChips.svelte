@@ -71,9 +71,9 @@
     display: inline-flex;
     align-items: center;
     transition:
-      color var(--transition-fast, 0.15s ease),
-      background var(--transition-fast, 0.15s ease),
-      border-color var(--transition-fast, 0.15s ease);
+      color var(--transition-fast),
+      background var(--transition-fast),
+      border-color var(--transition-fast);
   }
 
   .scenario-chip:hover {

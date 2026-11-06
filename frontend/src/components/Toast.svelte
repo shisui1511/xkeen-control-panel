@@ -2,7 +2,7 @@
   import { toastStore, type ToastItem } from '../stores';
   import Icon from '../lib/components/Icon.svelte';
   import { t } from '../i18n';
-  import { fly, flip, easeOut } from '../lib/motion.svelte';
+  import { fly, flip, easeOut, DURATION } from '../lib/motion.svelte';
 
   function dismiss(id: number) {
     toastStore.update((items) => items.filter((t) => t.id !== id));
@@ -28,9 +28,9 @@
          на место ушедшего (flip), а не прыгают. -->
     <div
       class="toast toast--{toast.type}"
-      in:fly={{ ...enterFrom(), duration: 220, easing: easeOut }}
-      out:fly={{ ...enterFrom(), duration: 160, opacity: 0 }}
-      animate:flip={{ duration: 220, easing: easeOut }}
+      in:fly={{ ...enterFrom(), duration: DURATION.enter, easing: easeOut }}
+      out:fly={{ ...enterFrom(), duration: DURATION.exit, opacity: 0 }}
+      animate:flip={{ duration: DURATION.move, easing: easeOut }}
       role={toast.type === 'error' ? 'alert' : 'status'}
       aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
       aria-atomic="true"

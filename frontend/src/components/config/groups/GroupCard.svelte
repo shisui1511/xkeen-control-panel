@@ -5,6 +5,7 @@
   import Button from '../../Button.svelte';
   import Select from '../../Select.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
+  import { slide, easeOut, DURATION } from '../../../lib/motion.svelte';
   import { applyRunning, handleLayerError } from '../../../lib/configLayer';
   import { configSubTabHash } from '../../../lib/configSubTab';
   import { sourcesView, type KernelName } from '../../../lib/configSources';
@@ -276,7 +277,7 @@
         data-testid="group-toggle-{group.id}"
         onclick={ontoggle}
       >
-        <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={16} />
+        <Icon name="chevron-right" size={16} class="chevron-turn" />
         <span class="gc-name" id="{uid}-title">{group.name}</span>
       </button>
       <span class="chip chip-default" data-testid="group-mode-{group.id}">
@@ -339,7 +340,12 @@
   </div>
 
   {#if expanded}
-    <div class="gc-list" id="{uid}-list" data-testid="group-list-{group.id}">
+    <div
+      class="gc-list"
+      transition:slide={{ duration: DURATION.move, easing: easeOut }}
+      id="{uid}-list"
+      data-testid="group-list-{group.id}"
+    >
       {#if previewState === 'loading' && preview === null}
         <p class="gc-empty">
           <span class="spinner" aria-hidden="true"></span>

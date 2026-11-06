@@ -841,6 +841,14 @@
     ].filter(Boolean).length
   );
 
+  // Шаг «установить XKeen / ядро / запустить» на телефоне уже назван «пультом» вместе с кнопкой
+  // перехода в «Сервисы»: в списке замечаний ниже он не повторяется и не входит в счётчик
+  const pulseCoversStep = $derived(
+    currentNextStep === 'install_xkeen' ||
+      currentNextStep === 'install_kernel' ||
+      currentNextStep === 'start'
+  );
+
   function scrollToProblems() {
     document.querySelector('.dash-alerts')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -1043,7 +1051,9 @@
     inert={drawerIsModal}
   >
     <!-- Mihomo offline warning banner / Restarting notice -->
-    {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities?.mihomo?.reachable && !$isConflict}
+    <!-- Mihomo не установлен — страницы сами говорят об этом пустым состоянием со ссылкой на «Сервисы»;
+         красный баннер «API офлайн» с таймером повтора в этом случае только пугает -->
+    {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities?.mihomo?.reachable && $capabilities?.kernels?.mihomo?.installed !== false && !$isConflict}
       {#if $isServiceRestarting}
         <div
           class="service-restarting-banner"
@@ -1144,7 +1154,7 @@
                   ? 'loading'
                   : 'not_installed'}
             xkeenInstalled={serviceStatus.xkeen !== 'not_installed'}
-            {problemCount}
+            problemCount={problemCount - (pulseCoversStep ? 1 : 0)}
             onShowProblems={scrollToProblems}
             onSwitchTab={switchTab}
           />
@@ -1446,6 +1456,7 @@
                     class="problem-item alert-error"
                     data-testid="problem-xkeen-missing"
                     data-step="install_xkeen"
+                    class:in-pulse={pulseCoversStep}
                   >
                     <div class="problem-content">
                       <span class="problem-icon"><Icon name="warning" size={16} /></span>
@@ -1488,6 +1499,7 @@
                     class="problem-item alert-error"
                     data-testid="problem-next-step"
                     data-step="install_kernel"
+                    class:in-pulse={pulseCoversStep}
                   >
                     <div class="problem-content">
                       <span class="problem-icon"><Icon name="warning" size={16} /></span>
@@ -1533,6 +1545,7 @@
                     class="problem-item alert-warning"
                     data-testid="problem-next-step"
                     data-step="start"
+                    class:in-pulse={pulseCoversStep}
                   >
                     <div class="problem-content">
                       <span class="problem-icon"><Icon name="warning" size={16} /></span>
@@ -2157,6 +2170,14 @@
 
     .problems-list {
       gap: var(--spacing-2, 8px);
+    }
+
+    .problem-item.in-pulse {
+      display: none;
+    }
+
+    .dash-alerts:not(:has(.problem-item:not(.in-pulse))) {
+      display: none;
     }
 
     .dash-alerts {

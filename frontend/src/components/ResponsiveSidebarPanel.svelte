@@ -482,8 +482,8 @@
     background: var(--border);
     border-radius: 1px;
     transition:
-      width 0.15s ease,
-      background 0.15s ease;
+      width var(--transition-fast),
+      background var(--transition-fast);
   }
 
   .editor-splitter:hover::before,

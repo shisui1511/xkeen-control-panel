@@ -173,7 +173,7 @@
     overflow: hidden;
     background: var(--bg-elevated);
     cursor: pointer;
-    transition: height 0.15s ease;
+    transition: height var(--transition-fast);
     border: none;
     padding: 0;
     font: inherit;
@@ -198,7 +198,7 @@
 
   .health-segment {
     height: 100%;
-    transition: width 0.3s ease;
+    transition: width var(--duration-slow) var(--ease-out);
   }
 
   .health-segment.fast {

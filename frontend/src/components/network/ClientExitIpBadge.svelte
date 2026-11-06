@@ -342,9 +342,9 @@
     font-size: var(--font-size-xs);
     color: var(--fg-primary);
     transition:
-      background 0.18s ease,
-      border-color 0.18s ease,
-      box-shadow 0.18s ease;
+      background var(--transition-fast),
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast);
     user-select: none;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   }
@@ -446,8 +446,8 @@
     cursor: pointer;
     padding: 0;
     transition:
-      color 0.15s ease,
-      transform 0.15s ease;
+      color var(--transition-fast),
+      transform var(--transition-fast);
   }
 
   .refresh-icon-btn:hover {
@@ -481,7 +481,7 @@
       0 10px 25px -5px rgba(0, 0, 0, 0.25),
       0 8px 10px -6px rgba(0, 0, 0, 0.15);
     z-index: 100;
-    animation: popoverFadeIn 0.15s ease;
+    animation: popoverFadeIn var(--duration-fast) var(--ease-out);
     overflow: hidden;
   }
 
@@ -604,8 +604,8 @@
     border-radius: 4px;
     cursor: pointer;
     transition:
-      color 0.15s,
-      background 0.15s;
+      color var(--transition-fast),
+      background var(--transition-fast);
   }
 
   .btn-copy-val:hover {

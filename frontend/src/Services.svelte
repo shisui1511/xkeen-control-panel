@@ -2095,7 +2095,7 @@
     border-radius: 50%;
     border: 2px solid var(--border-hover, var(--fg-dim));
     position: relative;
-    transition: border-color 0.15s ease;
+    transition: border-color var(--transition-fast);
   }
 
   .radio-dot.checked {
@@ -2184,16 +2184,6 @@
   /* Hero Actions */
   .hero-actions {
     margin-top: auto;
-  }
-
-  .btn-danger-soft {
-    background: color-mix(in srgb, var(--danger) 8%, transparent);
-    color: var(--danger);
-    border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
-  }
-
-  .btn-danger-soft:hover {
-    background: color-mix(in srgb, var(--danger) 25%, transparent);
   }
 
   .btn-warning-soft {

@@ -1513,8 +1513,8 @@
     padding: 4px 8px;
     border-radius: var(--radius-sm, 6px);
     transition:
-      opacity 0.2s ease,
-      background 0.2s ease;
+      opacity var(--transition-normal),
+      background var(--transition-normal);
   }
 
   .key-btn:hover {
@@ -1812,7 +1812,7 @@
     height: 100%;
     background: linear-gradient(90deg, var(--accent), var(--success));
     border-radius: 2px;
-    transition: width 0.3s ease;
+    transition: width var(--duration-slow) var(--ease-out);
   }
 
   .client-meta-sub {

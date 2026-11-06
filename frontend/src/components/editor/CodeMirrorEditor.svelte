@@ -695,8 +695,8 @@
     font-size: var(--font-size-xs, 12px);
     line-height: 1.5;
     transition:
-      border-color var(--transition-fast, 150ms ease),
-      background var(--transition-fast, 150ms ease);
+      border-color var(--transition-fast),
+      background var(--transition-fast);
   }
   :global(.cm-schema-tooltip-description li:hover) {
     border-color: var(--border-strong);
@@ -773,12 +773,12 @@
     border: 1px solid var(--border);
     color: var(--fg-primary);
     transition:
-      color var(--transition-fast, 150ms ease),
-      background-color var(--transition-fast, 150ms ease),
-      border-color var(--transition-fast, 150ms ease),
-      box-shadow var(--transition-fast, 150ms ease),
-      opacity var(--transition-fast, 150ms ease),
-      transform var(--transition-fast, 150ms ease);
+      color var(--transition-fast),
+      background-color var(--transition-fast),
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast),
+      opacity var(--transition-fast),
+      transform var(--transition-fast);
   }
   :global(.cm-schema-enum-pill:hover) {
     border-color: var(--accent);

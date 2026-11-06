@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { slide } from '../../lib/motion.svelte';
+  import { slide, DURATION } from '../../lib/motion.svelte';
   import { t } from '../../i18n';
 
   interface DiffGroup {
@@ -47,7 +47,7 @@
   }
 </script>
 
-<div class="editor-bottom-drawer" transition:slide={{ duration: 200 }}>
+<div class="editor-bottom-drawer" transition:slide={{ duration: DURATION.enter }}>
   <div class="drawer-topbar">
     {#if mobileScreen === 'diff'}
       <button type="button" class="drawer-back-btn" onclick={() => (mobileScreen = 'list')}>
@@ -201,8 +201,8 @@
     color: var(--fg-dim);
     border-radius: var(--radius);
     transition:
-      color 0.15s ease,
-      background 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast);
     width: 100%;
   }
 
@@ -240,7 +240,7 @@
     padding: 2px 6px;
     font-size: var(--font-size-xs);
     opacity: 0;
-    transition: opacity 0.15s ease;
+    transition: opacity var(--transition-fast);
   }
 
   .backup-item:hover .restore-inline-btn,

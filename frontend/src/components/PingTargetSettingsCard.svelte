@@ -182,7 +182,7 @@
   }
 
   .custom-url-wrapper {
-    animation: fadeIn 0.15s ease-out;
+    animation: fadeIn var(--duration-fast) var(--ease-out);
   }
 
   @keyframes fadeIn {

@@ -1016,7 +1016,7 @@
     align-items: center;
     gap: 8px;
     opacity: 0.45;
-    transition: opacity 0.25s ease;
+    transition: opacity var(--transition-normal);
   }
 
   .wizard-step-indicator.active {

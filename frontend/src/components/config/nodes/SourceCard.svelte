@@ -5,6 +5,7 @@
   import Button from '../../Button.svelte';
   import StatusBadge from '../../StatusBadge.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
+  import { slide, easeOut, DURATION } from '../../../lib/motion.svelte';
   import { applyRunning, handleLayerError } from '../../../lib/configLayer';
   import {
     refreshSource,
@@ -283,7 +284,7 @@
         data-testid="nodes-source-toggle-{source.id}"
         onclick={ontoggle}
       >
-        <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={16} />
+        <Icon name="chevron-right" size={16} class="chevron-turn" />
         <span class="sc-name">{displayName}</span>
       </button>
       <!-- Вид источника: у «Моих узлов» он совпадает с названием и не повторяется -->
@@ -447,7 +448,12 @@
   {/if}
 
   {#if expanded}
-    <div class="sc-list" id="{uid}-list" data-testid="nodes-list-{source.id}">
+    <div
+      class="sc-list"
+      transition:slide={{ duration: DURATION.move, easing: easeOut }}
+      id="{uid}-list"
+      data-testid="nodes-list-{source.id}"
+    >
       {#if source.nodes.length === 0}
         <p class="sc-empty" data-testid="nodes-empty-{source.id}">
           {#if isMy}

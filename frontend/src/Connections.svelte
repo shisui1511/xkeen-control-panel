@@ -1379,9 +1379,9 @@
     color: var(--fg-primary);
     width: 220px;
     transition:
-      border-color 0.15s ease,
-      box-shadow 0.15s ease,
-      width 0.15s ease;
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast),
+      width var(--transition-fast);
   }
 
   .search-input:focus {
@@ -1469,16 +1469,6 @@
     color: var(--accent);
   }
 
-  .btn-danger-soft {
-    background: color-mix(in srgb, var(--danger) 15%, transparent);
-    color: var(--danger);
-    border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
-  }
-
-  .btn-danger-soft:hover {
-    background: color-mix(in srgb, var(--danger) 25%, transparent);
-  }
-
   /* Tables & Groups (CONN-01) */
   .grouped-container {
     display: flex;
@@ -1504,7 +1494,7 @@
     border-bottom: 1px solid var(--border);
     cursor: pointer;
     text-align: left;
-    transition: background 0.15s ease;
+    transition: background var(--transition-fast);
   }
 
   .group-header:hover {
@@ -1520,7 +1510,7 @@
   .grp-chevron {
     font-size: var(--font-size-base);
     color: var(--accent);
-    transition: transform 0.2s ease;
+    transition: transform var(--transition-move);
   }
 
   .grp-chevron.collapsed {
@@ -1588,7 +1578,7 @@
   .conn-row {
     border-bottom: 1px solid var(--border-light);
     cursor: pointer;
-    transition: background 0.1s ease;
+    transition: background var(--transition-fast);
   }
 
   .conn-row:hover {
@@ -1780,7 +1770,7 @@
     color: var(--danger);
     font-size: var(--font-size-lg);
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: background var(--transition-fast);
   }
 
   .btn-close-conn::before {
@@ -1805,7 +1795,7 @@
     -webkit-backdrop-filter: blur(2px);
     backdrop-filter: blur(2px);
     z-index: 100;
-    animation: drawer-backdrop-in 180ms ease-out;
+    animation: drawer-backdrop-in var(--duration-enter) var(--ease-out);
   }
 
   .inspector-drawer {

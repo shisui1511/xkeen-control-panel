@@ -488,8 +488,8 @@
     padding: 0;
     color: var(--fg-primary);
     transition:
-      background 0.15s ease,
-      border-color 0.15s ease;
+      background var(--transition-fast),
+      border-color var(--transition-fast);
   }
 
   .rail-status-btn:hover {
@@ -512,8 +512,8 @@
     border-radius: 50%;
     flex-shrink: 0;
     transition:
-      background-color 0.3s ease,
-      box-shadow 0.3s ease;
+      background-color var(--transition-normal),
+      box-shadow var(--transition-normal);
   }
 
   .led-green {
@@ -551,7 +551,7 @@
   .chevron-icon {
     display: inline-flex;
     align-items: center;
-    transition: transform 0.2s ease;
+    transition: transform var(--transition-move);
   }
 
   .chevron-icon.open {

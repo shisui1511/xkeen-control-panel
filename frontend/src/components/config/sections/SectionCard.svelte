@@ -155,7 +155,7 @@
       onclick={() => (expanded = !expanded)}
     >
       <span class="sc-chevron" aria-hidden="true">
-        <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={16} />
+        <Icon name="chevron-right" size={16} class="chevron-turn" />
       </span>
       <span class="sc-head">
         <span class="sc-line">

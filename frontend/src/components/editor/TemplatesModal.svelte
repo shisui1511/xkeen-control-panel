@@ -253,8 +253,8 @@
     cursor: pointer;
     text-align: left;
     transition:
-      background 0.2s,
-      border-color 0.2s;
+      background var(--transition-normal),
+      border-color var(--transition-normal);
     width: 100%;
     color: var(--fg-primary);
   }

@@ -154,9 +154,9 @@
     color: var(--fg-dim);
     cursor: pointer;
     transition:
-      color 0.15s,
-      background 0.15s,
-      border-color 0.15s;
+      color var(--transition-fast),
+      background var(--transition-fast),
+      border-color var(--transition-fast);
     line-height: 1.3;
   }
 
@@ -232,8 +232,8 @@
     cursor: pointer;
     font-family: var(--font-family-mono);
     transition:
-      color 0.15s ease,
-      background 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast);
     margin-left: 6px;
   }
 
@@ -243,7 +243,7 @@
   }
 
   .chevron-icon {
-    transition: transform 0.2s ease;
+    transition: transform var(--transition-move);
   }
 
   .chevron-icon.rotated {

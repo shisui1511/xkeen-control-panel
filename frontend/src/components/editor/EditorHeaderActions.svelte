@@ -263,7 +263,7 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
-    animation: menuPop 140ms var(--ease-out);
+    animation: menuPop var(--duration-fast) var(--ease-out);
   }
 
   .dropdown-item {
@@ -279,7 +279,7 @@
     font-size: var(--font-size-sm);
     text-align: left;
     cursor: pointer;
-    transition: background 0.15s;
+    transition: background var(--transition-fast);
   }
 
   .dropdown-item:hover:not(:disabled) {

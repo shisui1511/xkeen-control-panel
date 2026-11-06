@@ -148,9 +148,9 @@
     justify-content: center;
     background: var(--bg-card);
     transition:
-      color 0.15s ease,
-      background 0.15s ease,
-      border-color 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast),
+      border-color var(--transition-fast);
   }
 
   .btn-icon:hover,
@@ -173,7 +173,7 @@
       0 10px 24px -4px rgba(0, 0, 0, 0.55),
       0 0 0 1px var(--surface-tint);
     padding: 8px 0;
-    animation: menuSlide 0.14s ease-out forwards;
+    animation: menuSlide var(--duration-fast) var(--ease-out) forwards;
   }
 
   @keyframes menuSlide {
@@ -219,7 +219,7 @@
     font-size: var(--font-size-xs);
     cursor: pointer;
     text-align: left;
-    transition: background 0.12s ease;
+    transition: background var(--transition-fast);
   }
 
   .dropdown-item:hover {
@@ -261,9 +261,9 @@
     color: var(--fg-secondary);
     cursor: pointer;
     transition:
-      color 0.12s ease,
-      background 0.12s ease,
-      border-color 0.12s ease;
+      color var(--transition-fast),
+      background var(--transition-fast),
+      border-color var(--transition-fast);
   }
 
   .timeout-chip:hover {

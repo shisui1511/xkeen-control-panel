@@ -444,7 +444,7 @@
     right: 0;
     bottom: 0;
     background-color: var(--hover);
-    transition: 0.4s;
+    transition: var(--transition-normal);
     border: 1px solid var(--border);
   }
 
@@ -456,7 +456,7 @@
     left: 2px;
     bottom: 2px;
     background-color: var(--fg-secondary);
-    transition: 0.4s;
+    transition: var(--transition-normal);
   }
 
   input:checked + .slider {

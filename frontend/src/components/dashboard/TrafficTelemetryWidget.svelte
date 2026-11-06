@@ -137,8 +137,8 @@
     border-radius: 50%;
     background-color: var(--fg-dim);
     transition:
-      background-color 0.25s ease,
-      box-shadow 0.25s ease;
+      background-color var(--transition-normal),
+      box-shadow var(--transition-normal);
   }
 
   .live-dot-active {

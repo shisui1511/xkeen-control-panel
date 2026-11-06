@@ -124,7 +124,7 @@
     border-radius: var(--radius-sm);
     font-size: var(--font-size-sm);
     width: 200px;
-    transition: border-color 0.2s;
+    transition: border-color var(--transition-normal);
   }
 
   .group-search:focus {

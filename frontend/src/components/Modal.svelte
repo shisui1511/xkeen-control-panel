@@ -207,7 +207,7 @@
     justify-content: center;
     z-index: 1000;
     padding: 24px;
-    animation: modal-backdrop-in 160ms ease-out;
+    animation: modal-backdrop-in var(--duration-fast) var(--ease-out);
   }
   .modal-container {
     background: var(--bg-card);

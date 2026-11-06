@@ -260,7 +260,7 @@
               data-testid="nodes-preview-my-toggle"
               onclick={() => (expanded = !expanded)}
             >
-              <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={14} />
+              <Icon name="chevron-right" size={14} class="chevron-turn" />
               <span>{expanded ? $t('cfg.nodes.my_collapse') : $t('cfg.nodes.my_expand')}</span>
             </button>
           {/if}

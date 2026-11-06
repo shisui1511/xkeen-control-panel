@@ -721,9 +721,9 @@
     color: var(--fg-secondary);
     cursor: pointer;
     transition:
-      color 0.15s ease,
-      background 0.15s ease,
-      border-color 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast),
+      border-color var(--transition-fast);
   }
 
   .node-filter-chip:hover {

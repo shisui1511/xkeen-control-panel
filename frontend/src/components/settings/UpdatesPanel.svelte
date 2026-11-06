@@ -1033,7 +1033,7 @@
     height: 100%;
     background: var(--accent);
     border-radius: 4px;
-    transition: width 0.3s ease;
+    transition: width var(--duration-slow) var(--ease-out);
   }
 
   .progress-fill.progress-pulse {

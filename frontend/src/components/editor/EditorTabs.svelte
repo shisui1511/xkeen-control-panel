@@ -150,8 +150,8 @@
     color: var(--fg-dim);
     border-right: 1px solid var(--border);
     transition:
-      color 0.15s ease,
-      background 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast);
     position: relative;
     flex-shrink: 0;
   }
@@ -231,8 +231,8 @@
     padding: 0;
     margin-left: 4px;
     transition:
-      color 0.1s ease,
-      background 0.1s ease;
+      color var(--transition-fast),
+      background var(--transition-fast);
   }
 
   .tab-close-btn:hover {
