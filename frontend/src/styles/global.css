@@ -896,6 +896,21 @@ h2.card-title {
   color: var(--on-danger);
 }
 
+/* Удаление в строке или карточке: опасное действие видно, но не спорит с основной кнопкой.
+   Сплошная .btn-danger остаётся для подтверждения в диалоге */
+.btn-danger-soft {
+  /* 9 %, а не --danger-soft (14 %): текст --danger держит 4.5:1 во всех тёмных темах */
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 32%, transparent);
+}
+
+.btn-danger-soft:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .btn-sm {
   padding: 0 var(--spacing-3);
   font-size: var(--font-size-xs);

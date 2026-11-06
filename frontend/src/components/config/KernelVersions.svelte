@@ -93,7 +93,7 @@
               {:else if kernel.status === 'undetermined'}
                 <StatusBadge variant="idle" label={$t('cfg.version.undetermined')} />
               {:else if kernel.status === 'not_installed'}
-                <StatusBadge variant="stopped" label={$t('cfg.version.not_installed')} />
+                <StatusBadge variant="idle" label={$t('cfg.version.not_installed')} />
               {/if}
             </span>
             {#if note}

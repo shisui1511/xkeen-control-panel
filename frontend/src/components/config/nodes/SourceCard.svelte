@@ -84,6 +84,7 @@
 
   const isMy = $derived(source.kind === 'my');
   const displayName = $derived(isMy ? $t('cfg.nodes.my_name') : source.name);
+  const kindLabel = $derived(isMy ? $t('cfg.nodes.kind_my') : $t('cfg.nodes.kind_subscription'));
   const off = $derived(!source.enabled);
   const meta = $derived(source.meta);
 
@@ -95,6 +96,8 @@
     if (x !== null && m !== null) parts.push($t('cfg.nodes.counts', { xray: x, mihomo: m }));
     else if (x !== null) parts.push($t('cfg.nodes.count_xray', { n: x }));
     else if (m !== null) parts.push($t('cfg.nodes.count_mihomo', { n: m }));
+    // Ни одно ядро не установлено: без числа узлов свёрнутая карточка ничего не говорит о составе
+    else parts.push($tp('cfg.nodes.nodes_count', source.nodes.length));
     const skipped = source.skipped + source.unsupported;
     if (skipped > 0) parts.push($tp('cfg.nodes.preview_skipped', skipped));
     if (source.stubs > 0) parts.push($tp('cfg.nodes.stubs', source.stubs));
@@ -283,9 +286,10 @@
         <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={16} />
         <span class="sc-name">{displayName}</span>
       </button>
-      <span class="chip chip-default">
-        {isMy ? $t('cfg.nodes.kind_my') : $t('cfg.nodes.kind_subscription')}
-      </span>
+      <!-- Вид источника: у «Моих узлов» он совпадает с названием и не повторяется -->
+      {#if kindLabel !== displayName}
+        <span class="chip chip-default">{kindLabel}</span>
+      {/if}
       {#if off}
         <span class="chip chip-default" data-testid="nodes-source-off-{source.id}">
           {$t('cfg.nodes.disabled')}
@@ -531,7 +535,7 @@
         {$t('cfg.nodes.btn_diag')}
       </Button>
       <Button
-        variant="danger"
+        variant="danger-soft"
         class="btn-sm"
         data-testid="nodes-delete-{source.id}"
         onclick={removeSource}

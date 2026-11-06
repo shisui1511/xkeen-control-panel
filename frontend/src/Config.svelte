@@ -58,7 +58,7 @@
 <!--
   Каркас раздела «Конфигурация» (D-02, D-15): уведомления (config-notices), DraftBar
   (config-draftbar) и ход применения (config-progress) общие и стоят над вкладками;
-  вкладки «Узлы» (nodes-tab), «Группы» (groups-tab), «Правила» (rules-tab), «Списки» (lists-tab, менеджер geodata XKeen), «Xray │ Mihomo» (cores-tab, секции ядер) и «Файлы панели» — нынешний стек: расхождения
+  вкладки «Узлы» (nodes-tab), «Группы» (groups-tab), «Правила» (rules-tab), «Списки» (lists-tab, менеджер geodata XKeen), «Ядра» (cores-tab, секции Xray и Mihomo) и «Файлы панели» — нынешний стек: расхождения
   (config-drift) и файлы (config-files) внутри ManagedFiles, ядра (config-kernels),
   диагностика (config-diag). Фазы 146–148 добавляют вкладки в тот же Tabs.
 -->

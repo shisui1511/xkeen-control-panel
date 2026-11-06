@@ -253,6 +253,7 @@
         title={$t('cfg.rules.empty_title')}
         description={$t('cfg.rules.empty_body')}
         ctaText={$t('cfg.rules.empty_cta')}
+        ctaVariant="secondary"
         plain
         oncta={() => (presetOpen = true)}
       />

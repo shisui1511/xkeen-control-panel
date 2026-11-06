@@ -16,7 +16,7 @@
     children
   }: {
     type?: 'button' | 'submit' | 'reset';
-    variant?: 'primary' | 'secondary' | 'danger' | 'warning';
+    variant?: 'primary' | 'secondary' | 'danger' | 'danger-soft' | 'warning';
     disabled?: boolean;
     loading?: boolean;
     title?: string;

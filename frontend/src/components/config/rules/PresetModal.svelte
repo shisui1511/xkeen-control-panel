@@ -432,6 +432,12 @@
             />
             <span class="pm-card-title">{cardTitle(id)}</span>
             <span class="pm-card-desc">{cardDesc(id)}</span>
+            <!-- Неактивная карточка объясняет причину: иначе она выглядит как сбой -->
+            {#if !busy && view !== null && cardDisabled(id)}
+              <span class="pm-card-note" data-testid="preset-card-note-{id}">
+                {$t('cfg.preset.no_countries')}
+              </span>
+            {/if}
           </label>
         {/each}
       </div>
@@ -673,7 +679,7 @@
     overflow-wrap: anywhere;
   }
 
-  .pm-card:hover {
+  .pm-card:hover:not(.pm-disabled) {
     background: var(--bg-hover);
   }
 
@@ -692,9 +698,22 @@
     outline-offset: 2px;
   }
 
+  /* Недоступная карточка приглушена, а строка причины под ней читается полностью */
   .pm-card.pm-disabled {
-    opacity: 0.55;
     cursor: not-allowed;
+    background: transparent;
+    border-style: dashed;
+  }
+
+  .pm-card.pm-disabled .pm-card-title,
+  .pm-card.pm-disabled .pm-card-desc {
+    opacity: 0.6;
+  }
+
+  .pm-card-note {
+    margin-top: var(--spacing-1);
+    font-size: var(--font-size-xs);
+    color: var(--warning);
   }
 
   .pm-card-title {

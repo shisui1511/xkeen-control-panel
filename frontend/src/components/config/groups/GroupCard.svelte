@@ -289,7 +289,9 @@
       {/each}
     </div>
 
-    <p class="gc-summary" data-testid="group-summary-{group.id}">{summary}</p>
+    {#if summary}
+      <p class="gc-summary" data-testid="group-summary-{group.id}">{summary}</p>
+    {/if}
 
     {#if emptyAll}
       <p class="gc-hint" data-testid="group-empty-hint-{group.id}">
@@ -417,7 +419,7 @@
       </Button>
     {/if}
     <Button
-      variant="danger"
+      variant="danger-soft"
       class="btn-sm"
       disabled={$applyRunning}
       title={$applyRunning ? $t('cfg.routing.apply_busy_hint') : undefined}
