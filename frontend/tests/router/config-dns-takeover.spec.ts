@@ -3,6 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
+import { escapeRe } from './lib/regex';
 import {
   emptyDnsTargetPrep,
   ensureDnsTarget,
@@ -356,7 +357,7 @@ const RE_ZONE_FORMAT = /Зона — доменное имя без схемы �
 const RE_ZONES_EMPTY = /Своих зон нет\.|No custom zones\./;
 const RE_ZONES_REVERSE = /^(обратные зоны частных сетей|reverse zones of private networks)$/;
 const reDup = (zone: string): RegExp =>
-  new RegExp(`Зона «${zone}» уже есть|Zone “${zone}” is already`.replace(/\./g, '\\.'));
+  new RegExp(`Зона «${escapeRe(zone)}» уже есть|Zone “${escapeRe(zone)}” is already`);
 const reGroupMissing = (name: string): RegExp =>
   new RegExp(`Группа «${name}» удалена|The “${name}” group was deleted`);
 

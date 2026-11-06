@@ -163,7 +163,7 @@ func XrayDNSFileWithTakeover(value json.RawMessage, ov XrayDNSOverlay) ([]byte, 
 			return nil, fmt.Errorf("секция Xray \"dns\": servers: ожидался массив")
 		}
 	}
-	servers := make([]any, 0, len(ov.Front)+len(user)+len(xrayDNSDefaultServers))
+	servers := make([]any, 0, len(user))
 	for _, s := range ov.Front {
 		servers = append(servers, s)
 	}

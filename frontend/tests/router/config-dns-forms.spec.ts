@@ -3,6 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
+import { escapeRe } from './lib/regex';
 import {
   emptyDnsTargetPrep,
   ensureDnsTarget,
@@ -641,7 +642,7 @@ test.describe('dns-forms-takeover', () => {
       await expect(block.locator('li', { hasText: 'nameserver-policy' })).toContainText(/\d+.*\d+/);
       const profile = (await readKernelFile(page, MIHOMO_PROFILE)) ?? '';
       expect(profile, 'listen в профиле Mihomo').toMatch(
-        new RegExp(`listen:\\s*['"]?${listen.replace(/[[\].]/g, '\\$&')}['"]?`)
+        new RegExp(`listen:\\s*['"]?${escapeRe(listen)}['"]?`)
       );
 
       await guard.assertClean();
