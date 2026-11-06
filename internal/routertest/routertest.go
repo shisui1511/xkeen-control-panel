@@ -96,11 +96,44 @@ func (k KnownMark) Applies(tg Target) bool {
 	}
 }
 
-// Маркеры вывода, по которым go-suite.sh отличает KNOWN и XPASS от PASS и FAIL.
+// Маркеры вывода, по которым go-suite.sh отличает KNOWN, XPASS, QPASS и QFAIL от PASS
+// и FAIL.
 const (
-	markerKnown = "KNOWN-FAILURE slug="
-	markerXPass = "XPASS slug="
+	markerKnown      = "KNOWN-FAILURE slug="
+	markerXPass      = "XPASS slug="
+	markerQuarantine = "QUARANTINE slug="
 )
+
+// Quarantine ставит тест в карантин: нестабильный тест (прошёл на подтверждающем
+// перепрогоне) продолжает идти, его исход виден в результатах как QPASS или QFAIL,
+// но на итог прогона не влияет. Метка — уровня теста: подтесты наследуют её.
+// Устойчивое падение продукта размечается не карантином, а Known и Verdict.
+//
+// Поведение теста метка не меняет: падение остаётся падением для go test, статус
+// меняет разбор (scripts/router/go-parse.awk). Вызывать прямо в теле TestRouter*,
+// slug — строковым литералом: его ищут scripts/router/check-known.sh (todo в pending
+// со сроком until) и scripts/router/core-marks.cjs.
+func Quarantine(t *testing.T, slug string) {
+	t.Helper()
+	if !validSlug(slug) {
+		t.Fatalf("недопустимый slug карантина %q: нужен [a-z0-9][a-z0-9-]*", slug)
+	}
+	t.Logf("%s%s: тест в карантине, исход не влияет на итог", markerQuarantine, slug)
+}
+
+// validSlug проверяет slug по шаблону ^[a-z0-9][a-z0-9-]*$ (имя файла todo).
+func validSlug(s string) bool {
+	if s == "" || s[0] == '-' {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+			return false
+		}
+	}
+	return true
+}
 
 // Verdict фиксирует итог утверждения с учётом метки известного падения.
 //   - метка не применяется: ok=false — провал теста;

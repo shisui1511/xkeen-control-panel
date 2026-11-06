@@ -10,6 +10,7 @@
 # не в индексе):
 #   scripts/router/known-failures                 третье поле записи
 #   internal/**/*_test.go                         routertest.Known("<селектор>", "<slug>")
+#                                                 routertest.Quarantine(t, "<slug>") — карантин (D-17)
 #   frontend/tests/router/**/*.ts                 knownFailure('<селектор>', '<slug>')
 # Вызовы могут быть перенесены на другую строку (prettier, gofmt), поэтому файл перед
 # поиском склеивается в одну строку; строки-комментарии в поиске не участвуют.
@@ -121,13 +122,20 @@ fi
 scan_calls() {
   # scan_calls <каталог> <маска файлов> — выводит «файл<TAB>slug»
   [ -d "$1" ] || return 0
-  grep -rlE 'routertest\.Known|knownFailure' --include="$2" "$1" 2>/dev/null | while IFS= read -r _file; do
-    grep -vE '^[[:space:]]*(//|/\*|\*)' "$_file" | tr '\n' ' ' |
-      grep -oE "(routertest\.Known|knownFailure)\([[:space:]]*[\"'][^\"']*[\"'][[:space:]]*,[[:space:]]*[\"'][a-z0-9][a-z0-9-]*[\"']" |
-      sed -E "s/.*,[[:space:]]*[\"']([a-z0-9-]+)[\"']\$/\1/" |
-      while IFS= read -r _slug; do
-        printf '%s\t%s\n' "${_file#"$ROOT"/}" "$_slug"
-      done
+  grep -rlE 'routertest\.Known|knownFailure|routertest\.Quarantine' --include="$2" "$1" 2>/dev/null | while IFS= read -r _file; do
+    _flat=$(grep -vE '^[[:space:]]*(//|/\*|\*)' "$_file" | tr '\n' ' ')
+    {
+      # метки известного падения: два строковых аргумента, slug — второй
+      printf '%s\n' "$_flat" |
+        grep -oE "(routertest\.Known|knownFailure)\([[:space:]]*[\"'][^\"']*[\"'][[:space:]]*,[[:space:]]*[\"'][a-z0-9][a-z0-9-]*[\"']" |
+        sed -E "s/.*,[[:space:]]*[\"']([a-z0-9-]+)[\"']\$/\1/"
+      # карантин Go: routertest.Quarantine(t, "<slug>") — первый аргумент идентификатор теста
+      printf '%s\n' "$_flat" |
+        grep -oE "routertest\.Quarantine\([[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*,[[:space:]]*\"[a-z0-9][a-z0-9-]*\"" |
+        sed -E 's/.*"([a-z0-9-]+)"$/\1/'
+    } | while IFS= read -r _slug; do
+      printf '%s\t%s\n' "${_file#"$ROOT"/}" "$_slug"
+    done
   done
 }
 
