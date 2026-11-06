@@ -1677,10 +1677,10 @@ test('editor-mobile backups-switch vp:1280', { tag: CORE_TAG }, async ({ page, b
     await expect(confirm).toHaveCount(0, { timeout: T.action });
 
     const staleToast = page.locator('.toast--info', {
-      hasText: /Бэкап не восстановлен|Backup not restored/
+      hasText: /Копия не восстановлена|Backup not restored/
     });
     const restoredToast = page.locator('.toast--success', {
-      hasText: /Backup восстановлен|Backup restored/
+      hasText: /Копия восстановлена|Backup restored/
     });
     await expect(
       staleToast.or(restoredToast).first(),
@@ -1693,7 +1693,7 @@ test('editor-mobile backups-switch vp:1280', { tag: CORE_TAG }, async ({ page, b
     ).toHaveCount(0);
     await expect(
       restoredToast,
-      'WR-01 restore: показано «Backup восстановлен» для копии прежнего файла'
+      'WR-01 restore: показано «Копия восстановлена» для копии прежнего файла'
     ).toHaveCount(0);
     await expect(staleToast.first()).toBeVisible({ timeout: T.action });
     await expect(page.locator(`.editor-tab.active .tab-name[title="${x.name}"]`)).toHaveCount(1);
@@ -1820,7 +1820,7 @@ test('editor-mobile menu-save-target vp:390', { tag: CORE_TAG }, async ({ page, 
     ).not.toContain(d.name);
     await expectDisk('после «Удалить → подтвердить»');
 
-    // «История бэкапов» по F: файл открывается во вкладке, F на диске прежний
+    // «История резервных копий» по F: файл открывается во вкладке, F на диске прежний
     await editA();
     await openSheetFromToolbar(page);
     const menu4 = await openFileMenu(page, f.name);
@@ -1828,7 +1828,7 @@ test('editor-mobile menu-save-target vp:390', { tag: CORE_TAG }, async ({ page, 
     await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
     await expect(
       page.locator(`.editor-tab.active .tab-name[title="${f.name}"]`),
-      'CR-01: «История бэкапов» не открыла файл из меню — «Сохранить» нацелено не на открытую вкладку'
+      'CR-01: «История резервных копий» не открыла файл из меню — «Сохранить» нацелено не на открытую вкладку'
     ).toHaveCount(1, { timeout: T.page });
     await expect(page.locator('.editor-bottom-drawer')).toHaveCount(0);
     await tabA.click({ timeout: T.action });
@@ -1838,9 +1838,9 @@ test('editor-mobile menu-save-target vp:390', { tag: CORE_TAG }, async ({ page, 
     await saveActiveFile(page);
     expect(
       await readOnDisk(page, f.path),
-      'CR-01: после «История бэкапов» «Сохранить» записало открытую вкладку в файл из меню'
+      'CR-01: после «История резервных копий» «Сохранить» записало открытую вкладку в файл из меню'
     ).toBe(origin.f);
-    await expectDisk('после «История бэкапов»');
+    await expectDisk('после «История резервных копий»');
 
     await expectNoHorizontalScroll(page, 'действия меню выполнены');
     await guard.assertClean();
@@ -1873,7 +1873,7 @@ test('editor-mobile menu-backups vp:390', { tag: CORE_TAG }, async ({ page }) =>
   await menu1.locator('.ctx-item').nth(CTX_BACKUPS).click();
   await expect(
     activeTab(fx().name),
-    'WR-03: «История бэкапов» из шторки при пустом Редакторе не открыли файл'
+    'WR-03: «История резервных копий» из шторки при пустом Редакторе не открыли файл'
   ).toHaveCount(1, { timeout: T.page });
   await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
   await expect(drawer, 'WR-03: лист копий не открылся').toBeVisible({ timeout: T.page });
@@ -1899,8 +1899,12 @@ test('editor-mobile menu-backups vp:390', { tag: CORE_TAG }, async ({ page }) =>
   await expect(activeTab(altFx().name)).toHaveCount(1, { timeout: T.page });
   await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
   await expect(
-    page.locator('.toast--info', { hasText: /Нет сохранённых бэкапов|No saved backups/ }).first(),
-    'WR-03: нет уведомления «Нет сохранённых бэкапов» при успешном пустом списке'
+    page
+      .locator('.toast--info', {
+        hasText: /Резервных копий этого файла пока нет|No backups of this file yet/
+      })
+      .first(),
+    'WR-03: нет уведомления «Резервных копий этого файла пока нет» при успешном пустом списке'
   ).toBeVisible({ timeout: T.action });
   await expect(
     page.locator('.toast--error'),

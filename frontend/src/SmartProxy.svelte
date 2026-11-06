@@ -342,7 +342,15 @@
 
   async function deleteProfile(id: string) {
     error = '';
-    if (!(await showConfirm($t('app.confirm'), $t('app.delete') + '?'))) return;
+    const name = profiles.find((p) => p.id === id)?.name ?? '';
+    if (
+      !(await showConfirm({
+        title: $t('smartproxy.delete_title', { name }),
+        consequence: $t('smartproxy.delete_consequence'),
+        confirmLabel: $t('app.delete')
+      }))
+    )
+      return;
     try {
       await apiFetchJSON(`/api/smart-proxy/profiles/delete?id=${id}`, {
         method: 'POST'

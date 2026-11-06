@@ -140,7 +140,7 @@
   async function handleDownloadBackup() {
     if (isCreatingBackup) return;
     isCreatingBackup = true;
-    showToast('info', $t('dash.qa_backup_title') + '...');
+    showToast('info', $t('dash.qa_backup_progress'));
     try {
       const dateStr = new Date().toISOString().slice(0, 10);
       const meta = await apiFetchJSON<{ id: string }>('/api/snapshots/create', {

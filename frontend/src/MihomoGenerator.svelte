@@ -394,7 +394,7 @@
           title: $t('editor.empty_proxies_title'),
           consequence: $t('editor.empty_proxies_warning'),
           variant: 'warning',
-          confirmLabel: $t('app.continue')
+          confirmLabel: $t('editor.apply_without_proxies')
         }))
       ) {
         return;

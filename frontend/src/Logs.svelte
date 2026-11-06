@@ -436,7 +436,11 @@
   }
 
   async function handleClearLogs() {
-    const confirmed = await showConfirm($t('logs.clear_confirm'));
+    const confirmed = await showConfirm({
+      title: $t('logs.clear_confirm_title'),
+      message: $t('logs.clear_confirm'),
+      confirmLabel: $t('logs.clear')
+    });
     if (!confirmed) return;
     try {
       await apiFetch('/api/logs/clear', {
