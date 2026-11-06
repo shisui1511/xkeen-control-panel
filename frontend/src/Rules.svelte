@@ -334,12 +334,7 @@
 </script>
 
 <div class="container rules-page">
-  <PageHeader
-    title={$t('rules.title')}
-    subtitle={currentSubtitle}
-    breadcrumbs={[{ label: $t('nav.group_routing') }, { label: $t('nav.rules') }]}
-    {onSwitchTab}
-  >
+  <PageHeader title={$t('rules.title')} subtitle={currentSubtitle}>
     {#snippet actions()}
       <Button
         variant="secondary"

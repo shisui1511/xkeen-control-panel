@@ -409,12 +409,7 @@
 </script>
 
 <div class="container">
-  <PageHeader
-    title={$t('trafficquotas.title')}
-    subtitle={$t('trafficquotas.subtitle')}
-    breadcrumbs={[{ label: $t('nav.group_observability') }, { label: $t('nav.trafficquotas') }]}
-    {onSwitchTab}
-  >
+  <PageHeader title={$t('trafficquotas.title')} subtitle={$t('trafficquotas.subtitle')}>
     {#if stats}
       <Button variant="secondary" onclick={clearAlerts}>
         {$t('trafficquotas.clear_alerts')}

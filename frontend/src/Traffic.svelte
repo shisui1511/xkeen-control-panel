@@ -678,26 +678,24 @@
   let timeLabels = $derived.by(() => {
     const s = $t('traffic.sec');
     const m = $t('traffic.per_min');
+    // Пять делений через равные четверти окна. Неразрывный пробел держит «-60 сек» в одну
+    // строку на телефоне; промежуточные деления 5 и 15 минут — минуты:секунды без единицы
+    const nb = '\u00a0';
     switch (activeTimeframe) {
       case '1m':
-        return [`-60 ${s}`, `-45 ${s}`, `-30 ${s}`, `-15 ${s}`, $t('traffic.now')];
+        return [`-60${nb}${s}`, `-45${nb}${s}`, `-30${nb}${s}`, `-15${nb}${s}`, $t('traffic.now')];
       case '5m':
-        return [`-5 ${m}`, `-3.5 ${m}`, `-2.5 ${m}`, `-1 ${m}`, $t('traffic.now')];
+        return [`-5${nb}${m}`, '-3:45', '-2:30', '-1:15', $t('traffic.now')];
       case '15m':
-        return [`-15 ${m}`, `-11 ${m}`, `-7.5 ${m}`, `-3.5 ${m}`, $t('traffic.now')];
+        return [`-15${nb}${m}`, '-11:15', '-7:30', '-3:45', $t('traffic.now')];
       case '1h':
-        return [`-60 ${m}`, `-45 ${m}`, `-30 ${m}`, `-15 ${m}`, $t('traffic.now')];
+        return [`-60${nb}${m}`, `-45${nb}${m}`, `-30${nb}${m}`, `-15${nb}${m}`, $t('traffic.now')];
     }
   });
 </script>
 
 <div class="container">
-  <PageHeader
-    title={$t('traffic.title')}
-    subtitle={$t('traffic.realtime')}
-    breadcrumbs={[{ label: $t('nav.group_observability') }, { label: $t('traffic.title') }]}
-    {onSwitchTab}
-  >
+  <PageHeader title={$t('traffic.title')} subtitle={$t('traffic.realtime')}>
     <span
       class="badge-live-indicator"
       class:is-live={connected && !coreOffline && !isPaused}
@@ -1142,7 +1140,6 @@
                   <span class="download-color">↓ {formatBytes(client.download)}</span>
                   <span class="sep">·</span>
                   <span class="upload-color">↑ {formatBytes(client.upload)}</span>
-                  <span class="sep">·</span>
                   <span class="share-label">{sharePercent}% {$t('traffic.session')}</span>
                 </div>
               </div>
@@ -1655,6 +1652,15 @@
     font-family: var(--font-family-mono);
   }
 
+  /* Телефон: пять подписей в ~280 px слипались. Деления равномерные, поэтому остаются
+     крайние и среднее — они по-прежнему стоят на своих местах (0, ½, 1) */
+  @media (max-width: 768px) {
+    .chart-x span:nth-child(2),
+    .chart-x span:nth-child(4) {
+      display: none;
+    }
+  }
+
   /* Analytics Grid (2 Columns) */
   .traffic-analytics-grid {
     display: grid;
@@ -1717,6 +1723,25 @@
     display: flex;
     flex-direction: column;
     font-size: var(--font-size-xs);
+  }
+
+  /* Телефон: периоды друг под другом, разделитель сверху (а не слева, как у колонок);
+     загрузка и отдача внутри периода — рядом, иначе каждый период занимал шесть строк */
+  @media (max-width: 768px) {
+    .peak-period-card {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 16px;
+    }
+
+    .peak-period-title {
+      grid-column: 1 / -1;
+    }
+
+    .peak-period-card + .peak-period-card {
+      border-left: 0;
+      border-top: 1px solid var(--border);
+    }
   }
 
   .peak-flow {

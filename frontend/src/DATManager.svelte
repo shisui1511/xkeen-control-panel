@@ -529,12 +529,7 @@
 </script>
 
 <div class="container">
-  <PageHeader
-    title={$t('dat.h1')}
-    subtitle={$t('dat.h1_sub')}
-    breadcrumbs={[{ label: $t('nav.group_tools') }, { label: $t('nav.dat') }]}
-    {onSwitchTab}
-  >
+  <PageHeader title={$t('dat.h1')} subtitle={$t('dat.h1_sub')}>
     <Button variant="secondary" title={$t('dat.geoscan')} onclick={() => (showGeoScanModal = true)}>
       <svg
         width="14"

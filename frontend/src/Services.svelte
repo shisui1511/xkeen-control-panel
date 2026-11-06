@@ -952,12 +952,7 @@
 </script>
 
 <div class="container" {@attach pullToRefresh(handleRefreshStatus)}>
-  <PageHeader
-    title={$t('svc.h1')}
-    subtitle={$t('svc.h1_sub')}
-    breadcrumbs={[{ label: $t('nav.group_system') }, { label: $t('nav.services') }]}
-    {onSwitchTab}
-  >
+  <PageHeader title={$t('svc.h1')} subtitle={$t('svc.h1_sub')}>
     <Button
       variant="secondary"
       loading={refreshingStatus}
@@ -1076,9 +1071,7 @@
                 <div class="radio-name">
                   <span>Mihomo</span>
                   {#if kernelVersion(mihomo?.current_version)}
-                    <span
-                      class="k-ver text-secondary"
-                      style="font-size:var(--font-size-xs); font-weight:normal;"
+                    <span class="k-ver text-secondary"
                       >{kernelVersion(mihomo?.current_version)}</span
                     >
                   {/if}
@@ -1166,11 +1159,7 @@
                 <div class="radio-name">
                   <span>Xray</span>
                   {#if kernelVersion(xray?.current_version)}
-                    <span
-                      class="k-ver text-secondary"
-                      style="font-size:var(--font-size-xs); font-weight:normal;"
-                      >{kernelVersion(xray?.current_version)}</span
-                    >
+                    <span class="k-ver text-secondary">{kernelVersion(xray?.current_version)}</span>
                   {/if}
                   {#if activeKernel === 'xray'}
                     <span class="active-pill">{$t('svc.active_label')}</span>
@@ -1564,7 +1553,7 @@
               <input
                 type="file"
                 bind:this={fileInputRefs['mihomo']}
-                style="display:none"
+                hidden
                 onchange={(e) => handleUploadSelected('mihomo', e)}
                 accept=".gz,.zip,application/octet-stream,*"
               />
@@ -1718,7 +1707,7 @@
               <input
                 type="file"
                 bind:this={fileInputRefs['xray']}
-                style="display:none"
+                hidden
                 onchange={(e) => handleUploadSelected('xray', e)}
                 accept=".gz,.zip,application/octet-stream,*"
               />
@@ -2455,5 +2444,11 @@
     .services-bottom-grid {
       grid-template-columns: 1fr;
     }
+  }
+
+  /* Версия ядра рядом с названием в выборе активного ядра */
+  .k-ver {
+    font-size: var(--font-size-xs);
+    font-weight: normal;
   }
 </style>

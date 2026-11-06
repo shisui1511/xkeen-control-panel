@@ -602,12 +602,7 @@
 </script>
 
 <div class="logs-page">
-  <PageHeader
-    title={$t('logs.h1')}
-    subtitle={$t('logs.h1_sub')}
-    breadcrumbs={[{ label: $t('nav.group_observability') }, { label: $t('nav.logs') }]}
-    {onSwitchTab}
-  >
+  <PageHeader title={$t('logs.h1')} subtitle={$t('logs.h1_sub')}>
     <SegmentedControl items={viewItems} bind:value={logsView} ariaLabel={$t('xlog.view_label')} />
     <!-- Flash Health Badge -->
     {#if flashHealth}

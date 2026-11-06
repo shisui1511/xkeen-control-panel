@@ -415,12 +415,7 @@
 </script>
 
 <div class="container">
-  <PageHeader
-    title={$t('smartproxy.title')}
-    subtitle={$t('smartproxy.subtitle')}
-    breadcrumbs={[{ label: $t('nav.group_proxy_subs') }, { label: $t('smartproxy.title') }]}
-    {onSwitchTab}
-  >
+  <PageHeader title={$t('smartproxy.title')} subtitle={$t('smartproxy.subtitle')}>
     <Button variant="primary" onclick={startCreate}>
       <Icon name="add" size={14} />
       {$t('smartproxy.create_profile')}

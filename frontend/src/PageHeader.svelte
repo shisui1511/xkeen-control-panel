@@ -1,37 +1,26 @@
 <script lang="ts">
-  import { t } from './i18n';
   import type { Snippet } from 'svelte';
-  import Breadcrumbs from './Breadcrumbs.svelte';
 
+  // Шапка страницы: заголовок, подзаголовок и действия. Хлебных крошек нет: средний уровень
+  // был группой меню (не ссылкой), последний повторял заголовок, а где ты — и так показывают
+  // подсвеченный пункт сайдбара или нижней панели.
   interface Props {
     title: string;
     subtitle?: string;
-    breadcrumbs?: { label: string; tab?: string }[];
-    onSwitchTab?: (tab: string) => void;
-    hideHome?: boolean;
     actions?: Snippet;
     children?: Snippet;
   }
 
-  let {
-    title,
-    subtitle = '',
-    breadcrumbs = [],
-    onSwitchTab = () => {},
-    hideHome = false,
-    actions,
-    children
-  }: Props = $props();
+  let { title, subtitle = '', actions, children }: Props = $props();
 </script>
 
 <!-- Styles live in global.css under .page-header / .page-header-content / .page-header-actions -->
 <div class="page-header">
-  <Breadcrumbs items={breadcrumbs} onNavigate={onSwitchTab} {hideHome} />
   <div class="page-header-content">
     <div>
       <h1>{title}</h1>
       {#if subtitle}
-        <p class="text-secondary page-header-subtitle" style="margin: 6px 0 0;">{subtitle}</p>
+        <p class="text-secondary page-header-subtitle">{subtitle}</p>
       {/if}
     </div>
     {#if actions || children}

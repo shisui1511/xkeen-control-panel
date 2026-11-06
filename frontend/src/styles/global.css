@@ -1905,56 +1905,15 @@ body.drawer-locked {
   flex-wrap: wrap;
 }
 
+.page-header-subtitle {
+  margin: 6px 0 0;
+}
+
 .page-header-actions {
   display: flex;
   gap: var(--spacing-2, 8px);
   flex-wrap: wrap;
   align-items: center;
-}
-
-/* ----- Breadcrumbs ----- */
-.breadcrumbs {
-  display: flex;
-  align-items: center;
-  /* Крошки переносятся на новую строку, а не выступают за окно на 390 px */
-  flex-wrap: wrap;
-  gap: 0.25rem 0.5rem;
-  margin-bottom: 0.75rem;
-  font-size: var(--font-size-xs);
-  letter-spacing: 0;
-  color: var(--fg-dim);
-  font-weight: 600;
-}
-
-.breadcrumb-home,
-.breadcrumb-link {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--fg-secondary);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-  font-weight: inherit;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.breadcrumb-home:hover,
-.breadcrumb-link:hover {
-  color: var(--accent);
-}
-
-.breadcrumb-separator {
-  color: var(--fg-faint);
-}
-
-.breadcrumb-current {
-  color: var(--fg-primary);
-  font-weight: 700;
 }
 
 /* ----- Toolbar (Proxies, Rules, Connections, Logs, Editor) ----- */
@@ -3445,12 +3404,6 @@ a.chip:hover {
   .floating-progress-bar {
     bottom: calc(16px + var(--dock-space));
     max-width: calc(100vw - 24px);
-  }
-
-  /* Крошки на телефоне дублируют заголовок страницы и съедают строку-две:
-     где ты, показывают заголовок и подсвеченный пункт нижней панели */
-  .page-header .breadcrumbs {
-    display: none;
   }
 
   .page-header {

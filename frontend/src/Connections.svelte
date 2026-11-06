@@ -624,12 +624,7 @@
 <svelte:window onkeydown={handleWindowKeyDown} />
 
 <div class="container">
-  <PageHeader
-    title={$t('conn.title')}
-    subtitle={$t('conn.h1_sub')}
-    breadcrumbs={[{ label: $t('nav.group_observability') }, { label: $t('conn.title') }]}
-    {onSwitchTab}
-  >
+  <PageHeader title={$t('conn.title')} subtitle={$t('conn.h1_sub')}>
     {#snippet actions()}
       <LiveIndicator
         live={wsConnected && !paused}
@@ -2079,11 +2074,20 @@
       text-align: left;
     }
 
+    /* Скорости — столбиком справа: в одну строку с объёмами на 390 px они наезжали
+       на «↓ 105.92 MB» */
     .conn-row .col-speed {
       grid-area: speed;
       display: flex;
-      gap: 8px;
-      justify-content: flex-end;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0;
+      white-space: nowrap;
+    }
+
+    .conn-row .col-upload,
+    .conn-row .col-download {
+      white-space: nowrap;
     }
 
     .conn-row .col-upload,

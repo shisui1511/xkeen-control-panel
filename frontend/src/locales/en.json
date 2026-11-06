@@ -102,7 +102,6 @@
   "auth.strength_strong": "Strong",
   "auth.session_password_changed": "Password changed — please sign in again",
   "auth.session_terminated_elsewhere": "Session terminated from another device",
-  "nav.breadcrumbs": "Breadcrumbs",
   "nav.dashboard": "Dashboard",
   "nav.config": "Configuration",
   "nav.config_badge_aria": "Changes and notices: {n}",

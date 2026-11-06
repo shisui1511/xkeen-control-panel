@@ -102,7 +102,6 @@
   "auth.strength_strong": "Отличный",
   "auth.session_password_changed": "Пароль изменён — выполните вход снова",
   "auth.session_terminated_elsewhere": "Сессия завершена с другого устройства",
-  "nav.breadcrumbs": "Хлебные крошки",
   "nav.dashboard": "Дашборд",
   "nav.config": "Конфигурация",
   "nav.config_badge_aria": "Изменений и уведомлений: {n}",

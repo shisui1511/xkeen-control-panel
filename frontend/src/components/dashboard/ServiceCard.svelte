@@ -311,8 +311,11 @@
     min-width: 0;
   }
 
+  /* Имя ядра важнее номера версии: на узкой строке рядом с «Активно» сжимается версия,
+     а не «Mihomo» до «Mih…» */
   .service-name {
-    min-width: 0;
+    flex-shrink: 0;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -328,7 +331,10 @@
   }
 
   .version-text {
-    flex-shrink: 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
     color: var(--fg-dim);

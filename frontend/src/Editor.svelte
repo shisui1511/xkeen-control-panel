@@ -1428,16 +1428,7 @@
 
 <div class="editor-page-container" class:constructor-mode={activeTab === 'constructor'}>
   <!-- Level 1 Header (EDIT-01) -->
-  <PageHeader
-    title={$t('editor.h1')}
-    subtitle={$t('editor.h1_sub')}
-    breadcrumbs={[
-      { label: $t('nav.group_tools') },
-      { label: $t('nav.editor') },
-      ...(activeTab === 'constructor' ? [{ label: $t('editor.tab_constructor') }] : [])
-    ]}
-    {onSwitchTab}
-  >
+  <PageHeader title={$t('editor.h1')} subtitle={$t('editor.h1_sub')}>
     <Tabs
       items={editorModeTabItems}
       value={activeTab}

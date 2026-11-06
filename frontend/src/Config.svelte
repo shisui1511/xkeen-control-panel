@@ -63,12 +63,7 @@
   диагностика (config-diag). Фазы 146–148 добавляют вкладки в тот же Tabs.
 -->
 <div class="container config-page" data-testid="config-page">
-  <PageHeader
-    title={$t('cfg.title')}
-    subtitle={$t('cfg.subtitle')}
-    breadcrumbs={[{ label: $t('nav.group_overview') }, { label: $t('nav.config') }]}
-    {onSwitchTab}
-  />
+  <PageHeader title={$t('cfg.title')} subtitle={$t('cfg.subtitle')} />
 
   <div class="config-stack">
     <ConfigNotices />
