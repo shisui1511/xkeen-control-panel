@@ -391,7 +391,7 @@
   }
 
   .dns-banner__fill--smooth {
-    transition: width 250ms linear;
+    transition: width var(--duration-move) linear;
   }
 
   .dns-banner__timer {

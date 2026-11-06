@@ -923,12 +923,7 @@
 <svelte:window onhashchange={syncFromHash} />
 
 <div class="container">
-  <PageHeader
-    title={$t('settings.h1')}
-    subtitle={$t('settings.h1_sub')}
-    breadcrumbs={[{ label: $t('nav.group_system') }, { label: $t('settings.h1') }]}
-    {onSwitchTab}
-  />
+  <PageHeader title={$t('settings.h1')} subtitle={$t('settings.h1_sub')} />
 
   {#if listMode}
     <nav class="settings-list" aria-label={$t('settings.h1')}>
@@ -1311,7 +1306,7 @@
               <div class="ctrl">
                 <Select
                   class="input"
-                  style="min-width: 250px;"
+                  wrapperClass="backup-file-select"
                   bind:value={selectedFile}
                   onchange={fetchBackups}
                   title={$t('settings.backup_file')}
@@ -1496,7 +1491,7 @@
               id="backup-upload-input"
               type="file"
               accept=".tar.gz"
-              style="display: none;"
+              hidden
               onchange={handleFileSelect}
               disabled={uploading || creatingSnapshot || restoringSnapshot !== ''}
             />
@@ -1518,7 +1513,7 @@
             {/if}
             <div class="field-row">
               <span class="field-row-name">{$t('mihomo.controller_type')}</span>
-              <span class="field-row-val" style="display:flex;align-items:center;gap:8px;">
+              <span class="field-row-val field-row-val--inline">
                 {#if $capabilities?.mihomo?.controller_type === 'unix'}
                   <span class="status-ok">● {$t('mihomo.controller_mode_unix')}</span>
                 {:else if $capabilities?.mihomo?.is_insecure_lan}
@@ -1568,14 +1563,14 @@
                 {:else if $capabilities?.mihomo.api_reachable}
                   <span class="status-err">{$t('settings.mihomo_auth_error')}</span>
                 {:else}
-                  <span style="color: var(--fg-secondary)">—</span>
+                  <span class="text-secondary">—</span>
                 {/if}
               </span>
             </div>
             {#if $capabilities?.mihomo.discovered_secret}
               <div class="field-row">
                 <span class="field-row-name">{$t('settings.mihomo_secret_discovered')}</span>
-                <span class="field-row-val mono" style="display:flex;align-items:center;gap:6px;">
+                <span class="field-row-val field-row-val--inline mono">
                   {secretVisible ? $capabilities.mihomo.discovered_secret : '••••••••'}
                   <button
                     class="btn btn-secondary btn-sm"
@@ -2567,5 +2562,17 @@
   .feature-check {
     display: inline-flex;
     color: var(--success);
+  }
+
+  /* Значение строки с кнопкой или пометкой рядом: в одну линию */
+  .field-row-val--inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Имена архивов длинные: список не сжимается до нечитаемого */
+  :global(.backup-file-select) {
+    min-width: 250px;
   }
 </style>

@@ -146,15 +146,30 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
   --shadow-md: 0 6px 20px -8px rgba(0, 0, 0, 0.4);
 
-  /* Движение. --transition-* — длительность вместе с easing: пишется как
-     `opacity var(--transition-fast)`, без второго easing (иначе объявление невалидно).
-     --ease-out — для появлений и перемещений, --ease-spring — для мелких «посадок». */
-  --transition-fast: 140ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  /* Движение. Шкала длительностей одна на всю панель (зеркало — DURATION в
+     src/lib/motion.svelte.ts; сырые длительности в transition ловит scripts/check-motion.cjs):
+       --duration-fast  140 — отклик на наведение и нажатие (цвет, рамка, тень);
+       --duration-exit  160 — уход: исчезает быстрее, чем появляется;
+       --duration-enter 200 — появление меню, подсказки, строки;
+       --duration-move  260 — перемещение и смена размера (индикатор, полоса, шторка);
+       --duration-slow  400 — заполнение шкал прогресса, где важно увидеть изменение;
+       --duration-spin  800 — один оборот спиннера.
+     --transition-* — длительность вместе с easing: пишется как `opacity var(--transition-fast)`,
+     без второго easing (иначе объявление невалидно). --ease-standard — смена состояния на месте,
+     --ease-out — появления и перемещения, --ease-in — уходы, --ease-spring — мелкие «посадки». */
+  --duration-fast: 140ms;
+  --duration-exit: 160ms;
   --duration-enter: 200ms;
   --duration-move: 260ms;
+  --duration-slow: 400ms;
+  --duration-spin: 800ms;
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --transition-fast: var(--duration-fast) var(--ease-standard);
+  --transition-normal: 250ms var(--ease-standard);
+  --transition-move: var(--duration-move) var(--ease-out);
 
   /* Layout */
   --sidebar-w: 252px;
@@ -896,9 +911,35 @@ h2.card-title {
   color: var(--on-danger);
 }
 
+/* Удаление в строке или карточке: опасное действие видно, но не спорит с основной кнопкой.
+   Сплошная .btn-danger остаётся для подтверждения в диалоге */
+.btn-danger-soft {
+  /* 9 %, а не --danger-soft (14 %): текст --danger держит 4.5:1 во всех тёмных темах */
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 32%, transparent);
+}
+
+.btn-danger-soft:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .btn-sm {
   padding: 0 var(--spacing-3);
   font-size: var(--font-size-xs);
+}
+
+/* Шеврон раскрытия: один значок поворачивается, а не подменяется — видно, что открылось.
+   Ставится на значок внутри кнопки с aria-expanded */
+.chevron-turn {
+  flex-shrink: 0;
+  transition: transform var(--transition-move);
+}
+
+[aria-expanded='true'] .chevron-turn {
+  transform: rotate(90deg);
 }
 
 /* ------------ Spinner ------------- */
@@ -1133,7 +1174,7 @@ input[type='number'] {
   overflow-y: auto;
   overscroll-behavior: contain;
   z-index: 200;
-  transition: transform 0.25s ease;
+  transition: transform var(--transition-move);
   display: flex;
   flex-direction: column;
 }
@@ -1266,7 +1307,7 @@ input[type='number'] {
   flex: 0 0 auto;
   display: inline-flex;
   margin-left: 8px;
-  transition: transform 0.2s ease;
+  transition: transform var(--transition-move);
   color: var(--fg-dim);
 }
 
@@ -1359,9 +1400,9 @@ input[type='number'] {
 @media (min-width: 769px) {
   .sidebar {
     transition:
-      width 220ms ease,
-      padding 220ms ease,
-      gap 220ms ease;
+      width var(--transition-move),
+      padding var(--transition-move),
+      gap var(--transition-move);
   }
 
   .sidebar.rail {
@@ -1553,7 +1594,7 @@ input[type='number'] {
   -webkit-backdrop-filter: blur(4px);
   z-index: 150;
   -webkit-tap-highlight-color: transparent;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--transition-normal);
 }
 
 .sidebar-overlay:focus-visible {
@@ -1580,7 +1621,7 @@ body.drawer-locked {
   align-items: center;
   justify-content: center;
   padding: 16px;
-  animation: overlayFadeIn 160ms ease-out;
+  animation: overlayFadeIn var(--duration-fast) var(--ease-out);
 }
 
 .confirm-modal {
@@ -1810,7 +1851,7 @@ body.drawer-locked {
   height: 100%;
   background: linear-gradient(90deg, var(--accent), #5fdaff);
   border-radius: 2px;
-  transition: width 0.3s ease;
+  transition: width var(--duration-slow) var(--ease-out);
   box-shadow: 0 0 8px var(--accent-line);
 }
 
@@ -1864,56 +1905,15 @@ body.drawer-locked {
   flex-wrap: wrap;
 }
 
+.page-header-subtitle {
+  margin: 6px 0 0;
+}
+
 .page-header-actions {
   display: flex;
   gap: var(--spacing-2, 8px);
   flex-wrap: wrap;
   align-items: center;
-}
-
-/* ----- Breadcrumbs ----- */
-.breadcrumbs {
-  display: flex;
-  align-items: center;
-  /* Крошки переносятся на новую строку, а не выступают за окно на 390 px */
-  flex-wrap: wrap;
-  gap: 0.25rem 0.5rem;
-  margin-bottom: 0.75rem;
-  font-size: var(--font-size-xs);
-  letter-spacing: 0;
-  color: var(--fg-dim);
-  font-weight: 600;
-}
-
-.breadcrumb-home,
-.breadcrumb-link {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--fg-secondary);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-  font-weight: inherit;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.breadcrumb-home:hover,
-.breadcrumb-link:hover {
-  color: var(--accent);
-}
-
-.breadcrumb-separator {
-  color: var(--fg-faint);
-}
-
-.breadcrumb-current {
-  color: var(--fg-primary);
-  font-weight: 700;
 }
 
 /* ----- Toolbar (Proxies, Rules, Connections, Logs, Editor) ----- */
@@ -2306,7 +2306,7 @@ td.mono,
   border-radius: 50%;
   /* Бегунок «доезжает» с лёгким перелётом — понятно, что переключатель сработал */
   transition:
-    transform 220ms var(--ease-spring),
+    transform var(--duration-enter) var(--ease-spring),
     background-color var(--transition-fast);
 }
 
@@ -3053,7 +3053,7 @@ a.chip:hover {
   align-items: center;
   gap: 6px;
   opacity: 0.65;
-  transition: opacity 0.15s ease-in-out;
+  transition: opacity var(--transition-fast);
   background: var(--bg-card);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
@@ -3088,8 +3088,8 @@ a.chip:hover {
   justify-content: center;
   font-size: var(--font-size-xs);
   transition:
-    color 0.15s ease,
-    background 0.15s ease;
+    color var(--transition-fast),
+    background var(--transition-fast);
 }
 
 .editor-cm-tool-btn:hover {
@@ -3183,7 +3183,7 @@ a.chip:hover {
   backdrop-filter: blur(12px);
   min-width: 320px;
   max-width: 90vw;
-  animation: floatSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: floatSlideUp var(--duration-enter) var(--ease-out) forwards;
 }
 
 /* Появление выпадающих меню и поповеров: короткое проявление со сдвигом от
@@ -3265,7 +3265,7 @@ a.chip:hover {
   height: 100%;
   background: var(--accent);
   border-radius: 2px;
-  transition: width 0.15s ease-out;
+  transition: width var(--transition-fast);
 }
 
 .floating-progress-bar .progress-retry-badge {
@@ -3286,9 +3286,9 @@ a.chip:hover {
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition:
-    color 0.15s ease,
-    background 0.15s ease,
-    border-color 0.15s ease;
+    color var(--transition-fast),
+    background var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .floating-progress-bar .btn-cancel:hover {
@@ -3404,12 +3404,6 @@ a.chip:hover {
   .floating-progress-bar {
     bottom: calc(16px + var(--dock-space));
     max-width: calc(100vw - 24px);
-  }
-
-  /* Крошки на телефоне дублируют заголовок страницы и съедают строку-две:
-     где ты, показывают заголовок и подсвеченный пункт нижней панели */
-  .page-header .breadcrumbs {
-    display: none;
   }
 
   .page-header {

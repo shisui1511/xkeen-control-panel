@@ -197,7 +197,7 @@
     font: inherit;
     color: inherit;
     border-radius: 0;
-    transition: background 0.15s ease;
+    transition: background var(--transition-fast);
   }
 
   .obs-stat-btn:hover {

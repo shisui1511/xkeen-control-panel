@@ -29,12 +29,10 @@
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { isServiceRestarting } from './lib/serviceGrace';
   import { serviceAction } from './lib/serviceControl';
-  import { kernelLabel } from './lib/kernelState';
   import { panelNewVersion, rememberPanelVersion } from './lib/panelHealth';
   import Sidebar from './components/Sidebar.svelte';
   import BottomDock from './components/BottomDock.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
-  import Card from './components/Card.svelte';
   import Button from './components/Button.svelte';
   import Icon from './lib/components/Icon.svelte';
   import Warning from './lib/components/icons/Warning.svelte';
@@ -70,6 +68,8 @@
   import { tabFromHash, legacyRedirectHash } from './lib/tabFromHash';
   import { swipeToDismiss, pullToRefresh } from './lib/gestures';
   import DashboardPulse from './components/dashboard/DashboardPulse.svelte';
+  import DashboardProblems from './components/dashboard/DashboardProblems.svelte';
+  import QuickstartCard from './components/dashboard/QuickstartCard.svelte';
   import { currentTheme, schemeOf, toggleThemeScheme } from './lib/theme';
   import {
     isAnySourceDirty,
@@ -560,14 +560,6 @@
   );
   const allQuickstartComplete = $derived(quickstartDoneCount === 4);
 
-  function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  }
-
   async function fetchVersion() {
     try {
       const data = await apiFetchJSON<{ version: string; panel_version: string }>('/api/version');
@@ -841,6 +833,14 @@
     ].filter(Boolean).length
   );
 
+  // Шаг «установить XKeen / ядро / запустить» на телефоне уже назван «пультом» вместе с кнопкой
+  // перехода в «Сервисы»: в списке замечаний ниже он не повторяется и не входит в счётчик
+  const pulseCoversStep = $derived(
+    currentNextStep === 'install_xkeen' ||
+      currentNextStep === 'install_kernel' ||
+      currentNextStep === 'start'
+  );
+
   function scrollToProblems() {
     document.querySelector('.dash-alerts')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -993,7 +993,7 @@
         onSwitchTab={switchTab}
       />
     {:else}
-      <span style="width: 34px;"></span>
+      <span class="mhdr-spacer" aria-hidden="true"></span>
     {/if}
   </header>
 
@@ -1010,7 +1010,6 @@
     class="sidebar"
     class:sidebar-open={$isSidebarOpen}
     class:rail={$isSidebarCollapsed}
-    style="display: flex; flex-direction: column;"
     {@attach drawerFocus}
     {@attach drawerScrollLock}
     {@attach drawerSwipe}
@@ -1043,18 +1042,17 @@
     inert={drawerIsModal}
   >
     <!-- Mihomo offline warning banner / Restarting notice -->
-    {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities?.mihomo?.reachable && !$isConflict}
+    <!-- Mihomo не установлен — страницы сами говорят об этом пустым состоянием со ссылкой на «Сервисы»;
+         красный баннер «API офлайн» с таймером повтора в этом случае только пугает -->
+    {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities?.mihomo?.reachable && $capabilities?.kernels?.mihomo?.installed !== false && !$isConflict}
       {#if $isServiceRestarting}
-        <div
-          class="service-restarting-banner"
-          style="margin: 12px 16px 0; padding: 12px 18px; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius-md); display: flex; align-items: center; gap: 12px; font-size: var(--font-size-base); color: var(--fg-primary);"
-        >
+        <div class="service-restarting-banner" role="status" aria-live="polite">
           <span class="spinner"></span>
           <span>{$t('service.restarting_wait')}</span>
         </div>
       {:else if currentTab !== 'rules'}
         <!-- «Правила» работают без API Mihomo: вместо баннера — пометка на самой странице (D-19) -->
-        <div style="margin: 12px 16px 0;">
+        <div class="shell-banner-slot">
           <ApiOffline
             endpoint={$capabilities?.mihomo?.discovered_secret ? 'Mihomo API' : '127.0.0.1:9090'}
             lastSeenSeconds={0}
@@ -1115,13 +1113,7 @@
           {@attach pullToRefresh(handleRefresh)}
         >
           <!-- Page header -->
-          <PageHeader
-            title={$t('dash.title')}
-            subtitle={$t('dash.welcome')}
-            breadcrumbs={[{ label: $t('nav.group_overview') }, { label: $t('nav.dashboard') }]}
-            onSwitchTab={switchTab}
-            hideHome={true}
-          >
+          <PageHeader title={$t('dash.title')} subtitle={$t('dash.welcome')}>
             <Button
               variant="secondary"
               onclick={handleRefresh}
@@ -1144,428 +1136,42 @@
                   ? 'loading'
                   : 'not_installed'}
             xkeenInstalled={serviceStatus.xkeen !== 'not_installed'}
-            {problemCount}
+            problemCount={problemCount - (pulseCoversStep ? 1 : 0)}
             onShowProblems={scrollToProblems}
             onSwitchTab={switchTab}
           />
 
-          <!-- Quickstart Checklist (карточка видна только при активном Mihomo, auto-hides when all steps complete).
-               Gated on statusLoading/subsSummaryLoaded so it doesn't flash "incomplete"
-               using each store's not-yet-fetched default before the first poll round
-               of fetchLiveStatus/fetchSubscriptionSummary actually lands. -->
+          <!-- Чек-лист первого запуска: виден при активном Mihomo, пока не пройден. Ждёт первого
+               опроса статуса и подписок, иначе мигнул бы «не сделано» на значениях по умолчанию -->
           {#if $isMihomo && !statusLoading && subsSummaryLoaded && !allQuickstartComplete}
-            <div style="margin-bottom: 18px;">
-              <Card title={$t('dash.quickstart.title')}>
-                {#snippet actions()}
-                  <span
-                    style="font-size: var(--font-size-xs); font-weight: 400; color: var(--fg-dim); font-family: var(--font-family-mono);"
-                  >
-                    {$t('dash.quickstart.progress', {
-                      done: String(quickstartDoneCount),
-                      total: '4'
-                    })}
-                  </span>
-                {/snippet}
-                <ul class="quickstart-list" role="list">
-                  <!-- Step 1: kernel selected (always done when card is visible) -->
-                  <li class="qs-step qs-step--done">
-                    <span class="qs-icon" role="img" aria-label={$t('dash.quickstart.step_done')}>
-                      <Icon name="check" size={16} color="var(--success)" />
-                    </span>
-                    <span class="qs-text">{$t('dash.quickstart.step1_label')}</span>
-                  </li>
-                  <!-- Step 2: subscription added -->
-                  <li class="qs-step" class:qs-step--done={hasSubscription}>
-                    <span
-                      class="qs-icon"
-                      role="img"
-                      aria-label={hasSubscription
-                        ? $t('dash.quickstart.step_done')
-                        : $t('dash.quickstart.step_pending')}
-                    >
-                      {#if hasSubscription}
-                        <Icon name="check" size={16} color="var(--success)" />
-                      {:else}
-                        <svg
-                          width="16"
-                          height="16"
-                          viewBox="0 0 16 16"
-                          fill="none"
-                          aria-hidden="true"
-                        >
-                          <circle cx="8" cy="8" r="6.5" stroke="var(--fg-dim)" stroke-width="1.5" />
-                        </svg>
-                      {/if}
-                    </span>
-                    <span class="qs-text">
-                      {hasSubscription
-                        ? $t('dash.quickstart.step2_done')
-                        : $t('dash.quickstart.step2_label')}
-                    </span>
-                    {#if !hasSubscription}
-                      <a class="btn btn-secondary qs-cta" href="#/proxies?tab=providers">
-                        {$t('dash.quickstart.step2_cta')}
-                      </a>
-                    {/if}
-                  </li>
-                  <!-- Step 3: config applied (Mihomo API reachable) -->
-                  <li class="qs-step" class:qs-step--done={$mihomoApiAvailable}>
-                    <span
-                      class="qs-icon"
-                      role="img"
-                      aria-label={$mihomoApiAvailable
-                        ? $t('dash.quickstart.step_done')
-                        : $t('dash.quickstart.step_pending')}
-                    >
-                      {#if $mihomoApiAvailable}
-                        <Icon name="check" size={16} color="var(--success)" />
-                      {:else}
-                        <svg
-                          width="16"
-                          height="16"
-                          viewBox="0 0 16 16"
-                          fill="none"
-                          aria-hidden="true"
-                        >
-                          <circle cx="8" cy="8" r="6.5" stroke="var(--fg-dim)" stroke-width="1.5" />
-                        </svg>
-                      {/if}
-                    </span>
-                    <span class="qs-text">
-                      {$mihomoApiAvailable
-                        ? $t('dash.quickstart.step3_done')
-                        : $t('dash.quickstart.step3_label')}
-                      {#if $mihomoApiState === 'down' && $mihomoOfflineReason}
-                        <span class="qs-reason" data-testid="qs-step3-reason">
-                          {$t(`dash.mihomo_offline_${$mihomoOfflineReason}`)}
-                        </span>
-                      {/if}
-                    </span>
-                    {#if !$mihomoApiAvailable}
-                      <a
-                        class="btn btn-secondary qs-cta"
-                        href="#/constructor"
-                        onclick={() => {
-                          window.location.hash = '#/constructor';
-                        }}
-                      >
-                        {$t('dash.quickstart.step3_cta')}
-                      </a>
-                    {/if}
-                  </li>
-                  <!-- Step 4: Mihomo running -->
-                  <li class="qs-step" class:qs-step--done={serviceStatus.mihomo === 'running'}>
-                    <span
-                      class="qs-icon"
-                      role="img"
-                      aria-label={serviceStatus.mihomo === 'running'
-                        ? $t('dash.quickstart.step_done')
-                        : $t('dash.quickstart.step_pending')}
-                    >
-                      {#if serviceStatus.mihomo === 'running'}
-                        <Icon name="check" size={16} color="var(--success)" />
-                      {:else}
-                        <svg
-                          width="16"
-                          height="16"
-                          viewBox="0 0 16 16"
-                          fill="none"
-                          aria-hidden="true"
-                        >
-                          <circle cx="8" cy="8" r="6.5" stroke="var(--fg-dim)" stroke-width="1.5" />
-                        </svg>
-                      {/if}
-                    </span>
-                    <span class="qs-text">
-                      {serviceStatus.mihomo === 'running'
-                        ? $t('dash.quickstart.step4_done')
-                        : $t('dash.quickstart.step4_label')}
-                    </span>
-                    {#if serviceStatus.mihomo !== 'running'}
-                      <a
-                        class="btn btn-secondary qs-cta"
-                        href="#/services"
-                        onclick={() => switchTab('services')}
-                      >
-                        {$t('dash.quickstart.step4_cta')}
-                      </a>
-                    {/if}
-                  </li>
-                </ul>
-              </Card>
-            </div>
+            <QuickstartCard
+              {hasSubscription}
+              mihomoRunning={serviceStatus.mihomo === 'running'}
+              onSwitchTab={switchTab}
+            />
           {/if}
 
           <UpdateBanner />
 
-          <!-- Problems Panel (conditional) -->
-          {#if (systemStats && systemStats.invalid_config) || currentNextStep !== null || ($capabilities !== null && !$capabilities?.mihomo?.api_reachable && $capabilities?.mihomo?.process_running) || ($capabilities !== null && $capabilities?.mihomo?.is_insecure_lan) || isKernelCrashed || isDiskLow || isSSLExpiring || isWatchdogIncident}
-            <section class="dash-alerts" aria-label={$t('dash.problems_panel')}>
-              <div class="problems-list">
-                {#if isWatchdogIncident && watchdogStatus}
-                  <div
-                    class="problem-item {watchdogStatus.state === 'degraded'
-                      ? 'alert-error'
-                      : 'alert-warning'}"
-                  >
-                    <div class="problem-content">
-                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                      <div>
-                        <strong class="problem-title">
-                          {$t(
-                            watchdogStatus.state === 'degraded'
-                              ? 'watchdog.banner_degraded_title'
-                              : 'watchdog.banner_disarmed_title'
-                          )}
-                        </strong>
-                        <div class="problem-desc">
-                          {$t(
-                            watchdogStatus.state === 'degraded'
-                              ? 'watchdog.banner_degraded_desc'
-                              : 'watchdog.banner_disarmed_desc'
-                          )}
-                          {#if statusError}
-                            <span class="watchdog-stale-desc">({$t('watchdog.stale_note')})</span>
-                          {/if}
-                        </div>
-                        {#if watchdogStatus.last_disarm_error}
-                          <div class="watchdog-error-detail">
-                            {watchdogStatus.last_disarm_error}
-                          </div>
-                        {/if}
-                      </div>
-                    </div>
-                    <Button
-                      variant="secondary"
-                      loading={isResettingWatchdog}
-                      onclick={handleResetWatchdog}
-                    >
-                      {$t(
-                        watchdogStatus.state === 'degraded'
-                          ? 'watchdog.cta_retry'
-                          : 'watchdog.cta_reset'
-                      )}
-                    </Button>
-                  </div>
-                {/if}
-                {#if isKernelCrashed}
-                  <div class="problem-item alert-error">
-                    <div class="problem-content">
-                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                      <div>
-                        <strong class="problem-title"
-                          >{$t('dash.problems.kernel_crash_title')}</strong
-                        >
-                        <div class="problem-desc">
-                          {$t('dash.problems.kernel_crash_desc', {
-                            kernel: kernelLabel($activeKernelName)
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                    <Button variant="secondary" onclick={restartXkeen}>
-                      {$t('dash.problems.kernel_crash_cta')}
-                    </Button>
-                  </div>
-                {/if}
-
-                {#if isDiskLow && systemStats && systemStats.disk}
-                  <div class="problem-item alert-error">
-                    <div class="problem-content">
-                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                      <div>
-                        <strong class="problem-title">{$t('dash.problems.disk_low_title')}</strong>
-                        <div class="problem-desc">
-                          {$t('dash.problems.disk_low_desc', {
-                            free: formatBytes(systemStats.disk.free)
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                    <Button variant="secondary" onclick={() => switchTab('settings')}>
-                      {$t('dash.problems.disk_low_cta')}
-                    </Button>
-                  </div>
-                {/if}
-
-                {#if isSSLExpiring && systemStats}
-                  <div class="problem-item alert-warning">
-                    <div class="problem-content">
-                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                      <div>
-                        <strong class="problem-title">{$t('dash.problems.ssl_expire_title')}</strong
-                        >
-                        <div class="problem-desc">
-                          {$t('dash.problems.ssl_expire_desc', {
-                            days: systemStats.ssl_cert_days
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                {/if}
-
-                {#if systemStats && systemStats.invalid_config}
-                  <div class="problem-item alert-error">
-                    <div class="problem-content">
-                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                      <div>
-                        <strong class="problem-title"
-                          >{$t('dash.problems.invalid_config_title')}</strong
-                        >
-                        <div class="problem-desc">{$t('dash.problems.invalid_config_desc')}</div>
-                      </div>
-                    </div>
-                    <Button variant="secondary" onclick={() => switchTab('editor')}>
-                      {$t('dash.problems.invalid_config_cta')}
-                    </Button>
-                  </div>
-                {/if}
-                {#if $capabilities !== null && !$capabilities?.mihomo?.api_reachable && $capabilities?.mihomo?.process_running}
-                  <div class="problem-item alert-warning">
-                    <div class="problem-content">
-                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                      <div>
-                        <strong class="problem-title">{$t('dash.problems.mihomo_api_title')}</strong
-                        >
-                        <div class="problem-desc">{$t('dash.problems.mihomo_api_desc')}</div>
-                      </div>
-                    </div>
-                    <Button
-                      variant="secondary"
-                      onclick={() => {
-                        window.location.hash = '#/constructor';
-                      }}
-                    >
-                      {$t('dash.problems.mihomo_api_cta')}
-                    </Button>
-                  </div>
-                {/if}
-                {#if currentNextStep === 'install_xkeen'}
-                  <div
-                    class="problem-item alert-error"
-                    data-testid="problem-xkeen-missing"
-                    data-step="install_xkeen"
-                  >
-                    <div class="problem-content">
-                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                      <div>
-                        <span class="problem-step-label">{$t('dash.next_step_label')}</span>
-                        <strong class="problem-title"
-                          >{$t('dash.problems.xkeen_missing_title')}</strong
-                        >
-                        <div class="problem-desc">{$t('dash.problems.xkeen_missing_desc')}</div>
-                      </div>
-                    </div>
-                    <Button variant="primary" onclick={() => switchTab('services')}>
-                      {$t('dash.problems.xkeen_missing_cta')}
-                    </Button>
-                  </div>
-                {:else if currentNextStep === 'finish_xkeen_setup'}
-                  <div
-                    class="problem-item alert-warning"
-                    data-testid="problem-next-step"
-                    data-step="finish_xkeen_setup"
-                  >
-                    <div class="problem-content">
-                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                      <div>
-                        <span class="problem-step-label">{$t('dash.next_step_label')}</span>
-                        <strong class="problem-title"
-                          >{$t('dash.problems.xkeen_incomplete_title')}</strong
-                        >
-                        <div class="problem-desc">
-                          {$t('dash.problems.xkeen_incomplete_desc')}
-                        </div>
-                      </div>
-                    </div>
-                    <Button variant="primary" onclick={() => switchTab('services')}>
-                      {$t('dash.problems.xkeen_incomplete_cta')}
-                    </Button>
-                  </div>
-                {:else if currentNextStep === 'install_kernel'}
-                  <div
-                    class="problem-item alert-error"
-                    data-testid="problem-next-step"
-                    data-step="install_kernel"
-                  >
-                    <div class="problem-content">
-                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                      <div>
-                        <span class="problem-step-label">{$t('dash.next_step_label')}</span>
-                        <strong class="problem-title"
-                          >{$t('dash.problems.kernel_missing_title')}</strong
-                        >
-                        <div class="problem-desc">{$t('dash.problems.kernel_missing_desc')}</div>
-                      </div>
-                    </div>
-                    <Button variant="primary" onclick={() => switchTab('services')}>
-                      {$t('dash.problems.kernel_missing_cta')}
-                    </Button>
-                  </div>
-                {:else if currentNextStep === 'configure'}
-                  <div
-                    class="problem-item alert-warning"
-                    data-testid="problem-next-step"
-                    data-step="configure"
-                  >
-                    <div class="problem-content">
-                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                      <div>
-                        <span class="problem-step-label">{$t('dash.next_step_label')}</span>
-                        <strong class="problem-title">{$t('dash.problems.configure_title')}</strong>
-                        <div class="problem-desc">
-                          {$t('dash.problems.configure_desc', { kernel: nextStepKernelName })}
-                        </div>
-                      </div>
-                    </div>
-                    <Button
-                      variant="primary"
-                      onclick={() => {
-                        window.location.hash = '#/constructor';
-                      }}
-                    >
-                      {$t('dash.problems.configure_cta')}
-                    </Button>
-                  </div>
-                {:else if currentNextStep === 'start'}
-                  <div
-                    class="problem-item alert-warning"
-                    data-testid="problem-next-step"
-                    data-step="start"
-                  >
-                    <div class="problem-content">
-                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                      <div>
-                        <span class="problem-step-label">{$t('dash.next_step_label')}</span>
-                        <strong class="problem-title">{$t('dash.problems.start_title')}</strong>
-                        <div class="problem-desc">{$t('dash.problems.start_desc')}</div>
-                      </div>
-                    </div>
-                    <Button variant="primary" onclick={() => switchTab('services')}>
-                      {$t('dash.problems.start_cta')}
-                    </Button>
-                  </div>
-                {/if}
-                {#if $capabilities !== null && $capabilities?.mihomo?.is_insecure_lan}
-                  <div class="problem-item alert-warning">
-                    <div class="problem-content">
-                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                      <div>
-                        <strong class="problem-title"
-                          >{$t('dash.problems.mihomo_insecure_title')}</strong
-                        >
-                        <div class="problem-desc">{$t('dash.problems.mihomo_insecure_desc')}</div>
-                      </div>
-                    </div>
-                    <Button variant="secondary" onclick={() => (showMihomoMigrateModal = true)}>
-                      {$t('mihomo.migrate_btn')}
-                    </Button>
-                  </div>
-                {/if}
-              </div>
-            </section>
-          {/if}
+          <DashboardProblems
+            invalidConfig={systemStats?.invalid_config === true}
+            diskFree={systemStats?.disk?.free ?? null}
+            sslCertDays={systemStats?.ssl_cert_days ?? null}
+            {watchdogStatus}
+            {isWatchdogIncident}
+            {isResettingWatchdog}
+            statusStale={statusError}
+            {isKernelCrashed}
+            {isDiskLow}
+            {isSSLExpiring}
+            nextStep={currentNextStep}
+            {nextStepKernelName}
+            {pulseCoversStep}
+            onResetWatchdog={handleResetWatchdog}
+            onRestartXkeen={restartXkeen}
+            onMigrateMihomo={() => (showMihomoMigrateModal = true)}
+            onSwitchTab={switchTab}
+          />
 
           <!-- Live Service Status cards (DASH-03) -->
           <!-- Dashboard 60/40 Layout Grid (DASH-01) -->
@@ -1973,59 +1579,9 @@
     min-width: 0;
   }
 
-  .dash-alerts {
-    margin-bottom: var(--spacing-6);
-  }
-
   .dash-section {
     width: 100%;
     min-width: 0;
-  }
-
-  /* Quickstart checklist card */
-  .quickstart-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-2, 8px);
-  }
-
-  .qs-step {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-2, 8px);
-    padding: var(--spacing-1, 4px) 0;
-  }
-
-  .qs-icon {
-    display: inline-flex;
-    align-items: center;
-    flex-shrink: 0;
-  }
-
-  .qs-text {
-    font-size: var(--font-size-sm);
-    color: var(--fg-primary);
-    flex: 1;
-  }
-
-  .qs-reason {
-    display: block;
-    font-size: var(--font-size-xs);
-    color: var(--fg-secondary);
-  }
-
-  .qs-step--done .qs-text {
-    color: var(--fg-secondary);
-  }
-
-  .qs-cta {
-    font-size: var(--font-size-xs);
-    padding: 4px 8px;
-    margin-left: auto;
-    flex-shrink: 0;
   }
 
   .dash-watchdog-badge-row {
@@ -2040,147 +1596,20 @@
     color: var(--fg-dim);
   }
 
-  .watchdog-stale-desc {
-    display: inline-block;
-    margin-left: var(--spacing-1, 4px);
-    color: var(--fg-dim);
-    font-size: var(--font-size-xs, 12px);
+  /* Баннеры над содержимым вкладки: перезапуск службы (D-19) и переподключение
+     к панели (D-20) — один рецепт, слот офлайн-баннера Mihomo — те же отступы */
+  .shell-banner-slot {
+    margin: 12px 16px 0;
   }
 
-  /* Problems panel: a tinted row with an icon chip, a text column and the
-     action on the right (wraps below the text on narrow widths). The tone
-     comes from the .alert-* modifier; text stays on neutral foreground
-     tokens so only the stripe, chip and step label carry the colour. */
-  .problems-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-3, 12px);
-  }
-
-  .problem-item {
-    --tone: var(--warning);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: var(--spacing-3, 12px) var(--spacing-4, 16px);
-    padding: var(--spacing-4, 16px) var(--spacing-5, 20px);
-    border: 1px solid color-mix(in srgb, var(--tone) 28%, var(--border));
-    border-left: 3px solid var(--tone);
-    border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--tone) 7%, var(--bg-card));
-    color: var(--fg-primary);
-  }
-
-  .problem-item.alert-error {
-    --tone: var(--danger);
-  }
-
-  .problem-content {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--spacing-3, 12px);
-    flex: 1 1 320px;
-    min-width: 0;
-  }
-
-  .problem-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    width: 32px;
-    height: 32px;
-    border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--tone) 16%, transparent);
-    color: var(--tone);
-  }
-
-  .problem-content > div {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-    max-width: 68ch;
-  }
-
-  .problem-step-label {
-    display: block;
-    font-size: var(--font-size-xs, 12px);
-    font-weight: 600;
-    line-height: 1.3;
-    color: var(--tone);
-  }
-
-  .problem-title {
-    font-size: var(--font-size-lg, 16px);
-    font-weight: 600;
-    line-height: 1.35;
-    color: var(--fg-primary);
-  }
-
-  .problem-desc {
-    font-size: var(--font-size-base, 14px);
-    line-height: 1.5;
-    color: var(--fg-secondary);
-  }
-
-  .problem-item > :global(.btn),
-  .problem-item > :global(button) {
+  /* Пустое место справа в мобильной шапке, пока капсула статуса не загрузилась:
+     логотип остаётся по центру */
+  .mhdr-spacer {
+    width: 34px;
     flex-shrink: 0;
   }
 
-  @media (max-width: 768px) {
-    .problem-item {
-      padding: var(--spacing-3, 12px) var(--spacing-4, 16px);
-    }
-
-    /* Телефон: замечание — компактная строка под «пультом», а не крупная
-       карточка на пол-экрана; описание сокращено до трёх строк */
-    .problem-icon {
-      width: 28px;
-      height: 28px;
-    }
-
-    .problem-title {
-      font-size: var(--font-size-base, 14px);
-    }
-
-    .problem-desc {
-      font-size: var(--font-size-sm);
-      display: -webkit-box;
-      -webkit-box-orient: vertical;
-      -webkit-line-clamp: 3;
-      line-clamp: 3;
-      overflow: hidden;
-    }
-
-    .problems-list {
-      gap: var(--spacing-2, 8px);
-    }
-
-    .dash-alerts {
-      scroll-margin-top: calc(var(--mhdr-h) + env(safe-area-inset-top) + 12px);
-    }
-
-    .problem-item > :global(.btn),
-    .problem-item > :global(button) {
-      width: 100%;
-    }
-  }
-
-  .watchdog-error-detail {
-    font-family: var(--font-family-mono, monospace);
-    font-size: var(--font-size-xs, 12px);
-    color: var(--fg-secondary);
-    margin-top: var(--spacing-2, 8px);
-    word-break: break-word;
-    white-space: pre-wrap;
-  }
-
-  /* Panel reconnect banner (D-20) — same recipe as .service-restarting-banner
-     above, kept as a real class (not an inline style) since it appears on
-     every tab rather than only inside the Mihomo-scoped block. */
+  .service-restarting-banner,
   .panel-reconnect-banner {
     margin: 12px 16px 0;
     padding: 12px 18px;

@@ -529,12 +529,7 @@
 </script>
 
 <div class="container">
-  <PageHeader
-    title={$t('dat.h1')}
-    subtitle={$t('dat.h1_sub')}
-    breadcrumbs={[{ label: $t('nav.group_tools') }, { label: $t('nav.dat') }]}
-    {onSwitchTab}
-  >
+  <PageHeader title={$t('dat.h1')} subtitle={$t('dat.h1_sub')}>
     <Button variant="secondary" title={$t('dat.geoscan')} onclick={() => (showGeoScanModal = true)}>
       <svg
         width="14"
@@ -1459,8 +1454,8 @@
     border-radius: var(--radius-sm, 4px);
     cursor: pointer;
     transition:
-      color 0.15s ease,
-      background 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast);
   }
 
   .qs-type-btn:hover {
@@ -1495,8 +1490,8 @@
     border-radius: var(--radius);
     outline: none;
     transition:
-      border-color 0.15s ease,
-      box-shadow 0.15s ease;
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast);
   }
 
   .qs-input:focus {
@@ -1711,8 +1706,8 @@
     cursor: pointer;
     text-align: center;
     transition:
-      color 0.15s ease,
-      background 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast);
   }
 
   .pill-btn:hover {
@@ -1761,8 +1756,8 @@
     border-bottom: 1px solid var(--border);
     cursor: pointer;
     transition:
-      background 0.15s ease,
-      border-color 0.15s ease;
+      background var(--transition-fast),
+      border-color var(--transition-fast);
     user-select: none;
     gap: 10px;
     border-left: 3px solid transparent;
@@ -1879,7 +1874,7 @@
   .stat-bar-fill {
     height: 100%;
     border-radius: 2px;
-    transition: width 0.3s ease;
+    transition: width var(--duration-slow) var(--ease-out);
   }
 
   .db-actions {
@@ -2082,8 +2077,8 @@
     border-radius: var(--radius);
     overflow: hidden;
     transition:
-      border-color 0.15s ease,
-      background 0.15s ease;
+      border-color var(--transition-fast),
+      background var(--transition-fast);
   }
 
   .tag-card-row:hover {
@@ -2132,7 +2127,7 @@
   .tag-arrow {
     color: var(--fg-dim);
     font-size: var(--font-size-xs);
-    transition: transform 0.15s ease;
+    transition: transform var(--transition-fast);
   }
 
   .tag-main-btn:hover .tag-arrow {
@@ -2151,8 +2146,8 @@
     align-items: center;
     justify-content: center;
     transition:
-      color 0.15s ease,
-      background 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast);
   }
 
   .tag-copy-btn:hover {
@@ -2243,7 +2238,7 @@
     padding: 6px 12px;
     border-radius: var(--radius-sm);
     gap: 8px;
-    transition: background 0.15s ease;
+    transition: background var(--transition-fast);
   }
 
   .entry-row:hover {

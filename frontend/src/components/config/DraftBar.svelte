@@ -49,6 +49,9 @@
           : ''
   );
   const busy = $derived(applyingHere || applyingOther || resetting || $routingBusy);
+  // Пустой черновик: две неактивные кнопки ничего не предлагают, а на телефоне занимают
+  // две строки по 44 px. Кнопки появляются вместе с первой правкой или идущим применением
+  const showActions = $derived(dirty || busy);
   const blockedByDrift = $derived(dirty && hasDrift);
   // Проблемы проверки черновика (пустая группа, нет списка, цикл): «Применить» отказывает,
   // пока их не исправят (GRP-05, SRC-07)
@@ -149,7 +152,12 @@
   }
 </script>
 
-<section class="draft-bar card" data-testid="config-draftbar" aria-label={$t('cfg.draftbar_label')}>
+<section
+  class="draft-bar card"
+  class:draft-bar-idle={!showActions}
+  data-testid="config-draftbar"
+  aria-label={$t('cfg.draftbar_label')}
+>
   <div class="draft-bar-status" aria-live="polite">
     {#if lost}
       <span class="status-line status-muted">
@@ -213,23 +221,30 @@
       </span>
     {/if}
   </div>
-  <div class="draft-bar-actions">
-    <Button
-      variant="secondary"
-      class="draft-bar-btn"
-      disabled={!ready || !dirty || busy}
-      onclick={onReset}>{$t('cfg.reset')}</Button
-    >
-    <Button
-      variant="primary"
-      class="draft-bar-btn"
-      data-testid="config-apply"
-      disabled={!ready || !dirty || busy || holderHint !== '' || blockedByDrift || blockedByChecks}
-      loading={applyingHere}
-      title={applyHint}
-      onclick={onApply}>{$t('cfg.apply')}</Button
-    >
-  </div>
+  {#if showActions}
+    <div class="draft-bar-actions">
+      <Button
+        variant="secondary"
+        class="draft-bar-btn"
+        disabled={!ready || !dirty || busy}
+        onclick={onReset}>{$t('cfg.reset')}</Button
+      >
+      <Button
+        variant="primary"
+        class="draft-bar-btn"
+        data-testid="config-apply"
+        disabled={!ready ||
+          !dirty ||
+          busy ||
+          holderHint !== '' ||
+          blockedByDrift ||
+          blockedByChecks}
+        loading={applyingHere}
+        title={applyHint}
+        onclick={onApply}>{$t('cfg.apply')}</Button
+      >
+    </div>
+  {/if}
 </section>
 
 <TakeRoutingModal open={interceptOpen} mode="intercept" onclose={() => (interceptOpen = false)} />
@@ -249,6 +264,14 @@
     box-shadow: var(--shadow-sm);
     font-size: var(--font-size-base);
     line-height: 1.5;
+  }
+
+  /* Пустой черновик — спокойная строка состояния без тени и лишней высоты */
+  .draft-bar.draft-bar-idle {
+    padding-top: 10px;
+    padding-bottom: 10px;
+    box-shadow: none;
+    background: var(--surface-tint);
   }
 
   .draft-bar-status {

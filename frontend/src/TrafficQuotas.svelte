@@ -409,12 +409,7 @@
 </script>
 
 <div class="container">
-  <PageHeader
-    title={$t('trafficquotas.title')}
-    subtitle={$t('trafficquotas.subtitle')}
-    breadcrumbs={[{ label: $t('nav.group_observability') }, { label: $t('nav.trafficquotas') }]}
-    {onSwitchTab}
-  >
+  <PageHeader title={$t('trafficquotas.title')} subtitle={$t('trafficquotas.subtitle')}>
     {#if stats}
       <Button variant="secondary" onclick={clearAlerts}>
         {$t('trafficquotas.clear_alerts')}
@@ -977,7 +972,7 @@
     height: 100%;
     background: var(--accent);
     border-radius: 3px;
-    transition: width 0.3s ease;
+    transition: width var(--duration-slow) var(--ease-out);
   }
 
   .stat-bar-fill.warning {
@@ -1021,7 +1016,7 @@
     display: flex;
     flex-direction: column;
     padding: 4px;
-    animation: dropdown-anim 0.15s ease-out;
+    animation: dropdown-anim var(--duration-fast) var(--ease-out);
   }
 
   @keyframes dropdown-anim {
@@ -1046,8 +1041,8 @@
     border-radius: 4px;
     width: 100%;
     transition:
-      background 0.2s,
-      color 0.2s;
+      background var(--transition-normal),
+      color var(--transition-normal);
   }
 
   .dropdown-menu button:hover {
@@ -1161,7 +1156,7 @@
     cursor: pointer;
     line-height: 1;
     padding: 4px 8px;
-    transition: color 0.2s;
+    transition: color var(--transition-normal);
   }
   .info-banner-close:hover {
     color: var(--fg-primary);

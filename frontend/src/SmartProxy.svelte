@@ -415,12 +415,7 @@
 </script>
 
 <div class="container">
-  <PageHeader
-    title={$t('smartproxy.title')}
-    subtitle={$t('smartproxy.subtitle')}
-    breadcrumbs={[{ label: $t('nav.group_proxy_subs') }, { label: $t('smartproxy.title') }]}
-    {onSwitchTab}
-  >
+  <PageHeader title={$t('smartproxy.title')} subtitle={$t('smartproxy.subtitle')}>
     <Button variant="primary" onclick={startCreate}>
       <Icon name="add" size={14} />
       {$t('smartproxy.create_profile')}
@@ -1016,7 +1011,7 @@
     align-items: center;
     gap: 8px;
     opacity: 0.45;
-    transition: opacity 0.25s ease;
+    transition: opacity var(--transition-normal);
   }
 
   .wizard-step-indicator.active {

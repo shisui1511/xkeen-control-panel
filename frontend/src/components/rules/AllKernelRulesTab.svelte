@@ -320,7 +320,7 @@
     color: var(--fg-primary);
     font-size: var(--font-size-sm);
     box-sizing: border-box;
-    transition: border-color var(--transition-fast, 0.15s ease);
+    transition: border-color var(--transition-fast);
   }
 
   .clear-search-btn {
@@ -337,7 +337,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: color var(--transition-fast, 0.15s ease);
+    transition: color var(--transition-fast);
   }
 
   .clear-search-btn:hover {
@@ -549,8 +549,8 @@
     justify-content: center;
     border-radius: var(--radius-sm);
     transition:
-      color 0.15s ease,
-      background 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast);
   }
 
   .btn-more:hover {
@@ -571,7 +571,7 @@
     display: flex;
     flex-direction: column;
     padding: 4px 0;
-    animation: menuPop 140ms var(--ease-out);
+    animation: menuPop var(--duration-fast) var(--ease-out);
   }
 
   .dropdown-menu-up {
@@ -589,7 +589,7 @@
     font-size: var(--font-size-xs);
     cursor: pointer;
     width: 100%;
-    transition: background-color 0.15s ease;
+    transition: background-color var(--transition-fast);
   }
 
   .dropdown-menu button:hover {

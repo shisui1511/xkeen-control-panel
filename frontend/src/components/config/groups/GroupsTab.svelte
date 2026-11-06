@@ -5,6 +5,7 @@
   import EmptyState from '../../EmptyState.svelte';
   import Skeleton from '../../Skeleton.svelte';
   import Button from '../../Button.svelte';
+  import Icon from '../../../lib/components/Icon.svelte';
   import SegmentedControl from '../../SegmentedControl.svelte';
   import { handleLayerError, layerSnapshot } from '../../../lib/configLayer';
   import { configSubTabHash } from '../../../lib/configSubTab';
@@ -149,6 +150,7 @@
   {:else if noSources}
     <div class="groups-panel">
       <Button variant="primary" data-testid="groups-add" onclick={openNew}>
+        <Icon name="add" size={14} />
         {$t('cfg.groups.add')}
       </Button>
     </div>
@@ -156,6 +158,7 @@
       title={$t('cfg.groups.nosrc_title')}
       description={$t('cfg.groups.nosrc_body')}
       ctaText={$t('cfg.groups.nosrc_cta')}
+      ctaVariant="secondary"
       plain
       oncta={gotoNodes}
     />
@@ -184,6 +187,7 @@
         {$tp('cfg.groups.count', groups.length)}
       </span>
       <Button variant="primary" data-testid="groups-add" onclick={openNew}>
+        <Icon name="add" size={14} />
         {$t('cfg.groups.add')}
       </Button>
     </div>

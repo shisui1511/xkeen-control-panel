@@ -186,8 +186,8 @@
     padding: 4px 6px;
     border-radius: var(--radius-xs);
     transition:
-      color 0.15s ease,
-      background 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast);
     display: inline-flex;
     align-items: center;
   }
@@ -321,9 +321,9 @@
     cursor: pointer;
     text-align: center;
     transition:
-      color 0.15s ease,
-      background 0.15s ease,
-      border-color 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast),
+      border-color var(--transition-fast);
   }
 
   .add-btn:hover {

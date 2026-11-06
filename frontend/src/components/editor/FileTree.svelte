@@ -471,7 +471,7 @@
     border-radius: var(--radius-sm);
     cursor: pointer;
     flex-shrink: 0;
-    transition: opacity 0.15s ease;
+    transition: opacity var(--transition-fast);
   }
 
   .btn-new-file:hover {
@@ -560,8 +560,8 @@
     cursor: pointer;
     text-align: left;
     transition:
-      color 0.12s ease,
-      background 0.12s ease;
+      color var(--transition-fast),
+      background var(--transition-fast);
   }
 
   .file-row:hover {
@@ -695,7 +695,7 @@
     display: flex;
     flex-direction: column;
     gap: 1px;
-    animation: menuPop 140ms var(--ease-out);
+    animation: menuPop var(--duration-fast) var(--ease-out);
   }
 
   .ctx-header {
@@ -720,7 +720,7 @@
     border-radius: 3px;
     cursor: pointer;
     text-align: left;
-    transition: background 0.1s ease;
+    transition: background var(--transition-fast);
   }
 
   .ctx-item:hover {

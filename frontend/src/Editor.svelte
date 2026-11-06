@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick, untrack } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
-  import { fade, slide } from './lib/motion.svelte';
+  import { fade, slide, DURATION } from './lib/motion.svelte';
   import { MediaQuery, SvelteSet } from 'svelte/reactivity';
   import { t, currentLang } from './i18n';
   import {
@@ -1428,16 +1428,7 @@
 
 <div class="editor-page-container" class:constructor-mode={activeTab === 'constructor'}>
   <!-- Level 1 Header (EDIT-01) -->
-  <PageHeader
-    title={$t('editor.h1')}
-    subtitle={$t('editor.h1_sub')}
-    breadcrumbs={[
-      { label: $t('nav.group_tools') },
-      { label: $t('nav.editor') },
-      ...(activeTab === 'constructor' ? [{ label: $t('editor.tab_constructor') }] : [])
-    ]}
-    {onSwitchTab}
-  >
+  <PageHeader title={$t('editor.h1')} subtitle={$t('editor.h1_sub')}>
     <Tabs
       items={editorModeTabItems}
       value={activeTab}
@@ -1704,7 +1695,7 @@
       {#await import('./Constructor.svelte')}
         <Skeleton type="card" height="60vh" />
       {:then { default: Constructor }}
-        <div transition:fade={{ duration: 150 }} style="margin-top: 16px;">
+        <div transition:fade={{ duration: DURATION.fast }} style="margin-top: 16px;">
           <Constructor
             {onSwitchTab}
             onInsertIntoEditor={handleInsertIntoEditor}

@@ -5,6 +5,7 @@
   import Button from '../../Button.svelte';
   import StatusBadge from '../../StatusBadge.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
+  import { slide, easeOut, DURATION } from '../../../lib/motion.svelte';
   import { applyRunning, handleLayerError } from '../../../lib/configLayer';
   import {
     refreshSource,
@@ -84,6 +85,7 @@
 
   const isMy = $derived(source.kind === 'my');
   const displayName = $derived(isMy ? $t('cfg.nodes.my_name') : source.name);
+  const kindLabel = $derived(isMy ? $t('cfg.nodes.kind_my') : $t('cfg.nodes.kind_subscription'));
   const off = $derived(!source.enabled);
   const meta = $derived(source.meta);
 
@@ -95,6 +97,8 @@
     if (x !== null && m !== null) parts.push($t('cfg.nodes.counts', { xray: x, mihomo: m }));
     else if (x !== null) parts.push($t('cfg.nodes.count_xray', { n: x }));
     else if (m !== null) parts.push($t('cfg.nodes.count_mihomo', { n: m }));
+    // Ни одно ядро не установлено: без числа узлов свёрнутая карточка ничего не говорит о составе
+    else parts.push($tp('cfg.nodes.nodes_count', source.nodes.length));
     const skipped = source.skipped + source.unsupported;
     if (skipped > 0) parts.push($tp('cfg.nodes.preview_skipped', skipped));
     if (source.stubs > 0) parts.push($tp('cfg.nodes.stubs', source.stubs));
@@ -280,12 +284,13 @@
         data-testid="nodes-source-toggle-{source.id}"
         onclick={ontoggle}
       >
-        <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={16} />
+        <Icon name="chevron-right" size={16} class="chevron-turn" />
         <span class="sc-name">{displayName}</span>
       </button>
-      <span class="chip chip-default">
-        {isMy ? $t('cfg.nodes.kind_my') : $t('cfg.nodes.kind_subscription')}
-      </span>
+      <!-- Вид источника: у «Моих узлов» он совпадает с названием и не повторяется -->
+      {#if kindLabel !== displayName}
+        <span class="chip chip-default">{kindLabel}</span>
+      {/if}
       {#if off}
         <span class="chip chip-default" data-testid="nodes-source-off-{source.id}">
           {$t('cfg.nodes.disabled')}
@@ -443,7 +448,12 @@
   {/if}
 
   {#if expanded}
-    <div class="sc-list" id="{uid}-list" data-testid="nodes-list-{source.id}">
+    <div
+      class="sc-list"
+      transition:slide={{ duration: DURATION.move, easing: easeOut }}
+      id="{uid}-list"
+      data-testid="nodes-list-{source.id}"
+    >
       {#if source.nodes.length === 0}
         <p class="sc-empty" data-testid="nodes-empty-{source.id}">
           {#if isMy}
@@ -531,7 +541,7 @@
         {$t('cfg.nodes.btn_diag')}
       </Button>
       <Button
-        variant="danger"
+        variant="danger-soft"
         class="btn-sm"
         data-testid="nodes-delete-{source.id}"
         onclick={removeSource}

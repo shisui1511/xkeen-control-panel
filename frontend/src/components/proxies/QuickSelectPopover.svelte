@@ -270,7 +270,7 @@
   class="qs-popover"
   class:qs-bottom-sheet={isBottomSheet}
   style={isBottomSheet
-    ? `transform: translateY(${dragTranslateY}px); transition: ${isDragging ? 'none' : 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)'};`
+    ? `transform: translateY(${dragTranslateY}px); transition: ${isDragging ? 'none' : 'transform var(--transition-move)'};`
     : `top: ${top}px; left: ${left}px;`}
   role="dialog"
   aria-modal="false"
@@ -393,7 +393,7 @@
     flex-direction: column;
     overflow: hidden;
     color: var(--fg-primary);
-    animation: menuPop 140ms var(--ease-out);
+    animation: menuPop var(--duration-fast) var(--ease-out);
   }
 
   .qs-popover.qs-bottom-sheet {
@@ -544,7 +544,7 @@
     min-height: 32px;
     cursor: pointer;
     font-size: var(--font-size-sm);
-    transition: background 0.15s ease;
+    transition: background var(--transition-fast);
     user-select: none;
     background: none;
     border: none;

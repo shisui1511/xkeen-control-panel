@@ -675,7 +675,7 @@
 <style>
   :global(.collapse-toggle-icon) {
     flex-shrink: 0;
-    transition: transform 0.2s ease;
+    transition: transform var(--transition-move);
   }
   :global(.collapse-toggle-icon.is-expanded) {
     transform: rotate(180deg);
@@ -697,6 +697,38 @@
        themed scrollbar (see global.css `*` rule) instead of hiding it. */
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+
+  /* Пункт меню у края прокрутки не обрезается на полуслове, а растворяется: видно, что
+     список продолжается. Без прокрутки шкала неактивна и маски нет (как у полосы вкладок) */
+  @supports (animation-timeline: scroll()) {
+    .sidebar-nav {
+      mask-image: linear-gradient(
+        to bottom,
+        transparent 0,
+        black var(--tabs-fade-l),
+        black calc(100% - var(--tabs-fade-r)),
+        transparent 100%
+      );
+      animation: nav-edge-fade linear both;
+      animation-timeline: scroll(self block);
+    }
+  }
+
+  @keyframes nav-edge-fade {
+    0% {
+      --tabs-fade-l: 0px;
+      --tabs-fade-r: 36px;
+    }
+    6%,
+    94% {
+      --tabs-fade-l: 24px;
+      --tabs-fade-r: 36px;
+    }
+    100% {
+      --tabs-fade-l: 24px;
+      --tabs-fade-r: 0px;
+    }
   }
 
   .sidebar-nav::-webkit-scrollbar {

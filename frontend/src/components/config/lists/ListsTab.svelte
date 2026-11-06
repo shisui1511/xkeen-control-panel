@@ -182,6 +182,11 @@
       ? ''
       : $tp('cfg.geo.summary', $geodataView.files, { size: formatBytes($geodataView.total_size) })
   );
+
+  // Ядра и XKeen ставятся на странице «Сервисы»
+  function openServices() {
+    window.location.hash = '#/services';
+  }
 </script>
 
 <div class="lists-tab" data-testid="lists-tab">
@@ -203,7 +208,10 @@
     <EmptyState
       title={$t('cfg.geo.no_xkeen_title')}
       description={$t('cfg.geo.no_xkeen_body')}
+      ctaText={$t('cfg.open_services')}
+      ctaVariant="secondary"
       plain
+      oncta={openServices}
     />
   {:else if $geodataView !== null}
     {#if oldXkeen}

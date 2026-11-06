@@ -685,9 +685,9 @@
   .rule-card {
     padding: 12px;
     transition:
-      transform 0.15s ease,
-      border-color 0.15s ease,
-      box-shadow 0.15s ease;
+      transform var(--transition-fast),
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast);
   }
 
   .rule-card.dragging {
@@ -740,8 +740,8 @@
     cursor: pointer;
     position: relative;
     transition:
-      background-color 0.2s,
-      border-color 0.2s;
+      background-color var(--transition-normal),
+      border-color var(--transition-normal);
   }
 
   .rule-toggle-btn.active {
@@ -757,7 +757,7 @@
     height: 12px;
     background: var(--btn-primary-text);
     border-radius: 50%;
-    transition: transform 0.2s;
+    transition: transform var(--transition-move);
   }
 
   .rule-toggle-btn.active .toggle-dot {
@@ -806,10 +806,10 @@
     align-items: center;
     justify-content: center;
     transition:
-      color 0.15s ease,
-      background 0.15s ease,
-      border-color 0.15s ease,
-      opacity 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast),
+      border-color var(--transition-fast),
+      opacity var(--transition-fast);
   }
 
   .btn-rule-action:disabled {
@@ -931,9 +931,9 @@
     cursor: pointer;
     text-align: center;
     transition:
-      color 0.15s ease,
-      background 0.15s ease,
-      border-color 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast),
+      border-color var(--transition-fast);
   }
 
   .add-btn:hover {

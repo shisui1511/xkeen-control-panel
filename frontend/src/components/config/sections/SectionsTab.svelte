@@ -169,6 +169,11 @@
     toggle?.scrollIntoView({ block: 'start', behavior: 'smooth' });
     toggle?.focus({ preventScroll: true });
   }
+
+  // Ядра и XKeen ставятся на странице «Сервисы»
+  function openServices() {
+    window.location.hash = '#/services';
+  }
 </script>
 
 <div class="cores-tab" data-testid="cores-tab">
@@ -221,7 +226,10 @@
         <EmptyState
           title={$t('cfg.sec.empty_title', { kernel: kernelTitle(k) })}
           description={$t('cfg.sec.empty_body')}
+          ctaText={$t('cfg.open_services')}
+          ctaVariant="secondary"
           plain
+          oncta={openServices}
         />
       {:else}
         {#if k === 'xray' && apiUnavailable}

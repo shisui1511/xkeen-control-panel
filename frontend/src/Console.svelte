@@ -152,12 +152,7 @@
 </script>
 
 <div class="container">
-  <PageHeader
-    title={$t('console.title')}
-    subtitle={$t('console.subtitle')}
-    breadcrumbs={[{ label: $t('nav.group_tools') }, { label: $t('nav.console') }]}
-    {onSwitchTab}
-  />
+  <PageHeader title={$t('console.title')} subtitle={$t('console.subtitle')} />
 
   <!-- Tab Navigation -->
   <Tabs bind:value={activeTab} items={consoleTabItems} ariaLabel={$t('console.title')} />

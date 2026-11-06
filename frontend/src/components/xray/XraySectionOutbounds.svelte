@@ -614,7 +614,7 @@
   .tag-card {
     padding: 12px;
     border-radius: var(--radius);
-    transition: background 0.15s ease;
+    transition: background var(--transition-fast);
   }
 
   .badge-tag {
@@ -638,8 +638,8 @@
     cursor: pointer;
     color: var(--fg-secondary);
     transition:
-      color 0.15s ease,
-      background 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast);
     display: inline-flex;
     align-items: center;
   }
@@ -685,9 +685,9 @@
     cursor: pointer;
     text-align: center;
     transition:
-      color 0.15s ease,
-      background 0.15s ease,
-      border-color 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast),
+      border-color var(--transition-fast);
   }
 
   .add-btn:hover {
@@ -716,8 +716,8 @@
     position: relative;
     background: var(--bg-card);
     transition:
-      border-color 0.2s,
-      background-color 0.2s;
+      border-color var(--transition-normal),
+      background-color var(--transition-normal);
   }
 
   .conf-dropzone.dragging {

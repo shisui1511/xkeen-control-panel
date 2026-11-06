@@ -401,8 +401,8 @@
     border-radius: var(--radius);
     outline: none;
     transition:
-      border-color 0.15s ease,
-      box-shadow 0.15s ease;
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast);
   }
 
   .geoscan-input:focus {
@@ -457,8 +457,8 @@
     border-radius: var(--radius-sm, 4px);
     cursor: pointer;
     transition:
-      background 0.15s ease,
-      color 0.15s ease;
+      background var(--transition-fast),
+      color var(--transition-fast);
   }
 
   .geoscan-toggle-btn:hover {
@@ -482,8 +482,8 @@
     color: var(--fg-secondary);
     cursor: pointer;
     transition:
-      color 0.15s ease,
-      border-color 0.15s ease;
+      color var(--transition-fast),
+      border-color var(--transition-fast);
   }
 
   .geoscan-file-filter-btn:hover {
@@ -618,7 +618,7 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    transition: border-color 0.15s ease;
+    transition: border-color var(--transition-fast);
   }
 
   .geoscan-result-card:hover {

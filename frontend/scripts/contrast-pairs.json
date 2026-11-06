@@ -59,28 +59,44 @@
     "id": "chip-success-text-on-tinted-bg-light",
     "theme": "light",
     "fg": "--success",
-    "bg": { "over": "--bg-card", "mixToken": "--success", "mixPercent": 8 },
+    "bg": {
+      "over": "--bg-card",
+      "mixToken": "--success",
+      "mixPercent": 8
+    },
     "minRatio": 4.5
   },
   {
     "id": "chip-warning-text-on-tinted-bg-light",
     "theme": "light",
     "fg": "--warning",
-    "bg": { "over": "--bg-card", "mixToken": "--warning", "mixPercent": 8 },
+    "bg": {
+      "over": "--bg-card",
+      "mixToken": "--warning",
+      "mixPercent": 8
+    },
     "minRatio": 4.5
   },
   {
     "id": "chip-danger-text-on-tinted-bg-light",
     "theme": "light",
     "fg": "--danger",
-    "bg": { "over": "--bg-card", "mixToken": "--danger", "mixPercent": 8 },
+    "bg": {
+      "over": "--bg-card",
+      "mixToken": "--danger",
+      "mixPercent": 8
+    },
     "minRatio": 4.5
   },
   {
     "id": "chip-accent-text-on-tinted-bg-light",
     "theme": "light",
     "fg": "--accent-text",
-    "bg": { "over": "--bg-card", "mixToken": "--accent-text", "mixPercent": 8 },
+    "bg": {
+      "over": "--bg-card",
+      "mixToken": "--accent-text",
+      "mixPercent": 8
+    },
     "minRatio": 4.5
   },
   {
@@ -139,7 +155,13 @@
     "bg": "--cm-bg",
     "minRatio": 4.5
   },
-  { "id": "cm-null-dark", "theme": "dark", "fg": "--cm-null", "bg": "--cm-bg", "minRatio": 4.5 },
+  {
+    "id": "cm-null-dark",
+    "theme": "dark",
+    "fg": "--cm-null",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
   {
     "id": "cm-bracket-dark",
     "theme": "dark",
@@ -203,7 +225,13 @@
     "bg": "--cm-bg",
     "minRatio": 4.5
   },
-  { "id": "cm-null-light", "theme": "light", "fg": "--cm-null", "bg": "--cm-bg", "minRatio": 4.5 },
+  {
+    "id": "cm-null-light",
+    "theme": "light",
+    "fg": "--cm-null",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
   {
     "id": "cm-bracket-light",
     "theme": "light",
@@ -342,6 +370,28 @@
     "theme": "light",
     "fg": "--seq-8",
     "bg": "--bg-card",
+    "minRatio": 4.5
+  },
+  {
+    "id": "btn-danger-soft-text-light",
+    "theme": "light",
+    "fg": "--danger",
+    "bg": {
+      "over": "--bg-card",
+      "mixToken": "--danger",
+      "mixPercent": 9
+    },
+    "minRatio": 4.5
+  },
+  {
+    "id": "btn-danger-soft-text-dark",
+    "theme": "dark",
+    "fg": "--danger",
+    "bg": {
+      "over": "--bg-card",
+      "mixToken": "--danger",
+      "mixPercent": 9
+    },
     "minRatio": 4.5
   }
 ]

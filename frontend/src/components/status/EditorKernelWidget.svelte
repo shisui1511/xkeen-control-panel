@@ -152,8 +152,8 @@
     color: var(--fg-dim);
     cursor: pointer;
     transition:
-      background 0.15s ease,
-      color 0.15s ease;
+      background var(--transition-fast),
+      color var(--transition-fast);
   }
 
   .widget-restart-btn:hover:not(:disabled) {

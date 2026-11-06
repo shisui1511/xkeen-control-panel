@@ -523,7 +523,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     padding: 14px 16px;
-    transition: border-color 0.15s ease;
+    transition: border-color var(--transition-fast);
   }
 
   .provider-card:hover {

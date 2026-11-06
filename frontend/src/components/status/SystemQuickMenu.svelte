@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
-  import { fade } from '../../lib/motion.svelte';
+  import { fade, DURATION } from '../../lib/motion.svelte';
   import { t } from '../../i18n';
   import {
     showToast,
@@ -211,7 +211,7 @@
     role="menu"
     aria-label={$t('capsule.quick_actions')}
     tabindex="-1"
-    transition:fade={{ duration: 120 }}
+    transition:fade={{ duration: DURATION.fast }}
   >
     <div class="menu-header">
       <div class="menu-title-row">
@@ -329,7 +329,7 @@
     padding: 6px;
     z-index: 1000;
     user-select: none;
-    animation: menu-pop 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: menu-pop var(--duration-fast) var(--ease-out);
   }
 
   @keyframes menu-pop {
@@ -400,9 +400,9 @@
     text-align: left;
     cursor: pointer;
     transition:
-      background 0.15s ease,
-      color 0.15s ease,
-      transform 0.1s ease;
+      background var(--transition-fast),
+      color var(--transition-fast),
+      transform var(--transition-fast);
   }
 
   .menu-item:hover:not(:disabled) {

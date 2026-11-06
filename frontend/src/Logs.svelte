@@ -602,12 +602,7 @@
 </script>
 
 <div class="logs-page">
-  <PageHeader
-    title={$t('logs.h1')}
-    subtitle={$t('logs.h1_sub')}
-    breadcrumbs={[{ label: $t('nav.group_observability') }, { label: $t('nav.logs') }]}
-    {onSwitchTab}
-  >
+  <PageHeader title={$t('logs.h1')} subtitle={$t('logs.h1_sub')}>
     <SegmentedControl items={viewItems} bind:value={logsView} ariaLabel={$t('xlog.view_label')} />
     <!-- Flash Health Badge -->
     {#if flashHealth}
@@ -1420,9 +1415,9 @@
     color: var(--fg-primary);
     width: 200px;
     transition:
-      border-color 0.15s ease,
-      box-shadow 0.15s ease,
-      width 0.15s ease;
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast),
+      width var(--transition-fast);
   }
 
   .search-input:focus {
@@ -1491,8 +1486,8 @@
     border-radius: 3px;
     cursor: pointer;
     transition:
-      background 0.15s,
-      color 0.15s;
+      background var(--transition-fast),
+      color var(--transition-fast);
   }
 
   .source-pill:hover {
@@ -1550,7 +1545,7 @@
     box-sizing: border-box;
     white-space: nowrap;
     border-bottom: 1px solid var(--border-light);
-    transition: background 0.1s ease;
+    transition: background var(--transition-fast);
   }
 
   .wrap-mode .log-row {
@@ -1696,8 +1691,8 @@
     padding: 2px 4px;
     border-radius: 3px;
     transition:
-      opacity 0.15s,
-      color 0.15s;
+      opacity var(--transition-fast),
+      color var(--transition-fast);
     margin-left: 6px;
     flex-shrink: 0;
   }
@@ -1749,7 +1744,7 @@
     font-size: var(--font-size-xs);
     color: var(--fg-terminal);
     z-index: 10;
-    animation: fadeIn 0.2s ease;
+    animation: fadeIn var(--duration-enter) var(--ease-out);
   }
 
   @keyframes fadeIn {

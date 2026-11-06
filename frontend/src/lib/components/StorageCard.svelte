@@ -103,7 +103,7 @@
   .storage-bar {
     height: 100%;
     border-radius: var(--radius-sm);
-    transition: width 0.3s ease;
+    transition: width var(--duration-slow) var(--ease-out);
   }
 
   .storage-used {

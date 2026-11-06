@@ -174,7 +174,7 @@
     padding: 14px;
     color: var(--fg-primary);
     font-family: var(--font-family-sans);
-    animation: popoverFadeIn 0.16s ease-out forwards;
+    animation: popoverFadeIn var(--duration-fast) var(--ease-out) forwards;
   }
 
   @keyframes popoverFadeIn {
@@ -217,7 +217,7 @@
     cursor: pointer;
     padding: 0 4px;
     border-radius: 4px;
-    transition: color 0.15s ease;
+    transition: color var(--transition-fast);
   }
 
   .popover-close-btn:hover {
@@ -263,8 +263,8 @@
     min-width: 6px;
     border-radius: 2px;
     transition:
-      height 0.2s ease,
-      opacity 0.15s ease;
+      height var(--transition-move),
+      opacity var(--transition-fast);
     cursor: pointer;
   }
 

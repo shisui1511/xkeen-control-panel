@@ -676,7 +676,7 @@
     border-radius: var(--radius-lg);
     overflow: hidden;
     box-shadow: var(--shadow-sm);
-    transition: box-shadow 0.2s ease;
+    transition: box-shadow var(--transition-normal);
   }
   .group-card.expanded {
     grid-column: 1 / -1;
@@ -793,9 +793,9 @@
     align-items: center;
     justify-content: center;
     transition:
-      color 0.15s ease,
-      background 0.15s ease,
-      opacity 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast),
+      opacity var(--transition-fast);
     opacity: 0.6;
   }
   .gc-pin-btn:hover:not(:disabled) {
@@ -868,9 +868,9 @@
     align-items: center;
     justify-content: center;
     transition:
-      color 0.15s ease,
-      background 0.15s ease,
-      opacity 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast),
+      opacity var(--transition-fast);
   }
   .gc-ping-btn:hover:not(:disabled) {
     color: var(--accent);
@@ -897,7 +897,7 @@
   .chevron-wrap {
     display: inline-flex;
     align-items: center;
-    transition: transform 0.2s ease;
+    transition: transform var(--transition-move);
   }
   .chevron-wrap.rotated {
     transform: rotate(180deg);
@@ -941,9 +941,9 @@
     font-size: var(--font-size-xs);
     font-weight: 600;
     transition:
-      color 0.2s,
-      background 0.2s,
-      border-color 0.2s;
+      color var(--transition-normal),
+      background var(--transition-normal),
+      border-color var(--transition-normal);
     text-align: left;
     font-family: inherit;
   }
@@ -1137,8 +1137,8 @@
     align-items: center;
     justify-content: center;
     transition:
-      color 0.2s,
-      background 0.2s;
+      color var(--transition-normal),
+      background var(--transition-normal);
     border-radius: var(--radius-sm);
     flex-shrink: 0;
   }
@@ -1171,9 +1171,9 @@
     color: var(--fg-secondary);
     cursor: pointer;
     transition:
-      color 0.15s ease,
-      background 0.15s ease,
-      border-color 0.15s ease;
+      color var(--transition-fast),
+      background var(--transition-fast),
+      border-color var(--transition-fast);
   }
   .filter-chip:hover {
     background: var(--hover);
@@ -1251,7 +1251,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: opacity 0.15s ease;
+    transition: opacity var(--transition-fast);
   }
   button.lat:hover {
     opacity: 0.85;
@@ -1307,8 +1307,8 @@
     font-size: var(--font-size-xs);
     cursor: pointer;
     transition:
-      background 0.15s,
-      border-color 0.15s;
+      background var(--transition-fast),
+      border-color var(--transition-fast);
   }
   .proxy-grid-more:hover {
     background: var(--bg-card-hover);
@@ -1371,7 +1371,7 @@
   :global(.group-list) .gc-body {
     display: grid;
     grid-template-rows: 0fr;
-    transition: grid-template-rows 0.18s ease;
+    transition: grid-template-rows var(--transition-move);
   }
   :global(.group-list) .expanded .gc-body,
   :global(.group-list .group-card.expanded) .gc-body {

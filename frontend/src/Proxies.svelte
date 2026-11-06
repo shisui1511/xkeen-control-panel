@@ -949,12 +949,7 @@
 </script>
 
 <div class="container" {@attach pullToRefresh(() => fetchProxies())}>
-  <PageHeader
-    title={$t('proxies.title')}
-    subtitle={$t('proxies.subtitle')}
-    breadcrumbs={[{ label: $t('nav.group_proxy_subs') }, { label: $t('proxies.title') }]}
-    {onSwitchTab}
-  >
+  <PageHeader title={$t('proxies.title')} subtitle={$t('proxies.subtitle')}>
     {#if activeTab === 'groups'}
       <ClientExitIpBadge />
       {#if mihomoOffline}

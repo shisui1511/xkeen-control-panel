@@ -356,8 +356,8 @@
     height: 100%;
     border-radius: var(--radius-full);
     transition:
-      width 0.4s cubic-bezier(0.4, 0, 0.2, 1),
-      background-color 0.3s ease;
+      width var(--duration-slow) var(--ease-out),
+      background-color var(--transition-normal);
   }
 
   .sparkline-container {

@@ -38,10 +38,6 @@
     { value: 'mihomo', label: 'Mihomo' }
   ];
   const showList = $derived(!loading && !failed && !empty && $sourcesView !== null);
-
-  function focusAddField() {
-    document.getElementById('nodes-add-input')?.focus();
-  }
 </script>
 
 <div class="nodes-tab" data-testid="nodes-tab">
@@ -61,9 +57,7 @@
     <EmptyState
       title={$t('cfg.nodes.empty_title')}
       description={$t('cfg.nodes.empty_body')}
-      ctaText={$t('cfg.nodes.empty_cta')}
       plain
-      oncta={focusAddField}
     />
   {:else if showList && $sourcesView}
     <!-- Строка счётчика есть всегда: сегмент появляется в ней без сдвига списка -->

@@ -8,6 +8,7 @@
     icon: IconComponent = undefined,
     ctaText = '',
     ctaLoading = false,
+    ctaVariant = 'primary',
     plain = false,
     oncta = undefined
   }: {
@@ -16,6 +17,8 @@
     icon?: Component<any>;
     ctaText?: string;
     ctaLoading?: boolean;
+    /** secondary — когда основная кнопка того же действия уже стоит на панели над пустым состоянием. */
+    ctaVariant?: 'primary' | 'secondary';
     plain?: boolean;
     oncta?: () => void;
   } = $props();
@@ -30,7 +33,8 @@
   <h2 class="empty-state__title">{title}</h2>
   <p class="empty-state__description">{description}</p>
   {#if ctaText && oncta}
-    <Button variant="primary" loading={ctaLoading} title={ctaText} onclick={oncta}>{ctaText}</Button
+    <Button variant={ctaVariant} loading={ctaLoading} title={ctaText} onclick={oncta}
+      >{ctaText}</Button
     >
   {/if}
 </div>
@@ -78,6 +82,9 @@
     font-weight: 600;
     color: var(--fg-primary);
     margin: 0;
+  }
+  .empty-state > :global(.btn) {
+    margin-top: 6px;
   }
   .empty-state__description {
     font-size: var(--font-size-sm);
