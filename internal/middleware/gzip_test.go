@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestGzipJSON(t *testing.T) {
+func TestRouterGzipJSON(t *testing.T) {
 	big := `{"data":"` + strings.Repeat("x", 5000) + `"}`
 	h := GzipJSON(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

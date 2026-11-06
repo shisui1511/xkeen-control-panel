@@ -21,6 +21,9 @@ const (
 	RestartReasonPort    = "port"
 	RestartReasonTun     = "tun"
 	RestartReasonProfile = "profile"
+	// RestartReasonFirmwareDNS — перехват DNS роутера снимает старое перенаправление
+	// XKeen (proxy_dns): его правила с :53 пересобираются только полным перезапуском.
+	RestartReasonFirmwareDNS = "firmware_dns"
 )
 
 // RestartBase — сторона перехода владения, которую RestartReasons по двум

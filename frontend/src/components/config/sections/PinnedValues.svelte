@@ -120,8 +120,11 @@
     color: var(--fg-secondary);
   }
 
+  /* --fg-secondary общего .badge на --surface-tint поверх --bg-elevated в тёмной теме даёт
+     4.3:1 (ниже 4.5:1 для 12px); --fg-primary — не ниже 7:1 во всех темах */
   .pv-badge {
     flex-shrink: 0;
+    color: var(--fg-primary);
   }
 
   @media (pointer: coarse), (max-width: 768px) {

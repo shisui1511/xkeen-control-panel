@@ -1,0 +1,112 @@
+<script lang="ts">
+  import { t } from '../../../i18n';
+  import Icon from '../../../lib/components/Icon.svelte';
+  import {
+    dnsClockOffset,
+    dnsKernelTitle,
+    type DnsOutcome,
+    type DnsState
+  } from '../../../lib/configDns';
+
+  // Строки исхода без пользователя в карточке перехвата (D-28): откат по таймеру, возврат
+  // сторожем, смена ядра вне панели, непрошедшая проба после отката. Строка висит до
+  // следующего действия пользователя (карточка скрывает её сама, бэкенд снимает исход тем же
+  // действием). Ожидание ядра (D-14, D-16) — нейтральная строка без тоста.
+  let {
+    outcome,
+    state,
+    waitingReason,
+    kernel = ''
+  }: {
+    /** Исход из вида перехвата; undefined — строки исхода нет. */
+    outcome: DnsOutcome | undefined;
+    /** Состояние перехвата: в «Ждёт ядро» показывается строка ожидания. */
+    state: DnsState;
+    /**
+     * Причина ожидания: у disable_failed (выключение оборвалось сбоем) строки «вернётся
+     * сам» нет — строка состояния и блок сбоя просят повторить выключение.
+     */
+    waitingReason?: string;
+    /** Ядро-перехватчик из вида: подставляется, если в исходе ядро не пришло. */
+    kernel?: string;
+  } = $props();
+
+  /** Время сервера в локальных часах: «ЧЧ:ММ:СС». */
+  function clock(serverMs: number): string {
+    const d = new Date(serverMs - $dnsClockOffset);
+    return [d.getHours(), d.getMinutes(), d.getSeconds()]
+      .map((n) => String(n).padStart(2, '0'))
+      .join(':');
+  }
+
+  // Текст строки по виду исхода; ручной откат («Откатить сейчас») строки не даёт: решение
+  // принял сам пользователь
+  const text = $derived.by<string | null>(() => {
+    const o = outcome;
+    if (!o) return null;
+    const time = clock(o.at_ms);
+    switch (o.kind) {
+      case 'timeout':
+        return $t('cfg.dns.outcome_timeout', { time });
+      case 'panel_restart':
+        return $t('cfg.dns.outcome_panel_restart', { time });
+      case 'probe_failed':
+        return $t('cfg.dns.outcome_probe_failed', { reason: $t('cfg.dns.reason_probe'), time });
+      case 'watchdog':
+        return $t('cfg.dns.outcome_watchdog', { kernel: dnsKernelTitle(o.kernel || kernel), time });
+      case 'kernel_changed':
+        return $t('cfg.dns.outcome_kernel_changed', {
+          from: dnsKernelTitle(o.from),
+          to: dnsKernelTitle(o.to),
+          time
+        });
+      default:
+        return null;
+    }
+  });
+</script>
+
+{#if outcome && text !== null}
+  <div
+    class="alert alert-warning dns-outcome"
+    role="status"
+    data-testid="dns-outcome"
+    data-kind={outcome.kind}
+  >
+    <Icon name="warning" size={16} class="icon-first-line" />
+    <span class="dns-outcome-text">{text}</span>
+  </div>
+{/if}
+{#if state === 'waiting' && waitingReason !== 'disable_failed'}
+  <p class="dns-outcome-wait" role="status" data-testid="dns-outcome-waiting">
+    <Icon name="info" size={14} class="icon-first-line" />
+    <span class="dns-outcome-text">{$t('cfg.dns.outcome_waiting')}</span>
+  </p>
+{/if}
+
+<style>
+  .dns-outcome {
+    margin: 0;
+    min-width: 0;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2) var(--spacing-4);
+    font-size: var(--font-size-base);
+    line-height: 1.5;
+  }
+
+  .dns-outcome-wait {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-1);
+    margin: 0;
+    min-width: 0;
+    font-size: var(--font-size-xs);
+    line-height: 1.5;
+    color: var(--fg-secondary);
+  }
+
+  .dns-outcome-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+</style>

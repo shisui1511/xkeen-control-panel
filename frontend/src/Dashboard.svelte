@@ -42,6 +42,7 @@
   import Skeleton from './components/Skeleton.svelte';
   import ApiOffline from './components/ApiOffline.svelte';
   import KernelConflictBanner from './components/KernelConflictBanner.svelte';
+  import DnsConfirmBanner from './components/DnsConfirmBanner.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import PageHeader from './PageHeader.svelte';
   import ServiceStatusGroup from './components/dashboard/ServiceStatusGroup.svelte';
@@ -1088,6 +1089,12 @@
          не в блоке mihomoDependentTabs; во время окна перезапуска не показывается. -->
     {#if $conflictVisible}
       <KernelConflictBanner />
+    {/if}
+
+    <!-- Окно подтверждения перехвата DNS: на всех страницах, пока бэкенд сообщает окно;
+         при выключенном слое «Конфигурация» баннера и запросов перехвата нет. -->
+    {#if $configLayerEnabled}
+      <DnsConfirmBanner />
     {/if}
 
     {#key chunkReloadKey}

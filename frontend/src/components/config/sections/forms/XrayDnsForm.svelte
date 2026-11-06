@@ -6,10 +6,13 @@
     type CoreKernel,
     type ForceProxyView,
     type KeyIssue,
+    type PinnedValue,
     type SectionView
   } from '../../../../lib/configCores';
+  import { dnsTakeover, DEFAULT_DNS_GROUP_NAME } from '../../../../lib/configDns';
   import Select from '../../../Select.svelte';
   import AdvancedBlock from '../AdvancedBlock.svelte';
+  import PinnedValues from '../PinnedValues.svelte';
   import {
     KERNEL_DEFAULTS,
     commitSection,
@@ -24,6 +27,9 @@
   // «Дополнительно». Запись в черновик идёт по уходу фокуса через commitSection; ключа нет
   // в объекте — поле пустое с подсказкой умолчания, очистка поля снимает ключ. Чужая секция
   // (readonly) показывает действующие значения и ничего не пишет. Props — общий контракт форм.
+  // При перехвате DNS на Xray (D-19, D-20) блок «Перехват DNS» показывает закреплённые
+  // строки с сервера (section.pinned: слушатель, исходящий dns, маршрут, серверы), а под
+  // списком серверов — подпись о группе-цели; у чужой секции блока нет.
   let {
     kernel,
     section,
@@ -78,6 +84,33 @@
 
   const byField = $derived(issuesByField(issues));
   const advIssues = $derived(issues.filter((i) => !FIELD_KEYS.includes(i.key)));
+
+  // Перехват DNS держит Xray: состояние, ядро и группу-цель считает сервер
+  const TAKEOVER_STATES = ['on', 'window', 'applying'];
+  const takeover = $derived(
+    $dnsTakeover !== null &&
+      $dnsTakeover.kernel === 'xray' &&
+      TAKEOVER_STATES.includes($dnsTakeover.state)
+  );
+  // Группа не пришла — группа-цель по умолчанию (D-09); default_name — имя пробы резолва, не
+  // группа. Группа удалена — подписи нет (карточка в это время пишет «Группа … удалена»)
+  const takeoverGroup = $derived.by(() => {
+    const g = $dnsTakeover?.group;
+    if (!g) return DEFAULT_DNS_GROUP_NAME;
+    if (g.missing) return '';
+    return g.name || g.id || DEFAULT_DNS_GROUP_NAME;
+  });
+
+  // Ключи-коды закреплённых строк показываются подписями; прочие — как пришли
+  const PINNED_LABELS: Record<string, string> = {
+    'dns.servers.zones': 'cfg.dns.pinned_zones',
+    'dns.servers.nodes': 'cfg.dns.pinned_nodes'
+  };
+  const pinned = $derived<PinnedValue[]>(
+    section.pinned.map((p) =>
+      PINNED_LABELS[p.key] === undefined ? p : { key: $t(PINNED_LABELS[p.key]), value: p.value }
+    )
+  );
 
   function onOff(on: boolean): string {
     return $t(on ? 'cfg.sec.value_on' : 'cfg.sec.value_off');
@@ -150,8 +183,7 @@
             <li class="xf-item">
               <input
                 id="{uid}-server-{row.key}"
-                class="input xf-mono"
-                class:input-error={byField.has('servers')}
+                class={['input xf-mono', { 'input-error': byField.has('servers') }]}
                 type="text"
                 spellcheck="false"
                 autocomplete="off"
@@ -195,6 +227,11 @@
             </button>
           </div>
         {/if}
+      {/if}
+      {#if takeover && !readonly && takeoverGroup !== ''}
+        <p class="xf-hint" data-testid="{fieldTestId(kernel, ID, 'servers')}-via-group">
+          {$t('cfg.sec.f.servers_via_group', { group: takeoverGroup })}
+        </p>
       {/if}
     </div>
   </div>
@@ -269,6 +306,17 @@
     </div>
   </div>
 
+  {#if !readonly && pinned.length > 0}
+    <section
+      class="xf-pinned"
+      aria-labelledby="{uid}-pinned-title"
+      data-testid="section-pinned-xray-dns"
+    >
+      <h4 class="xf-pinned-title" id="{uid}-pinned-title">{$t('cfg.dns.pinned_title')}</h4>
+      <PinnedValues {kernel} id="dns-takeover" items={pinned} />
+    </section>
+  {/if}
+
   <AdvancedBlock
     {kernel}
     id={ID}
@@ -333,6 +381,21 @@
     font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--fg-secondary);
+    overflow-wrap: anywhere;
+  }
+
+  .xf-pinned {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+    min-width: 0;
+  }
+
+  .xf-pinned-title {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--fg-primary);
     overflow-wrap: anywhere;
   }
 

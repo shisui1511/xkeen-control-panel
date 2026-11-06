@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
@@ -159,6 +160,14 @@ type Layer struct {
 	checksOK    bool
 	// afterApply — хуки после успешного применения (AddAfterApply), до Start.
 	afterApply []func(ctx context.Context, info AfterApplyInfo)
+	// beforeApply — хуки до применения черновика (Hooks.BeforeApply), до Start:
+	// вызываются синхронно под замком применения.
+	beforeApply []func(st StateView)
+	// dnsSeq — счётчик событий dns (PublishDNS).
+	dnsSeq atomic.Uint64
+	// applySeq — номер запуска, который получают хуки BeforeApply и AfterApply
+	// одного «Применить».
+	applySeq atomic.Int64
 	// holder — кто держит исключительный замок применения вне конвейера
 	// (BeginExclusive: HolderGeodata*); пусто — никто. Под mu.
 	holder string
@@ -749,6 +758,16 @@ func (l *Layer) PublishSources() {
 	l.broker.Publish(Event{Type: EventSources, Data: SourcesEvent{Revision: l.store.Snapshot().DraftRevision}})
 }
 
+// PublishDNS сообщает клиентам, что состояние перехвата DNS изменилось (событие
+// dns со сквозным счётчиком): клиент по нему перечитывает состояние службы.
+// Выключенный слой молчит.
+func (l *Layer) PublishDNS() {
+	if !l.Enabled() {
+		return
+	}
+	l.broker.Publish(Event{Type: EventDNS, Data: DNSEvent{Seq: l.dnsSeq.Add(1)}})
+}
+
 // PublishRouting сообщает клиентам, что владение маршрутизацией или её дрейф
 // изменились (событие routing с текущей ревизией черновика). Выключенный слой
 // молчит.
@@ -956,6 +975,8 @@ func (l *Layer) UpdateLiveWith(fn func(view StateView) error) error {
 
 // StateView — копия секций слоя для сервисов-потребителей.
 type StateView struct {
+	// ApplySeq — номер запуска «Применить» (только в хуке BeforeApply).
+	ApplySeq      int64
 	DraftRevision int64
 	Draft         Sections
 	Applied       Sections
@@ -1016,6 +1037,9 @@ type AfterApplyInfo struct {
 	Source  SourceKind
 	Result  ResultView
 	Restart []RestartView
+	// ApplySeq — номер запуска, совпадающий с StateView.ApplySeq, который получил
+	// хук BeforeApply этого запуска; 0 — до запуска хуки BeforeApply не вызывались.
+	ApplySeq int64
 }
 
 // AddAfterApply добавляет хук, который слой вызывает асинхронно после каждого
@@ -1048,14 +1072,40 @@ func (l *Layer) fireAfterApply(req ApplyRequest, view ApplyView) {
 		return
 	}
 	info := AfterApplyInfo{
-		Trigger: req.Trigger,
-		Source:  req.Source,
-		Result:  *view.Result,
-		Restart: append([]RestartView(nil), view.Restart...),
+		Trigger:  req.Trigger,
+		Source:   req.Source,
+		Result:   *view.Result,
+		Restart:  append([]RestartView(nil), view.Restart...),
+		ApplySeq: req.ApplySeq,
 	}
 	for _, fn := range hooks {
 		l.spawn(func() { fn(l.ctx, info) })
 	}
+}
+
+// fireBeforeApply вызывает хуки Hooks.BeforeApply по порядку регистрации, каждый
+// со своей копией состояния. Вызывается под замком применения до запуска
+// конвейера; паника хука журналируется, применение идёт дальше. Возвращает номер
+// запуска: он идёт в ApplyRequest.ApplySeq и в AfterApplyInfo, чтобы хук после
+// применения нашёл снимок именно своего запуска.
+func (l *Layer) fireBeforeApply() int64 {
+	seq := l.applySeq.Add(1)
+	l.mu.Lock()
+	hooks := append([]func(StateView){}, l.beforeApply...)
+	l.mu.Unlock()
+	for _, fn := range hooks {
+		st := l.store.Snapshot()
+		view := StateView{ApplySeq: seq, DraftRevision: st.DraftRevision, Draft: st.Draft, Applied: st.Applied, Live: st.Live}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("configlayer: хук до применения: паника: %v", r)
+				}
+			}()
+			fn(view)
+		}()
+	}
+	return seq
 }
 
 // RegisterChecker добавляет проверку до записи в реестр. Допустима только до
@@ -1133,10 +1183,15 @@ func (l *Layer) OnDriftResolved(fn func()) error {
 // Hooks — всё, чем сервис подключается к слою: генераторы, проверка и хуки.
 // Пустые поля пропускаются.
 type Hooks struct {
-	Generators      []Generator
-	Checker         Checker
-	LiveCommitter   LiveCommitFunc
-	AfterApply      func(ctx context.Context, info AfterApplyInfo)
+	Generators    []Generator
+	Checker       Checker
+	LiveCommitter LiveCommitFunc
+	AfterApply    func(ctx context.Context, info AfterApplyInfo)
+	// BeforeApply вызывается синхронно под замком применения в StartApply и
+	// ApplyEdit до запуска конвейера и получает копию состояния (черновик, который
+	// сейчас применится, прежнее Applied, Live). Хук должен быть коротким: он
+	// держит замок применения; паника хука применение не валит.
+	BeforeApply     func(st StateView)
 	OnDriftResolved func()
 }
 
@@ -1175,6 +1230,9 @@ func (l *Layer) Register(h Hooks) error {
 	}
 	if h.AfterApply != nil {
 		l.afterApply = append(l.afterApply, h.AfterApply)
+	}
+	if h.BeforeApply != nil {
+		l.beforeApply = append(l.beforeApply, h.BeforeApply)
 	}
 	if h.OnDriftResolved != nil {
 		l.onDriftResolved = h.OnDriftResolved
@@ -1241,9 +1299,12 @@ func (l *Layer) StartApply(user bool) error {
 		release()
 		return ErrDriftBlocked
 	}
+	// Хуки до применения — под замком применения, после проверки дрейфа и до
+	// запуска конвейера (окно «Применить», D-08 фазы 148).
+	seq := l.fireBeforeApply()
 	if !l.spawn(func() {
 		defer release()
-		req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft}
+		req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft, ApplySeq: seq}
 		view := l.runPipeline(req)
 		release()
 		l.afterRun()
@@ -1291,7 +1352,9 @@ func (l *Layer) ApplyEdit(ctx context.Context, edit func(st StateView) (map[stri
 	if err != nil {
 		return ApplyView{}, err
 	}
-	req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft}
+	// Хуки до применения видят черновик с правкой, которая сейчас применится.
+	seq := l.fireBeforeApply()
+	req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft, ApplySeq: seq}
 	view := l.runPipeline(req)
 	if view.Result == nil || !view.Result.OK {
 		l.discardEdit(ev.DraftRevision, st.Draft, sections)
@@ -1517,6 +1580,24 @@ type SectionLiveRun struct {
 	// принятое вызывающим раньше (секция у панели), могло устареть, пока замок ждали.
 	// Ошибка Guard отменяет запуск; nil — проверки нет.
 	Guard func(st StateView) error
+	// Live — ключи живых данных запуска: подставляются генераторам и после успеха
+	// фиксируются в State.Live одной записью с манифестом (ApplyRequest.LiveCommit).
+	Live Sections
+	// ForceFullRestart — см. ApplyRequest.ForceFullRestart.
+	ForceFullRestart bool
+	// BeforeWrite и BeforeRollback — хуки запуска (см. ApplyRequest).
+	BeforeWrite    func(ctx context.Context) error
+	BeforeRollback func()
+	// ReleaseListener — запуск снимает слушатель :53 перехвата DNS: дрейф файлов не
+	// блокирует его, пишутся только файлы, затронутые живыми данными перехвата
+	// (см. ApplyRequest.ReleaseListener).
+	ReleaseListener bool
+	// Wait — ждать замки применения и жизненного цикла, как фоновый запуск
+	// (TryBegin с user=false), пока их не отпустят или не отменят ctx. Без Wait
+	// занятый замок сразу даёт ErrApplyBusy или ErrKernelBusy, как у «Применить» по
+	// кнопке. Нужен путям возврата DNS роутера прошивке: их запись не должна
+	// теряться из-за идущего применения или операции над ядром.
+	Wait bool
 }
 
 // RunSectionLive — запуск конвейера поверх применённого состояния с подменой
@@ -1525,9 +1606,10 @@ type SectionLiveRun struct {
 // записью с манифестом в Applied, а в Draft сливается функцией run.MergeDraft;
 // остальные правки черновика не применяются и остаются в нём. Владение
 // маршрутизацией и секциями не меняется. Занятость как у StartApply по кнопке
-// (user=true). Отказ проверки или перезапуска — ни Applied, ни Draft, ни файлы не
-// меняются; нерешённый дрейф — ErrDriftBlocked. Вызов синхронный; после снятия
-// замка идут afterRun и хуки AddAfterApply.
+// (user=true), с run.Wait — ожидание обоих замков. Отказ проверки или перезапуска — ни Applied, ни Draft, ни файлы не
+// меняются; нерешённый дрейф — ErrDriftBlocked. Ключи run.Live фиксируются в
+// State.Live той же записью; запуск допустим и только с ними, без секций. Вызов
+// синхронный; после снятия замка идут afterRun и хуки AddAfterApply.
 func (l *Layer) RunSectionLive(ctx context.Context, run SectionLiveRun) (ApplyView, error) {
 	if !l.Enabled() {
 		return ApplyView{}, ErrDisabled
@@ -1535,8 +1617,8 @@ func (l *Layer) RunSectionLive(ctx context.Context, run SectionLiveRun) (ApplyVi
 	if run.Trigger == "" {
 		return ApplyView{}, errors.New("configlayer: не задан триггер запуска")
 	}
-	if len(run.Sections) == 0 {
-		return ApplyView{}, errors.New("configlayer: не заданы секции запуска")
+	if len(run.Sections) == 0 && len(run.Live) == 0 {
+		return ApplyView{}, errors.New("configlayer: не заданы ни секции, ни живые данные запуска")
 	}
 	l.mu.Lock()
 	stopped := l.stopped
@@ -1544,7 +1626,7 @@ func (l *Layer) RunSectionLive(ctx context.Context, run SectionLiveRun) (ApplyVi
 	if stopped {
 		return ApplyView{}, ErrStopped
 	}
-	release, err := l.pipeline.TryBegin(ctx, true)
+	release, err := l.pipeline.TryBegin(ctx, !run.Wait)
 	if err != nil {
 		return ApplyView{}, l.mapBusy(err)
 	}
@@ -1561,6 +1643,92 @@ func (l *Layer) RunSectionLive(ctx context.Context, run SectionLiveRun) (ApplyVi
 	req := ApplyRequest{
 		Trigger: run.Trigger, Source: SourceApplied, Kernel: run.Kernel,
 		SectionsOverlay: run.Sections.Clone(), MergeDraft: run.MergeDraft,
+		LiveCommit: run.Live.Clone(), ForceFullRestart: run.ForceFullRestart,
+		BeforeWrite: run.BeforeWrite, BeforeRollback: run.BeforeRollback,
+		ReleaseListener: run.ReleaseListener,
+	}
+	view := l.runPipeline(req)
+	release()
+	l.afterRun()
+	l.fireAfterApply(req, view)
+	if view.Result != nil && view.Result.Code == ResultDriftBlocked {
+		return view, ErrDriftBlocked
+	}
+	return view, nil
+}
+
+// RestoreRun — параметры отката уже зафиксированного применения к снимку
+// (RunRestore).
+type RestoreRun struct {
+	// Trigger — что запустило откат (TriggerDNSRestore).
+	Trigger Trigger
+	// Kernel ограничивает запуск одним ядром; пусто — все установленные.
+	Kernel string
+	// Applied — применённое состояние снимка целиком: после успеха Applied равно
+	// ему посекционно, секций вне снимка в Applied не остаётся.
+	Applied Sections
+	// Live — ключи живых данных снимка; JSON null удаляет ключ.
+	Live Sections
+	// ResetDraftSections — секции черновика, которые возвращаются к снимку, если
+	// пользователь их не правил; остальной черновик не меняется (D-27).
+	ResetDraftSections []string
+	// ForceFullRestart — см. ApplyRequest.ForceFullRestart.
+	ForceFullRestart bool
+	// Guard проверяет состояние слоя под замком применения, до сборки; ошибка
+	// отменяет запуск. nil — проверки нет.
+	Guard func(st StateView) error
+	// BeforeWrite и BeforeRollback — хуки запуска (см. ApplyRequest).
+	BeforeWrite    func(ctx context.Context) error
+	BeforeRollback func()
+}
+
+// RunRestore возвращает прежнее применённое состояние через тот же конвейер:
+// сборка из снимка, проверки до записи, проверка обоими ядрами, запись с набором
+// копий, перезапуск только запущенного ядра, коммит одной записью (Applied,
+// ключи Live снимка, манифест). Черновик и его ревизия не меняются, кроме секций
+// run.ResetDraftSections без правки пользователя. Идущее применение откат ждёт, а
+// не отказывает (откат по таймеру не должен проваливаться из-за занятости).
+// Нерешённый дрейф — ErrDriftBlocked. Вызов синхронный; после снятия замка идут
+// afterRun и хуки AddAfterApply.
+func (l *Layer) RunRestore(ctx context.Context, run RestoreRun) (ApplyView, error) {
+	if !l.Enabled() {
+		return ApplyView{}, ErrDisabled
+	}
+	if run.Trigger == "" {
+		return ApplyView{}, errors.New("configlayer: не задан триггер запуска")
+	}
+	l.mu.Lock()
+	stopped := l.stopped
+	l.mu.Unlock()
+	if stopped {
+		return ApplyView{}, ErrStopped
+	}
+	release, err := l.pipeline.TryBegin(ctx, false)
+	if err != nil {
+		if l.ctx.Err() != nil {
+			return ApplyView{}, ErrStopped
+		}
+		return ApplyView{}, err
+	}
+	defer release()
+	if run.Guard != nil {
+		st, err := l.ReadState()
+		if err == nil {
+			err = run.Guard(st)
+		}
+		if err != nil {
+			return ApplyView{}, err
+		}
+	}
+	req := ApplyRequest{
+		Trigger: run.Trigger, Source: SourceApplied, Kernel: run.Kernel,
+		Restore: &RestoreSpec{
+			Applied:            run.Applied.Clone(),
+			Live:               run.Live.Clone(),
+			ResetDraftSections: append([]string(nil), run.ResetDraftSections...),
+		},
+		ForceFullRestart: run.ForceFullRestart,
+		BeforeWrite:      run.BeforeWrite, BeforeRollback: run.BeforeRollback,
 	}
 	view := l.runPipeline(req)
 	release()

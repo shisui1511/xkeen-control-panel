@@ -145,6 +145,17 @@ func (a *API) SettingsConfigLayer(w http.ResponseWriter, r *http.Request) {
 		return saveErr
 	}
 	if current && a.configLayer != nil {
+		// Перехват DNS роутера возвращается до переноса файлов (D-36): DNS прошивке,
+		// строка proxy_dns к значению до включения перехвата и перезапуск
+		// запущенного ядра, чтобы XKeen перестроил прежний перехват с :53. Ошибка
+		// оставляет флаг включённым.
+		if a.dns != nil {
+			if err := a.dns.ReleaseForFlagOff(a.configLayer.Context()); err != nil {
+				JSONErrorCodeDetail(w, http.StatusInternalServerError, "config_layer_disable_failed",
+					a.t(r, "configlayer.disable_failed"), maskURLsInText(utils.StripANSI(err.Error())))
+				return
+			}
+		}
 		// Перенос не обрывается закрытием вкладки и не ограничен дедлайном: он идёт
 		// под контекстом слоя, который отменяет только остановка панели.
 		if err := a.configLayer.Disable(a.configLayer.Context(), commitFlag); err != nil {

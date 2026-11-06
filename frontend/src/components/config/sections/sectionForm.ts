@@ -34,7 +34,13 @@ export const KERNEL_DEFAULTS: Record<string, Record<string, string>> = {
     ipv6: 'false',
     'bind-address': '*'
   },
-  'mihomo.dns': { enable: 'false', 'enhanced-mode': 'normal', ipv6: 'false' },
+  // listen без умолчания: ключа нет — слушателя DNS у ядра нет
+  'mihomo.dns': {
+    enable: 'false',
+    'enhanced-mode': 'normal',
+    ipv6: 'false',
+    'fake-ip-range': '198.18.0.1/16'
+  },
   'mihomo.inbounds': {
     'tun.enable': 'false',
     'tun.stack': 'system',

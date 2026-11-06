@@ -205,6 +205,52 @@
     return null;
   }
 
+  // Перехват DNS (фаза 148, D-28): исход без пользователя dns_outcome:<вид> — те же тексты,
+  // что строка в карточке; время — локальное время роутера из params.time. Прочие dns_ —
+  // событие уже случилось: общая строка со ссылкой на карточку, без сырого идентификатора
+  function describeDns(n: LayerNotice): Described | null {
+    if (!n.id.startsWith('dns_')) return null;
+    const p = n.params ?? {};
+    // Без времени фраза исхода («…, {время}.») не собирается — общая строка о событии
+    if (!p.time) return { notice: n, tone: 'warning', text: $t('cfg.dns.notice_event') };
+    const time = p.time;
+    const kernelName = (k: string | undefined): string =>
+      (k ? KERNEL_LABELS[k] : undefined) ?? $t('cfg.dns.kernel_unknown');
+    switch (n.id) {
+      case 'dns_outcome:timeout':
+        return { notice: n, tone: 'warning', text: $t('cfg.dns.outcome_timeout', { time }) };
+      case 'dns_outcome:panel_restart':
+        return { notice: n, tone: 'warning', text: $t('cfg.dns.outcome_panel_restart', { time }) };
+      case 'dns_outcome:probe_failed':
+        return {
+          notice: n,
+          tone: 'warning',
+          text: $t('cfg.dns.outcome_probe_failed', { reason: $t('cfg.dns.reason_probe'), time })
+        };
+      case 'dns_outcome:watchdog':
+        return {
+          notice: n,
+          tone: 'warning',
+          text: $t('cfg.dns.outcome_watchdog', {
+            kernel: kernelName(n.kernel ?? p.kernel),
+            time
+          })
+        };
+      case 'dns_outcome:kernel_changed':
+        return {
+          notice: n,
+          tone: 'warning',
+          text: $t('cfg.dns.outcome_kernel_changed', {
+            from: kernelName(p.from),
+            to: kernelName(p.to),
+            time
+          })
+        };
+      default:
+        return { notice: n, tone: 'warning', text: $t('cfg.dns.notice_event') };
+    }
+  }
+
   // Уведомления известных видов; неизвестные идентификаторы не показываем
   function describe(n: LayerNotice): Described | null {
     if (n.id === 'schema_reset') {
@@ -227,7 +273,7 @@
         })
       };
     }
-    return describeSource(n) ?? describeRouting(n) ?? describeGeodata(n);
+    return describeSource(n) ?? describeRouting(n) ?? describeGeodata(n) ?? describeDns(n);
   }
 
   // Уведомления о связи и об отказе провайдера сервер ведёт по одному на ядро, а в тексте

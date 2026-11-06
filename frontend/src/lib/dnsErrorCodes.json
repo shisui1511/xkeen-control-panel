@@ -1,0 +1,37 @@
+{
+  "codes": [
+    "busy",
+    "check_failed",
+    "draft_open",
+    "generic",
+    "group_missing",
+    "group_name_invalid",
+    "kernel_conflict",
+    "kernel_stopped",
+    "legacy_blocked",
+    "legacy_off_failed",
+    "name_invalid",
+    "no_window",
+    "not_enabled",
+    "override_failed",
+    "port_busy",
+    "probe_external",
+    "probe_local",
+    "restart_failed",
+    "rollback_failed",
+    "routing_not_managed",
+    "section_foreign",
+    "self_server",
+    "unavailable",
+    "window_active"
+  ],
+  "issues": [
+    "dns_group_missing",
+    "dns_group_name_invalid",
+    "dns_routing_required",
+    "dns_section_required",
+    "dns_self_server",
+    "dns_zone_dup",
+    "dns_zone_invalid"
+  ]
+}

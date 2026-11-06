@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { t } from '../../../i18n';
-  import { activeKernelName } from '../../../stores';
+  import { activeKernelName, configLayerEnabled } from '../../../stores';
   import Button from '../../Button.svelte';
   import EmptyState from '../../EmptyState.svelte';
   import Skeleton from '../../Skeleton.svelte';
@@ -20,6 +20,8 @@
   import ProfilesCard from '../profiles/ProfilesCard.svelte';
   import TakeSectionModal from './TakeSectionModal.svelte';
   import { coresBusy } from './coresOwner';
+  import DnsTakeoverCard from '../dns/DnsTakeoverCard.svelte';
+  import { startDns, stopDns } from '../../../lib/configDns';
 
   // Вкладка «Xray │ Mihomo»: переключатель ядра, строка состояния, загрузка, пустое
   // состояние и карточки секций (SEC-01). Оба вида ядер загружаются при открытии и остаются
@@ -66,7 +68,13 @@
 
   onMount(() => {
     loadAll();
-    return onCoresChanged(loadAll);
+    // Состояние перехвата DNS (карточка перед секцией DNS) — общий стор на оба ядра
+    startDns();
+    const offCores = onCoresChanged(loadAll);
+    return () => {
+      offCores();
+      stopDns();
+    };
   });
 
   // Активное ядро; при конфликте или без запущенного — Xray, если установлен, иначе Mihomo
@@ -152,6 +160,15 @@
       : []
   );
   const takeBlocked = $derived($coresBusy || $applyRunning);
+
+  // Ссылка «К форме DNS» карточки перехвата: раскрыть карточку секции DNS и перейти к ней
+  async function openDnsForm(k: CoreKernel): Promise<void> {
+    open[`${k}.dns`] = true;
+    await tick();
+    const toggle = document.querySelector<HTMLElement>(`[data-testid="section-toggle-${k}-dns"]`);
+    toggle?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    toggle?.focus({ preventScroll: true });
+  }
 </script>
 
 <div class="cores-tab" data-testid="cores-tab">
@@ -228,6 +245,10 @@
         {/if}
         <div class="cores-sections" data-testid="cores-sections-{k}">
           {#each ordered(view) as sec (sec.id)}
+            <!-- Перехват DNS роутера: одна копия в DOM, в панели выбранного ядра перед DNS -->
+            {#if sec.id === 'dns' && k === kernel && $configLayerEnabled}
+              <DnsTakeoverCard currentKernel={k} onopenform={() => void openDnsForm(k)} />
+            {/if}
             <SectionCard
               kernel={k}
               section={sec}

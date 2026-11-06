@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
@@ -37,9 +39,12 @@ const (
 // checkerID — идентификатор проверки секций ядер в реестре слоя.
 const checkerID = "cores_check"
 
-// groupsSection — имя секции черновика с группами маршрутизации (пакет routing
-// импортирует cores, обратный импорт невозможен).
-const groupsSection = "groups"
+// groupsSection и rulesSection — имена секций черновика с группами и правилами
+// маршрутизации (пакет routing импортирует cores, обратный импорт невозможен).
+const (
+	groupsSection = "groups"
+	rulesSection  = "rules"
+)
 
 // Error — ошибка сервиса с кодом и параметрами текста для клиента (имя файла,
 // ключ, строка). Секретов и значений секций в параметрах нет.
@@ -436,6 +441,8 @@ func (s *Service) viewXray(v *KernelView, st configlayer.StateView) error {
 	}
 	tooOld := s.xkeenTooOld()
 	byID := map[string]json.RawMessage{}
+	dnsLive, dnsOn := configlayer.ParseDNSTakeoverLive(st.Live)
+	dnsOn = dnsOn && dnsLive.Kernel == configlayer.KernelXray
 
 	for _, spec := range XraySpecs {
 		sc := scans[spec.ID]
@@ -479,6 +486,9 @@ func (s *Service) viewXray(v *KernelView, st configlayer.StateView) error {
 		if cs.Managed || taken {
 			sv.PanelFile = spec.File
 			sv.Pinned = append(sv.Pinned, XrayPinned(spec.ID, sv.Value)...)
+			if spec.ID == xrayDNSSection && dnsOn {
+				sv.Pinned = append(sv.Pinned, xrayDNSTakeoverPinned(dnsLive, st.Draft)...)
+			}
 		}
 		if taken {
 			sv.Files = []string{spec.File}
@@ -555,6 +565,8 @@ func (s *Service) viewMihomo(v *KernelView, st configlayer.StateView) error {
 	panelish := prof.Owner == ownerPanel || prof.Owner == ownerPending
 	releasing := prof.Owner == ownerReleasing
 	applied := configlayer.DesiredCores(st.Applied)
+	dnsLive, dnsOn := configlayer.ParseDNSTakeoverLive(st.Live)
+	dnsOn = dnsOn && dnsLive.Kernel == configlayer.KernelMihomo
 
 	var seeds map[string]json.RawMessage
 	if !panelish && !releasing && perr == nil {
@@ -599,6 +611,10 @@ func (s *Service) viewMihomo(v *KernelView, st configlayer.StateView) error {
 				sv.Value = json.RawMessage("{}")
 			}
 		}
+		if spec.ID == mihomoDNS && dnsOn && (panelish || releasing) {
+			sv.Pinned = append(sv.Pinned, MihomoDNSTakeoverPinned(dnsLive, dnsParams(st.Draft),
+				mihomoEnhancedMode(sv.Value), directDNSRuleCount(st.Draft))...)
+		}
 		fillForm(&sv, configlayer.KernelMihomo)
 		byID[spec.ID] = sv.Value
 		v.Sections = append(v.Sections, sv)
@@ -618,6 +634,153 @@ func (s *Service) viewMihomo(v *KernelView, st configlayer.StateView) error {
 		}
 	}
 	return nil
+}
+
+// --- закреплённые значения перехвата DNS (D-19, DNSF-01, DNSF-04) ---
+
+// Теги и порт частей Xray под перехватом DNS — те же строки, что константы
+// TagDNSIn, TagDNSIn6, TagDNSOut и xdnsPort генератора (routing/xray_gen.go,
+// routing/dns_xray.go; пакет routing импортирует cores): менять только вместе.
+const (
+	xrayDNSSection = "dns"
+	xrayDNSTagIn   = "xcp-dns-in"
+	xrayDNSTagIn6  = "xcp-dns-in6"
+	xrayDNSTagOut  = "xcp-dns-out"
+	xrayDNSPort    = "53"
+)
+
+// Ключи-коды закреплённых строк Xray, которые интерфейс показывает подписями
+// (cfg.dns.pinned_zones, cfg.dns.pinned_nodes).
+const (
+	pinnedDNSZones = "dns.servers.zones"
+	pinnedDNSNodes = "dns.servers.nodes"
+)
+
+// dnsParams — параметры перехвата из секции dns_takeover черновика; секция не
+// разбирается — нулевые параметры (генератор тогда берёт те же умолчания).
+func dnsParams(sections configlayer.Sections) configlayer.DNSTakeoverParams {
+	p, err := configlayer.ParseDNSTakeoverParams(sections[configlayer.SectionDNSTakeover])
+	if err != nil {
+		return configlayer.DNSTakeoverParams{}
+	}
+	return p
+}
+
+// dnsGroupName — имя группы-цели перехвата: группа секции dns_takeover или
+// группа по умолчанию (D-09). Группы нет в секции groups — имя по умолчанию
+// или id (выпуск такой конфигурации всё равно отклонит генератор).
+func dnsGroupName(sections configlayer.Sections, p configlayer.DNSTakeoverParams) string {
+	if p.Group == "" {
+		return configlayer.DefaultDNSGroupName
+	}
+	if name, ok := configlayer.DNSTargetGroupName(sections, p.Group); ok && name != "" {
+		return name
+	}
+	return p.Group
+}
+
+// xrayDNSTakeoverPinned — закреплённые строки секции DNS Xray при перехвате на
+// Xray: входящие слушателя :53 (адреса — Live.Listen или по IPv6 роутера, как
+// в xdnsInbounds генератора), исходящий dns, маршрут слушателя в исходящий,
+// серверы через группу-цель (D-20) и серверы локальных зон и имён узлов
+// напрямую (D-11, D-18).
+func xrayDNSTakeoverPinned(live configlayer.DNSTakeoverLive, sections configlayer.Sections) []configlayer.PinnedValue {
+	var addrs []string
+	for _, a := range live.Listen {
+		a = strings.TrimSpace(a)
+		if h, _, err := net.SplitHostPort(a); err == nil {
+			a = h
+		}
+		a = strings.Trim(a, "[]")
+		if a != "" && !slices.Contains(addrs, a) {
+			addrs = append(addrs, a)
+		}
+	}
+	if len(addrs) == 0 {
+		addrs = []string{"0.0.0.0"}
+		if live.IPv6 {
+			addrs = []string{"::"}
+		}
+	}
+	out := make([]configlayer.PinnedValue, 0, len(addrs)+5)
+	tags := make([]string, 0, len(addrs))
+	for i, a := range addrs {
+		tag := xrayDNSTagIn
+		switch {
+		case i == 1:
+			tag = xrayDNSTagIn6
+		case i > 1:
+			tag = xrayDNSTagIn + "-" + strconv.Itoa(i+1)
+		}
+		tags = append(tags, tag)
+		out = append(out, configlayer.PinnedValue{Key: "inbound " + tag, Value: net.JoinHostPort(a, xrayDNSPort)})
+	}
+	return append(out,
+		configlayer.PinnedValue{Key: "outbound " + xrayDNSTagOut, Value: "dns"},
+		configlayer.PinnedValue{Key: "routing: " + strings.Join(tags, ", "), Value: xrayDNSTagOut},
+		configlayer.PinnedValue{Key: "servers", Value: dnsGroupName(sections, dnsParams(sections))},
+		configlayer.PinnedValue{Key: pinnedDNSZones, Value: "direct"},
+		configlayer.PinnedValue{Key: pinnedDNSNodes, Value: "direct"},
+	)
+}
+
+// mihomoEnhancedMode — значение enhanced-mode секции DNS Mihomo; нет ключа или
+// не строка — пусто.
+func mihomoEnhancedMode(value json.RawMessage) string {
+	raw, ok := objOf(value).Get("enhanced-mode")
+	if !ok {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	return s
+}
+
+// directDNSRuleCount — число direct-правил, домены и списки которых панель
+// пишет в nameserver-policy (выборка D-21, как routing.DirectDNSRules): правило
+// включено, цель direct, не «своё правило ядра», есть условия, и все они —
+// домены или geosite. Минимальный разбор секции rules: пакет routing отсюда не
+// импортируется. Секция не разбирается — 0 (такую конфигурацию генератор не
+// выпустит).
+func directDNSRuleCount(sections configlayer.Sections) int {
+	raw, ok := sections[rulesSection]
+	if !ok || isEmptyValue(raw) {
+		return 0
+	}
+	var cfg struct {
+		Items []struct {
+			Enabled bool            `json:"enabled"`
+			Raw     json.RawMessage `json:"raw"`
+			Target  struct {
+				Kind string `json:"kind"`
+			} `json:"target"`
+			Conds []struct {
+				Type string `json:"type"`
+			} `json:"conds"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(raw, &cfg) != nil {
+		return 0
+	}
+	n := 0
+	for _, r := range cfg.Items {
+		if !r.Enabled || !isEmptyValue(r.Raw) || r.Target.Kind != "direct" || len(r.Conds) == 0 {
+			continue
+		}
+		all := true
+		for _, c := range r.Conds {
+			if c.Type != "domain" && c.Type != "geosite" {
+				all = false
+				break
+			}
+		}
+		if all {
+			n++
+		}
+	}
+	return n
 }
 
 // --- предпросмотр и взятие ---
