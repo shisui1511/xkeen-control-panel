@@ -362,7 +362,7 @@
       title: $t('editor.unsaved_changes_title'),
       message: $t('editor.unsaved_warning'),
       variant: 'warning',
-      confirmLabel: $t('app.continue')
+      confirmLabel: $t('editor.discard_changes')
     });
   }
 

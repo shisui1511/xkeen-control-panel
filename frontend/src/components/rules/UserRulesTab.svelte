@@ -89,7 +89,7 @@
 
   async function deleteRule(id: string) {
     const confirmed = await showConfirm({
-      title: $t('rules.delete_rule'),
+      title: $t('rules.delete_confirm_title'),
       message: $t('rules.delete_confirm'),
       confirmLabel: $t('app.delete'),
       variant: 'danger'

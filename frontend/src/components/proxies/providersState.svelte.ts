@@ -314,7 +314,7 @@ export class ProvidersState {
               get(t)('subscr.refresh.mihomo_failed').replace('{message}', err.reason)
             );
           } else {
-            showToast('error', get(t)('app.error'));
+            showToast('error', get(t)('subscr.refresh.failed'));
           }
         }
       }
@@ -341,7 +341,7 @@ export class ProvidersState {
       }
     } catch (e: any) {
       if (e?.status === 401) return;
-      showToast('error', get(t)('app.error'));
+      showToast('error', get(t)('subscr.refresh.failed'));
     } finally {
       this.refreshLoading[id] = false;
     }

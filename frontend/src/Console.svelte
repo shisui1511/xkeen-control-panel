@@ -325,8 +325,8 @@
       <button class="btn btn-secondary" onclick={cancelConfirm} title={$t('app.cancel')}>
         {$t('app.cancel')}
       </button>
-      <button class="btn btn-danger" onclick={confirmExecute} title={$t('app.confirm')}>
-        {$t('app.confirm')}
+      <button class="btn btn-danger" onclick={confirmExecute}>
+        {$t('console.confirm_run')}
       </button>
     </div>
   {/if}
