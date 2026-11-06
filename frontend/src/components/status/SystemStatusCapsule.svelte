@@ -92,9 +92,11 @@
   let ledClass = $derived.by(() => {
     if ($isServiceRestarting) return 'led-amber-pulse';
     if ($isConflict) return 'led-red';
+    // Ядро не выбрано (XKeen ещё не поставлен или не настроен) — это не авария,
+    // а незавершённая настройка: серая точка, а не красная.
+    if (!activeKernel || activeKernel === 'none') return 'led-gray';
     if (!isXkeenRunning) return 'led-red';
-    if (activeKernel && activeKernel !== 'none') return 'led-green';
-    return 'led-gray';
+    return 'led-green';
   });
 
   let kernelDisplayName = $derived.by(() => {
@@ -132,8 +134,11 @@
       aria-expanded={isMenuOpen}
     >
       <span class="led-dot {ledClass}"></span>
-      <span class="mobile-kernel">{kernelDisplayName}</span>
-      {#if $capsuleConfigStore.showTraffic}
+      <span class="mobile-kernel" class:is-wide={!activeKernel || activeKernel === 'none'}
+        >{kernelDisplayName}</span
+      >
+      <!-- Без ядра трафик всегда «0 B/s»: место в узкой шапке отдаём подписи состояния -->
+      {#if $capsuleConfigStore.showTraffic && activeKernel && activeKernel !== 'none'}
         <span class="mobile-traffic">↓↑ {combinedSpeedFormatted}</span>
       {/if}
       <!-- Accessible name = visible text + purpose (WCAG 2.5.3 Label in Name) -->
@@ -610,6 +615,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* Без ядра скорость не показывается — её место занимает подпись состояния */
+  .mobile-kernel.is-wide {
+    max-width: 128px;
   }
 
   .mobile-traffic {

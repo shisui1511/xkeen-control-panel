@@ -62,7 +62,10 @@
   const stateKnown = $derived($mihomoApiState !== 'unknown');
   const offline = $derived(offlineReason !== null);
   const needApiText = $derived(
-    offlineReason === 'api_down' ? $t('rules.tabs_need_api_down') : $t('rules.tabs_need_api')
+    $t(offlineReason === 'api_down' ? 'rules.tabs_need_api_down' : 'rules.tabs_need_api', {
+      diag: $t('rules.tab_diagnostic'),
+      all: $t('rules.tab_all_rules')
+    })
   );
 
   // Custom Rules State

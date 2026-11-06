@@ -112,18 +112,25 @@
               <div class="res-head">
                 <span class="res-label">{$t('dash.disk')}</span>
                 <span class="res-pct" style="color: {getPctColor(diskUsedPct)};"
-                  >{diskUsedPct.toFixed(1)}%</span
+                  >{diskUsedPct.toFixed(0)}%</span
                 >
               </div>
+              <!-- Как у ОЗУ: крупно — занятое (к нему же относятся процент и полоса),
+                   свободное место — в подписи -->
               <div class="res-value">
-                {formatBytes(systemStats.disk.free)}
-                <span class="res-unit">{$t('dash.free_suffix')}</span>
+                {formatBytes(systemStats.disk.used)}
               </div>
               <div
                 class="res-note"
-                title={$t('dash.disk_of_total', { total: formatBytes(systemStats.disk.total) })}
+                title={$t('dash.disk_of_total_free', {
+                  total: formatBytes(systemStats.disk.total),
+                  free: formatBytes(systemStats.disk.free)
+                })}
               >
-                {$t('dash.disk_of_total', { total: formatBytes(systemStats.disk.total) })}
+                {$t('dash.disk_of_total_free', {
+                  total: formatBytes(systemStats.disk.total),
+                  free: formatBytes(systemStats.disk.free)
+                })}
               </div>
               <div class="res-bar">
                 <div
@@ -141,7 +148,7 @@
             <div class="res-head">
               <span class="res-label">{$t('dash.ram')}</span>
               <span class="res-pct" style="color: {getPctColor(ramUsedPct)};"
-                >{ramUsedPct.toFixed(1)}%</span
+                >{ramUsedPct.toFixed(0)}%</span
               >
             </div>
             <div class="res-value">
@@ -164,8 +171,10 @@
             <div class="res-head">
               <span class="res-label">{$t('dash.load')}</span>
               {#if loadPerCorePct !== null}
-                <span class="res-pct" style="color: {getPctColor(loadPerCorePct)};"
-                  >{loadPerCorePct.toFixed(0)}%</span
+                <span
+                  class="res-pct"
+                  style="color: {getPctColor(loadPerCorePct)};"
+                  title={$t('dash.load_pct_title')}>{loadPerCorePct.toFixed(0)}%</span
                 >
               {/if}
             </div>

@@ -12,6 +12,7 @@
   import ProviderUrlResult from './ProviderUrlResult.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import EmptyState from '../EmptyState.svelte';
+  import StatusBadge from '../StatusBadge.svelte';
   import Button from '../Button.svelte';
   import DatIcon from '../../lib/components/icons/Dat.svelte';
 
@@ -160,9 +161,9 @@
       <span class="header-title">{$t('rules.tab_providers')}</span>
       <span class="header-badge">{providers.length}</span>
       {#if offline}
-        <span class="badge badge-info offline-badge" data-testid="rules-offline-badge"
-          >{offlineLabel(offline)}</span
-        >
+        <span data-testid="rules-offline-badge">
+          <StatusBadge variant="idle" label={offlineLabel(offline)} />
+        </span>
       {/if}
       {#if emptyCount > 0}
         <span class="header-warning" role="status">
@@ -211,7 +212,7 @@
   {:else if providers.length === 0}
     <EmptyState
       title={$t('rules.no_providers')}
-      description={$t('rules.providers_subtitle')}
+      description={$t('rules.no_providers_desc')}
       icon={DatIcon}
     />
   {:else}
@@ -387,10 +388,6 @@
 
 <style>
   /* Светлая тема: акцентный текст на подложке бейджа даёт 4,0:1, нужно 4,5:1. */
-  .offline-badge {
-    color: color-mix(in srgb, var(--accent-text, var(--accent)) 65%, var(--fg-primary));
-  }
-
   .header-warning {
     font-size: var(--font-size-xs);
     font-weight: 600;

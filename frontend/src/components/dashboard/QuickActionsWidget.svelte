@@ -1,7 +1,13 @@
 <script lang="ts">
   import { t } from '../../i18n';
   import { apiFetch, apiFetchJSON } from '../../lib/api';
-  import { showToast, showConfirm, mihomoApiReady, mihomoOfflineReason } from '../../stores';
+  import {
+    showToast,
+    showConfirm,
+    mihomoApiReady,
+    mihomoOfflineReason,
+    isConflict
+  } from '../../stores';
   import Icon from '../../lib/components/Icon.svelte';
   import Card from '../Card.svelte';
   import Section from '../Section.svelte';
@@ -22,6 +28,11 @@
   // а title объясняет причину. Подписки и резервная копия от API ядра не зависят.
   const offlineTitle = $derived(
     $mihomoOfflineReason ? $t(`dash.mihomo_offline_${$mihomoOfflineReason}`) : null
+  );
+  // Причина видна прямо в подписи строки, а не только во всплывающей подсказке:
+  // серая кнопка без объяснения выглядит сломанной.
+  const unavailableReason = $derived(
+    $mihomoApiReady ? null : (offlineTitle ?? ($isConflict ? $t('kernel.conflict_blocked') : null))
   );
 
   async function handleRefreshSubs() {
@@ -195,7 +206,11 @@
           </div>
           <div class="qa-content">
             <div class="qa-title">{$t('dash.qa_latency_test_title')}</div>
-            <div class="qa-sub">{$t('dash.qa_latency_test_sub')}</div>
+            {#if unavailableReason}
+              <div class="qa-sub qa-reason">{unavailableReason}</div>
+            {:else}
+              <div class="qa-sub">{$t('dash.qa_latency_test_sub')}</div>
+            {/if}
           </div>
           <span class="qa-chevron"><Icon name="chevron-right" size={14} /></span>
         </button>
@@ -217,7 +232,11 @@
           </div>
           <div class="qa-content">
             <div class="qa-title title-danger">{$t('dash.qa_reset_sessions_title')}</div>
-            <div class="qa-sub">{$t('dash.qa_reset_sessions_sub')}</div>
+            {#if unavailableReason}
+              <div class="qa-sub qa-reason">{unavailableReason}</div>
+            {:else}
+              <div class="qa-sub">{$t('dash.qa_reset_sessions_sub')}</div>
+            {/if}
           </div>
           <span class="qa-chevron"><Icon name="chevron-right" size={14} /></span>
         </button>
@@ -293,10 +312,19 @@
     cursor: not-allowed;
   }
 
+  /* Неактивная строка: гаснут значок и шеврон, а текст остаётся читаемым
+     (вторичный цвет, не прозрачность) — в подписи написано, почему действие недоступно. */
   .qa-btn:disabled .qa-icon-wrap,
-  .qa-btn:disabled .qa-content,
   .qa-btn:disabled .qa-chevron {
     opacity: 0.5;
+  }
+
+  .qa-btn:disabled .qa-title {
+    color: var(--fg-secondary);
+  }
+
+  .qa-reason {
+    color: var(--fg-secondary);
   }
 
   .qa-icon-wrap {

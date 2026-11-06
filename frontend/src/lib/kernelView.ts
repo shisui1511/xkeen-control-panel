@@ -93,7 +93,13 @@ export function resultMessage(k: KernelLike): I18nRef | null {
 export function failureMessage(k: KernelLike): I18nRef | null {
   if (k.status !== 'failed') return null;
   const kind = k.error_kind;
-  if (!kind || !(ERROR_KINDS as readonly string[]).includes(kind)) return null;
+  // Проверка обновлений отдаёт сбой запроса к GitHub без error_kind, сырым текстом
+  // («GitHub API HTTP 403»): человеку — понятная фраза, код ответа — в скобках.
+  if (!kind) {
+    const m = /^GitHub API(?: error)?:?\s*(.*)$/.exec(k.message ?? '');
+    return m ? { key: 'svc.kernel_error_github', params: { detail: m[1].trim() } } : null;
+  }
+  if (!(ERROR_KINDS as readonly string[]).includes(kind)) return null;
   const key = `svc.kernel_error_${kind}`;
   if (kind === 'no_release') return { key };
   const message = k.message ?? '';
@@ -106,7 +112,8 @@ const UNKNOWN_KERNEL_VERSIONS = ['error', 'unknown'];
 
 export function kernelBadge(k: KernelLike): KernelBadge {
   if (!formatKernelVersion(k.current_version)) {
-    return { variant: 'stopped', key: 'kernel.status.not_installed' };
+    // «Не установлено» — нейтральное состояние, как на дашборде, а не красная авария
+    return { variant: 'idle', key: 'kernel.status.not_installed' };
   }
   if (k.status === 'checking') return { variant: 'idle', key: 'svc.channel_checking' };
   if (k.status === 'failed') return { variant: 'stopped', key: 'svc.kernel_error_badge' };
