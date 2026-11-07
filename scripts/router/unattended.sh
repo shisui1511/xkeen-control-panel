@@ -453,8 +453,11 @@ ua_run() {
     else
       _unread="полный прогон $_date: красный, новых падений $_new"
     fi
-    # История (D-20): база добора и bisect ищет прогон «до» в ней
-    if [ -f "$ROOT/scripts/router/history.mjs" ]; then
+    # История (D-20): база добора и bisect ищет прогон «до» в ней. Прерванный прогон не пишется (как
+    # и в run.sh, где выход 130 раньше записи): частичный прогон без падений стал бы «зелёным полным»
+    if [ "$_rc" = 130 ]; then
+      _hist="история: не записано (прогон прерван)"
+    elif [ -f "$ROOT/scripts/router/history.mjs" ]; then
       if node "$ROOT/scripts/router/history.mjs" append "$_report"; then
         _hist="история: записано"
       else

@@ -12,7 +12,10 @@
 //                   results.tsv, иначе время записи
 //     sha           40 hex: meta (sha=), иначе «- SHA:» report.md
 //     suite         full|changed|smoke|session|harness|rerun|bisect|delta|reboot|- («- Набор:»
-//                   report.md; у этапа сессии — session)
+//                   report.md; у этапа сессии — session). Неполный полный прогон — прерванный
+//                   («- Прерван: да»), с незакоммиченными правками, суженный окружением (narrow= в
+//                   meta не none) или одним ядром (отладка RT_CORES в plan.txt) — пишется как -: иначе
+//                   он стал бы «прошлым зелёным полным» для bisect, тренда и частот
 //     release       тег («- Релиз:» report.md) или -
 //     report        имя каталога отчёта; у этапа сессии — <сессия>/<NN>-<этап>
 //     target        цель (каталог results.tsv)
@@ -235,6 +238,14 @@ function reportInfo(dir) {
   if (!SUITES.has(suite)) suite = '-';
   let release = (md.match(/^- Релиз: (\S+)/m) || [])[1] || '-';
   if (!/^[A-Za-z0-9._+-]+$/.test(release)) release = '-';
+  if (suite === 'full') {
+    const interrupted = /^- Прерван: да/m.test(md);
+    const dirty = /^dirty=true\s*$/m.test(meta) || /^- SHA: [0-9a-f]{40} \(незакоммиченные правки: true\)/m.test(md);
+    // narrow= пишет run.sh с фазы 148.1; у старых отчётов строки нет — они не отсекаются
+    const narrow = (meta.match(/^narrow=(.*)$/m) || [])[1];
+    const narrowed = (narrow !== undefined && narrow.trim() !== 'none') || /отладка RT_CORES/.test(readText(path.join(dir, 'plan.txt')));
+    if (interrupted || dirty || narrowed) suite = '-';
+  }
   return { sha: sha && SHA_RE.test(sha) ? sha : null, suite, release };
 }
 
