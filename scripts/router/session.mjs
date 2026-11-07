@@ -18,6 +18,9 @@
 //                                           true — все проходы до конца (полный список
 //                                           падений), false — остановка на первом
 //                                           несовпадении (см. ниже)
+//     "budget_reason": "…",                 необязательно: почему спека сверх бюджета 20 мин
+//                                           (непустая строка до 300 символов без перевода
+//                                           строки), см. «Оценка и бюджет»
 //     "passes": [
 //       {
 //         "name": "before-fix",             [a-z0-9-]
@@ -169,6 +172,18 @@
 // на ядре без полного состава определяется по specFacts. Settle после Go — один раз перед первым
 // спеком. Несовпадение после спека останавливает проход до следующего спека.
 //
+// Оценка и бюджет (D-23): оценка длительности сессии — сумма по проходам и ядрам медиан
+// выбранных тестов из истории (тест без медианы на ядре — медиана другого ядра, иначе 30 с) и
+// накладных расходов: деплой и смоук на смену продукта 180 с, переключение ядра 45 с, settle
+// после Go 30 с, запуск pw-suite.sh 15 с на спек; проход-прогон и вложенная сессия — max_minutes
+// или 15 мин. dry-run печатает `Оценка: N мин (бюджет 20 мин)` и при превышении — `сверх
+// бюджета: причина — <budget_reason>` или `сверх бюджета: нет budget_reason`. С --budget (только
+// вместе с --dry-run) спека сверх бюджета без budget_reason — код 4: проверка плана не пускает
+// спеку на часы без причины. Настоящий запуск сверх бюджета не запрещён: строка предупреждения в
+// session.log и stderr, сессия идёт. После возврата стенда отчёты этапов сессии и прогонов
+// наборов записываются в историю (history.mjs append): оценки следующих сессий опираются на
+// них; ошибка записи код сессии не меняет (строка в «Стенд в конце»).
+//
 // Порядок: проходы по очереди; внутри прохода ядра змейкой, первым — активное. На N проходов
 // приходится не больше N переключений, и ещё одно в конце, если стенд не на исходном ядре.
 // Сборка ставится в начале и при смене продукта.
@@ -178,13 +193,17 @@
 // (итог по ожиданиям).
 //
 // Режимы без стенда (из корня репозитория):
-//   node scripts/router/session.mjs --dry-run <спека>   план этапов
+//   node scripts/router/session.mjs --dry-run <спека>   план этапов, порядок и оценка
+//   node scripts/router/session.mjs --dry-run --budget <спека>
+//                                                       то же; сверх бюджета без
+//                                                       budget_reason — код 4
 //   node scripts/router/session.mjs --target <спека>    проверить спеку и напечатать цель
 //
 // Код выхода сессии: 0 — все ожидания совпали и стенд вернулся в исходное состояние;
 // 1 — расхождение, или этап сломался, или стенд не вернулся; 2 — неверная спека или запуск
 // не через run.sh; 3 — сбой связи ПК↔стенд (не красный прогон, разбор по AGENTS.md; в том
-// числе FAIL reachable во вложенном прогоне набора); 130 — прерывание.
+// числе FAIL reachable во вложенном прогоне набора); 4 — только --dry-run --budget: оценка
+// сверх бюджета, budget_reason нет; 130 — прерывание.
 // Прерывание во время вложенного прогона: сигнал уходит всей группе процессов текущего этапа
 // (каждый этап и вложенный run.sh идут отдельной группой), сессия ждёт выхода run.sh (стенд по
 // снимку он восстанавливает сам) и опустения группы; повторный сигнал — выход без возврата.
@@ -212,7 +231,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
 
 import coreMarks from './core-marks.cjs';
-import { durations, readHistory } from './history.mjs';
+import { appendReport, durations, readHistory } from './history.mjs';
 
 const { goMarks, specFacts } = coreMarks;
 const SCRIPT = fileURLToPath(import.meta.url);
@@ -248,10 +267,11 @@ function git(...args) {
 // --- аргументы и спека --------------------------------------------------------
 
 function parseArgs(argv) {
-  const out = { spec: '', mode: 'run' };
+  const out = { spec: '', mode: 'run', budget: false };
   for (const a of argv) {
     if (a === '--dry-run') out.mode = 'dry-run';
     else if (a === '--target') out.mode = 'target';
+    else if (a === '--budget') out.budget = true;
     else if (a === '-h' || a === '--help') {
       const lines = readFileSync(SCRIPT, 'utf8').split('\n').slice(1);
       const head = lines.slice(
@@ -263,7 +283,8 @@ function parseArgs(argv) {
     } else if (!out.spec && !a.startsWith('--')) out.spec = a;
     else die(`неизвестный аргумент: ${a}`);
   }
-  if (!out.spec) die('usage: session.mjs [--dry-run | --target] <спека.json>');
+  if (!out.spec) die('usage: session.mjs [--dry-run [--budget] | --target] <спека.json>');
+  if (out.budget && out.mode !== 'dry-run') die('--budget — только вместе с --dry-run');
   return out;
 }
 
@@ -440,6 +461,15 @@ function loadSpec(file, root, nested = false) {
   if (new Set(cores).size !== cores.length) die('cores: ядро указано дважды');
   const keepGoing = spec.keep_going ?? false;
   if (typeof keepGoing !== 'boolean') die('keep_going: true или false');
+  // причина спеки сверх бюджета (D-23): одна непустая строка до 300 символов
+  let budgetReason = null;
+  if (spec.budget_reason !== undefined) {
+    const r = spec.budget_reason;
+    if (typeof r !== 'string' || !r.trim() || r.length > 300 || /[\n\r]/.test(r)) {
+      die('budget_reason: непустая строка до 300 символов без перевода строки');
+    }
+    budgetReason = r.trim();
+  }
   if (!Array.isArray(spec.passes) || !spec.passes.length) die('passes: непустой список');
   const names = new Set();
   const suites = [];
@@ -553,7 +583,7 @@ function loadSpec(file, root, nested = false) {
     }
     return { name: p.name, version, product, go, specs, grep, expect, cores: pcores };
   });
-  return { target: spec.target, cores, keepGoing, passes };
+  return { target: spec.target, cores, keepGoing, budgetReason, passes };
 }
 
 // Ядра прохода змейкой: сначала активное, затем остальные в порядке спеки.
@@ -778,6 +808,50 @@ function composition(p, full, root, core, h) {
   };
 }
 
+// --- оценка длительности и бюджет спеки (D-23) -------------------------------------
+
+// Бюджет размера спеки, минут: оценка больше — нужен budget_reason (проверка плана --budget).
+const BUDGET_MIN = 20;
+// Накладные расходы оценки, секунды: деплой и смоук на смену продукта, переключение ядра,
+// settle после Go, запуск pw-suite.sh на спек, тест без медианы; проход-прогон — max_minutes
+// или suiteMinutes минут.
+const EST = { deploy: 180, switch: 45, settle: 30, pwStart: 15, unknownTest: 30, suiteMinutes: 15 };
+
+// Оценка теста на ядре: медиана на этом ядре, иначе на другом, иначе unknownTest.
+function testSeconds(h, check, core) {
+  const other = CORES.find((c) => c !== core);
+  return medianOf(h, check, core) ?? medianOf(h, check, other) ?? EST.unknownTest;
+}
+
+// Оценка прохода на ядре по составу: Go-тесты, settle, запуски pw-suite и тесты спеков. Спек
+// без списка Playwright — unknownTest на каждый вызов test( в тексте спека (не меньше одного);
+// Go без состава (legacy) — один неизвестный тест.
+function passSeconds(comp, core, h, root) {
+  let sec = 0;
+  if (comp.go) {
+    sec += comp.go.legacy
+      ? EST.unknownTest
+      : comp.go.tests.reduce((a, t) => a + testSeconds(h, `go:${t.test}`, core), 0);
+    if (comp.specs.length) sec += EST.settle;
+  }
+  for (const s of comp.specs) {
+    sec += EST.pwStart;
+    if (s.names) {
+      sec += s.names.reduce((a, t) => a + testSeconds(h, t.name, core), 0);
+    } else {
+      let n = 1;
+      try {
+        const text = readFileSync(path.join(root, 'frontend', s.spec), 'utf8');
+        n = Math.max(1, (text.match(/(?<![\w.$])test\(/g) || []).length);
+      } catch {
+        // спек не читается — один тест
+      }
+      sec += n * EST.unknownTest;
+    }
+  }
+  return sec;
+}
+
 // Имена до 10 первых и «… ещё N».
 function headList(names) {
   const head = names.slice(0, 10).join(', ');
@@ -829,11 +903,13 @@ function productKey(p) {
   return p.product ? `${p.product.sha}:${p.product.files.join(',')}` : 'HEAD';
 }
 
-// План сессии без стенда. Исходное ядро неизвестно до смоука: план считает его первым в
-// cores, на стенде с другим активным ядром порядок ядер зеркальный.
-function dryRun(spec, specFile, root) {
+// План сессии без стенда и оценка её длительности. Исходное ядро неизвестно до смоука: план
+// считает его первым в cores, на стенде с другим активным ядром порядок ядер зеркальный.
+// Итог — { lines, minutes, over }.
+function planSession(spec, specFile, root) {
   const c0 = spec.cores[0];
   const h = loadMedians();
+  let seconds = 0;
   const lines = [
     `Сессия по ${specFile}: цель ${spec.target}, ядра ${spec.cores.join(', ')} (исходное считается ${c0})`,
     spec.keepGoing
@@ -843,11 +919,16 @@ function dryRun(spec, specFile, root) {
     'дешёвые тесты первыми: неизвестные истории («?») в начале, затем по возрастанию медианы'
   ];
   let n = 0;
-  const step = (s) => lines.push(`${++n}. ${s}`);
+  const step = (s, sec = 0) => {
+    seconds += sec;
+    lines.push(`${++n}. ${s}`);
+  };
   let deployed = null;
   let cur = c0;
   for (const p of spec.passes) {
     if (p.suite) {
+      // прогон набора и вложенная сессия — max_minutes прохода или 15 мин
+      seconds += (p.expect.maxMinutes ?? EST.suiteMinutes) * 60;
       // вложенный прогон ставит сборку HEAD сам и оставляет активным ядро, найденное в начале
       const irq = p.interrupt
         ? `; прерывание SIG${p.interrupt.signal} через ${p.interrupt.after} с после старта go, выход до ${p.interrupt.deadline} с`
@@ -878,7 +959,7 @@ function dryRun(spec, specFile, root) {
         : p.product
           ? `${p.product.files.join(' ')} из ${p.product.ref}`
           : 'HEAD';
-      step(`деплой и смоук: ${target}`);
+      step(`деплой и смоук: ${target}`, EST.deploy);
       deployed = key;
     }
     const what = (comp) => {
@@ -901,9 +982,12 @@ function dryRun(spec, specFile, root) {
         lines.push(`   проход ${p.name} на ${c}: пропуск — тестов с меткой ядра нет (ядро не важно)`);
         continue;
       }
-      if (c !== cur) step(`переключение на ${c}`);
+      if (c !== cur) step(`переключение на ${c}`, EST.switch);
       cur = c;
-      step(`проход ${p.name} на ${c}: ${compositionTitle(comp)} — ${what(comp)}`);
+      step(
+        `проход ${p.name} на ${c}: ${compositionTitle(comp)} — ${what(comp)}`,
+        passSeconds(comp, c, h, root)
+      );
       const mark = (x) => (x.median === null ? '?' : `${Math.round(x.median)} с`);
       if (comp.go && !comp.go.legacy) {
         lines.push(
@@ -917,12 +1001,29 @@ function dryRun(spec, specFile, root) {
       }
     }
   }
-  if (deployed !== 'HEAD') step('деплой и смоук: HEAD (возврат продукта)');
-  if (cur !== c0) step(`переключение на ${c0} (исходное)`);
+  if (deployed !== 'HEAD') step('деплой и смоук: HEAD (возврат продукта)', EST.deploy);
+  if (cur !== c0) step(`переключение на ${c0} (исходное)`, EST.switch);
   step(
     'проверка стенда: дерево чистое, сборка HEAD, исходное ядро, xcp запущен, снимка незавершённого прогона нет'
   );
-  process.stdout.write(lines.join('\n') + '\n');
+  const minutes = Math.ceil(seconds / 60);
+  const over = minutes > BUDGET_MIN;
+  lines.push(`Оценка: ${minutes} мин (бюджет ${BUDGET_MIN} мин)`);
+  if (over) {
+    lines.push(
+      spec.budgetReason
+        ? `сверх бюджета: причина — ${spec.budgetReason}`
+        : 'сверх бюджета: нет budget_reason'
+    );
+  }
+  return { lines, minutes, over };
+}
+
+// План сессии без стенда: печать плана и оценки. Итог — { minutes, over }.
+function dryRun(spec, specFile, root) {
+  const plan = planSession(spec, specFile, root);
+  process.stdout.write(plan.lines.join('\n') + '\n');
+  return plan;
 }
 
 // --- сессия -------------------------------------------------------------------
@@ -964,6 +1065,28 @@ class Session {
     const line = `session: ${msg}\n`;
     process.stdout.write(line);
     appendFileSync(this.log, line);
+  }
+
+  // Предупреждение: stderr и session.log.
+  warn(msg) {
+    const line = `session: ${msg}\n`;
+    process.stderr.write(line);
+    appendFileSync(this.log, line);
+  }
+
+  // Отчёты этапов сессии — в историю прогонов (D-20): каталог сессии (его этапы <NN>-<этап>) и
+  // отчёты прогонов наборов. Повторная запись ничего не добавляет (history.idx); ошибка истории
+  // код сессии не меняет — строка в notes.
+  appendHistory() {
+    const dirs = [this.dir, ...this.steps.filter((x) => x.kind === 'suite').map((x) => x.dir)];
+    for (const d of [...new Set(dirs)]) {
+      if (!existsSync(d)) continue;
+      try {
+        appendReport(d);
+      } catch (e) {
+        this.notes.push(`история: отчёт ${path.relative(this.root, d)} не записан: ${e.message}`);
+      }
+    }
   }
 
   // Каталог этапа в формате отчёта router-test (meta как у rt_report_init).
@@ -2323,7 +2446,14 @@ async function main() {
   process.chdir(root);
   const spec = loadSpec(specFile, root);
   if (args.mode === 'dry-run') {
-    dryRun(spec, path.relative(root, specFile), root);
+    const plan = dryRun(spec, path.relative(root, specFile), root);
+    if (args.budget && plan.over && !spec.budgetReason) {
+      // проверка плана (D-23): спека сверх бюджета без причины не проходит
+      process.stderr.write(
+        `session: оценка ${plan.minutes} мин сверх бюджета ${BUDGET_MIN} мин, budget_reason в спеке нет\n`
+      );
+      process.exit(4);
+    }
     return;
   }
   if (args.mode === 'target') {
@@ -2339,6 +2469,18 @@ async function main() {
 
   const s = new Session(spec, specFile, root);
   s.say(`отчёт ${path.relative(root, s.dir)}`);
+  // оценка и бюджет (D-23): сверх бюджета — только предупреждение, сессия идёт
+  try {
+    const plan = planSession(spec, path.relative(root, specFile), root);
+    s.say(`оценка: ${plan.minutes} мин (бюджет ${BUDGET_MIN} мин)`);
+    if (plan.over) {
+      s.warn(
+        `предупреждение: оценка ${plan.minutes} мин сверх бюджета ${BUDGET_MIN} мин — ${spec.budgetReason ? `причина: ${spec.budgetReason}` : 'budget_reason в спеке нет'}`
+      );
+    }
+  } catch (e) {
+    s.notes.push(`оценка длительности не посчитана: ${e.message}`);
+  }
   let interrupts = 0;
   const onSignal = () => {
     if (++interrupts > 1) {
@@ -2434,6 +2576,8 @@ async function main() {
   } catch (e) {
     s.notes.push(`возврат стенда упал: ${e.message}`);
   }
+  // оценки следующих сессий опираются на эти отчёты
+  s.appendHistory();
   const end = s.network ? null : s.standEnd();
   const mismatches = s.verdicts.filter((v) => !v.ok).length;
   let code = 0;
