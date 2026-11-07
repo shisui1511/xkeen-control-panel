@@ -475,7 +475,7 @@ function closeGate() {
       return {
         code: 1,
         lines: [
-          `close-gate: нет зелёного полного прогона на ${tail.tag}: make router-test SUITE=full RELEASE=${tail.tag}`
+          `close-gate: нет зелёного полного прогона или добора на ${tail.tag}: make router-test SUITE=delta RELEASE=${tail.tag} (добор от прошлого полного прогона вехи) или SUITE=full RELEASE=${tail.tag}`
         ]
       };
     }

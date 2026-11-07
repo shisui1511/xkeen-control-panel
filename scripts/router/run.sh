@@ -86,6 +86,26 @@
 #                сборка, стоявшая до поиска (HEAD или RELEASE), и исходное ядро. Одна цель
 #                (ROUTERS=<id>). Статус релиза не публикуется. Код выхода — код bisect.mjs: 0 —
 #                вердикт есть и стенд вернулся, 1 — нет вердикта, 2 — неверные значения, 3 — связь.
+#   delta        добор stand/<arch>-full на новый тег без повторного полного прогона (RTR-11, D-24,
+#                D-25): RELEASE=<тег|latest> [DRY_RUN=1] [BASE_REPORT=<отчёт>]. Условия те же, что у
+#                полного прогона (todo 11): есть отчёт полного прогона по более старому тегу той же
+#                вехи (коммит — предок нового тега, новее последнего stable; delta-plan.mjs base),
+#                все упавшие в нём тесты (кроме known и карантина) зелёные на новом теге, зелёные все
+#                тесты, выбранные select-changed.mjs по диффу между тегами (с ярусом full для
+#                затронутых областей), и смоук нового тега в этом же прогоне зелёный. Состав по ядрам
+#                собирает delta-plan.mjs merge в <отчёт>/<цель>/delta.sel.d/<ядро>.sel (упавшие в базе
+#                плюс выбор по диффу; первая ветвь — ядро по SHA HEAD, как у changed, вторая — только
+#                тесты с меткой ядра); дальше прогон идёт как перепрогон через RT_SEL_DIR: деплой
+#                сборки нового тега, смоук, снимок, ветви, подтверждающий перепрогон новых падений,
+#                восстановление. Выбор по диффу полный (правка самого выбора), неизвестный файл,
+#                упавший в базе тест, который нельзя перегнать, — добор невозможен (код 1, стенд не
+#                трогается): нужен полный прогон. Решение — строки summary.md «- Добор: база …» и
+#                «- Решение добора: success|failure»; статус stand/<arch>-full на коммите нового
+#                тега публикуется с описанием «добор от <тег базы>: зелёный|красный, тестов N,
+#                новых падений M» (release-status.sh). DRY_RUN=1 — статус не отправляется
+#                (release-status.sh --dry-run), решение в summary.md с пометкой «dry_run: не
+#                отправлено». Тег проверяется до блокировки: шаблон, наличие локально, коммит —
+#                предок HEAD (иначе код 2: тесты старше релиза). Код выхода — как у полного прогона.
 #   reboot       холодный старт (D-24): деплой, предполёт и снимок параллельно, затем
 #                по одной цели в порядке XCP_REBOOT_ORDER (нижестоящая цель каскада первой):
 #                перезагрузка, ожидание возврата, проверки автозапуска (xcp той же версии,
@@ -128,8 +148,9 @@
 #
 # Окружение:
 #   ROUTERS=<id,id>      выбор целей (по умолчанию все из конфига)
-#   RELEASE=<тег>        ставить артефакт GitHub Release вместо сборки ветки. У наборов smoke и
-#                        full после прогона для каждой цели публикуется статус коммита тега
+#   RELEASE=<тег>        ставить артефакт GitHub Release вместо сборки ветки (у набора delta —
+#                        обязателен, latest — новейший релиз). У наборов smoke, full и delta (контекст
+#                        stand/<arch>-full, описание «добор от <тег базы>: …») после прогона для каждой цели публикуется статус коммита тега
 #                        stand/<arch>-<smoke|full> (release-status.sh): success при нуле FAIL и
 #                        XPASS цели (по классам падений: красные new, flaky, xpass, не догнанный
 #                        stand), иначе failure. Статуса нет при незакоммиченных правках, сбое
@@ -143,6 +164,10 @@
 #                        абсолютный, только под build/router; проверка до блокировки, иначе код 2).
 #                        У набора bisect FROM — ссылка git, с которой искать (TEST, CORE, TO, MODE, SPEC,
 #                        GREP — там же; все значения проверяются до блокировки, иначе код 2)
+#   DRY_RUN=1            набор delta: статус на GitHub не отправляется (release-status.sh --dry-run),
+#                        состав и решение добора — в summary.md (0 по умолчанию)
+#   BASE_REPORT=<отчёт>  набор delta: отчёт полного прогона, от которого считается добор (имя каталога
+#                        под build/router или путь); по умолчанию — самый свежий подходящий в истории
 #   RT_SEL_DIR=<каталог> состав ветви из файлов <ядро>.sel (rerun-plan.mjs): вместо выбора набора
 #                        ветвь берёт GO_SEQ, SPECS и GREP из <ядро>.sel, а ветвь без файла
 #                        пропускается; читается построчно, без eval, по шаблонам безопасных символов.
@@ -205,9 +230,9 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 SUITE=${1:-}
 case "$SUITE" in
-  smoke | changed | harness | reboot | session | rerun | bisect | full | '') ;;
+  smoke | changed | harness | reboot | session | rerun | bisect | delta | full | '') ;;
   *)
-    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke, changed, harness, reboot, session, rerun, bisect и full (полный, можно без SUITE)" >&2
+    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke, changed, harness, reboot, session, rerun, bisect, delta и full (полный, можно без SUITE)" >&2
     echo "router-test: пример: make router-test SUITE=smoke" >&2
     exit 2
     ;;
@@ -387,10 +412,62 @@ process.exit(1);
   esac
 fi
 
+# Набор delta: тег, DRY_RUN, BASE_REPORT и база добора проверяются до check-known.sh, целей и блокировки
+# (код 2 на неверных значениях, код 1 — нет подходящей базы; стенд не трогается). RELEASE=latest — новейший
+# опубликованный релиз (как latestReleaseTag в session.mjs). Коммит тега обязан быть предком HEAD: тесты
+# берутся из рабочего дерева, оно не должно быть старше релиза. База — delta-plan.mjs base: отчёт полного
+# прогона по более старому тегу той же вехи (условия — в его заголовке).
+DELTA_BASE_DIR=""
+DELTA_BASE_TAG=""
+DELTA_BASE_NAME=""
+DELTA_DRY=0
+rt_dl_die() {
+  echo "router-test: SUITE=delta: $*" >&2
+  exit 2
+}
+if [ "$SUITE" = delta ]; then
+  [ -z "$RT_CORES_SET" ] || rt_dl_die "RT_CORES не применяется: добор идёт на обоих ядрах по составу"
+  [ -n "${RELEASE:-}" ] || rt_dl_die "нужен RELEASE=<тег|latest>"
+  if [ "$RELEASE" = latest ]; then
+    command -v gh >/dev/null 2>&1 || rt_dl_die "RELEASE=latest: нужен gh"
+    RELEASE=$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null) || RELEASE=""
+    [ -n "$RELEASE" ] || rt_dl_die "RELEASE=latest: новейший релиз не определён (gh release list)"
+  fi
+  printf '%s\n' "$RELEASE" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-z]+\.[0-9]+)?$' || rt_dl_die "RELEASE: ожидается vX.Y.Z или vX.Y.Z-<суффикс>.<N>"
+  git rev-parse -q --verify "refs/tags/$RELEASE^{commit}" >/dev/null 2>&1 || rt_dl_die "тег $RELEASE не найден локально (git fetch --tags)"
+  git merge-base --is-ancestor "$RELEASE" HEAD 2>/dev/null || rt_dl_die "тесты старше релиза: коммит $RELEASE не предок HEAD"
+  case "${DRY_RUN:-0}" in
+    0 | 1) DELTA_DRY=${DRY_RUN:-0} ;;
+    *) rt_dl_die "DRY_RUN: 0 или 1" ;;
+  esac
+  if [ -n "${BASE_REPORT:-}" ]; then
+    printf '%s\n' "$BASE_REPORT" | grep -Eq '^[A-Za-z0-9_./-]+$' || rt_dl_die "BASE_REPORT: недопустимые символы"
+  fi
+  _dl_rc=0
+  if [ -n "${BASE_REPORT:-}" ]; then
+    _dl_out=$(node "$SCRIPT_DIR/delta-plan.mjs" base --release "$RELEASE" --base-report "$BASE_REPORT") || _dl_rc=$?
+  else
+    _dl_out=$(node "$SCRIPT_DIR/delta-plan.mjs" base --release "$RELEASE") || _dl_rc=$?
+  fi
+  case "$_dl_rc" in
+    0) ;;
+    1)
+      echo "router-test: красный — нет базы добора: нужен полный прогон на пре-релизе этой вехи (make router-test SUITE=full RELEASE=<тег>)" >&2
+      exit 1
+      ;;
+    *) rt_dl_die "база добора не определена (delta-plan.mjs, код $_dl_rc)" ;;
+  esac
+  DELTA_BASE_DIR=$(printf '%s\n' "$_dl_out" | cut -f1)
+  DELTA_BASE_TAG=$(printf '%s\n' "$_dl_out" | cut -f2)
+  printf '%s\n' "$DELTA_BASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-z]+\.[0-9]+)?$' || rt_dl_die "тег базы добора не разобран"
+  [ -d "$DELTA_BASE_DIR" ] || rt_dl_die "отчёт базы добора не найден"
+  DELTA_BASE_NAME=$(basename "$DELTA_BASE_DIR")
+fi
+
 # Виды спеков рабочего дерева (WR-04): незакоммиченный спек read не уходит в несколько воркеров
 # без проверки. До блокировки и деплоя, только для наборов с Playwright.
 case "$SUITE" in
-  '' | changed | harness | session)
+  '' | changed | harness | session | delta)
     if ! node scripts/check-router-kinds.js --worktree; then
       echo "router-test: красный — виды роутерных спеков рабочего дерева не прошли проверку (check-router-kinds.js --worktree)" >&2
       exit 1
@@ -659,6 +736,78 @@ if [ "$SUITE" = changed ]; then
   [ "$RT_HARNESS" != 1 ] || echo "router-test: $(grep '^\(обвязка\|всё\):' "$RT_REPORT/select.txt" | tail -n 1)"
 fi
 
+# --- состав набора delta (RTR-11, D-24, D-25) ------------------------------------------------
+# Добор честен только пока состав полон: невозможность составить его целиком (полный выбор по диффу,
+# неизвестный файл, упавший в базе тест, который нельзя перегнать) — не «зелёный по умолчанию», а
+# отказ с кодом 1 до деплоя: нужен полный прогон. Состав каждой цели — <цель>/delta.sel.d/<ядро>.sel
+# (формат rerun-plan.mjs плюс CORE_ONLY), пишет delta-plan.mjs merge; run.sh читает его как состав
+# перепрогона (full_target, _sel_dir). Ветвь первого ядра пишется всегда: в ней идёт смоук нового тега.
+DELTA_B1=""
+DELTA_B2=""
+delta_abort() {
+  echo "router-test: красный — добор невозможен: $*; нужен полный прогон (make router-test SUITE=full RELEASE=$RELEASE)" >&2
+  exit 1
+}
+delta_compose() {
+  _ds_rc=0
+  _ds=$(node "$SCRIPT_DIR/select-changed.mjs" --explain --base "$DELTA_BASE_TAG" --head "$RELEASE" 2>"$RT_REPORT/select.txt") || _ds_rc=$?
+  if [ "$_ds_rc" != 0 ] ||
+    [ "$(printf '%s\n' "$_ds" | wc -l)" != 13 ] ||
+    [ "$(printf '%s\n' "$_ds" | sed 's/=.*//' | tr '\n' ' ')" != "RT_SELECT_ALL RT_GO_PKGS RT_SPECS RT_PW_GREP RT_GO_CORE_PKGS RT_GO_CORE_RUN RT_SPECS_CORE RT_KERNEL_TOUCHED RT_GO_SEQ RT_SPECS_FIRST RT_PW_INVERT RT_HARNESS RT_AREAS " ]; then
+    delta_abort "выбор по диффу $DELTA_BASE_TAG..$RELEASE не удался (код $_ds_rc, причины — $RT_REPORT/select.txt)"
+  fi
+  _ds_all=$(printf '%s\n' "$_ds" | sed -n 's/^RT_SELECT_ALL=//p')
+  RT_HARNESS=$(printf '%s\n' "$_ds" | sed -n 's/^RT_HARNESS=//p')
+  case "$_ds_all" in 0 | 1) ;; *) delta_abort "выбор по диффу: RT_SELECT_ALL не разобран" ;; esac
+  case "$RT_HARNESS" in 0 | 1) ;; *) delta_abort "выбор по диффу: RT_HARNESS не разобран" ;; esac
+  [ "$_ds_all" = 0 ] || delta_abort "выбор по диффу $DELTA_BASE_TAG..$RELEASE полный (правка самого выбора), добор не годится"
+  if grep -q 'предупреждение: неизвестный файл' "$RT_REPORT/select.txt"; then
+    delta_abort "в диффе $DELTA_BASE_TAG..$RELEASE есть файл, неизвестный выбору (select.txt)"
+  fi
+  printf '%s\n' "$_ds" >"$RT_REPORT/delta-select.env"
+  DELTA_B1=$(rt_sha_core "$(git rev-parse HEAD)")
+  case "$DELTA_B1" in xray) DELTA_B2=mihomo ;; *) DELTA_B2=xray ;; esac
+  RT_CORES="$DELTA_B1 $DELTA_B2"
+  # Правка обвязки между тегами: тесты и спеки блока harness входят в обе ветви, самопроверка сессии идёт в конце
+  if [ "$RT_HARNESS" = 1 ]; then
+    rt_harness_load || delta_abort "блок harness в areas.json не прочитан (причина — $RT_REPORT/harness-load.err)"
+  fi
+  RT_PW_INVERT=""
+  _dc_first=1
+  for _dc_t in $RT_TARGETS; do
+    mkdir -p "$RT_REPORT/$_dc_t"
+    _dc_out="$RT_REPORT/$_dc_t/delta.plan.txt"
+    [ -f "$DELTA_BASE_DIR/$_dc_t/results.tsv" ] || delta_abort "в базе добора $DELTA_BASE_NAME нет результатов цели $_dc_t"
+    _dc_rc=0
+    if [ "$RT_HARNESS" = 1 ]; then
+      node "$SCRIPT_DIR/delta-plan.mjs" merge --release "$RELEASE" --base-report "$DELTA_BASE_DIR" --target "$_dc_t" \
+        --out-dir "$RT_REPORT/$_dc_t/delta.sel.d" --select-env "$RT_REPORT/delta-select.env" --b1 "$DELTA_B1" --b2 "$DELTA_B2" \
+        --extra-go-seq "$RT_H_GO_SEQ" --extra-specs "$RT_H_SPECS" --extra-grep "$RT_H_GREP" >"$_dc_out" 2>"$_dc_out.err" || _dc_rc=$?
+    else
+      node "$SCRIPT_DIR/delta-plan.mjs" merge --release "$RELEASE" --base-report "$DELTA_BASE_DIR" --target "$_dc_t" \
+        --out-dir "$RT_REPORT/$_dc_t/delta.sel.d" --select-env "$RT_REPORT/delta-select.env" --b1 "$DELTA_B1" --b2 "$DELTA_B2" \
+        >"$_dc_out" 2>"$_dc_out.err" || _dc_rc=$?
+    fi
+    if [ "$_dc_rc" != 0 ]; then
+      delta_abort "состав цели $_dc_t не составлен (delta-plan.mjs, код $_dc_rc): $(head -c 300 "$_dc_out.err" | tr '\n' ' ')"
+    fi
+    _dc_sk=$(awk -F'\t' '$1 == "skipped" {print $2; exit}' "$_dc_out")
+    [ -z "$_dc_sk" ] || delta_abort "упавший в базе тест нельзя перегнать на цели $_dc_t: $_dc_sk"
+    [ -f "$RT_REPORT/$_dc_t/delta.sel.d/$DELTA_B1.sel" ] || delta_abort "состав цели $_dc_t не записан"
+    # счётчики для строки «Добор»: упавших в базе, Go и спеков по диффу
+    awk -F'\t' '$1 == "base-failed" {f = $2} $1 == "diff-go" {g = $2} $1 == "diff-specs" {s = $2} END {printf "%d\t%d\t%d\n", f, g, s}' "$_dc_out" >"$RT_REPORT/$_dc_t/delta.counts"
+    # отсев яруса full выбора снимается, если в составе есть упавшие в базе спеки (они могли быть яруса full)
+    _dc_inv=$(awk -F'\t' '$1 == "pw-invert" {print $2}' "$_dc_out")
+    if [ "$_dc_first" = 1 ]; then
+      RT_PW_INVERT=$_dc_inv
+      _dc_first=0
+    elif [ -z "$_dc_inv" ]; then
+      RT_PW_INVERT=""
+    fi
+    awk -F'\t' -v t="$_dc_t" '{printf "router-test: добор %s — %s: %s\n", t, $1, $2}' "$_dc_out" >&2
+  done
+}
+
 # --- план ветвей и окно смоука (D-01…D-03, D-07) -----------------------------------------
 # changed без явного RT_CORES — гибрид: первая ветвь идёт под ядром из SHA HEAD со всем
 # выбором, вторая (другое ядро) — только с тестами, размеченными как зависящие от ядра, и не
@@ -714,6 +863,16 @@ elif [ "$SUITE" = rerun ]; then
     RT_SMOKE_WINDOW=30
   fi
   export RT_SMOKE_WINDOW
+elif [ "$SUITE" = delta ]; then
+  # набор delta: состав по ядрам — файлы <ядро>.sel в <цель>/delta.sel.d (упавшие в базе плюс выбор по
+  # диффу между тегами); ветвь без файла пропускается. Окно смоука — как у полного прогона.
+  delta_compose
+  : >"$RT_REPORT/plan.txt"
+  echo "- Ядро ветви: $DELTA_B1 (правило: cksum SHA HEAD чётный — xray, нечётный — mihomo)" >>"$RT_REPORT/plan.txt"
+  echo "- Состав добора: база $DELTA_BASE_TAG ($DELTA_BASE_NAME), упавшие в базе и выбор по диффу $DELTA_BASE_TAG..$RELEASE; вторая ветвь ($DELTA_B2) — по составу цели" >>"$RT_REPORT/plan.txt"
+  echo "- Окно смоука: ${RT_SMOKE_WINDOW:-120} с (добор: смоук нового тега $RELEASE в этом же прогоне)" >>"$RT_REPORT/plan.txt"
+  [ -z "${RT_SMOKE_WINDOW:-}" ] || export RT_SMOKE_WINDOW
+  echo "router-test: ветви — $(head -n 1 "$RT_REPORT/plan.txt")"
 elif [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
   : >"$RT_REPORT/plan.txt"
   if [ -n "$RT_CORES_SET" ] && [ "$SUITE" = changed ] && [ "$SEL_ANY" = 0 ]; then
@@ -919,6 +1078,8 @@ full_target() {
   # иначе — RT_SEL_DIR из окружения; нет каталога — выбор набора, как раньше.
   _sel_dir=${RT_SEL_DIR:-}
   [ "$SUITE" != rerun ] || _sel_dir="$RT_REPORT/$_t/rerun-$RT_RERUN_N.sel.d"
+  # набор delta: состав цели — упавшие в базе плюс выбор по диффу (delta-plan.mjs merge)
+  [ "$SUITE" != delta ] || _sel_dir="$RT_REPORT/$_t/delta.sel.d"
   # Повторный сигнал (TERM группе плюс TERM, пересланный верхним run.sh, или второй Ctrl+C) не
   # должен обрывать восстановление: игнорирование наследуют rt_restore, _after_restore и ssh.
   _finish() {
@@ -1397,13 +1558,15 @@ EOF
       _p_specs=$_sel_specs
       _p_first=""
       _p_core=""
+      # CORE_ONLY=1 (набор delta, вторая ветвь): из спеков идут только тесты с меткой ядра
+      [ "$(rt_sel_val "$_sel_f" CORE_ONLY)" != 1 ] || _p_core=1
       _p_grep=$_sel_grep
       _b_go=0
       [ -z "$_sel_seq" ] || _b_go=1
       _b_pw=0
       [ -z "$_sel_specs" ] || _b_pw=1
-      _b_skip="в перепрогоне нет Go-тестов этого ядра"
-      _b_skip_pw="в перепрогоне нет спеков этого ядра"
+      _b_skip="в составе (перепрогон, добор) нет Go-тестов этого ядра"
+      _b_skip_pw="в составе (перепрогон, добор) нет спеков этого ядра"
     fi
 
     # Выбор Go по именам (RT_GO_SEQ, первая ветвь): порядок и состав задаёт список, пакеты и
@@ -1861,7 +2024,7 @@ else
   # стенд и выходит с кодом 130.
   trap 'RT_INTR=1; echo "router-test: прерывание — останавливаю этапы и жду восстановления стенда" >&2; for _kp in $PIDS; do kill -s TERM "$_kp" 2>/dev/null || true; done' INT TERM HUP
   for t in ${DEPLOYED:-}; do
-    if [ -z "$SUITE" ] || [ "$SUITE" = harness ] || [ "$SUITE" = rerun ] || { [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ]; }; then
+    if [ -z "$SUITE" ] || [ "$SUITE" = harness ] || [ "$SUITE" = rerun ] || [ "$SUITE" = delta ] || { [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ]; }; then
       (full_target "$t") &
     else
       sh "$SCRIPT_DIR/smoke.sh" "$t" "$EXPECT" &
@@ -2119,7 +2282,7 @@ if (bad.length) {
   rt_result "$_hs_rt" PASS harness-session-fail-fast "сессия остановилась на первом несовпадении (код 1), второй проход не выполнялся, стенд вернулся; отчёт $_hs_rel"
 }
 
-if [ "$RT_INTR" != 1 ] && { [ "$SUITE" = harness ] || { [ "$SUITE" = changed ] && [ "$RT_HARNESS" = 1 ]; }; }; then
+if [ "$RT_INTR" != 1 ] && { [ "$SUITE" = harness ] || { { [ "$SUITE" = changed ] || [ "$SUITE" = delta ]; } && [ "$RT_HARNESS" = 1 ]; }; }; then
   harness_selfcheck
 fi
 
@@ -2277,6 +2440,54 @@ for t in $RT_TARGETS; do
   XPASSES=$((XPASSES + RT_RC_XPASS))
 done
 
+# --- решение добора (набор delta, RTR-11, D-24, D-25) --------------------------------------
+# Решение по цели: success только при всех условиях todo 11 — найденная база (иначе прогона не было),
+# нуль красных классов (new, flaky, не догнанный stand, xpass: упавшие в базе, тесты по диффу и
+# подтверждающий перепрогон), зелёный смоук нового тега (хотя бы одна пройденная проверка смоука этого
+# прогона и нет FAIL), полный состав (непустой notrun.txt — часть не выполнена из-за обрыва связи).
+# Результат — RT_DD_STATE (success|failure) и RT_DD_TESTS (число разных тестов go: и pw: прогона).
+DELTA_RED=0
+delta_decide() {
+  RT_DD_STATE=failure
+  RT_DD_TESTS=0
+  _dd_res="$RT_REPORT/$1/results.tsv"
+  [ -f "$_dd_res" ] || return 0
+  RT_DD_TESTS=$(awk -F'\t' '
+    $1 != "SKIP" && ($3 ~ /^go:/ || $3 ~ /^pw:/) && $3 != "go:setup" && $3 != "pw:run" && $3 !~ /^pw:core-switch:/ {
+      c = $3; if (c ~ /^go:/) sub(/\/.*/, "", c)
+      if (!(c in seen)) { seen[c] = 1; n++ }
+    }
+    END { print n + 0 }' "$_dd_res")
+  rt_red_counts "$1"
+  [ "$RT_RC_RED" -eq 0 ] && [ "$RT_RC_XPASS" -eq 0 ] || return 0
+  [ ! -s "$RT_REPORT/$1/notrun.txt" ] || return 0
+  awk -F'\t' '$1 == "PASS" && $3 == "kernel-running" {f = 1} END {exit !f}' "$_dd_res" || return 0
+  RT_DD_STATE=success
+}
+# Строки «- Добор:» и «- Решение добора:» в summary.md по каждой цели; при DRY_RUN=1 решение с пометкой
+# «dry_run: не отправлено» (статус на GitHub не отправляется).
+delta_report() {
+  for _dr_t in $RT_TARGETS; do
+    _dr_f=0
+    _dr_g=0
+    _dr_s=0
+    if [ -f "$RT_REPORT/$_dr_t/delta.counts" ]; then
+      IFS="$(printf '\t')" read -r _dr_f _dr_g _dr_s <"$RT_REPORT/$_dr_t/delta.counts" || true
+    fi
+    delta_decide "$_dr_t"
+    [ "$RT_DD_STATE" = success ] || DELTA_RED=1
+    echo "- Добор: база $DELTA_BASE_TAG ($DELTA_BASE_NAME), упавших в базе ${_dr_f:-0}, по диффу $((${_dr_g:-0} + ${_dr_s:-0})), всего тестов $RT_DD_TESTS" >>"$RT_REPORT/summary.md"
+    if [ "$DELTA_DRY" = 1 ]; then
+      echo "- Решение добора: $RT_DD_STATE (dry_run: не отправлено)" >>"$RT_REPORT/summary.md"
+    else
+      echo "- Решение добора: $RT_DD_STATE" >>"$RT_REPORT/summary.md"
+    fi
+  done
+}
+if [ "$SUITE" = delta ]; then
+  delta_report
+fi
+
 echo
 cat "$RT_REPORT/summary.md"
 
@@ -2295,12 +2506,14 @@ cat "$RT_REPORT/summary.md"
 publish_release_status() {
   [ -n "${RELEASE:-}" ] || return 0
   case "$SUITE_NAME" in
-    smoke | full) ;;
+    smoke | full | delta) ;;
     *) return 0 ;;
   esac
   for _pt in $RT_TARGETS; do
     _parch=$(rt_get "$_pt" ARCH)
     _pctx="stand/${_parch}-${SUITE_NAME}"
+    # добор публикует тот же контекст, что полный прогон: хук закрытия вехи читает stand/arm64-full
+    [ "$SUITE_NAME" != delta ] || _pctx="stand/${_parch}-full"
     _preason=""
     _pres="$RT_REPORT/$_pt/results.tsv"
     if [ "$DIRTY" = true ]; then
@@ -2324,7 +2537,7 @@ publish_release_status() {
       # Смоук ветки с изменённым кодом стенда проверяет не то, что идёт в main; не удалось
       # сравнить с origin/main (нет ссылки) — тоже не ставим
       _preason="код стенда ветки отличается от main"
-    elif [ "$SUITE_NAME" = full ]; then
+    elif [ "$SUITE_NAME" = full ] || [ "$SUITE_NAME" = delta ]; then
       if ! git rev-parse -q --verify "refs/tags/$RELEASE^{commit}" >/dev/null 2>&1; then
         _preason="тег релиза не найден локально"
       elif ! git merge-base --is-ancestor "$RELEASE" HEAD 2>/dev/null; then
@@ -2355,12 +2568,30 @@ publish_release_status() {
         _pverdict="красный"
       fi
       _pdesc="$_pword $_parch: $_pverdict, ядро $_pcore, новых падений $((_pnew + _px))"
+      if [ "$SUITE_NAME" = delta ]; then
+        # добор: решение — delta_decide (все условия todo 11), описание называет тег базы (D-25)
+        delta_decide "$_pt"
+        _pstate=$RT_DD_STATE
+        _pverdict="красный"
+        [ "$_pstate" != success ] || _pverdict="зелёный"
+        _pdesc="добор от $DELTA_BASE_TAG: $_pverdict, тестов $RT_DD_TESTS, новых падений $((_pnew + _px))"
+      fi
       _prc=0
-      sh "$SCRIPT_DIR/release-status.sh" "$RELEASE" "$_pctx" "$_pstate" "$_pdesc" || _prc=$?
-      if [ "$_prc" -eq 0 ]; then
-        _pline="- Статус на GitHub: $_pctx $_pstate"
+      if [ "$DELTA_DRY" = 1 ]; then
+        # сухой режим: release-status.sh --dry-run проверяет коммит тега и текст, ничего не отправляя
+        sh "$SCRIPT_DIR/release-status.sh" --dry-run "$RELEASE" "$_pctx" "$_pstate" "$_pdesc" || _prc=$?
+        if [ "$_prc" -eq 0 ]; then
+          _pline="- Статус на GitHub: не отправлен (dry_run: $_pctx $_pstate)"
+        else
+          _pline="- Статус на GitHub: не отправлен (dry_run, проверка статуса не прошла)"
+        fi
       else
-        _pline="- Статус на GitHub: не отправлен (ошибка отправки)"
+        sh "$SCRIPT_DIR/release-status.sh" "$RELEASE" "$_pctx" "$_pstate" "$_pdesc" || _prc=$?
+        if [ "$_prc" -eq 0 ]; then
+          _pline="- Статус на GitHub: $_pctx $_pstate"
+        else
+          _pline="- Статус на GitHub: не отправлен (ошибка отправки)"
+        fi
       fi
     else
       _pline="- Статус на GitHub: не отправлен ($_preason)"
@@ -2505,6 +2736,10 @@ if [ "$SUITE" = bisect ]; then
   exit "$BISECT_RC"
 fi
 
+if [ "$DELTA_RED" = 1 ] && [ "$FAILS" -eq 0 ] && [ "$XPASSES" -eq 0 ]; then
+  echo "router-test: красный — решение добора failure (строки «Решение добора» в $RT_REPORT/summary.md)" >&2
+  exit 1
+fi
 if [ "$FAILS" -gt 0 ] || [ "$XPASSES" -gt 0 ]; then
   # причина — строки «- Итог:» целей (branch-report.mjs), иначе счётчики
   _itog=$(grep -h '^- Итог: красный' "$RT_REPORT"/summary.md | sed 's/^- Итог: //' | paste -sd ';' - | sed 's/;/; /g' || true)
