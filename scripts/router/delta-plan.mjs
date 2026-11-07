@@ -12,7 +12,12 @@
 //     заданный --base-report (имя каталога или путь под build/router; тот же набор условий);
 //   - тег A отличается от нового тега B, коммит A — предок коммита B (та же ветка выпусков);
 //   - A новее новейшего stable-тега (vX.Y.Z), достижимого из B: stable-тег — предок A и не равен
-//     ему (A и B — одна веха).
+//     ему (A и B — одна веха);
+//   - база полная: dirty=false и narrow=none в meta (состав не сужен RT_CORES, RT_SEL_DIR, RT_GO_*,
+//     RT_SPECS*, RT_PW_GREP*), тесты обоих ядер у каждой цели, пустой notrun.txt, отправленный статус
+//     stand/<arch>-full по каждой цели;
+//   - роутерные тесты (*_test.go, frontend/tests/router/, internal/routertest/) не менялись между
+//     коммитом прогона базы и HEAD вне диффа A..B: иначе такой тест не шёл бы ни в базе, ни в доборе.
 // Без --base-report берётся самый свежий подходящий отчёт. Вывод: «<абсолютный путь отчёта>
 // <TAB><тег A><TAB><sha коммита A>». Код 0 — база найдена, 1 — подходящей базы нет (причины по
 // каждому кандидату — в stderr), 2 — неверные аргументы.
@@ -169,12 +174,83 @@ function reportInfo(dir) {
 
 // --- base ---------------------------------------------------------------------------------
 
+function gitLines(args) {
+  try {
+    return git(args).split("\n").filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+/** Роутерные тесты и их помощники: Go-тесты, спеки и lib/ Playwright, пакет routertest. */
+const isTestFile = (f) => /_test\.go$/.test(f) || f.startsWith("frontend/tests/router/") || f.startsWith("internal/routertest/");
+
+/**
+ * Полнота базы: в добор идут только упавшие в базе и выбор по диффу, поэтому тест, не шедший в базе,
+ * не проверяется ни там, ни здесь. База годится, только если сама опубликовала бы stand/<arch>-full:
+ * чистое дерево, состав без сужения окружением (narrow=none в meta пишет run.sh), обе ветви матрицы
+ * ядер, пустой notrun.txt и отправленный статус полного прогона (его publish_release_status пишет
+ * лишь после своих проверок: обрыв без догона, сбой деплоя). Пустая строка — годится.
+ */
+function completenessProblem(dir) {
+  const meta = readText(path.join(dir, "meta")) || "";
+  const md = readText(path.join(dir, "report.md")) || "";
+  if (!/^dirty=false\s*$/m.test(meta) || /\(незакоммиченные правки: true\)/.test(md)) {
+    return "база с незакоммиченными правками (или в meta нет dirty=false)";
+  }
+  if (!/^narrow=none\s*$/m.test(meta)) {
+    return "состав базы мог быть сужен окружением (RT_CORES, RT_SEL_DIR, RT_GO_*, RT_SPECS*, RT_PW_GREP*): в meta нет narrow=none";
+  }
+  if (/отладка RT_CORES/.test(readText(path.join(dir, "plan.txt")) || "")) return "база шла не полной матрицей ядер (RT_CORES)";
+  const targets = fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && fs.existsSync(path.join(dir, e.name, "results.tsv")))
+    .map((e) => e.name);
+  if (!targets.length) return "в базе нет результатов целей";
+  const sum = readText(path.join(dir, "summary.md")) || "";
+  if (/^- Статус на GitHub: не отправлен/m.test(sum)) return "база не публиковала статус полного прогона (обрыв связи, notrun, сбой деплоя)";
+  const sent = (sum.match(/^- Статус на GitHub: stand\/\S+-full (?:success|failure)\s*$/gm) || []).length;
+  if (sent < targets.length) return "база не публиковала статус полного прогона по каждой цели";
+  for (const t of targets) {
+    const nr = path.join(dir, t, "notrun.txt");
+    if (fs.existsSync(nr) && fs.statSync(nr).size > 0) return `в базе не выполнена часть набора цели ${t} (notrun.txt)`;
+    const cores = new Set();
+    for (const line of (readText(path.join(dir, t, "results.tsv")) || "").split("\n")) {
+      const f = line.split("\t");
+      if (f.length >= 3 && CORES.includes(f[1]) && /^(go|pw):/.test(f[2])) cores.add(f[1]);
+    }
+    for (const c of CORES) if (!cores.has(c)) return `в базе цели ${t} нет тестов ядра ${c}: матрица неполная`;
+  }
+  return "";
+}
+
+/**
+ * Тесты берутся из HEAD, а выбор по диффу считается по A..B: тест, изменённый (добавленный) между
+ * коммитом прогона базы (sha= в meta) и HEAD вне диффа A..B, не шёл ни в базе, ни в доборе. Такой
+ * добор не составляется: нужен полный прогон. Пустая строка — таких тестов нет.
+ */
+function lateTestsProblem(dir, aTag, aSha, bTag, bSha) {
+  const meta = readText(path.join(dir, "meta")) || "";
+  const baseSha = (meta.match(/^sha=([0-9a-f]{40})\s*$/m) || [])[1];
+  if (!baseSha) return "в meta базы нет sha";
+  if (!gitOk(["cat-file", "-e", `${baseSha}^{commit}`])) return `коммита прогона базы ${baseSha.slice(0, 8)} нет в локальном git`;
+  const ab = gitLines(["diff", "--no-renames", "--name-only", aSha, bSha]);
+  const late = gitLines(["diff", "--no-renames", "--name-only", "--diff-filter=d", baseSha, "HEAD"]);
+  if (!ab || !late) return "дифф тестов после базы не посчитан (git diff)";
+  const abSet = new Set(ab);
+  const out = late.filter((f) => isTestFile(f) && !abSet.has(f));
+  if (!out.length) return "";
+  return `тесты HEAD изменены после прогона базы вне диффа ${aTag}..${bTag}: ${out.slice(0, 3).join(", ")}${out.length > 3 ? ` и ещё ${out.length - 3}` : ""}`;
+}
+
 /** Пустая строка — отчёт годится в базу добора тега B, иначе причина отказа. */
 function baseProblem(bTag, dir, aTagArg) {
   const info = reportInfo(dir);
   if (!info) return "в отчёте нет summary.md и report.md";
   if (info.suite !== "full") return `набор отчёта «${info.suite || "-"}», нужен full`;
   if (info.interrupted) return "отчёт прерван";
+  const why = completenessProblem(dir);
+  if (why) return why;
   const aTag = aTagArg || info.release;
   if (!aTag || !TAG_RE.test(aTag)) return "у отчёта нет тега релиза";
   if (aTag === bTag) return "тег базы совпадает с новым тегом";
@@ -190,7 +266,7 @@ function baseProblem(bTag, dir, aTagArg) {
     if (sSha === aSha) return `база — stable-тег ${stable}: нужен пре-релиз после него`;
     if (!gitOk(["merge-base", "--is-ancestor", sSha, aSha])) return `${aTag} старше последнего stable ${stable}: другая веха`;
   }
-  return "";
+  return lateTestsProblem(dir, aTag, aSha, bTag, bSha);
 }
 
 if (cmd === "base") {

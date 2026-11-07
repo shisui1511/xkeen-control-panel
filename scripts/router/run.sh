@@ -263,6 +263,18 @@ for _c in $RT_CORES; do
   _seen="$_seen $_c"
 done
 
+# Сужение состава окружением: явный RT_CORES и непустые переменные отбора тестов, которые этапы
+# читают из окружения (отладка точечного прогона). Список имён пишется в meta отчёта строкой
+# narrow= (none — без сужения): базой добора годится только полный прогон с narrow=none
+# (delta-plan.mjs). Имена в цикле фиксированные, eval читает только их значения.
+RT_NARROW=""
+[ -z "$RT_CORES_SET" ] || RT_NARROW=" RT_CORES"
+for _nv in RT_SEL_DIR RT_GO_PKGS RT_GO_RUN RT_GO_RUN_SEQ RT_GO_SEQ RT_SPECS RT_SPECS_FIRST RT_PW_GREP RT_PW_GREP_INVERT RT_PW_INVERT RT_RESULTS_NAME RT_ART_SUB; do
+  eval "_nvv=\${$_nv:-}"
+  [ -z "$_nvv" ] || RT_NARROW="$RT_NARROW $_nv"
+done
+RT_NARROW=${RT_NARROW# }
+
 # Ядро первой ветви набора changed (D-02): чётная контрольная сумма cksum строки SHA HEAD
 # (без перевода строки) — xray, нечётная — mihomo. Зависит только от SHA: повтор на том же
 # HEAD идёт под тем же ядром, а на разных коммитах ядра чередуются.
@@ -539,6 +551,7 @@ if [ "$SUITE" = rerun ]; then
   export RT_RESULTS_NAME RT_ART_SUB
 else
   rt_report_init
+  echo "narrow=${RT_NARROW:-none}" >>"$RT_REPORT/meta"
 fi
 echo "router-test: отчёт $RT_REPORT"
 
