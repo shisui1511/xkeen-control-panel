@@ -54,7 +54,8 @@
 // Проход-прогон набора (вместо go/specs): прогон набора router-test целиком как этап сессии.
 //   {
 //     "name": "narrow-go",                  [a-z0-9-]
-//     "suite": "changed",                   full, changed или smoke (с release, см. ниже)
+//     "suite": "changed",                   full, changed, smoke (с release), session, harness, rerun,
+//                                           delta или bisect (поля — ниже)
 //     "files": ["internal/nodes/router_nodes_test.go"],    только у changed: выбор по списку
 //                                           файлов (RT_FILES) вместо git; пути без «..»
 //     "expect": {
@@ -93,6 +94,30 @@
 // Вложенный `run.sh smoke` идёт с RELEASE=<тег>; статус stand/<arch>-smoke на коммите тега
 // публикует сам run.sh. files и interrupt у smoke не допускаются. После прогона на стенде
 // остаётся сборка релиза, поэтому следующий проход и конец сессии снова ставят HEAD.
+// Остальные наборы механики (148.1-16) — проходы-прогоны с собственными полями; interrupt и files
+// у них не допускаются, ожидания exit, summary и max_minutes — как у прочих:
+//   {"name": "mech", "suite": "harness", "expect": {"exit": 0}}
+//        набор harness: проверка механики стенда (деплой, смоук, снимок, тесты блока harness на
+//        обоих ядрах, самопроверка сессии); полей набора нет.
+//   {"name": "again", "suite": "rerun", "from": "mech", "expect": {"exit": 0}}
+//        набор rerun: перепрогон упавших тестов отчёта более раннего прохода-прогона from (имя
+//        прохода: его отчёт — прогон набора или вложенная сессия). Перепрогон дописывает раздел
+//        «Перепрогон N» в summary.md отчёта from, поэтому строки summary ищутся там, а не в
+//        собственном каталоге прохода. Упавших тестов нет — код 0, стенд не тронут.
+//   {"name": "top-up", "suite": "delta", "release": "latest", "dry_run": true, "expect": {"exit": 0}}
+//        набор delta: добор stand/<arch>-full на тег (release — latest или тег vX.Y.Z[-<суффикс>.N]);
+//        dry_run (булево, по умолчанию false) — статус на GitHub не отправляется, решение добора
+//        остаётся в summary.md. Без dry_run проход публикует статус: ставить только осознанно.
+//   {"name": "culprit", "suite": "bisect", "test": "go:TestRouterX", "core": "mihomo",
+//    "from": "71c55fea", "to": "12094e1f", "mode": "fix", "expect": {"exit": 0}}
+//        набор bisect: поиск виновного коммита. test — go:TestRouter<Имя>, go:<пакет>:TestRouter<Имя>
+//        или pw:<название>; core — xray или mihomo (ядро, на котором тест падает); from и to — ссылки
+//        git (коммиты есть; to по умолчанию HEAD); mode — regress (по умолчанию) или fix; для pw: —
+//        spec (tests/router/<имя>.spec.ts или имя файла; файл есть) и необязательно grep (одна
+//        строка без одинарной кавычки). Итог — раздел «Поиск виновного коммита» summary.md прохода.
+// Вложенный run.sh, как у прочих проходов-прогонов, идёт под блокировкой сессии без RT_CORES,
+// RT_BASE и настроек окружения оператора; FROM, TEST, CORE, TO, MODE, GREP, DRY_RUN, BASE_REPORT
+// выставляются только проходом, которому они нужны.
 // Прерывание прогона посреди этапа (необязательно, проверка исправления обрыва, G-145.1-5):
 //     "interrupt": {
 //       "stage": "go",                      обязателен; поддерживается только go
@@ -340,19 +365,101 @@ function loadInterrupt(i, where) {
 function suiteTitle(p, release) {
   if (p.suite === 'smoke') return `smoke (релиз ${release})`;
   if (p.suite === 'session') return `session по ${p.nested.path}`;
+  if (p.suite === 'delta') {
+    return `delta (релиз ${release}${p.dryRun ? ', dry_run' : ''})`;
+  }
+  if (p.suite === 'rerun') return `rerun по отчёту прохода ${p.from}`;
+  if (p.suite === 'bisect') {
+    const b = p.bisect;
+    return `bisect ${b.test} на ${b.core}: ${b.from}..${b.to} (${b.mode})`;
+  }
   return `${p.suite}${p.files.length ? ` по файлам ${p.files.join(' ')}` : ''}`;
 }
 
 // Проход-прогон набора: разбор и проверка полей. earlier — имена прогонов набора выше по спеке,
 // ctx — { root, specFile, nested } внешней спеки (nested: спека сама вложенная).
-function loadSuitePass(p, where, earlier, ctx) {
-  if (!['full', 'changed', 'smoke', 'session'].includes(p.suite)) {
-    die(`${where}.suite: full, changed, smoke или session`);
+// Поля прохода bisect (набор поиска виновного коммита): те же правила, что у run.sh до блокировки.
+function loadBisect(p, where, root) {
+  const t = p.test;
+  if (typeof t !== 'string' || /[\n\r]/.test(t)) {
+    die(`${where}.test: go:TestRouter<Имя>, go:<пакет>:TestRouter<Имя> или pw:<название>`);
   }
-  if (p.go || p.specs !== undefined || p.grep !== undefined || p.product) {
+  const isPw = t.startsWith('pw:');
+  if (isPw ? t.length <= 3 : !/^go:(?:[A-Za-z0-9_./-]+:)?TestRouter[A-Za-z0-9_]+$/.test(t)) {
+    die(`${where}.test: go:TestRouter<Имя>, go:<пакет>:TestRouter<Имя> или pw:<название>`);
+  }
+  if (!CORES.includes(p.core)) die(`${where}.core: ${CORES.join(' или ')}`);
+  const commitOk = (ref, key) => {
+    if (typeof ref !== 'string' || !SAFE_REF.test(ref)) die(`${where}.${key}: недопустимая ссылка`);
+    try {
+      git('rev-parse', '--verify', '--quiet', `${ref}^{commit}`);
+    } catch {
+      die(`${where}.${key}: коммит ${ref} не найден`);
+    }
+  };
+  commitOk(p.from, 'from');
+  const to = p.to ?? 'HEAD';
+  commitOk(to, 'to');
+  const mode = p.mode ?? 'regress';
+  if (mode !== 'regress' && mode !== 'fix') die(`${where}.mode: regress или fix`);
+  let spec = '';
+  if (isPw) {
+    if (typeof p.spec !== 'string') die(`${where}.spec: у pw: обязателен — tests/router/<имя>.spec.ts`);
+    spec = p.spec.includes('/') ? p.spec : `tests/router/${p.spec}`;
+    if (!/^tests\/router\/[A-Za-z0-9_.-]+\.spec\.ts$/.test(spec)) {
+      die(`${where}.spec: ожидается tests/router/<имя>.spec.ts`);
+    }
+    if (!existsSync(path.join(root, 'frontend', spec))) die(`${where}.spec: нет файла frontend/${spec}`);
+  } else if (p.spec !== undefined) {
+    die(`${where}.spec: только у bisect с pw:`);
+  }
+  let grep = '';
+  if (p.grep !== undefined) {
+    if (!isPw) die(`${where}.grep: только у bisect с pw:`);
+    if (typeof p.grep !== 'string' || !p.grep || /[\n\r']/.test(p.grep)) {
+      die(`${where}.grep: одна строка без одинарной кавычки`);
+    }
+    grep = p.grep;
+  }
+  return { test: t, core: p.core, from: p.from, to, mode, spec, grep };
+}
+
+const SUITE_KINDS = ['full', 'changed', 'smoke', 'session', 'harness', 'rerun', 'delta', 'bisect'];
+
+function loadSuitePass(p, where, earlier, ctx) {
+  if (!SUITE_KINDS.includes(p.suite)) {
+    die(`${where}.suite: full, changed, smoke, session, harness, rerun, delta или bisect`);
+  }
+  if (p.go || p.specs !== undefined || (p.grep !== undefined && p.suite !== 'bisect') || p.product) {
     die(`${where}: проход-прогон не сочетается с go/specs/product`);
   }
   if (p.version !== undefined) die(`${where}.version: только у прохода go/specs`);
+  if (p.tree !== undefined) die(`${where}.tree: только у прохода go/specs`);
+  // поля наборов механики (148.1-16)
+  for (const k of ['test', 'core', 'to', 'mode']) {
+    if (p[k] !== undefined && p.suite !== 'bisect') die(`${where}.${k}: только у bisect`);
+  }
+  if (p.from !== undefined && p.suite !== 'rerun' && p.suite !== 'bisect') {
+    die(`${where}.from: только у rerun и bisect`);
+  }
+  if (p.dry_run !== undefined && p.suite !== 'delta') die(`${where}.dry_run: только у delta`);
+  if (['rerun', 'bisect'].includes(p.suite) && p.interrupt !== undefined) {
+    die(`${where}.interrupt: у ${p.suite} не поддерживается`);
+  }
+  let from = null;
+  let dryRun = false;
+  let bisect = null;
+  if (p.suite === 'rerun') {
+    if (typeof p.from !== 'string' || !ctx.runs.includes(p.from)) {
+      die(`${where}.from: нужно имя более раннего прохода-прогона (его отчёт перегоняется)`);
+    }
+    from = p.from;
+  }
+  if (p.suite === 'delta' && p.dry_run !== undefined) {
+    if (typeof p.dry_run !== 'boolean') die(`${where}.dry_run: true или false`);
+    dryRun = p.dry_run;
+  }
+  if (p.suite === 'bisect') bisect = loadBisect(p, where, ctx.root);
   let nested = null;
   if (p.suite === 'session') {
     if (ctx.nested) die(`${where}: вложенная сессия не может содержать сессию`);
@@ -372,18 +479,18 @@ function loadSuitePass(p, where, earlier, ctx) {
     if (inner.target !== ctx.target) {
       die(`${where}.spec: цель вложенной спеки ${inner.target}, у внешней ${ctx.target}`);
     }
-  } else if (p.spec !== undefined) {
-    die(`${where}.spec: только у session`);
+  } else if (p.spec !== undefined && p.suite !== 'bisect') {
+    die(`${where}.spec: только у session и bisect`);
   }
   let release = null;
-  if (p.suite === 'smoke') {
+  if (p.suite === 'smoke' || p.suite === 'delta') {
     if (typeof p.release !== 'string' || (p.release !== 'latest' && !RELEASE_TAG.test(p.release))) {
-      die(`${where}.release: у smoke обязателен — latest или тег vX.Y.Z[-<суффикс>.N]`);
+      die(`${where}.release: у ${p.suite} обязателен — latest или тег vX.Y.Z[-<суффикс>.N]`);
     }
     release = p.release;
-    if (p.interrupt !== undefined) die(`${where}.interrupt: у smoke не поддерживается`);
+    if (p.interrupt !== undefined) die(`${where}.interrupt: у ${p.suite} не поддерживается`);
   } else if (p.release !== undefined) {
-    die(`${where}.release: только у smoke`);
+    die(`${where}.release: только у smoke и delta`);
   }
   let files = [];
   if (p.files !== undefined) {
@@ -433,6 +540,9 @@ function loadSuitePass(p, where, earlier, ctx) {
     release,
     files,
     nested,
+    from,
+    dryRun,
+    bisect,
     interrupt: p.interrupt === undefined ? null : loadInterrupt(p.interrupt, where),
     version: null,
     product: null,
@@ -473,6 +583,7 @@ function loadSpec(file, root, nested = false) {
   if (!Array.isArray(spec.passes) || !spec.passes.length) die('passes: непустой список');
   const names = new Set();
   const suites = [];
+  const runs = [];
   const passes = spec.passes.map((p, i) => {
     const where = `passes[${i}]`;
     if (typeof p.name !== 'string' || !SAFE_NAME.test(p.name)) die(`${where}.name: [a-z0-9-]`);
@@ -489,10 +600,13 @@ function loadSpec(file, root, nested = false) {
         root,
         specFile: file,
         nested,
-        target: spec.target
+        target: spec.target,
+        runs
       });
       // same_failures_as сравнивает строки results.tsv прогонов наборов; у вложенной сессии их нет
       if (sp.suite !== 'session') suites.push(sp.name);
+      // rerun.from ссылается на любой более ранний проход-прогон, в том числе на вложенную сессию
+      runs.push(sp.name);
       return sp;
     }
     let version = null;
@@ -878,6 +992,21 @@ function localTagExists(tag) {
 }
 
 // Новейший опубликованный (не draft) релиз GitHub; при сбое gh бросает.
+// Номер последнего перепрогона в отчёте: наибольшее N среди rerun-N.meta (run.sh пишет его при старте
+// перепрогона); 0 — перепрогонов не было.
+function rerunNumber(dir) {
+  let n = 0;
+  try {
+    for (const f of readdirSync(dir)) {
+      const m = f.match(/^rerun-(\d+)\.meta$/);
+      if (m) n = Math.max(n, Number(m[1]));
+    }
+  } catch {
+    // каталога нет — перепрогонов тоже
+  }
+  return n;
+}
+
 function latestReleaseTag() {
   return execFileSync(
     'gh',
@@ -937,6 +1066,10 @@ function planSession(spec, specFile, root) {
         step(
           `вложенная сессия по ${p.nested.path}, проходов: ${p.nested.passes}; отчёт build/router/<сессия>-NN-${p.name}`
         );
+      } else if (p.suite === 'rerun') {
+        step(
+          `прогон набора ${suiteTitle(p, p.release)}: вложенный run.sh, перепрогон дописывается в отчёт прохода ${p.from}`
+        );
       } else {
         step(
           `прогон набора ${suiteTitle(p, p.release)}: вложенный run.sh, отчёт build/router/<сессия>-NN-${p.name}${irq}`
@@ -949,7 +1082,7 @@ function planSession(spec, specFile, root) {
       }
       // смоук релиза оставляет на стенде сборку релиза, а не HEAD; вложенная сессия
       // возвращает стенд сама (сборка HEAD и её исходное ядро)
-      deployed = p.suite === 'smoke' ? null : 'HEAD';
+      deployed = p.suite === 'smoke' || p.suite === 'delta' ? null : 'HEAD';
       continue;
     }
     const key = productKey(p);
@@ -1044,6 +1177,8 @@ class Session {
     this.verdicts = [];
     this.suites = [];
     this.suiteFails = new Map();
+    // имя прохода-прогона -> каталог его отчёта (для rerun.from)
+    this.suiteDirs = new Map();
     this.notes = [];
     this.n = 0;
     this.c0 = null;
@@ -1830,11 +1965,32 @@ class Session {
   // Вложенный прогон сам ставит сборку HEAD, снимает снимок и восстанавливает стенд.
   async runSuite(p) {
     const base = `${path.basename(this.dir)}-${String(++this.n).padStart(2, '0')}-${p.name}`;
-    const dir = path.join(this.root, 'build', 'router', base);
+    let dir = path.join(this.root, 'build', 'router', base);
+    // rerun дописывает перепрогон в отчёт более раннего прохода-прогона (from), своего каталога нет
+    if (p.suite === 'rerun') {
+      dir = this.suiteDirs.get(p.from) ?? '';
+      if (!dir || !existsSync(dir)) {
+        const err = `отчёт прохода ${p.from} не найден: перегонять нечего`;
+        this.say(`прогон набора rerun не начат: ${err}`);
+        this.verdicts.push({
+          pass: p.name,
+          core: '-',
+          test: 'rerun: отчёт from',
+          expected: [p.from],
+          actual: 'не найден',
+          detail: err,
+          ok: false,
+          report: '-'
+        });
+        return 0;
+      }
+    }
     const rel = path.relative(this.root, dir);
-    // смоук релиза: тег — из спеки или новейший опубликованный (не draft) релиз
+    this.suiteDirs.set(p.name, dir);
+    const rerunBefore = p.suite === 'rerun' ? rerunNumber(dir) : 0;
+    // смоук релиза и добор: тег — из спеки или новейший опубликованный (не draft) релиз
     let tag = null;
-    if (p.suite === 'smoke') {
+    if (p.suite === 'smoke' || p.suite === 'delta') {
       tag = p.release;
       let err = '';
       if (tag === 'latest') {
@@ -1848,7 +2004,7 @@ class Session {
         err = `новейший релиз не определён или тег «${tag}» не похож на vX.Y.Z`;
       }
       if (err) {
-        this.say(`прогон набора smoke не начат: ${err}`);
+        this.say(`прогон набора ${p.suite} не начат: ${err}`);
         this.verdicts.push({
           pass: p.name,
           core: '-',
@@ -1863,8 +2019,10 @@ class Session {
       }
     }
     this.say(`прогон набора ${suiteTitle(p, tag)} → ${rel}`);
+    const bs = p.bisect;
     const env = {
-      RT_REPORT_DIR: dir,
+      // rerun пишет в отчёт from (FROM), свой каталог у него не создаётся
+      RT_REPORT_DIR: p.suite === 'rerun' ? undefined : dir,
       RT_HOLD_MINUTES: undefined,
       RT_CORES: undefined,
       RT_BASE: undefined,
@@ -1878,11 +2036,21 @@ class Session {
       RT_KERNEL_TOUCHED: undefined,
       RT_SELECT_ALL: undefined,
       RT_FILES: p.files.length ? p.files.join(',') : undefined,
-      // вложенная сессия: её спека; у остальных наборов SPEC не наследуется
-      SPEC: p.suite === 'session' ? p.nested.path : undefined,
+      // вложенная сессия: её спека; у bisect — спек теста pw:; у остальных наборов SPEC не наследуется
+      SPEC: p.suite === 'session' ? p.nested.path : bs?.spec || undefined,
       SUITE: undefined,
-      // установка артефакта релиза и публикация статуса — только у smoke с release
-      RELEASE: tag ?? undefined
+      // установка артефакта релиза и публикация статуса — только у smoke и delta с release
+      RELEASE: tag ?? undefined,
+      // поля наборов rerun, delta и bisect (148.1-16): у остальных проходов снимаются, чтобы
+      // вложенный прогон не унаследовал их от оператора
+      FROM: p.suite === 'rerun' ? dir : bs?.from,
+      TO: bs?.to,
+      TEST: bs?.test,
+      CORE: bs?.core,
+      MODE: bs?.mode,
+      GREP: bs?.grep || undefined,
+      DRY_RUN: p.suite === 'delta' ? (p.dryRun ? '1' : '0') : undefined,
+      BASE_REPORT: undefined
     };
     const args = [path.join(SCRIPT_DIR, 'run.sh')];
     if (p.suite !== 'full') args.push(p.suite);
@@ -1899,15 +2067,22 @@ class Session {
     this.record({
       kind: 'suite',
       pass: p.name,
-      label: tag ? `smoke ${tag}` : p.suite,
+      label: tag ? `${p.suite} ${tag}` : p.suite,
       dir,
       rc
     });
     if (this.aborted && !existsSync(dir)) return 0;
 
-    const res = path.join(dir, this.t, 'results.tsv');
+    // перепрогон пишет строки в rerun-N.tsv отчёта from (N — следующий свободный); упавших тестов
+    // нет — стенд не тронут и новой записи нет
+    const rerunAfter = p.suite === 'rerun' ? rerunNumber(dir) : 0;
+    const rerunTouched = rerunAfter > rerunBefore;
+    let res = path.join(dir, this.t, 'results.tsv');
+    if (p.suite === 'rerun') {
+      res = rerunTouched ? path.join(dir, this.t, `rerun-${rerunAfter}.tsv`) : '';
+    }
     const rows = [];
-    if (existsSync(res)) {
+    if (res && existsSync(res)) {
       for (const line of readFileSync(res, 'utf8').split('\n')) {
         if (!line) continue;
         const [status, core = '-', check = '', detail = ''] = line.split('\t');
@@ -1919,11 +2094,15 @@ class Session {
     // results.tsv нет, а на стенде остаётся сборка прохода product.ref. Нет признака — сборку HEAD
     // вернёт cleanup
     const deployRc = path.join(dir, this.t, 'deploy.rc');
-    // (после смоука релиза на стенде артефакт релиза, а не HEAD — признак тоже сбрасывается)
-    this.deployed =
-      p.suite !== 'smoke' && existsSync(deployRc) && readFileSync(deployRc, 'utf8').trim() === '0'
-        ? 'HEAD'
-        : null;
+    const deployOk = existsSync(deployRc) && readFileSync(deployRc, 'utf8').trim() === '0';
+    if (p.suite === 'rerun') {
+      // перепрогон без упавших тестов стенд не трогает: признак сборки остаётся прежним; иначе
+      // deploy.rc отчёта from перезаписан деплоем перепрогона (сборка HEAD)
+      if (rerunTouched) this.deployed = deployOk ? 'HEAD' : null;
+    } else {
+      // (после смоука релиза и добора на стенде артефакт релиза — признак тоже сбрасывается)
+      this.deployed = p.suite !== 'smoke' && p.suite !== 'delta' && deployOk ? 'HEAD' : null;
+    }
     if (p.suite === 'session') this.nestedEnd(p, dir, rc);
     // сбой связи — только проверка reachable и потеря связи при восстановлении; по подстроке
     // «нет связи» в любой строке нельзя: так пишет и смоук, когда не отвечает сама панель
@@ -1970,12 +2149,16 @@ class Session {
     };
     this.suites.push({
       pass: p.name,
-      suite: tag ? `smoke ${tag}` : p.suite,
+      suite: tag ? `${p.suite} ${tag}` : p.suite,
       files: p.files,
       exit: rc,
-      // у вложенной сессии строки «Итого» нет — время по замеру прохода
-      total: num(/^- Итого: (\d+) с/m) ?? (p.suite === 'session' ? took : null),
-      shell: num(/^- Оболочка: (\d+) с/m),
+      // у вложенной сессии строки «Итого» нет — время по замеру прохода; у перепрогона summary.md
+      // принадлежит отчёту from, его «Итого» и «Оболочка» — не этого прохода
+      total:
+        p.suite === 'rerun'
+          ? took
+          : (num(/^- Итого: (\d+) с/m) ?? (p.suite === 'session' ? took : null)),
+      shell: p.suite === 'rerun' ? null : num(/^- Оболочка: (\d+) с/m),
       report: rel
     });
 
