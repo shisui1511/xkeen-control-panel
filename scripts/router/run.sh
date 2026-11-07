@@ -76,6 +76,19 @@
 #                XKeen, то же ядро, правила iptables), смоук, сверка со снимком. В конце
 #                все цели снова отвечают (reboot-reachable-end). Матрица ядер не применяется.
 #
+# Разбор падений (RTR-05, D-19…D-21), наборы full, changed и harness. Каждое новое падение теста
+# (FAIL проверок go: и pw:, кроме известных, карантина и признаков потери связи) после всех ветвей и до
+# восстановления стенда, в той же блокировке и в тот же отчёт, перегоняется один раз только для
+# классификации (confirm-go-<ядро>, confirm-pw-<ядро>; строки — в <цель>/confirm.tsv, артефакты — в
+# <цель>/<ядро>/confirm/): прошёл — класс flaky, упал снова — new. Основной проход идёт без повторов
+# (retries: 0), прошедший со второго раза тест красный. Потолок — RT_CONFIRM_MAX тестов (10) на цель:
+# новых падений больше — перепрогона нет вовсе (общая причина), все они new, в plan.txt строка
+# «подтверждающий перепрогон пропущен». Классы падений — <цель>/classes.tsv и раздел «Классы падений»
+# summary.md (branch-report.mjs), итог — строка «- Итог:»; код выхода красный при new, flaky, xpass и
+# при потере связи, не догнанной после возврата связи. Счётчики report.md и summary.md показывают
+# QPASS и QFAIL (карантин). В конце каждого прогона с отчётом (кроме session) отчёт добавляется в
+# историю — node history.mjs append, класс падения попадает в колонку class (D-20).
+#
 # Порядок: check-known.sh (метки известных падений) -> цели из локального конфига ->
 # блокировка на весь прогон -> отчёт -> ротация build/router (tidy-lib.sh; сборки ротирует
 # make router-<арх>) -> проверка связи -> deploy.sh -> по целям
@@ -91,8 +104,9 @@
 #   RELEASE=<тег>        ставить артефакт GitHub Release вместо сборки ветки. У наборов smoke и
 #                        full после прогона для каждой цели публикуется статус коммита тега
 #                        stand/<arch>-<smoke|full> (release-status.sh): success при нуле FAIL и
-#                        XPASS цели, иначе failure. Статуса нет при незакоммиченных правках, сбое
-#                        связи ПК↔стенд, прерванном прогоне, а у full — когда коммит тега не
+#                        XPASS цели (по классам падений: красные new, flaky, xpass, не догнанный
+#                        stand), иначе failure. Статуса нет при незакоммиченных правках, сбое
+#                        связи ПК↔стенд (связь не вернулась или обрыв без догона), прерванном прогоне, а у full — когда коммит тега не
 #                        предок HEAD. Итог — строка «Статус на GitHub» в summary.md; код выхода
 #                        прогона от публикации не зависит. Сбой посреди прогона даёт красный
 #                        статус; повторный прогон перекрывает его (побеждает последний статус
@@ -104,6 +118,7 @@
 #                        ветвь берёт GO_SEQ, SPECS и GREP из <ядро>.sel, а ветвь без файла
 #                        пропускается; читается построчно, без eval, по шаблонам безопасных символов.
 #                        Набор rerun задаёт его сам (<цель>/rerun-N.sel.d)
+#   RT_LINK_WAIT=<с>     ожидание возврата связи после обрыва (rt_wait_link), 60…7200, по умолчанию 600
 #   RT_HOLD_MINUTES=<N>  после прогона держать блокировку N минут для ручной
 #                        проверки; снять раньше: touch <git-common-dir>/router-test.release
 #   RT_LOCK_WAIT=<с>     ожидание очереди на роутеры (по умолчанию 3600)
@@ -129,7 +144,22 @@
 # settle-<ядро>, pw-<ядро> (часть state). Хвост xcp.log ветви пишет наблюдатель окна.
 # Этап, оборванный сигналом, — строка с кодом 130 (её пишет _term), начало и ядро ветви те же.
 #
-# Код выхода: 0 — нет строк FAIL и XPASS, 2 — неизвестный набор, иначе 1. Набор session —
+# Потеря связи со стендом (класс stand, D-21, D-26), наборы full, changed и harness. Этап Go с
+# кодом 3 или этап Playwright с ненулевым кодом при молчащем ssh — обрыв: rt_wait_link ждёт связь до
+# RT_LINK_WAIT (600 с), затем один раз на ветвь догоняется сорванное — Go-пакеты вне go-done.txt
+# (catchup-go-<ядро>) или та же часть Playwright (catchup-pw-<ядро>), строки — в <цель>/catchup.tsv,
+# артефакты — в <цель>/<ядро>/catchup/ — и набор продолжается со следующего шага. Второй обрыв в
+# ветви не догоняется. Связь не вернулась — ветвь и цель останавливаются, несделанное — в
+# <цель>/notrun.txt (и в разделе «Не выполнено из-за обрыва связи» summary.md), стенд
+# восстанавливается по снимку, как при любом сбое. Обрывы — в <цель>/link-loss.tsv. Набор rerun связь
+# ждёт, но не догоняет.
+#
+# Файлы разбора падений в <отчёт>/<цель>/: confirm.tsv, confirm-count (сколько тестов подлежало
+# перепрогону), confirm-skip (причина, если перепрогона не было), confirm-plan.txt, classes.tsv,
+# catchup.tsv, link-loss.tsv, notrun.txt.
+#
+# Код выхода: 0 — нет красных классов (new, flaky, xpass, не догнанный stand), 2 — неизвестный
+# набор, иначе 1. Набор session —
 # код session.mjs: 0 — ожидания совпали и стенд вернулся, 3 — сбой связи ПК↔стенд, иначе 1 или 2.
 # Набор rerun: 0 — все перегнанные тесты прошли (PASS, KNOWN, QPASS, QFAIL) или упавших нет,
 # 1 — есть FAIL или XPASS, 2 — неверный FROM, 3 — сбой связи ПК↔стенд.
@@ -642,6 +672,47 @@ rt_sel_ok() {
   esac
 }
 
+# Потолок подтверждающего перепрогона (D-19): новых падений цели больше — общая причина
+# (случай 148-25), перепрогона нет вовсе, все падения остаются new. Решение принимается одним
+# сравнением общего числа новых падений по всем ветвям цели с этим значением (full_target).
+RT_CONFIRM_MAX=10
+
+# Признаки потери связи в детали строки результата (класс stand, D-21); тот же список — в
+# branch-report.mjs (STAND_RE). Такие падения в подтверждающий перепрогон не идут.
+RT_STAND_RE='нет связи|связь потеряна|ERR_NETWORK_CHANGED|net::ERR_INTERNET_DISCONNECTED|net::ERR_NAME_NOT_RESOLVED|ECONNRESET|ETIMEDOUT'
+
+# Красные классы цели одной строкой «new flaky xpass stand_open»: из classes.tsv (stand_open — класс
+# stand с причиной «не догнан…»: связь не вернулась или догона не было), без него — прежний подсчёт
+# по results.tsv (FAIL как new, XPASS как xpass); нет результатов — «1 0 0 0».
+rt_class_counts() {
+  if [ -f "$RT_REPORT/$1/classes.tsv" ]; then
+    # подтест Go и его родитель — один тест
+    awk -F'\t' '
+      { c = $3; if (c ~ /^go:/) sub(/\/.*/, "", c); k = $1 "\t" $2 "\t" c }
+      k in seen { next }
+      { seen[k] = 1 }
+      $1 == "new" {n++}
+      $1 == "flaky" {f++}
+      $1 == "xpass" {x++}
+      $1 == "stand" && $4 ~ /^не догнан/ {s++}
+      END {printf "%d %d %d %d\n", n, f, x, s}' "$RT_REPORT/$1/classes.tsv"
+  elif [ -f "$RT_REPORT/$1/results.tsv" ]; then
+    awk -F'\t' '$1 == "FAIL" {n++} $1 == "XPASS" {x++} END {printf "%d 0 %d 0\n", n, x}' "$RT_REPORT/$1/results.tsv"
+  else
+    echo "1 0 0 0"
+  fi
+}
+
+# Красные классы цели в переменных: RT_RC_NEW (new), RT_RC_RED (new, flaky и не догнанный stand),
+# RT_RC_XPASS (xpass). Разбор счётчиков — в функции: set -- не должен менять позиционные параметры
+# вызывающего.
+rt_red_counts() {
+  set -- $(rt_class_counts "$1")
+  RT_RC_NEW=$1
+  RT_RC_RED=$(($1 + $2 + $4))
+  RT_RC_XPASS=$3
+}
+
 # --- проверка связи -----------------------------------------------------------
 
 REACHABLE=""
@@ -707,6 +778,17 @@ full_target() {
     [ -n "${RT_GO_PKGS:-}" ] || _do_go=0
     [ -n "${RT_SPECS:-}" ] || _do_pw=0
   fi
+  # Срок ожидания связи после обрыва (D-21): целое 60…7200, иначе 600 с.
+  _link_wait=${RT_LINK_WAIT:-600}
+  case "$_link_wait" in '' | *[!0-9]*) _link_wait=600 ;; esac
+  if [ "$_link_wait" -lt 60 ] || [ "$_link_wait" -gt 7200 ]; then
+    _link_wait=600
+  fi
+  # 1 — в ветви догон уже был (или набор rerun, где догона нет): второй обрыв не догоняется
+  _cu_done=0
+  # исход _stand_gate: none (обрыва не было), catchup (связь вернулась, догонять), nocatchup (связь
+  # вернулась, догона нет), gone (связь не вернулась, несделанное записано в notrun.txt)
+  _sg_state=none
   # Состав ветвей из файлов <ядро>.sel (rerun-plan.mjs): набор rerun берёт каталог своей цели,
   # иначе — RT_SEL_DIR из окружения; нет каталога — выбор набора, как раньше.
   _sel_dir=${RT_SEL_DIR:-}
@@ -715,6 +797,8 @@ full_target() {
   # должен обрывать восстановление: игнорирование наследуют rt_restore, _after_restore и ssh.
   _finish() {
     trap '' INT TERM HUP
+    # прерванный подтверждающий перепрогон не должен утащить строки восстановления в confirm.tsv
+    [ "$SUITE" = rerun ] || unset RT_RESULTS_NAME RT_ART_SUB
     # сэмплер PID ядра (если ветвь оборвалась между Go-тестами и частью state) — до восстановления
     _kpid_stop "$_t" "$_ks"
     _ks=""
@@ -926,6 +1010,181 @@ EOF
     _bg_stage=""
     return "$_brc"
   }
+  # --- потеря связи со стендом (класс stand, D-21, D-26) --------------------------------------
+  # Строка в <цель>/notrun.txt: несделанное из-за обрыва.
+  _notrun() {
+    printf '%s\n' "$1" >>"$RT_REPORT/$_t/notrun.txt"
+  }
+  # Обрыв связи после этапа ветви: _stand_gate <этап> <код этапа> <что не выполнено, если связь не
+  # вернётся>. Обрыв — код 3 либо ненулевой код этапа и молчащий ssh (Playwright кода 3 не даёт).
+  # Ждёт связь до _link_wait; результат — _sg_state: none, catchup (первый обрыв ветви: догнать),
+  # nocatchup (второй обрыв или набор rerun: связь вернулась, но сорванное не догоняется — оно в
+  # notrun.txt) или gone (связь не вернулась: несделанное, остальные ветви и подтверждающий
+  # перепрогон — в notrun.txt, вызывающий выходит из цикла ветвей). Каждый обрыв — строка в
+  # link-loss.tsv (ядро, этап, исход).
+  _stand_gate() {
+    _sg_state=none
+    if [ "$2" != 3 ]; then
+      [ "$2" != 0 ] || return 0
+      if rt_ssh "$_t" true >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
+    if rt_wait_link "$_t" "$_link_wait"; then
+      if [ "$_cu_done" = 0 ]; then
+        _cu_done=1
+        _sg_state=catchup
+        printf '%s\t%s\t%s\n' "$_c" "$1" "догон" >>"$RT_REPORT/$_t/link-loss.tsv"
+        # файл есть уже при пустом догоне: по нему видно, что связь возвращалась и догон был
+        : >>"$RT_REPORT/$_t/catchup.tsv"
+      else
+        _sg_state=nocatchup
+        printf '%s\t%s\t%s\n' "$_c" "$1" "без догона" >>"$RT_REPORT/$_t/link-loss.tsv"
+        _notrun "$_c: этап $1 оборван (код $2), связь вернулась, сорванное не догоняется (второй обрыв в ветви или набор rerun): $3"
+      fi
+      return 0
+    fi
+    _sg_state=gone
+    printf '%s\t%s\t%s\n' "$_c" "$1" "связь не вернулась" >>"$RT_REPORT/$_t/link-loss.tsv"
+    _notrun "$_c: этап $1 оборван (код $2), связь не вернулась за $_link_wait с: $3"
+    for _sg_k in ${RT_CORES#*"$_c"}; do
+      _notrun "ветвь $_sg_k: не выполнена"
+    done
+    if [ "$SUITE" != rerun ]; then
+      _notrun "подтверждающий перепрогон: не выполнен"
+    fi
+    return 0
+  }
+  # Что в Go-этапе ветви не доделано: записи RT_GO_RUN_SEQ (_gl_seq) или пакеты (_gl_pkgs), которых
+  # нет в go-done.txt этапа (go-suite.sh пишет его на пакет, обработка которого закончилась без
+  # обрыва). Нет файла — не доделано всё. Выбор ветви — _g_seq, _g_pkgs; без них — все пакеты с
+  # роутерными тестами (тот же поиск, что в go-suite.sh).
+  _go_left() {
+    _gl_seq=""
+    _gl_pkgs=""
+    _gl_done="$_bdir/go-done.txt"
+    if [ -n "$_g_seq" ]; then
+      for _gl_e in $_g_seq; do
+        grep -qxF -e "${_gl_e%%:*}" "$_gl_done" 2>/dev/null || _gl_seq="$_gl_seq $_gl_e"
+      done
+      _gl_seq=${_gl_seq# }
+      return 0
+    fi
+    _gl_all=""
+    if [ -n "$_g_pkgs" ]; then
+      for _gl_p in $_g_pkgs; do
+        _gl_all="$_gl_all ${_gl_p#./}"
+      done
+    else
+      for _gl_f in $(find internal cmd -name '*_test.go' 2>/dev/null | sort); do
+        if [ "$(head -n 1 "$_gl_f")" = "//go:build router" ]; then
+          _gl_d=$(dirname "$_gl_f")
+          case " $_gl_all " in
+            *" $_gl_d "*) ;;
+            *) _gl_all="$_gl_all $_gl_d" ;;
+          esac
+        fi
+      done
+    fi
+    for _gl_p in $_gl_all; do
+      grep -qxF -e "$_gl_p" "$_gl_done" 2>/dev/null || _gl_pkgs="$_gl_pkgs $_gl_p"
+    done
+    _gl_pkgs=${_gl_pkgs# }
+  }
+  # Догон части Playwright: _cu_pw <read|state> — та же часть набора ветви, строки в catchup.tsv.
+  _cu_pw() {
+    rt_stage "$_t" "catchup-pw-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_SPECS_FIRST=$2" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" "RT_RESULTS_NAME=catchup.tsv" "RT_ART_SUB=catchup" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part "$1" || true
+  }
+  # Подтверждающий перепрогон новых падений (RTR-05, D-19). Идёт после цикла ветвей и до
+  # восстановления стенда (его делает _finish в EXIT-ловушке), в той же блокировке и в тот же отчёт.
+  # Вход — FAIL проверок go: и pw: без признаков потери связи (confirm-src.tsv). Решение принимается
+  # по общему числу таких падений цели, одним сравнением с RT_CONFIRM_MAX: больше — перепрогона нет
+  # ни на одном ядре (confirm-skip, строка в plan.txt), падения остаются new. Иначе для каждого
+  # ядра с падениями (сначала то, что сейчас на стенде) rerun-plan.mjs --core <ядро> --max <остаток
+  # потолка> собирает состав, ядро переключается так же, как в ветвях, и тесты идут этапами
+  # confirm-go-<ядро> и confirm-pw-<ядро> со строками в confirm.tsv и артефактами в <ядро>/confirm/.
+  # Прошедший тест — flaky, упавший снова — new (branch-report.mjs); retries основного прохода не
+  # меняются, результат перепрогона не делает тест зелёным.
+  _confirm_run() {
+    [ -f "$RT_REPORT/$_t/results.tsv" ] || return 0
+    awk -F'\t' -v re="$RT_STAND_RE" '$1 == "FAIL" && $3 ~ /^(go|pw):/ && $4 !~ re' "$RT_REPORT/$_t/results.tsv" >"$RT_REPORT/$_t/confirm-src.tsv"
+    _cf_cd="$RT_REPORT/$_t/confirm-count.d"
+    rm -rf "$_cf_cd"
+    _cf_prc=0
+    node "$SCRIPT_DIR/rerun-plan.mjs" "$RT_REPORT" "$_t" --results confirm-src.tsv --out-dir "$_cf_cd" >"$RT_REPORT/$_t/confirm-plan.txt" 2>&1 || _cf_prc=$?
+    if [ "$_cf_prc" != 0 ]; then
+      rm -rf "$_cf_cd"
+      [ "$_cf_prc" = 1 ] || echo "router-test: цель $_t: rerun-plan.mjs не составил состав подтверждающего перепрогона (код $_cf_prc, confirm-plan.txt), падения остаются new" >&2
+      return 0
+    fi
+    _cf_n=0
+    for _cf_s in "$_cf_cd"/*.sel; do
+      [ -f "$_cf_s" ] || continue
+      _cf_v=$(rt_sel_val "$_cf_s" COUNT | tr -dc '0-9')
+      _cf_n=$((_cf_n + ${_cf_v:-0}))
+    done
+    rm -rf "$_cf_cd"
+    printf '%s\n' "$_cf_n" >"$RT_REPORT/$_t/confirm-count"
+    if [ "$_cf_n" -gt "$RT_CONFIRM_MAX" ]; then
+      printf '%s\n' "без перепрогона: падений больше $RT_CONFIRM_MAX" >"$RT_REPORT/$_t/confirm-skip"
+      echo "- Цель $_t: подтверждающий перепрогон пропущен: новых падений $_cf_n больше $RT_CONFIRM_MAX — общая причина" >>"$RT_REPORT/plan.txt"
+      echo "router-test: цель $_t: подтверждающий перепрогон пропущен: новых падений $_cf_n больше $RT_CONFIRM_MAX — общая причина" >&2
+      return 0
+    fi
+    _cf_left=$RT_CONFIRM_MAX
+    _cf_order=""
+    [ -z "$_cur" ] || _cf_order=$_cur
+    for _cf_k in xray mihomo; do
+      [ "$_cf_k" = "$_cur" ] || _cf_order="$_cf_order $_cf_k"
+    done
+    _cf_sd="$RT_REPORT/$_t/confirm.sel.d"
+    rm -rf "$_cf_sd"
+    # строки результатов и артефакты перепрогона — отдельно от основного прохода (в том числе
+    # stand-ready после Go-тестов перепрогона)
+    RT_RESULTS_NAME=confirm.tsv
+    RT_ART_SUB=confirm
+    export RT_RESULTS_NAME RT_ART_SUB
+    for _cf_k in $_cf_order; do
+      [ "$_cf_left" -gt 0 ] || break
+      _cf_prc=0
+      node "$SCRIPT_DIR/rerun-plan.mjs" "$RT_REPORT" "$_t" --core "$_cf_k" --max "$_cf_left" --results confirm-src.tsv --out-dir "$_cf_sd" >>"$RT_REPORT/$_t/confirm-plan.txt" 2>&1 || _cf_prc=$?
+      if [ "$_cf_prc" != 0 ] || [ ! -f "$_cf_sd/$_cf_k.sel" ]; then
+        continue
+      fi
+      _cf_f="$_cf_sd/$_cf_k.sel"
+      _cf_seq=$(rt_sel_val "$_cf_f" GO_SEQ)
+      _cf_specs=$(rt_sel_val "$_cf_f" SPECS)
+      _cf_grep=$(rt_sel_val "$_cf_f" GREP)
+      _cf_cnt=$(rt_sel_val "$_cf_f" COUNT)
+      if ! rt_sel_ok GO_SEQ "$_cf_seq" || ! rt_sel_ok SPECS "$_cf_specs" || ! rt_sel_ok COUNT "$_cf_cnt"; then
+        echo "router-test: цель $_t: файл состава $_cf_k.sel подтверждающего перепрогона не прошёл проверку, ядро пропущено" >&2
+        continue
+      fi
+      _cf_left=$((_cf_left - _cf_cnt))
+      RT_CORE=$_cf_k
+      export RT_CORE
+      mkdir -p "$RT_REPORT/$_t/$_cf_k/confirm"
+      if [ "$_cur" != "$_cf_k" ]; then
+        rt_stage "$_t" "confirm-switch-$_cf_k" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_cf_k" --switch "$_cf_k" || true
+        if [ "$_brc" != 0 ]; then
+          echo "router-test: цель $_t: переключение на $_cf_k для подтверждающего перепрогона не удалось" >&2
+          _cur=""
+          continue
+        fi
+        _cur=$_cf_k
+        printf '%s\n' "$_cf_k" >"$RT_REPORT/$_t/core"
+      fi
+      if [ -n "$_cf_seq" ]; then
+        rt_stage "$_t" "confirm-go-$_cf_k" _bg env "RT_GO_PKGS=" "RT_GO_RUN=" "RT_GO_RUN_SEQ=$_cf_seq" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_cf_k" || true
+        rt_stage "$_t" "confirm-settle-$_cf_k" _bg _settle "$_t" || true
+      fi
+      if [ -n "$_cf_specs" ]; then
+        rt_stage "$_t" "confirm-pw-$_cf_k" _bg env "RT_SPECS=$_cf_specs" "RT_PW_GREP=$_cf_grep" "RT_PW_GREP_INVERT=" "RT_PW_CORE_ONLY=" "RT_SPECS_FIRST=" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_cf_k" || true
+      fi
+    done
+    unset RT_RESULTS_NAME RT_ART_SUB
+    RT_CORE=""
+  }
   trap '_finish' EXIT
   trap '_term' INT TERM HUP
   # Флаг ставится до снимка: сигнал, пришедший сразу после возврата ssh снимка, обрабатывается
@@ -940,6 +1199,11 @@ EOF
   _orig=$(sed -n 's/^core=//p' "$RT_REPORT/$_t/snapshot.log" | tail -n 1)
 
   _first=1
+  # ядро, которое сейчас на стенде (после последнего успешного переключения): с него начинается
+  # подтверждающий перепрогон
+  _cur=""
+  # 1 — цикл ветвей прерван: связь со стендом не вернулась (подтверждающего перепрогона нет)
+  _stop=0
   for _c in $RT_CORES; do
     # Состав из <ядро>.sel: у ветви без файла тестов нет — она пропускается целиком
     if [ -n "$_sel_dir" ] && [ ! -f "$_sel_dir/$_c.sel" ]; then
@@ -960,6 +1224,9 @@ EOF
     # (Go — RT_GO_CORE_PKGS по RT_GO_CORE_RUN, Playwright — RT_SPECS_CORE с отбором @core);
     # пустой список — этап пропускается. Значения этапам передаёт env: _bg запускает этап в
     # фоне отдельной группой процессов. Пустые значения этапы читают как «по умолчанию».
+    # догон после обрыва — один на ветвь; в наборе rerun его нет
+    _cu_done=0
+    [ "$SUITE" != rerun ] || _cu_done=1
     _b_go=$_do_go
     _b_pw=$_do_pw
     _b_skip="роутерные Go-пакеты набора changed не затронуты"
@@ -1057,6 +1324,7 @@ EOF
       done
       continue
     fi
+    _cur=$_c
 
     # 2. смоук без окна (только чтение; строки лога — после начала ветви). Ключи --from-* общие
     # для проверок и наблюдателя: числа и шестнадцатеричный отпечаток, кавычки не нужны.
@@ -1074,6 +1342,7 @@ EOF
     # смоук записывает в core определённое им ядро: ветвь продолжается с ядром ветви
     printf '%s\n' "$_c" >"$RT_REPORT/$_t/core"
 
+    _pwr_rc=0
     # 2а. окно наблюдения (smoke.sh --observe-only: smoke-settle 30 с, окно RT_SMOKE_WINDOW, вердикт
     # kernel-restart и правила логов) фоном параллельно с частью Playwright только чтения
     # (D-07): окно перекрыто обходом страниц, а не простоем. Параллельно окну идут только спеки
@@ -1092,6 +1361,7 @@ EOF
       _sps="$_sps $_osp"
       if [ "$_b_pw" = 1 ]; then
         rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+        _pwr_rc=$_brc
       fi
       _harness_pw read
       _orc=0
@@ -1101,8 +1371,25 @@ EOF
     else
       if [ "$_b_pw" = 1 ]; then
         rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+        _pwr_rc=$_brc
       fi
       _harness_pw read
+    fi
+    # 2а'. обрыв связи в части read: ждём связь, один раз догоняем часть (D-21)
+    if [ "$_b_pw" = 1 ]; then
+      _stand_gate "pw-read-$_c" "$_pwr_rc" "часть read Playwright, Go-тесты, часть state Playwright"
+      if [ "$_sg_state" = gone ]; then
+        _stop=1
+        break
+      fi
+      if [ "$_sg_state" = catchup ]; then
+        _cu_pw read ""
+        _stand_gate "catchup-pw-$_c" "$_brc" "часть read Playwright (догон), Go-тесты, часть state Playwright"
+        if [ "$_sg_state" = gone ]; then
+          _stop=1
+          break
+        fi
+      fi
     fi
     # хвост xcp.log пишет наблюдатель (без него — смоук без окна не пишет)
     [ ! -f "$RT_REPORT/$_t/xcp-log-tail.txt" ] || mv "$RT_REPORT/$_t/xcp-log-tail.txt" "$_bdir/xcp-log-tail.txt"
@@ -1122,6 +1409,22 @@ EOF
     # 3. Go-тесты на устройстве с этим ядром
     if [ "$_b_go" = 1 ]; then
       rt_stage "$_t" "go-$_c" _bg env "RT_GO_PKGS=$_g_pkgs" "RT_GO_RUN=$_g_run" "RT_GO_RUN_SEQ=$_g_seq" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
+      # обрыв связи в Go-этапе: ждём связь, один раз догоняем пакеты вне go-done.txt (D-21)
+      _gorc=$_brc
+      _go_left
+      _stand_gate "go-$_c" "$_gorc" "Go: ${_gl_seq:-${_gl_pkgs:--}}, часть state Playwright"
+      if [ "$_sg_state" = gone ]; then
+        _stop=1
+        break
+      fi
+      if [ "$_sg_state" = catchup ] && { [ -n "$_gl_seq" ] || [ -n "$_gl_pkgs" ]; }; then
+        rt_stage "$_t" "catchup-go-$_c" _bg env "RT_GO_PKGS=$_gl_pkgs" "RT_GO_RUN=$_g_run" "RT_GO_RUN_SEQ=$_gl_seq" "RT_RESULTS_NAME=catchup.tsv" "RT_ART_SUB=catchup" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
+        _stand_gate "catchup-go-$_c" "$_brc" "Go (догон): ${_gl_seq:-$_gl_pkgs}, часть state Playwright"
+        if [ "$_sg_state" = gone ]; then
+          _stop=1
+          break
+        fi
+      fi
 
       # 3а. стенд после разрушающих тестов должен прийти в рабочее состояние
       rt_stage "$_t" "settle-$_c" _bg _settle "$_t" || true
@@ -1133,6 +1436,20 @@ EOF
     # чтения прошла в шаге 2а
     if [ "$_b_pw" = 1 ]; then
       rt_stage "$_t" "pw-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_SPECS_FIRST=$_p_first" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part state || true
+      # обрыв связи в части state: ждём связь, один раз догоняем часть (D-21)
+      _stand_gate "pw-$_c" "$_brc" "часть state Playwright"
+      if [ "$_sg_state" = gone ]; then
+        _stop=1
+        break
+      fi
+      if [ "$_sg_state" = catchup ]; then
+        _cu_pw state "$_p_first"
+        _stand_gate "catchup-pw-$_c" "$_brc" "часть state Playwright (догон)"
+        if [ "$_sg_state" = gone ]; then
+          _stop=1
+          break
+        fi
+      fi
     else
       rt_result "$_t" SKIP pw "$_b_skip_pw"
     fi
@@ -1146,6 +1463,10 @@ EOF
     _ks=""
   done
   RT_CORE=""
+  # подтверждающий перепрогон новых падений (D-19): до восстановления стенда, кроме набора rerun
+  if [ "$SUITE" != rerun ] && [ "$_stop" = 0 ]; then
+    _confirm_run
+  fi
   exit 0
 }
 
@@ -1443,6 +1764,14 @@ done
 # доводится до конца, и прогон выходит с кодом 130 без удержания блокировки.
 trap 'RT_INTR=1' INT TERM HUP
 
+# История результатов (D-20): history.mjs append добавляет отчёт (строки результатов и классы
+# падений) в build/router/history.tsv; повторное добавление того же отчёта ничего не пишет. Вызывается
+# в конце каждого прогона с отчётом (все наборы, кроме session: её историю пишет session.mjs) до
+# hold_lock; сбой — предупреждение, код выхода прогона не меняется.
+rt_history_append() {
+  node "$SCRIPT_DIR/history.mjs" append "$RT_REPORT" >/dev/null || echo "router-test: предупреждение: запись отчёта в историю не удалась (node scripts/router/history.mjs append $RT_REPORT)" >&2
+}
+
 # --- отчёт набора rerun -------------------------------------------------------------------
 # Итог перепрогона дописывается в отчёт FROM: раздел «## Перепрогон N» в summary.md (копия в
 # rerun-N.md) с таблицей «проверка, ядро, было, стало» и строкой «- Перепрогон: K тестов из
@@ -1537,6 +1866,7 @@ rerun_finish() {
     echo "router-test: прерван (код 130), итог — $_rf_md" >&2
     exit 130
   fi
+  rt_history_append
   hold_lock
   if [ "$_rf_link" = 1 ]; then
     echo "router-test: сбой связи ПК↔стенд (итог — $_rf_md)" >&2
@@ -1741,7 +2071,7 @@ done
     echo
     echo "- Версия xcp: ${ver:--}"
     if [ -f "$RT_REPORT/$t/results.tsv" ]; then
-      awk -F'\t' '{c[$1]++} END {printf "- PASS: %d, FAIL: %d, KNOWN: %d, XPASS: %d, SKIP: %d\n", c["PASS"], c["FAIL"], c["KNOWN"], c["XPASS"], c["SKIP"]}' "$RT_REPORT/$t/results.tsv"
+      awk -F'\t' '{c[$1]++} END {printf "- PASS: %d, FAIL: %d, KNOWN: %d, XPASS: %d, SKIP: %d, QPASS: %d, QFAIL: %d\n", c["PASS"], c["FAIL"], c["KNOWN"], c["XPASS"], c["SKIP"], c["QPASS"], c["QFAIL"]}' "$RT_REPORT/$t/results.tsv"
     else
       echo "- результатов нет"
     fi
@@ -1755,7 +2085,15 @@ done
     if [ -f "$RT_REPORT/$t/results.tsv" ] && awk -F'\t' '$1 == "FAIL" || $1 == "XPASS" {f = 1} END {exit !f}' "$RT_REPORT/$t/results.tsv"; then
       echo "Падения:"
       echo
-      awk -F'\t' '$1 == "FAIL" || $1 == "XPASS" {printf "- %s %s: %s\n", $1, $3, $4}' "$RT_REPORT/$t/results.tsv"
+      # класс падения — из classes.tsv цели (нет файла — без класса)
+      _cls_f="$RT_REPORT/$t/classes.tsv"
+      [ -f "$_cls_f" ] || _cls_f=/dev/null
+      awk -F'\t' -v cf="$_cls_f" '
+        FILENAME == cf { cls[$2 "\t" $3] = $1; next }
+        $1 == "FAIL" || $1 == "XPASS" {
+          c = cls[$2 "\t" $3]
+          printf "- %s %s%s: %s\n", $1, $3, (c != "" ? " [" c "]" : ""), $4
+        }' "$_cls_f" "$RT_REPORT/$t/results.tsv"
       echo
     fi
     if [ -f "$RT_REPORT/$t/results.tsv" ] && awk -F'\t' '$1 == "KNOWN" {f = 1} END {exit !f}' "$RT_REPORT/$t/results.tsv"; then
@@ -1795,7 +2133,7 @@ done
     [ -f "$RT_REPORT/$t/xcp_version" ] && ver=$(cat "$RT_REPORT/$t/xcp_version")
     printf '%s: xcp %s, ' "$arch" "${ver:--}"
     if [ -f "$RT_REPORT/$t/results.tsv" ]; then
-      awk -F'\t' '{c[$1]++} END {printf "passed %d, failed %d, known %d, xpass %d, skipped %d\n", c["PASS"], c["FAIL"], c["KNOWN"], c["XPASS"], c["SKIP"]}' "$RT_REPORT/$t/results.tsv"
+      awk -F'\t' '{c[$1]++} END {printf "passed %d, failed %d, known %d, xpass %d, skipped %d, quarantine %d (QPASS %d, QFAIL %d)\n", c["PASS"], c["FAIL"], c["KNOWN"], c["XPASS"], c["SKIP"], c["QPASS"] + c["QFAIL"], c["QPASS"], c["QFAIL"]}' "$RT_REPORT/$t/results.tsv"
     else
       echo "результатов нет"
     fi
@@ -1805,15 +2143,12 @@ done
   done
 } >"$RT_REPORT/summary.md"
 
+# Красные классы (D-19…D-21): new, flaky и не догнанный stand — в FAILS, xpass — в XPASSES. Нет
+# classes.tsv (разбор не сработал) — прежний подсчёт FAIL и XPASS по results.tsv.
 for t in $RT_TARGETS; do
-  if [ -f "$RT_REPORT/$t/results.tsv" ]; then
-    f=$(awk -F'\t' '$1 == "FAIL" {n++} END {print n + 0}' "$RT_REPORT/$t/results.tsv")
-    x=$(awk -F'\t' '$1 == "XPASS" {n++} END {print n + 0}' "$RT_REPORT/$t/results.tsv")
-    FAILS=$((FAILS + f))
-    XPASSES=$((XPASSES + x))
-  else
-    FAILS=$((FAILS + 1))
-  fi
+  rt_red_counts "$t"
+  FAILS=$((FAILS + RT_RC_RED))
+  XPASSES=$((XPASSES + RT_RC_XPASS))
 done
 
 echo
@@ -1823,8 +2158,10 @@ cat "$RT_REPORT/summary.md"
 
 # Для каждой цели ставит статус stand/<arch>-<smoke|full> на коммите RELEASE и дописывает в
 # summary.md строку «Статус на GitHub: <контекст> <состояние>» (при отказе — «не отправлен
-# (<причина>)»). Статуса нет при незакоммиченных правках, сбое связи ПК↔стенд (в том числе когда
-# у красного прогона в конце нет связи с целью), отсутствии результатов, деплое, не дошедшем до
+# (<причина>)»). Статуса нет при незакоммиченных правках, сбое связи ПК↔стенд (непустой
+# <цель>/notrun.txt, строка FAIL reachable без догона — нет catchup.tsv, а также когда у красного
+# прогона в конце нет связи с целью; обрыв, после которого связь вернулась и был догон, статус не
+# останавливает), отсутствии результатов, деплое, не дошедшем до
 # цели (сбой на ПК), сбое подготовки стенда (deploy.rc=2), у smoke — когда ветка меняла
 # scripts/router относительно origin/main (или сравнить не удалось), а у full — когда коммит
 # тега не предок HEAD. Прерванный прогон досюда не доходит (выход по RT_INTR раньше). Код выхода
@@ -1846,7 +2183,11 @@ publish_release_status() {
       _preason="сбой связи ПК↔стенд"
     elif [ ! -f "$_pres" ]; then
       _preason="результатов нет"
-    elif awk -F'\t' '$1 == "FAIL" && $3 == "reachable" {f = 1} END {exit !f}' "$_pres"; then
+    elif [ -s "$RT_REPORT/$_pt/notrun.txt" ]; then
+      # связь не вернулась или часть набора после обрыва не выполнена (D-21, D-26)
+      _preason="сбой связи ПК↔стенд"
+    elif awk -F'\t' '$1 == "FAIL" && $3 == "reachable" {f = 1} END {exit !f}' "$_pres" && [ ! -f "$RT_REPORT/$_pt/catchup.tsv" ]; then
+      # обрыв без догона; обрыв, после которого связь вернулась и был догон, статус не останавливает
       _preason="сбой связи ПК↔стенд"
     elif [ ! -f "$RT_REPORT/$_pt/deploy.rc" ]; then
       # deploy.sh вышел до установки на цель: нет ассета, сбой gh или sha256 на ПК
@@ -1865,8 +2206,12 @@ publish_release_status() {
       fi
     fi
     if [ -z "$_preason" ]; then
-      _pf=$(awk -F'\t' '$1 == "FAIL" {n++} END {print n + 0}' "$_pres")
-      _px=$(awk -F'\t' '$1 == "XPASS" {n++} END {print n + 0}' "$_pres")
+      # красные классы цели: new, flaky, не догнанный stand (_pf) и xpass (_px); «новых падений» в
+      # описании — new плюс xpass
+      rt_red_counts "$_pt"
+      _pnew=$RT_RC_NEW
+      _pf=$RT_RC_RED
+      _px=$RT_RC_XPASS
       # Красный прогон без связи в конце — вероятный обрыв посреди прогона, а не регрессия
       if [ "$_pf" -gt 0 ] && ! rt_ssh "$_pt" true >/dev/null 2>&1; then
         _preason="сбой связи ПК↔стенд"
@@ -1883,7 +2228,7 @@ publish_release_status() {
         _pstate=failure
         _pverdict="красный"
       fi
-      _pdesc="$_pword $_parch: $_pverdict, ядро $_pcore, новых падений $((_pf + _px))"
+      _pdesc="$_pword $_parch: $_pverdict, ядро $_pcore, новых падений $((_pnew + _px))"
       _prc=0
       sh "$SCRIPT_DIR/release-status.sh" "$RELEASE" "$_pctx" "$_pstate" "$_pdesc" || _prc=$?
       if [ "$_prc" -eq 0 ]; then
@@ -1908,12 +2253,17 @@ if [ "$RT_INTR" = 1 ]; then
   exit 130
 fi
 
+# История результатов (D-20): отчёт со строками и классами добавляется в build/router/history.tsv.
+# Сбой записи прогон не краснит и код выхода не меняет.
+rt_history_append
 publish_release_status
 
 hold_lock
 
 if [ "$FAILS" -gt 0 ] || [ "$XPASSES" -gt 0 ]; then
-  echo "router-test: красный (FAIL: $FAILS, XPASS: $XPASSES)" >&2
+  # причина — строки «- Итог:» целей (branch-report.mjs), иначе счётчики
+  _itog=$(grep -h '^- Итог: красный' "$RT_REPORT"/summary.md | sed 's/^- Итог: //' | paste -sd ';' - | sed 's/;/; /g' || true)
+  echo "router-test: ${_itog:-красный (FAIL: $FAILS, XPASS: $XPASSES)}" >&2
   exit 1
 fi
 echo "router-test: зелёный"

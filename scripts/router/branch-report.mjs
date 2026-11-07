@@ -23,7 +23,26 @@
 //     на ship:pre;
 //   - «## Нужна метка ядра» (только --suite full) — страховка D-05б: проверка go:/pw: без метки
 //     ядра, чей исход в ветвях xray и mihomo различается как класс (PASS / SKIP / KNOWN /
-//     FAIL и XPASS), либо «- нет»;
+//     FAIL и XPASS), либо «- нет»; проверки с QPASS или QFAIL (карантин) в раздел не входят;
+//   - «## Классы падений» (RTR-05, D-19…D-21) — класс каждого падения: new (находка по продукту),
+//     flaky (упал в основном проходе и прошёл при подтверждающем перепрогоне, <цель>/confirm.tsv),
+//     known (метка известного падения), xpass, stand (потеря связи со стендом), quarantine
+//     (карантин). Таблица Класс, Проверка, Ядро, Причина класса, В истории (падений/прогонов за 30
+//     дней по history.mjs failFreq; ошибка истории — «-»), затем строка итога по классам:
+//       - Итог: зелёный
+//       - Итог: красный (новых N, нестабильных N, xpass N, обрывов N)
+//       - Итог: красный: нестабильный (нестабильных N)       (одни flaky)
+//     Падения без confirm.tsv (старый отчёт, потолок перепрогона, проверка вне go:/pw:) — new.
+//     Потеря связи (проверка reachable или признаки в детали: «нет связи», ERR_NETWORK_CHANGED и
+//     т. п.) — stand; догнанная проверка (строка в <цель>/catchup.tsv, run.sh) получает класс по
+//     результату догона: прошла — stand (итог не краснит), упала не из-за связи — new, снова из-за
+//     связи — открытый stand. reachable считается догнанным, если catchup.tsv есть, а notrun.txt
+//     пуст. Непустой notrun.txt (связь не вернулась, часть набора не выполнена) без открытых строк
+//     stand добавляет строку notrun:связь, итог остаётся красным.
+//   - «- Обрывы связи: N, догнано: M» (при N > 0, по <цель>/link-loss.tsv) и «## Не выполнено из-за
+//     обрыва связи» (по <цель>/notrun.txt, D-26).
+//     Причина класса — короткая фраза без текста ошибки; причина открытого stand (связь не
+//     вернулась, догона не было) начинается со слов «не догнан» (run.sh считает их красными).
 //   - «## Тренд набора» (только --suite full, D-16) — число проверок go:/pw: и время тестов этого
 //     отчёта против прошлого полного прогона истории (history.mjs, lastFull строго до начала
 //     отчёта из meta) и до 5 самых долгих новых тестов; нет истории — «- Тренд: история
@@ -48,6 +67,9 @@
 // на каждую такую проверку (повторный запуск не дублирует строки) и пишет <цель>/layout.tsv:
 // «проверка<TAB>ядра через пробел<TAB>причина» (метка ядра | метка падения с ядром | ротация —
 // ядро из SHA | полная матрица | отладка RT_CORES; причина берётся по plan.txt).
+// Он же пишет <цель>/classes.tsv: «класс<TAB>ядро<TAB>проверка<TAB>причина» на каждую строку
+// FAIL, XPASS, KNOWN, QFAIL и QPASS (читают run.sh, history.mjs, unattended.sh, rerun-plan.mjs);
+// повторный запуск перезаписывает файл.
 // В вывод попадают лишь имена этапов и тестов, ядра, статусы и секунды: деталь результатов,
 // адреса и тексты ошибок не выводятся.
 // Без зависимостей: только встроенные модули Node и core-marks.cjs.
@@ -89,8 +111,22 @@ const COMMON = new Set([
   "restore",
   "verify",
 ]);
-const BRANCH = ["sync", "switch", "smoke", "observe", "pw-read", "go", "settle", "pw"];
-const TEST_STAGES = new Set(["go", "pw-read", "pw"]);
+const BRANCH = [
+  "sync",
+  "switch",
+  "smoke",
+  "observe",
+  "pw-read",
+  "go",
+  "settle",
+  "pw",
+  "catchup-go",
+  "catchup-pw",
+  "confirm-switch",
+  "confirm-go",
+  "confirm-pw",
+];
+const TEST_STAGES = new Set(["go", "pw-read", "pw", "catchup-go", "catchup-pw", "confirm-go", "confirm-pw"]);
 const CORE_SUFFIX = /-(xray|mihomo)$/;
 
 function isCommon(name) {
@@ -539,8 +575,9 @@ if (testMap.size > 0) {
 
 // --- метки ядра: страховка D-05б и раскладка тестов по ветвям (D-19) ----------------------
 
-const RESULT_ORDER = ["FAIL", "XPASS", "KNOWN", "SKIP", "PASS"];
-const classOf = (st) => (st === "FAIL" || st === "XPASS" ? "FAIL" : st);
+// QFAIL и QPASS — исход теста в карантине (D-17): отдельный класс, на итог не влияет
+const RESULT_ORDER = ["FAIL", "XPASS", "QFAIL", "KNOWN", "QPASS", "SKIP", "PASS"];
+const classOf = (st) => (st === "FAIL" || st === "XPASS" ? "FAIL" : st === "QFAIL" || st === "QPASS" ? "quarantine" : st);
 const resultsFile = path.join(report, target, "results.tsv");
 let resultsRaw = "";
 try {
@@ -592,6 +629,8 @@ const bothBranches = [...byCheck.values()].some((m) => m.has("xray")) && [...byC
 if (suite === "full" && bothBranches) {
   for (const [check, perCore] of byCheck) {
     if (!perCore.has("xray") || !perCore.has("mihomo")) continue;
+    // проверка в карантине хоть в одной ветви метки ядра не требует (D-17)
+    if (classOf(perCore.get("xray")) === "quarantine" || classOf(perCore.get("mihomo")) === "quarantine") continue;
     if (classOf(perCore.get("xray")) === classOf(perCore.get("mihomo"))) continue;
     if (markOf(check) !== "") continue; // размечен или Go-разметка не прочитана
     needMark.push({ check, xray: perCore.get("xray"), mihomo: perCore.get("mihomo") });
@@ -672,6 +711,175 @@ if (suite === "full") {
   out.push("");
 }
 
+// --- классы падений (RTR-05, D-19…D-21) -----------------------------------------------------
+
+// Признаки потери связи в детали строки результата (D-21); тот же список — в run.sh (RT_STAND_RE).
+const STAND_RE =
+  /нет связи|связь потеряна|ERR_NETWORK_CHANGED|net::ERR_INTERNET_DISCONNECTED|net::ERR_NAME_NOT_RESOLVED|ECONNRESET|ETIMEDOUT/;
+// от худшего статуса к лучшему; прочие значения в разбор не берутся
+const WORST = ["FAIL", "XPASS", "QFAIL", "KNOWN", "QPASS", "SKIP", "PASS"];
+const PASSED = new Set(["PASS", "QPASS"]);
+
+function readText(name) {
+  try {
+    return fs.readFileSync(path.join(report, target, name), "utf8");
+  } catch {
+    return null;
+  }
+}
+// строки файла результатов цели: статус, ядро, проверка, деталь (деталь в вывод не идёт)
+function readRows(name) {
+  const text = readText(name);
+  if (!text) return [];
+  const rows = [];
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    const f = line.split("\t");
+    if (f.length < 3 || !WORST.includes(f[0])) continue;
+    rows.push({ st: f[0], core: f[1], check: f[2], detail: f[3] || "" });
+  }
+  return rows;
+}
+// семья проверки: подтест Go сводится к родителю (перепрогон гонит родительский TestRouter*)
+const famOf = (core, check) => `${core}\t${check.startsWith("go:") ? "go:" + check.slice(3).split("/")[0] : check}`;
+const exactOf = (core, check) => `${core}\t${check}`;
+// ключ -> { st: худший статус, detail: деталь первой худшей строки }
+function worstBy(rows, keyOf) {
+  const m = new Map();
+  for (const r of rows) {
+    const k = keyOf(r.core, r.check);
+    const prev = m.get(k);
+    if (!prev || WORST.indexOf(r.st) < WORST.indexOf(prev.st)) m.set(k, { st: r.st, detail: r.detail });
+  }
+  return m;
+}
+
+const mainRows = readRows("results.tsv");
+// строки core-mark:… попадают в results.tsv только с --write: в сводке без него они учитываются здесь
+for (const n of needMark) {
+  if (!existingMarks.has(n.check)) mainRows.push({ st: "FAIL", core: "-", check: `core-mark:${n.check}`, detail: "" });
+}
+const mainWorst = worstBy(mainRows, exactOf);
+const confirmWorst = worstBy(
+  readRows("confirm.tsv").filter((r) => /^(go|pw):/.test(r.check)),
+  famOf
+);
+// «без перепрогона: …» — перепрогон пропущен из-за потолка (run.sh пишет причину в confirm-skip)
+const catchupExists = readText("catchup.tsv") !== null;
+const catchupRows = readRows("catchup.tsv");
+const catchupFam = worstBy(
+  catchupRows.filter((r) => /^(go|pw):/.test(r.check)),
+  famOf
+);
+const notrunLines = (readText("notrun.txt") || "")
+  .split("\n")
+  .map((l) => l.trim())
+  .filter(Boolean);
+const confirmSkipText = readText("confirm-skip");
+const confirmSkipWhy = confirmSkipText === null ? null : confirmSkipText.split("\n")[0].trim() || "без перепрогона";
+
+// Класс одной проверки. stand — потеря связи; open — связь не вернулась или догона не было
+// (причина начинается со слов «не догнан»: run.sh краснит такие строки).
+function classify(core, check, st, detail) {
+  if (st === "XPASS") return { cls: "xpass", why: "метка известного падения больше не нужна" };
+  if (st === "KNOWN") return { cls: "known", why: "метка известного падения" };
+  if (st === "QFAIL") return { cls: "quarantine", why: "карантин: упал" };
+  if (st === "QPASS") return { cls: "quarantine", why: "карантин: прошёл", quiet: true };
+  if (st !== "FAIL") return null;
+  if (check === "reachable" || STAND_RE.test(detail)) {
+    if (check === "reachable") {
+      if (catchupExists && notrunLines.length === 0) return { cls: "stand", why: "потеря связи, догон выполнен" };
+    } else {
+      const c = catchupFam.get(famOf(core, check));
+      if (c && (PASSED.has(c.st) || c.st === "KNOWN")) return { cls: "stand", why: "потеря связи, догнан: прошёл" };
+      if (c && c.st === "FAIL" && !STAND_RE.test(c.detail)) return { cls: "new", why: "упал при догоне после потери связи" };
+    }
+    return { cls: "stand", why: "не догнан: потеря связи со стендом", open: true };
+  }
+  if (!/^(go|pw):/.test(check)) return { cls: "new", why: "падение проверки" };
+  if (confirmSkipWhy !== null) return { cls: "new", why: confirmSkipWhy };
+  const c = confirmWorst.get(famOf(core, check));
+  if (c && PASSED.has(c.st)) return { cls: "flaky", why: "прошёл при подтверждающем перепрогоне" };
+  if (c && (c.st === "FAIL" || c.st === "XPASS")) return { cls: "new", why: "упал снова при подтверждающем перепрогоне" };
+  return { cls: "new", why: "без подтверждающего перепрогона" };
+}
+
+const classRows = [];
+for (const [key, v] of mainWorst) {
+  const [core, check] = key.split("\t");
+  const c = classify(core, check, v.st, v.detail);
+  if (c) classRows.push({ core, check, ...c });
+}
+// счёт по тестам: подтест Go и его родитель — один тест
+// строки догона, не бывшие падением основного прохода (набор не дошёл до них из-за обрыва)
+for (const [key, v] of worstBy(catchupRows, exactOf)) {
+  const [core, check] = key.split("\t");
+  const m = mainWorst.get(key);
+  if (m && (m.st === "FAIL" || m.st === "XPASS")) continue;
+  if (v.st === "XPASS") classRows.push({ core, check, cls: "xpass", why: "метка известного падения больше не нужна" });
+  else if (v.st === "FAIL") {
+    const standLike = STAND_RE.test(v.detail);
+    classRows.push({
+      core,
+      check,
+      cls: standLike ? "stand" : "new",
+      why: standLike ? "не догнан: потеря связи при догоне" : "упал при догоне после потери связи",
+      open: standLike,
+    });
+  }
+}
+// часть набора не выполнена, а строк открытого stand нет: итог всё равно красный
+if (notrunLines.length > 0 && !classRows.some((r) => r.open)) {
+  classRows.push({ core: "-", check: "notrun:связь", cls: "stand", why: "не догнан: часть набора не выполнена (notrun.txt)", open: true });
+}
+const nOf = (pred) => new Set(classRows.filter(pred).map((r) => `${r.cls}\t${famOf(r.core, r.check)}`)).size;
+const nNew = nOf((r) => r.cls === "new");
+const nFlaky = nOf((r) => r.cls === "flaky");
+const nXpass = nOf((r) => r.cls === "xpass");
+const nOpen = nOf((r) => r.open);
+const haveResults = readText("results.tsv") !== null;
+
+// «падений/прогонов за 30 дней» по истории; ошибка истории — «-»
+let freq = null;
+try {
+  const hist = await import("./history.mjs");
+  freq = hist.failFreq(hist.readHistory(), { days: 30 });
+} catch {
+  freq = null;
+}
+const histCell = (check) => {
+  const v = freq && freq.get(check);
+  return v ? `${v.fails}/${v.runs}` : "-";
+};
+
+out.push("## Классы падений", "");
+const lossRows = (readText("link-loss.tsv") || "").split("\n").filter(Boolean);
+if (lossRows.length > 0) {
+  const caught = lossRows.filter((l) => l.split("\t")[2] === "догон").length;
+  out.push(`- Обрывы связи: ${lossRows.length}, догнано: ${caught}`);
+}
+const confirmCount = Number((readText("confirm-count") || "").trim());
+if (confirmSkipWhy !== null) out.push(`- Подтверждающий перепрогон: пропущен (новых падений ${Number.isFinite(confirmCount) ? confirmCount : "-"}, ${confirmSkipWhy})`);
+else if (readText("confirm.tsv") !== null) out.push(`- Подтверждающий перепрогон: перегнано тестов ${Number.isFinite(confirmCount) ? confirmCount : "-"}`);
+if (out[out.length - 1] !== "") out.push("");
+const shown = classRows.filter((r) => !r.quiet);
+if (shown.length === 0) out.push("- падений нет");
+else {
+  out.push("| Класс | Проверка | Ядро | Причина класса | В истории |", "|---|---|---|---|---:|");
+  for (const r of shown) out.push(`| ${r.cls} | ${mdName(r.check)} | ${r.core} | ${r.why} | ${histCell(r.check)} |`);
+}
+out.push("");
+if (!haveResults) out.push("- Итог: красный (результатов нет)");
+else if (nNew + nFlaky + nXpass + nOpen === 0) out.push("- Итог: зелёный");
+else if (nNew + nXpass + nOpen === 0) out.push(`- Итог: красный: нестабильный (нестабильных ${nFlaky})`);
+else out.push(`- Итог: красный (новых ${nNew}, нестабильных ${nFlaky}, xpass ${nXpass}, обрывов ${nOpen})`);
+out.push("");
+if (notrunLines.length > 0) {
+  out.push("## Не выполнено из-за обрыва связи", "");
+  for (const l of notrunLines) out.push(`- ${cleanName(l)}`);
+  out.push("");
+}
+
 if (write) {
   // строки FAIL core-mark:<проверка> в results.tsv (без дублей при повторном запуске)
   const rows = needMark.filter((n) => !existingMarks.has(n.check));
@@ -683,6 +891,15 @@ if (write) {
       fs.appendFileSync(resultsFile, text);
     } catch {
       // отчёта цели нет — писать некуда
+    }
+  }
+  // classes.tsv: класс, ядро, проверка, причина класса (без текста ошибки); файл пишется и пустым
+  if (haveResults) {
+    try {
+      const body = classRows.map((r) => `${r.cls}\t${r.core}\t${r.check}\t${r.why}`).join("\n");
+      fs.writeFileSync(path.join(report, target, "classes.tsv"), body ? body + "\n" : "");
+    } catch {
+      // каталог цели недоступен
     }
   }
   // layout.tsv: проверка, ядра, причина раскладки
