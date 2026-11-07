@@ -2189,6 +2189,20 @@ class Session {
       RT_SPECS_CORE: undefined,
       RT_KERNEL_TOUCHED: undefined,
       RT_SELECT_ALL: undefined,
+      // сужение состава оператора (отладка точечного прогона) во вложенный прогон не переходит:
+      // full и delta с ним публиковали бы stand/<arch>-full по части набора
+      RT_SEL_DIR: undefined,
+      RT_GO_PKGS: undefined,
+      RT_GO_RUN: undefined,
+      RT_GO_RUN_SEQ: undefined,
+      RT_GO_SEQ: undefined,
+      RT_SPECS: undefined,
+      RT_SPECS_FIRST: undefined,
+      RT_PW_GREP: undefined,
+      RT_PW_GREP_INVERT: undefined,
+      RT_PW_INVERT: undefined,
+      RT_RESULTS_NAME: undefined,
+      RT_ART_SUB: undefined,
       RT_FILES: p.files.length ? p.files.join(',') : undefined,
       // вложенная сессия: её спека; у bisect — спек теста pw:; у остальных наборов SPEC не наследуется
       SPEC: p.suite === 'session' ? p.nested.path : bs?.spec || undefined,

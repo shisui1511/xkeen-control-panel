@@ -158,7 +158,9 @@
 #                        предок HEAD. Итог — строка «Статус на GitHub» в summary.md; код выхода
 #                        прогона от публикации не зависит. Сбой посреди прогона даёт красный
 #                        статус; повторный прогон перекрывает его (побеждает последний статус
-#                        контекста)
+#                        контекста). У full и delta с RELEASE состав не сужается: заданные
+#                        RT_CORES, RT_SEL_DIR, RT_GO_*, RT_SPECS*, RT_PW_GREP*, RT_PW_INVERT,
+#                        RT_RESULTS_NAME или RT_ART_SUB — отказ с кодом 2 до блокировки
 #   SPEC=<файл>          спека набора session (путь от корня рабочей копии или абсолютный)
 #   FROM=<отчёт>         отчёт прогона или сессии набора rerun (путь от корня рабочей копии или
 #                        абсолютный, только под build/router; проверка до блокировки, иначе код 2).
@@ -274,6 +276,12 @@ for _nv in RT_SEL_DIR RT_GO_PKGS RT_GO_RUN RT_GO_RUN_SEQ RT_GO_SEQ RT_SPECS RT_S
   [ -z "$_nvv" ] || RT_NARROW="$RT_NARROW $_nv"
 done
 RT_NARROW=${RT_NARROW# }
+# full и delta с RELEASE публикуют stand/<arch>-full: после части набора это был бы ложный зелёный.
+# Сужение — только для отладки без RELEASE; отказ с кодом 2 до блокировки, стенд не трогается.
+if [ -n "${RELEASE:-}" ] && [ -n "$RT_NARROW" ] && { [ "$SUITE_NAME" = full ] || [ "$SUITE_NAME" = delta ]; }; then
+  echo "router-test: SUITE=$SUITE_NAME с RELEASE публикует stand/<arch>-full, а состав сужен окружением: $RT_NARROW — снимите эти переменные (сужение — только для отладки без RELEASE)" >&2
+  exit 2
+fi
 
 # Ядро первой ветви набора changed (D-02): чётная контрольная сумма cksum строки SHA HEAD
 # (без перевода строки) — xray, нечётная — mihomo. Зависит только от SHA: повтор на том же
@@ -2230,6 +2238,7 @@ harness_selfcheck() {
     -u RT_SMOKE_WINDOW -u RT_SMOKE_IPT_WAIT -u RT_GO_PKGS -u RT_GO_RUN -u RT_GO_RUN_SEQ \
     -u RT_GO_CORE_PKGS -u RT_GO_CORE_RUN -u RT_SPECS -u RT_SPECS_CORE -u RT_SPECS_FIRST \
     -u RT_PW_GREP -u RT_PW_GREP_INVERT -u RT_PW_CORE_ONLY -u RT_ART_SUB -u RT_KERNEL_TOUCHED \
+    -u RT_SEL_DIR -u RT_GO_SEQ -u RT_PW_INVERT -u RT_RESULTS_NAME \
     -u RT_SELECT_ALL -u RT_CORE -u RT_REPORT -u XCP_WANT_CORE -u XCP_VERSION \
     SPEC="$RT_H_SESSION" RT_LOCK_HELD=1 RT_REPORT_DIR="$_hs_dir" \
     sh "$SCRIPT_DIR/run.sh" session >"$RT_REPORT/harness-session.log" 2>&1 &
