@@ -10,9 +10,20 @@
  * Правила:
  *   1. Строка `// e2e-kind: <вид>` допустима только в первых пяти строках, один раз, и только
  *      со значением read или state (точная форма: pw-suite.sh отбирает её через grep -x).
- *   2. В спеке вида read после вырезания комментариев запрещены: метод 'POST'|'PUT'|'DELETE'|
- *      'PATCH' в строковом литерале, request.post/put/delete/patch(, кнопки «Сохранить»/
- *      «Применить»/Save/Apply через getByRole('button', …), XCP_WANT_CORE, writeFile.
+ *   2. В спеке вида read после вырезания комментариев запрещены:
+ *      - метод POST|PUT|DELETE|PATCH в строковом или шаблонном литерале, в любом регистре;
+ *      - изменяющий метод контекста запросов: request.post(, request?.post(, request['post'](,
+ *        и то же через псевдоним (const r = page.request, ({ request: r }), import { request as r },
+ *        const c = await request.newContext(), const { post } = request);
+ *      - действия UI: getByText/getByRole/getByLabel/getByTitle/locator/filter с текстом
+ *        Применить|Сохранить|Удалить|Перезапустить|Apply|Save|Delete|Restart (строка или
+ *        регулярка), press('Control+S'|'Meta+S');
+ *      - execFileSync/execFile/execSync/exec/spawn/spawnSync с первым аргументом 'ssh';
+ *      - запись и удаление файлов: writeFile*, appendFile*, rm*, rmdir*, unlink*, rename*,
+ *        mkdir*, mkdtemp*, copyFile*, cp*, truncate*, symlink*, createWriteStream;
+ *      - XCP_WANT_CORE.
+ *      Комментарии вырезаются посимвольно: `/` после `=>`, return, typeof, операторов и скобок —
+ *      начало регулярки, и `//` или `/*` внутри неё комментарий не открывают.
  *   3. Спек вида read импортирует из frontend/tests/router/lib только читающие помощники:
  *      модули console, env, known, pages, regex, motion целиком; из nodes-api — nodeLink,
  *      randomPort, installedKernels, listSources, withPanel, api и типы. Вызов api допустим
@@ -45,11 +56,39 @@ for (const a of args) {
 
 const KIND_STRICT = /^\/\/ e2e-kind: (read|state)$/;
 
+// Слова, после которых `/` начинает регулярку, а не деление.
+const REGEX_AFTER_WORDS = new Set([
+  'return',
+  'typeof',
+  'case',
+  'do',
+  'else',
+  'in',
+  'of',
+  'new',
+  'delete',
+  'void',
+  'throw',
+  'instanceof',
+  'yield',
+  'await'
+]);
+
+// `/` начинает регулярку: в начале текста, после оператора или открывающей скобки, после
+// `=>`, return, typeof и других слов из REGEX_AFTER_WORDS; после имени, числа, `)` и `]` — деление.
+function regexAllowed(prev, prevWord) {
+  if (prev === '') return true;
+  if (/[\w$]/.test(prev)) return REGEX_AFTER_WORDS.has(prevWord);
+  return '(,=:[!&|?{};+-*%<>~^'.includes(prev);
+}
+
 // Вырезает комментарии, сохраняя строковые литералы и регулярные литералы как есть.
+// Внутри регулярки (с учётом классов […] и экранирования) `//` и `/*` комментарий не открывают.
 function stripComments(text) {
   let out = '';
   let i = 0;
   let prev = ''; // последний значимый символ вне комментариев (для отличия деления от регулярки)
+  let prevWord = ''; // последнее слово, если prev — его последний символ
   const n = text.length;
   while (i < n) {
     const c = text[i];
@@ -74,9 +113,10 @@ function stripComments(text) {
       out += text.slice(i, j + 1);
       i = j + 1;
       prev = c;
+      prevWord = '';
       continue;
     }
-    if (c === '/' && (prev === '' || '(,=:[!&|?{};'.includes(prev))) {
+    if (c === '/' && regexAllowed(prev, prevWord)) {
       let j = i + 1;
       let inClass = false;
       while (j < n && text[j] !== '\n') {
@@ -86,25 +126,104 @@ function stripComments(text) {
         else if (text[j] === '/' && !inClass) break;
         j++;
       }
-      out += text.slice(i, j + 1);
-      i = j + 1;
-      prev = '/';
-      continue;
+      if (j < n && text[j] === '/') {
+        out += text.slice(i, j + 1);
+        i = j + 1;
+        prev = '/';
+        prevWord = '';
+        continue;
+      }
+      // регулярка не закрылась до конца строки — это не регулярка, `/` идёт как обычный символ
     }
+    const glued = out.length > 0 && /[\w$]/.test(out[out.length - 1]);
     out += c;
-    if (!/\s/.test(c)) prev = c;
+    if (/[\w$]/.test(c)) {
+      prevWord = glued ? prevWord + c : c;
+      prev = c;
+    } else if (!/\s/.test(c)) {
+      prev = c;
+      prevWord = '';
+    }
     i++;
   }
   return out;
 }
 
+// Тексты действий, которые меняют стенд из интерфейса.
+const UI_WORDS = 'Применить|Сохранить|Удалить|Перезапустить|Apply|Save|Delete|Restart';
+
+// Регулярки без вложенных квантификаторов: разбор линейный на любом тексте (T-148.1-10).
 const MUTATIONS = [
-  [/['"](POST|PUT|DELETE|PATCH)['"]/, "метод 'POST'|'PUT'|'DELETE'|'PATCH'"],
-  [/\brequest\s*\.\s*(post|put|delete|patch)\s*\(/, 'request.post/put/delete/patch'],
-  [/getByRole\(\s*['"]button['"]\s*,\s*\{[^}]*(Сохранить|Применить|Save|Apply)/, 'кнопка «Сохранить»/«Применить»'],
-  [/XCP_WANT_CORE/, 'XCP_WANT_CORE'],
-  [/writeFile/, 'writeFile']
+  [/(['"`])(?:post|put|delete|patch)\1/i, 'метод POST|PUT|DELETE|PATCH в строковом литерале (любой регистр)'],
+  [
+    new RegExp(`\\b(?:getByText|getByRole|getByLabel|getByTitle|locator|filter)\\s*\\(\\s*[^)]*?(?:${UI_WORDS})`, 'i'),
+    'действие «Применить»/«Сохранить»/«Удалить»/«Перезапустить» (getByText/getByRole/locator)'
+  ],
+  [/\.press\s*\(\s*(['"`])(?:Control|Meta|ControlOrMeta)\+s\1/i, 'сочетание Control+S/Meta+S (keyboard.press)'],
+  [/\b(?:execFileSync|execFile|execSync|exec|spawnSync|spawn)\s*\(\s*(['"`])ssh\b/, 'запуск ssh (execFileSync/execSync/spawn)'],
+  [
+    /\b(?:writeFile|appendFile|rm|rmdir|unlink|rename|mkdir|mkdtemp|copyFile|cp|truncate|symlink)(?:Sync)?\s*\(|\bcreateWriteStream\s*\(/,
+    'запись или удаление файлов (writeFile*, appendFile*, rm*, unlink*, rename*, mkdir*, copyFile*)'
+  ],
+  [/XCP_WANT_CORE/, 'XCP_WANT_CORE']
 ];
+
+const HTTP_MUTATING = /^(?:post|put|delete|patch)$/i;
+const IDENT = '[A-Za-z_$][\\w$]*';
+// Цепочка «a.b?.c» без вложенных неоднозначных квантификаторов: сегменты разделены точкой.
+const CHAIN = '(?:[\\w$]+\\s*\\??\\.\\s*)*[\\w$]+';
+
+// Нарушения сетевых изменений через контекст запросов Playwright и его псевдонимы (WR-01):
+// request.post(, request?.post(, request['post'](, const r = page.request; r.put(,
+// ({ request: r }) => r.delete(, const { post } = request; post(, const c = await request.newContext(); c.patch(.
+function requestIssues(code) {
+  const issues = [];
+  const masked = maskStrings(code);
+  const aliases = new Set(['request']);
+  const fns = new Set();
+  for (const m of masked.matchAll(new RegExp(`\\brequest\\s*(?::|\\bas\\b)\\s*(${IDENT})`, 'g'))) aliases.add(m[1]);
+  const assign = new RegExp(
+    `\\b(?:const|let|var)\\s+(${IDENT})\\s*(?::\\s*[\\w$.]+\\s*)?=\\s*(?:await\\s+)?(${CHAIN})(\\s*\\()?`,
+    'g'
+  );
+  const destructure = new RegExp(`\\b(?:const|let|var)\\s*\\{([^}]*)\\}\\s*=\\s*(?:await\\s+)?(${CHAIN})`, 'g');
+  for (let grew = true; grew; ) {
+    grew = false;
+    const add = (name) => {
+      if (!aliases.has(name)) {
+        aliases.add(name);
+        grew = true;
+      }
+    };
+    for (const m of masked.matchAll(assign)) {
+      const seg = m[2].split(/\s*\??\.\s*/);
+      const last = seg[seg.length - 1];
+      if (!m[3] && aliases.has(last)) add(m[1]);
+      else if (m[3] && last === 'newContext' && seg.length > 1 && aliases.has(seg[seg.length - 2])) add(m[1]);
+    }
+    for (const m of masked.matchAll(destructure)) {
+      const seg = m[2].split(/\s*\??\.\s*/);
+      if (!aliases.has(seg[seg.length - 1])) continue;
+      for (const part of m[1].split(',')) {
+        const p = /^\s*([\w$]+)\s*(?::\s*([\w$]+))?\s*$/.exec(part);
+        if (p && HTTP_MUTATING.test(p[1])) fns.add(p[2] || p[1]);
+      }
+    }
+  }
+  for (const a of aliases) {
+    const name = a.replace(/\$/g, '\\$');
+    const call = new RegExp(`(?:^|[^\\w$])${name}\\s*(?:\\?\\.|\\.)\\s*(post|put|delete|patch)\\s*\\(`, 'i');
+    const bracket = new RegExp(`(?:^|[^\\w$])${name}\\s*(?:\\?\\.)?\\s*\\[\\s*(['"\`])(post|put|delete|patch)\\1\\s*\\]`, 'i');
+    const m = call.exec(code) || bracket.exec(code);
+    if (m) issues.push(`спек вида read содержит изменяющий вызов: ${a === 'request' ? '' : `псевдоним ${a} контекста запросов, `}метод ${m[m.length - 1]}`);
+  }
+  for (const f of fns) {
+    if (new RegExp(`(?:^|[^\\w$.])${f.replace(/\$/g, '\\$')}\\s*\\(`).test(masked)) {
+      issues.push(`спек вида read содержит изменяющий вызов: ${f}(…) — метод контекста запросов`);
+    }
+  }
+  return issues;
+}
 
 // Импорты спека read (CR-02). Модули lib/, которые целиком только читают стенд.
 const READ_LIB_MODULES = new Set(['console', 'env', 'known', 'pages', 'regex', 'motion']);
@@ -312,6 +431,7 @@ function kindIssues(text) {
     for (const [re, what] of MUTATIONS) {
       if (re.test(code)) issues.push(`спек вида read содержит изменяющий вызов: ${what}`);
     }
+    issues.push(...requestIssues(code));
     issues.push(...importIssues(code));
   }
   return issues;
@@ -337,7 +457,36 @@ const samples = [
   [READ + "const m = await import('./lib/nodes-api');\n", 1],
   [READ + "import { api } from './lib/nodes-api';\nawait api(page, 'GET', '/api/settings');\nawait api(page, \"get\", '/x');\n", 0],
   [READ + "import { api as call } from './lib/nodes-api';\nconst m = 'GE' + 'T';\nawait call(page, m, '/api/settings');\n", 1],
-  [READ + "import { api } from './lib/nodes-api';\nconst f = api;\n", 1]
+  [READ + "import { api } from './lib/nodes-api';\nconst f = api;\n", 1],
+  // WR-01: сетевые формы изменения
+  [READ + "await fetch('/api/x', { method: 'post' });\n", 1],
+  [READ + "await fetch('/api/x', { method: `delete` });\n", 1],
+  [READ + "await request?.put('/api/x');\n", 1],
+  [READ + "await request['post']('/api/x');\n", 2], // литерал 'post' и форма request['post']
+  [READ + "const r = page.request;\nawait r.put('/api/x', {});\n", 1],
+  [READ + "test('x', async ({ request: rq }) => {\n  await rq.delete('/api/x');\n});\n", 1],
+  [READ + 'const { post: send } = request;\nawait send(url);\n', 1],
+  [READ + 'const ctx = await request.newContext();\nawait ctx.patch(url);\n', 1],
+  [READ + "const r = page.request;\nawait r.get('/api/x');\nconst post = { title: 'x' };\n", 0],
+  [READ + "await fetch('/api/x', { method: 'GET' });\nconst postal = 'postal';\n", 0],
+  [READ + 'const { get } = request;\nawait get(url);\n', 0],
+  // WR-02: регулярка против деления; `//` и `/*` внутри регулярки не прячут код
+  [READ + "const f = (s: string) => /a\\/*b/.test(s);\nawait api(page, 'POST', '/x');\n", 1],
+  [READ + "function f(s) {\n  return /a\\/\\//.test(s) ? fetch('/x', { method: 'DELETE' }) : 0;\n}\n", 1],
+  [READ + "const re = /[/*]+/;\nawait api(page, 'PATCH', '/x');\n", 1],
+  [READ + "const half = total / 2; // 'POST' в комментарии\nconst q = a / b / c; /* 'PUT' */\n", 0],
+  [READ + "const re = /https?:\\/\\//; // 'POST'\nconst x = (a) / 2; // 'PATCH'\n", 0],
+  // WR-03: действия UI, сочетания клавиш, ssh и запись файлов
+  [READ + "await page.getByText('Применить').click();\n", 1],
+  [READ + "await page.getByRole('button', { name: /удалить/i }).click();\n", 1],
+  [READ + "await page.locator('button', { hasText: 'Перезапустить' }).click();\n", 1],
+  [READ + "await page.keyboard.press('Control+S');\n", 1],
+  [READ + "execFileSync('ssh', ['stand', 'true']);\n", 1],
+  [READ + 'await fs.promises.rm(dir, { recursive: true });\n', 1],
+  [READ + "fs.appendFileSync(f, 'x');\n", 1],
+  [READ + "await expect(page.getByText('Ядро')).toBeVisible();\nawait page.keyboard.press('Escape');\n", 0],
+  [READ + "const data = fs.readFileSync(f, 'utf8');\nexecFileSync('node', ['-v']);\n", 0],
+  [READ + "await page.getByRole('heading', { name: 'Настройки' }).isVisible();\nawait page.keyboard.press('Control+A');\n", 0]
 ];
 for (const [text, want] of samples) {
   const got = kindIssues(text).length;
