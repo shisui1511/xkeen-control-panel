@@ -742,6 +742,71 @@ function specTestFacts(text) {
   return rows;
 }
 
+const TIER_CALL = /\broutertest\.(Tier|Slow)\(/g;
+
+/**
+ * Нарушения разметки яруса и Slow в тексте одного роутерного Go-файла: [{name, reason}].
+ * Метка — вызов routertest.Tier/Slow прямо в теле TestRouter*: в помощнике, объявлении уровня
+ * файла или ином Test* её не читают выбор и сводка. Уровень — routertest.Full/Gate литералом,
+ * причина — непустой строковый литерал; Full и Slow вместе недопустимы (ярус full — по виду,
+ * Slow — долгий тест gate).
+ */
+function goTierIssues(text) {
+  const issues = [];
+  for (const d of declarations(text)) {
+    const calls = [...d.masked.matchAll(TIER_CALL)];
+    if (calls.length === 0) continue;
+    const name = d.name || '(объявление уровня файла)';
+    if (d.kind !== 'func' || d.receiver || !TEST_NAME.test(d.name)) {
+      issues.push({ name, reason: 'routertest.Tier/Slow вне тела TestRouter*: метку читают только из тела теста' });
+      continue;
+    }
+    let full = false;
+    let slow = false;
+    for (const m of calls) {
+      const open = m.index + m[0].length - 1;
+      const args = splitArgs(d.code, open);
+      if (m[1] === 'Slow') {
+        slow = true;
+        if (!args || args.length !== 2 || !goStringArg(d.code, open, 1)) {
+          issues.push({ name, reason: 'routertest.Slow: причина — непустой строковый литерал' });
+        }
+        continue;
+      }
+      if (!args || args.length !== 3 || !/^routertest\.(Full|Gate)$/.test(args[1].text)) {
+        issues.push({ name, reason: 'routertest.Tier: уровень — routertest.Full или routertest.Gate литералом' });
+        continue;
+      }
+      if (!goStringArg(d.code, open, 2)) issues.push({ name, reason: 'routertest.Tier: причина — непустой строковый литерал' });
+      if (args[1].text === 'routertest.Full') full = true;
+    }
+    if (full && slow) issues.push({ name, reason: 'ярус full и Slow вместе: full — по виду теста, Slow — долгий тест gate' });
+    if (calls.filter((m) => m[1] === 'Tier').length > 1) issues.push({ name, reason: 'routertest.Tier вызван больше одного раза' });
+  }
+  return issues;
+}
+
+/** Нарушения разметки яруса и Slow в тексте одного спека: [{test, reason}]. */
+function specTierIssues(text) {
+  const code = stripTs(text);
+  const issues = [];
+  for (const m of code.matchAll(/(?<![\w.$])test\(/g)) {
+    const args = splitArgs(code, m.index + m[0].length - 1);
+    if (!args || args.length === 0) continue;
+    const details = args.length >= 3 ? args[1].text : '';
+    const test = literalValue(args[0].text) || args[0].text.slice(0, 60);
+    const full = SPEC_FULL_TAG.test(details);
+    const fullAnn = annotationOf(details, 'tier-full');
+    const slowAnn = annotationOf(details, 'slow');
+    if (full && fullAnn === null) issues.push({ test, reason: '@full без аннотации tier-full с причиной' });
+    if (!full && fullAnn !== null) issues.push({ test, reason: 'аннотация tier-full без тега @full (FULL_TAG)' });
+    if (fullAnn === '') issues.push({ test, reason: 'tier-full: причина — непустой строковый литерал' });
+    if (slowAnn === '') issues.push({ test, reason: 'slow: причина — непустой строковый литерал' });
+    if (full && slowAnn !== null) issues.push({ test, reason: 'ярус full и slow вместе: full — по виду теста, slow — долгий тест gate' });
+  }
+  return issues;
+}
+
 /**
  * Факты всех роутерных тестов репозитория (по индексу git): массив
  * { kind: 'go'|'pw', file, pkg|null, spec|null, test (имя или null у PW с вычисляемым
@@ -814,6 +879,61 @@ function contractReaders(root) {
   return out;
 }
 
+/** Сравнение имени проверки pw:… истории с названием теста спека (точное, после « > », шаблон). */
+function titleMatcher(x) {
+  if (x.test !== null) {
+    const t = x.test;
+    return (check) => check === 'pw:' + t || check.endsWith(' > ' + t);
+  }
+  if (x.titleTemplate) {
+    const re = new RegExp(
+      '(?:^pw:|\\s>\\s)' +
+        x.titleTemplate
+          .split(/\$\{[^}]*\}/)
+          .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+          .join('.+') +
+        '$'
+    );
+    return (check) => re.test(check);
+  }
+  return null;
+}
+
+/** История основной копии: Map check → Map core → [секунды] за days дней или null. */
+function loadHistory(root, days) {
+  let file;
+  try {
+    const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+      cwd: root,
+      encoding: 'utf8'
+    }).trim();
+    file = path.join(path.dirname(common), 'build', 'router', 'history.tsv');
+  } catch {
+    return null;
+  }
+  if (!fs.existsSync(file)) return null;
+  const since = Date.now() - days * 86400 * 1000;
+  const map = new Map();
+  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+    const col = line.split('\t');
+    if (col.length < 11) continue;
+    const [finished, , , , , , core, check, status, , seconds] = col;
+    if (!/^(?:go|pw):/.test(check) || status === 'SKIP' || !/^\d+(?:\.\d+)?$/.test(seconds)) continue;
+    if (Date.parse(finished) < since) continue;
+    if (!map.has(check)) map.set(check, new Map());
+    const byCore = map.get(check);
+    if (!byCore.has(core)) byCore.set(core, []);
+    byCore.get(core).push(Number(seconds));
+  }
+  return map;
+}
+
+function median(xs) {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
 module.exports = {
   analyzeGo,
   contractReaders,
@@ -831,6 +951,11 @@ module.exports = {
   areaOfText,
   goTestFacts,
   specTestFacts,
+  goTierIssues,
+  titleMatcher,
+  loadHistory,
+  median,
+  specTierIssues,
   testFacts
 };
 

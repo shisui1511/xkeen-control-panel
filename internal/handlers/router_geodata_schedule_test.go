@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
+	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 )
 
 // Расписание обновления баз панелью на настоящем устройстве, в настоящем времени и
@@ -397,6 +398,7 @@ func TestRouterGeodataScheduleWaitsApply(t *testing.T) {
 // запускается — пропущенный слот запускается через 3 минуты после старта, ровно один раз
 // за период (повторного запуска нет).
 func TestRouterGeodataCatchUp(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "реальное время: догоняющее обновление geodata ждёт минуты")
 	rtGeoNeedXKeen(t)
 	e := rtNewSrc(t)
 	e.enableLayer()

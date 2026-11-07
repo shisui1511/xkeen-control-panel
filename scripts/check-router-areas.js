@@ -46,7 +46,10 @@ const {
   specTestFacts,
   routerGoFiles,
   testFacts,
-  contractReaders
+  contractReaders,
+  titleMatcher,
+  loadHistory: loadHistoryOf,
+  median
 } = require('./router/core-marks.cjs');
 
 const root = path.resolve(__dirname, '..');
@@ -64,6 +67,7 @@ const HISTORY_DAYS = 60;
 const problems = [];
 const violations = [];
 const notes = [];
+const loadHistory = () => loadHistoryOf(root, HISTORY_DAYS);
 
 // ── Самопроверка разбора: если он сломан, страж молчал бы ──
 const GO_HEAD = '//go:build router\n\n';
@@ -279,61 +283,6 @@ if (map) {
       }
     }
   }
-}
-
-/** Сравнение имени проверки pw:… истории с названием теста спека (точное, после « > », шаблон). */
-function titleMatcher(x) {
-  if (x.test !== null) {
-    const t = x.test;
-    return (check) => check === 'pw:' + t || check.endsWith(' > ' + t);
-  }
-  if (x.titleTemplate) {
-    const re = new RegExp(
-      '(?:^pw:|\\s>\\s)' +
-        x.titleTemplate
-          .split(/\$\{[^}]*\}/)
-          .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-          .join('.+') +
-        '$'
-    );
-    return (check) => re.test(check);
-  }
-  return null;
-}
-
-/** История основной копии: Map check → Map core → [секунды] за HISTORY_DAYS дней или null. */
-function loadHistory() {
-  let file;
-  try {
-    const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
-      cwd: root,
-      encoding: 'utf8'
-    }).trim();
-    file = path.join(path.dirname(common), 'build', 'router', 'history.tsv');
-  } catch {
-    return null;
-  }
-  if (!fs.existsSync(file)) return null;
-  const since = Date.now() - HISTORY_DAYS * 86400 * 1000;
-  const map = new Map();
-  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
-    const col = line.split('\t');
-    if (col.length < 11) continue;
-    const [finished, , , , , , core, check, status, , seconds] = col;
-    if (!/^(?:go|pw):/.test(check) || status === 'SKIP' || !/^\d+(?:\.\d+)?$/.test(seconds)) continue;
-    if (Date.parse(finished) < since) continue;
-    if (!map.has(check)) map.set(check, new Map());
-    const byCore = map.get(check);
-    if (!byCore.has(core)) byCore.set(core, []);
-    byCore.get(core).push(Number(seconds));
-  }
-  return map;
-}
-
-function median(xs) {
-  const s = [...xs].sort((a, b) => a - b);
-  const m = s.length >> 1;
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
 /** Длительность канарейки по ядрам: сумма медиан подходящих проверок, каждое ядро короче порога. */
