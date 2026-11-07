@@ -10,10 +10,24 @@
 //   - «- Строк времени без начала или ядра: N» — строки timings.tsv короче шести колонок;
 //   - «- Восстановление: N с, путь: …» — этап restore и разбивка расхождений из restore.log
 //     (D-15: быстрый путь без перезапуска ядра или перезапуск);
-//   - «## 10 самых долгих тестов» — по Go (go-*.jsonl) и Playwright (pw*/report*.json);
+//   - «## 10 самых долгих тестов» — по Go (go-*.jsonl) и Playwright (pw*/report*.json), секунды
+//     суммируются по нормализованному имени (cleanName); колонка «перезапуски» — смены PID ядра
+//     на стенде в окне теста (D-06);
+//   - «## Тесты Парето (80% времени Go)» — тесты Go верхнего уровня всех ветвей по убыванию
+//     секунд до накопленных 80% суммарного времени Go: строка «- Всего Go: N тестов, M с;
+//     Парето: K тестов» и таблица Тест, Ядро, с, доля %, перезапуски;
 //   - «## Нужна метка ядра» (только --suite full) — страховка D-05б: проверка go:/pw: без метки
 //     ядра, чей исход в ветвях xray и mihomo различается как класс (PASS / SKIP / KNOWN /
 //     FAIL и XPASS), либо «- нет».
+// Имена тестов: в ячейках таблиц — mdName (cleanName плюс экранирование `\` и `|`), в пунктах
+// списков — cleanName без экранирования (текст совпадает с именем проверки в results.tsv).
+// cleanName убирает ANSI, сводит пробельные символы к одному пробелу и режет до 300 знаков.
+// Перезапуски: <цель>/<ядро>/kernel-pids.tsv («<эпоха устройства>\t<PID через запятую или ->» при
+// каждой смене; пишет сэмплер run.sh) и clock.tsv («<эпоха ПК>\t<эпоха устройства>»). Перезапуск —
+// строка со значением, отличным от предыдущей, и не «-», попавшая в окно теста на часах ПК. Окно
+// Go-теста — начало этапа go-run-<имя> (или go-run-<имя>-<k>) из timings.tsv плюс сумма Elapsed
+// предыдущих тестов верхнего уровня файла go-<имя>[-<k>].jsonl; окно Playwright — startTime и
+// duration результатов изменяющих частей (pw, pw-2). Нет файлов ветви или окна — «-».
 // Формат timings.tsv: <цель> <этап> <секунды> <код> <начало> <ядро ветви или ->. У старых
 // отчётов колонок пять или четыре: ядро берётся из суффикса имени этапа, иначе — по
 // интервалу ветви.
@@ -257,19 +271,25 @@ if (haveStages) {
   out.push("", ...recoveryLines(), "");
 }
 
-// --- 10 самых долгих тестов --------------------------------------------------------
+// --- 10 самых долгих тестов, перезапуски ядра, тесты Парето ----------------------------
 
-const longest = [];
 // теги спеков Playwright по имени проверки (как в pw-parse.js, без «pw:»): `core`, `core-label`
 const pwTags = new Map();
 // eslint-disable-next-line no-control-regex
 const ANSI = /\u001b\[[0-9;]*m/g;
+// Нормализованное имя теста: без ANSI, пробельные символы (в том числе переводы строки и
+// табуляции) — один пробел, не длиннее 300 знаков. Это представление — в пунктах списков.
 function cleanName(text) {
   const flat = String(text || "")
     .replace(ANSI, "")
     .replace(/\s+/g, " ")
     .trim();
   return flat.length > 300 ? flat.slice(0, 300) + "…" : flat;
+}
+// Имя теста для ячейки таблицы Markdown: cleanName плюс экранирование `\` и `|`. Все таблицы
+// сводки берут имя только через эту функцию.
+function mdName(text) {
+  return cleanName(text).replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 }
 const coreDir = path.join(report, target);
 let coreDirs = [];
@@ -290,9 +310,73 @@ function list(dir, re) {
   }
 }
 
+// Перезапуски ядра ветви (D-06): смены PID из <ядро>/kernel-pids.tsv («<эпоха устройства>\t<PID
+// через запятую или ->») в часах ПК — через смещение из clock.tsv («<эпоха ПК>\t<эпоха
+// устройства>»). Перезапуск — строка, чьё значение отличается от предыдущей и не равно «-»
+// (первая строка — исходное состояние). Нет файлов ветви — null: в таблицах «-».
+function kernelRestarts(core) {
+  let pids = "";
+  let clock = "";
+  try {
+    pids = fs.readFileSync(path.join(coreDir, core, "kernel-pids.tsv"), "utf8");
+    clock = fs.readFileSync(path.join(coreDir, core, "clock.tsv"), "utf8");
+  } catch {
+    return null;
+  }
+  const c = clock.split("\n")[0].split("\t").map(Number);
+  if (c.length < 2 || !Number.isFinite(c[0]) || !Number.isFinite(c[1])) return null;
+  const shift = c[1] - c[0];
+  const events = [];
+  let prev = null;
+  for (const line of pids.split("\n")) {
+    if (!line) continue;
+    const [t, v] = line.split("\t");
+    const dev = Number(t);
+    if (!Number.isFinite(dev) || v === undefined) continue;
+    if (prev !== null && v !== prev && v !== "-") events.push(dev - shift);
+    prev = v;
+  }
+  return events;
+}
+// Число перезапусков в окне [начало, конец] (секунды эпохи ПК); нет данных ветви — null.
+function restartsIn(events, start, end) {
+  if (!events) return null;
+  const a = Math.floor(start);
+  const b = Math.ceil(end);
+  return events.filter((t) => t >= a && t <= b).length;
+}
+
+// Начала этапов go-run-<имя> (и go-run-<имя>-<k> режима последовательности) цели по ядру:
+// 5-я колонка timings.tsv, часы ПК.
+const goRunStart = new Map();
+for (const line of raw.split("\n")) {
+  if (!line) continue;
+  const f = line.split("\t");
+  if (f[0] !== target || !f[1] || !f[1].startsWith("go-run-")) continue;
+  const start = Number(f[4]);
+  if (!Number.isFinite(start)) continue;
+  const key = `${f[5] && f[5] !== "-" ? f[5] : ""}\t${f[1]}`;
+  if (!goRunStart.has(key)) goRunStart.set(key, start);
+}
+
+// Тесты по ключу «ядро\tcleanName»: { name, core, sec, kind (go|pw), restarts (число или null) }.
+// Секунды и перезапуски суммируются по нормализованному имени (WR-01).
+const testMap = new Map();
+function addTest(kind, core, name, sec, restarts) {
+  const clean = cleanName(name);
+  const key = `${kind}\t${core}\t${clean}`;
+  if (!testMap.has(key)) testMap.set(key, { name: clean, core, sec: 0, kind, restarts: null });
+  const t = testMap.get(key);
+  t.sec += sec;
+  if (restarts !== null) t.restarts = (t.restarts || 0) + restarts;
+}
+
 for (const core of coreDirs) {
   const base = path.join(coreDir, core);
-  // Go: событие test2json pass/fail/skip верхнего теста (без «/») несёт Elapsed
+  const events = kernelRestarts(core);
+  // Go: событие test2json pass/fail/skip верхнего теста (без «/») несёт Elapsed. Тесты верхнего
+  // уровня идут последовательно: начало теста — начало этапа go-run-<имя> плюс сумма Elapsed
+  // предыдущих тестов верхнего уровня этого файла.
   for (const f of list(base, /^go-.*\.jsonl$/)) {
     let text = "";
     try {
@@ -300,6 +384,9 @@ for (const core of coreDirs) {
     } catch {
       continue;
     }
+    const stage = `go-run-${f.slice(3, -".jsonl".length)}`;
+    const stageStart = goRunStart.has(`${core}\t${stage}`) ? goRunStart.get(`${core}\t${stage}`) : goRunStart.get(`\t${stage}`);
+    let offset = 0;
     for (const line of text.split("\n")) {
       if (!line.includes('"Elapsed"')) continue;
       let ev;
@@ -311,11 +398,19 @@ for (const core of coreDirs) {
       if (!["pass", "fail", "skip"].includes(ev.Action)) continue;
       if (!ev.Test || ev.Test.includes("/")) continue;
       if (typeof ev.Elapsed !== "number") continue;
-      longest.push({ name: ev.Test, core, sec: ev.Elapsed });
+      let restarts = null;
+      if (stageStart !== undefined) {
+        const s = stageStart + offset;
+        restarts = restartsIn(events, s, s + ev.Elapsed);
+      }
+      offset += ev.Elapsed;
+      addTest("go", core, ev.Test, ev.Elapsed, restarts);
     }
   }
-  // Playwright: сумма длительностей прогонов теста; имя — как в pw-parse.js
+  // Playwright: сумма длительностей прогонов теста; имя — как в pw-parse.js. Окна перезапусков —
+  // только у изменяющих частей (pw, pw-2): часть только чтения идёт до запуска сэмплера.
   for (const dir of list(base, /^pw/)) {
+    const windows = /^pw(-\d+)?$/.test(dir);
     for (const f of list(path.join(base, dir), /^report.*\.json$/)) {
       let rep;
       try {
@@ -323,7 +418,6 @@ for (const core of coreDirs) {
       } catch {
         continue;
       }
-      const sums = new Map();
       const visit = (suiteNode, titles) => {
         for (const spec of suiteNode.specs || []) {
           const name = [...titles, spec.title].join(" > ");
@@ -332,24 +426,54 @@ for (const core of coreDirs) {
           for (const tag of spec.tags || []) pwTags.get(tagKey).add(String(tag).replace(/^@/, ""));
           for (const test of spec.tests || []) {
             let ms = 0;
-            for (const r of test.results || []) ms += Number(r.duration) || 0;
-            sums.set(name, (sums.get(name) || 0) + ms);
+            let restarts = null;
+            for (const r of test.results || []) {
+              const dur = Number(r.duration) || 0;
+              ms += dur;
+              const st = Date.parse(r.startTime || "");
+              if (windows && Number.isFinite(st)) {
+                const n = restartsIn(events, st / 1000, (st + dur) / 1000);
+                if (n !== null) restarts = (restarts || 0) + n;
+              }
+            }
+            addTest("pw", core, name, ms / 1000, restarts);
           }
         }
         for (const child of suiteNode.suites || []) visit(child, [...titles, child.title]);
       };
       for (const top of rep.suites || []) visit(top, top.file === top.title ? [] : [top.title]);
-      for (const [name, ms] of sums) longest.push({ name, core, sec: ms / 1000 });
     }
   }
 }
 
+const restartsCell = (t) => (t.restarts === null ? "-" : String(t.restarts));
+const longest = [...testMap.values()].sort((a, b) => b.sec - a.sec);
 if (longest.length > 0) {
-  longest.sort((a, b) => b.sec - a.sec);
-  out.push("## 10 самых долгих тестов", "", "| Тест | Ядро | с |", "|---|---|---:|");
+  out.push("## 10 самых долгих тестов", "", "| Тест | Ядро | с | перезапуски |", "|---|---|---:|---:|");
   for (const t of longest.slice(0, 10)) {
-    const name = t.name.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
-    out.push(`| ${name} | ${t.core} | ${Math.round(t.sec)} |`);
+    out.push(`| ${mdName(t.name)} | ${t.core} | ${Math.round(t.sec)} | ${restartsCell(t)} |`);
+  }
+  out.push("");
+}
+
+// Тесты Парето (todo 01): тесты Go верхнего уровня всех ветвей по убыванию секунд, пока
+// накопленное время не достигнет 80% суммарного времени тестов Go.
+const goTests = longest.filter((t) => t.kind === "go");
+if (goTests.length > 0) {
+  const goTotal = goTests.reduce((s, t) => s + t.sec, 0);
+  const pareto = [];
+  let acc = 0;
+  for (const t of goTests) {
+    if (goTotal > 0 && acc >= 0.8 * goTotal) break;
+    pareto.push(t);
+    acc += t.sec;
+  }
+  out.push("## Тесты Парето (80% времени Go)", "");
+  out.push(`- Всего Go: ${goTests.length} тестов, ${Math.round(goTotal)} с; Парето: ${pareto.length} тестов`, "");
+  out.push("| Тест | Ядро | с | доля % | перезапуски |", "|---|---|---:|---:|---:|");
+  for (const t of pareto) {
+    const share = goTotal > 0 ? ((t.sec / goTotal) * 100).toFixed(1) : "0.0";
+    out.push(`| ${mdName(t.name)} | ${t.core} | ${Math.round(t.sec)} | ${share} | ${restartsCell(t)} |`);
   }
   out.push("");
 }
@@ -418,9 +542,9 @@ if (suite === "full" && bothBranches) {
 if (suite === "full") {
   out.push("## Нужна метка ядра", "");
   if (needMark.length === 0) out.push("- нет");
+  // пункт списка: cleanName без экранирования — текст совпадает с именем проверки в results.tsv
   for (const n of needMark) {
-    const name = n.check.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
-    out.push(`- core-mark:${name}: нужна метка ядра: xray ${n.xray}, mihomo ${n.mihomo}`);
+    out.push(`- core-mark:${cleanName(n.check)}: нужна метка ядра: xray ${n.xray}, mihomo ${n.mihomo}`);
   }
   out.push("");
 }

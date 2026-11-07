@@ -1,4 +1,4 @@
-.PHONY: build run clean lint fmt deps hooks router-arm64 router-mipsle router-mips router-test proto tidy
+.PHONY: build run clean lint fmt deps hooks router-arm64 router-mipsle router-mips router-test router-test-unattended proto tidy
 
 BINARY_NAME=xcp
 # Single source of truth for the version: scripts/version.sh (git tags +
@@ -51,6 +51,16 @@ router-mips: update-version
 # по спеке (формат — в scripts/router/session.mjs).
 router-test:
 	sh scripts/router/run.sh $(SUITE)
+
+# Полный прогон без присмотра (scripts/router/unattended.sh): команда возвращается сразу, отвязанный
+# процесс ставит отдельный worktree на REF, ждёт AT и очередь на роутеры (до 2 ч), гонит полный
+# прогон и пишет итог в build/router/unattended/latest.md (одна строка — в начале следующей сессии).
+#   make router-test-unattended [REF=<ref>] [RELEASE=<тег|auto>] [AT=<ЧЧ:ММ>]
+# REF — что проверять (по умолчанию origin/main после fetch); RELEASE — ставить ассет релиза
+# (auto — пре-релиз, покрывающий origin/main); AT — локальное время старта. Ход:
+# sh scripts/router/unattended.sh status. Это инструмент: правил, когда запускать, и напоминаний нет.
+router-test-unattended:
+	sh scripts/router/unattended.sh start
 
 run: build
 	./build/$(BINARY_NAME)

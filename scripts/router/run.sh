@@ -81,7 +81,9 @@
 #
 # Раскладка отчёта: результаты всех ветвей — в <отчёт>/<id>/results.tsv (ядро ветви — во
 # второй колонке), артефакты ветви (go-*.jsonl, pw-read/, pw/, pw-switch/) — в
-# <отчёт>/<id>/<ядро>/: pw-read/ — часть Playwright только чтения, pw/ — изменяющая часть.
+# <отчёт>/<id>/<ядро>/: pw-read/ — часть Playwright только чтения, pw/ — изменяющая часть;
+# kernel-pids.tsv (смены PID ядра на стенде от Go-тестов до конца части state) и clock.tsv
+# (часы ПК и устройства) — для счёта перезапусков ядра на тест в summary.md.
 # Этапы ветви в timings.tsv: sync-<ядро>, switch-<ядро>, smoke-<ядро> (проверки без окна),
 # observe-<ядро> (окно, идёт параллельно pw-read-<ядро>), pw-read-<ядро>, go-<ядро>,
 # settle-<ядро>, pw-<ядро> (часть state). Хвост xcp.log ветви пишет наблюдатель окна.
@@ -333,6 +335,10 @@ if [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
   echo "router-test: ветви — $(head -n 1 "$RT_REPORT/plan.txt")"
 fi
 
+# Файл сэмплера PID ядра на устройстве (full_target, _kpid_start): вне /opt/tmp/xcp-rt, который
+# чистит смоук, и вне каталога снимка.
+RT_KPID=/opt/tmp/xcp-rt-kpid.tsv
+
 # Проверки смоука, которые пропускаются, если цель недоступна или деплой не удался.
 SKIP_CHECKS="kernel-running iptables-rules api-version version xcp-pid api-me api-service-status log-panic log-error kernel-restart"
 
@@ -405,6 +411,9 @@ full_target() {
   # должен обрывать восстановление: игнорирование наследуют rt_restore, _after_restore и ssh.
   _finish() {
     trap '' INT TERM HUP
+    # сэмплер PID ядра (если ветвь оборвалась между Go-тестами и частью state) — до восстановления
+    _kpid_stop "$_t" "$_ks"
+    _ks=""
     if [ "$_snapped" = 1 ]; then
       _snapped=0
       # строки восстановления и сверки несут исходное ядро
@@ -450,6 +459,49 @@ full_target() {
       rt_result "$1" PASS stand-ready "после Go-тестов ядро запущено и перехват на месте за $_sl_dt с"
     else
       rt_result "$1" FAIL stand-ready "после Go-тестов стенд не пришёл в рабочее состояние за $_sl_dt с (код $_sl_rc)"
+    fi
+  }
+  # Сэмплер PID ядра на стенде (D-06, todo 01): замер перезапусков ядра на тест. Фоновый цикл на
+  # устройстве раз в секунду берёт `pidof xray mihomo` и при смене значения дописывает строку
+  # «<эпоха устройства>\t<PID через запятую или ->» в $RT_KPID. Идёт от Go-тестов ветви до конца её
+  # части Playwright state: стартует после окна смоука и останавливается до смоука следующей ветви,
+  # поэтому проверки процессов смоука (pidof ядра и xcp) его не видят; имя процесса — sh. Файл
+  # забирается в <отчёт>/<цель>/<ядро>/kernel-pids.tsv, рядом clock.tsv — «<эпоха ПК>\t<эпоха
+  # устройства>» в момент запуска: по ним branch-report.mjs переводит смены PID на часы ПК и
+  # считает перезапуски в окне каждого теста. Нет связи — сэмплер не запускается, ветвь идёт как
+  # раньше. _ks — PID цикла на устройстве (пусто — сэмплер не идёт).
+  _ks=""
+  _kpid_start() {
+    RT_SSH_STDIN=1 rt_ssh "$1" "sh -s" 2>/dev/null <<EOF | sed -n 's/^kpid=//p' | tr -dc '0-9'
+F=$RT_KPID
+rm -f "\$F"
+kpid_loop() {
+  l=""
+  while :; do
+    p=\$(pidof xray mihomo | tr ' ' ',')
+    [ -n "\$p" ] || p=-
+    if [ "\$p" != "\$l" ]; then
+      printf '%s\t%s\n' "\$(date +%s)" "\$p" >>"\$F"
+      l=\$p
+    fi
+    sleep 1
+  done
+}
+(
+  trap '' HUP
+  kpid_loop
+) </dev/null >/dev/null 2>&1 &
+echo "kpid=\$!"
+EOF
+  }
+  # Остановка сэмплера: _kpid_stop <цель> <PID> [<каталог ветви>] — с каталогом файл забирается в
+  # kernel-pids.tsv; без него (_term, _finish) только остановка и удаление файла, best effort.
+  _kpid_stop() {
+    [ -n "$2" ] || return 0
+    if [ -n "${3:-}" ]; then
+      rt_ssh "$1" "kill $2 2>/dev/null; cat $RT_KPID 2>/dev/null; rm -f $RT_KPID" >"$3/kernel-pids.tsv" 2>/dev/null || true
+    else
+      rt_ssh "$1" "kill $2 2>/dev/null; rm -f $RT_KPID" >/dev/null 2>&1 || true
     fi
   }
   _sp=""
@@ -525,6 +577,8 @@ full_target() {
     if [ "$_tm_obs" = 1 ] && [ -n "$_ot0" ]; then
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_t" "observe-$_c" "$((_tm_now - _ot0))" 130 "$_ot0" "${RT_CORE:--}" >>"$RT_REPORT/timings.tsv"
     fi
+    _kpid_stop "$_t" "$_ks"
+    _ks=""
     exit 130
   }
   # Этап ветви в фоне с ожиданием: код этапа попадает в _brc и возвращается как код функции
@@ -683,6 +737,18 @@ full_target() {
     # хвост xcp.log пишет наблюдатель (без него — смоук без окна не пишет)
     [ ! -f "$RT_REPORT/$_t/xcp-log-tail.txt" ] || mv "$RT_REPORT/$_t/xcp-log-tail.txt" "$RT_REPORT/$_t/$_c/xcp-log-tail.txt"
 
+    # 2б. сэмплер PID ядра (см. _kpid_start) и сверка часов ПК и устройства: clock.tsv — середина
+    # интервала вызова ssh на ПК и эпоха устройства. Нет связи (смоук вернул 3) — не запускается.
+    if [ "$_smrc" != 3 ]; then
+      _ks=$(_kpid_start "$_t") || _ks=""
+      if [ -n "$_ks" ]; then
+        _kc0=$(date +%s)
+        _kdev=$(rt_ssh "$_t" 'date +%s' 2>/dev/null | tr -dc '0-9') || _kdev=""
+        _kc1=$(date +%s)
+        [ -z "$_kdev" ] || printf '%s\t%s\n' "$(((_kc0 + _kc1) / 2))" "$_kdev" >"$RT_REPORT/$_t/$_c/clock.tsv"
+      fi
+    fi
+
     # 3. Go-тесты на устройстве с этим ядром
     if [ "$_b_go" = 1 ]; then
       rt_stage "$_t" "go-$_c" _bg env "RT_GO_PKGS=$_g_pkgs" "RT_GO_RUN=$_g_run" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
@@ -700,6 +766,10 @@ full_target() {
     else
       rt_result "$_t" SKIP pw "$_b_skip_pw"
     fi
+
+    # 4а. остановка сэмплера и забор смен PID ядра ветви: до смоука следующей ветви
+    _kpid_stop "$_t" "$_ks" "$RT_REPORT/$_t/$_c"
+    _ks=""
   done
   RT_CORE=""
   exit 0
