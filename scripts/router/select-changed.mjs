@@ -28,6 +28,13 @@
 // pages.spec.ts без сужения и канарейки всех областей; мажор (D-13) — канарейки плюс все спеки
 // (npm) или все Go-тесты (go.mod). Неизвестный файл — только смоук и предупреждение в причинах.
 //
+// Ярус full (D-14). Тест яруса full (метка Tier full у Go, @full у Playwright; core-marks.cjs,
+// testFacts → tier) идёт в гейте, только если его область затронута напрямую: изменён файл
+// продукта области по areas.json (область без флага shared) или сам файл теста. Через канарейку,
+// зависимости, граф импортов фронтенда и общий код (shared) тесты full не выбираются. Откат на
+// пакет целиком и полный выбор идут со всеми ярусами. Отсев Go — исключение из RT_GO_SEQ и из
+// RT_GO_CORE_RUN; число отсеянных тестов — в причинах (--explain).
+//
 // Порядок (RTR-03): сначала тесты затронутых областей, затем остальные выбранные; внутри группы —
 // по убыванию частоты падений из истории (history.mjs failFreq, окно 30 дней). Спеки затронутых
 // областей — RT_SPECS_FIRST. Ошибка истории — без сортировки (причина в stderr).
@@ -501,6 +508,8 @@ async function select(changed) {
   const res = {
     all: false,
     goSel: new Map(), // 'пакет:Тест' → true (затронутая область) | false (канарейка, зависимости)
+    goFullOk: new Set(), // 'пакет:Тест', которым ярус full не мешает: область напрямую, свой файл, откат на пакет
+    fullDropGo: [], // тесты яруса full, отсеянные из выбора (D-14)
     goAllPkgs: false, // все роутерные пакеты целиком (откат, мажор Go)
     specsDirect: new Set(), // спеки затронутых областей, правок и маршрутов — идут первыми
     specsOther: new Set(), // канарейки и зависимости
@@ -533,27 +542,32 @@ async function select(changed) {
   const areasOf = (file) => Object.keys(areaMap).filter((n) => areaMap[n].paths.some((g) => matchGlob(g, file)));
   const goRows = facts.filter((r) => r.kind === 'go');
   const specOfRow = (r) => r.spec;
-  const addGo = (pkg, test, direct) => {
+  // fullOk — основание выбрать и тест яруса full (D-14): область затронута напрямую, изменён сам
+  // тест или откат на пакет целиком; канарейки, зависимости и общий код его не дают
+  const addGo = (pkg, test, direct, fullOk = false) => {
     const key = `${pkg}:${test}`;
     res.goSel.set(key, direct || res.goSel.get(key) === true);
+    if (fullOk) res.goFullOk.add(key);
   };
   const addWholePkg = (pkg, direct) => {
-    for (const r of goRows) if (r.pkg === pkg) addGo(r.pkg, r.test, direct);
+    for (const r of goRows) if (r.pkg === pkg) addGo(r.pkg, r.test, direct, true);
   };
   const specSelectable = (s) => specsAll.includes(s);
 
   /** Тесты области: Go и спеки (факты + поле tests). Нет теста из tests — расширение. */
   const addAreaTests = (name, direct) => {
     const a = areaMap[name];
+    // общий код (shared) задевает все области: тесты full его области напрямую не выбираются
+    const fullOk = direct && !a.shared;
     let go = 0;
     const specs = new Set();
-    for (const r of goRows) if (r.area === name) { addGo(r.pkg, r.test, direct); go++; }
+    for (const r of goRows) if (r.area === name) { addGo(r.pkg, r.test, direct, fullOk); go++; }
     for (const r of facts) if (r.kind === 'pw' && r.area === name && specOfRow(r)) specs.add(specOfRow(r));
     for (const t of a.tests || []) {
       if (t.startsWith('go:')) {
         const hit = goRows.filter((r) => r.test === t.slice(3));
         if (hit.length === 0) escalate(`область ${name}: тест ${t} из поля tests не найден`);
-        for (const r of hit) { addGo(r.pkg, r.test, direct); go++; }
+        for (const r of hit) { addGo(r.pkg, r.test, direct, fullOk); go++; }
       } else {
         specs.add(t);
       }
@@ -775,7 +789,7 @@ async function select(changed) {
         }
       }
       if (fileRows.length > 0 && fileRows[0].area) {
-        for (const r of fileRows) addGo(r.pkg, r.test, true);
+        for (const r of fileRows) addGo(r.pkg, r.test, true, true);
         reasons.push(`${file}: изменён роутерный тест — тесты файла (${fileRows.length})`);
       } else if (routerPkgs.includes(dir)) {
         addWholePkg(dir, true);
@@ -809,6 +823,23 @@ async function select(changed) {
         }
       }
       if (!any) reasons.push('Go: ни один роутерный пакет не затронут');
+    }
+  }
+
+  // --- ярус full: отсев Go-тестов без прямого затрагивания (D-14) ---------------
+  // Откат на пакет целиком (goAllPkgs) отсева не знает: при сомнении выбор только расширяется
+  if (!res.all && !res.goAllPkgs) {
+    const tierOf = new Map(goRows.map((r) => [`${r.pkg}:${r.test}`, r.tier]));
+    for (const key of [...res.goSel.keys()]) {
+      if (tierOf.get(key) === 'full' && !res.goFullOk.has(key)) {
+        res.goSel.delete(key);
+        res.fullDropGo.push(key);
+      }
+    }
+    if (res.fullDropGo.length > 0) {
+      reasons.push(
+        `ярус full: ${res.fullDropGo.length} тестов не выбраны — область затронута не напрямую (${res.fullDropGo.map((k) => k.slice(k.indexOf(':') + 1)).join(', ')})`
+      );
     }
   }
 
