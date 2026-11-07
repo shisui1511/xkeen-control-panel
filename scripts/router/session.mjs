@@ -14,6 +14,10 @@
 //   {
 //     "target": "arm64",                    id цели из локального конфига
 //     "cores": ["xray", "mihomo"],          ядра проходов (по умолчанию оба)
+//     "keep_going": false,                  необязательно (true/false, по умолчанию false):
+//                                           true — все проходы до конца (полный список
+//                                           падений), false — остановка на первом
+//                                           несовпадении (см. ниже)
 //     "passes": [
 //       {
 //         "name": "before-fix",             [a-z0-9-]
@@ -98,6 +102,25 @@
 // detail — подстрока детали в results.tsv. Без default тест вне tests справочный, но FAIL
 // и XPASS у него — расхождение: неожиданное падение не теряется.
 //
+// Остановка на первом несовпадении (по умолчанию; "keep_going": true её выключает): красная
+// сессия не дожидается конца, когда итог уже ясен. Первое несовпадение с ожиданиями:
+//   - Go-этап — по мере вывода: сессия раз в секунду дочитывает файлы go-*.raw этапа в
+//     <этап>/<цель>/<ядро>/ (вывод -test.v=test2json, пока бинарник работает на цели) и готовые
+//     go-*.parsed пакетов; строка `--- FAIL: <тест>`, чей статус (XPASS при маркере
+//     `XPASS slug=`, QFAIL при маркере `QUARANTINE slug=` у теста или предка, иначе FAIL)
+//     ожидание теста не допускает, останавливает этап: TERM группе процессов этапа (как при
+//     прерывании), ожидание выхода и опустения группы, затем добивание тестовых бинарников на
+//     цели. Родитель, упавший из-за подтеста, отдельно не сверяется (как в go-parse.awk);
+//     деталь (detail) по ходу вывода не сверяется — её сверяет разбор после этапа;
+//   - Playwright, деплой со смоуком и прогоны наборов — после этапа (сверка results.tsv);
+//     несовпадение в Go-части прохода со спеками не пускает этап Playwright.
+// Остановленный проход сверяется по уже записанным результатам: тест, на котором остановились, —
+// несовпадение, невыполненные тесты не сверяются. Следующие ядра и проходы не запускаются,
+// стенд возвращается как при любом исходе (сборка HEAD, исходное ядро). В summary.md — раздел
+// «## Остановлено на первом несовпадении»: проход, ядро, тест, ожидаемый и полученный статус и
+// «Не выполнено:» (ядра прохода и проходы); код выхода 1. Несовпадение в последнем этапе
+// остановкой не считается: невыполненного нет.
+//
 // Порядок: проходы по очереди; внутри прохода ядра змейкой, первым — активное. На N проходов
 // приходится не больше N переключений, и ещё одно в конце, если стенд не на исходном ядре.
 // Сборка ставится в начале и при смене продукта.
@@ -123,15 +146,20 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
   appendFileSync,
+  closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   rmSync,
   writeFileSync
 } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
 
 const SCRIPT = fileURLToPath(import.meta.url);
@@ -186,6 +214,22 @@ function parseStatus(s, where) {
     if (!STATUSES.includes(p)) die(`${where}: неизвестный статус «${p}» (${STATUSES.join(', ')})`);
   }
   return parts;
+}
+
+// Статусы, которые ожидание прохода допускает для теста: явное ожидание из tests, иначе
+// default; без них тест справочный — допустимо всё, кроме FAIL и XPASS.
+function expectedOf(expect, name) {
+  const want = expect.tests.get(name);
+  if (want) return want.status;
+  if (SERVICE.has(name)) return ['PASS'];
+  if (expect.def) return expect.def;
+  return ['справочно'];
+}
+
+function allowedStatus(expect, name, status) {
+  const want = expectedOf(expect, name);
+  if (want[0] === 'справочно') return status !== 'FAIL' && status !== 'XPASS';
+  return want.includes(status);
 }
 
 // Поле interrupt прохода-прогона: прерывание вложенного run.sh посреди этапа go.
@@ -295,6 +339,8 @@ function loadSpec(file, root) {
     die(`cores: непустой список из ${CORES.join(', ')}`);
   }
   if (new Set(cores).size !== cores.length) die('cores: ядро указано дважды');
+  const keepGoing = spec.keep_going ?? false;
+  if (typeof keepGoing !== 'boolean') die('keep_going: true или false');
   if (!Array.isArray(spec.passes) || !spec.passes.length) die('passes: непустой список');
   const names = new Set();
   const suites = [];
@@ -390,7 +436,7 @@ function loadSpec(file, root) {
     }
     return { name: p.name, version, product, go, specs, grep, expect };
   });
-  return { target: spec.target, cores, passes };
+  return { target: spec.target, cores, keepGoing, passes };
 }
 
 // Ядра прохода змейкой: сначала активное, затем остальные в порядке спеки.
@@ -436,7 +482,10 @@ function productKey(p) {
 function dryRun(spec, specFile) {
   const c0 = spec.cores[0];
   const lines = [
-    `Сессия по ${specFile}: цель ${spec.target}, ядра ${spec.cores.join(', ')} (исходное считается ${c0})`
+    `Сессия по ${specFile}: цель ${spec.target}, ядра ${spec.cores.join(', ')} (исходное считается ${c0})`,
+    spec.keepGoing
+      ? 'keep_going: все проходы до конца, полный список падений'
+      : 'остановка на первом несовпадении (keep_going: false): Go — по ходу вывода, остальное — после этапа'
   ];
   let n = 0;
   const step = (s) => lines.push(`${++n}. ${s}`);
@@ -512,6 +561,10 @@ class Session {
     this.cleaning = false;
     this.network = false;
     this.broken = false;
+    // остановка на первом несовпадении: { pass, core, test, expected, actual, how, live, todo }
+    this.stopped = null;
+    // вердикты с этим индексом и дальше ещё не проверены на остановку (checkStop)
+    this.checked = 0;
   }
 
   say(msg) {
@@ -535,7 +588,8 @@ class Session {
 
   // Запуск этапа: вывод — в консоль и session.log. Код выхода (сигнал — 128+n).
   // opts.detached — отдельная группа процессов; opts.onSpawn(child) вызывается сразу после
-  // spawn и может вернуть функцию, которая будет вызвана при закрытии процесса.
+  // spawn и может вернуть функцию, которая будет вызвана при закрытии процесса; opts.drainIf()
+  // — true, если после выхода лидера нужно дождаться опустения группы.
   run(cmd, args, env = {}, opts = {}) {
     if (this.aborted && !this.cleaning) return Promise.resolve(130);
     const base = { ...process.env };
@@ -582,7 +636,8 @@ class Session {
         // пережить лидера: возврат стенда не стартует, пока группа не опустеет, иначе он шёл бы
         // одновременно с ними
         const pid = child.pid;
-        const interrupted = this.aborted || rc >= 128;
+        // opts.drainIf — этап остановлен сессией (первое несовпадение): ждать группу и при коде < 128
+        const interrupted = this.aborted || rc >= 128 || (opts.drainIf ? opts.drainIf() : false);
         if (opts.drain !== false && interrupted && Number.isInteger(pid) && pid > 1) {
           this.drainGroup(pid).then(() => resolve(rc));
         } else {
@@ -834,9 +889,28 @@ class Session {
     if (p.go) {
       const env = { RT_REPORT: dir, RT_GO_PKGS: p.go.pkgs };
       if (p.go.run) env.RT_GO_RUN = p.go.run;
-      const g = await this.run('sh', [path.join(SCRIPT_DIR, 'go-suite.sh'), this.t, core], env);
+      const watch = this.spec.keepGoing ? {} : this.goWatch(p, core, dir);
+      const g = await this.run(
+        'sh',
+        [path.join(SCRIPT_DIR, 'go-suite.sh'), this.t, core],
+        env,
+        watch
+      );
       this.record({ kind: 'go', pass: p.name, core, dir, rc: g, version: p.resolved ?? null });
-      if (g === 3) return 3;
+      if (g === 3 && !this.stopped?.live) return 3;
+      if (!this.stopped && p.specs.length && !this.spec.keepGoing && !this.aborted) {
+        // несовпадение в Go-части, которое видно только после этапа (например, PASS вместо
+        // ожидаемого FAIL), не пускает этап Playwright
+        const m = this.firstMismatch(p, dir);
+        if (m) this.setStopped({ pass: p.name, core, ...m, how: 'после этапа go', live: false });
+      }
+      if (this.stopped) {
+        // этап остановлен посреди пакета: тестовый бинарник на цели мог пережить обрыв ssh
+        if (this.stopped.live) this.killRemoteTests();
+        if (p.specs.length) this.stopped.todo.push(`проход ${p.name} на ${core}: этап Playwright`);
+        this.judge(p, core, dir);
+        return 0;
+      }
       if (p.specs.length) {
         // после разрушающих Go-тестов спеки начинают с рабочего стенда (как в run.sh)
         const s = spawnSync(
@@ -870,6 +944,243 @@ class Session {
     }
     this.judge(p, core, dir);
     return 0;
+  }
+
+  // --- остановка на первом несовпадении ---
+
+  setStopped(s) {
+    this.stopped = { todo: [], ...s };
+    this.say(
+      `остановка на первом несовпадении (${s.how}): проход ${s.pass}, ядро ${s.core}: ${s.test} — ожидалось ${s.expected.join('|')}, получено ${s.actual}`
+    );
+  }
+
+  // Первое несовпадение среди вердиктов, добавленных после прошлой проверки (сверка после
+  // этапа). Возвращает true, если сессия остановлена.
+  checkStop() {
+    if (this.stopped) return true;
+    const fresh = this.verdicts.slice(this.checked);
+    this.checked = this.verdicts.length;
+    if (this.spec.keepGoing || this.aborted) return false;
+    const v = fresh.find((x) => !x.ok);
+    if (!v) return false;
+    this.setStopped({
+      pass: v.pass,
+      core: v.core,
+      test: v.test,
+      expected: v.expected,
+      actual: v.actual,
+      how: 'после этапа',
+      live: false
+    });
+    return true;
+  }
+
+  // Первая строка results.tsv этапа, которую ожидание прохода не допускает.
+  firstMismatch(p, dir) {
+    const file = path.join(dir, this.t, 'results.tsv');
+    if (!existsSync(file)) return null;
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      if (!line) continue;
+      const [status, , check = ''] = line.split('\t');
+      if (/^(pw|go):/.test(check)) {
+        if (!allowedStatus(p.expect, check, status)) {
+          return { test: check, expected: expectedOf(p.expect, check), actual: status };
+        }
+      } else if (status === 'FAIL' || status === 'XPASS') {
+        return { test: check, expected: ['PASS'], actual: status };
+      }
+    }
+    return null;
+  }
+
+  // Сторож Go-этапа: раз в секунду дочитывает go-*.raw в <этап>/<цель>/<ядро>/ (и на уровень
+  // ниже) с запомненной позиции и разбирает маркеры теста; готовые go-*.parsed (их .raw уже
+  // удалён) сверяет целиком. Несовпадение — this.stopped и TERM группе этапа; если бинарник
+  // в этот момент не работает (между пакетами), сигнал уходит, как только появится следующий
+  // .raw. Возвращает opts для run.
+  goWatch(p, core, dir) {
+    const art = path.join(dir, this.t, core);
+    const raws = new Map();
+    const parsedDone = new Set();
+    let found = false;
+    let sent = false;
+    let child = null;
+    const MARKS = [
+      ['xpass', /XPASS slug=[a-z0-9-]+/],
+      ['quarantine', /QUARANTINE slug=[a-z0-9-]+/]
+    ];
+    const signal = () => {
+      if (sent || !child) return;
+      sent = true;
+      this.stopped.live = true;
+      this.say('этап go останавливается: TERM группе этапа');
+      this.signalChild('SIGTERM');
+    };
+    const check = (name, status, hasRaw) => {
+      if (found || this.aborted) return;
+      const test = `go:${name}`;
+      if (allowedStatus(p.expect, test, status)) return;
+      found = true;
+      this.setStopped({
+        pass: p.name,
+        core,
+        test,
+        expected: expectedOf(p.expect, test),
+        actual: status,
+        how: 'по ходу этапа go',
+        live: false
+      });
+      if (hasRaw) signal();
+    };
+    const list = () => {
+      const out = [];
+      const walk = (d, depth) => {
+        let ents;
+        try {
+          ents = readdirSync(d, { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const e of ents) {
+          const f = path.join(d, e.name);
+          if (e.isDirectory()) {
+            if (depth === 0) walk(f, 1);
+          } else if (/^go-.+\.(raw|parsed)$/.test(e.name)) {
+            out.push(f);
+          }
+        }
+      };
+      walk(art, 0);
+      return out;
+    };
+    const onFail = (st, name) => {
+      // родитель, упавший из-за подтеста, отдельно не сверяется (badchild в go-parse.awk)
+      const byChild = [...st.failed].some((f) => f.startsWith(`${name}/`));
+      st.failed.add(name);
+      if (byChild) return;
+      const has = (t, k) => st.marks.get(t)?.has(k) ?? false;
+      const parts = name.split('/');
+      const ancestors = parts.map((_, i) => parts.slice(0, i + 1).join('/'));
+      let status = 'FAIL';
+      if (has(name, 'xpass')) status = 'XPASS';
+      else if (ancestors.some((a) => has(a, 'quarantine'))) status = 'QFAIL';
+      check(name, status, true);
+    };
+    const rawLine = (st, line) => {
+      // вывод -test.v=test2json: служебные строки начинаются с \x16, у подтестов — с отступом
+      const l = line.replace(/^[\s\x16]+/, '');
+      let m = l.match(/^=== (RUN|CONT|NAME)\s+(\S+)/);
+      if (m) {
+        st.cur = m[2];
+        return;
+      }
+      m = l.match(/^--- (FAIL|PASS|SKIP): (\S+)/);
+      if (m) {
+        if (m[1] === 'FAIL') onFail(st, m[2]);
+        return;
+      }
+      if (!st.cur) return;
+      for (const [kind, re] of MARKS) {
+        if (!re.test(l)) continue;
+        if (!st.marks.has(st.cur)) st.marks.set(st.cur, new Set());
+        st.marks.get(st.cur).add(kind);
+      }
+    };
+    const readRaw = (f) => {
+      let st = raws.get(f);
+      if (!st) {
+        st = {
+          pos: 0,
+          dec: new StringDecoder('utf8'),
+          rest: '',
+          cur: '',
+          marks: new Map(),
+          failed: new Set()
+        };
+        raws.set(f, st);
+      }
+      let fd;
+      try {
+        fd = openSync(f, 'r');
+      } catch {
+        return;
+      }
+      try {
+        const size = fstatSync(fd).size;
+        while (st.pos < size) {
+          const buf = Buffer.alloc(Math.min(size - st.pos, 1 << 20));
+          const n = readSync(fd, buf, 0, buf.length, st.pos);
+          if (n <= 0) break;
+          st.pos += n;
+          st.rest += st.dec.write(buf.subarray(0, n));
+        }
+      } finally {
+        closeSync(fd);
+      }
+      const lines = st.rest.split('\n');
+      st.rest = lines.pop();
+      for (const line of lines) rawLine(st, line);
+    };
+    const readParsed = (f) => {
+      parsedDone.add(f);
+      let text = '';
+      try {
+        text = readFileSync(f, 'utf8');
+      } catch {
+        return;
+      }
+      for (const line of text.split('\n')) {
+        const [status, name = ''] = line.split('\t');
+        if (name.startsWith('go:')) check(name.slice(3), status, false);
+      }
+    };
+    const poll = () => {
+      if (sent || this.aborted) return;
+      const files = list();
+      const live = files.filter((f) => f.endsWith('.raw'));
+      if (found) {
+        // несовпадение найдено между пакетами: остановить, как только пойдёт следующий бинарник
+        if (live.length) signal();
+        return;
+      }
+      for (const f of live) readRaw(f);
+      for (const f of files) {
+        if (found) break;
+        if (!f.endsWith('.parsed') || parsedDone.has(f)) continue;
+        if (existsSync(f.replace(/\.parsed$/, '.raw'))) continue;
+        readParsed(f);
+      }
+      if (found && !sent && live.some((f) => existsSync(f))) signal();
+    };
+    return {
+      drainIf: () => sent,
+      onSpawn: (c) => {
+        child = c;
+        const timer = setInterval(poll, 1000);
+        return () => {
+          clearInterval(timer);
+          child = null;
+        };
+      }
+    };
+  }
+
+  // Тестовые бинарники на цели после остановки Go-этапа: ssh этапа оборван, бинарник мог
+  // остаться работать — добить, чтобы возврат стенда не шёл одновременно с тестом.
+  killRemoteTests() {
+    const r = this.remote(
+      'n=0; for f in /proc/[0-9]*/cmdline; do p=${f#/proc/}; p=${p%/cmdline}; tr "\\000" " " <"$f" 2>/dev/null | grep -q "[.]test -test[.]" && kill "$p" 2>/dev/null && n=$((n+1)); done; echo "n=$n"'
+    );
+    const m = r.out.match(/^n=(\d+)$/m);
+    if (r.rc === 3) this.network = true;
+    if (!m) {
+      this.notes.push(
+        `после остановки этапа go тестовые процессы на цели не проверены (код ${r.rc})`
+      );
+    } else if (Number(m[1]) > 0) {
+      this.say(`после остановки этапа go добито тестовых процессов на цели: ${m[1]}`);
+    }
   }
 
   // Прерывание вложенного run.sh по спеке (interrupt). Вложенный прогон идёт отдельной группой
@@ -1303,9 +1614,24 @@ class Session {
         report: rel
       });
     const { expect } = p;
+    // этап остановлен на первом несовпадении посреди вывода: тест остановки — несовпадение,
+    // тесты, до которых этап не дошёл, не сверяются
+    const st = this.stopped;
+    const stop = st && st.live && st.pass === p.name && st.core === core ? st : null;
+    if (stop) {
+      push(
+        stop.test,
+        stop.expected,
+        stop.actual,
+        `${stop.how}: этап остановлен, следующие тесты не выполнялись`,
+        false
+      );
+    }
     for (const [name, want] of expect.tests) {
+      if (stop && name === stop.test) continue;
       const r = got.get(name);
       if (!r) {
+        if (stop) continue;
         push(name, want.status, 'нет', 'тест не запускался: имя или --grep', false);
         continue;
       }
@@ -1315,7 +1641,7 @@ class Session {
       push(name, want.status, r.status, why, okStatus && okDetail);
     }
     for (const [name, r] of got) {
-      if (expect.tests.has(name)) continue;
+      if (expect.tests.has(name) || (stop && name === stop.test)) continue;
       if (SERVICE.has(name)) {
         push(name, ['PASS'], r.status, r.detail, r.status === 'PASS');
       } else if (expect.def) {
@@ -1327,7 +1653,7 @@ class Session {
       }
     }
     for (const e of extra) push(e.check, ['PASS'], e.status, e.detail, false);
-    if (expect.count !== null) {
+    if (expect.count !== null && !stop) {
       const n = [...got.keys()].filter((k) => !SERVICE.has(k)).length;
       push(`число тестов`, [String(expect.count)], String(n), '', n === expect.count);
     }
@@ -1390,6 +1716,16 @@ class Session {
       `- Цель: ${this.t}; исходное ядро: ${this.c0 ?? '-'}; ядра проходов: ${this.spec.cores.join(', ')}`
     );
     L.push(`- Отчёт: ${path.relative(this.root, this.dir)}`, '');
+    const st = this.stopped;
+    if (st) {
+      L.push('## Остановлено на первом несовпадении', '');
+      L.push(
+        `- проход ${st.pass}, ядро ${st.core}: ${esc(st.test)} — ожидалось ${st.expected.join('|')}, получено ${st.actual} (${st.how})`
+      );
+      L.push(`- Не выполнено:${st.todo.length ? '' : ' —'}`);
+      for (const t of st.todo) L.push(`  - ${t}`);
+      L.push('');
+    }
     L.push('## Ожидания', '');
     L.push('| Проход | Ядро | Тест | Ожидалось | Получено | Совпало | Деталь | Отчёт |');
     L.push('|---|---|---|---|---|---|---|---|');
@@ -1449,6 +1785,7 @@ class Session {
             dir: path.relative(this.root, s.dir)
           })),
           stand_end: end,
+          stopped: this.stopped,
           notes: this.notes
         },
         null,
@@ -1495,13 +1832,27 @@ async function main() {
   };
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, onSignal);
 
+  // Невыполненное при остановке: оставшиеся ядра текущего прохода и следующие проходы.
+  const passTitle = (q) =>
+    q.suite
+      ? `проход ${q.name} (прогон набора ${q.suite})`
+      : `проход ${q.name}: ядра ${spec.cores.join(', ')}`;
+  const stopAt = (i, cores = []) => {
+    if (cores.length) {
+      s.stopped.todo.push(`проход ${spec.passes[i].name}: ядра ${cores.join(', ')}`);
+    }
+    for (const q of spec.passes.slice(i + 1)) s.stopped.todo.push(passTitle(q));
+  };
+
   try {
-    for (const p of spec.passes) {
-      if (s.aborted || s.network || s.broken) break;
+    for (let i = 0; i < spec.passes.length; i++) {
+      const p = spec.passes[i];
+      if (s.aborted || s.network || s.broken || s.stopped) break;
       if (p.suite) {
         // вложенный прогон деплоит рабочее дерево: файлы продукта прежнего прохода — к HEAD
         s.restoreProduct();
         await s.runSuite(p);
+        if (s.checkStop()) stopAt(i);
         continue;
       }
       if (p.version && !s.resolveVersion(p)) break;
@@ -1524,17 +1875,30 @@ async function main() {
           s.c0 = s.cur;
           s.say(`исходное ядро стенда: ${s.c0}`);
         }
+        // красный смоук — несовпадение: проход не начинается
+        if (s.checkStop()) {
+          stopAt(i, coreOrder(spec.cores, s.cur));
+          break;
+        }
       }
-      for (const core of coreOrder(spec.cores, s.cur)) {
+      const order = coreOrder(spec.cores, s.cur);
+      for (let j = 0; j < order.length; j++) {
+        const core = order[j];
         if (s.aborted || s.network || s.broken) break;
         if (s.cur !== core) {
           const rc = await s.switchTo(core);
           if (rc !== 0) break;
         }
         const rc = await s.runPass(p, core);
+        if (s.checkStop()) {
+          stopAt(i, order.slice(j + 1));
+          break;
+        }
         if (rc === 3) break;
       }
     }
+    // несовпадение в последнем этапе без остановки посреди вывода — не остановка: невыполненного нет
+    if (s.stopped && !s.stopped.live && !s.stopped.todo.length) s.stopped = null;
   } catch (e) {
     s.notes.push(`сессия упала: ${e.message}`);
     s.broken = true;
@@ -1555,9 +1919,14 @@ async function main() {
   } else if (s.network) {
     code = 3;
     result = 'сбой связи ПК↔стенд — не красный прогон, нужен todo с разбором (AGENTS.md)';
-  } else if (s.broken || mismatches || !end?.ok) {
+  } else if (s.broken || s.stopped || mismatches || !end?.ok) {
     code = 1;
     const why = [];
+    if (s.stopped) {
+      why.push(
+        `остановлено на первом несовпадении: проход ${s.stopped.pass}, ядро ${s.stopped.core}, ${s.stopped.test}`
+      );
+    }
     if (s.broken) why.push('этап сломался');
     if (mismatches) why.push(`расхождений с ожиданиями: ${mismatches}`);
     if (!end?.ok) why.push('стенд не вернулся в исходное состояние');
