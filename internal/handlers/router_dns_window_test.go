@@ -162,6 +162,7 @@ func (e *rtSrc) rtDNSExpectRolledBack(v map[string]any, kernel string, overrideB
 // 409 window_active → «Оставить» → state on, действующий перехват → повторное
 // «Оставить» (вторая вкладка) → 200, state on. Метка ядра: перехват ведёт активное ядро.
 func TestRouterDNSWindowKeep(t *testing.T) {
+	routertest.Slow(t, "включение перехвата DNS с перезапуском ядра и окном подтверждения")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)
@@ -274,6 +275,7 @@ func TestRouterDNSWindowTimeout(t *testing.T) {
 // нет → повторное «Откатить сейчас» и «Оставить» без окна — 409 no_window. Метка
 // ядра: откат перезапускает активное ядро.
 func TestRouterDNSWindowRollbackNow(t *testing.T) {
+	routertest.Slow(t, "включение перехвата DNS и «Откатить сейчас»: два перезапуска ядра")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)
@@ -307,6 +309,7 @@ func TestRouterDNSWindowRollbackNow(t *testing.T) {
 // toast_pending и уведомление слоя (открытая вкладка после переподключения видит
 // «Откачено: нет подтверждения»). Метка ядра: откат перезапускает активное ядро.
 func TestRouterDNSWindowPanelRestart(t *testing.T) {
+	routertest.Slow(t, "перезапуск панели init-скриптом посреди окна, откат при старте")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)

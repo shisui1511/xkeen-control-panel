@@ -11,7 +11,7 @@ import {
   releaseDnsTarget,
   type DnsTargetPrep
 } from './lib/dns-target';
-import { CORE_TAG } from './lib/known';
+import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
 import { api, layerFlag, randomPort, resetDraft, withPanel } from './lib/nodes-api';
 
 // Поля DNS через прокси формы DNS Mihomo на настоящей панели (фаза 148, DNSF-01):
@@ -271,43 +271,52 @@ test('dns-forms: верные адрес слушателя и диапазон 
   await guard.assertClean();
 });
 
-test('dns-forms: строки proxy-server-nameserver и fake-ip-filter, включая последнюю', async ({
-  page
-}) => {
-  test.setTimeout(T.save * 4);
-  const guard = attachConsoleGuard(page);
-  await prepare(page);
+test(
+  'dns-forms: строки proxy-server-nameserver и fake-ip-filter, включая последнюю',
+  {
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description: 'правки формы DNS Mihomo и «Применить» с перезапуском Mihomo'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.save * 4);
+    const guard = attachConsoleGuard(page);
+    await prepare(page);
 
-  for (const list of LISTS) {
-    const rows = rowsOf(page, list.path);
-    const start = await rows.count();
+    for (const list of LISTS) {
+      const rows = rowsOf(page, list.path);
+      const start = await rows.count();
 
-    // ноль, одна и много строк: добавляются одинаково
-    for (let n = 0; n < 2; n++) {
-      await page.getByTestId(`section-add-mihomo-${SEC}-${list.path}`).click();
-      const row = page.getByTestId(`${FIELD(list.path)}-${start + n}`);
-      await expect(row, `${list.path}: новая строка в фокусе`).toBeFocused();
-      await row.fill(`${list.value}${n === 0 ? '' : `#${n}`}`);
-      await row.blur();
-      // следующая строка — после того, как вид секции вернулся с записанной
+      // ноль, одна и много строк: добавляются одинаково
+      for (let n = 0; n < 2; n++) {
+        await page.getByTestId(`section-add-mihomo-${SEC}-${list.path}`).click();
+        const row = page.getByTestId(`${FIELD(list.path)}-${start + n}`);
+        await expect(row, `${list.path}: новая строка в фокусе`).toBeFocused();
+        await row.fill(`${list.value}${n === 0 ? '' : `#${n}`}`);
+        await row.blur();
+        // следующая строка — после того, как вид секции вернулся с записанной
+        await expect
+          .poll(async () => (await formList(page, list.path))?.length ?? 0, { timeout: T.action })
+          .toBe(start + n + 1);
+        await expect(rows).toHaveCount(start + n + 1);
+      }
+      expect(await formList(page, list.path)).toContain(list.value);
+
+      // удаляются все строки, последняя — тоже; опустевший список снимает ключ
+      for (let left = start + 2; left > 0; left--) {
+        await page.getByTestId(`section-remove-mihomo-${SEC}-${list.path}-0`).click();
+        await expect(rows).toHaveCount(left - 1, { timeout: T.action });
+      }
+      await expect(page.getByTestId(`section-list-empty-mihomo-${SEC}-${list.path}`)).toBeVisible();
       await expect
-        .poll(async () => (await formList(page, list.path))?.length ?? 0, { timeout: T.action })
-        .toBe(start + n + 1);
-      await expect(rows).toHaveCount(start + n + 1);
+        .poll(async () => formList(page, list.path), { timeout: T.action })
+        .toBeUndefined();
     }
-    expect(await formList(page, list.path)).toContain(list.value);
 
-    // удаляются все строки, последняя — тоже; опустевший список снимает ключ
-    for (let left = start + 2; left > 0; left--) {
-      await page.getByTestId(`section-remove-mihomo-${SEC}-${list.path}-0`).click();
-      await expect(rows).toHaveCount(left - 1, { timeout: T.action });
-    }
-    await expect(page.getByTestId(`section-list-empty-mihomo-${SEC}-${list.path}`)).toBeVisible();
-    await expect.poll(async () => formList(page, list.path), { timeout: T.action }).toBeUndefined();
+    await guard.assertClean();
   }
-
-  await guard.assertClean();
-});
+);
 
 /**
  * Критичные и серьёзные нарушения axe (WCAG 2.0/2.1 A и AA, в том числе color-contrast)

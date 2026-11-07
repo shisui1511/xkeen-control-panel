@@ -5,7 +5,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { CORE_TAG } from './lib/known';
+import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
 import { addToDraft, api, layerFlag, nodeLink, randomPort, resetDraft } from './lib/nodes-api';
 
 // Списки и пресеты на вкладке «Правила» на настоящей панели (фаза 146, план 22): выбор списка
@@ -441,59 +441,69 @@ async function prepareXKeen(page: Page): Promise<() => Promise<void>> {
   };
 }
 
-test('presets: взятие с пресетом', { tag: CORE_TAG }, async ({ page }) => {
-  test.setTimeout(T.save * 10);
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await startPage(page);
-  const snap = await ownerSnap(page);
-  test.skip(!snap.xray && !snap.mihomo, 'на стенде нет установленных ядер');
-  const restore = await prepareXKeen(page);
-  try {
-    await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), 'RtPresetA'));
-    test.skip(
-      (await routingNow(page)).rules.length > 0,
-      'в черновике уже есть правила: взятие не идёт через пресет'
-    );
+test(
+  'presets: взятие с пресетом',
+  {
+    tag: CORE_TAG,
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description: 'взятие маршрутизации с пресетом: «Применить» с перезапуском ядра'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.save * 10);
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await startPage(page);
+    const snap = await ownerSnap(page);
+    test.skip(!snap.xray && !snap.mihomo, 'на стенде нет установленных ядер');
+    const restore = await prepareXKeen(page);
+    try {
+      await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), 'RtPresetA'));
+      test.skip(
+        (await routingNow(page)).rules.length > 0,
+        'в черновике уже есть правила: взятие не идёт через пресет'
+      );
 
-    await page.goto('/#/config/rules', { timeout: T.page, waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('config-page')).toBeVisible({ timeout: T.page });
-    const notice = page.getByTestId('routing-notice');
-    await expect(notice).toHaveAttribute('data-owner', 'xkeen', { timeout: T.action });
-    await page.getByTestId('routing-take').click();
+      await page.goto('/#/config/rules', { timeout: T.page, waitUntil: 'domcontentloaded' });
+      await expect(page.getByTestId('config-page')).toBeVisible({ timeout: T.page });
+      const notice = page.getByTestId('routing-notice');
+      await expect(notice).toHaveAttribute('data-owner', 'xkeen', { timeout: T.action });
+      await page.getByTestId('routing-take').click();
 
-    // список правил пуст: «Взять» открывает диалог пресета в режиме взятия
-    const take = page.getByTestId('take-routing-modal');
-    await expect(take).toBeVisible({ timeout: T.action });
-    await take.getByTestId('take-routing-confirm').click();
-    const modal = page.getByTestId('preset-modal');
-    await expect(modal).toBeVisible({ timeout: T.action });
-    await expect(modal.getByTestId('preset-loading')).toHaveCount(0, { timeout: T.page });
-    await expect(modal.getByTestId('preset-card-empty')).toBeVisible();
-    await expect(modal.getByTestId('preset-create')).toBeDisabled();
-    expect((await ownerSnap(page)).desired, 'диалог сам ничего не записал').toBe(false);
+      // список правил пуст: «Взять» открывает диалог пресета в режиме взятия
+      const take = page.getByTestId('take-routing-modal');
+      await expect(take).toBeVisible({ timeout: T.action });
+      await take.getByTestId('take-routing-confirm').click();
+      const modal = page.getByTestId('preset-modal');
+      await expect(modal).toBeVisible({ timeout: T.action });
+      await expect(modal.getByTestId('preset-loading')).toHaveCount(0, { timeout: T.page });
+      await expect(modal.getByTestId('preset-card-empty')).toBeVisible();
+      await expect(modal.getByTestId('preset-create')).toBeDisabled();
+      expect((await ownerSnap(page)).desired, 'диалог сам ничего не записал').toBe(false);
 
-    // «Всё через прокси»: одна правка черновика — желание «взять» и правила пресета
-    await pickCard(page, 'all_proxy');
-    await modal.getByTestId('preset-create').click();
-    await expect(modal).toBeHidden({ timeout: T.action });
-    await expect(take).toHaveCount(0, { timeout: T.action });
-    await expect(notice).toHaveAttribute('data-owner', 'pending', { timeout: T.action });
-    expect((await ownerSnap(page)).desired).toBe(true);
-    const drafted = await routingNow(page);
-    expect(drafted.rules.length, 'правила пресета в черновике').toBeGreaterThan(0);
-    expect(drafted.rules.every((r) => r.origin === 'preset')).toBe(true);
-    expect((await ownerSnap(page)).taken, 'до «Применить» файлы не тронуты').toBe(false);
+      // «Всё через прокси»: одна правка черновика — желание «взять» и правила пресета
+      await pickCard(page, 'all_proxy');
+      await modal.getByTestId('preset-create').click();
+      await expect(modal).toBeHidden({ timeout: T.action });
+      await expect(take).toHaveCount(0, { timeout: T.action });
+      await expect(notice).toHaveAttribute('data-owner', 'pending', { timeout: T.action });
+      expect((await ownerSnap(page)).desired).toBe(true);
+      const drafted = await routingNow(page);
+      expect(drafted.rules.length, 'правила пресета в черновике').toBeGreaterThan(0);
+      expect(drafted.rules.every((r) => r.origin === 'preset')).toBe(true);
+      expect((await ownerSnap(page)).taken, 'до «Применить» файлы не тронуты').toBe(false);
 
-    await page.getByTestId('config-apply').click();
-    await expect(notice).toHaveAttribute('data-owner', 'panel', { timeout: T.save * 3 });
-    expect((await ownerSnap(page)).taken).toBe(true);
+      await page.getByTestId('config-apply').click();
+      await expect(notice).toHaveAttribute('data-owner', 'panel', { timeout: T.save * 3 });
+      expect((await ownerSnap(page)).taken).toBe(true);
 
-    await guard.assertClean();
-  } finally {
-    await restore();
+      await guard.assertClean();
+    } finally {
+      await restore();
+    }
   }
-});
+);
 
 // --- Доступность диалогов (axe) ---
 

@@ -376,6 +376,7 @@ func TestRouterDNSApplyReleaseWindow(t *testing.T) {
 // панели в файлах ядра нет, черновик закрыт. Метка ядра: откат перезапускает
 // активное ядро, слушатель — в его файлах.
 func TestRouterDNSEnablePanelRestart(t *testing.T) {
+	routertest.Slow(t, "перезапуск панели init-скриптом посреди включения, откат при старте")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)

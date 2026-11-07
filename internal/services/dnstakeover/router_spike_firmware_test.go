@@ -784,6 +784,7 @@ func fwProxyToggle(t *testing.T, before, coresBefore string) bool {
 }
 
 func TestRouterDNSFirmwareFacts(t *testing.T) {
+	routertest.Slow(t, "переключения proxy_dns командой xkeen -dns с перезапусками ядра и паузами")
 	routertest.Current(t)
 
 	// 1. До изменений.

@@ -5,6 +5,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
 import { api, layerFlag, randomPort, resetDraft } from './lib/nodes-api';
+import { SLOW_ANNOTATION } from './lib/known';
 
 // Формы секций Xray на настоящей панели (фаза 147, план 22): DNS, «Лог», «Политики» и
 // «Входящие» правятся полями без потери ключей, которых формы не знают; входящие, которые
@@ -230,99 +231,108 @@ async function takeViaDialog(page: Page, id: string): Promise<void> {
 
 // --- DNS ------------------------------------------------------------------------------------
 
-test('cores: Xray DNS — серверы списком, сложный сервер в «Дополнительно»', async ({ page }) => {
-  test.setTimeout(T.save * 14);
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await startPage(page);
-  const before = await xrayView(page);
-  test.skip(!before.installed, 'Xray не установлен');
-  const dns = before.sections.find((s) => s.id === 'dns');
-  test.skip(dns?.owner === 'panel' || dns?.owner === 'pending', 'секция DNS уже у панели');
-  await resetDraft(page);
-
-  const complexServer = { address: '127.0.0.2', domains: ['domain:example.test'] };
-  const fixture = `${JSON.stringify(
-    { dns: { servers: ['127.0.0.1', complexServer], queryStrategy: 'UseIP' } },
-    null,
-    2
-  )}\n`;
-  const original = await readConfig(page, DNS_FILE);
-  try {
-    await writeConfig(page, DNS_FILE, fixture);
-
-    // секция читается только из 02_dns.json: другие файлы с ключом dns меняют раскладку
-    await expect
-      .poll(async () => (await sectionOf(page, 'dns'))?.files.length ?? 0, { timeout: T.action })
-      .toBeGreaterThan(0);
-    const files = (await sectionOf(page, 'dns'))?.files ?? [];
-    const foreign = files.filter((f) => !f.endsWith('02_dns.json'));
-    expect(
-      foreign,
-      `раскладка стенда не та, что у шаблонов XKeen: ключ dns и в файлах ${foreign.join(', ')}`
-    ).toEqual([]);
-
-    await openSection(page, 'dns');
-    await takeViaDialog(page, 'dns');
-
-    // форма: серверы-объекты списком не показываются, текст сервера в форму не попадает
-    const form = page.getByTestId('section-form-xray-dns');
-    await expect(form).toBeVisible({ timeout: T.action });
-    const complex = page.getByTestId('section-field-xray-dns-servers-complex');
-    await expect(complex).toBeVisible({ timeout: T.action });
-    await expect(complex).not.toContainText('example.test');
-    await expect(page.getByTestId('section-field-xray-dns-servers-0')).toHaveCount(0);
-
-    // смена стратегии пишет в черновик; сложный сервер остаётся
-    const revision = (await layerProbe(page)).revision;
-    await page.getByTestId('section-field-xray-dns-querystrategy').selectOption('UseIPv4');
-    await expect
-      .poll(async () => (await layerProbe(page)).revision, { timeout: T.action })
-      .toBeGreaterThan(revision);
-    await expect
-      .poll(
-        async () => {
-          const value = inner((await sectionOf(page, 'dns'))?.value, 'dns');
-          const servers = (value.servers ?? []) as unknown[];
-          const kept = servers.some(
-            (s) =>
-              s !== null &&
-              typeof s === 'object' &&
-              ((s as { domains?: string[] }).domains ?? []).includes('domain:example.test')
-          );
-          return kept && value.queryStrategy === 'UseIPv4';
-        },
-        { timeout: T.action }
-      )
-      .toBe(true);
-
-    // «Применить»: файл панели хранит сложный сервер и новую стратегию
-    await applyAndWait(page);
-    const written = await readConfig(page, DNS_PANEL_FILE);
-    expect(written, `${DNS_PANEL_FILE} после «Применить»`).not.toBeNull();
-    const panel = inner(JSON.parse(written ?? '{}'), 'dns');
-    expect(panel.queryStrategy, 'queryStrategy в файле панели').toBe('UseIPv4');
-    expect(JSON.stringify(panel.servers), 'сложный сервер сохранён в файле панели').toContain(
-      'domain:example.test'
-    );
-
-    // «Отпустить»: подтверждение, затем «Применить» возвращает исходный файл побайтно
-    await page.getByTestId('section-release-xray-dns').click();
-    const dialog = page.getByRole('dialog');
-    await expect(dialog).toBeVisible({ timeout: T.action });
-    await dialog.getByRole('button', { name: /^(Отпустить секцию|Release section)$/ }).click();
-    await expect(page.getByTestId('config-apply')).toBeEnabled({ timeout: T.action });
-    await applyAndWait(page);
-    expect(await readConfig(page, DNS_FILE), '02_dns.json вернулся побайтно').toBe(fixture);
-
-    await guard.assertClean();
-  } finally {
+test(
+  'cores: Xray DNS — серверы списком, сложный сервер в «Дополнительно»',
+  {
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description: 'правки формы DNS Xray и «Применить» с перезапуском Xray'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.save * 14);
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await startPage(page);
+    const before = await xrayView(page);
+    test.skip(!before.installed, 'Xray не установлен');
+    const dns = before.sections.find((s) => s.id === 'dns');
+    test.skip(dns?.owner === 'panel' || dns?.owner === 'pending', 'секция DNS уже у панели');
     await resetDraft(page);
-    await releaseViaApi(page, 'dns');
-    if (original === null) await removeConfig(page, DNS_FILE);
-    else await writeConfig(page, DNS_FILE, original);
+
+    const complexServer = { address: '127.0.0.2', domains: ['domain:example.test'] };
+    const fixture = `${JSON.stringify(
+      { dns: { servers: ['127.0.0.1', complexServer], queryStrategy: 'UseIP' } },
+      null,
+      2
+    )}\n`;
+    const original = await readConfig(page, DNS_FILE);
+    try {
+      await writeConfig(page, DNS_FILE, fixture);
+
+      // секция читается только из 02_dns.json: другие файлы с ключом dns меняют раскладку
+      await expect
+        .poll(async () => (await sectionOf(page, 'dns'))?.files.length ?? 0, { timeout: T.action })
+        .toBeGreaterThan(0);
+      const files = (await sectionOf(page, 'dns'))?.files ?? [];
+      const foreign = files.filter((f) => !f.endsWith('02_dns.json'));
+      expect(
+        foreign,
+        `раскладка стенда не та, что у шаблонов XKeen: ключ dns и в файлах ${foreign.join(', ')}`
+      ).toEqual([]);
+
+      await openSection(page, 'dns');
+      await takeViaDialog(page, 'dns');
+
+      // форма: серверы-объекты списком не показываются, текст сервера в форму не попадает
+      const form = page.getByTestId('section-form-xray-dns');
+      await expect(form).toBeVisible({ timeout: T.action });
+      const complex = page.getByTestId('section-field-xray-dns-servers-complex');
+      await expect(complex).toBeVisible({ timeout: T.action });
+      await expect(complex).not.toContainText('example.test');
+      await expect(page.getByTestId('section-field-xray-dns-servers-0')).toHaveCount(0);
+
+      // смена стратегии пишет в черновик; сложный сервер остаётся
+      const revision = (await layerProbe(page)).revision;
+      await page.getByTestId('section-field-xray-dns-querystrategy').selectOption('UseIPv4');
+      await expect
+        .poll(async () => (await layerProbe(page)).revision, { timeout: T.action })
+        .toBeGreaterThan(revision);
+      await expect
+        .poll(
+          async () => {
+            const value = inner((await sectionOf(page, 'dns'))?.value, 'dns');
+            const servers = (value.servers ?? []) as unknown[];
+            const kept = servers.some(
+              (s) =>
+                s !== null &&
+                typeof s === 'object' &&
+                ((s as { domains?: string[] }).domains ?? []).includes('domain:example.test')
+            );
+            return kept && value.queryStrategy === 'UseIPv4';
+          },
+          { timeout: T.action }
+        )
+        .toBe(true);
+
+      // «Применить»: файл панели хранит сложный сервер и новую стратегию
+      await applyAndWait(page);
+      const written = await readConfig(page, DNS_PANEL_FILE);
+      expect(written, `${DNS_PANEL_FILE} после «Применить»`).not.toBeNull();
+      const panel = inner(JSON.parse(written ?? '{}'), 'dns');
+      expect(panel.queryStrategy, 'queryStrategy в файле панели').toBe('UseIPv4');
+      expect(JSON.stringify(panel.servers), 'сложный сервер сохранён в файле панели').toContain(
+        'domain:example.test'
+      );
+
+      // «Отпустить»: подтверждение, затем «Применить» возвращает исходный файл побайтно
+      await page.getByTestId('section-release-xray-dns').click();
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toBeVisible({ timeout: T.action });
+      await dialog.getByRole('button', { name: /^(Отпустить секцию|Release section)$/ }).click();
+      await expect(page.getByTestId('config-apply')).toBeEnabled({ timeout: T.action });
+      await applyAndWait(page);
+      expect(await readConfig(page, DNS_FILE), '02_dns.json вернулся побайтно').toBe(fixture);
+
+      await guard.assertClean();
+    } finally {
+      await resetDraft(page);
+      await releaseViaApi(page, 'dns');
+      if (original === null) await removeConfig(page, DNS_FILE);
+      else await writeConfig(page, DNS_FILE, original);
+    }
   }
-});
+);
 
 // --- «Лог» и «Политики» ---------------------------------------------------------------------
 

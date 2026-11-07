@@ -4,7 +4,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { CORE_TAG } from './lib/known';
+import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
 import { addToDraft, api, layerFlag, nodeLink, randomPort, resetDraft } from './lib/nodes-api';
 
 // Вкладки «Группы» и «Правила» раздела «Конфигурация» на настоящей панели (фаза 146,
@@ -368,80 +368,91 @@ async function prepareXKeen(page: Page): Promise<() => Promise<void>> {
   };
 }
 
-test('routing: взятие и отпускание', { tag: CORE_TAG }, async ({ page }) => {
-  test.setTimeout(T.save * 10);
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await startPage(page);
-  const snap = await ownerSnap(page);
-  test.skip(!snap.xray && !snap.mihomo, 'на стенде нет установленных ядер');
-  const restore = await prepareXKeen(page);
-  try {
-    await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), 'RtOwnA'));
-    await openConfig(page, '#/config/rules');
-    await tabReady(page, 'rules-tab');
+test(
+  'routing: взятие и отпускание',
+  {
+    tag: CORE_TAG,
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description:
+        'взятие и отпускание маршрутизации: «Применить» с перезапуском ядра на каждом шаге'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.save * 10);
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await startPage(page);
+    const snap = await ownerSnap(page);
+    test.skip(!snap.xray && !snap.mihomo, 'на стенде нет установленных ядер');
+    const restore = await prepareXKeen(page);
+    try {
+      await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), 'RtOwnA'));
+      await openConfig(page, '#/config/rules');
+      await tabReady(page, 'rules-tab');
 
-    // управляет XKeen: плашка и кнопка взятия
-    const notice = page.getByTestId('routing-notice');
-    await expect(notice).toHaveAttribute('data-owner', 'xkeen', { timeout: T.action });
-    await page.getByTestId('routing-take').click();
+      // управляет XKeen: плашка и кнопка взятия
+      const notice = page.getByTestId('routing-notice');
+      await expect(notice).toHaveAttribute('data-owner', 'xkeen', { timeout: T.action });
+      await page.getByTestId('routing-take').click();
 
-    // диалог показывает последствия до любого запроса записи
-    const modal = page.getByTestId('take-routing-modal');
-    await expect(modal).toBeVisible({ timeout: T.action });
-    await expect(modal.getByTestId('take-routing-consequence')).toBeVisible({
-      timeout: T.action
-    });
-    if (snap.xray) {
+      // диалог показывает последствия до любого запроса записи
+      const modal = page.getByTestId('take-routing-modal');
+      await expect(modal).toBeVisible({ timeout: T.action });
+      await expect(modal.getByTestId('take-routing-consequence')).toBeVisible({
+        timeout: T.action
+      });
+      if (snap.xray) {
+        await expect(
+          modal.getByTestId('take-routing-move').or(modal.getByTestId('take-routing-none'))
+        ).toBeVisible();
+      }
+      if (snap.mihomo) await expect(modal.getByTestId('take-routing-mihomo')).toBeVisible();
+      expect((await ownerSnap(page)).desired, 'диалог сам ничего не записал').toBe(false);
+
+      // «Взять» пишет желание в черновик: файлы меняются при «Применить»
+      const noRules = (await routingProbe(page)).rules === 0;
+      await modal.getByTestId('take-routing-confirm').click();
+      if (noRules) {
+        // список правил пуст: взятие идёт через диалог пресета; закрытие без выбора
+        // оставляет маршрутизацию взятой в черновике с пустым списком правил (D-04)
+        const preset = page.getByTestId('preset-modal');
+        await expect(preset).toBeVisible({ timeout: T.action });
+        await preset.getByTestId('preset-cancel').click();
+      }
+      await expect(modal).toHaveCount(0, { timeout: T.action });
+      await expect(notice).toHaveAttribute('data-owner', 'pending', { timeout: T.action });
+      await expect(page.getByTestId('routing-take-pending')).toBeVisible();
+      expect((await ownerSnap(page)).taken, 'до «Применить» файлы не тронуты').toBe(false);
+
+      await page.getByTestId('config-apply').click();
+      await expect(notice).toHaveAttribute('data-owner', 'panel', { timeout: T.save * 3 });
       await expect(
-        modal.getByTestId('take-routing-move').or(modal.getByTestId('take-routing-none'))
-      ).toBeVisible();
+        page
+          .locator('.toast--success')
+          .filter({ hasText: /Маршрутизацию взяла панель|managed by the panel/ })
+      ).toBeVisible({ timeout: T.action });
+      expect((await ownerSnap(page)).taken).toBe(true);
+
+      // «Отпустить»: подтверждение, возврат и применение без ожидания
+      await page.getByTestId('routing-release').click();
+      const confirm = page.getByRole('dialog');
+      await expect(confirm).toBeVisible({ timeout: T.action });
+      await confirm.getByRole('button', { name: /^(Отпустить|Release)$/ }).click();
+      await expect(notice).toHaveAttribute('data-owner', 'xkeen', { timeout: T.save * 3 });
+      await expect(
+        page
+          .locator('.toast--success')
+          .filter({ hasText: /Маршрутизацию вернули XKeen|returned to XKeen/ })
+      ).toBeVisible({ timeout: T.action });
+      expect((await ownerSnap(page)).taken).toBe(false);
+
+      await guard.assertClean();
+    } finally {
+      await restore();
     }
-    if (snap.mihomo) await expect(modal.getByTestId('take-routing-mihomo')).toBeVisible();
-    expect((await ownerSnap(page)).desired, 'диалог сам ничего не записал').toBe(false);
-
-    // «Взять» пишет желание в черновик: файлы меняются при «Применить»
-    const noRules = (await routingProbe(page)).rules === 0;
-    await modal.getByTestId('take-routing-confirm').click();
-    if (noRules) {
-      // список правил пуст: взятие идёт через диалог пресета; закрытие без выбора
-      // оставляет маршрутизацию взятой в черновике с пустым списком правил (D-04)
-      const preset = page.getByTestId('preset-modal');
-      await expect(preset).toBeVisible({ timeout: T.action });
-      await preset.getByTestId('preset-cancel').click();
-    }
-    await expect(modal).toHaveCount(0, { timeout: T.action });
-    await expect(notice).toHaveAttribute('data-owner', 'pending', { timeout: T.action });
-    await expect(page.getByTestId('routing-take-pending')).toBeVisible();
-    expect((await ownerSnap(page)).taken, 'до «Применить» файлы не тронуты').toBe(false);
-
-    await page.getByTestId('config-apply').click();
-    await expect(notice).toHaveAttribute('data-owner', 'panel', { timeout: T.save * 3 });
-    await expect(
-      page
-        .locator('.toast--success')
-        .filter({ hasText: /Маршрутизацию взяла панель|managed by the panel/ })
-    ).toBeVisible({ timeout: T.action });
-    expect((await ownerSnap(page)).taken).toBe(true);
-
-    // «Отпустить»: подтверждение, возврат и применение без ожидания
-    await page.getByTestId('routing-release').click();
-    const confirm = page.getByRole('dialog');
-    await expect(confirm).toBeVisible({ timeout: T.action });
-    await confirm.getByRole('button', { name: /^(Отпустить|Release)$/ }).click();
-    await expect(notice).toHaveAttribute('data-owner', 'xkeen', { timeout: T.save * 3 });
-    await expect(
-      page
-        .locator('.toast--success')
-        .filter({ hasText: /Маршрутизацию вернули XKeen|returned to XKeen/ })
-    ).toBeVisible({ timeout: T.action });
-    expect((await ownerSnap(page)).taken).toBe(false);
-
-    await guard.assertClean();
-  } finally {
-    await restore();
   }
-});
+);
 
 /** Узел и группа, пустая для всех ядер: проверка черновика отказывает «Применить» (GRP-05). */
 async function seedBlockedDraft(page: Page): Promise<void> {
@@ -546,66 +557,76 @@ test('routing: 390 px — «Применить недоступно» перен
   }
 });
 
-test('routing: перехват «Применить»', { tag: CORE_TAG }, async ({ page }) => {
-  test.setTimeout(T.save * 10);
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await startPage(page);
-  const snap = await ownerSnap(page);
-  test.skip(!snap.xray && !snap.mihomo, 'на стенде нет установленных ядер');
-  const restore = await prepareXKeen(page);
-  try {
-    await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), 'RtOwnC'));
-    // группы по умолчанию создаются вместе с первым источником (D-09)
-    const probe = await routingProbe(page);
-    expect(probe.groups, 'группы по умолчанию в черновике').toBeGreaterThan(0);
+test(
+  'routing: перехват «Применить»',
+  {
+    tag: CORE_TAG,
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description: '«Применить» маршрутизации с перезапуском ядра'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.save * 10);
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await startPage(page);
+    const snap = await ownerSnap(page);
+    test.skip(!snap.xray && !snap.mihomo, 'на стенде нет установленных ядер');
+    const restore = await prepareXKeen(page);
+    try {
+      await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), 'RtOwnC'));
+      // группы по умолчанию создаются вместе с первым источником (D-09)
+      const probe = await routingProbe(page);
+      expect(probe.groups, 'группы по умолчанию в черновике').toBeGreaterThan(0);
 
-    await openConfig(page, '#/config/nodes');
-    const apply = page.getByTestId('config-apply');
-    await expect(apply).toBeEnabled({ timeout: T.action });
-    await apply.click();
+      await openConfig(page, '#/config/nodes');
+      const apply = page.getByTestId('config-apply');
+      await expect(apply).toBeEnabled({ timeout: T.action });
+      await apply.click();
 
-    // три исхода: взять, только узлы, отмена
-    const modal = page.getByTestId('take-routing-modal');
-    await expect(modal).toBeVisible({ timeout: T.action });
-    await expect(modal.getByTestId('take-routing-confirm')).toBeEnabled({ timeout: T.action });
-    await expect(modal.getByTestId('take-routing-nodes-only')).toBeVisible();
-    await expect(modal.getByTestId('take-routing-cancel')).toBeVisible();
+      // три исхода: взять, только узлы, отмена
+      const modal = page.getByTestId('take-routing-modal');
+      await expect(modal).toBeVisible({ timeout: T.action });
+      await expect(modal.getByTestId('take-routing-confirm')).toBeEnabled({ timeout: T.action });
+      await expect(modal.getByTestId('take-routing-nodes-only')).toBeVisible();
+      await expect(modal.getByTestId('take-routing-cancel')).toBeVisible();
 
-    // «Отмена»: ничего не записано и не применено
-    await modal.getByTestId('take-routing-cancel').click();
-    await expect(modal).toHaveCount(0, { timeout: T.action });
-    const afterCancel = await ownerSnap(page);
-    expect(afterCancel.desired, 'отмена не пишет желание «взять»').toBe(false);
-    expect(afterCancel.changes, 'отмена не применяет черновик').toBeGreaterThan(0);
+      // «Отмена»: ничего не записано и не применено
+      await modal.getByTestId('take-routing-cancel').click();
+      await expect(modal).toHaveCount(0, { timeout: T.action });
+      const afterCancel = await ownerSnap(page);
+      expect(afterCancel.desired, 'отмена не пишет желание «взять»').toBe(false);
+      expect(afterCancel.changes, 'отмена не применяет черновик').toBeGreaterThan(0);
 
-    // «Применить только узлы»: применение без взятия, плашка XKeen прежняя
-    await apply.click();
-    await expect(modal).toBeVisible({ timeout: T.action });
-    await modal.getByTestId('take-routing-nodes-only').click();
-    await expect(modal).toHaveCount(0, { timeout: T.action });
-    await expect
-      .poll(
-        async () => {
-          const s = await ownerSnap(page);
-          return !s.running && s.changes === 0;
-        },
-        { timeout: T.save * 4, intervals: [2000] }
-      )
-      .toBe(true);
-    expect((await ownerSnap(page)).taken, 'только узлы: маршрутизация не взята').toBe(false);
+      // «Применить только узлы»: применение без взятия, плашка XKeen прежняя
+      await apply.click();
+      await expect(modal).toBeVisible({ timeout: T.action });
+      await modal.getByTestId('take-routing-nodes-only').click();
+      await expect(modal).toHaveCount(0, { timeout: T.action });
+      await expect
+        .poll(
+          async () => {
+            const s = await ownerSnap(page);
+            return !s.running && s.changes === 0;
+          },
+          { timeout: T.save * 4, intervals: [2000] }
+        )
+        .toBe(true);
+      expect((await ownerSnap(page)).taken, 'только узлы: маршрутизация не взята').toBe(false);
 
-    await openConfig(page, '#/config/rules');
-    await tabReady(page, 'rules-tab');
-    await expect(page.getByTestId('routing-notice')).toHaveAttribute('data-owner', 'xkeen', {
-      timeout: T.action
-    });
+      await openConfig(page, '#/config/rules');
+      await tabReady(page, 'rules-tab');
+      await expect(page.getByTestId('routing-notice')).toHaveAttribute('data-owner', 'xkeen', {
+        timeout: T.action
+      });
 
-    await guard.assertClean();
-  } finally {
-    await restore();
+      await guard.assertClean();
+    } finally {
+      await restore();
+    }
   }
-});
+);
 
 for (const theme of ['dark', 'light'] as const) {
   test(`routing axe: владение и взятие, тема ${theme}`, async ({ page }) => {
@@ -678,37 +699,47 @@ for (const theme of ['dark', 'light'] as const) {
   });
 }
 
-test('routing: уведомления', { tag: CORE_TAG }, async ({ page }) => {
-  test.setTimeout(T.save * 10);
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await startPage(page);
-  const snap = await ownerSnap(page);
-  test.skip(!snap.xray && !snap.mihomo, 'на стенде нет установленных ядер');
-  const restore = await prepareXKeen(page);
-  try {
-    // уведомления разметки ConfigNotices по снимку стенда без события не вызвать: проверяем
-    // обратное — взятие и применение их не порождает, а «Версии» не жалуются на пороги
-    await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), 'RtOwnE'));
-    await setOwnership(page, true);
+test(
+  'routing: уведомления',
+  {
+    tag: CORE_TAG,
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description: 'серия «Применить» маршрутизации с перезапуском ядра'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.save * 10);
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await startPage(page);
+    const snap = await ownerSnap(page);
+    test.skip(!snap.xray && !snap.mihomo, 'на стенде нет установленных ядер');
+    const restore = await prepareXKeen(page);
+    try {
+      // уведомления разметки ConfigNotices по снимку стенда без события не вызвать: проверяем
+      // обратное — взятие и применение их не порождает, а «Версии» не жалуются на пороги
+      await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), 'RtOwnE'));
+      await setOwnership(page, true);
 
-    await openConfig(page, '#/config/rules');
-    await tabReady(page, 'rules-tab');
-    await expect(page.getByTestId('routing-notice')).toHaveAttribute('data-owner', 'panel', {
-      timeout: T.action
-    });
-    const notices = page.getByTestId('config-notices');
-    await expect(notices.locator('[data-notice^="routing_auto_taken:"]')).toHaveCount(0);
-    await expect(notices.locator('[data-notice^="routing_list_missing:"]')).toHaveCount(0);
+      await openConfig(page, '#/config/rules');
+      await tabReady(page, 'rules-tab');
+      await expect(page.getByTestId('routing-notice')).toHaveAttribute('data-owner', 'panel', {
+        timeout: T.action
+      });
+      const notices = page.getByTestId('config-notices');
+      await expect(notices.locator('[data-notice^="routing_auto_taken:"]')).toHaveCount(0);
+      await expect(notices.locator('[data-notice^="routing_list_missing:"]')).toHaveCount(0);
 
-    // стенд: Mihomo не ниже 1.19.27, Xray не ниже 1.8.10 — пояснений о порогах нет
-    await openConfig(page, '#/config/files');
-    await expect(page.getByTestId('config-kernels')).toBeVisible({ timeout: T.action });
-    await expect(page.getByTestId('config-kernels').locator('li').first()).toBeVisible();
-    await expect(page.locator('[data-testid^="config-kernel-note-"]')).toHaveCount(0);
+      // стенд: Mihomo не ниже 1.19.27, Xray не ниже 1.8.10 — пояснений о порогах нет
+      await openConfig(page, '#/config/files');
+      await expect(page.getByTestId('config-kernels')).toBeVisible({ timeout: T.action });
+      await expect(page.getByTestId('config-kernels').locator('li').first()).toBeVisible();
+      await expect(page.locator('[data-testid^="config-kernel-note-"]')).toHaveCount(0);
 
-    await guard.assertClean();
-  } finally {
-    await restore();
+      await guard.assertClean();
+    } finally {
+      await restore();
+    }
   }
-});
+);

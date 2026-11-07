@@ -95,6 +95,7 @@ func rtHelperWaitNewPID(name string, old int, wait time.Duration) (int, string) 
 }
 
 func TestRouterRestartWithKernelHelper(t *testing.T) {
+	routertest.Slow(t, "перезапуск панели вместе с помощником ядра, ожидание нового PID")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	if kernel != "xray" && kernel != "mihomo" {

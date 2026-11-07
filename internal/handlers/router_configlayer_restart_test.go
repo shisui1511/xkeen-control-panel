@@ -282,6 +282,7 @@ func rtRstExpectApplied(t *testing.T, a map[string]any) {
 }
 
 func TestRouterConfigApplyRestartsRunningKernel(t *testing.T) {
+	routertest.Slow(t, "серия «Применить» с перезапуском запущенного ядра")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	if kernel != "xray" && kernel != "mihomo" {

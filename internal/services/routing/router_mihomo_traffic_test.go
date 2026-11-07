@@ -19,6 +19,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
 )
@@ -230,6 +231,7 @@ func (m *rtmtMeasure) addTo(doc map[string]any) {
 // не мешает живому основному (A4). На том же процессе — замер A1/A2: время PUT
 // провайдера правил и рост VmRSS в format: text против format: yaml.
 func TestRouterMihomoFailClosed(t *testing.T) {
+	routertest.Slow(t, "мёртвые узлы и замер PUT провайдера правил (text против yaml) на живом Mihomo")
 	probeURL, targetURL := rtmtTarget(t)
 	core := rtNewMihomoCore(t)
 	e := rtNewEnv(t, rtWithKernels(rtMihomoOnly), rtWithMihomoCore(core))

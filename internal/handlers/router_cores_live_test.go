@@ -1083,6 +1083,7 @@ func rtCoresLiveMihomoInboundsMainKeys(t *testing.T, e *rtSrc) {
 // взятие со сменой tun в одном черновике.
 // Метка ядра: ветка выбирается по активному ядру цели.
 func TestRouterCoresRestartKind(t *testing.T) {
+	routertest.Slow(t, "несколько перезапусков ядра: смена порта Xray и stack tun Mihomo, взятие и отпускание")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
 	e.enableLayer()

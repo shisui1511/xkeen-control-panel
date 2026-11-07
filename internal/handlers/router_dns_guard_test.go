@@ -181,6 +181,7 @@ func TestRouterDNSGuard(t *testing.T) {
 // возвращает исходное ядро через API служб и выключает перехват. Метка ядра:
 // сценарий меняет активное ядро.
 func TestRouterDNSGuardKernelChanged(t *testing.T) {
+	routertest.Slow(t, "смена ядра командой XKeen и возврат исходного ядра через API служб")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	other := rtDNSOtherKernel(t, kernel)
@@ -304,6 +305,7 @@ func rtDNSRestoreOverride(t *testing.T, before bool) {
 
 // Метка ядра: подтест reboot перезапускает активное ядро и ждёт его подъёма.
 func TestRouterDNSStartReconcile(t *testing.T) {
+	routertest.Slow(t, "перезапуск панели и ядра в подтестах, сверка перехвата DNS при старте")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 
