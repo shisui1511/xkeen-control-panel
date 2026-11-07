@@ -116,9 +116,13 @@
 // сессии). В summary.md сессии — раздел «Прогоны наборов»: проход, набор, код, итог,
 // оболочка, путь отчёта; те же данные — в session.json (suites).
 //
-// Статус ожидания — PASS, FAIL, KNOWN, XPASS или SKIP; несколько — через «|» (PASS|KNOWN).
-// detail — подстрока детали в results.tsv. Без default тест вне tests справочный, но FAIL
-// и XPASS у него — расхождение: неожиданное падение не теряется.
+// Статус ожидания — PASS, FAIL, KNOWN, XPASS, SKIP, QPASS или QFAIL; несколько — через «|»
+// (PASS|KNOWN). detail — подстрока детали в results.tsv. Без default тест вне tests справочный,
+// но FAIL и XPASS у него — расхождение: неожиданное падение не теряется.
+// Карантин (D-17): QPASS и QFAIL — исход теста с меткой карантина. Тест в карантине вне tests
+// (под default или справочный) несовпадением не считается и сессию не останавливает: строка
+// вердикта «карантин» со статусом. Тест из tests сверяется строго по указанным статусам —
+// QFAIL можно ждать явно ("QPASS|QFAIL" — любой исход карантина).
 //
 // Остановка на первом несовпадении (по умолчанию; "keep_going": true её выключает): красная
 // сессия не дожидается конца, когда итог уже ясен. Первое несовпадение с ожиданиями:
@@ -184,7 +188,9 @@ import { fileURLToPath } from 'node:url';
 const SCRIPT = fileURLToPath(import.meta.url);
 const SCRIPT_DIR = path.dirname(SCRIPT);
 const CORES = ['xray', 'mihomo'];
-const STATUSES = ['PASS', 'FAIL', 'KNOWN', 'XPASS', 'SKIP'];
+const STATUSES = ['PASS', 'FAIL', 'KNOWN', 'XPASS', 'SKIP', 'QPASS', 'QFAIL'];
+// Статусы теста в карантине (метка quarantine, D-17): на итог не влияют, если их не ждут явно.
+const QUARANTINE = new Set(['QPASS', 'QFAIL']);
 const SAFE_PATH = /^[A-Za-z0-9_.][A-Za-z0-9_./-]*$/;
 const SAFE_NAME = /^[a-z0-9][a-z0-9-]*$/;
 const SAFE_REF = /^[A-Za-z0-9_.][A-Za-z0-9_./~^-]*$/;
@@ -238,8 +244,9 @@ function parseStatus(s, where) {
   return parts;
 }
 
-// Статусы, которые ожидание прохода допускает для теста: явное ожидание из tests, иначе
-// default; без них тест справочный — допустимо всё, кроме FAIL и XPASS.
+// Статусы, которые ожидание прохода допускает для теста: явное ожидание из tests (строго, в том
+// числе QPASS и QFAIL), иначе default; без них тест справочный — допустимо всё, кроме FAIL и
+// XPASS. Тест в карантине (QPASS, QFAIL) вне tests — не несовпадение ни под default, ни справочно.
 function expectedOf(expect, name) {
   const want = expect.tests.get(name);
   if (want) return want.status;
@@ -249,6 +256,7 @@ function expectedOf(expect, name) {
 }
 
 function allowedStatus(expect, name, status) {
+  if (QUARANTINE.has(status) && !expect.tests.has(name) && !SERVICE.has(name)) return true;
   const want = expectedOf(expect, name);
   if (want[0] === 'справочно') return status !== 'FAIL' && status !== 'XPASS';
   return want.includes(status);
@@ -1764,6 +1772,9 @@ class Session {
       if (expect.tests.has(name) || (stop && name === stop.test)) continue;
       if (SERVICE.has(name)) {
         push(name, ['PASS'], r.status, r.detail, r.status === 'PASS');
+      } else if (QUARANTINE.has(r.status)) {
+        // карантин (D-17): исход виден, на итог не влияет
+        push(name, ['карантин'], r.status, r.detail, true);
       } else if (expect.def) {
         push(name, expect.def, r.status, r.detail, expect.def.includes(r.status));
       } else if (r.status === 'FAIL' || r.status === 'XPASS') {
