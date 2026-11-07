@@ -17,7 +17,8 @@
  *   4. Каждый файл продукта принадлежит хотя бы одной области: файлы internal/ и cmd/, кроме
  *      *_test.go и internal/routertest/ (testdata входит), embed.go, scripts/setup.sh,
  *      frontend/src/lib/sourcesContract.json и routingContract.json.
- *   5. Канарейка области (D-11): Go-тест есть в файле этой области, не в карантине, без
+ *   5. Канарейка области (D-11): Go-тест есть в файле этой области (у contract-* — в её поле
+ *      tests), не в карантине, без
  *      CoreSpecific и метки known с ядром, не в ярусе full; спек — в своей области, ни один его
  *      тест не несёт тег ядра, карантин или ярус full. null допустим только с непустым reason.
  *      Длительность — медиана по build/router/history.tsv основной копии за 60 дней на каждом
@@ -245,11 +246,15 @@ if (map) {
     if (!history) notes.push('длительность канареек не проверена: нет истории (CI)');
     for (const [name, a] of Object.entries(areas)) {
       const c = a.canary;
+      // У областей contract-* своих файлов тестов нет: канарейка берётся из их поля tests.
+      const listed = new Set(a.tests || []);
       if (c.go) {
         const rows = facts.filter((x) => x.kind === 'go' && x.test === c.go);
         if (rows.length === 0) violations.push(`канарейка ${name}: Go-тест ${c.go} не найден`);
         for (const x of rows) {
-          if (x.area !== name) violations.push(`канарейка ${name}: ${c.go} в файле области ${x.area} (${x.file})`);
+          if (x.area !== name && !listed.has('go:' + c.go)) {
+            violations.push(`канарейка ${name}: ${c.go} в файле области ${x.area} (${x.file})`);
+          }
           if (x.quarantine !== null) violations.push(`канарейка ${name}: ${c.go} в карантине`);
           if (x.coreMarked) violations.push(`канарейка ${name}: ${c.go} с меткой ядра (CoreSpecific или known с ядром)`);
           if (x.tier !== 'gate') violations.push(`канарейка ${name}: ${c.go} в ярусе full`);
@@ -263,7 +268,7 @@ if (map) {
         }
         const rows = facts.filter((x) => x.kind === 'pw' && x.spec === c.spec);
         const { area } = areaOfText(fs.readFileSync(path.join(root, 'frontend', c.spec), 'utf8'));
-        if (area !== name) violations.push(`канарейка ${name}: спек ${c.spec} в области ${area}`);
+        if (area !== name && !listed.has(c.spec)) violations.push(`канарейка ${name}: спек ${c.spec} в области ${area}`);
         for (const x of rows) {
           const t = x.test || x.titleTemplate || '(вычисляемое название)';
           if (x.quarantine !== null) violations.push(`канарейка ${name}: тест «${t}» спека ${c.spec} в карантине`);

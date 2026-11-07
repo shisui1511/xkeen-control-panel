@@ -16,8 +16,8 @@
       ],
       "canary": {
         "go": null,
-        "spec": null,
-        "reason": "назначается задачей 3 плана 148.1-07"
+        "spec": "tests/router/core-switch.spec.ts",
+        "reason": "Go: тесты области с путём «Применить → ядро» размечены CoreSpecific, единственный без метки (TestRouterMihomoSwitchDraftOpen) длиннее 30 с — кандидат 148.1.1; спек core-switch идёт в каждой ветви ядра"
       }
     },
     "cores": {
@@ -28,9 +28,9 @@
         "internal/handlers/cores.go"
       ],
       "canary": {
-        "go": null,
+        "go": "TestRouterCoresXraySectionsGenerate",
         "spec": null,
-        "reason": "назначается задачей 3 плана 148.1-07"
+        "reason": "спеки области длиннее 30 с (config-cores-forms около 31 с) — кандидат 148.1.1; путь «Применить → ядро» — у тестов с меткой ядра"
       }
     },
     "configlayer": {
@@ -47,9 +47,9 @@
         "internal/services/mihomo.go"
       ],
       "canary": {
-        "go": null,
+        "go": "TestRouterTakeoverApplyAndRelease",
         "spec": null,
-        "reason": "назначается задачей 3 плана 148.1-07"
+        "reason": "спек config-cascade длиннее 30 с, preflight-save несёт тег ядра — кандидат 148.1.1"
       }
     },
     "dns": {
@@ -60,9 +60,9 @@
         "internal/handlers/dns_takeover.go"
       ],
       "canary": {
-        "go": null,
+        "go": "TestRouterDNSParamsCheck",
         "spec": null,
-        "reason": "назначается задачей 3 плана 148.1-07"
+        "reason": "путь «Применить → ядро» области — только у тестов с меткой ядра, канарейка проверяет отказ «Применить» проверкой слоя; все спеки области несут тесты с тегом ядра"
       }
     },
     "geodata": {
@@ -77,9 +77,9 @@
         "internal/services/dat.go"
       ],
       "canary": {
-        "go": null,
+        "go": "TestRouterGeodataRemoveAfterApply",
         "spec": null,
-        "reason": "назначается задачей 3 плана 148.1-07"
+        "reason": "единственный спек области (config-lists-actions) длиннее 30 с — кандидат 148.1.1"
       }
     },
     "routing": {
@@ -99,9 +99,9 @@
         "internal/services/smartproxy.go"
       ],
       "canary": {
-        "go": null,
+        "go": "TestRouterXrayRulesTraffic",
         "spec": null,
-        "reason": "назначается задачей 3 плана 148.1-07"
+        "reason": "спеки области длиннее 30 с или несут тег ядра (rules-offline) — кандидат 148.1.1"
       }
     },
     "sources": {
@@ -121,9 +121,9 @@
         "internal/services/xray.go"
       ],
       "canary": {
-        "go": null,
+        "go": "TestRouterApplyWithIncompatibleNodes",
         "spec": null,
-        "reason": "назначается задачей 3 плана 148.1-07"
+        "reason": "спеки области длиннее 30 с (config-nodes-list около 32 с на Mihomo) или несут тег ядра (subscription) — кандидат 148.1.1"
       }
     },
     "profiles": {
@@ -142,9 +142,8 @@
         "internal/services/template.go"
       ],
       "canary": {
-        "go": null,
-        "spec": null,
-        "reason": "назначается задачей 3 плана 148.1-07"
+        "go": "TestRouterProfileSaveMirror",
+        "spec": "tests/router/mihomo-undo-profile.spec.ts"
       }
     },
     "access-log": {
@@ -157,9 +156,9 @@
         "internal/services/log_dispatcher.go"
       ],
       "canary": {
-        "go": null,
+        "go": "TestRouterAccessLogPathGuard",
         "spec": null,
-        "reason": "назначается задачей 3 плана 148.1-07"
+        "reason": "путь «Применить → ядро» — у тестов с меткой ядра; спек access-log несёт тесты с тегом ядра"
       }
     },
     "update": {
@@ -171,9 +170,9 @@
         "internal/handlers/version.go"
       ],
       "canary": {
-        "go": null,
+        "go": "TestRouterUpdateManualInstall",
         "spec": null,
-        "reason": "назначается задачей 3 плана 148.1-07"
+        "reason": "пути «Применить → ядро» у области нет; спек update длиннее 30 с — кандидат 148.1.1"
       }
     },
     "storage-auth": {
@@ -186,9 +185,9 @@
         "internal/handlers/session_settings.go"
       ],
       "canary": {
-        "go": null,
+        "go": "TestRouterLoginWithDirtyDisk",
         "spec": null,
-        "reason": "назначается задачей 3 плана 148.1-07"
+        "reason": "пути «Применить → ядро» у области нет; у области нет спеков"
       }
     },
     "server": {
@@ -226,9 +225,9 @@
         "internal/services/xray_grpc.go"
       ],
       "canary": {
-        "go": null,
+        "go": "TestRouterPanelRestartWithOpenStreams",
         "spec": null,
-        "reason": "назначается задачей 3 плана 148.1-07"
+        "reason": "пути «Применить → ядро» у области нет; у области нет спеков"
       }
     },
     "ui-shell": {
@@ -244,8 +243,8 @@
       ],
       "canary": {
         "go": null,
-        "spec": null,
-        "reason": "назначается задачей 3 плана 148.1-07"
+        "spec": "tests/router/editor-sheet-motion.spec.ts",
+        "reason": "у области нет Go-тестов; пути «Применить → ядро» нет"
       }
     },
     "contract-sources": {
@@ -256,9 +255,9 @@
         "internal/**/testdata/**"
       ],
       "canary": {
-        "go": null,
+        "go": "TestRouterSourcesMyNodesFlow",
         "spec": null,
-        "reason": "назначается задачей 3 плана 148.1-07"
+        "reason": "ключи ответов сверяют Go-тесты; спеки из tests читают только ссылки testdata и выбираются полем tests"
       },
       "tests": [
         "go:TestRouterAddRevisionConflict",
@@ -428,9 +427,9 @@
         "frontend/src/lib/routingContract.json"
       ],
       "canary": {
-        "go": null,
+        "go": "TestRouterRoutingProtected",
         "spec": null,
-        "reason": "назначается задачей 3 плана 148.1-07"
+        "reason": "пути «Применить → ядро» у области нет; спеков, читающих контракт маршрутизации, нет"
       },
       "tests": [
         "go:TestRouterRoutingAPIFlow",
