@@ -22,10 +22,14 @@
 // (теста тогда ещё не было). Шаг SKIP в середине — берётся ближайший сосед в границах интервала; не
 // осталось проверяемых — вердикт «между <a> и <b>». Потолок шагов — ceil(log2(N)) + 3 (или --max-steps).
 //
+// Снимок стенда (rt_snapshot из lib.sh) снимается до первого шага: шаги ставят сборки старых коммитов
+// и гоняют изменяющие тесты, а старая сборка может переписать файлы данных в своём формате. Снимок не
+// снят (preflight, snapshot) — поиск не идёт, вердикта нет.
 // Возврат стенда (в finally при любом исходе): tree-step.sh cleanup снимает worktree поиска; сборка,
 // стоявшая до поиска (--restore-release <тег> — ассет релиза, иначе сборка HEAD), ставится обратно
-// deploy.sh; исходное ядро (--restore-core, иначе активное на начало поиска) возвращается переключением.
-// Служебные результаты возврата идут в отдельный каталог <отчёт>/bisect-<n>/restore, а не в deploy.rc
+// deploy.sh; исходное ядро (--restore-core, иначе активное на начало поиска) возвращается переключением;
+// затем стенд восстанавливается по снимку со сверкой (rt_restore, строка restore-verify). Служебные
+// результаты снимка и возврата идут в отдельный каталог <отчёт>/bisect-<n>/restore, а не в deploy.rc
 // и version отчёта прогона.
 //
 // Вывод. В <отчёт>/summary.md дописывается раздел «## Поиск виновного коммита» (заголовок один на
@@ -659,10 +663,39 @@ async function search() {
 
 // --- возврат стенда ----------------------------------------------------------------------------
 
-async function restoreStand(restoreCore) {
+// Снимок стенда до первого шага: код rt_snapshot (0 — снят, 1 — preflight или snapshot не прошли,
+// 3 — нет связи). Строки preflight и snapshot — в <RESTORE_DIR>/<цель>/results.tsv.
+async function snapStand() {
+  mkdirSync(path.join(RESTORE_DIR, TARGET), { recursive: true });
+  const s = await run(
+    'sh',
+    ['-c', '. "$1/lib.sh"; rt_load_targets >/dev/null || exit 2; rt_snapshot "$2"', 'sh', SCRIPT_DIR, TARGET],
+    { RT_REPORT: RESTORE_DIR }
+  );
+  return s.rc;
+}
+
+// Строка проверки check из <RESTORE_DIR>/<цель>/results.tsv (последняя): [статус, деталь] или null.
+function restoreRow(check) {
+  let text = '';
+  try {
+    text = readFileSync(path.join(RESTORE_DIR, TARGET, 'results.tsv'), 'utf8');
+  } catch {
+    return null;
+  }
+  let row = null;
+  for (const line of text.split('\n')) {
+    const c = line.split('\t');
+    if (c[2] === check) row = [c[0], c.slice(3).join('\t')];
+  }
+  return row;
+}
+
+async function restoreStand(restoreCore, snapped) {
   cleaning = true;
   let ok = true;
   const notes = [];
+  let verify = '';
   await run('sh', [path.join(SCRIPT_DIR, 'tree-step.sh'), 'cleanup']);
   mkdirSync(path.join(RESTORE_DIR, TARGET), { recursive: true });
   const dargs = [path.join(SCRIPT_DIR, 'deploy.sh')];
@@ -697,7 +730,21 @@ async function restoreStand(restoreCore) {
       notes.push(`ядро сейчас ${fin.rc === 0 ? fin.out : 'неизвестно'}, исходное ${restoreCore}`);
     }
   }
-  return { ok, notes };
+  if (snapped) {
+    // файлы данных, версии, ядро и xcp — по снимку, со сверкой (как в конце полного прогона)
+    const r = await run(
+      'sh',
+      ['-c', '. "$1/lib.sh"; rt_load_targets >/dev/null || exit 2; rt_restore "$2"', 'sh', SCRIPT_DIR, TARGET],
+      { RT_REPORT: RESTORE_DIR }
+    );
+    const row = restoreRow('restore-verify');
+    verify = row ? `${row[0]}${row[1] ? `: ${row[1]}` : ''}` : `нет строки (код ${r.rc})`;
+    if (r.rc !== 0 || !row || row[0] !== 'PASS') {
+      ok = false;
+      notes.push(`стенд не равен снимку (restore-verify ${verify})`);
+    }
+  }
+  return { ok, notes, verify };
 }
 
 // --- вывод в summary.md ------------------------------------------------------------------------
@@ -737,14 +784,22 @@ async function main() {
     `поиск ${N}: ${LABEL} на ${CORE}, режим ${mode}, ${short(FROM)}..${short(TO)}, кандидатов ${C.length}, потолок шагов ${CAP}`
   );
   let verdict = { kind: 'none' };
+  let snapped = false;
   try {
-    verdict = await search();
+    const src = await snapStand();
+    if (src === 0) snapped = true;
+    else if (src === 3) netLoss = true;
+    else if (!aborted) {
+      const row = restoreRow('preflight') || restoreRow('snapshot');
+      stepError = `снимок стенда до поиска не снят (код ${src}${row && row[0] !== 'PASS' ? `: ${row[1]}` : ''})`;
+    }
+    if (snapped && !aborted) verdict = await search();
   } catch (e) {
     stepError = `сбой поиска: ${e.message}`;
     verdict = { kind: 'none' };
   } finally {
     // возврат стенда — при любом исходе
-    verdict.restore = await restoreStand(restoreCore);
+    verdict.restore = await restoreStand(restoreCore, snapped);
   }
   const back = verdict.restore.ok;
   let itog;
@@ -774,7 +829,8 @@ async function main() {
     ...lines,
     itog,
     ...extra,
-    `- Стенд вернулся: ${back ? 'да' : `нет (${verdict.restore.notes.join('; ')})`}`
+    `- Стенд вернулся: ${back ? 'да' : `нет (${verdict.restore.notes.join('; ')})`}` +
+      (verdict.restore.verify ? `; сверка со снимком: ${verdict.restore.verify}` : '; снимка не было')
   ].join('\n');
   appendSummary(block);
   say(itog);
