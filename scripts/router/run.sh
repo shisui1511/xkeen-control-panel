@@ -102,8 +102,9 @@
 #   RELEASE=<тег>        ставить артефакт GitHub Release вместо сборки ветки. У наборов smoke и
 #                        full после прогона для каждой цели публикуется статус коммита тега
 #                        stand/<arch>-<smoke|full> (release-status.sh): success при нуле FAIL и
-#                        XPASS цели, иначе failure. Статуса нет при незакоммиченных правках, сбое
-#                        связи ПК↔стенд, прерванном прогоне, а у full — когда коммит тега не
+#                        XPASS цели (по классам падений: красные new, flaky, xpass, не догнанный
+#                        stand), иначе failure. Статуса нет при незакоммиченных правках, сбое
+#                        связи ПК↔стенд (связь не вернулась или обрыв без догона), прерванном прогоне, а у full — когда коммит тега не
 #                        предок HEAD. Итог — строка «Статус на GitHub» в summary.md; код выхода
 #                        прогона от публикации не зависит. Сбой посреди прогона даёт красный
 #                        статус; повторный прогон перекрывает его (побеждает последний статус
@@ -141,8 +142,19 @@
 # settle-<ядро>, pw-<ядро> (часть state). Хвост xcp.log ветви пишет наблюдатель окна.
 # Этап, оборванный сигналом, — строка с кодом 130 (её пишет _term), начало и ядро ветви те же.
 #
+# Потеря связи со стендом (класс stand, D-21, D-26), наборы full, changed и harness. Этап Go с
+# кодом 3 или этап Playwright с ненулевым кодом при молчащем ssh — обрыв: rt_wait_link ждёт связь до
+# RT_LINK_WAIT (600 с), затем один раз на ветвь догоняется сорванное — Go-пакеты вне go-done.txt
+# (catchup-go-<ядро>) или та же часть Playwright (catchup-pw-<ядро>), строки — в <цель>/catchup.tsv,
+# артефакты — в <цель>/<ядро>/catchup/ — и набор продолжается со следующего шага. Второй обрыв в
+# ветви не догоняется. Связь не вернулась — ветвь и цель останавливаются, несделанное — в
+# <цель>/notrun.txt (и в разделе «Не выполнено из-за обрыва связи» summary.md), стенд
+# восстанавливается по снимку, как при любом сбое. Обрывы — в <цель>/link-loss.tsv. Набор rerun связь
+# ждёт, но не догоняет.
+#
 # Файлы разбора падений в <отчёт>/<цель>/: confirm.tsv, confirm-count (сколько тестов подлежало
-# перепрогону), confirm-skip (причина, если перепрогона не было), confirm-plan.txt, classes.tsv.
+# перепрогону), confirm-skip (причина, если перепрогона не было), confirm-plan.txt, classes.tsv,
+# catchup.tsv, link-loss.tsv, notrun.txt.
 #
 # Код выхода: 0 — нет красных классов (new, flaky, xpass, не догнанный stand), 2 — неизвестный
 # набор, иначе 1. Набор session —
@@ -764,6 +776,17 @@ full_target() {
     [ -n "${RT_GO_PKGS:-}" ] || _do_go=0
     [ -n "${RT_SPECS:-}" ] || _do_pw=0
   fi
+  # Срок ожидания связи после обрыва (D-21): целое 60…7200, иначе 600 с.
+  _link_wait=${RT_LINK_WAIT:-600}
+  case "$_link_wait" in '' | *[!0-9]*) _link_wait=600 ;; esac
+  if [ "$_link_wait" -lt 60 ] || [ "$_link_wait" -gt 7200 ]; then
+    _link_wait=600
+  fi
+  # 1 — в ветви догон уже был (или набор rerun, где догона нет): второй обрыв не догоняется
+  _cu_done=0
+  # исход _stand_gate: none (обрыва не было), catchup (связь вернулась, догонять), nocatchup (связь
+  # вернулась, догона нет), gone (связь не вернулась, несделанное записано в notrun.txt)
+  _sg_state=none
   # Состав ветвей из файлов <ядро>.sel (rerun-plan.mjs): набор rerun берёт каталог своей цели,
   # иначе — RT_SEL_DIR из окружения; нет каталога — выбор набора, как раньше.
   _sel_dir=${RT_SEL_DIR:-}
@@ -983,6 +1006,91 @@ EOF
     _bg_stage=""
     return "$_brc"
   }
+  # --- потеря связи со стендом (класс stand, D-21, D-26) --------------------------------------
+  # Строка в <цель>/notrun.txt: несделанное из-за обрыва.
+  _notrun() {
+    printf '%s\n' "$1" >>"$RT_REPORT/$_t/notrun.txt"
+  }
+  # Обрыв связи после этапа ветви: _stand_gate <этап> <код этапа> <что не выполнено, если связь не
+  # вернётся>. Обрыв — код 3 либо ненулевой код этапа и молчащий ssh (Playwright кода 3 не даёт).
+  # Ждёт связь до _link_wait; результат — _sg_state: none, catchup (первый обрыв ветви: догнать),
+  # nocatchup (второй обрыв или набор rerun: связь вернулась, но сорванное не догоняется — оно в
+  # notrun.txt) или gone (связь не вернулась: несделанное, остальные ветви и подтверждающий
+  # перепрогон — в notrun.txt, вызывающий выходит из цикла ветвей). Каждый обрыв — строка в
+  # link-loss.tsv (ядро, этап, исход).
+  _stand_gate() {
+    _sg_state=none
+    if [ "$2" != 3 ]; then
+      [ "$2" != 0 ] || return 0
+      if rt_ssh "$_t" true >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
+    if rt_wait_link "$_t" "$_link_wait"; then
+      if [ "$_cu_done" = 0 ]; then
+        _cu_done=1
+        _sg_state=catchup
+        printf '%s\t%s\t%s\n' "$_c" "$1" "догон" >>"$RT_REPORT/$_t/link-loss.tsv"
+        # файл есть уже при пустом догоне: по нему видно, что связь возвращалась и догон был
+        : >>"$RT_REPORT/$_t/catchup.tsv"
+      else
+        _sg_state=nocatchup
+        printf '%s\t%s\t%s\n' "$_c" "$1" "без догона" >>"$RT_REPORT/$_t/link-loss.tsv"
+        _notrun "$_c: этап $1 оборван (код $2), связь вернулась, сорванное не догоняется (второй обрыв в ветви или набор rerun): $3"
+      fi
+      return 0
+    fi
+    _sg_state=gone
+    printf '%s\t%s\t%s\n' "$_c" "$1" "связь не вернулась" >>"$RT_REPORT/$_t/link-loss.tsv"
+    _notrun "$_c: этап $1 оборван (код $2), связь не вернулась за $_link_wait с: $3"
+    for _sg_k in ${RT_CORES#*"$_c"}; do
+      _notrun "ветвь $_sg_k: не выполнена"
+    done
+    if [ "$SUITE" != rerun ]; then
+      _notrun "подтверждающий перепрогон: не выполнен"
+    fi
+    return 0
+  }
+  # Что в Go-этапе ветви не доделано: записи RT_GO_RUN_SEQ (_gl_seq) или пакеты (_gl_pkgs), которых
+  # нет в go-done.txt этапа (go-suite.sh пишет его на пакет, обработка которого закончилась без
+  # обрыва). Нет файла — не доделано всё. Выбор ветви — _g_seq, _g_pkgs; без них — все пакеты с
+  # роутерными тестами (тот же поиск, что в go-suite.sh).
+  _go_left() {
+    _gl_seq=""
+    _gl_pkgs=""
+    _gl_done="$_bdir/go-done.txt"
+    if [ -n "$_g_seq" ]; then
+      for _gl_e in $_g_seq; do
+        grep -qxF -e "${_gl_e%%:*}" "$_gl_done" 2>/dev/null || _gl_seq="$_gl_seq $_gl_e"
+      done
+      _gl_seq=${_gl_seq# }
+      return 0
+    fi
+    _gl_all=""
+    if [ -n "$_g_pkgs" ]; then
+      for _gl_p in $_g_pkgs; do
+        _gl_all="$_gl_all ${_gl_p#./}"
+      done
+    else
+      for _gl_f in $(find internal cmd -name '*_test.go' 2>/dev/null | sort); do
+        if [ "$(head -n 1 "$_gl_f")" = "//go:build router" ]; then
+          _gl_d=$(dirname "$_gl_f")
+          case " $_gl_all " in
+            *" $_gl_d "*) ;;
+            *) _gl_all="$_gl_all $_gl_d" ;;
+          esac
+        fi
+      done
+    fi
+    for _gl_p in $_gl_all; do
+      grep -qxF -e "$_gl_p" "$_gl_done" 2>/dev/null || _gl_pkgs="$_gl_pkgs $_gl_p"
+    done
+    _gl_pkgs=${_gl_pkgs# }
+  }
+  # Догон части Playwright: _cu_pw <read|state> — та же часть набора ветви, строки в catchup.tsv.
+  _cu_pw() {
+    rt_stage "$_t" "catchup-pw-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_SPECS_FIRST=$2" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" "RT_RESULTS_NAME=catchup.tsv" "RT_ART_SUB=catchup" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part "$1" || true
+  }
   # Подтверждающий перепрогон новых падений (RTR-05, D-19). Идёт после цикла ветвей и до
   # восстановления стенда (его делает _finish в EXIT-ловушке), в той же блокировке и в тот же отчёт.
   # Вход — FAIL проверок go: и pw: без признаков потери связи (confirm-src.tsv). Решение принимается
@@ -1090,6 +1198,8 @@ EOF
   # ядро, которое сейчас на стенде (после последнего успешного переключения): с него начинается
   # подтверждающий перепрогон
   _cur=""
+  # 1 — цикл ветвей прерван: связь со стендом не вернулась (подтверждающего перепрогона нет)
+  _stop=0
   for _c in $RT_CORES; do
     # Состав из <ядро>.sel: у ветви без файла тестов нет — она пропускается целиком
     if [ -n "$_sel_dir" ] && [ ! -f "$_sel_dir/$_c.sel" ]; then
@@ -1110,6 +1220,9 @@ EOF
     # (Go — RT_GO_CORE_PKGS по RT_GO_CORE_RUN, Playwright — RT_SPECS_CORE с отбором @core);
     # пустой список — этап пропускается. Значения этапам передаёт env: _bg запускает этап в
     # фоне отдельной группой процессов. Пустые значения этапы читают как «по умолчанию».
+    # догон после обрыва — один на ветвь; в наборе rerun его нет
+    _cu_done=0
+    [ "$SUITE" != rerun ] || _cu_done=1
     _b_go=$_do_go
     _b_pw=$_do_pw
     _b_skip="роутерные Go-пакеты набора changed не затронуты"
@@ -1225,6 +1338,7 @@ EOF
     # смоук записывает в core определённое им ядро: ветвь продолжается с ядром ветви
     printf '%s\n' "$_c" >"$RT_REPORT/$_t/core"
 
+    _pwr_rc=0
     # 2а. окно наблюдения (smoke.sh --observe-only: smoke-settle 30 с, окно RT_SMOKE_WINDOW, вердикт
     # kernel-restart и правила логов) фоном параллельно с частью Playwright только чтения
     # (D-07): окно перекрыто обходом страниц, а не простоем. Параллельно окну идут только спеки
@@ -1243,6 +1357,7 @@ EOF
       _sps="$_sps $_osp"
       if [ "$_b_pw" = 1 ]; then
         rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+        _pwr_rc=$_brc
       fi
       _harness_pw read
       _orc=0
@@ -1252,8 +1367,25 @@ EOF
     else
       if [ "$_b_pw" = 1 ]; then
         rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+        _pwr_rc=$_brc
       fi
       _harness_pw read
+    fi
+    # 2а'. обрыв связи в части read: ждём связь, один раз догоняем часть (D-21)
+    if [ "$_b_pw" = 1 ]; then
+      _stand_gate "pw-read-$_c" "$_pwr_rc" "часть read Playwright, Go-тесты, часть state Playwright"
+      if [ "$_sg_state" = gone ]; then
+        _stop=1
+        break
+      fi
+      if [ "$_sg_state" = catchup ]; then
+        _cu_pw read ""
+        _stand_gate "catchup-pw-$_c" "$_brc" "часть read Playwright (догон), Go-тесты, часть state Playwright"
+        if [ "$_sg_state" = gone ]; then
+          _stop=1
+          break
+        fi
+      fi
     fi
     # хвост xcp.log пишет наблюдатель (без него — смоук без окна не пишет)
     [ ! -f "$RT_REPORT/$_t/xcp-log-tail.txt" ] || mv "$RT_REPORT/$_t/xcp-log-tail.txt" "$_bdir/xcp-log-tail.txt"
@@ -1273,6 +1405,22 @@ EOF
     # 3. Go-тесты на устройстве с этим ядром
     if [ "$_b_go" = 1 ]; then
       rt_stage "$_t" "go-$_c" _bg env "RT_GO_PKGS=$_g_pkgs" "RT_GO_RUN=$_g_run" "RT_GO_RUN_SEQ=$_g_seq" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
+      # обрыв связи в Go-этапе: ждём связь, один раз догоняем пакеты вне go-done.txt (D-21)
+      _gorc=$_brc
+      _go_left
+      _stand_gate "go-$_c" "$_gorc" "Go: ${_gl_seq:-${_gl_pkgs:--}}, часть state Playwright"
+      if [ "$_sg_state" = gone ]; then
+        _stop=1
+        break
+      fi
+      if [ "$_sg_state" = catchup ] && { [ -n "$_gl_seq" ] || [ -n "$_gl_pkgs" ]; }; then
+        rt_stage "$_t" "catchup-go-$_c" _bg env "RT_GO_PKGS=$_gl_pkgs" "RT_GO_RUN=$_g_run" "RT_GO_RUN_SEQ=$_gl_seq" "RT_RESULTS_NAME=catchup.tsv" "RT_ART_SUB=catchup" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
+        _stand_gate "catchup-go-$_c" "$_brc" "Go (догон): ${_gl_seq:-$_gl_pkgs}, часть state Playwright"
+        if [ "$_sg_state" = gone ]; then
+          _stop=1
+          break
+        fi
+      fi
 
       # 3а. стенд после разрушающих тестов должен прийти в рабочее состояние
       rt_stage "$_t" "settle-$_c" _bg _settle "$_t" || true
@@ -1284,6 +1432,20 @@ EOF
     # чтения прошла в шаге 2а
     if [ "$_b_pw" = 1 ]; then
       rt_stage "$_t" "pw-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_SPECS_FIRST=$_p_first" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part state || true
+      # обрыв связи в части state: ждём связь, один раз догоняем часть (D-21)
+      _stand_gate "pw-$_c" "$_brc" "часть state Playwright"
+      if [ "$_sg_state" = gone ]; then
+        _stop=1
+        break
+      fi
+      if [ "$_sg_state" = catchup ]; then
+        _cu_pw state "$_p_first"
+        _stand_gate "catchup-pw-$_c" "$_brc" "часть state Playwright (догон)"
+        if [ "$_sg_state" = gone ]; then
+          _stop=1
+          break
+        fi
+      fi
     else
       rt_result "$_t" SKIP pw "$_b_skip_pw"
     fi
@@ -1298,7 +1460,7 @@ EOF
   done
   RT_CORE=""
   # подтверждающий перепрогон новых падений (D-19): до восстановления стенда, кроме набора rerun
-  if [ "$SUITE" != rerun ]; then
+  if [ "$SUITE" != rerun ] && [ "$_stop" = 0 ]; then
     _confirm_run
   fi
   exit 0
@@ -1975,8 +2137,10 @@ cat "$RT_REPORT/summary.md"
 
 # Для каждой цели ставит статус stand/<arch>-<smoke|full> на коммите RELEASE и дописывает в
 # summary.md строку «Статус на GitHub: <контекст> <состояние>» (при отказе — «не отправлен
-# (<причина>)»). Статуса нет при незакоммиченных правках, сбое связи ПК↔стенд (в том числе когда
-# у красного прогона в конце нет связи с целью), отсутствии результатов, деплое, не дошедшем до
+# (<причина>)»). Статуса нет при незакоммиченных правках, сбое связи ПК↔стенд (непустой
+# <цель>/notrun.txt, строка FAIL reachable без догона — нет catchup.tsv, а также когда у красного
+# прогона в конце нет связи с целью; обрыв, после которого связь вернулась и был догон, статус не
+# останавливает), отсутствии результатов, деплое, не дошедшем до
 # цели (сбой на ПК), сбое подготовки стенда (deploy.rc=2), у smoke — когда ветка меняла
 # scripts/router относительно origin/main (или сравнить не удалось), а у full — когда коммит
 # тега не предок HEAD. Прерванный прогон досюда не доходит (выход по RT_INTR раньше). Код выхода
@@ -1998,7 +2162,11 @@ publish_release_status() {
       _preason="сбой связи ПК↔стенд"
     elif [ ! -f "$_pres" ]; then
       _preason="результатов нет"
-    elif awk -F'\t' '$1 == "FAIL" && $3 == "reachable" {f = 1} END {exit !f}' "$_pres"; then
+    elif [ -s "$RT_REPORT/$_pt/notrun.txt" ]; then
+      # связь не вернулась или часть набора после обрыва не выполнена (D-21, D-26)
+      _preason="сбой связи ПК↔стенд"
+    elif awk -F'\t' '$1 == "FAIL" && $3 == "reachable" {f = 1} END {exit !f}' "$_pres" && [ ! -f "$RT_REPORT/$_pt/catchup.tsv" ]; then
+      # обрыв без догона; обрыв, после которого связь вернулась и был догон, статус не останавливает
       _preason="сбой связи ПК↔стенд"
     elif [ ! -f "$RT_REPORT/$_pt/deploy.rc" ]; then
       # deploy.sh вышел до установки на цель: нет ассета, сбой gh или sha256 на ПК

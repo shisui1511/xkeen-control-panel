@@ -33,6 +33,14 @@
 //       - Итог: красный (новых N, нестабильных N, xpass N, обрывов N)
 //       - Итог: красный: нестабильный (нестабильных N)       (одни flaky)
 //     Падения без confirm.tsv (старый отчёт, потолок перепрогона, проверка вне go:/pw:) — new.
+//     Потеря связи (проверка reachable или признаки в детали: «нет связи», ERR_NETWORK_CHANGED и
+//     т. п.) — stand; догнанная проверка (строка в <цель>/catchup.tsv, run.sh) получает класс по
+//     результату догона: прошла — stand (итог не краснит), упала не из-за связи — new, снова из-за
+//     связи — открытый stand. reachable считается догнанным, если catchup.tsv есть, а notrun.txt
+//     пуст. Непустой notrun.txt (связь не вернулась, часть набора не выполнена) без открытых строк
+//     stand добавляет строку notrun:связь, итог остаётся красным.
+//   - «- Обрывы связи: N, догнано: M» (при N > 0, по <цель>/link-loss.tsv) и «## Не выполнено из-за
+//     обрыва связи» (по <цель>/notrun.txt, D-26).
 //     Причина класса — короткая фраза без текста ошибки; причина открытого stand (связь не
 //     вернулась, догона не было) начинается со слов «не догнан» (run.sh считает их красными).
 //   - «## Тренд набора» (только --suite full, D-16) — число проверок go:/pw: и время тестов этого
@@ -103,8 +111,22 @@ const COMMON = new Set([
   "restore",
   "verify",
 ]);
-const BRANCH = ["sync", "switch", "smoke", "observe", "pw-read", "go", "settle", "pw"];
-const TEST_STAGES = new Set(["go", "pw-read", "pw"]);
+const BRANCH = [
+  "sync",
+  "switch",
+  "smoke",
+  "observe",
+  "pw-read",
+  "go",
+  "settle",
+  "pw",
+  "catchup-go",
+  "catchup-pw",
+  "confirm-switch",
+  "confirm-go",
+  "confirm-pw",
+];
+const TEST_STAGES = new Set(["go", "pw-read", "pw", "catchup-go", "catchup-pw", "confirm-go", "confirm-pw"]);
 const CORE_SUFFIX = /-(xray|mihomo)$/;
 
 function isCommon(name) {
@@ -740,6 +762,16 @@ const confirmWorst = worstBy(
   famOf
 );
 // «без перепрогона: …» — перепрогон пропущен из-за потолка (run.sh пишет причину в confirm-skip)
+const catchupExists = readText("catchup.tsv") !== null;
+const catchupRows = readRows("catchup.tsv");
+const catchupFam = worstBy(
+  catchupRows.filter((r) => /^(go|pw):/.test(r.check)),
+  famOf
+);
+const notrunLines = (readText("notrun.txt") || "")
+  .split("\n")
+  .map((l) => l.trim())
+  .filter(Boolean);
 const confirmSkipText = readText("confirm-skip");
 const confirmSkipWhy = confirmSkipText === null ? null : confirmSkipText.split("\n")[0].trim() || "без перепрогона";
 
@@ -752,6 +784,13 @@ function classify(core, check, st, detail) {
   if (st === "QPASS") return { cls: "quarantine", why: "карантин: прошёл", quiet: true };
   if (st !== "FAIL") return null;
   if (check === "reachable" || STAND_RE.test(detail)) {
+    if (check === "reachable") {
+      if (catchupExists && notrunLines.length === 0) return { cls: "stand", why: "потеря связи, догон выполнен" };
+    } else {
+      const c = catchupFam.get(famOf(core, check));
+      if (c && (PASSED.has(c.st) || c.st === "KNOWN")) return { cls: "stand", why: "потеря связи, догнан: прошёл" };
+      if (c && c.st === "FAIL" && !STAND_RE.test(c.detail)) return { cls: "new", why: "упал при догоне после потери связи" };
+    }
     return { cls: "stand", why: "не догнан: потеря связи со стендом", open: true };
   }
   if (!/^(go|pw):/.test(check)) return { cls: "new", why: "падение проверки" };
@@ -769,6 +808,27 @@ for (const [key, v] of mainWorst) {
   if (c) classRows.push({ core, check, ...c });
 }
 // счёт по тестам: подтест Go и его родитель — один тест
+// строки догона, не бывшие падением основного прохода (набор не дошёл до них из-за обрыва)
+for (const [key, v] of worstBy(catchupRows, exactOf)) {
+  const [core, check] = key.split("\t");
+  const m = mainWorst.get(key);
+  if (m && (m.st === "FAIL" || m.st === "XPASS")) continue;
+  if (v.st === "XPASS") classRows.push({ core, check, cls: "xpass", why: "метка известного падения больше не нужна" });
+  else if (v.st === "FAIL") {
+    const standLike = STAND_RE.test(v.detail);
+    classRows.push({
+      core,
+      check,
+      cls: standLike ? "stand" : "new",
+      why: standLike ? "не догнан: потеря связи при догоне" : "упал при догоне после потери связи",
+      open: standLike,
+    });
+  }
+}
+// часть набора не выполнена, а строк открытого stand нет: итог всё равно красный
+if (notrunLines.length > 0 && !classRows.some((r) => r.open)) {
+  classRows.push({ core: "-", check: "notrun:связь", cls: "stand", why: "не догнан: часть набора не выполнена (notrun.txt)", open: true });
+}
 const nOf = (pred) => new Set(classRows.filter(pred).map((r) => `${r.cls}\t${famOf(r.core, r.check)}`)).size;
 const nNew = nOf((r) => r.cls === "new");
 const nFlaky = nOf((r) => r.cls === "flaky");
@@ -790,6 +850,15 @@ const histCell = (check) => {
 };
 
 out.push("## Классы падений", "");
+const lossRows = (readText("link-loss.tsv") || "").split("\n").filter(Boolean);
+if (lossRows.length > 0) {
+  const caught = lossRows.filter((l) => l.split("\t")[2] === "догон").length;
+  out.push(`- Обрывы связи: ${lossRows.length}, догнано: ${caught}`);
+}
+const confirmCount = Number((readText("confirm-count") || "").trim());
+if (confirmSkipWhy !== null) out.push(`- Подтверждающий перепрогон: пропущен (новых падений ${Number.isFinite(confirmCount) ? confirmCount : "-"}, ${confirmSkipWhy})`);
+else if (readText("confirm.tsv") !== null) out.push(`- Подтверждающий перепрогон: перегнано тестов ${Number.isFinite(confirmCount) ? confirmCount : "-"}`);
+if (out[out.length - 1] !== "") out.push("");
 const shown = classRows.filter((r) => !r.quiet);
 if (shown.length === 0) out.push("- падений нет");
 else {
@@ -802,6 +871,11 @@ else if (nNew + nFlaky + nXpass + nOpen === 0) out.push("- Итог: зелён�
 else if (nNew + nXpass + nOpen === 0) out.push(`- Итог: красный: нестабильный (нестабильных ${nFlaky})`);
 else out.push(`- Итог: красный (новых ${nNew}, нестабильных ${nFlaky}, xpass ${nXpass}, обрывов ${nOpen})`);
 out.push("");
+if (notrunLines.length > 0) {
+  out.push("## Не выполнено из-за обрыва связи", "");
+  for (const l of notrunLines) out.push(`- ${cleanName(l)}`);
+  out.push("");
+}
 
 if (write) {
   // строки FAIL core-mark:<проверка> в results.tsv (без дублей при повторном запуске)
