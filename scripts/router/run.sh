@@ -18,7 +18,13 @@
 #   full         то же, что запуск без SUITE: полный прогон (синоним для статуса релиза).
 #   smoke        деплой и смоук (только чтение, без снимка).
 #   changed      быстрый набор для каждой задачи (D-25): select-changed.mjs по diff от
-#                origin/main и незакоммиченным правкам выбирает Go-пакеты и роутерные спеки.
+#                origin/main и незакоммиченным правкам выбирает тесты затронутых областей
+#                (scripts/router/areas.json, строки router-area) по именам: Go через RT_GO_SEQ,
+#                спеки областей и канарейки; полный выбор — только при правке самого выбора,
+#                обвязка стенда даёт RT_HARNESS=1, зависимости — pages и канарейки (D-13).
+#                Порядок гейта: сначала тесты затронутых областей, затем по частоте падений из
+#                истории (RTR-03); гейт идёт до конца. Вывод выбора — 13 строк eval, run.sh
+#                сверяет число, порядок и форму строк. В summary.md строки «Области» и «Выбор».
 #                Ветви строятся гибридом (D-01…D-03): первая — ядро из SHA HEAD (cksum SHA
 #                чётный — xray, нечётный — mihomo; повтор на том же HEAD идёт под тем же
 #                ядром) со всем выбором; вторая — другое ядро и только тесты с меткой ядра
@@ -165,6 +171,17 @@ if [ "$SUITE" = session ]; then
   fi
 fi
 
+# Виды спеков рабочего дерева (WR-04): незакоммиченный спек read не уходит в несколько воркеров
+# без проверки. До блокировки и деплоя, только для наборов с Playwright.
+case "$SUITE" in
+  '' | changed | session)
+    if ! node scripts/check-router-kinds.js --worktree; then
+      echo "router-test: красный — виды роутерных спеков рабочего дерева не прошли проверку (check-router-kinds.js --worktree)" >&2
+      exit 1
+    fi
+    ;;
+esac
+
 # Метки известных падений должны ссылаться на живые todo (D-13): до блокировки и деплоя.
 if ! sh "$SCRIPT_DIR/check-known.sh"; then
   echo "router-test: красный — метки известных падений ссылаются на закрытые или несуществующие todo" >&2
@@ -224,15 +241,22 @@ if [ "$SUITE" = session ]; then
 fi
 
 # --- выбор проверок набора changed (D-25) ------------------------------------------
-# select-changed.mjs печатает восемь строк для eval; перед eval вывод проверяется по
-# строгому шаблону на каждую строку и по их числу (T-144.1-23, T-145.1-18), при любом
-# сомнении выбирается всё, а вторая ветвь идёт со всеми тестами (RT_SEL_BAD=1).
+# select-changed.mjs печатает тринадцать строк для eval; перед eval вывод проверяется по
+# строгому шаблону на каждую строку, по их числу и порядку имён (T-144.1-23, T-145.1-18,
+# T-148.1-23), при любом сомнении выбирается всё, а вторая ветвь идёт со всеми тестами
+# (RT_SEL_BAD=1).
 SEL_ANY=1
 RT_SEL_BAD=0
 RT_KERNEL_TOUCHED=0
 RT_GO_CORE_PKGS=""
 RT_GO_CORE_RUN=""
 RT_SPECS_CORE=""
+RT_GO_SEQ=""
+RT_SPECS_FIRST=""
+RT_PW_INVERT=""
+RT_HARNESS=0
+RT_AREAS=""
+RT_SEL_KIND=""
 if [ "$SUITE" = changed ]; then
   _sel_args=""
   [ -z "${RT_BASE:-}" ] || _sel_args="--base $RT_BASE"
@@ -242,25 +266,36 @@ if [ "$SUITE" = changed ]; then
   _sel=$(node "$SCRIPT_DIR/select-changed.mjs" --explain $_sel_args 2>"$RT_REPORT/select.txt") || _sel_rc=$?
   _q="'"
   if [ "$_sel_rc" != 0 ] ||
-    [ "$(printf '%s\n' "$_sel" | wc -l)" != 8 ] ||
-    printf '%s\n' "$_sel" | grep -qvE "^(RT_SELECT_ALL=[01]|RT_GO_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_SPECS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_PW_GREP=${_q}[A-Za-z0-9_|()?!^*.: -]*${_q}|RT_GO_CORE_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_GO_CORE_RUN=${_q}[A-Za-z0-9_|^\$()]*${_q}|RT_SPECS_CORE=${_q}[A-Za-z0-9_./ -]*${_q}|RT_KERNEL_TOUCHED=[01])\$"; then
+    [ "$(printf '%s\n' "$_sel" | wc -l)" != 13 ] ||
+    [ "$(printf '%s\n' "$_sel" | sed 's/=.*//' | tr '\n' ' ')" != "RT_SELECT_ALL RT_GO_PKGS RT_SPECS RT_PW_GREP RT_GO_CORE_PKGS RT_GO_CORE_RUN RT_SPECS_CORE RT_KERNEL_TOUCHED RT_GO_SEQ RT_SPECS_FIRST RT_PW_INVERT RT_HARNESS RT_AREAS " ] ||
+    printf '%s\n' "$_sel" | grep -qvE "^(RT_SELECT_ALL=[01]|RT_GO_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_SPECS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_PW_GREP=${_q}[A-Za-z0-9_|()?!^*.: -]*${_q}|RT_GO_CORE_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_GO_CORE_RUN=${_q}[A-Za-z0-9_|^\$()]*${_q}|RT_SPECS_CORE=${_q}[A-Za-z0-9_./ -]*${_q}|RT_KERNEL_TOUCHED=[01]|RT_GO_SEQ=${_q}[A-Za-z0-9_./: -]*${_q}|RT_SPECS_FIRST=${_q}[A-Za-z0-9_./ -]*${_q}|RT_PW_INVERT=${_q}[A-Za-z0-9_@|()?!^*.: -]*${_q}|RT_HARNESS=[01]|RT_AREAS=${_q}[a-z0-9 -]*${_q})\$"; then
     echo "всё: выбор не удался или его вывод не прошёл проверку (код $_sel_rc)" >>"$RT_REPORT/select.txt"
     RT_SELECT_ALL=1
     RT_SEL_BAD=1
     RT_KERNEL_TOUCHED=1
+    RT_SEL_KIND="полный"
   else
     eval "$_sel"
+    # вид выбора — строка причин «вид выбора: …» (select-changed.mjs --explain)
+    RT_SEL_KIND=$(sed -n 's/^  - вид выбора: //p' "$RT_REPORT/select.txt" | tail -n 1)
+    case "$RT_SEL_KIND" in
+      полный | обвязка | зависимости | области | смоук) ;;
+      *) RT_SEL_KIND="полный" ;;
+    esac
   fi
   if [ "$RT_SELECT_ALL" = 1 ]; then
     # полный набор: списки не нужны, этапы go и pw берут значения по умолчанию; списки тестов
     # с меткой ядра и RT_KERNEL_TOUCHED остаются: по ним строится вторая ветвь
     unset RT_GO_PKGS RT_SPECS RT_PW_GREP
+    RT_GO_SEQ=""
+    RT_SPECS_FIRST=""
+    RT_PW_INVERT=""
     echo "итог: полный набор" >>"$RT_REPORT/select.txt"
   elif [ -z "$RT_GO_PKGS" ] && [ -z "$RT_SPECS" ]; then
     SEL_ANY=0
     echo "итог: затронутого нет — деплой и смоук" >>"$RT_REPORT/select.txt"
   else
-    echo "итог: Go: ${RT_GO_PKGS:--}; спеки: ${RT_SPECS:--}" >>"$RT_REPORT/select.txt"
+    echo "итог: Go: ${RT_GO_PKGS:--}; спеки: ${RT_SPECS:--}; области: ${RT_AREAS:--}" >>"$RT_REPORT/select.txt"
     export RT_GO_PKGS RT_SPECS RT_PW_GREP
   fi
   echo "router-test: выбор — $(tail -n 1 "$RT_REPORT/select.txt")"
@@ -639,12 +674,16 @@ EOF
     _b_skip_pw="роутерные спеки набора changed не затронуты"
     _g_pkgs=${RT_GO_PKGS:-}
     _g_run=${RT_GO_RUN:-}
+    _g_seq=${RT_GO_SEQ:-}
     _p_specs=${RT_SPECS:-}
+    _p_first=${RT_SPECS_FIRST:-}
     _p_core=""
     if [ "${RT_HYBRID:-0}" = 1 ] && [ "$_c" = "$RT_B2" ]; then
       _g_pkgs=$RT_GO_CORE_PKGS
       _g_run=$RT_GO_CORE_RUN
+      _g_seq=""
       _p_specs=$RT_SPECS_CORE
+      _p_first=""
       _p_core=1
       _b_go=1
       _b_pw=1
@@ -652,6 +691,13 @@ EOF
       [ -n "$RT_SPECS_CORE" ] || _b_pw=0
       _b_skip="во второй ветви нет тестов с меткой ядра"
       _b_skip_pw="во второй ветви нет тестов с меткой ядра"
+    fi
+
+    # Выбор Go по именам (RT_GO_SEQ, первая ветвь): порядок и состав задаёт список, пакеты и
+    # выражение отбора go-suite.sh не нужны. Пустой список — пакеты целиком, как раньше.
+    if [ -n "$_g_seq" ]; then
+      _g_pkgs=""
+      _g_run=""
     fi
 
     # Номер последней строки xcp.log до начала ветви: смоук смотрит только строки после неё,
@@ -725,14 +771,14 @@ EOF
       _osp=$!
       _sps="$_sps $_osp"
       if [ "$_b_pw" = 1 ]; then
-        rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+        rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
       fi
       _orc=0
       wait "$_osp" || _orc=$?
       _sps=""
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_t" "observe-$_c" "$(($(date +%s) - _ot0))" "$_orc" "$_ot0" "$_c" >>"$RT_REPORT/timings.tsv"
     elif [ "$_b_pw" = 1 ]; then
-      rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+      rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
     fi
     # хвост xcp.log пишет наблюдатель (без него — смоук без окна не пишет)
     [ ! -f "$RT_REPORT/$_t/xcp-log-tail.txt" ] || mv "$RT_REPORT/$_t/xcp-log-tail.txt" "$RT_REPORT/$_t/$_c/xcp-log-tail.txt"
@@ -751,7 +797,7 @@ EOF
 
     # 3. Go-тесты на устройстве с этим ядром
     if [ "$_b_go" = 1 ]; then
-      rt_stage "$_t" "go-$_c" _bg env "RT_GO_PKGS=$_g_pkgs" "RT_GO_RUN=$_g_run" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
+      rt_stage "$_t" "go-$_c" _bg env "RT_GO_PKGS=$_g_pkgs" "RT_GO_RUN=$_g_run" "RT_GO_RUN_SEQ=$_g_seq" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
 
       # 3а. стенд после разрушающих тестов должен прийти в рабочее состояние
       rt_stage "$_t" "settle-$_c" _bg _settle "$_t" || true
@@ -762,7 +808,7 @@ EOF
     # 4. Playwright, часть state: спеки, меняющие состояние стенда, один воркер. Часть только
     # чтения прошла в шаге 2а
     if [ "$_b_pw" = 1 ]; then
-      rt_stage "$_t" "pw-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part state || true
+      rt_stage "$_t" "pw-$_c" _bg env "RT_SPECS=$_p_specs" "RT_SPECS_FIRST=$_p_first" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part state || true
     else
       rt_result "$_t" SKIP pw "$_b_skip_pw"
     fi
@@ -1173,6 +1219,10 @@ done
   echo "# Сводка прогона"
   echo
   echo "- Набор: $SUITE_NAME"
+  if [ "$SUITE" = changed ]; then
+    echo "- Области: ${RT_AREAS:-нет}"
+    echo "- Выбор: ${RT_SEL_KIND:-полный}"
+  fi
   echo "- SHA: $SHA"
   [ -z "${RELEASE:-}" ] || echo "- Релиз: $RELEASE"
   echo "- Проверены цели: $(printf '%s' "$RT_TARGETS" | tr ' ' ',')"
