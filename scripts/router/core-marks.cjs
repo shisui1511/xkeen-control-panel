@@ -703,14 +703,21 @@ function goTestFacts(text) {
 
 const SPEC_FULL_TAG = /\bFULL_TAG\b|['"`]@full['"`]/;
 
-/** Описание аннотации заданного типа в тексте деталей test(…): строка, '' (без описания) или null. */
+const ANNOTATION_CONST = { 'tier-full': 'TIER_FULL_ANNOTATION', slow: 'SLOW_ANNOTATION' };
+
+/**
+ * Описание аннотации заданного типа в тексте деталей test(…): строка, '' (без описания, с
+ * нелитеральным описанием) или null. Тип — строковый литерал ('tier-full', 'slow') или
+ * константа из lib/known.ts (TIER_FULL_ANNOTATION, SLOW_ANNOTATION).
+ */
 function annotationOf(seg, type) {
+  const typeRe = `(?:(['"\`])${type}\\1|\\b${ANNOTATION_CONST[type]}\\b)`;
   const re = new RegExp(
-    `\\{\\s*type:\\s*(['"\`])${type}\\1\\s*,\\s*description:\\s*(['"\`])((?:[^\\\\\\n]|\\\\.)*?)\\2\\s*,?\\s*\\}`
+    `\\{\\s*type:\\s*${typeRe}\\s*,\\s*description:\\s*(['"\`])((?:[^\\\\\\n]|\\\\.)*?)\\2\\s*,?\\s*\\}`
   );
   const m = re.exec(seg);
   if (m) return m[3];
-  return new RegExp(`\\btype:\\s*(['"\`])${type}\\1`).test(seg) ? '' : null;
+  return new RegExp(`\\btype:\\s*${typeRe}`).test(seg) ? '' : null;
 }
 
 /** Факты тестов одного спека (без области): [{test, tier, tierReason, slowReason, quarantine, coreMarked}]. */

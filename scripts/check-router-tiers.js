@@ -82,6 +82,9 @@ const specSamples = [
   ["test('a', { tag: FULL_TAG, annotation: { type: 'tier-full', description: 'реальное время: x' } }, async () => {});\n", 0],
   ["test('a', { tag: [CORE_TAG, FULL_TAG], annotation: [{ type: 'tier-full', description: 'x' }] }, async () => {});\n", 0],
   ["test('a', { annotation: { type: 'slow', description: 'x' } }, async () => {});\n", 0],
+  ["test('a', { tag: FULL_TAG, annotation: { type: TIER_FULL_ANNOTATION, description: 'x' } }, async () => {});\n", 0],
+  ["test('a', { annotation: { type: SLOW_ANNOTATION, description: 'x' } }, async () => {});\n", 0],
+  ["test('a', { annotation: { type: SLOW_ANNOTATION, description: '' } }, async () => {});\n", 1],
   ["test('a', { tag: FULL_TAG }, async () => {});\n", 1],
   ["test('a', { annotation: { type: 'tier-full', description: 'x' } }, async () => {});\n", 1],
   ["test('a', { tag: FULL_TAG, annotation: { type: 'tier-full', description: '' } }, async () => {});\n", 1],
@@ -101,7 +104,14 @@ const factSamples = [
   [goTestFacts(GO_HEAD + 'func TestRouterA(t *testing.T) {\n\troutertest.Tier(t, routertest.Full, "реальное время: x")\n}\n')[0], 'full', 'реальное время: x', null],
   [goTestFacts(GO_HEAD + 'func TestRouterA(t *testing.T) {\n\troutertest.Slow(t, "y")\n}\n')[0], 'gate', null, 'y'],
   [specTestFacts("test('a', { tag: FULL_TAG, annotation: { type: 'tier-full', description: 'x' } }, async () => {});\n")[0], 'full', 'x', null],
-  [specTestFacts("test('a', { annotation: { type: 'slow', description: 'y' } }, async () => {});\n")[0], 'gate', null, 'y']
+  [specTestFacts("test('a', { annotation: { type: 'slow', description: 'y' } }, async () => {});\n")[0], 'gate', null, 'y'],
+  [
+    specTestFacts("test('a', { tag: FULL_TAG, annotation: { type: TIER_FULL_ANNOTATION, description: 'z' } }, async () => {});\n")[0],
+    'full',
+    'z',
+    null
+  ],
+  [specTestFacts("test('a', { annotation: { type: SLOW_ANNOTATION, description: 'w' } }, async () => {});\n")[0], 'gate', null, 'w']
 ];
 for (const [got, tier, tierReason, slowReason] of factSamples) {
   if (!got || got.tier !== tier || got.tierReason !== tierReason || got.slowReason !== slowReason) {
