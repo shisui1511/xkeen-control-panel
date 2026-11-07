@@ -1830,6 +1830,9 @@ class Session {
     // разбора, results.tsv этапа не появляется — сессия дописывает их сама (перепрогон rerun
     // и отчёт берут упавшие оттуда)
     const seen = new Map();
+    // тест верхнего уровня, чьё несовпадение найдено, пока он ещё идёт (упал подтест): TERM
+    // уходит только после строки «--- » самого теста — его t.Cleanup успевает вернуть стенд
+    let pendingRoot = '';
     let found = false;
     let sent = false;
     let child = null;
@@ -1858,7 +1861,10 @@ class Session {
         how: 'по ходу этапа go',
         live: false
       });
-      if (hasRaw) signal();
+      if (!hasRaw) return;
+      const root = name.split('/')[0];
+      if (root !== name) pendingRoot = root;
+      else signal();
     };
     const list = () => {
       const out = [];
@@ -1901,12 +1907,15 @@ class Session {
       let m = l.match(/^=== (RUN|CONT|NAME)\s+(\S+)/);
       if (m) {
         st.cur = m[2];
+        // запасной путь: строки конца теста не было, а пошёл другой тест верхнего уровня
+        if (pendingRoot && m[1] === 'RUN' && m[2].split('/')[0] !== pendingRoot) signal();
         return;
       }
       m = l.match(/^--- (FAIL|PASS|SKIP): (\S+)/);
       if (m) {
         if (m[1] === 'FAIL') onFail(st, m[2]);
         else seen.set(m[2], m[1]);
+        if (pendingRoot && m[2] === pendingRoot) signal();
         return;
       }
       if (!st.cur) return;
@@ -1968,6 +1977,11 @@ class Session {
       if (sent || this.aborted) return;
       const files = list();
       const live = files.filter((f) => f.endsWith('.raw'));
+      if (found && pendingRoot) {
+        // упал подтест: дочитывать вывод до конца теста верхнего уровня (сигнал — в rawLine)
+        for (const f of live) readRaw(f);
+        return;
+      }
       if (found) {
         // несовпадение найдено между пакетами: остановить, как только пойдёт следующий бинарник
         if (live.length) signal();
