@@ -37,6 +37,8 @@
 //   сессия  <отчёт>/<NN>-<этап>/<цель>/results.tsv и <отчёт>/<NN>-<этап>/meta (каталоги
 //           этапов в формате прогона, см. session.mjs); прогоны наборов внутри сессии лежат
 //           отдельными отчётами build/router/<сессия>-<NN>-<проход> и идут как прогоны.
+//   перепрогон  <отчёт FROM>/<цель>/rerun-N.tsv, <отчёт FROM>/rerun-N.meta и rerun-N.md (SUITE=rerun);
+//           единица истории <отчёт>/rerun-N с набором rerun, без классов; прерванный — не пишется.
 //
 // CLI (из любой рабочей копии):
 //   node scripts/router/history.mjs append <отчёт>   добавить отчёт (путь или имя в
@@ -249,7 +251,7 @@ function reportInfo(dir) {
   return { sha: sha && SHA_RE.test(sha) ? sha : null, suite, release };
 }
 
-function targetsOf(dir) {
+function targetsOf(dir, results = 'results.tsv') {
   let names = [];
   try {
     names = readdirSync(dir);
@@ -257,7 +259,7 @@ function targetsOf(dir) {
     return [];
   }
   return names
-    .filter((n) => /^[a-z0-9]+$/.test(n) && existsSync(path.join(dir, n, 'results.tsv')))
+    .filter((n) => /^[a-z0-9]+$/.test(n) && existsSync(path.join(dir, n, results)))
     .sort();
 }
 
@@ -332,13 +334,15 @@ function fmtSeconds(sec) {
   return String(Math.round(sec * 100) / 100);
 }
 
-// строки истории одного каталога в формате прогона (отчёт или этап сессии)
-function rowsOf(dir, name, info) {
-  const targets = targetsOf(dir);
-  let finished = mtime(path.join(dir, 'summary.md'));
+// строки истории одного каталога в формате прогона (отчёт или этап сессии); у перепрогона (rerun) —
+// <цель>/rerun-N.tsv, артефакты тестов в <ядро>/rerun-N/, время — rerun-N.md, классов нет
+function rowsOf(dir, name, info, rerun = '') {
+  const results = rerun ? `rerun-${rerun}.tsv` : 'results.tsv';
+  const targets = targetsOf(dir, results);
+  let finished = mtime(path.join(dir, rerun ? `rerun-${rerun}.md` : 'summary.md'));
   if (!finished) {
     for (const t of targets) {
-      const m = mtime(path.join(dir, t, 'results.tsv'));
+      const m = mtime(path.join(dir, t, results));
       if (m && (!finished || m > finished)) finished = m;
     }
   }
@@ -346,9 +350,9 @@ function rowsOf(dir, name, info) {
   const lines = [];
   for (const target of targets) {
     const tdir = path.join(dir, target);
-    const classes = classesOf(tdir);
+    const classes = rerun ? new Map() : classesOf(tdir);
     const secs = new Map();
-    for (const line of readText(path.join(tdir, 'results.tsv')).split('\n')) {
+    for (const line of readText(path.join(tdir, results)).split('\n')) {
       const parts = line.split('\t');
       if (parts.length < 3) continue;
       // деталь (parts[3]) не читается
@@ -358,7 +362,7 @@ function rowsOf(dir, name, info) {
       const core = CORES.has(rawCore) ? rawCore : '-';
       let sec;
       if (core !== '-' && (check.startsWith('go:') || check.startsWith('pw:'))) {
-        if (!secs.has(core)) secs.set(core, secondsOf(path.join(tdir, core)));
+        if (!secs.has(core)) secs.set(core, secondsOf(rerun ? path.join(tdir, core, `rerun-${rerun}`) : path.join(tdir, core)));
         sec = secs.get(core).get(check);
       }
       const row = [
@@ -426,11 +430,28 @@ export function appendReport(reportDir) {
     stages.length > 0
       ? stages.map((s) => ({ dir: path.join(dir, s), name: `${name}/${s}`, session: true }))
       : [{ dir, name, session: false }];
+  // перепрогоны (SUITE=rerun) пишут в отчёт FROM файлы <цель>/rerun-N.tsv: отдельные единицы
+  // <отчёт>/rerun-N с набором rerun. Незавершённый (нет rerun-N.md) и прерванный перепрогон не
+  // пишется и не отмечается.
+  for (const m of list(dir, /^rerun-\d+\.meta$/)) {
+    const n = m.slice('rerun-'.length, -'.meta'.length);
+    const md = readText(path.join(dir, `rerun-${n}.md`));
+    if (!md || /^- Прерван: да/m.test(md)) continue;
+    units.push({ dir, name: `${name}/rerun-${n}`, rerun: n });
+  }
+  units.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const top = reportInfo(dir);
   let added = 0;
   for (const u of units) {
     if (done.has(u.name)) continue;
-    const info = u.session ? reportInfo(u.dir) : top;
+    let info;
+    if (u.rerun) {
+      const meta = readText(path.join(dir, `rerun-${u.rerun}.meta`));
+      const sha = (meta.match(/^sha=([0-9a-f]{40})\s*$/m) || [])[1];
+      info = { sha: sha || null, suite: 'rerun', release: '-' };
+    } else {
+      info = u.session ? reportInfo(u.dir) : { ...top };
+    }
     if (!info.sha) info.sha = top.sha;
     if (u.session) info.suite = 'session';
     if (!info.sha) {
@@ -438,7 +459,7 @@ export function appendReport(reportDir) {
       console.error(`history: нет SHA в отчёте ${u.name}, пропущен`);
       continue;
     }
-    const lines = rowsOf(u.dir, u.name, info);
+    const lines = rowsOf(u.dir, u.name, info, u.rerun || '');
     if (lines.length > 0) appendFileSync(file, lines.join('\n') + '\n');
     appendFileSync(idx, `${u.name}\n`);
     done.add(u.name);
