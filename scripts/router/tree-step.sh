@@ -13,7 +13,8 @@
 # <основная копия>/build/bisect/wt-<короткий sha> (git worktree add --detach --lock), рабочее дерево
 # прогона не трогается. Обвязка — скрипты этого каталога (HEAD): deploy.sh, pw-suite.sh --switch,
 # go-suite.sh, pw-suite.sh запускаются с текущим каталогом worktree и RT_LOCK_HELD=1. В worktree
-# build/router — ссылка на build/router основной копии (отчёт шага физически лежит там),
+# build/router — ссылка на build/router вызывающей копии (основной или worktree агента: отчёт шага
+# и его артефакты физически лежат в отчёте, который читает bisect.mjs),
 # frontend/node_modules — ссылка на node_modules основной копии при совпадающем package-lock.json,
 # иначе npm ci. Worktree переиспользуется, если уже стоит на том же sha.
 #
@@ -94,7 +95,9 @@ ts_wt_prepare() {
     git -C "$ROOT" worktree add --detach --lock --reason router-test-bisect "$WT" "$SHA" >&2 || return 1
   fi
   mkdir -p "$WT/build"
-  ln -sfn "$ROOT"/build/router "$WT/build"/router
+  # ссылка — на отчёты вызывающей копии, как у session.mjs enterTree: из worktree агента test.tsv и
+  # switch.tsv шага иначе уходили бы в build/router основной копии, мимо отчёта поиска
+  ln -sfn "$(rt_repo_root)"/build/router "$WT/build"/router
   if [ -f "$WT/frontend/package.json" ] && [ ! -e "$WT/frontend/node_modules" ]; then
     if [ -d "$ROOT/frontend/node_modules" ] && cmp -s "$ROOT/frontend/package-lock.json" "$WT/frontend/package-lock.json"; then
       ln -s "$ROOT/frontend/node_modules" "$WT/frontend/node_modules"
@@ -182,7 +185,7 @@ rt_load_targets
 rt_lock || exit 1
 
 # Каталог шага: проверка пути — от корня вызывающей копии (rt_report_use), сам отчёт пишется
-# через ссылку build/router worktree, физически в основную копию.
+# через ссылку build/router worktree, физически в ту же вызывающую копию.
 RT_REPORT=$OUT
 rt_report_use
 _root=$(rt_repo_root)
@@ -226,7 +229,7 @@ case "$_wrc" in
     ;;
 esac
 
-# Отчёт шага для этапов — внутри worktree (ссылка build/router на основную копию).
+# Отчёт шага для этапов — внутри worktree (ссылка build/router на вызывающую копию).
 STEP_REPORT="$WT/build"/router/$REL
 mkdir -p "$STEP_REPORT"
 mkdir -p "$STEP_REPORT/$ID"
