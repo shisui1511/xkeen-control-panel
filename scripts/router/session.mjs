@@ -55,9 +55,27 @@
 //     "expect": {
 //       "exit": 0,                          код выхода run.sh, по умолчанию 0
 //       "summary": ["- Окно смоука: 30 с"], подстроки summary.md вложенного отчёта
-//       "same_failures_as": "full-1"        множество строк FAIL, KNOWN и XPASS (статус, ядро,
-//     }                                     проверка) совпадает с более ранним проходом-прогоном
+//       "same_failures_as": "full-1",       множество строк FAIL, KNOWN и XPASS (статус, ядро,
+//                                           проверка) совпадает с более ранним проходом-прогоном
+//       "max_minutes": 30                   у любого прохода-прогона, целое 1…600: вердикт
+//     }                                     «время прохода: N мин из max_minutes» по замеру
+//   }                                       вложенного прогона
+// Вложенная сессия — проход-прогон набора session (проверка самой сессии: ожидаемая остановка,
+// предел времени):
+//   {
+//     "name": "nested",
+//     "suite": "session",
+//     "spec": "build/spec-check/inner.json", обязателен: путь от корня рабочей копии без «..»,
+//                                           файл есть и не совпадает с внешней спекой; цель
+//                                           та же; своих проходов session у вложенной спеки
+//                                           нет (глубина 1)
+//     "expect": { "exit": 1, "max_minutes": 30, "summary": ["Остановлено на первом несовпадении"] }
 //   }
+// Вложенный `sh run.sh session` идёт с SPEC=<spec>, под блокировкой сессии, отчёт — как у
+// прогонов наборов; exit и summary сверяются по её коду и summary.md. files, release,
+// interrupt и same_failures_as у session не допускаются. Стенд после неё — по её session.json
+// (сборка HEAD, её исходное ядро); прерывание внешней сессии уходит только run.sh вложенной,
+// он передаёт сигнал её session.mjs один раз — она возвращает стенд сама.
 // Смоук установленного релиза — проход-прогон набора smoke с полем release:
 //   {
 //     "name": "release-smoke",
@@ -93,7 +111,7 @@
 // вернулся — сессия останавливается. Снимок, оставшийся к концу сессии, возвращает cleanup.
 // С go, specs, grep и product проход-прогон не сочетается. Вложенный `sh run.sh [changed]`
 // идёт под блокировкой сессии (RT_LOCK_HELD=1) без RT_HOLD_MINUTES, RT_CORES, RT_BASE и
-// SPEC, сам ставит сборку HEAD, снимает снимок и восстанавливает стенд. Его отчёт — в
+// SPEC (SPEC — только у session), сам ставит сборку HEAD, снимает снимок и восстанавливает стенд. Его отчёт — в
 // build/router/<каталог сессии>-<NN>-<проход> (RT_REPORT_DIR; ссылка last остаётся на
 // сессии). В summary.md сессии — раздел «Прогоны наборов»: проход, набор, код, итог,
 // оболочка, путь отчёта; те же данные — в session.json (suites).
@@ -154,6 +172,7 @@ import {
   readdirSync,
   readFileSync,
   readSync,
+  realpathSync,
   rmSync,
   writeFileSync
 } from 'node:fs';
@@ -176,8 +195,11 @@ const SNAP_BASE = '/opt/tmp/xcp-rt-snap/baseline';
 // Служебные строки этапов: всегда расхождение, если их FAIL не ожидался явно.
 const SERVICE = new Set(['pw:run', 'pw:setup']);
 
+// Префикс ошибок разбора вложенной спеки (проход-прогон session).
+let dieCtx = '';
+
 function die(msg, code = 2) {
-  process.stderr.write(`session: ${msg}\n`);
+  process.stderr.write(`session: ${dieCtx}${msg}\n`);
   process.exit(code);
 }
 
@@ -256,18 +278,42 @@ function loadInterrupt(i, where) {
 // Название прохода-прогона для плана и журнала: «smoke (релиз <тег>)», «changed по файлам …».
 function suiteTitle(p, release) {
   if (p.suite === 'smoke') return `smoke (релиз ${release})`;
+  if (p.suite === 'session') return `session по ${p.nested.path}`;
   return `${p.suite}${p.files.length ? ` по файлам ${p.files.join(' ')}` : ''}`;
 }
 
-// Проход-прогон набора: разбор и проверка полей. earlier — имена прогонов набора выше по спеке.
-function loadSuitePass(p, where, earlier) {
-  if (p.suite !== 'full' && p.suite !== 'changed' && p.suite !== 'smoke') {
-    die(`${where}.suite: full, changed или smoke`);
+// Проход-прогон набора: разбор и проверка полей. earlier — имена прогонов набора выше по спеке,
+// ctx — { root, specFile, nested } внешней спеки (nested: спека сама вложенная).
+function loadSuitePass(p, where, earlier, ctx) {
+  if (!['full', 'changed', 'smoke', 'session'].includes(p.suite)) {
+    die(`${where}.suite: full, changed, smoke или session`);
   }
   if (p.go || p.specs !== undefined || p.grep !== undefined || p.product) {
     die(`${where}: проход-прогон не сочетается с go/specs/product`);
   }
   if (p.version !== undefined) die(`${where}.version: только у прохода go/specs`);
+  let nested = null;
+  if (p.suite === 'session') {
+    if (ctx.nested) die(`${where}: вложенная сессия не может содержать сессию`);
+    if (p.interrupt !== undefined) die(`${where}.interrupt: у session не поддерживается`);
+    if (typeof p.spec !== 'string' || !SAFE_PATH.test(p.spec) || p.spec.includes('..')) {
+      die(`${where}.spec: путь спеки от корня рабочей копии без «..»`);
+    }
+    const file = path.join(ctx.root, p.spec);
+    if (!existsSync(file)) die(`${where}.spec: нет файла ${p.spec}`);
+    if (realpathSync(file) === realpathSync(ctx.specFile)) {
+      die(`${where}.spec: вложенная спека совпадает с внешней`);
+    }
+    dieCtx = `${where}.spec ${p.spec}: `;
+    const inner = loadSpec(file, ctx.root, true);
+    dieCtx = '';
+    nested = { path: p.spec, passes: inner.passes.length, target: inner.target };
+    if (inner.target !== ctx.target) {
+      die(`${where}.spec: цель вложенной спеки ${inner.target}, у внешней ${ctx.target}`);
+    }
+  } else if (p.spec !== undefined) {
+    die(`${where}.spec: только у session`);
+  }
   let release = null;
   if (p.suite === 'smoke') {
     if (typeof p.release !== 'string' || (p.release !== 'latest' && !RELEASE_TAG.test(p.release))) {
@@ -291,12 +337,23 @@ function loadSuitePass(p, where, earlier) {
   }
   const e = p.expect ?? {};
   for (const k of Object.keys(e)) {
-    if (!['exit', 'summary', 'same_failures_as'].includes(k)) {
-      die(`${where}.expect.${k}: у прохода-прогона только exit, summary, same_failures_as`);
+    if (!['exit', 'summary', 'same_failures_as', 'max_minutes'].includes(k)) {
+      die(
+        `${where}.expect.${k}: у прохода-прогона только exit, summary, same_failures_as, max_minutes`
+      );
     }
   }
   if (e.exit !== undefined && (!Number.isInteger(e.exit) || e.exit < 0)) {
     die(`${where}.expect.exit: целое от 0`);
+  }
+  if (
+    e.max_minutes !== undefined &&
+    (!Number.isInteger(e.max_minutes) || e.max_minutes < 1 || e.max_minutes > 600)
+  ) {
+    die(`${where}.expect.max_minutes: целое от 1 до 600`);
+  }
+  if (p.suite === 'session' && e.same_failures_as !== undefined) {
+    die(`${where}.expect.same_failures_as: у session не поддерживается`);
   }
   const summary = e.summary ?? [];
   if (!Array.isArray(summary) || summary.some((x) => typeof x !== 'string' || !x)) {
@@ -314,17 +371,19 @@ function loadSuitePass(p, where, earlier) {
     suite: p.suite,
     release,
     files,
+    nested,
     interrupt: p.interrupt === undefined ? null : loadInterrupt(p.interrupt, where),
     version: null,
     product: null,
     go: null,
     specs: [],
     grep: '',
-    expect: { exit: e.exit ?? 0, summary, same }
+    expect: { exit: e.exit ?? 0, summary, same, maxMinutes: e.max_minutes ?? null }
   };
 }
 
-function loadSpec(file, root) {
+// nested — спека прохода-прогона session (глубина вложения 1: своих session у неё нет).
+function loadSpec(file, root, nested = false) {
   let spec;
   try {
     spec = JSON.parse(readFileSync(file, 'utf8'));
@@ -353,8 +412,14 @@ function loadSpec(file, root) {
       die(`${where}.interrupt: только у прохода-прогона`);
     }
     if (p.suite !== undefined) {
-      const sp = loadSuitePass(p, where, suites);
-      suites.push(sp.name);
+      const sp = loadSuitePass(p, where, suites, {
+        root,
+        specFile: file,
+        nested,
+        target: spec.target
+      });
+      // same_failures_as сравнивает строки results.tsv прогонов наборов; у вложенной сессии их нет
+      if (sp.suite !== 'session') suites.push(sp.name);
       return sp;
     }
     let version = null;
@@ -497,10 +562,22 @@ function dryRun(spec, specFile) {
       const irq = p.interrupt
         ? `; прерывание SIG${p.interrupt.signal} через ${p.interrupt.after} с после старта go, выход до ${p.interrupt.deadline} с`
         : '';
-      step(
-        `прогон набора ${suiteTitle(p, p.release)}: вложенный run.sh, отчёт build/router/<сессия>-NN-${p.name}${irq}`
-      );
-      // смоук релиза оставляет на стенде сборку релиза, а не HEAD
+      if (p.suite === 'session') {
+        step(
+          `вложенная сессия по ${p.nested.path}, проходов: ${p.nested.passes}; отчёт build/router/<сессия>-NN-${p.name}`
+        );
+      } else {
+        step(
+          `прогон набора ${suiteTitle(p, p.release)}: вложенный run.sh, отчёт build/router/<сессия>-NN-${p.name}${irq}`
+        );
+      }
+      if (p.expect.maxMinutes !== null) {
+        lines.push(
+          `   max_minutes: прогон прохода ${p.name} — не дольше ${p.expect.maxMinutes} мин`
+        );
+      }
+      // смоук релиза оставляет на стенде сборку релиза, а не HEAD; вложенная сессия
+      // возвращает стенд сама (сборка HEAD и её исходное ядро)
       deployed = p.suite === 'smoke' ? null : 'HEAD';
       continue;
     }
@@ -621,6 +698,7 @@ class Session {
         detached: opts.detached !== false
       });
       this.child = child;
+      this.childLeaderOnly = opts.leaderOnly === true;
       const onClose = opts.onSpawn ? opts.onSpawn(child) : null;
       const out = (d) => {
         process.stdout.write(d);
@@ -653,7 +731,9 @@ class Session {
     const c = this.child;
     if (!c) return;
     const pid = c.pid;
-    if (Number.isInteger(pid) && pid > 1) {
+    // вложенная сессия: сигнал только run.sh — он передаёт его session.mjs один раз; сигнал всей
+    // группе дошёл бы до session.mjs дважды, а второй сигнал — выход без возврата стенда
+    if (!this.childLeaderOnly && Number.isInteger(pid) && pid > 1) {
       try {
         process.kill(-pid, sig);
         return;
@@ -1314,15 +1394,23 @@ class Session {
       RT_KERNEL_TOUCHED: undefined,
       RT_SELECT_ALL: undefined,
       RT_FILES: p.files.length ? p.files.join(',') : undefined,
-      SPEC: undefined,
+      // вложенная сессия: её спека; у остальных наборов SPEC не наследуется
+      SPEC: p.suite === 'session' ? p.nested.path : undefined,
       SUITE: undefined,
       // установка артефакта релиза и публикация статуса — только у smoke с release
       RELEASE: tag ?? undefined
     };
     const args = [path.join(SCRIPT_DIR, 'run.sh')];
-    if (p.suite === 'changed' || p.suite === 'smoke') args.push(p.suite);
+    if (p.suite !== 'full') args.push(p.suite);
     const irq = p.interrupt ? this.interruptWatch(p.interrupt, dir) : null;
-    const rc = await this.run('sh', args, env, irq ? irq.opts : {});
+    const t0 = Date.now();
+    const rc = await this.run(
+      'sh',
+      args,
+      env,
+      irq ? irq.opts : { leaderOnly: p.suite === 'session' }
+    );
+    const took = Math.round((Date.now() - t0) / 1000);
     if (irq) irq.state.closedAt = Date.now();
     this.record({
       kind: 'suite',
@@ -1352,6 +1440,7 @@ class Session {
       p.suite !== 'smoke' && existsSync(deployRc) && readFileSync(deployRc, 'utf8').trim() === '0'
         ? 'HEAD'
         : null;
+    if (p.suite === 'session') this.nestedEnd(p, dir, rc);
     // сбой связи — только проверка reachable и потеря связи при восстановлении; по подстроке
     // «нет связи» в любой строке нельзя: так пишет и смоук, когда не отвечает сама панель
     if (
@@ -1400,7 +1489,8 @@ class Session {
       suite: tag ? `smoke ${tag}` : p.suite,
       files: p.files,
       exit: rc,
-      total: num(/^- Итого: (\d+) с/m),
+      // у вложенной сессии строки «Итого» нет — время по замеру прохода
+      total: num(/^- Итого: (\d+) с/m) ?? (p.suite === 'session' ? took : null),
       shell: num(/^- Оболочка: (\d+) с/m),
       report: rel
     });
@@ -1418,6 +1508,16 @@ class Session {
         report: rel
       });
     push('exit', [String(p.expect.exit)], String(rc), '', rc === p.expect.exit);
+    if (p.expect.maxMinutes !== null) {
+      const min = Math.round(took / 6) / 10;
+      push(
+        `время прохода: ${min} мин из ${p.expect.maxMinutes}`,
+        [`до ${p.expect.maxMinutes} мин`],
+        `${min} мин`,
+        `${took} с`,
+        took <= p.expect.maxMinutes * 60
+      );
+    }
     if (irq) {
       const st = irq.state;
       const sent = st.sentAt > 0;
@@ -1494,6 +1594,26 @@ class Session {
       }
     }
     return 0;
+  }
+
+  // Стенд после вложенной сессии — по её session.json: она сама возвращает сборку HEAD и своё
+  // исходное ядро (оно же активное ядро внешней сессии на момент прохода). Код 3 — сбой связи.
+  nestedEnd(p, dir, rc) {
+    if (rc === 3) this.network = true;
+    let j = null;
+    try {
+      j = JSON.parse(readFileSync(path.join(dir, 'session.json'), 'utf8'));
+    } catch {
+      this.notes.push(`вложенная сессия ${p.name} не оставила session.json: стенд вернёт cleanup`);
+      return;
+    }
+    const end = j.stand_end ?? {};
+    this.deployed = end.product_head === true ? 'HEAD' : null;
+    if (CORES.includes(j.core_initial) && !this.c0) {
+      this.c0 = j.core_initial;
+      this.say(`исходное ядро стенда: ${this.c0}`);
+    }
+    this.cur = CORES.includes(end.core) ? end.core : null;
   }
 
   // Вердикты после прерванного вложенного прогона: этап погас, блокировка свободна, стенд
