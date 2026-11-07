@@ -1,0 +1,443 @@
+{
+  "version": 1,
+  "areas": {
+    "kernel": {
+      "title": "Ядро: запуск, перезапуск, переключение, watchdog, XKeen",
+      "shared": true,
+      "paths": [
+        "internal/services/kernel*.go",
+        "internal/services/watchdog.go",
+        "internal/services/xkeen*.go",
+        "internal/handlers/kernel*.go",
+        "internal/handlers/watchdog.go",
+        "internal/handlers/service.go",
+        "internal/handlers/mihomo.go",
+        "internal/handlers/xkeen*.go"
+      ],
+      "canary": {
+        "go": null,
+        "spec": null,
+        "reason": "назначается задачей 3 плана 148.1-07"
+      }
+    },
+    "cores": {
+      "title": "Ядра: состав, секции ядер, контроллер Mihomo",
+      "shared": false,
+      "paths": [
+        "internal/services/cores/**",
+        "internal/handlers/cores.go"
+      ],
+      "canary": {
+        "go": null,
+        "spec": null,
+        "reason": "назначается задачей 3 плана 148.1-07"
+      }
+    },
+    "configlayer": {
+      "title": "Слой конфигурации: черновик, «Применить», проверка, снимки, файлы конфигурации",
+      "shared": true,
+      "paths": [
+        "internal/services/configlayer/**",
+        "internal/handlers/configlayer.go",
+        "internal/handlers/config.go",
+        "internal/handlers/snapshots.go",
+        "internal/services/config.go",
+        "internal/services/snapshots.go",
+        "internal/services/preflight_content.go",
+        "internal/services/mihomo.go"
+      ],
+      "canary": {
+        "go": null,
+        "spec": null,
+        "reason": "назначается задачей 3 плана 148.1-07"
+      }
+    },
+    "dns": {
+      "title": "Перехват DNS",
+      "shared": false,
+      "paths": [
+        "internal/services/dnstakeover/**",
+        "internal/handlers/dns_takeover.go"
+      ],
+      "canary": {
+        "go": null,
+        "spec": null,
+        "reason": "назначается задачей 3 плана 148.1-07"
+      }
+    },
+    "geodata": {
+      "title": "Геоданные и наборы dat",
+      "shared": false,
+      "paths": [
+        "internal/services/geodata/**",
+        "internal/services/assets/**",
+        "internal/handlers/geodata.go",
+        "internal/handlers/dat.go",
+        "internal/handlers/assets.go",
+        "internal/services/dat.go"
+      ],
+      "canary": {
+        "go": null,
+        "spec": null,
+        "reason": "назначается задачей 3 плана 148.1-07"
+      }
+    },
+    "routing": {
+      "title": "Маршрутизация: правила, группы, пресеты, списки, провайдеры правил",
+      "shared": false,
+      "paths": [
+        "internal/services/routing/**",
+        "internal/handlers/routing.go",
+        "internal/handlers/route_tracer.go",
+        "internal/handlers/rule_provider_inspect.go",
+        "internal/handlers/user_rules.go",
+        "internal/handlers/smartproxy.go",
+        "internal/services/route_tracer.go",
+        "internal/services/route_matcher.go",
+        "internal/services/rule_provider_inspect.go",
+        "internal/services/user_rules.go",
+        "internal/services/smartproxy.go"
+      ],
+      "canary": {
+        "go": null,
+        "spec": null,
+        "reason": "назначается задачей 3 плана 148.1-07"
+      }
+    },
+    "sources": {
+      "title": "Источники: подписки, свои узлы, разбор ссылок",
+      "shared": false,
+      "paths": [
+        "internal/nodes/*.go",
+        "internal/services/sources/**",
+        "internal/handlers/sources.go",
+        "internal/handlers/subscription.go",
+        "internal/handlers/proxy_providers.go",
+        "internal/handlers/outbound.go",
+        "internal/handlers/delay_guard.go",
+        "internal/handlers/xray.go",
+        "internal/services/subscription*.go",
+        "internal/services/node_metadata.go",
+        "internal/services/xray.go"
+      ],
+      "canary": {
+        "go": null,
+        "spec": null,
+        "reason": "назначается задачей 3 плана 148.1-07"
+      }
+    },
+    "profiles": {
+      "title": "Профили и шаблоны Mihomo",
+      "shared": false,
+      "paths": [
+        "internal/templates/**",
+        "internal/handlers/mihomo_profiles.go",
+        "internal/handlers/mihomo_migrate.go",
+        "internal/handlers/template.go",
+        "internal/services/mihomo_profile*.go",
+        "internal/services/mihomo_config_backup.go",
+        "internal/services/mihomo_migrate.go",
+        "internal/services/mihomo_yaml.go",
+        "internal/services/smart_merge.go",
+        "internal/services/template.go"
+      ],
+      "canary": {
+        "go": null,
+        "spec": null,
+        "reason": "назначается задачей 3 плана 148.1-07"
+      }
+    },
+    "access-log": {
+      "title": "Журналы панели и журнал доступа Xray",
+      "shared": false,
+      "paths": [
+        "internal/handlers/xray_access_log.go",
+        "internal/handlers/logs.go",
+        "internal/services/xray_access_log.go",
+        "internal/services/log_dispatcher.go"
+      ],
+      "canary": {
+        "go": null,
+        "spec": null,
+        "reason": "назначается задачей 3 плана 148.1-07"
+      }
+    },
+    "update": {
+      "title": "Обновление панели и установщик",
+      "shared": false,
+      "paths": [
+        "scripts/setup.sh",
+        "internal/handlers/update*.go",
+        "internal/handlers/version.go"
+      ],
+      "canary": {
+        "go": null,
+        "spec": null,
+        "reason": "назначается задачей 3 плана 148.1-07"
+      }
+    },
+    "storage-auth": {
+      "title": "Вход, сессии, middleware и хранение на флеше",
+      "shared": false,
+      "paths": [
+        "internal/auth/**",
+        "internal/middleware/**",
+        "internal/handlers/auth_handler.go",
+        "internal/handlers/session_settings.go"
+      ],
+      "canary": {
+        "go": null,
+        "spec": null,
+        "reason": "назначается задачей 3 плана 148.1-07"
+      }
+    },
+    "server": {
+      "title": "Сервер и общий код: cmd/xcp, маршрутизатор HTTP, общие обработчики, утилиты",
+      "shared": true,
+      "paths": [
+        "cmd/xcp/**",
+        "embed.go",
+        "internal/server/**",
+        "internal/utils/**",
+        "internal/i18n/**",
+        "internal/xrayapi/**",
+        "internal/cert/**",
+        "internal/config/**",
+        "internal/handlers/base.go",
+        "internal/handlers/response.go",
+        "internal/handlers/capabilities.go",
+        "internal/handlers/system.go",
+        "internal/handlers/diagnostics.go",
+        "internal/handlers/network.go",
+        "internal/handlers/console.go",
+        "internal/handlers/terminal.go",
+        "internal/handlers/clients.go",
+        "internal/handlers/settings.go",
+        "internal/handlers/traffic.go",
+        "internal/services/clients.go",
+        "internal/services/console.go",
+        "internal/services/network.go",
+        "internal/services/pty.go",
+        "internal/services/device_info.go",
+        "internal/services/sysctl.go",
+        "internal/services/redact.go",
+        "internal/services/script_output.go",
+        "internal/services/traffic.go",
+        "internal/services/xray_grpc.go"
+      ],
+      "canary": {
+        "go": null,
+        "spec": null,
+        "reason": "назначается задачей 3 плана 148.1-07"
+      }
+    },
+    "ui-shell": {
+      "title": "Оболочка интерфейса: каркас страниц, редактор, стили",
+      "shared": false,
+      "paths": [
+        "frontend/src/App.svelte",
+        "frontend/src/main.ts",
+        "frontend/src/PageHeader.svelte",
+        "frontend/src/Editor.svelte",
+        "frontend/src/components/editor/**",
+        "frontend/src/styles/**"
+      ],
+      "canary": {
+        "go": null,
+        "spec": null,
+        "reason": "назначается задачей 3 плана 148.1-07"
+      }
+    },
+    "contract-sources": {
+      "title": "Контракт API источников и данные узлов (testdata)",
+      "shared": false,
+      "paths": [
+        "frontend/src/lib/sourcesContract.json",
+        "internal/**/testdata/**"
+      ],
+      "canary": {
+        "go": null,
+        "spec": null,
+        "reason": "назначается задачей 3 плана 148.1-07"
+      },
+      "tests": [
+        "go:TestRouterAddRevisionConflict",
+        "go:TestRouterApplyWithIncompatibleNodes",
+        "go:TestRouterBlobsHoldReleaseRace",
+        "go:TestRouterBlobsPutHeldIntegrity",
+        "go:TestRouterBlobStore",
+        "go:TestRouterCapabilityAWG",
+        "go:TestRouterCapabilityConsistent",
+        "go:TestRouterCapabilityLevelB",
+        "go:TestRouterCapabilityMatrix",
+        "go:TestRouterCapabilityPinnedInsecure",
+        "go:TestRouterCapabilityPins",
+        "go:TestRouterCapabilityRawPins",
+        "go:TestRouterCapabilityTracer",
+        "go:TestRouterCascadeGroup",
+        "go:TestRouterCascadeServiceGroupEmpty",
+        "go:TestRouterCascadeSourceAndNode",
+        "go:TestRouterCatalogMatchesFiles",
+        "go:TestRouterCommitLive",
+        "go:TestRouterCommitLiveRemovedSourceDropsLive",
+        "go:TestRouterConfigApplyRestartsRunningKernel",
+        "go:TestRouterCoresAPIFlow",
+        "go:TestRouterCoresFill",
+        "go:TestRouterCoresMihomoControllerSecret",
+        "go:TestRouterCoresRestartKind",
+        "go:TestRouterCoresRetakeBeforeApply",
+        "go:TestRouterCoresXKeenInbounds",
+        "go:TestRouterDatWatchRebuild",
+        "go:TestRouterDeleteWithAndDraftExtras",
+        "go:TestRouterDiagBase64BodyMasked",
+        "go:TestRouterDiagGCUnknownSources",
+        "go:TestRouterDiagMaskedAndCapped",
+        "go:TestRouterDiagnosticsView",
+        "go:TestRouterDNSApplyProbe",
+        "go:TestRouterDNSEnablePanelRestart",
+        "go:TestRouterDNSMihomoSection",
+        "go:TestRouterDNSRestorePanelRestart",
+        "go:TestRouterDNSTxnRollback",
+        "go:TestRouterForceProxyRuleFirst",
+        "go:TestRouterGCKeepRules",
+        "go:TestRouterGCKeepsInflightCandidate",
+        "go:TestRouterGenerateDisabledSource",
+        "go:TestRouterGenerateExcludeFilter",
+        "go:TestRouterGenerateInstalledOnly",
+        "go:TestRouterGenerateMemo",
+        "go:TestRouterGenerateMissingBlobIsError",
+        "go:TestRouterGenerateOnlyCapableKernel",
+        "go:TestRouterGenerateRawIncompatibleExcluded",
+        "go:TestRouterGenerateSubscriptionPerKernel",
+        "go:TestRouterGeodataCascade",
+        "go:TestRouterGeodataForeignRefs",
+        "go:TestRouterGeodataForeignUnreadable",
+        "go:TestRouterGeodataRemoveAfterApply",
+        "go:TestRouterGeodataScheduleWaitsApply",
+        "go:TestRouterGroupEmptyBlocksApply",
+        "go:TestRouterGroupsDefaultsAndResolve",
+        "go:TestRouterIsolationGeneratorPathsTable",
+        "go:TestRouterIsolationInactiveKernelDir",
+        "go:TestRouterIsolationOnlyPanelFiles",
+        "go:TestRouterIsolationSwitchKernelKeepsBoth",
+        "go:TestRouterListNotFoundBlocksApply",
+        "go:TestRouterManageDeleteAndReveal",
+        "go:TestRouterManageUpdate",
+        "go:TestRouterManageUpdateMySource",
+        "go:TestRouterMask",
+        "go:TestRouterMaskReason",
+        "go:TestRouterMihomoGroupsMaterialize",
+        "go:TestRouterMihomoListRegexComma",
+        "go:TestRouterMihomoRulesAndLists",
+        "go:TestRouterMihomoSplitChecks",
+        "go:TestRouterMihomoSplitGenerators",
+        "go:TestRouterMihomoSwitch",
+        "go:TestRouterMihomoSwitchDraftOpen",
+        "go:TestRouterMihomoSwitchRollback",
+        "go:TestRouterMyNodesAddSanitizesName",
+        "go:TestRouterMyNodesDeleteAndRaw",
+        "go:TestRouterMyNodesEditKeepsID",
+        "go:TestRouterMyNodesEditSingleNode",
+        "go:TestRouterMyNodesUniqueKeys",
+        "go:TestRouterNodeKeysUnique",
+        "go:TestRouterNodeLinks",
+        "go:TestRouterNoticesRebuildFromLive",
+        "go:TestRouterPanelProfileUnixSocket",
+        "go:TestRouterParseBody",
+        "go:TestRouterParseClashAnchors",
+        "go:TestRouterParseClashPassthrough",
+        "go:TestRouterParseClashRoundTripXray",
+        "go:TestRouterParseClashXHTTP",
+        "go:TestRouterParseFixtures",
+        "go:TestRouterParseSingbox",
+        "go:TestRouterParseWG",
+        "go:TestRouterParseXrayChainRemoved",
+        "go:TestRouterParseXrayForbiddenFieldsKept",
+        "go:TestRouterParseXrayForbiddenKey",
+        "go:TestRouterParseXrayForms",
+        "go:TestRouterPresetsCompose",
+        "go:TestRouterPresetsTakeWithPreset",
+        "go:TestRouterPresetsValidByKernels",
+        "go:TestRouterPreviewDupExists",
+        "go:TestRouterPreviewDupInSubscription",
+        "go:TestRouterPreviewDupSubscription",
+        "go:TestRouterPreviewNodeSingle",
+        "go:TestRouterPreviewTokenSingleUse",
+        "go:TestRouterPreviewViewJSONKeys",
+        "go:TestRouterProfileActivateOwnership",
+        "go:TestRouterProfileCopyPanel",
+        "go:TestRouterProfileDeps",
+        "go:TestRouterProfileNames",
+        "go:TestRouterProfileTemplates",
+        "go:TestRouterRecognizeDedupe",
+        "go:TestRouterRecognizeFiles",
+        "go:TestRouterRecognizeLimits",
+        "go:TestRouterRecognizeMixedWithWG",
+        "go:TestRouterRecognizeStructured",
+        "go:TestRouterRecognizeTextAndFormat",
+        "go:TestRouterRecognizeTracer",
+        "go:TestRouterRefreshChangedSetTracer",
+        "go:TestRouterRefreshDisabledAndUnknown",
+        "go:TestRouterRefreshMetaOnRejection",
+        "go:TestRouterRefreshSingleflight",
+        "go:TestRouterRoutingAPIFlow",
+        "go:TestRouterRoutingPresetsAndLists",
+        "go:TestRouterRoutingProviderTargeted",
+        "go:TestRouterRoutingSelectLive",
+        "go:TestRouterRoutingView",
+        "go:TestRouterRoutingViewRules",
+        "go:TestRouterRuleCondConflict",
+        "go:TestRouterRulesLint",
+        "go:TestRouterRulesModel",
+        "go:TestRouterSchedulerAddressChangeAfterApply",
+        "go:TestRouterSchedulerBacksOffAfterSnapshotFailure",
+        "go:TestRouterSchedulerFlagOffZeroRequests",
+        "go:TestRouterSchedulerNetworkRetries",
+        "go:TestRouterShareLinks",
+        "go:TestRouterSourcesMyNodesFlow",
+        "go:TestRouterSourcesSubscriptionFlow",
+        "go:TestRouterSourcesTracer",
+        "go:TestRouterStubs",
+        "go:TestRouterUsableCountCollapsesDuplicates",
+        "go:TestRouterViewDupAndKernelState",
+        "go:TestRouterViewNetworkRetryFollowsScheduler",
+        "go:TestRouterViewOrderAndEmpty",
+        "go:TestRouterViewSkippedNotSummedAcrossKernels",
+        "go:TestRouterViewTracer",
+        "go:TestRouterXrayAPIBlock",
+        "go:TestRouterXrayGroupsMaterialize",
+        "go:TestRouterXrayProbeBurstFields",
+        "go:TestRouterXrayProbeSeedFromForeign",
+        "go:TestRouterXrayRulesTranslate",
+        "tests/router/config-cascade.spec.ts",
+        "tests/router/config-dialog-touch.spec.ts",
+        "tests/router/config-dns-takeover.spec.ts",
+        "tests/router/config-groups.spec.ts",
+        "tests/router/config-nodes-list.spec.ts",
+        "tests/router/config-nodes-modals.spec.ts",
+        "tests/router/config-nodes.spec.ts",
+        "tests/router/config-presets.spec.ts",
+        "tests/router/config-profiles.spec.ts",
+        "tests/router/config-routing.spec.ts"
+      ]
+    },
+    "contract-routing": {
+      "title": "Контракт API маршрутизации",
+      "shared": false,
+      "paths": [
+        "frontend/src/lib/routingContract.json"
+      ],
+      "canary": {
+        "go": null,
+        "spec": null,
+        "reason": "назначается задачей 3 плана 148.1-07"
+      },
+      "tests": [
+        "go:TestRouterRoutingAPIFlow",
+        "go:TestRouterRoutingPresetsAndLists",
+        "go:TestRouterRoutingProtected",
+        "go:TestRouterRoutingSelectLive"
+      ]
+    }
+  }
+}
