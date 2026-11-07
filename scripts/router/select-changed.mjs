@@ -31,7 +31,9 @@
 // Ярус full (D-14). Тест яруса full (метка Tier full у Go, @full у Playwright; core-marks.cjs,
 // testFacts → tier) идёт в гейте, только если его область затронута напрямую: изменён файл
 // продукта области по areas.json (область без флага shared) или сам файл теста. Через канарейку,
-// зависимости, граф импортов фронтенда и общий код (shared) тесты full не выбираются. Откат на
+// зависимости, граф импортов фронтенда и общий код (shared) тесты full не выбираются. Playwright:
+// RT_PW_INVERT='@full', пока ни один выбранный спек не выбран напрямую по области и не изменён
+// сам (иначе тесты full выбранных спеков идут все, расширение). Откат на
 // пакет целиком и полный выбор идут со всеми ярусами. Отсев Go — исключение из RT_GO_SEQ и из
 // RT_GO_CORE_RUN; число отсеянных тестов — в причинах (--explain).
 //
@@ -69,9 +71,10 @@
 //   RT_KERNEL_TOUCHED  1, если изменён код запуска или перезапуска ядра либо watchdog
 //                    (KERNEL_PATHS, D-07) или выбор полный по любой причине; иначе 0
 // Строки 9–13: RT_GO_SEQ — порядок и состав Go первой ветви по именам (пусто — пакеты целиком,
-// откат); RT_SPECS_FIRST — спеки затронутых областей; RT_PW_INVERT — значение --grep-invert
-// (отсев яруса full, заполняет 148.1-12; здесь всегда пусто); RT_HARNESS — изменена обвязка
-// стенда; RT_AREAS — затронутые области.
+// откат); RT_SPECS_FIRST — спеки затронутых областей; RT_PW_INVERT — значение --grep-invert:
+// '@full' (отсев яруса full), если ни один выбранный спек не выбран напрямую по области и не
+// изменён сам, иначе пусто (расширение: тесты full выбранных спеков идут все), при полном выборе
+// пусто; RT_HARNESS — изменена обвязка стенда; RT_AREAS — затронутые области.
 // Сбой расчёта ядра не роняет выбор: списки расширяются (все пакеты, все спеки), не сужаются.
 // Причины выбора — в stderr при --explain; последняя строка «вид выбора: …» (полный | обвязка |
 // зависимости | области | смоук) читают run.sh и select-replay.mjs.
@@ -514,6 +517,8 @@ async function select(changed) {
     specsDirect: new Set(), // спеки затронутых областей, правок и маршрутов — идут первыми
     specsOther: new Set(), // канарейки и зависимости
     specsForced: new Set(), // выбраны не по маршрутам: без сужения обхода
+    specsFullOk: new Set(), // спеки, чья область затронута напрямую или изменённые сами: тесты full идут (D-14)
+    pwFull: [], // факты Playwright-тестов яруса full: { spec } — для числа отсеянных
     grepRoutes: null, // null — без сужения
     areas: new Set(), // затронутые области
     harness: false,
@@ -576,6 +581,7 @@ async function select(changed) {
     for (const s of pick) {
       (direct ? res.specsDirect : res.specsOther).add(s);
       res.specsForced.add(s);
+      if (fullOk) res.specsFullOk.add(s);
     }
     return { go, specs: pick.length };
   };
@@ -876,6 +882,7 @@ async function select(changed) {
     for (const s of touchedSpecs) {
       res.specsDirect.add(s);
       res.specsForced.add(s);
+      res.specsFullOk.add(s);
     }
 
     // Обход всех страниц (`// e2e-pages: *`) сужается до маршрутов, только если ни одна
@@ -923,6 +930,7 @@ async function select(changed) {
     }
   }
 
+  res.pwFull = facts.filter((r) => r.kind === 'pw' && r.tier === 'full').map((r) => ({ spec: r.spec }));
   return { res, routerPkgs, specsAll, routerGoRows: goRows };
 }
 
@@ -1140,6 +1148,16 @@ async function emit(res, routerPkgs, specsAll) {
     core = coreSafeAll(routerPkgs, specsAll, core.reasons);
     res.reasons.push('всё: значение выбора не прошло проверку безопасных символов');
   }
+  // Ярус full (D-14): спеки выбраны не напрямую по области и не правкой самого спека — тесты
+  // @full отсеиваются; иначе (расширение) идут все тесты выбранных спеков. Полный выбор — пусто.
+  const specsFullOk = res.specsFullOk ?? new Set();
+  const invert = all || specs.some((s) => specsFullOk.has(s)) ? '' : '@full';
+  if (invert) {
+    const dropped = (res.pwFull ?? []).filter((r) => specs.includes(r.spec)).length;
+    res.reasons.push(
+      `ярус full: Playwright — тестов @full в выбранных спеках ${dropped} не выбраны — область затронута не напрямую`
+    );
+  }
   res.reasons.push(...core.reasons);
   const nothing = !all && go.length === 0 && specs.length === 0;
   const kind = all
@@ -1163,7 +1181,7 @@ async function emit(res, routerPkgs, specsAll) {
     `RT_KERNEL_TOUCHED=${all || res.kernelTouched ? 1 : 0}`,
     `RT_GO_SEQ=${quote(all ? '' : seq.join(' '))}`,
     `RT_SPECS_FIRST=${quote(first.join(' '))}`,
-    `RT_PW_INVERT=${quote('')}`,
+    `RT_PW_INVERT=${quote(invert)}`,
     `RT_HARNESS=${res.harness ? 1 : 0}`,
     `RT_AREAS=${quote(areas.join(' '))}`
   ].join('\n');
