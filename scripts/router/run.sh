@@ -85,7 +85,9 @@
 # новых падений больше — перепрогона нет вовсе (общая причина), все они new, в plan.txt строка
 # «подтверждающий перепрогон пропущен». Классы падений — <цель>/classes.tsv и раздел «Классы падений»
 # summary.md (branch-report.mjs), итог — строка «- Итог:»; код выхода красный при new, flaky, xpass и
-# при потере связи, не догнанной после возврата связи.
+# при потере связи, не догнанной после возврата связи. Счётчики report.md и summary.md показывают
+# QPASS и QFAIL (карантин). В конце каждого прогона с отчётом (кроме session) отчёт добавляется в
+# историю — node history.mjs append, класс падения попадает в колонку class (D-20).
 #
 # Порядок: check-known.sh (метки известных падений) -> цели из локального конфига ->
 # блокировка на весь прогон -> отчёт -> ротация build/router (tidy-lib.sh; сборки ротирует
@@ -1760,6 +1762,14 @@ done
 # доводится до конца, и прогон выходит с кодом 130 без удержания блокировки.
 trap 'RT_INTR=1' INT TERM HUP
 
+# История результатов (D-20): history.mjs append добавляет отчёт (строки результатов и классы
+# падений) в build/router/history.tsv; повторное добавление того же отчёта ничего не пишет. Вызывается
+# в конце каждого прогона с отчётом (все наборы, кроме session: её историю пишет session.mjs) до
+# hold_lock; сбой — предупреждение, код выхода прогона не меняется.
+rt_history_append() {
+  node "$SCRIPT_DIR/history.mjs" append "$RT_REPORT" >/dev/null || echo "router-test: предупреждение: запись отчёта в историю не удалась (node scripts/router/history.mjs append $RT_REPORT)" >&2
+}
+
 # --- отчёт набора rerun -------------------------------------------------------------------
 # Итог перепрогона дописывается в отчёт FROM: раздел «## Перепрогон N» в summary.md (копия в
 # rerun-N.md) с таблицей «проверка, ядро, было, стало» и строкой «- Перепрогон: K тестов из
@@ -1854,6 +1864,7 @@ rerun_finish() {
     echo "router-test: прерван (код 130), итог — $_rf_md" >&2
     exit 130
   fi
+  rt_history_append
   hold_lock
   if [ "$_rf_link" = 1 ]; then
     echo "router-test: сбой связи ПК↔стенд (итог — $_rf_md)" >&2
@@ -2058,7 +2069,7 @@ done
     echo
     echo "- Версия xcp: ${ver:--}"
     if [ -f "$RT_REPORT/$t/results.tsv" ]; then
-      awk -F'\t' '{c[$1]++} END {printf "- PASS: %d, FAIL: %d, KNOWN: %d, XPASS: %d, SKIP: %d\n", c["PASS"], c["FAIL"], c["KNOWN"], c["XPASS"], c["SKIP"]}' "$RT_REPORT/$t/results.tsv"
+      awk -F'\t' '{c[$1]++} END {printf "- PASS: %d, FAIL: %d, KNOWN: %d, XPASS: %d, SKIP: %d, QPASS: %d, QFAIL: %d\n", c["PASS"], c["FAIL"], c["KNOWN"], c["XPASS"], c["SKIP"], c["QPASS"], c["QFAIL"]}' "$RT_REPORT/$t/results.tsv"
     else
       echo "- результатов нет"
     fi
@@ -2072,7 +2083,15 @@ done
     if [ -f "$RT_REPORT/$t/results.tsv" ] && awk -F'\t' '$1 == "FAIL" || $1 == "XPASS" {f = 1} END {exit !f}' "$RT_REPORT/$t/results.tsv"; then
       echo "Падения:"
       echo
-      awk -F'\t' '$1 == "FAIL" || $1 == "XPASS" {printf "- %s %s: %s\n", $1, $3, $4}' "$RT_REPORT/$t/results.tsv"
+      # класс падения — из classes.tsv цели (нет файла — без класса)
+      _cls_f="$RT_REPORT/$t/classes.tsv"
+      [ -f "$_cls_f" ] || _cls_f=/dev/null
+      awk -F'\t' -v cf="$_cls_f" '
+        FILENAME == cf { cls[$2 "\t" $3] = $1; next }
+        $1 == "FAIL" || $1 == "XPASS" {
+          c = cls[$2 "\t" $3]
+          printf "- %s %s%s: %s\n", $1, $3, (c != "" ? " [" c "]" : ""), $4
+        }' "$_cls_f" "$RT_REPORT/$t/results.tsv"
       echo
     fi
     if [ -f "$RT_REPORT/$t/results.tsv" ] && awk -F'\t' '$1 == "KNOWN" {f = 1} END {exit !f}' "$RT_REPORT/$t/results.tsv"; then
@@ -2112,7 +2131,7 @@ done
     [ -f "$RT_REPORT/$t/xcp_version" ] && ver=$(cat "$RT_REPORT/$t/xcp_version")
     printf '%s: xcp %s, ' "$arch" "${ver:--}"
     if [ -f "$RT_REPORT/$t/results.tsv" ]; then
-      awk -F'\t' '{c[$1]++} END {printf "passed %d, failed %d, known %d, xpass %d, skipped %d\n", c["PASS"], c["FAIL"], c["KNOWN"], c["XPASS"], c["SKIP"]}' "$RT_REPORT/$t/results.tsv"
+      awk -F'\t' '{c[$1]++} END {printf "passed %d, failed %d, known %d, xpass %d, skipped %d, quarantine %d (QPASS %d, QFAIL %d)\n", c["PASS"], c["FAIL"], c["KNOWN"], c["XPASS"], c["SKIP"], c["QPASS"] + c["QFAIL"], c["QPASS"], c["QFAIL"]}' "$RT_REPORT/$t/results.tsv"
     else
       echo "результатов нет"
     fi
@@ -2232,6 +2251,9 @@ if [ "$RT_INTR" = 1 ]; then
   exit 130
 fi
 
+# История результатов (D-20): отчёт со строками и классами добавляется в build/router/history.tsv.
+# Сбой записи прогон не краснит и код выхода не меняет.
+rt_history_append
 publish_release_status
 
 hold_lock

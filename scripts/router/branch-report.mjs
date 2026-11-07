@@ -23,7 +23,7 @@
 //     на ship:pre;
 //   - «## Нужна метка ядра» (только --suite full) — страховка D-05б: проверка go:/pw: без метки
 //     ядра, чей исход в ветвях xray и mihomo различается как класс (PASS / SKIP / KNOWN /
-//     FAIL и XPASS), либо «- нет»;
+//     FAIL и XPASS), либо «- нет»; проверки с QPASS или QFAIL (карантин) в раздел не входят;
 //   - «## Классы падений» (RTR-05, D-19…D-21) — класс каждого падения: new (находка по продукту),
 //     flaky (упал в основном проходе и прошёл при подтверждающем перепрогоне, <цель>/confirm.tsv),
 //     known (метка известного падения), xpass, stand (потеря связи со стендом), quarantine
@@ -575,8 +575,9 @@ if (testMap.size > 0) {
 
 // --- метки ядра: страховка D-05б и раскладка тестов по ветвям (D-19) ----------------------
 
-const RESULT_ORDER = ["FAIL", "XPASS", "KNOWN", "SKIP", "PASS"];
-const classOf = (st) => (st === "FAIL" || st === "XPASS" ? "FAIL" : st);
+// QFAIL и QPASS — исход теста в карантине (D-17): отдельный класс, на итог не влияет
+const RESULT_ORDER = ["FAIL", "XPASS", "QFAIL", "KNOWN", "QPASS", "SKIP", "PASS"];
+const classOf = (st) => (st === "FAIL" || st === "XPASS" ? "FAIL" : st === "QFAIL" || st === "QPASS" ? "quarantine" : st);
 const resultsFile = path.join(report, target, "results.tsv");
 let resultsRaw = "";
 try {
@@ -628,6 +629,8 @@ const bothBranches = [...byCheck.values()].some((m) => m.has("xray")) && [...byC
 if (suite === "full" && bothBranches) {
   for (const [check, perCore] of byCheck) {
     if (!perCore.has("xray") || !perCore.has("mihomo")) continue;
+    // проверка в карантине хоть в одной ветви метки ядра не требует (D-17)
+    if (classOf(perCore.get("xray")) === "quarantine" || classOf(perCore.get("mihomo")) === "quarantine") continue;
     if (classOf(perCore.get("xray")) === classOf(perCore.get("mihomo"))) continue;
     if (markOf(check) !== "") continue; // размечен или Go-разметка не прочитана
     needMark.push({ check, xray: perCore.get("xray"), mihomo: perCore.get("mihomo") });
