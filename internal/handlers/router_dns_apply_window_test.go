@@ -100,6 +100,19 @@ func (e *rtSrc) rtDNSAddServer(kernel, server string) {
 	}
 }
 
+// rtDNSRemoveServer убирает сервер из списка серверов DNS-секции черновика ядра.
+func (e *rtSrc) rtDNSRemoveServer(kernel, server string) {
+	e.t.Helper()
+	form, advanced := e.rtDNSSectionForm(kernel)
+	key := rtDNSServersKey(kernel)
+	list, _ := form[key].([]any)
+	form[key] = slices.DeleteFunc(slices.Clone(list), func(v any) bool { s, _ := v.(string); return s == server })
+	r := e.rtCoresPost("/save", map[string]any{"kernel": kernel, "section": "dns", "form": form, "advanced": advanced})
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("save dns (%s): %d %s", kernel, r.Status, r.Code)
+	}
+}
+
 // rtDNSDraftHasServer — сервер есть в списке серверов DNS-секции черновика.
 func (e *rtSrc) rtDNSDraftHasServer(kernel, server string) bool {
 	e.t.Helper()
@@ -142,6 +155,12 @@ func TestRouterDNSApplyWindow(t *testing.T) {
 	e.rtDNSEnableOK()
 	t.Cleanup(func() { e.with(t).rtDNSEnsureOff() })
 	section := configlayer.CoreSectionName(kernel, "dns")
+	if rtDNSAppliedHas(t, section, rtDNSApplyServer) {
+		// хвост прерванного прогона: тест остановлен посреди сценария, t.Cleanup не выполнялся
+		t.Logf("подготовка: сервер %s остался в применённой секции %s от прерванного прогона — убирается", rtDNSApplyServer, section)
+		e.rtDNSRemoveServer(kernel, rtDNSApplyServer)
+		e.rtDNSApplyKept("подготовка: оставшийся сервер")
+	}
 	orig := rtDNSLayerApplied(t)[section]
 	t.Cleanup(func() { e.with(t).rtDNSRestoreSection(section, orig) })
 	if rtDNSAppliedHas(t, section, rtDNSApplyServer) {
