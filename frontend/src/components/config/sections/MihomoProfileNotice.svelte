@@ -113,12 +113,12 @@
     </div>
     {@render hint()}
   {:else if owner === 'pending'}
-    <span class="badge badge-warning" data-testid="mihomo-profile-pending">
+    <span class="badge badge--tag badge-warning" data-testid="mihomo-profile-pending">
       {$t('cfg.sec.owner_pending')}
     </span>
   {:else if owner === 'releasing'}
     <div class="mpn-row" data-testid="mihomo-profile-releasing">
-      <span class="badge badge-warning">{$t('cfg.sec.owner_releasing')}</span>
+      <span class="badge badge--tag badge-warning">{$t('cfg.sec.owner_releasing')}</span>
       <span class="mpn-row-text">{$t('cfg.sec.profile_releasing')}</span>
       <Button
         variant="secondary"
@@ -176,7 +176,7 @@
 
   .mpn-alert :global(.mpn-icon) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .mpn-body {
@@ -230,7 +230,7 @@
 
   .mpn-hint :global(.mpn-hint-icon) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
     color: var(--warning);
   }
 

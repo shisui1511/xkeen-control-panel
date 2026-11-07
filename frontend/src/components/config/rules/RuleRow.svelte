@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from '../../Toggle.svelte';
   import { t } from '../../../i18n';
   import { showConfirm, showToast } from '../../../stores';
   import Icon from '../../../lib/components/Icon.svelte';
@@ -241,20 +242,20 @@
       {#if i > 0}
         <span class="rr-and">{$t('cfg.rules.and')}</span>
       {/if}
-      <span class="chip chip-default rr-cond">
+      <span class="badge badge-neutral rr-cond">
         <span>{$t(condLabelKey(cond.type))}</span>
         {#if valuesOf(cond).length > 0}
           <span class="rr-value">· {shownOf(cond)}</span>
         {/if}
       </span>
       {#if hiddenOf(cond) > 0}
-        <span class="chip chip-default" title={valuesOf(cond).join(', ')}>
+        <span class="badge badge-neutral" title={valuesOf(cond).join(', ')}>
           {$t('cfg.rules.more_values', { n: hiddenOf(cond) })}
         </span>
       {/if}
     {/each}
     {#if rule.raw}
-      <span class="chip chip-default rr-cond" title={rawText}>
+      <span class="badge badge-neutral rr-cond" title={rawText}>
         <span>{$t('cfg.rules.raw_title')}</span>
         <span class="rr-value">· {rawShort}</span>
       </span>
@@ -264,24 +265,23 @@
   <span class="rr-target">
     <Icon name="arrow-right" size={14} />
     <span
-      class="chip {rule.target.kind === 'reject' ? 'chip-danger' : 'chip-default'} rr-target-chip"
+      class="badge {rule.target.kind === 'reject'
+        ? 'badge-danger'
+        : 'badge-neutral'} rr-target-chip"
       class:rr-mono={rule.target.kind !== 'group'}
     >
       {targetLabel($t, rule.target, groups)}
     </span>
   </span>
 
-  <label class="toggle-switch rr-switch">
-    <input
-      type="checkbox"
-      checked={rule.enabled}
-      disabled={locked}
-      aria-label={$t('cfg.rules.enabled_aria', { n: rule.index })}
-      data-testid="rule-enabled-{rule.id}"
-      onchange={toggleEnabled}
-    />
-    <span class="toggle-slider"></span>
-  </label>
+  <Toggle
+    class="rr-switch"
+    checked={rule.enabled}
+    disabled={locked}
+    aria-label={$t('cfg.rules.enabled_aria', { n: rule.index })}
+    data-testid="rule-enabled-{rule.id}"
+    onchange={toggleEnabled}
+  />
 
   <span class="rr-actions">
     <button
@@ -335,26 +335,31 @@
   {#if hasStatus}
     <div class="rr-status" data-testid="rule-status-{rule.id}">
       {#if rule.origin === 'preset'}
-        <span class="chip chip-default" data-chip="preset">{$t('cfg.rules.from_preset_chip')}</span>
+        <span class="badge badge-neutral" data-chip="preset"
+          >{$t('cfg.rules.from_preset_chip')}</span
+        >
       {/if}
       {#if rule.only === 'xray' || rule.only === 'mihomo'}
-        <span class="chip chip-info" data-chip="only-{rule.only}">
+        <span class="badge badge-info" data-chip="only-{rule.only}">
           {$t(rule.only === 'xray' ? 'cfg.rules.only_xray' : 'cfg.rules.only_mihomo')}
         </span>
       {/if}
       {#if !rule.enabled}
-        <span class="chip chip-default" data-chip="disabled">{$t('cfg.rules.disabled_chip')}</span>
+        <span class="badge badge-neutral" data-chip="disabled">{$t('cfg.rules.disabled_chip')}</span
+        >
       {/if}
       {#each rule.issues as issue, i (i)}
         <span
-          class="chip {chipKind(issue) === 'danger' ? 'chip-danger' : 'chip-warning'} rr-chip-text"
+          class="badge {chipKind(issue) === 'danger'
+            ? 'badge-danger'
+            : 'badge-warning'} rr-chip-text"
           data-chip={issue.code}
         >
           {issueText(issue)}
         </span>
       {/each}
       {#each rule.warnings as w, i (i)}
-        <span class="chip chip-warning rr-chip-text" title={warningTitle(w)} data-chip={w.code}>
+        <span class="badge badge-warning rr-chip-text" title={warningTitle(w)} data-chip={w.code}>
           {warningText(w)}
         </span>
         {#if w.code === 'overlap' && warningN(w) >= 1}
@@ -410,7 +415,7 @@
   /* Выключенное правило приглушается цветом текста, а не прозрачностью (контраст) */
   .rr-off,
   .rr-off .rr-num,
-  .rr-off .chip-default,
+  .rr-off .badge-neutral,
   .rr-off .rr-and,
   .rr-off .rr-target {
     color: var(--fg-dim);
@@ -499,7 +504,7 @@
     font-family: var(--font-family-mono);
   }
 
-  .rr-switch {
+  :global(.rr-switch) {
     grid-area: toggle;
     flex-shrink: 0;
   }

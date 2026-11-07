@@ -1464,14 +1464,14 @@
     <!-- Workspace with Resizable Splitter (EDIT-02) -->
     <div class="editor-workspace">
       <EditorSidebar
-        show={showSidebar}
+        open={showSidebar}
         {xrayFiles}
         {mihomoFiles}
         {selectedFile}
         activeKernel={$activeKernelName}
         overlay={isNarrow}
         loadingPath={treeBusyPath}
-        onClose={() => (showSidebar = false)}
+        onclose={() => (showSidebar = false)}
         onLoadFile={async (path, isPreviewClick) => {
           const opened = await loadFile(path, isPreviewClick);
           // D-16: шторка закрывается только после того, как файл показан во вкладке; при отмене
@@ -1684,7 +1684,7 @@
               {backupLoading}
               onSelectBackup={selectBackup}
               onRestoreBackup={restoreBackup}
-              onClose={() => (drawerOpen = false)}
+              onclose={() => (drawerOpen = false)}
             />
           {/if}
         </div>
@@ -1737,33 +1737,33 @@
 
 <!-- Templates Modal -->
 <TemplatesModal
-  isOpen={showTemplatesModal}
+  open={showTemplatesModal}
   {selectedFile}
   hasEditorView={!!editorView}
   onApplyTemplate={applyTemplate}
-  onClose={() => (showTemplatesModal = false)}
+  onclose={() => (showTemplatesModal = false)}
 />
 
 <OutboundGeneratorModal
-  isOpen={showGeneratorModal}
+  open={showGeneratorModal}
   onGenerate={handleGeneratedOutbound}
-  onClose={() => (showGeneratorModal = false)}
+  onclose={() => (showGeneratorModal = false)}
 />
 
 <SaveConfirmModal
-  isOpen={showSaveConfirmModal}
+  open={showSaveConfirmModal}
   {originalContent}
   currentContent={editorView ? editorView.state.doc.toString() : ''}
   {saving}
   onConfirm={confirmSave}
-  onClose={() => (showSaveConfirmModal = false)}
+  onclose={() => (showSaveConfirmModal = false)}
 />
 
 <DeleteFileModal
-  isOpen={showDeleteConfirmModal}
+  open={showDeleteConfirmModal}
   filePath={actionTarget}
   onConfirm={confirmDeleteFile}
-  onClose={() => {
+  onclose={() => {
     showDeleteConfirmModal = false;
     menuTarget = '';
   }}
@@ -1827,7 +1827,7 @@
     border-radius: var(--radius-md);
     overflow: hidden;
     position: relative;
-    padding: 32px 24px;
+    padding: var(--spacing-8) var(--spacing-6);
     box-sizing: border-box;
   }
 
@@ -1854,16 +1854,16 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 12px;
-    margin-top: 20px;
+    gap: var(--spacing-3);
+    margin-top: var(--spacing-5);
     flex-wrap: wrap;
   }
 
   .editor-empty-actions .btn {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 18px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2) 18px;
     font-size: var(--font-size-sm);
     font-weight: 500;
   }
@@ -1872,8 +1872,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
-    margin-top: 32px;
+    gap: var(--spacing-2-5);
+    margin-top: var(--spacing-8);
     padding-top: 18px;
     border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
     color: var(--fg-dim);
@@ -1883,14 +1883,14 @@
   .editor-empty-shortcuts .shortcut-item {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .editor-empty-shortcuts kbd {
     background: var(--surface-tint);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 4px);
-    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    padding: var(--spacing-0-5) var(--spacing-1-5);
     font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     color: var(--fg-secondary);
@@ -1909,7 +1909,7 @@
     }
 
     .editor-empty-card {
-      padding: 24px 16px;
+      padding: var(--spacing-6) var(--spacing-4);
     }
 
     .editor-page-container :global(.page-header-subtitle) {
@@ -1918,7 +1918,7 @@
 
     .editor-empty-shortcuts {
       flex-wrap: wrap;
-      margin-top: 24px;
+      margin-top: var(--spacing-6);
     }
   }
 </style>

@@ -320,7 +320,7 @@
   .apply-progress {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .steps {
@@ -329,13 +329,13 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .step {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
+    gap: var(--spacing-2);
     min-width: 0;
   }
 
@@ -385,7 +385,7 @@
   .step-body {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     min-width: 0;
     overflow-wrap: anywhere;
   }
@@ -405,17 +405,17 @@
 
   .restart-rows {
     list-style: none;
-    margin: 4px 0 0;
+    margin: var(--spacing-1) 0 0;
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .restart-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 2px 8px;
+    gap: var(--spacing-0-5) var(--spacing-2);
     min-width: 0;
     overflow-wrap: anywhere;
     font-size: var(--font-size-sm);
@@ -436,7 +436,7 @@
   .result-body {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
     min-width: 0;
     overflow-wrap: anywhere;
     color: var(--fg-primary);
@@ -450,7 +450,7 @@
 
   .kernel-output {
     margin: 0;
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
     background: var(--bg-elevated);
     border: 1px solid var(--border-light);
     border-radius: var(--radius-sm);
@@ -484,13 +484,13 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .issue-key {
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
-    margin-right: 4px;
+    margin-right: var(--spacing-1);
   }
 
   .progress-actions {

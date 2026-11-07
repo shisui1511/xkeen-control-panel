@@ -38,22 +38,22 @@
 
 <div class="subscription-chips">
   <!-- Формат подписки -->
-  <span class="chip chip-info">
+  <span class="badge badge-info">
     {getFormatBadge()}
   </span>
 
   <!-- Провайдер -->
   {#if getProviderBadge()}
-    <span class="chip chip-default">
+    <span class="badge badge-neutral">
       {getProviderBadge()}
     </span>
   {/if}
 
   <!-- Интервал обновления -->
   <span
-    class="chip chip--icon"
-    class:chip-info={sub.use_provider_interval && sub.profile_update_hours}
-    class:chip-default={!(sub.use_provider_interval && sub.profile_update_hours)}
+    class="badge badge--icon"
+    class:badge-info={sub.use_provider_interval && sub.profile_update_hours}
+    class:badge-neutral={!(sub.use_provider_interval && sub.profile_update_hours)}
     title={$t('subscr.provider_interval')}
   >
     <svg
@@ -76,9 +76,9 @@
   <!-- Качество подписки -->
   {#if sub.detected_format}
     {#if ['xray-json', 'clash-meta', 'sing-box'].includes(sub.detected_format)}
-      <span class="chip chip-success" title={$t('subscr.quality_full_tip')}> ✓ 100% </span>
+      <span class="badge badge-success" title={$t('subscr.quality_full_tip')}> ✓ 100% </span>
     {:else}
-      <span class="chip chip-warning" title={$t('subscr.quality_partial_tip')}>
+      <span class="badge badge-warning" title={$t('subscr.quality_partial_tip')}>
         ⚠ {$t('subscr.quality_partial')}
       </span>
     {/if}
@@ -90,7 +90,7 @@
       href={sub.support_url}
       target="_blank"
       rel="noopener noreferrer"
-      class="chip chip-default chip--icon"
+      class="badge badge-neutral badge--icon"
       title={sub.support_url}
     >
       <svg
@@ -112,7 +112,7 @@
   .subscription-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     align-items: center;
   }
 </style>

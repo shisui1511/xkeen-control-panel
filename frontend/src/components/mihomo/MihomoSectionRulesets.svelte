@@ -47,8 +47,8 @@
           </div>
           {#if checkedCount > 0}
             <span
-              class="badge"
-              class:badge-primary={checkedCount === items.length}
+              class="badge badge--tag"
+              class:badge-info={checkedCount === items.length}
               class:badge-secondary={checkedCount < items.length}
               style="font-size: var(--font-size-xs); font-weight:500;"
             >
@@ -122,15 +122,15 @@
 
 <style>
   .sec-body {
-    padding: 16px;
+    padding: var(--spacing-4);
   }
 
   .badge {
-    padding: 2px 6px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
     border-radius: var(--radius-sm);
   }
 
-  .badge-primary {
+  .badge-info {
     background: var(--accent);
     color: var(--btn-primary-text);
   }

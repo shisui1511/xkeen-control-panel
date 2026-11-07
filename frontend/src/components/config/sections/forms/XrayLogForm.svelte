@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from '../../../Toggle.svelte';
   import { t } from '../../../../i18n';
   import {
     coresErrorText,
@@ -200,16 +201,12 @@
         />
       {:else}
         <span class="xf-switch">
-          <label class="toggle-switch">
-            <input
-              id="{uid}-dnslog"
-              type="checkbox"
-              checked={dnsLogOn}
-              data-testid={fieldTestId(kernel, ID, 'dnsLog')}
-              onchange={onDnsLog}
-            />
-            <span class="toggle-slider"></span>
-          </label>
+          <Toggle
+            id="{uid}-dnslog"
+            checked={dnsLogOn}
+            data-testid={fieldTestId(kernel, ID, 'dnsLog')}
+            onchange={onDnsLog}
+          />
         </span>
       {/if}
     </div>

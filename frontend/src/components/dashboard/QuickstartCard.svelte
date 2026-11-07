@@ -119,14 +119,14 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-2, 8px);
+    gap: var(--spacing-2);
   }
 
   .qs-step {
     display: flex;
     align-items: center;
-    gap: var(--spacing-2, 8px);
-    padding: var(--spacing-1, 4px) 0;
+    gap: var(--spacing-2);
+    padding: var(--spacing-1) 0;
   }
 
   .qs-icon {
@@ -164,7 +164,7 @@
 
   .qs-cta {
     font-size: var(--font-size-xs);
-    padding: 4px 8px;
+    padding: var(--spacing-1) var(--spacing-2);
     margin-left: auto;
     flex-shrink: 0;
   }

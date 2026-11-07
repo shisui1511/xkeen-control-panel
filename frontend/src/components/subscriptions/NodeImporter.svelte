@@ -25,7 +25,7 @@
     diagnosticLoading = false,
     parseReportData = null,
     rawResponseData = null,
-    onClose,
+    onclose: onClose,
     onTabChange
   }: {
     diagnosticSub: Subscription | null;
@@ -33,7 +33,7 @@
     diagnosticLoading: boolean;
     parseReportData: ParseReport | null;
     rawResponseData: RawResponse | null;
-    onClose: () => void;
+    onclose: () => void;
     onTabChange: (tab: 'report' | 'headers' | 'raw') => void;
   } = $props();
 
@@ -49,7 +49,7 @@
 </script>
 
 <Modal
-  isOpen={!!diagnosticSub}
+  open={!!diagnosticSub}
   title={diagnosticSub ? $t('subscr.diag_title').replace('{name}', diagnosticSub.name) : ''}
   onclose={onClose}
   class="node-importer-wide"
@@ -176,7 +176,7 @@
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
-    padding: 12px;
+    padding: var(--spacing-3);
     color: var(--fg-dim);
     font-size: var(--font-size-sm);
     font-weight: 600;
@@ -199,7 +199,7 @@
   }
 
   .diag-body {
-    padding: 20px;
+    padding: var(--spacing-5);
     max-height: 60vh;
     overflow-y: auto;
   }
@@ -207,15 +207,15 @@
   .diag-summary-cards {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
-    margin-bottom: 20px;
+    gap: var(--spacing-3);
+    margin-bottom: var(--spacing-5);
   }
 
   .diag-sum-card {
     background: var(--accent-soft);
     border: 1px solid var(--accent-line);
     border-radius: var(--radius-md);
-    padding: 12px 16px;
+    padding: var(--spacing-3) var(--spacing-4);
   }
 
   .diag-sum-card.success {
@@ -240,7 +240,7 @@
   .diag-sum-card .val {
     font-size: var(--font-size-2xl);
     font-weight: 700;
-    margin-top: 4px;
+    margin-top: var(--spacing-1);
     font-family: var(--font-family-mono);
   }
 
@@ -258,7 +258,7 @@
 
   .diag-table th,
   .diag-table td {
-    padding: 10px 12px;
+    padding: var(--spacing-2-5) var(--spacing-3);
     text-align: left;
     border-bottom: 1px solid var(--border);
   }
@@ -285,21 +285,21 @@
   .diag-table .snippet code {
     font-family: var(--font-family-mono);
     background: rgba(0, 0, 0, 0.2);
-    padding: 2px 4px;
-    border-radius: 3px;
+    padding: var(--spacing-0-5) var(--spacing-1);
+    border-radius: var(--radius-xs);
     word-break: break-all;
   }
 
   .diag-headers-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .hdr-item {
     display: flex;
     flex-direction: column;
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
     background: rgba(0, 0, 0, 0.1);
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
@@ -315,14 +315,14 @@
   .hdr-val {
     font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
-    margin-top: 4px;
+    margin-top: var(--spacing-1);
     word-break: break-all;
     color: var(--fg-primary);
   }
 
   .raw-body-pre {
     margin: 0;
-    padding: 16px;
+    padding: var(--spacing-4);
     background: rgba(0, 0, 0, 0.2);
     border-radius: var(--radius-md);
     border: 1px solid var(--border);

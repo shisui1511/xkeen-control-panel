@@ -212,10 +212,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={$t('cfg.prof.modal_title')}
   maxWidth="640px"
-  dataTestid="new-profile-modal"
+  testid="new-profile-modal"
   onclose={close}
 >
   <div class="np-body">
@@ -578,7 +578,7 @@
 
   .np-alert :global(.np-alert-icon) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .np-alert-text {

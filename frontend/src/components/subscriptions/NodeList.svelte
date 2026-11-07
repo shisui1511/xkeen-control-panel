@@ -355,7 +355,7 @@
                 </span>
                 {#if showSelectionBadge && isDefault}
                   <span
-                    class="badge badge-success sub-node-selection-badge"
+                    class="badge badge--tag badge-success sub-node-selection-badge"
                     data-testid="node-default-badge"
                     title={stableTag ? $t('subscr.node.stable_tag_hint', { tag: stableTag }) : ''}
                   >
@@ -363,7 +363,7 @@
                   </span>
                 {:else if showSelectionBadge && stableTag}
                   <span
-                    class="badge badge-info sub-node-selection-badge"
+                    class="badge badge--tag badge-info sub-node-selection-badge"
                     data-testid="node-by-tag-badge"
                     title={$t('subscr.node.stable_tag_hint', { tag: stableTag })}
                   >
@@ -467,7 +467,7 @@
                   {/each}
                 </Select>
               {:else if node.dialer_proxy}
-                <span class="badge badge-tag" data-testid="dialer-proxy-active-tag">
+                <span class="badge badge--tag badge-tag" data-testid="dialer-proxy-active-tag">
                   {node.dialer_proxy}
                 </span>
               {:else}
@@ -618,15 +618,15 @@
   .node-list-toolbar {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    margin-bottom: 10px;
+    gap: var(--spacing-2);
+    margin-bottom: var(--spacing-2-5);
   }
 
   .node-search-bar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .search-input-wrap {
@@ -647,10 +647,10 @@
   .node-search-input {
     width: 100%;
     height: 34px;
-    padding: 0 32px 0 32px;
+    padding: 0 var(--spacing-8) 0 var(--spacing-8);
     background: rgba(0, 0, 0, 0.2);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 6px);
+    border-radius: var(--radius-md);
     color: var(--fg-primary);
     font-size: var(--font-size-sm);
     font-family: inherit;
@@ -705,15 +705,15 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .node-filter-chip {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 3px 10px;
-    border-radius: var(--radius-full, 9999px);
+    padding: 3px var(--spacing-2-5);
+    border-radius: var(--radius-full);
     font-size: var(--font-size-xs);
     font-weight: 500;
     background: var(--surface-tint);
@@ -744,15 +744,15 @@
   }
 
   .nodes-empty-search {
-    padding: 24px;
+    padding: var(--spacing-6);
     text-align: center;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 6px);
+    border-radius: var(--radius-md);
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .nodes-empty-search .empty-title {
@@ -765,14 +765,14 @@
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
     max-width: 400px;
-    margin-bottom: 4px;
+    margin-bottom: var(--spacing-1);
   }
 
   .inline-nodes-list {
     display: flex;
     flex-direction: column;
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 6px);
+    border-radius: var(--radius-md);
     overflow: hidden;
     background: var(--bg-card);
   }
@@ -783,7 +783,7 @@
     align-items: center;
     border-bottom: 1px solid var(--border);
     transition: background var(--transition-fast);
-    padding-right: 16px;
+    padding-right: var(--spacing-4);
   }
 
   .sub-node-select-btn {
@@ -791,7 +791,7 @@
     display: flex;
     align-items: center;
     flex: 1;
-    padding: 10px 16px;
+    padding: var(--spacing-2-5) var(--spacing-4);
     background: none;
     border: 0;
     font: inherit;
@@ -825,13 +825,13 @@
   .sub-node-avatar-container {
     width: 32px;
     height: 32px;
-    border-radius: 8px;
+    border-radius: var(--radius);
     background: rgba(0, 0, 0, 0.25);
     border: 1px solid var(--border-light);
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-right: 12px;
+    margin-right: var(--spacing-3);
     flex-shrink: 0;
     font-size: var(--font-size-lg);
     transition:
@@ -879,7 +879,7 @@
   .sub-node-name-row {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     margin-bottom: 1px;
   }
 
@@ -903,8 +903,8 @@
     background: color-mix(in srgb, var(--accent) 8%, transparent);
     border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
     color: var(--accent);
-    padding: 2px 10px;
-    border-radius: 12px;
+    padding: var(--spacing-0-5) var(--spacing-2-5);
+    border-radius: var(--radius-xl);
     font-size: var(--font-size-xs);
     font-weight: 500;
     display: inline-flex;
@@ -924,8 +924,8 @@
     background: var(--surface-tint);
     border: 1px solid var(--border);
     color: var(--fg-secondary);
-    padding: 2px 8px;
-    border-radius: 12px;
+    padding: var(--spacing-0-5) var(--spacing-2);
+    border-radius: var(--radius-xl);
     font-size: var(--font-size-xs);
     font-weight: 600;
     display: inline-flex;
@@ -940,8 +940,8 @@
   }
 
   .sub-node-chip-compat {
-    padding: 2px 8px;
-    border-radius: 12px;
+    padding: var(--spacing-0-5) var(--spacing-2);
+    border-radius: var(--radius-xl);
     font-size: var(--font-size-xs);
     font-weight: 600;
     display: inline-flex;
@@ -963,8 +963,8 @@
     background: color-mix(in srgb, var(--warning) 10%, transparent);
     border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
     color: var(--warning);
-    padding: 2px 6px;
-    border-radius: var(--radius-sm, 4px);
+    padding: var(--spacing-0-5) var(--spacing-1-5);
+    border-radius: var(--radius-sm);
     font-size: var(--font-size-xs);
     font-weight: 700;
     letter-spacing: 0;
@@ -981,16 +981,16 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: var(--spacing-1);
     margin-top: 3px;
   }
 
   .sub-node-status-container {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--spacing-3);
     flex-shrink: 0;
-    margin-left: 12px;
+    margin-left: var(--spacing-3);
   }
 
   .sub-node-ping-btn {
@@ -1001,7 +1001,7 @@
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     transition: opacity var(--transition-fast);
   }
 
@@ -1064,8 +1064,8 @@
   .sub-node-dialer-proxy-container {
     display: flex;
     align-items: center;
-    margin-left: 8px;
-    margin-right: 8px;
+    margin-left: var(--spacing-2);
+    margin-right: var(--spacing-2);
     flex-shrink: 0;
   }
 
@@ -1076,7 +1076,7 @@
   :global(.sub-node-dialer-select) {
     height: 28px !important;
     font-size: var(--font-size-xs) !important;
-    padding: 2px 28px 2px 8px !important;
+    padding: var(--spacing-0-5) 28px var(--spacing-0-5) var(--spacing-2) !important;
   }
 
   .sub-node-selection-badge {
@@ -1089,7 +1089,7 @@
 
   .sub-node-clear-btn {
     flex-shrink: 0;
-    margin-left: 8px;
+    margin-left: var(--spacing-2);
     white-space: nowrap;
   }
 
@@ -1112,8 +1112,8 @@
 
   .sub-node-na-badge {
     font-size: var(--font-size-xs);
-    padding: 2px 6px;
-    border-radius: var(--radius-sm, 4px);
+    padding: var(--spacing-0-5) var(--spacing-1-5);
+    border-radius: var(--radius-sm);
     background: var(--bg-card-subtle);
     color: var(--fg-dim);
     border: 1px solid var(--border-subtle);

@@ -4,27 +4,27 @@
   import { getDiffGroups } from './diff';
 
   interface Props {
-    isOpen: boolean;
+    open: boolean;
     originalContent: string;
     currentContent: string;
     saving?: boolean;
     onConfirm: () => void;
-    onClose: () => void;
+    onclose: () => void;
   }
 
   let {
-    isOpen,
+    open: isOpen,
     originalContent,
     currentContent,
     saving = false,
     onConfirm,
-    onClose
+    onclose: onClose
   }: Props = $props();
 
   let diffGroups = $derived(getDiffGroups(originalContent, currentContent));
 </script>
 
-<Modal {isOpen} title={$t('editor.confirm_save_title')} maxWidth="700px" onclose={onClose}>
+<Modal open={isOpen} title={$t('editor.confirm_save_title')} maxWidth="700px" onclose={onClose}>
   <!-- Diff Preview -->
   <div class="diff-preview" style="margin-top: 12px;">
     <div class="diff-preview-title">
@@ -74,7 +74,7 @@
     font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-dim);
-    margin-bottom: 6px;
+    margin-bottom: var(--spacing-1-5);
     flex-shrink: 0;
   }
 
@@ -83,8 +83,8 @@
     overflow-y: auto;
     background: var(--cm-bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 10px;
+    border-radius: var(--radius-md);
+    padding: var(--spacing-2-5);
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
     line-height: 1.5;

@@ -200,25 +200,25 @@
     switch (watchdogStatus.state) {
       case 'armed':
         return {
-          cssClass: 'badge badge-success',
+          cssClass: 'badge badge--tag badge-success',
           labelKey: 'watchdog.state_armed',
           hintKey: 'watchdog.state_armed_hint'
         };
       case 'idle':
         return {
-          cssClass: 'badge',
+          cssClass: 'badge badge--tag',
           labelKey: 'watchdog.state_idle',
           hintKey: 'watchdog.state_idle_hint'
         };
       case 'degraded':
         return {
-          cssClass: 'badge badge-danger',
+          cssClass: 'badge badge--tag badge-danger',
           labelKey: 'watchdog.state_degraded',
           hintKey: 'watchdog.state_degraded_hint'
         };
       case 'disarmed':
         return {
-          cssClass: 'badge badge-warning',
+          cssClass: 'badge badge--tag badge-warning',
           labelKey: 'watchdog.state_disarmed',
           hintKey: 'watchdog.state_disarmed_hint'
         };
@@ -1510,7 +1510,7 @@
   onsuccess={handleRefresh}
 />
 <UnsavedChangesModal
-  isOpen={showUnsavedModal}
+  open={showUnsavedModal}
   dirtySources={dirtySourceNames}
   isSaving={isSavingAndNavigating}
   onSaveAndLeave={handleSaveAndLeave}
@@ -1518,8 +1518,8 @@
   onStay={handleStay}
 />
 <SystemAboutModal
-  isOpen={showAboutModal}
-  onClose={() => (showAboutModal = false)}
+  open={showAboutModal}
+  onclose={() => (showAboutModal = false)}
   {systemStats}
   {panelVersion}
 />
@@ -1587,7 +1587,7 @@
   .dash-watchdog-badge-row {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .dash-watchdog-label {
@@ -1599,7 +1599,7 @@
   /* Баннеры над содержимым вкладки: перезапуск службы (D-19) и переподключение
      к панели (D-20) — один рецепт, слот офлайн-баннера Mihomo — те же отступы */
   .shell-banner-slot {
-    margin: 12px 16px 0;
+    margin: var(--spacing-3) var(--spacing-4) 0;
   }
 
   /* Пустое место справа в мобильной шапке, пока капсула статуса не загрузилась:
@@ -1611,15 +1611,15 @@
 
   .service-restarting-banner,
   .panel-reconnect-banner {
-    margin: 12px 16px 0;
-    padding: 12px 18px;
+    margin: var(--spacing-3) var(--spacing-4) 0;
+    padding: var(--spacing-3) 18px;
     background: var(--accent-soft);
     border: 1px solid var(--accent);
     border-radius: var(--radius-md);
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: var(--spacing-3);
     font-size: var(--font-size-base);
     color: var(--fg-primary);
   }

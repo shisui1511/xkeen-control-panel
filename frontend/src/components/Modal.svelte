@@ -5,23 +5,23 @@
   import { swipeToDismiss } from '../lib/gestures';
 
   let {
-    isOpen = false,
+    open: isOpen = false,
     title = '',
     maxWidth = '520px',
     class: className = '',
     ariaLabel = '',
-    dataTestid = '',
+    testid: dataTestid = '',
     onclose,
     children
   }: {
-    isOpen: boolean;
+    open: boolean;
     title: string;
     maxWidth?: string;
     class?: string;
     /** Overrides the accessible name when the visible `.modal-header` (and its `<h2>`) is hidden by a caller's stylesheet. */
     ariaLabel?: string;
     /** Optional `data-testid` on the container, for callers whose E2E specs target a specific dialog instance. */
-    dataTestid?: string;
+    testid?: string;
     onclose: () => void;
     children?: Snippet;
   } = $props();
@@ -205,8 +205,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
-    padding: 24px;
+    z-index: var(--z-overlay);
+    padding: var(--spacing-6);
     animation: modal-backdrop-in var(--duration-fast) var(--ease-out);
   }
   .modal-container {
@@ -229,7 +229,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 20px;
+    padding: var(--spacing-3-5) var(--spacing-5);
     border-bottom: 1px solid var(--border);
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
   }
@@ -262,7 +262,7 @@
     color: var(--fg-primary);
   }
   .modal-content {
-    padding: 20px;
+    padding: var(--spacing-5);
     overflow-y: auto;
     color: var(--fg-primary);
     font-size: var(--font-size-base);
@@ -288,7 +288,7 @@
     }
     .modal-header {
       position: relative;
-      padding: 18px 8px 10px 16px;
+      padding: 18px var(--spacing-2) var(--spacing-2-5) var(--spacing-4);
       touch-action: none;
     }
     /* Ручка листа: подсказывает, что лист можно смахнуть вниз */
@@ -300,7 +300,7 @@
       width: 36px;
       height: 4px;
       border-radius: 2px;
-      background: var(--border-strong, var(--border));
+      background: var(--border-strong);
       transform: translateX(-50%);
     }
     .modal-close-btn {
@@ -308,7 +308,7 @@
       height: 40px;
     }
     .modal-content {
-      padding: 14px 16px 18px;
+      padding: var(--spacing-3-5) var(--spacing-4) 18px;
     }
   }
 

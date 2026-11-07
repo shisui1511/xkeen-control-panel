@@ -53,7 +53,7 @@
             <li class="mc-row" data-testid="geo-mihomo-file">
               <span class="mc-name">{f.name}</span>
               <span class="mc-meta">{formatBytes(f.size)} · {routerDate(f.mtime)}</span>
-              <span class="chip chip-default">{$t('cfg.geo.mihomo_chip')}</span>
+              <span class="badge badge-neutral">{$t('cfg.geo.mihomo_chip')}</span>
             </li>
           {/each}
         </ul>
@@ -79,7 +79,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: var(--spacing-1) var(--spacing-2);
-    padding: 10px var(--card-pad);
+    padding: var(--spacing-2-5) var(--card-pad);
     border-top: 1px solid var(--border);
     min-width: 0;
   }

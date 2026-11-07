@@ -79,8 +79,8 @@
     max-width: 100%;
     overflow-x: auto;
     flex-wrap: nowrap;
-    padding: 2px;
-    gap: 2px;
+    padding: var(--spacing-0-5);
+    gap: var(--spacing-0-5);
     scrollbar-width: none;
   }
 
@@ -123,9 +123,9 @@
     flex-shrink: 0;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     height: var(--btn-h);
-    padding: 0 12px;
+    padding: 0 var(--spacing-3);
     background: transparent;
     border: 0;
     border-radius: var(--radius-md);

@@ -104,10 +104,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={$t('cfg.prof.fill_title')}
   maxWidth="560px"
-  dataTestid="fill-sections-modal"
+  testid="fill-sections-modal"
   onclose={close}
 >
   <div class="fs-body">
@@ -238,7 +238,7 @@
 
   .fs-alert :global(.fs-alert-icon) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .fs-footer {

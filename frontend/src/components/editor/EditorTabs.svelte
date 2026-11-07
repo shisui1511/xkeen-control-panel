@@ -82,11 +82,11 @@
         >
           <span class="tab-name" title={tab.name}>{tab.name}</span>
           {#if layerBadge(tab.path) === 'managed'}
-            <span class="badge badge-info layer-badge" data-testid="layer-badge"
+            <span class="badge badge--tag badge-info layer-badge" data-testid="layer-badge"
               >{$t('editor.managed_badge')}</span
             >
           {:else if layerBadge(tab.path) === 'manual'}
-            <span class="badge layer-badge" data-testid="layer-badge"
+            <span class="badge badge--tag layer-badge" data-testid="layer-badge"
               >{$t('editor.manual_badge')}</span
             >
           {/if}
@@ -145,7 +145,7 @@
     display: flex;
     align-items: center;
     height: 100%;
-    padding: 0 8px 0 0;
+    padding: 0 var(--spacing-2) 0 0;
     background: transparent;
     color: var(--fg-dim);
     border-right: 1px solid var(--border);
@@ -160,8 +160,8 @@
     display: flex;
     align-items: center;
     height: 100%;
-    gap: 8px;
-    padding: 0 8px 0 12px;
+    gap: var(--spacing-2);
+    padding: 0 var(--spacing-2) 0 var(--spacing-3);
     background: none;
     border: 0;
     color: inherit;
@@ -178,7 +178,7 @@
   /* Имя усекается, бейдж не сжимается */
   .layer-badge {
     flex-shrink: 0;
-    padding: 0 4px;
+    padding: 0 var(--spacing-1);
     line-height: 1.4;
     font-weight: 600;
   }
@@ -213,7 +213,7 @@
   .tab-dirty-dot {
     color: var(--warning);
     font-size: var(--font-size-xs);
-    margin-left: 2px;
+    margin-left: var(--spacing-0-5);
     line-height: 1;
   }
 
@@ -229,7 +229,7 @@
     border: 0;
     cursor: pointer;
     padding: 0;
-    margin-left: 4px;
+    margin-left: var(--spacing-1);
     transition:
       color var(--transition-fast),
       background var(--transition-fast);
@@ -264,7 +264,7 @@
   /* Зона × (по 15 px в стороны от кнопки 14 px) не накрывает имя и соседнюю вкладку */
   @media (max-width: 768px), (pointer: coarse) {
     .tab-close-btn {
-      margin-left: 8px;
+      margin-left: var(--spacing-2);
     }
 
     .editor-tab {

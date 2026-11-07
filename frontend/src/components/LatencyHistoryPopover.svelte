@@ -12,10 +12,10 @@
     proxyName: string;
     history: HistoryItem[];
     anchorEl: HTMLElement | null;
-    onClose: () => void;
+    onclose: () => void;
   }
 
-  let { proxyName, history = [], anchorEl, onClose }: Props = $props();
+  let { proxyName, history = [], anchorEl, onclose: onClose }: Props = $props();
 
   let top = $state(0);
   let left = $state(0);
@@ -163,7 +163,7 @@
 <style>
   .latency-history-popover {
     position: fixed;
-    z-index: 1100;
+    z-index: var(--z-popover);
     width: 280px;
     background: var(--bg-elevated);
     border: 1px solid var(--border-strong);
@@ -171,7 +171,7 @@
     box-shadow:
       0 12px 32px -4px rgba(0, 0, 0, 0.6),
       0 0 0 1px var(--surface-tint);
-    padding: 14px;
+    padding: var(--spacing-3-5);
     color: var(--fg-primary);
     font-family: var(--font-family-sans);
     animation: popoverFadeIn var(--duration-fast) var(--ease-out) forwards;
@@ -192,10 +192,10 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 12px;
+    gap: var(--spacing-2);
+    margin-bottom: var(--spacing-3);
     border-bottom: 1px solid var(--border);
-    padding-bottom: 8px;
+    padding-bottom: var(--spacing-2);
   }
 
   .popover-title {
@@ -215,8 +215,8 @@
     font-size: var(--font-size-xl);
     line-height: 1;
     cursor: pointer;
-    padding: 0 4px;
-    border-radius: 4px;
+    padding: 0 var(--spacing-1);
+    border-radius: var(--radius-sm);
     transition: color var(--transition-fast);
   }
 
@@ -225,7 +225,7 @@
   }
 
   .popover-empty {
-    padding: 12px 0;
+    padding: var(--spacing-3) 0;
     text-align: center;
   }
 
@@ -233,7 +233,7 @@
     font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-secondary);
-    margin-bottom: 4px;
+    margin-bottom: var(--spacing-1);
   }
 
   .empty-desc {
@@ -246,14 +246,14 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 10px;
-    margin-bottom: 12px;
+    padding: var(--spacing-2-5);
+    margin-bottom: var(--spacing-3);
   }
 
   .history-sparkline {
     display: flex;
     align-items: flex-end;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     height: 36px;
     width: 100%;
   }
@@ -277,8 +277,8 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding-right: 4px;
+    gap: var(--spacing-1-5);
+    padding-right: var(--spacing-1);
     scrollbar-width: thin;
     scrollbar-color: var(--border-strong) transparent;
   }
@@ -288,7 +288,7 @@
     align-items: center;
     justify-content: space-between;
     font-size: var(--font-size-xs);
-    padding: 2px 0;
+    padding: var(--spacing-0-5) 0;
   }
 
   .history-time {
@@ -299,7 +299,7 @@
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
     font-weight: 600;
-    padding: 2px 6px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
     border-radius: var(--radius-sm);
   }
 

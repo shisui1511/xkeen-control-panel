@@ -225,24 +225,32 @@
             <div class="provider-top">
               <span class="provider-name" title={provider.name}>{provider.name}</span>
               <div class="badges">
-                <span class="badge badge-type"
+                <span class="badge badge--tag badge-emphasis"
                   >{provider.vehicleType || provider.type || 'HTTP'}</span
                 >
                 {#if provider.behavior}
-                  <span class="badge badge-behavior">{provider.behavior}</span>
+                  <span class="badge badge--tag badge-behavior">{provider.behavior}</span>
                 {/if}
                 {#if offline}
                   {#if fs === 'none_file'}
-                    <span class="badge badge-error">{$t('rules.provider_badge_nofile')}</span>
+                    <span class="badge badge--tag badge-danger"
+                      >{$t('rules.provider_badge_nofile')}</span
+                    >
                   {:else if fs === 'empty'}
-                    <span class="badge badge-error">{$t('rules.provider_badge_empty_file')}</span>
+                    <span class="badge badge--tag badge-danger"
+                      >{$t('rules.provider_badge_empty_file')}</span
+                    >
                   {/if}
                 {:else}
                   {#if isEmpty(provider)}
-                    <span class="badge badge-empty">{$t('rules.provider_status_empty')}</span>
+                    <span class="badge badge--tag badge-empty"
+                      >{$t('rules.provider_status_empty')}</span
+                    >
                   {/if}
                   {#if d && !d.file_exists}
-                    <span class="badge badge-empty">{$t('rules.provider_status_no_file')}</span>
+                    <span class="badge badge--tag badge-empty"
+                      >{$t('rules.provider_status_no_file')}</span
+                    >
                   {/if}
                 {/if}
               </div>
@@ -424,7 +432,7 @@
   .provider-status {
     display: flex;
     align-items: flex-start;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     margin: 0;
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
@@ -451,7 +459,7 @@
   .providers-tab {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--spacing-4);
   }
 
   .tab-header {
@@ -459,13 +467,13 @@
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .header-info {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .header-title {
@@ -480,13 +488,13 @@
     justify-content: center;
     min-width: 20px;
     height: 20px;
-    padding: 0 6px;
+    padding: 0 var(--spacing-1-5);
     font-size: var(--font-size-xs);
     font-weight: 600;
     background: var(--bg-elevated);
     color: var(--fg-secondary);
     border: 1px solid var(--border);
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
   }
 
   .loading-state {
@@ -502,13 +510,13 @@
     border: 2px solid var(--border);
     border-top-color: var(--accent);
     border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+    animation: spin var(--duration-spin) linear infinite;
   }
 
   .providers-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .provider-card {
@@ -519,26 +527,26 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 14px 16px;
+    padding: var(--spacing-3-5) var(--spacing-4);
     transition: border-color var(--transition-fast);
   }
 
   .provider-card:hover {
-    border-color: var(--border-hover, var(--border));
+    border-color: var(--border-hover);
   }
 
   .provider-body {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
 
   .provider-top {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .provider-name {
@@ -552,18 +560,18 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .badge {
     font-size: var(--font-size-xs);
     font-weight: 600;
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
+    border-radius: var(--radius-sm);
     letter-spacing: 0;
   }
 
-  .badge-type {
+  .badge-emphasis {
     background: color-mix(in srgb, var(--accent) 12%, transparent);
     color: var(--accent);
     border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
@@ -578,14 +586,14 @@
   .provider-meta {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
     font-size: var(--font-size-xs);
   }
 
   .meta-item {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .meta-label {
@@ -597,21 +605,21 @@
   }
 
   .mono {
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
   }
 
   .updated-time {
-    color: var(--fg-faint, var(--fg-dim));
+    color: var(--fg-faint);
   }
 
   .provider-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     justify-content: flex-end;
-    margin-top: 12px;
-    padding-top: 10px;
-    border-top: 1px solid var(--border-light, var(--border));
+    margin-top: var(--spacing-3);
+    padding-top: var(--spacing-2-5);
+    border-top: 1px solid var(--border-light);
   }
 
   .provider-actions :global(.btn) {
@@ -619,18 +627,12 @@
   }
 
   .btn-icon {
-    margin-right: 4px;
+    margin-right: var(--spacing-1);
     flex-shrink: 0;
   }
 
   .spinning {
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
+    animation: spin var(--duration-spin) linear infinite;
   }
 
   .provider-status :global(svg) {

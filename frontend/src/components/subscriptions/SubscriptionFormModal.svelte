@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from '../Toggle.svelte';
   import Modal from '../Modal.svelte';
   import SegmentedControl from '../SegmentedControl.svelte';
   import { t, currentLang } from '../../i18n';
@@ -11,7 +12,7 @@
   }
 
   let {
-    isOpen = false,
+    open: isOpen = false,
     editingSub = null,
     formName = $bindable(''),
     formEnableXray = $bindable(false),
@@ -32,10 +33,10 @@
     formSockoptFastOpen = $bindable(false),
     formSockoptMptcp = $bindable(false),
     availableMihomoGroups = [],
-    onClose,
+    onclose: onClose,
     onSave
   }: {
-    isOpen?: boolean;
+    open?: boolean;
     editingSub: Subscription | null;
     formName: string;
     formEnableXray: boolean;
@@ -56,7 +57,7 @@
     formSockoptFastOpen?: boolean;
     formSockoptMptcp?: boolean;
     availableMihomoGroups?: string[];
-    onClose: () => void;
+    onclose: () => void;
     onSave: () => void;
   } = $props();
 
@@ -67,7 +68,7 @@
 </script>
 
 <Modal
-  {isOpen}
+  open={isOpen}
   title={editingSub ? $t('subscr.edit_title') : $t('subscr.add_title')}
   onclose={onClose}
 >
@@ -335,7 +336,7 @@
                   }}
                 />
                 <span>{missingGroup}</span>
-                <span class="badge missing-group-badge">
+                <span class="badge badge--tag missing-group-badge">
                   ({$t('subscr.modal.group_missing_in_config')})
                 </span>
               </label>
@@ -383,32 +384,24 @@
         </div>
 
         <div class="form-group-checkbox" style="margin-bottom: 8px;">
-          <label class="toggle-switch">
-            <input
-              type="checkbox"
-              id="sockopt-fast-open"
-              aria-label={$t('subscr.sockopt.tcp_fast_open')}
-              data-testid="sockopt-fast-open"
-              bind:checked={formSockoptFastOpen}
-            />
-            <span class="toggle-slider"></span>
-          </label>
+          <Toggle
+            id="sockopt-fast-open"
+            aria-label={$t('subscr.sockopt.tcp_fast_open')}
+            data-testid="sockopt-fast-open"
+            bind:checked={formSockoptFastOpen}
+          />
           <label for="sockopt-fast-open" class="checkbox-label">
             {$t('subscr.sockopt.tcp_fast_open')}
           </label>
         </div>
 
         <div class="form-group-checkbox">
-          <label class="toggle-switch">
-            <input
-              type="checkbox"
-              id="sockopt-mptcp"
-              aria-label={$t('subscr.sockopt.tcp_mptcp')}
-              data-testid="sockopt-mptcp"
-              bind:checked={formSockoptMptcp}
-            />
-            <span class="toggle-slider"></span>
-          </label>
+          <Toggle
+            id="sockopt-mptcp"
+            aria-label={$t('subscr.sockopt.tcp_mptcp')}
+            data-testid="sockopt-mptcp"
+            bind:checked={formSockoptMptcp}
+          />
           <label for="sockopt-mptcp" class="checkbox-label">
             {$t('subscr.sockopt.tcp_mptcp')}
           </label>
@@ -417,28 +410,16 @@
     {/if}
 
     <div class="form-group-checkbox">
-      <label class="toggle-switch">
-        <input
-          type="checkbox"
-          id="enabled"
-          aria-label={$t('subscr.enabled')}
-          bind:checked={formEnabled}
-        />
-        <span class="toggle-slider"></span>
-      </label>
+      <Toggle id="enabled" aria-label={$t('subscr.enabled')} bind:checked={formEnabled} />
       <label for="enabled" class="checkbox-label">{$t('subscr.enabled')}</label>
     </div>
 
     <div class="form-group-checkbox">
-      <label class="toggle-switch">
-        <input
-          type="checkbox"
-          id="use-provider-interval"
-          aria-label={$t('subscr.use_provider_interval')}
-          bind:checked={formUseProviderInterval}
-        />
-        <span class="toggle-slider"></span>
-      </label>
+      <Toggle
+        id="use-provider-interval"
+        aria-label={$t('subscr.use_provider_interval')}
+        bind:checked={formUseProviderInterval}
+      />
       <label for="use-provider-interval" class="checkbox-label">
         {$t('subscr.use_provider_interval')}
         {#if editingSub && editingSub.profile_update_hours && editingSub.profile_update_hours > 0}
@@ -462,8 +443,8 @@
   .form-group-checkbox {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-top: 4px;
+    gap: var(--spacing-3);
+    margin-top: var(--spacing-1);
   }
 
   .checkbox-label {
@@ -483,9 +464,9 @@
     font-weight: 600;
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 0;
-    margin: 12px 0 6px 0;
+    gap: var(--spacing-2);
+    padding: var(--spacing-1-5) 0;
+    margin: var(--spacing-3) 0 var(--spacing-1-5) 0;
     width: 100%;
     text-align: left;
     transition: color var(--transition-fast);
@@ -502,18 +483,18 @@
   .advanced-fields-box {
     display: flex;
     flex-direction: column;
-    gap: 16px;
-    padding: 16px;
+    gap: var(--spacing-4);
+    padding: var(--spacing-4);
     background: rgba(0, 0, 0, 0.15);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    margin-top: 4px;
-    margin-bottom: 12px;
+    margin-top: var(--spacing-1);
+    margin-bottom: var(--spacing-3);
   }
 
   .missing-group-badge {
     font-size: var(--font-size-xs);
-    padding: 1px 6px;
+    padding: 1px var(--spacing-1-5);
     background: color-mix(in srgb, var(--danger) 15%, transparent);
     color: var(--danger);
     border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);

@@ -346,7 +346,7 @@
   .config-notices {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
     min-width: 0;
   }
 
@@ -362,7 +362,7 @@
 
   .config-notices .alert :global(svg) {
     flex: none;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   /* Нейтральное уведомление: accent для уведомлений закрыт, цвет — вторичный текст */

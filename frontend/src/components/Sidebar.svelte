@@ -694,7 +694,7 @@
   .sidebar-nav {
     flex: 1;
     overflow-y: auto;
-    padding: 4px 0 10px;
+    padding: var(--spacing-1) 0 var(--spacing-2-5);
     /* CR-02: this list can overflow the viewport (e.g. the System/Tools
        groups push "Настройки" past the fold on short windows). A hidden
        scrollbar left zero affordance that more items existed below — the
@@ -742,26 +742,26 @@
 
   .sidebar-nav::-webkit-scrollbar-thumb {
     background: var(--scrollbar-thumb);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
   }
 
   .sidebar-footer {
     border-top: 1px solid var(--border);
-    padding: 0.5rem 0;
+    padding: var(--spacing-2) 0;
     background: var(--bg-card);
     flex-shrink: 0;
   }
 
   @media (max-width: 768px) {
     :global(.nav-group summary) {
-      padding: 8px 14px 6px !important;
+      padding: var(--spacing-2) var(--spacing-3-5) var(--spacing-1-5) !important;
     }
     :global(.nav-item) {
-      padding: 9px 14px !important;
+      padding: 9px var(--spacing-3-5) !important;
       min-height: 40px;
     }
     .sidebar-footer {
-      padding: 6px 0;
+      padding: var(--spacing-1-5) 0;
     }
   }
 
@@ -774,8 +774,8 @@
     transform: translateY(-50%);
     background: var(--bg-deep);
     color: var(--fg-primary);
-    padding: 6px 10px;
-    border-radius: 6px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
+    border-radius: var(--radius-md);
     font-size: var(--font-size-xs);
     font-weight: 700;
     line-height: 1.2;
@@ -801,7 +801,7 @@
     justify-content: center;
     min-width: 16px;
     height: 16px;
-    padding: 0 4px;
+    padding: 0 var(--spacing-1);
     border-radius: var(--radius-full);
     background: var(--accent);
     color: var(--btn-primary-text);

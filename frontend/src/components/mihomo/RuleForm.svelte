@@ -47,7 +47,7 @@
       <label class="form-label" for="rule-value">{$t('rules.value')}</label>
       <input
         id="rule-value"
-        class="form-input"
+        class="input input-sm"
         bind:value={nr.value}
         placeholder={nr.type === 'GEOIP'
           ? 'CN'
@@ -72,23 +72,23 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .form-row {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
   .form-row2 {
     display: flex;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
   .form-col {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
     flex: 1 1 140px;
     min-width: 140px;
   }
@@ -99,30 +99,15 @@
     font-weight: 500;
   }
 
-  .form-input {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--fg-primary);
-    font-size: var(--font-size-sm);
-    padding: 6px 10px;
-    width: 100%;
-    transition: border-color var(--transition-fast);
-  }
-
-  .form-input:focus {
-    border-color: var(--accent);
-  }
-
   .form-actions {
     position: sticky;
     bottom: -20px;
     background: var(--bg-card);
-    padding: 12px 0 0 0;
-    margin-top: 12px;
+    padding: var(--spacing-3) 0 0 0;
+    margin-top: var(--spacing-3);
     border-top: 1px solid var(--border);
     display: flex;
-    gap: 8px;
+    gap: var(--spacing-2);
     justify-content: flex-end;
     z-index: 10;
   }

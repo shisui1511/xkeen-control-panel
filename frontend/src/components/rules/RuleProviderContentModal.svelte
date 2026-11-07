@@ -67,7 +67,7 @@
 </script>
 
 <Modal
-  isOpen={true}
+  open={true}
   title={$t('rules.provider_content_title', { name })}
   maxWidth="720px"
   onclose={close}

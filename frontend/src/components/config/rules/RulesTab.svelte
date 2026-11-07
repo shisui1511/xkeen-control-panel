@@ -317,14 +317,14 @@
   .rules-tab {
     display: flex;
     flex-direction: column;
-    gap: var(--grid-gap, 16px);
+    gap: var(--grid-gap);
     min-width: 0;
   }
 
   .rules-skeleton {
     display: flex;
     flex-direction: column;
-    gap: var(--grid-gap, 16px);
+    gap: var(--grid-gap);
   }
 
   .rules-panel {
@@ -332,7 +332,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: var(--spacing-2) var(--spacing-4);
-    min-height: var(--btn-h, 38px);
+    min-height: var(--btn-h);
   }
 
   /* «Добавить правило» всегда у правого края, «Пресет» и счётчик — слева */

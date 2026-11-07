@@ -6,6 +6,7 @@
   import { t } from '../i18n';
   import { showToast } from '../stores';
   import Icon from '../lib/components/Icon.svelte';
+  import StatusBadge from './StatusBadge.svelte';
 
   interface Props {
     /** shell — интерактивная оболочка; xkeen-install — официальный установщик XKeen */
@@ -343,21 +344,22 @@
         {/if}
       </div>
 
-      <div class="status-pill {status}">
-        <span class="dot"></span>
-        <span class="status-name">
-          {#if status === 'connected'}
-            {$t('console.status_connected')}
-          {:else if status === 'connecting'}
-            {$t('console.status_connecting')}
-          {:else}
-            {$t('console.status_disconnected')}
-          {/if}
-        </span>
-      </div>
+      <StatusBadge
+        variant={status === 'connected'
+          ? 'running'
+          : status === 'connecting'
+            ? 'warning'
+            : 'stopped'}
+        pulse={status === 'connecting'}
+        label={status === 'connected'
+          ? $t('console.status_connected')
+          : status === 'connecting'
+            ? $t('console.status_connecting')
+            : $t('console.status_disconnected')}
+      />
 
       {#if sessionLimitHit}
-        <span class="badge badge-danger">
+        <span class="badge badge--tag badge-danger">
           {$t('console.terminal_session_limit')}
         </span>
       {/if}
@@ -529,23 +531,23 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 16px;
+    padding: var(--spacing-2-5) var(--spacing-4);
     background: var(--bg-elevated);
     border-bottom: 1px solid var(--border);
-    gap: 12px;
+    gap: var(--spacing-3);
     flex-wrap: wrap;
   }
 
   .header-left {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .terminal-title {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-primary);
@@ -554,7 +556,7 @@
 
   .shell-badge {
     display: inline-block;
-    padding: 1px 6px;
+    padding: 1px var(--spacing-1-5);
     font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     color: var(--accent);
@@ -563,78 +565,16 @@
     border-radius: var(--radius-sm);
   }
 
-  .status-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 2px 8px;
-    border-radius: 12px;
-    font-size: var(--font-size-xs);
-    font-weight: 500;
-  }
-
-  .status-pill .dot {
-    width: 6px;
-    height: 6px;
-    min-width: 6px;
-    min-height: 6px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .status-pill.connected {
-    background: color-mix(in srgb, var(--success) 12%, transparent);
-    color: var(--success);
-    border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
-  }
-
-  .status-pill.connected .dot {
-    background: var(--success);
-    box-shadow: 0 0 6px color-mix(in srgb, var(--success) 70%, transparent);
-  }
-
-  .status-pill.connecting {
-    background: color-mix(in srgb, var(--warning) 12%, transparent);
-    color: var(--warning);
-    border: 1px solid color-mix(in srgb, var(--warning) 25%, transparent);
-  }
-
-  .status-pill.connecting .dot {
-    background: var(--warning);
-    box-shadow: 0 0 6px color-mix(in srgb, var(--warning) 70%, transparent);
-    animation: blink 1.2s infinite;
-  }
-
-  .status-pill.disconnected {
-    background: color-mix(in srgb, var(--danger) 12%, transparent);
-    color: var(--danger);
-    border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
-  }
-
-  .status-pill.disconnected .dot {
-    background: var(--danger);
-  }
-
-  @keyframes blink {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.3;
-    }
-  }
-
   .header-right {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .header-right :global(.btn) {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     font-size: var(--font-size-xs);
   }
 
@@ -642,7 +582,7 @@
     flex: 1;
     position: relative;
     background: var(--bg-terminal);
-    padding: 10px 14px;
+    padding: var(--spacing-2-5) var(--spacing-3-5);
     overflow: hidden;
     min-height: 0;
   }
@@ -688,19 +628,19 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 6px 16px;
+    padding: var(--spacing-1-5) var(--spacing-4);
     background: var(--bg-elevated);
     border-top: 1px solid var(--border);
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .footer-hints,
   .footer-meta {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: var(--spacing-3-5);
   }
 
   .hint {
@@ -730,7 +670,7 @@
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
     background: var(--bg-card);
-    padding: 2px 7px;
+    padding: var(--spacing-0-5) 7px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
   }
@@ -742,8 +682,8 @@
   @media (pointer: coarse), (max-width: 768px) {
     .touch-keys {
       display: flex;
-      gap: 6px;
-      padding: 6px 8px;
+      gap: var(--spacing-1-5);
+      padding: var(--spacing-1-5) var(--spacing-2);
       overflow-x: auto;
       scrollbar-width: none;
       background: var(--bg-elevated);
@@ -758,7 +698,7 @@
       flex-shrink: 0;
       min-width: 44px;
       height: 40px;
-      padding: 0 10px;
+      padding: 0 var(--spacing-2-5);
       background: var(--bg-card);
       border: 1px solid var(--border-strong);
       border-radius: var(--radius-sm);
@@ -788,7 +728,7 @@
       display: none;
     }
     .footer-hints {
-      gap: 8px;
+      gap: var(--spacing-2);
     }
   }
 </style>

@@ -15,14 +15,14 @@
     content: string;
     language?: 'json' | 'yaml';
     storageKey: string;
-    isOpen?: boolean;
-    onClose?: () => void;
+    open?: boolean;
+    onclose?: () => void;
     title?: string;
     tabs?: PreviewTab[];
     activeTab?: string;
     onTabChange?: (tabId: string) => void;
     fileName?: string;
-    testId?: string;
+    testid?: string;
     children?: import('svelte').Snippet;
   }
 
@@ -30,14 +30,14 @@
     content,
     language = 'json',
     storageKey,
-    isOpen = true,
-    onClose,
+    open: isOpen = true,
+    onclose: onClose,
     title,
     tabs,
     activeTab,
     onTabChange,
     fileName,
-    testId,
+    testid: testId,
     children
   }: Props = $props();
 
@@ -300,7 +300,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
     background: var(--bg-card);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
@@ -309,7 +309,7 @@
   .preview-title-wrap {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .preview-title {
@@ -323,14 +323,14 @@
     background: var(--surface-tint);
     border: 1px solid var(--border-light);
     color: var(--fg-secondary);
-    padding: 1px 6px;
-    border-radius: 10px;
+    padding: 1px var(--spacing-1-5);
+    border-radius: var(--radius-lg);
   }
 
   .preview-header-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .preview-tabs-bar {
@@ -340,8 +340,8 @@
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
     scrollbar-width: none;
-    padding: 2px 4px 0 4px;
-    gap: 2px;
+    padding: var(--spacing-0-5) var(--spacing-1) 0 var(--spacing-1);
+    gap: var(--spacing-0-5);
     flex-shrink: 0;
   }
 
@@ -350,7 +350,7 @@
   }
 
   .preview-tab-btn {
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     background: transparent;
     border: none;
     border-bottom: 2px solid transparent;
@@ -379,7 +379,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     background: var(--bg-elevated);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
@@ -394,22 +394,22 @@
   .preview-tools-right {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .btn-tool-action {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     height: 24px;
-    padding: 2px 8px;
+    padding: var(--spacing-0-5) var(--spacing-2);
     font-size: var(--font-size-xs);
   }
 
   .constructor-preview-panel {
     flex: 1;
     margin: 0;
-    padding: 14px 16px;
+    padding: var(--spacing-3-5) var(--spacing-4);
     background: var(--code-bg);
     color: var(--code-fg);
     border: none;
@@ -461,7 +461,7 @@
   }
 
   .constructor-preview-footer {
-    margin-top: 12px;
+    margin-top: var(--spacing-3);
     flex-shrink: 0;
   }
 

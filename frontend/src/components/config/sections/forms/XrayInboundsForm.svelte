@@ -354,7 +354,7 @@
               <span class="xi-text" data-testid="section-inbound-tag-{i}">
                 {row.tag}
               </span>
-              <span class="badge xi-badge" data-testid="section-inbound-pinned-{i}">
+              <span class="badge badge--tag xi-badge" data-testid="section-inbound-pinned-{i}">
                 {$t('cfg.sec.pinned')}
               </span>
             {:else}
@@ -377,7 +377,7 @@
                 onchange={() => onField(i)}
               />
               {#if readonly && fixed}
-                <span class="badge xi-badge" data-testid="section-inbound-pinned-{i}">
+                <span class="badge badge--tag xi-badge" data-testid="section-inbound-pinned-{i}">
                   {$t('cfg.sec.pinned')}
                 </span>
               {/if}

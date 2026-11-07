@@ -43,7 +43,7 @@
   .skeleton-text-line {
     height: 14px;
     width: 100%;
-    margin-bottom: 8px;
+    margin-bottom: var(--spacing-2);
   }
   .skeleton-card {
     height: 100px;

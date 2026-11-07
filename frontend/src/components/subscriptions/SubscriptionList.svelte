@@ -314,7 +314,7 @@
 </script>
 
 <div class="stats-chips-row mb-3">
-  <span class="chip chip-default">
+  <span class="badge badge-neutral">
     {pluralize(
       stats.total,
       $t('subscr.total_one', { count: String(stats.total) }),
@@ -322,12 +322,12 @@
       $t('subscr.total_many', { count: String(stats.total) })
     )}
   </span>
-  <span class="chip chip-default">
+  <span class="badge badge-neutral">
     <b>{stats.nodes}</b>
     {$t('subscr.nodes_total_label')}
   </span>
   {#if stats.next !== '—'}
-    <span class="chip chip-default chip--icon" data-testid="subs-next-update">
+    <span class="badge badge-neutral badge--icon" data-testid="subs-next-update">
       <svg
         width="12"
         height="12"
@@ -399,7 +399,7 @@
           {/if}
           {#if sub.last_error && (sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0) > 0}
             <span
-              class="badge badge-warning"
+              class="badge badge--tag badge-warning"
               style="margin-left: 8px;"
               title={$t('subscr.cached_fallback_tooltip')
                 .replace('{date}', formatDate(sub.last_update))
@@ -408,7 +408,7 @@
               {$t('subscr.cached_fallback')}
             </span>
           {:else if isFormatError(sub.last_error)}
-            <span class="badge badge-error" style="margin-left: 8px;">
+            <span class="badge badge--tag badge-danger" style="margin-left: 8px;">
               {$t('subscr.format_error')}
             </span>
           {/if}
@@ -556,7 +556,7 @@
 
       {#if sub.last_error}
         {@const nodeCount = sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0}
-        {@const errorColor = nodeCount > 0 ? 'var(--warning, #f0b450)' : 'var(--danger)'}
+        {@const errorColor = nodeCount > 0 ? 'var(--warning)' : 'var(--danger)'}
         <div
           class="sub-error-details"
           style="font-size: var(--font-size-sm); color: {errorColor}; margin: -4px 0 8px 34px; line-height: 1.4; font-family: var(--font-family-sans); word-break: break-word;"
@@ -618,7 +618,7 @@
           {#if sub.enabled && sub.enable_xray && sub.next_update}
             <span class="meta-divider">|</span>
             <span
-              class="chip chip-default chip--icon"
+              class="badge badge-neutral badge--icon"
               data-testid="sub-next-update-chip"
               title={subRefreshTooltip(sub)}
             >
@@ -627,7 +627,7 @@
             </span>
           {:else if sub.enabled && !sub.enable_xray && sub.enable_mihomo}
             <span class="meta-divider">|</span>
-            <span class="chip chip-default chip--icon" data-testid="sub-mihomo-refresh-chip">
+            <span class="badge badge-neutral badge--icon" data-testid="sub-mihomo-refresh-chip">
               {$t('subscr.updated_by_mihomo', {
                 hours: String(sub.refresh_interval_hours ?? sub.interval)
               })}
@@ -807,14 +807,14 @@
     display: grid;
     /* minmax(0, 1fr): иначе колонка растёт до min-content самой широкой строки карточки */
     grid-template-columns: minmax(0, 1fr);
-    gap: 14px;
+    gap: var(--spacing-3-5);
   }
 
   .sub-card {
-    padding: 24px;
+    padding: var(--spacing-6);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
     position: relative;
     min-width: 0;
   }
@@ -824,13 +824,13 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 16px;
+    gap: var(--spacing-4);
   }
 
   .sub-header-left {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--spacing-2-5);
     flex: 1;
     min-width: 0;
   }
@@ -839,12 +839,12 @@
   .collapse-toggle {
     background: transparent;
     border: none;
-    padding: 4px;
+    padding: var(--spacing-1);
     color: var(--fg-dim);
     cursor: pointer;
     display: grid;
     place-items: center;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     transition:
       color var(--transition-fast),
       background var(--transition-fast);
@@ -913,7 +913,7 @@
 
   /* D-10: подпись бренда провайдера — вторичный текст, имя из формы важнее */
   .sub-profile-title {
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     white-space: nowrap;
     overflow: hidden;
@@ -923,21 +923,21 @@
 
   /* D-16: провайдер отклонил устройство, все узлы — заглушки */
   .sub-device-rejected {
-    margin: 0 0 8px 34px;
-    padding: 10px 12px;
+    margin: 0 0 var(--spacing-2) 34px;
+    padding: var(--spacing-2-5) var(--spacing-3);
     border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
-    border-radius: var(--radius-md, 6px);
+    border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--danger) 8%, transparent);
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    font-size: var(--font-size-sm, 13px);
+    gap: var(--spacing-1);
+    font-size: var(--font-size-sm);
     line-height: 1.4;
     word-break: break-word;
   }
 
   .sub-warning-details {
-    margin: -4px 0 8px 34px;
+    margin: calc(-1 * var(--spacing-1)) 0 var(--spacing-2) 34px;
     font-size: var(--font-size-sm);
     line-height: 1.4;
     color: var(--warning);
@@ -963,7 +963,7 @@
   .sub-header-right {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--spacing-3);
     flex-shrink: 0;
   }
 
@@ -977,8 +977,8 @@
     background: rgba(var(--accent-rgb), 0.1);
     border: 1px solid rgba(var(--accent-rgb), 0.25);
     color: var(--accent);
-    padding: 2px 10px;
-    border-radius: 12px;
+    padding: var(--spacing-0-5) var(--spacing-2-5);
+    border-radius: var(--radius-xl);
     font-size: var(--font-size-xs);
     font-weight: 700;
     transition:
@@ -994,10 +994,10 @@
   .action-icon-btn {
     background: transparent;
     border: none;
-    padding: 6px;
+    padding: var(--spacing-1-5);
     color: var(--fg-dim);
     cursor: pointer;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     display: grid;
     place-items: center;
     transition:
@@ -1033,14 +1033,14 @@
     align-items: center;
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
-    padding-bottom: 2px;
+    padding-bottom: var(--spacing-0-5);
   }
 
   .sub-meta-left {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 4px 6px;
+    gap: var(--spacing-1) var(--spacing-1-5);
     min-width: 0;
   }
 
@@ -1079,8 +1079,8 @@
     background: color-mix(in srgb, var(--purple) 12%, transparent);
     color: var(--purple);
     border: 1px solid color-mix(in srgb, var(--purple) 30%, transparent);
-    padding: 4px 8px;
-    border-radius: 12px;
+    padding: var(--spacing-1) var(--spacing-2);
+    border-radius: var(--radius-xl);
     font-size: var(--font-size-xs);
     font-weight: 700;
     white-space: nowrap;
@@ -1099,8 +1099,8 @@
   /* Кнопки поддержки и объявления */
   .sub-actions-row {
     display: flex;
-    gap: 10px;
-    margin-top: 4px;
+    gap: var(--spacing-2-5);
+    margin-top: var(--spacing-1);
     align-items: center;
   }
 
@@ -1108,14 +1108,14 @@
     background: color-mix(in srgb, var(--purple) 14%, transparent);
     border: 1px solid color-mix(in srgb, var(--purple) 30%, transparent);
     color: var(--purple);
-    padding: 6px 14px;
+    padding: var(--spacing-1-5) var(--spacing-3-5);
     border-radius: 20px;
     font-size: var(--font-size-xs);
     font-weight: 600;
     text-decoration: none;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     height: 28px;
     transition:
       color var(--transition-fast),
@@ -1139,13 +1139,13 @@
     background: color-mix(in srgb, var(--warning) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
     color: var(--warning);
-    padding: 6px 14px;
+    padding: var(--spacing-1-5) var(--spacing-3-5);
     border-radius: 20px;
     font-size: var(--font-size-xs);
     font-weight: 600;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     height: 28px;
     cursor: pointer;
     transition:
@@ -1169,8 +1169,8 @@
     background: var(--bg-elevated);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
-    padding: 16px;
+    box-shadow: var(--shadow-lg);
+    padding: var(--spacing-4);
     width: 380px;
     z-index: 250;
     opacity: 0;
@@ -1181,7 +1181,7 @@
       transform var(--transition-fast);
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
   .announcement-popover::before {
     content: '';
@@ -1214,12 +1214,12 @@
   .inline-announcement-warn {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
+    gap: var(--spacing-2);
     background: color-mix(in srgb, var(--danger) 5%, transparent);
     border: 1px solid color-mix(in srgb, var(--danger) 15%, transparent);
-    border-radius: var(--radius-sm, 4px);
-    padding: 8px 12px;
-    margin-bottom: 12px;
+    border-radius: var(--radius-sm);
+    padding: var(--spacing-2) var(--spacing-3);
+    margin-bottom: var(--spacing-3);
     text-align: left;
   }
 
@@ -1250,12 +1250,12 @@
   /* Раздел предпросмотра нод (Компактный инлайн-вид) */
   .nodes-preview-content {
     border-top: 1px solid var(--border);
-    margin-top: 8px;
-    padding-top: 16px;
+    margin-top: var(--spacing-2);
+    padding-top: var(--spacing-4);
     background: transparent;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
 
   .timer-icon {
@@ -1305,12 +1305,12 @@
     position: absolute;
     right: 0;
     top: 100%;
-    margin-top: 6px;
+    margin-top: var(--spacing-1-5);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
-    z-index: 100;
+    box-shadow: var(--shadow-lg);
+    z-index: var(--z-dropdown);
     min-width: 140px;
     overflow: hidden;
     display: flex;
@@ -1320,7 +1320,7 @@
   .dropdown-menu button {
     background: none;
     border: none;
-    padding: 10px 14px;
+    padding: var(--spacing-2-5) var(--spacing-3-5);
     text-align: left;
     font-size: var(--font-size-sm);
     color: var(--fg-primary);
@@ -1344,7 +1344,7 @@
   @media (max-width: 768px) {
     .sub-header-row {
       flex-wrap: wrap;
-      gap: 12px;
+      gap: var(--spacing-3);
     }
     .sub-header-left {
       width: 100%;
@@ -1355,7 +1355,7 @@
     }
     .sub-meta-row {
       flex-wrap: wrap;
-      gap: 8px;
+      gap: var(--spacing-2);
     }
     /* Всплывающее объявление привязано к строке кнопок на всю её ширину: от кнопки
        «Объявление» оно уходило за правый край окна и растягивало страницу */

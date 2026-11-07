@@ -28,18 +28,18 @@
 
 <li class="node-row" class:dimmed={item.dimmed} data-testid="nodes-node-{node.key}">
   <span class="node-name" title={node.name}>{node.name}</span>
-  <span class="chip chip-default node-proto">{node.protocol}</span>
+  <span class="badge badge-neutral node-proto">{node.protocol}</span>
   <span class="node-addr">{node.address}</span>
   {#if item.mark === 'only_xray' || item.mark === 'only_mihomo'}
-    <span class="chip chip-info node-mark" title={reason || undefined} data-mark={item.mark}>
+    <span class="badge badge-info node-mark" title={reason || undefined} data-mark={item.mark}>
       {$t('cfg.nodes.only_kernel', { kernel: kernelName })}
     </span>
   {:else if item.mark === 'unsupported'}
-    <span class="chip chip-warning node-mark" title={unsupportedReason} data-mark="unsupported">
+    <span class="badge badge-warning node-mark" title={unsupportedReason} data-mark="unsupported">
       {$t('cfg.nodes.unsupported', { reason: unsupportedReason })}
     </span>
   {:else if item.mark === 'excluded'}
-    <span class="chip chip-default node-mark" data-mark="excluded">
+    <span class="badge badge-neutral node-mark" data-mark="excluded">
       {$t('cfg.nodes.excluded')}
     </span>
   {/if}

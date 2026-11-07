@@ -555,7 +555,7 @@ test('config-add: уже добавленный узел помечен, Доб�
   await page.locator('#nodes-add-input').fill(link);
   await expect(page.getByTestId('nodes-preview-my')).toBeVisible({ timeout: T.action });
   await page.getByTestId('nodes-preview-my-toggle').click();
-  await expect(page.getByTestId('nodes-preview-nodes').locator('.chip-default')).toHaveCount(1);
+  await expect(page.getByTestId('nodes-preview-nodes').locator('.badge-neutral')).toHaveCount(1);
   await expect(page.getByTestId('nodes-add-submit')).toBeDisabled();
 
   await guard.assertClean();

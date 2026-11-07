@@ -410,16 +410,16 @@
   .rules-page {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: var(--spacing-5);
     width: 100%;
   }
 
   .tabs-wrapper {
-    margin-top: -4px;
+    margin-top: calc(-1 * var(--spacing-1));
   }
 
   .tabs-note {
-    margin: 8px 0 0;
+    margin: var(--spacing-2) 0 0;
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     overflow-wrap: anywhere;

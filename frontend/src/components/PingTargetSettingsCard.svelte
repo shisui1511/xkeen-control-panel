@@ -118,7 +118,7 @@
   .preset-row {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--spacing-3);
     cursor: pointer;
     transition: background var(--transition-fast);
   }
@@ -161,7 +161,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
+    gap: var(--spacing-4);
   }
 
   .field-row-name {
@@ -178,7 +178,7 @@
   .custom-url-wrapper {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .custom-url-wrapper {
@@ -199,7 +199,7 @@
   .form-error {
     font-size: var(--font-size-xs);
     color: var(--danger);
-    margin-top: 4px;
+    margin-top: var(--spacing-1);
   }
 
   .is-invalid {

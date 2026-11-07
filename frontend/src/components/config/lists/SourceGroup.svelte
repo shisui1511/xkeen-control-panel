@@ -103,6 +103,7 @@
                   <span class="toggle-switch">
                     <input
                       type="checkbox"
+                      role="switch"
                       checked={isOn(s)}
                       disabled={disabled ||
                         !!s.draft ||
@@ -149,7 +150,7 @@
 
   /* Строки набора — на всю ширину карточки, отступ от края как у строк настроек */
   .sg-list :global(.sr-row) {
-    padding: 12px var(--card-pad);
+    padding: var(--spacing-3) var(--card-pad);
   }
 
   .sg-list :global(.sr-row:first-child) {
@@ -157,7 +158,7 @@
   }
 
   .sg-toggle {
-    min-height: var(--btn-h, 32px);
+    min-height: var(--btn-h);
   }
 
   @media (pointer: coarse), (max-width: 768px) {

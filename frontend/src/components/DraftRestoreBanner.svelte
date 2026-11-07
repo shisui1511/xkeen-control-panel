@@ -71,12 +71,12 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    padding: 12px 18px;
+    gap: var(--spacing-4);
+    padding: var(--spacing-3) 18px;
     background: color-mix(in srgb, var(--warning) 12%, transparent);
     border: 1px solid var(--warning);
     border-radius: var(--radius-md);
-    margin-bottom: 16px;
+    margin-bottom: var(--spacing-4);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     animation: fadeIn var(--duration-enter) var(--ease-out);
   }
@@ -84,7 +84,7 @@
   .banner-content {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--spacing-3);
     color: var(--fg-primary);
     font-size: var(--font-size-base);
     font-weight: 500;
@@ -102,7 +102,7 @@
   .banner-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     flex-shrink: 0;
   }
 
@@ -114,7 +114,7 @@
     .banner-actions {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 8px;
+      gap: var(--spacing-2);
       width: 100%;
     }
     :global(.banner-actions .btn) {

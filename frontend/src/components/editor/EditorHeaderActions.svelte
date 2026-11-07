@@ -232,7 +232,7 @@
     align-items: center;
     flex-wrap: wrap;
     max-width: 100%;
-    gap: 8px;
+    gap: var(--spacing-2);
     position: relative;
   }
 
@@ -243,8 +243,8 @@
 
   .btn-overflow-trigger {
     display: none;
-    padding: 4px 10px;
-    gap: 4px;
+    padding: var(--spacing-1) var(--spacing-2-5);
+    gap: var(--spacing-1);
     align-items: center;
     justify-content: center;
   }
@@ -259,19 +259,19 @@
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-md);
     min-width: 180px;
-    padding: 4px;
+    padding: var(--spacing-1);
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     animation: menuPop var(--duration-fast) var(--ease-out);
   }
 
   .dropdown-item {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     width: 100%;
-    padding: 8px 10px;
+    padding: var(--spacing-2) var(--spacing-2-5);
     background: transparent;
     border: none;
     border-radius: var(--radius-sm);
@@ -292,7 +292,7 @@
   }
 
   .btn-compact {
-    padding: 4px 10px;
+    padding: var(--spacing-1) var(--spacing-2-5);
     font-size: var(--font-size-xs);
     height: 30px;
     display: inline-flex;
@@ -303,7 +303,7 @@
   .btn-accent {
     background: linear-gradient(180deg, var(--accent), var(--accent-2));
     border: 1px solid var(--accent);
-    color: var(--btn-primary-text, var(--bg-deep));
+    color: var(--btn-primary-text);
     font-weight: 600;
   }
   .btn-accent:hover:not(:disabled) {
@@ -318,8 +318,8 @@
   .ks-dot-spin {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    margin-right: 6px;
+    gap: var(--spacing-1);
+    margin-right: var(--spacing-1-5);
   }
   .ks-dot {
     width: 6px;

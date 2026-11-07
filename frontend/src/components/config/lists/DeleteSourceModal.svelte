@@ -228,10 +228,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={mode === 'delete' ? $t('cfg.geo.del_title', { file }) : $t('cfg.geo.off_title', { name })}
   maxWidth="720px"
-  dataTestid="geo-delete-modal"
+  testid="geo-delete-modal"
   onclose={close}
 >
   <div class="dm-body">
@@ -479,7 +479,7 @@
 
   .dm-link {
     align-self: flex-start;
-    color: var(--accent-text, var(--accent));
+    color: var(--accent-text);
     text-decoration: underline;
   }
 

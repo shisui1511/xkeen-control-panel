@@ -6,14 +6,14 @@
   import Button from '../Button.svelte';
 
   interface Props {
-    isOpen: boolean;
+    open: boolean;
     rule: UserRule | null;
     groups: string[];
     onSave: (r: UserRule) => void;
-    onClose: () => void;
+    onclose: () => void;
   }
 
-  let { isOpen, rule, groups, onSave, onClose }: Props = $props();
+  let { open: isOpen, rule, groups, onSave, onclose: onClose }: Props = $props();
 
   // Начальные значения формы пересчитываются при каждом открытии и при смене rule/groups.
   // Поля ниже — записываемые $derived: ввод пользователя переопределяет значение
@@ -87,7 +87,7 @@
 </script>
 
 <Modal
-  {isOpen}
+  open={isOpen}
   title={rule ? $t('rules.edit_rule') : $t('rules.add_rule')}
   onclose={onClose}
   maxWidth="500px"
@@ -153,19 +153,19 @@
   .rule-form {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--spacing-4);
   }
 
   .form-group {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .form-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   @media (max-width: 480px) {
@@ -183,7 +183,7 @@
   .input {
     width: 100%;
     height: var(--input-h);
-    padding: 0 12px;
+    padding: 0 var(--spacing-3);
     border-radius: var(--radius-md);
     border: 1px solid var(--border);
     background: var(--bg-elevated);
@@ -211,9 +211,9 @@
   .modal-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 10px;
-    margin-top: 8px;
-    padding-top: 16px;
+    gap: var(--spacing-2-5);
+    margin-top: var(--spacing-2);
+    padding-top: var(--spacing-4);
     border-top: 1px solid var(--border);
   }
 </style>

@@ -73,12 +73,12 @@
     display: flex;
     align-items: center;
     gap: var(--spacing-2);
-    margin: 6px 0 0;
+    margin: var(--spacing-1-5) 0 0;
   }
 
   .strength-segments {
     display: flex;
-    gap: 4px;
+    gap: var(--spacing-1);
     flex: 1;
   }
 

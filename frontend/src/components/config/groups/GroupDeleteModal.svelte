@@ -156,10 +156,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={$t('cfg.groups.del_title', { name: group?.name ?? '' })}
   maxWidth="720px"
-  dataTestid="group-delete-modal"
+  testid="group-delete-modal"
   onclose={close}
 >
   <div class="gd-body">

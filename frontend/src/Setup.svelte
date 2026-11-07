@@ -156,7 +156,7 @@
 
 <style>
   .setup-title {
-    margin: 0 0 6px;
+    margin: 0 0 var(--spacing-1-5);
     font-size: var(--font-size-lg);
     font-weight: 600;
     text-align: center;
@@ -176,7 +176,7 @@
   }
 
   .setup-hint {
-    margin: 6px 0 0;
+    margin: var(--spacing-1-5) 0 0;
     font-size: var(--font-size-xs);
     text-align: left;
     overflow-wrap: anywhere;
@@ -185,7 +185,7 @@
   .setup-hint code {
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
-    padding: 0 4px;
+    padding: 0 var(--spacing-1);
     border-radius: var(--radius-xs);
     background: var(--surface-tint);
     /* Команда переносится целиком: разрыв на «--» ломает её при чтении и копировании */

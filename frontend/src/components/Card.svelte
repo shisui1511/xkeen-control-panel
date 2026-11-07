@@ -56,7 +56,7 @@
     align-items: center;
     justify-content: space-between;
     margin: calc(-1 * var(--card-pad)) calc(-1 * var(--card-pad)) 18px;
-    padding: 16px 22px 12px;
+    padding: var(--spacing-4) 22px var(--spacing-3);
     font-size: var(--font-size-xs);
     font-weight: 600;
     letter-spacing: 0.02em;
@@ -64,12 +64,12 @@
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   }
   :global([data-density='compact']) .card-title {
-    padding: 10px 14px 8px;
-    margin-bottom: 12px;
+    padding: var(--spacing-2-5) var(--spacing-3-5) var(--spacing-2);
+    margin-bottom: var(--spacing-3);
   }
   .card-actions {
     display: flex;
-    gap: 8px;
+    gap: var(--spacing-2);
     align-items: center;
   }
 </style>

@@ -14,7 +14,7 @@
     backupLoading = false,
     onSelectBackup,
     onRestoreBackup,
-    onClose
+    onclose: onClose
   }: {
     backups: string[];
     selectedBackup: string;
@@ -22,7 +22,7 @@
     backupLoading: boolean;
     onSelectBackup: (backup: string) => void;
     onRestoreBackup: (backup: string) => void;
-    onClose?: () => void;
+    onclose?: () => void;
   } = $props();
 
   // Мобильный лист — два экрана: список копий → сравнение на весь лист
@@ -173,10 +173,10 @@
     width: 240px;
     border-right: 1px solid var(--border);
     overflow-y: auto;
-    padding: 6px;
+    padding: var(--spacing-1-5);
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
     scrollbar-width: thin;
   }
 
@@ -196,7 +196,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 4px 6px;
+    padding: var(--spacing-1) var(--spacing-1-5);
     background: transparent;
     color: var(--fg-dim);
     border-radius: var(--radius);
@@ -217,7 +217,7 @@
     font-size: var(--font-size-xs);
     text-align: left;
     cursor: pointer;
-    padding: 4px 4px;
+    padding: var(--spacing-1) var(--spacing-1);
     border-radius: var(--radius);
   }
 
@@ -237,7 +237,7 @@
   }
 
   .restore-inline-btn {
-    padding: 2px 6px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
     font-size: var(--font-size-xs);
     opacity: 0;
     transition: opacity var(--transition-fast);
@@ -265,8 +265,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
-    padding: 8px 14px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2) var(--spacing-3-5);
     background: var(--surface-tint);
     border-bottom: 1px solid var(--border);
     font-size: var(--font-size-xs);
@@ -276,7 +276,7 @@
   .diff-body {
     flex: 1;
     overflow-y: auto;
-    padding: 10px 14px;
+    padding: var(--spacing-2-5) var(--spacing-3-5);
     background: var(--bg-page);
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
@@ -305,14 +305,14 @@
     background: color-mix(in srgb, var(--success) 12%, transparent);
     color: var(--success);
     border-left: 3px solid var(--success);
-    padding-left: 6px;
+    padding-left: var(--spacing-1-5);
   }
 
   .diff-line-removed {
     background: color-mix(in srgb, var(--danger) 12%, transparent);
     color: var(--danger);
     border-left: 3px solid var(--danger);
-    padding-left: 6px;
+    padding-left: var(--spacing-1-5);
   }
 
   .diff-line-collapsed {
@@ -320,10 +320,10 @@
     color: var(--fg-faint);
     text-align: center;
     font-style: italic;
-    padding: 4px 0;
+    padding: var(--spacing-1) 0;
     border-top: 1px dashed var(--border);
     border-bottom: 1px dashed var(--border);
-    margin: 4px 0;
+    margin: var(--spacing-1) 0;
   }
 
   .diff-line-unchanged {
@@ -354,9 +354,9 @@
     .drawer-topbar {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: var(--spacing-2);
       min-height: 52px;
-      padding: 4px 8px;
+      padding: var(--spacing-1) var(--spacing-2);
       border-bottom: 1px solid var(--border);
       flex-shrink: 0;
     }
@@ -372,11 +372,11 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 4px;
+      gap: var(--spacing-1);
       flex-shrink: 0;
       min-height: 44px;
       min-width: 44px;
-      padding: 6px 14px;
+      padding: var(--spacing-1-5) var(--spacing-3-5);
       font-size: var(--font-size-sm);
       background: var(--surface-tint);
       border: 1px solid var(--border);
@@ -405,7 +405,7 @@
       max-height: none;
       border: none;
       overflow-y: auto;
-      padding: 6px;
+      padding: var(--spacing-1-5);
     }
 
     .backup-item {
@@ -435,7 +435,7 @@
     }
 
     .diff-header {
-      padding: 8px 12px;
+      padding: var(--spacing-2) var(--spacing-3);
     }
 
     .diff-restore-btn {

@@ -139,14 +139,14 @@
 
 <style>
   .forgot-password {
-    margin-top: 16px;
+    margin-top: var(--spacing-4);
     text-align: center;
   }
 
   .forgot-password summary {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     list-style: none;
     cursor: pointer;
     font-size: var(--font-size-sm);
@@ -166,12 +166,12 @@
   }
 
   .forgot-password-content {
-    margin-top: 10px;
+    margin-top: var(--spacing-2-5);
     text-align: left;
   }
 
   .forgot-password-instructions {
-    margin: 0 0 8px;
+    margin: 0 0 var(--spacing-2);
     font-size: var(--font-size-base);
     color: var(--fg-secondary);
   }
@@ -186,7 +186,7 @@
   .forgot-password-cmd code {
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
-    padding: 0 4px;
+    padding: 0 var(--spacing-1);
     border-radius: var(--radius-xs);
     background: var(--surface-tint);
   }
@@ -194,8 +194,8 @@
   .remember-me {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-top: 8px;
+    gap: var(--spacing-2);
+    margin-top: var(--spacing-2);
     font-size: var(--font-size-sm);
     color: var(--fg-secondary);
     cursor: pointer;
@@ -207,7 +207,7 @@
   }
 
   .alert-error {
-    margin-top: 10px;
+    margin-top: var(--spacing-2-5);
     margin-bottom: 0;
   }
 </style>

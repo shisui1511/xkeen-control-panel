@@ -97,7 +97,7 @@
     border: 1px solid var(--border-control);
     background: var(--bg-elevated);
     color: var(--fg-primary);
-    padding: 0 32px 0 12px;
+    padding: 0 var(--spacing-8) 0 var(--spacing-3);
     font-family: var(--font-family-sans);
     font-size: var(--font-size-sm);
     cursor: pointer;

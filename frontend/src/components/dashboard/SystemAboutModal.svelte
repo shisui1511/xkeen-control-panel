@@ -3,16 +3,17 @@
   import Icon from '../../lib/components/Icon.svelte';
   import Modal from '../Modal.svelte';
   import Button from '../Button.svelte';
+  import Badge from '../Badge.svelte';
   import type { SystemStats } from './SystemResourcesWidget.svelte';
 
   let {
-    isOpen = false,
-    onClose,
+    open: isOpen = false,
+    onclose: onClose,
     systemStats,
     panelVersion
   }: {
-    isOpen: boolean;
-    onClose: () => void;
+    open: boolean;
+    onclose: () => void;
     systemStats: SystemStats | null;
     panelVersion: string;
   } = $props();
@@ -21,17 +22,17 @@
 </script>
 
 <Modal
-  {isOpen}
+  open={isOpen}
   title={$t('dash.system_about_title')}
   maxWidth="640px"
   onclose={onClose}
-  dataTestid="system-about-modal"
+  testid="system-about-modal"
 >
   <div class="about-modal-body">
     <!-- Section 1: Go Runtime Telemetry -->
     <section class="diag-section">
       <div class="section-head">
-        <Icon name="console" size={16} color="var(--accent, #29c2f0)" />
+        <Icon name="console" size={16} color="var(--accent)" />
         <h3 class="section-title">{$t('dash.go_runtime_title')}</h3>
       </div>
       <p class="section-desc">{$t('dash.go_runtime_desc')}</p>
@@ -75,7 +76,7 @@
     <!-- Section 2: Entware & System Environment -->
     <section class="diag-section">
       <div class="section-head">
-        <Icon name="network" size={16} color="var(--success, #46d18a)" />
+        <Icon name="network" size={16} color="var(--success)" />
         <h3 class="section-title">{$t('dash.entware_diag_title')}</h3>
       </div>
       <p class="section-desc">{$t('dash.entware_diag_desc')}</p>
@@ -100,9 +101,9 @@
         <div class="diag-item">
           <span class="diag-label">{$t('dash.wan_status')}</span>
           <span class="diag-val">
-            <span class="status-pill" class:status-pill-ok={systemStats?.wan_status === 'online'}>
+            <Badge tone={systemStats?.wan_status === 'online' ? 'success' : 'neutral'}>
               {systemStats?.wan_status || '—'}
-            </span>
+            </Badge>
           </span>
         </div>
         <div class="diag-item">
@@ -146,27 +147,27 @@
   .about-modal-body {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: var(--spacing-5);
     max-height: 75vh;
     overflow-y: auto;
-    padding-right: 4px;
+    padding-right: var(--spacing-1);
     scrollbar-width: thin;
   }
 
   .diag-section {
     background: var(--surface-tint-faint);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 10px);
-    padding: 16px;
+    border-radius: var(--radius-md);
+    padding: var(--spacing-4);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .section-head {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .section-title {
@@ -179,14 +180,14 @@
   .section-desc {
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
-    margin: -6px 0 4px;
+    margin: calc(-1 * var(--spacing-1-5)) 0 var(--spacing-1);
     line-height: 1.4;
   }
 
   .diag-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
 
   @media (max-width: 480px) {
@@ -198,8 +199,8 @@
   .diag-item {
     background: rgba(0, 0, 0, 0.2);
     border: 1px solid var(--border-light);
-    border-radius: var(--radius-sm, 6px);
-    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    padding: var(--spacing-2) var(--spacing-3);
     display: flex;
     flex-direction: column;
     gap: 3px;
@@ -223,22 +224,7 @@
   }
 
   .mono {
-    font-family: var(--font-family-mono, monospace);
-  }
-
-  .status-pill {
-    display: inline-block;
-    padding: 1px 6px;
-    border-radius: 4px;
-    font-size: var(--font-size-xs);
-    font-weight: 600;
-    background: var(--surface-tint-strong);
-    color: var(--fg-secondary);
-  }
-
-  .status-pill-ok {
-    background: color-mix(in srgb, var(--success) 15%, transparent);
-    color: var(--success);
+    font-family: var(--font-family-mono);
   }
 
   .text-success {
@@ -252,6 +238,6 @@
   .modal-actions-footer {
     display: flex;
     justify-content: flex-end;
-    padding-top: 4px;
+    padding-top: var(--spacing-1);
   }
 </style>
