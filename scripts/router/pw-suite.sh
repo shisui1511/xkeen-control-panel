@@ -36,6 +36,13 @@
 # воркеров `.playwright-artifacts-*` удаляются после каждого запуска Playwright и при выходе
 # этапа; артефакты упавших тестов (<артефакты>/<тест>/trace.zip, снимки) остаются.
 #
+# Потребители файлов этапа: results.tsv (или RT_RESULTS_NAME) — run.sh (итог и сводка),
+# branch-report.mjs, session.mjs (ожидания прохода; строки pw:run и pw:setup — служебные);
+# <ядро>/pw*/report*.json — branch-report.mjs (самые долгие тесты, теги ядра): pw-read/report-pages.json,
+# pw/report.json, pw-2/report.json и pw-switch/report.json под этот обход попадают; run.log,
+# parsed.tsv и artifacts/ читает только человек. Каталоги в <ядро>/<RT_ART_SUB>/ обход
+# branch-report.mjs не видит: подкаталог читает тот, кто его задал.
+#
 # Окружение:
 #   RT_SPECS   спеки через пробел (по умолчанию все tests/router/**/*.spec.ts);
 #              при --switch не используется
