@@ -44,7 +44,7 @@
     </label>
     <input
       id="rule-inbounds"
-      class="form-input"
+      class="input input-sm"
       bind:value={rule.inboundTagRaw}
       placeholder="dns-in-ytb, socks"
     />
@@ -56,7 +56,7 @@
     </label>
     <input
       id="rule-domains"
-      class="form-input"
+      class="input input-sm"
       data-testid="rule-domain-input"
       bind:value={rule.domainRaw}
       placeholder="geosite:youtube, google.com"
@@ -69,7 +69,7 @@
     </label>
     <input
       id="rule-ips"
-      class="form-input"
+      class="input input-sm"
       bind:value={rule.ipRaw}
       placeholder="geoip:private, 1.1.1.1"
     />
@@ -82,7 +82,7 @@
       </label>
       <input
         id="rule-ports"
-        class="form-input"
+        class="input input-sm"
         bind:value={rule.port}
         placeholder="80,443,1000-2000"
       />
@@ -139,26 +139,6 @@
     font-weight: 500;
     color: var(--fg-secondary);
     margin-bottom: var(--spacing-1);
-  }
-
-  .form-input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: var(--spacing-1-5) var(--spacing-2-5);
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--fg-primary);
-    font-size: var(--font-size-sm);
-    outline: none;
-    transition:
-      border-color var(--transition-fast),
-      background-color var(--transition-fast);
-  }
-
-  .form-input:focus {
-    border-color: var(--accent);
-    background: var(--bg-card);
   }
 
   .form-actions {

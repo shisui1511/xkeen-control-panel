@@ -1,142 +1,72 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import type { HTMLButtonAttributes } from 'svelte/elements';
 
-  let {
-    type = 'button',
-    variant = 'primary',
-    disabled = false,
-    loading = false,
-    title,
-    ariaLabel,
-    ariaDescribedby,
-    style,
-    class: className = '',
-    'data-testid': testId,
-    onclick,
-    children
-  }: {
+  // Кнопка панели. Своих стилей нет: вид задаёт .btn в global.css, поэтому <Button> и
+  // <button class="btn …"> выглядят одинаково. Новый код пишет <Button> (scripts/check-controls.cjs).
+  //   variant: primary — главное действие экрана; secondary — остальные; ghost — третьестепенное;
+  //            danger — подтверждение удаления в диалоге; danger-soft — удаление в строке;
+  //            warning — действие с риском (остановка, перезапуск).
+  //   size:    md (по умолчанию) · sm — мельче текст, та же высота · xs — компактная, 28px.
+  //   iconOnly — квадратная кнопка-иконка; ariaLabel тогда обязателен.
+  interface Props extends Omit<HTMLButtonAttributes, 'class' | 'type'> {
     type?: 'button' | 'submit' | 'reset';
-    variant?: 'primary' | 'secondary' | 'danger' | 'danger-soft' | 'warning';
+    variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-soft' | 'warning';
+    size?: 'md' | 'sm' | 'xs';
+    iconOnly?: boolean;
     disabled?: boolean;
     loading?: boolean;
     title?: string;
     ariaLabel?: string;
     /** Идентификатор элемента с постоянным пояснением, почему кнопка неактивна. */
     ariaDescribedby?: string;
-    style?: string;
     class?: string;
+    testid?: string;
     'data-testid'?: string;
-    onclick?: (event: MouseEvent) => void;
     children?: Snippet;
-  } = $props();
+  }
+
+  let {
+    type = 'button',
+    variant = 'primary',
+    size = 'md',
+    iconOnly = false,
+    disabled = false,
+    loading = false,
+    title,
+    ariaLabel,
+    ariaDescribedby,
+    class: className = '',
+    testid,
+    'data-testid': dataTestid,
+    children,
+    ...rest
+  }: Props = $props();
+
+  if (import.meta.env.DEV) {
+    $effect(() => {
+      if (iconOnly && !ariaLabel && !rest['aria-label'])
+        console.warn('Button: iconOnly button needs ariaLabel');
+    });
+  }
 </script>
 
 <button
+  {...rest}
   {type}
   class="btn btn-{variant} {className}"
+  class:btn-sm={size === 'sm'}
+  class:btn-xs={size === 'xs'}
+  class:btn-icon-only={iconOnly}
   disabled={disabled || loading}
+  aria-busy={loading || undefined}
   {title}
-  aria-label={ariaLabel}
-  aria-describedby={ariaDescribedby}
-  data-testid={testId}
-  {style}
-  {onclick}
+  aria-label={ariaLabel ?? rest['aria-label']}
+  aria-describedby={ariaDescribedby ?? rest['aria-describedby']}
+  data-testid={testid ?? dataTestid}
 >
   {#if loading}
     <span class="spinner" aria-hidden="true"></span>
-    <span class="sr-only">Loading...</span>
   {/if}
   {@render children?.()}
 </button>
-
-<style>
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--spacing-2);
-    padding: 9px var(--spacing-3-5);
-    border-radius: var(--radius-md);
-    font-family: var(--font-family-sans);
-    font-size: var(--font-size-sm);
-    font-weight: 600;
-    cursor: pointer;
-    transition:
-      background-color var(--transition-fast),
-      border-color var(--transition-fast),
-      color var(--transition-fast),
-      filter var(--transition-fast),
-      box-shadow var(--transition-fast),
-      opacity var(--transition-fast),
-      transform var(--transition-fast);
-    border: 1px solid transparent;
-  }
-  .btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .btn-primary {
-    background: linear-gradient(180deg, var(--accent), var(--accent-2));
-    color: var(--btn-primary-text);
-    box-shadow: 0 6px 18px -8px var(--accent);
-  }
-  .btn-primary:hover:not(:disabled) {
-    filter: brightness(1.07);
-    color: var(--btn-primary-text);
-  }
-
-  .btn-secondary {
-    background: transparent;
-    border-color: var(--border);
-    color: var(--fg-primary);
-  }
-  .btn-secondary:hover:not(:disabled) {
-    border-color: var(--accent-line);
-    color: var(--accent);
-    background: var(--hover);
-  }
-
-  .btn-danger {
-    background: var(--danger);
-    color: var(--on-danger);
-  }
-  .btn-danger:hover:not(:disabled) {
-    opacity: 0.92;
-    color: var(--on-danger);
-  }
-
-  .btn-warning {
-    background: var(--warning);
-    color: var(--btn-primary-text);
-  }
-  .btn-warning:hover:not(:disabled) {
-    opacity: 0.92;
-    color: var(--btn-primary-text);
-  }
-
-  .spinner {
-    width: 13px;
-    height: 13px;
-    border: 2px solid currentColor;
-    border-top-color: transparent;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
-  }
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-</style>

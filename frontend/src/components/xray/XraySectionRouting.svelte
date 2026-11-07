@@ -232,7 +232,7 @@
           >
           <input
             id="test-route-domain"
-            class="form-input"
+            class="input input-sm"
             data-testid="test-route-domain"
             bind:value={testRouteForm.domain}
             placeholder="example.com"
@@ -242,7 +242,7 @@
           <label class="form-label" for="test-route-ip">{$t('xray.test_route.target_ip')}</label>
           <input
             id="test-route-ip"
-            class="form-input"
+            class="input input-sm"
             data-testid="test-route-ip"
             bind:value={testRouteForm.ip}
             placeholder="1.2.3.4"
@@ -257,7 +257,7 @@
           <input
             id="test-route-port"
             type="number"
-            class="form-input"
+            class="input input-sm"
             data-testid="test-route-port"
             bind:value={testRouteForm.port}
             min="1"
@@ -288,7 +288,7 @@
         >
         <input
           id="test-route-inbound"
-          class="form-input"
+          class="input input-sm"
           data-testid="test-route-inbound"
           bind:value={testRouteForm.inboundTag}
           placeholder="proxy-in"
@@ -889,20 +889,6 @@
     font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
-  }
-
-  .form-input {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: var(--spacing-1-5) var(--spacing-2-5);
-    font-size: var(--font-size-sm);
-    color: var(--fg-primary);
-  }
-
-  .form-input:focus {
-    outline: none;
-    border-color: var(--accent);
   }
 
   :global(.form-select) {

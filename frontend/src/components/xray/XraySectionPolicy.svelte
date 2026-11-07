@@ -29,7 +29,7 @@
         <label class="form-label" for="policy-handshake">Handshake</label>
         <input
           id="policy-handshake"
-          class="form-input"
+          class="input input-sm"
           type="number"
           bind:value={policyConfig.levels['0'].handshake}
           oninput={markChanged}
@@ -39,7 +39,7 @@
         <label class="form-label" for="policy-connidle">ConnIdle</label>
         <input
           id="policy-connidle"
-          class="form-input"
+          class="input input-sm"
           type="number"
           bind:value={policyConfig.levels['0'].connIdle}
           oninput={markChanged}
@@ -51,7 +51,7 @@
         <label class="form-label" for="policy-uplink">UplinkOnly</label>
         <input
           id="policy-uplink"
-          class="form-input"
+          class="input input-sm"
           type="number"
           bind:value={policyConfig.levels['0'].uplinkOnly}
           oninput={markChanged}
@@ -61,7 +61,7 @@
         <label class="form-label" for="policy-downlink">DownlinkOnly</label>
         <input
           id="policy-downlink"
-          class="form-input"
+          class="input input-sm"
           type="number"
           bind:value={policyConfig.levels['0'].downlinkOnly}
           oninput={markChanged}
@@ -138,20 +138,6 @@
     font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
-  }
-
-  .form-input {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: var(--spacing-1-5) var(--spacing-2-5);
-    font-size: var(--font-size-sm);
-    color: var(--fg-primary);
-  }
-
-  .form-input:focus {
-    outline: none;
-    border-color: var(--accent);
   }
 
   .checkbox-container {

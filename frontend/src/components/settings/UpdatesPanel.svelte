@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from '../Toggle.svelte';
   import { onMount, onDestroy } from 'svelte';
   import { t, tp, currentLang } from '../../i18n';
   import { apiFetch, apiFetchJSON } from '../../lib/api';
@@ -607,32 +608,24 @@
               <span class="field-row-name">{$t('settings.update_auto_check')}</span>
               <div class="field-row-desc">{$t('settings.update_auto_check_desc')}</div>
             </div>
-            <label class="toggle-switch">
-              <input
-                type="checkbox"
-                aria-label={$t('settings.update_auto_check')}
-                checked={auto.auto_check}
-                disabled={savingAuto}
-                onchange={(e) => saveAuto({ auto_check: e.currentTarget.checked })}
-              />
-              <span class="toggle-slider"></span>
-            </label>
+            <Toggle
+              aria-label={$t('settings.update_auto_check')}
+              checked={auto.auto_check}
+              disabled={savingAuto}
+              onchange={(e) => saveAuto({ auto_check: e.currentTarget.checked })}
+            />
           </div>
           <div class="field-row">
             <div>
               <span class="field-row-name">{$t('settings.update_auto_install')}</span>
               <div class="field-row-desc">{$t('settings.update_auto_install_desc')}</div>
             </div>
-            <label class="toggle-switch">
-              <input
-                type="checkbox"
-                aria-label={$t('settings.update_auto_install')}
-                checked={auto.auto_install}
-                disabled={savingAuto}
-                onchange={(e) => saveAuto({ auto_install: e.currentTarget.checked })}
-              />
-              <span class="toggle-slider"></span>
-            </label>
+            <Toggle
+              aria-label={$t('settings.update_auto_install')}
+              checked={auto.auto_install}
+              disabled={savingAuto}
+              onchange={(e) => saveAuto({ auto_install: e.currentTarget.checked })}
+            />
           </div>
           {#if auto.auto_install}
             <div class="field-row">

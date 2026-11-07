@@ -257,7 +257,7 @@ async function openFlagOffDialog(page: Page): Promise<{ dialog: Locator; toggle:
   await page.goto('/#/settings', { timeout: T.page, waitUntil: 'domcontentloaded' });
   const row = page.getByTestId('config-layer-row');
   await expect(row).toBeVisible({ timeout: T.page });
-  const toggle = row.getByRole('checkbox');
+  const toggle = row.getByRole('switch');
   await expect(toggle).toBeChecked();
   await row.locator('.toggle-slider').click();
   const dialog = page.getByRole('dialog');

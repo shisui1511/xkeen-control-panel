@@ -285,7 +285,7 @@
               <label class="form-label" for="proxy-awg-jc">Jc</label>
               <input
                 id="proxy-awg-jc"
-                class="form-input"
+                class="input input-sm"
                 type="number"
                 bind:value={np.awgJc}
                 min="1"
@@ -296,7 +296,7 @@
               <label class="form-label" for="proxy-awg-jmin">Jmin</label>
               <input
                 id="proxy-awg-jmin"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={isJInvalid}
                 aria-invalid={isJInvalid}
                 type="number"
@@ -308,7 +308,7 @@
               <label class="form-label" for="proxy-awg-jmax">Jmax</label>
               <input
                 id="proxy-awg-jmax"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={isJInvalid || isJunkMtuInvalid}
                 aria-invalid={isJInvalid || isJunkMtuInvalid}
                 type="number"
@@ -336,7 +336,7 @@
               <label class="form-label" for="proxy-awg-s1">S1</label>
               <input
                 id="proxy-awg-s1"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={isSInvalid || (hasHeaderProtection && Number(np.awgS1) < 12)}
                 aria-invalid={isSInvalid || (hasHeaderProtection && Number(np.awgS1) < 12)}
                 type="number"
@@ -348,7 +348,7 @@
               <label class="form-label" for="proxy-awg-s2">S2</label>
               <input
                 id="proxy-awg-s2"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={isSInvalid || (hasHeaderProtection && Number(np.awgS2) < 12)}
                 aria-invalid={isSInvalid || (hasHeaderProtection && Number(np.awgS2) < 12)}
                 type="number"
@@ -369,7 +369,7 @@
               <label class="form-label" for="proxy-awg-h1">H1</label>
               <input
                 id="proxy-awg-h1"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={isH1Invalid}
                 aria-invalid={isH1Invalid}
                 type="text"
@@ -381,7 +381,7 @@
               <label class="form-label" for="proxy-awg-h2">H2</label>
               <input
                 id="proxy-awg-h2"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={isH2Invalid}
                 aria-invalid={isH2Invalid}
                 type="text"
@@ -393,7 +393,7 @@
               <label class="form-label" for="proxy-awg-h3">H3</label>
               <input
                 id="proxy-awg-h3"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={isH3Invalid}
                 aria-invalid={isH3Invalid}
                 type="text"
@@ -405,7 +405,7 @@
               <label class="form-label" for="proxy-awg-h4">H4</label>
               <input
                 id="proxy-awg-h4"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={isH4Invalid}
                 aria-invalid={isH4Invalid}
                 type="text"
@@ -428,7 +428,7 @@
             <label class="form-label" for="proxy-awg-s3">{$t('proxies.awg_s3')}</label>
             <input
               id="proxy-awg-s3"
-              class="form-input"
+              class="input input-sm"
               class:input-warning={hasHeaderProtection &&
                 np.awgS3 !== undefined &&
                 np.awgS3 !== null &&
@@ -444,7 +444,7 @@
             <label class="form-label" for="proxy-awg-s4">{$t('proxies.awg_s4')}</label>
             <input
               id="proxy-awg-s4"
-              class="form-input"
+              class="input input-sm"
               class:input-warning={hasHeaderProtection &&
                 np.awgS4 !== undefined &&
                 np.awgS4 !== null &&
@@ -479,7 +479,7 @@
             <label class="form-label" for="proxy-awg-version">{$t('proxies.awg_version')}</label>
             <input
               id="proxy-awg-version"
-              class="form-input"
+              class="input input-sm"
               type="text"
               bind:value={np.awgVersion}
               disabled={!isAwg31Allowed}
@@ -492,7 +492,7 @@
             >
             <input
               id="proxy-awg-header-protection-key"
-              class="form-input"
+              class="input input-sm"
               type="text"
               bind:value={np.awgHeaderProtectionKey}
               disabled={!isAwg31Allowed}
@@ -508,7 +508,7 @@
               <label class="form-label" for="proxy-awg-i1">I1</label>
               <input
                 id="proxy-awg-i1"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={/<c>/i.test(np.awgI1 || '')}
                 type="text"
                 bind:value={np.awgI1}
@@ -520,7 +520,7 @@
               <label class="form-label" for="proxy-awg-i2">I2</label>
               <input
                 id="proxy-awg-i2"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={/<c>/i.test(np.awgI2 || '')}
                 type="text"
                 bind:value={np.awgI2}
@@ -532,7 +532,7 @@
               <label class="form-label" for="proxy-awg-i3">I3</label>
               <input
                 id="proxy-awg-i3"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={/<c>/i.test(np.awgI3 || '')}
                 type="text"
                 bind:value={np.awgI3}
@@ -544,7 +544,7 @@
               <label class="form-label" for="proxy-awg-i4">I4</label>
               <input
                 id="proxy-awg-i4"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={/<c>/i.test(np.awgI4 || '')}
                 type="text"
                 bind:value={np.awgI4}
@@ -556,7 +556,7 @@
               <label class="form-label" for="proxy-awg-i5">I5</label>
               <input
                 id="proxy-awg-i5"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={/<c>/i.test(np.awgI5 || '')}
                 type="text"
                 bind:value={np.awgI5}
@@ -579,7 +579,7 @@
             >
             <input
               id="proxy-awg-cpa"
-              class="form-input"
+              class="input input-sm"
               type="number"
               bind:value={np.awgContentPaddingAddition}
               disabled={!isAwg31Allowed}
@@ -593,7 +593,7 @@
             >
             <input
               id="proxy-awg-rekey"
-              class="form-input"
+              class="input input-sm"
               type="number"
               bind:value={np.awgRekeyAfterTime}
               disabled={!isAwg31Allowed}
@@ -648,7 +648,7 @@
       <label class="form-label" for="proxy-name-compact">{$t('subscr.name')}</label>
       <input
         id="proxy-name-compact"
-        class="form-input"
+        class="input input-sm"
         bind:value={np.name}
         placeholder="my-proxy"
       />
@@ -693,7 +693,7 @@
         <label class="form-label" for="proxy-wg-mtu-compact">{$t('proxies.awg_mtu')}</label>
         <input
           id="proxy-wg-mtu-compact"
-          class="form-input"
+          class="input input-sm"
           type="number"
           bind:value={np.wgMtu}
           min="1200"
@@ -742,14 +742,14 @@
     </div>
     <div class="form-row">
       <label class="form-label" for="proxy-name">{$t('subscr.name')}</label>
-      <input id="proxy-name" class="form-input" bind:value={np.name} placeholder="my-proxy" />
+      <input id="proxy-name" class="input input-sm" bind:value={np.name} placeholder="my-proxy" />
     </div>
     <div class="form-row2">
       <div class="form-col">
         <label class="form-label" for="proxy-server">{$t('proxies.server')}</label>
         <input
           id="proxy-server"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.server}
           placeholder="example.com"
         />
@@ -758,7 +758,7 @@
         <label class="form-label" for="proxy-port">{$t('proxies.port')}</label>
         <input
           id="proxy-port"
-          class="form-input"
+          class="input input-sm"
           type="number"
           bind:value={np.port}
           min="1"
@@ -771,7 +771,12 @@
       <div class="form-row">
         <label class="form-label" for="proxy-vless-uuid">UUID</label>
         <div class="input-with-btn">
-          <input id="proxy-vless-uuid" class="form-input" bind:value={np.uuid} placeholder="uuid" />
+          <input
+            id="proxy-vless-uuid"
+            class="input input-sm"
+            bind:value={np.uuid}
+            placeholder="uuid"
+          />
           <button
             class="btn-gen"
             onclick={() => (np.uuid = crypto.randomUUID())}
@@ -783,7 +788,7 @@
         <label class="form-label" for="proxy-vless-public-key">Reality Public Key</label>
         <input
           id="proxy-vless-public-key"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.publicKey}
           placeholder="public-key"
         />
@@ -793,7 +798,7 @@
           <label class="form-label" for="proxy-vless-short-id">Short ID</label>
           <input
             id="proxy-vless-short-id"
-            class="form-input"
+            class="input input-sm"
             bind:value={np.shortId}
             placeholder="short-id"
           />
@@ -802,7 +807,7 @@
           <label class="form-label" for="proxy-vless-sni">SNI</label>
           <input
             id="proxy-vless-sni"
-            class="form-input"
+            class="input input-sm"
             bind:value={np.servername}
             placeholder="www.apple.com"
           />
@@ -813,7 +818,7 @@
         <label class="form-label" for="proxy-hysteria2-password">{$t('proxies.password')}</label>
         <input
           id="proxy-hysteria2-password"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.password}
           placeholder="password"
         />
@@ -822,7 +827,7 @@
         <label class="form-label" for="proxy-hysteria2-sni">SNI</label>
         <input
           id="proxy-hysteria2-sni"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.sni}
           placeholder="example.com"
         />
@@ -841,7 +846,7 @@
           >
           <input
             id="proxy-hysteria2-obfs-password"
-            class="form-input"
+            class="input input-sm"
             bind:value={np.obfsPassword}
             placeholder="obfs password"
           />
@@ -860,7 +865,12 @@
       <div class="form-row">
         <label class="form-label" for="proxy-tuic-uuid">UUID</label>
         <div class="input-with-btn">
-          <input id="proxy-tuic-uuid" class="form-input" bind:value={np.uuid} placeholder="uuid" />
+          <input
+            id="proxy-tuic-uuid"
+            class="input input-sm"
+            bind:value={np.uuid}
+            placeholder="uuid"
+          />
           <button class="btn-gen" onclick={() => (np.uuid = crypto.randomUUID())} title="Generate"
             ><Icon name="refresh" /></button
           >
@@ -870,7 +880,7 @@
         <label class="form-label" for="proxy-tuic-password">{$t('proxies.password')}</label>
         <input
           id="proxy-tuic-password"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.password}
           placeholder="password"
         />
@@ -879,7 +889,7 @@
         <label class="form-label" for="proxy-tuic-sni">SNI</label>
         <input
           id="proxy-tuic-sni"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.sni}
           placeholder="example.com"
         />
@@ -895,7 +905,7 @@
         <label class="form-label" for="proxy-ss-password">{$t('proxies.password')}</label>
         <input
           id="proxy-ss-password"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.password}
           placeholder="password"
         />
@@ -904,7 +914,12 @@
       <div class="form-row">
         <label class="form-label" for="proxy-vmess-uuid">UUID</label>
         <div class="input-with-btn">
-          <input id="proxy-vmess-uuid" class="form-input" bind:value={np.uuid} placeholder="uuid" />
+          <input
+            id="proxy-vmess-uuid"
+            class="input input-sm"
+            bind:value={np.uuid}
+            placeholder="uuid"
+          />
           <button class="btn-gen" onclick={() => (np.uuid = crypto.randomUUID())} title="Generate"
             ><Icon name="refresh" /></button
           >
@@ -934,7 +949,7 @@
           <label class="form-label" for="proxy-vmess-ws-path">WS Path</label>
           <input
             id="proxy-vmess-ws-path"
-            class="form-input"
+            class="input input-sm"
             bind:value={np.wsPath}
             placeholder="/"
           />
@@ -945,7 +960,7 @@
           <label class="form-label" for="proxy-vmess-sni">SNI</label>
           <input
             id="proxy-vmess-sni"
-            class="form-input"
+            class="input input-sm"
             bind:value={np.sni}
             placeholder="example.com"
           />
@@ -956,7 +971,7 @@
         <label class="form-label" for="proxy-trojan-password">{$t('proxies.password')}</label>
         <input
           id="proxy-trojan-password"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.password}
           placeholder="password"
         />
@@ -965,7 +980,7 @@
         <label class="form-label" for="proxy-trojan-sni">SNI</label>
         <input
           id="proxy-trojan-sni"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.sni}
           placeholder="example.com"
         />
@@ -984,7 +999,7 @@
           <label class="form-label" for="proxy-trojan-ws-path">WS Path</label>
           <input
             id="proxy-trojan-ws-path"
-            class="form-input"
+            class="input input-sm"
             bind:value={np.wsPath}
             placeholder="/"
           />
@@ -1004,7 +1019,7 @@
         <label class="form-label" for="proxy-wg-private-key">{$t('proxies.wg_private_key')}</label>
         <input
           id="proxy-wg-private-key"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.wgPrivateKey}
           placeholder="private-key"
         />
@@ -1013,7 +1028,7 @@
         <label class="form-label" for="proxy-wg-public-key">{$t('proxies.wg_public_key')}</label>
         <input
           id="proxy-wg-public-key"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.wgPublicKey}
           placeholder="public-key"
         />
@@ -1023,7 +1038,7 @@
           <label class="form-label" for="proxy-wg-ip">{$t('proxies.wg_ip')}</label>
           <input
             id="proxy-wg-ip"
-            class="form-input"
+            class="input input-sm"
             bind:value={np.wgIp}
             placeholder="10.2.0.2/32"
           />
@@ -1032,7 +1047,7 @@
           <label class="form-label" for="proxy-wg-mtu">MTU</label>
           <input
             id="proxy-wg-mtu"
-            class="form-input"
+            class="input input-sm"
             type="number"
             bind:value={np.wgMtu}
             min="1200"
@@ -1050,7 +1065,7 @@
         <label class="form-label" for="proxy-wg-preshared-key">Pre-shared Key</label>
         <input
           id="proxy-wg-preshared-key"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.wgPresharedKey}
           placeholder="pre-shared-key (optional)"
         />
@@ -1080,7 +1095,7 @@
         >
         <input
           id="proxy-socks-username"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.username}
           placeholder="username"
         />
@@ -1091,7 +1106,7 @@
         >
         <input
           id="proxy-socks-password"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.password}
           placeholder="password"
         />
@@ -1102,7 +1117,7 @@
         >
         <input
           id="proxy-http-username"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.username}
           placeholder="username"
         />
@@ -1112,7 +1127,7 @@
         >
         <input
           id="proxy-http-password"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.password}
           placeholder="password"
         />
@@ -1286,28 +1301,13 @@
     text-transform: none;
   }
 
-  .form-input {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--fg-primary);
-    font-size: var(--font-size-sm);
-    padding: var(--spacing-1-5) var(--spacing-2-5);
-    width: 100%;
-    transition: border-color var(--transition-fast);
-  }
-
-  .form-input:focus {
-    border-color: var(--accent);
-  }
-
   .input-with-btn {
     display: flex;
     gap: var(--spacing-1-5);
     align-items: center;
   }
 
-  .input-with-btn .form-input {
+  .input-with-btn .input {
     flex: 1;
   }
 

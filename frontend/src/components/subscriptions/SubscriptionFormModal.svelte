@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from '../Toggle.svelte';
   import Modal from '../Modal.svelte';
   import SegmentedControl from '../SegmentedControl.svelte';
   import { t, currentLang } from '../../i18n';
@@ -383,32 +384,24 @@
         </div>
 
         <div class="form-group-checkbox" style="margin-bottom: 8px;">
-          <label class="toggle-switch">
-            <input
-              type="checkbox"
-              id="sockopt-fast-open"
-              aria-label={$t('subscr.sockopt.tcp_fast_open')}
-              data-testid="sockopt-fast-open"
-              bind:checked={formSockoptFastOpen}
-            />
-            <span class="toggle-slider"></span>
-          </label>
+          <Toggle
+            id="sockopt-fast-open"
+            aria-label={$t('subscr.sockopt.tcp_fast_open')}
+            data-testid="sockopt-fast-open"
+            bind:checked={formSockoptFastOpen}
+          />
           <label for="sockopt-fast-open" class="checkbox-label">
             {$t('subscr.sockopt.tcp_fast_open')}
           </label>
         </div>
 
         <div class="form-group-checkbox">
-          <label class="toggle-switch">
-            <input
-              type="checkbox"
-              id="sockopt-mptcp"
-              aria-label={$t('subscr.sockopt.tcp_mptcp')}
-              data-testid="sockopt-mptcp"
-              bind:checked={formSockoptMptcp}
-            />
-            <span class="toggle-slider"></span>
-          </label>
+          <Toggle
+            id="sockopt-mptcp"
+            aria-label={$t('subscr.sockopt.tcp_mptcp')}
+            data-testid="sockopt-mptcp"
+            bind:checked={formSockoptMptcp}
+          />
           <label for="sockopt-mptcp" class="checkbox-label">
             {$t('subscr.sockopt.tcp_mptcp')}
           </label>
@@ -417,28 +410,16 @@
     {/if}
 
     <div class="form-group-checkbox">
-      <label class="toggle-switch">
-        <input
-          type="checkbox"
-          id="enabled"
-          aria-label={$t('subscr.enabled')}
-          bind:checked={formEnabled}
-        />
-        <span class="toggle-slider"></span>
-      </label>
+      <Toggle id="enabled" aria-label={$t('subscr.enabled')} bind:checked={formEnabled} />
       <label for="enabled" class="checkbox-label">{$t('subscr.enabled')}</label>
     </div>
 
     <div class="form-group-checkbox">
-      <label class="toggle-switch">
-        <input
-          type="checkbox"
-          id="use-provider-interval"
-          aria-label={$t('subscr.use_provider_interval')}
-          bind:checked={formUseProviderInterval}
-        />
-        <span class="toggle-slider"></span>
-      </label>
+      <Toggle
+        id="use-provider-interval"
+        aria-label={$t('subscr.use_provider_interval')}
+        bind:checked={formUseProviderInterval}
+      />
       <label for="use-provider-interval" class="checkbox-label">
         {$t('subscr.use_provider_interval')}
         {#if editingSub && editingSub.profile_update_hours && editingSub.profile_update_hours > 0}

@@ -152,7 +152,7 @@
       <textarea
         id="re-domain"
         data-testid="rule-domain-input"
-        class="form-input re-list"
+        class="input input-sm re-list"
         rows="3"
         bind:value={domain}
         placeholder="geosite:youtube&#10;domain:example.com&#10;full:api.example.com"></textarea>
@@ -162,7 +162,7 @@
       <label class="form-label" for="re-ip">{$t('editor.xray_ip_list')}</label>
       <textarea
         id="re-ip"
-        class="form-input re-list"
+        class="input input-sm re-list"
         rows="2"
         bind:value={ip}
         placeholder="geoip:private&#10;1.1.1.0/24"></textarea>
@@ -171,7 +171,7 @@
     <div class="re-grid">
       <div class="re-row">
         <label class="form-label" for="re-port">{$t('editor.xray_port_range')}</label>
-        <input id="re-port" class="form-input" bind:value={port} placeholder="443,1000-2000" />
+        <input id="re-port" class="input input-sm" bind:value={port} placeholder="443,1000-2000" />
       </div>
       <div class="re-row">
         <label class="form-label" for="re-network">{$t('editor.xray_network')}</label>
@@ -179,13 +179,13 @@
       </div>
       <div class="re-row">
         <label class="form-label" for="re-source">{$t('xray.rule_source')}</label>
-        <input id="re-source" class="form-input" bind:value={source} placeholder="172.16.0.5" />
+        <input id="re-source" class="input input-sm" bind:value={source} placeholder="172.16.0.5" />
       </div>
       <div class="re-row">
         <label class="form-label" for="re-source-port">{$t('xray.rule_source_port')}</label>
         <input
           id="re-source-port"
-          class="form-input"
+          class="input input-sm"
           bind:value={sourcePort}
           placeholder="1000-2000"
         />
@@ -194,14 +194,14 @@
         <label class="form-label" for="re-inbound">{$t('xray.inbound_tags')}</label>
         <input
           id="re-inbound"
-          class="form-input"
+          class="input input-sm"
           bind:value={inboundTag}
           placeholder="redirect, tproxy"
         />
       </div>
       <div class="re-row">
         <label class="form-label" for="re-tag">{$t('xray.rule_tag')}</label>
-        <input id="re-tag" class="form-input" bind:value={ruleTag} placeholder="youtube" />
+        <input id="re-tag" class="input input-sm" bind:value={ruleTag} placeholder="youtube" />
       </div>
     </div>
 

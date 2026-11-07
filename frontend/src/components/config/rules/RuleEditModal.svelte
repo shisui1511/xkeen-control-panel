@@ -507,6 +507,7 @@
         <span class="toggle-switch">
           <input
             type="checkbox"
+            role="switch"
             bind:checked={expert}
             disabled={saving}
             data-testid="rule-expert"

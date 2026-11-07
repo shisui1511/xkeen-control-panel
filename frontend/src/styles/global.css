@@ -959,6 +959,51 @@ h2.card-title {
   font-size: var(--font-size-xs);
 }
 
+/* Размеры: md (по умолчанию, --btn-h) · sm — мельче текст и поля, высота та же ·
+   xs — компактная кнопка в строке таблицы или плашке (28px) */
+.btn-xs {
+  --btn-h: 28px;
+  gap: var(--spacing-1-5);
+  padding: 0 var(--spacing-2-5);
+  font-size: var(--font-size-xs);
+}
+
+/* Кнопка-иконка без подписи: квадрат по высоте кнопки; aria-label обязателен */
+.btn-icon-only {
+  width: var(--btn-h);
+  padding: 0;
+}
+
+.btn-warning {
+  background: var(--warning);
+  color: var(--btn-primary-text);
+  border-color: transparent;
+}
+
+.btn-warning:hover:not(:disabled) {
+  opacity: 0.92;
+  color: var(--btn-primary-text);
+}
+
+/* Третьестепенное действие: без рамки и подложки, видно при наведении */
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-secondary);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--fg-primary);
+}
+
+/* Спиннер загрузки внутри кнопки — цвета текста кнопки */
+.btn > .spinner {
+  --spinner-size: 13px;
+  --spinner-track: currentColor;
+  --spinner-color: transparent;
+}
+
 /* Шеврон раскрытия: один значок поворачивается, а не подменяется — видно, что открылось.
    Ставится на значок внутри кнопки с aria-expanded */
 .chevron-turn {
@@ -1017,6 +1062,52 @@ h2.card-title {
   color: var(--fg-dim);
 }
 
+/* Многострочное поле: высота по строкам (rows), а не фиксированная */
+textarea.input {
+  height: auto;
+  min-height: calc(var(--input-h) * 2);
+  padding: var(--spacing-2) var(--spacing-2-5);
+  line-height: 1.5;
+  resize: vertical;
+}
+
+/* Значения конфигурации (адреса, теги, ключи) — моноширинным */
+.input-mono {
+  font-family: var(--font-family-mono);
+}
+
+/* Плотные формы конструкторов: поле ниже и уже по полям */
+.input-sm {
+  --input-h: 30px;
+  padding: 0 var(--spacing-2-5);
+}
+
+/* Флажок с подписью (Checkbox.svelte): нативный input, цвет акцента */
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-size: var(--font-size-sm);
+  color: var(--fg-primary);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.checkbox input[type='checkbox'] {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.checkbox:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 /* Hide spin buttons globally for input[type="number"] */
 input::-webkit-outer-spin-button,
 input::-webkit-inner-spin-button {
@@ -1049,6 +1140,13 @@ input[type='number'] {
   margin-top: var(--spacing-1-5);
   font-size: var(--font-size-xs);
   color: var(--danger);
+}
+
+.form-hint {
+  display: block;
+  margin-top: var(--spacing-1-5);
+  font-size: var(--font-size-xs);
+  color: var(--fg-secondary);
 }
 
 .warning-text {
@@ -2429,6 +2527,45 @@ a.badge:hover {
   background: var(--accent);
   transform: translateX(16px);
   box-shadow: 0 0 6px var(--accent);
+}
+
+.toggle-switch:has(input:focus-visible) .toggle-slider {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.toggle-switch:has(input:disabled) {
+  opacity: 0.55;
+}
+
+.toggle-switch:has(input:disabled) .toggle-slider {
+  cursor: not-allowed;
+}
+
+/* Идёт сохранение: переключатель занят и мерцает */
+.toggle-switch.is-loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.toggle-switch.is-loading .toggle-slider {
+  animation: toggle-pulse 1.2s infinite ease-in-out;
+}
+
+@keyframes toggle-pulse {
+  0%,
+  100% {
+    background: var(--bg-elevated);
+  }
+  50% {
+    background: var(--accent-soft);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toggle-switch.is-loading .toggle-slider {
+    animation: none;
+  }
 }
 
 .toggle-label {

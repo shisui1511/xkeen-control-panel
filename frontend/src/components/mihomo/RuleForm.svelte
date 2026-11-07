@@ -47,7 +47,7 @@
       <label class="form-label" for="rule-value">{$t('rules.value')}</label>
       <input
         id="rule-value"
-        class="form-input"
+        class="input input-sm"
         bind:value={nr.value}
         placeholder={nr.type === 'GEOIP'
           ? 'CN'
@@ -97,21 +97,6 @@
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-weight: 500;
-  }
-
-  .form-input {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--fg-primary);
-    font-size: var(--font-size-sm);
-    padding: var(--spacing-1-5) var(--spacing-2-5);
-    width: 100%;
-    transition: border-color var(--transition-fast);
-  }
-
-  .form-input:focus {
-    border-color: var(--accent);
   }
 
   .form-actions {

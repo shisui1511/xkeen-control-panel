@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from './components/Toggle.svelte';
   import { onMount } from 'svelte';
   import { usePoller } from './lib/poller';
   import Modal from './components/Modal.svelte';
@@ -630,15 +631,11 @@
             {/if}
 
             <div style="margin-left:auto; display:flex; align-items:center; gap:12px;">
-              <label class="toggle-switch">
-                <input
-                  type="checkbox"
-                  aria-label={$t('smartproxy.profile_active')}
-                  checked={p.enabled}
-                  onchange={() => toggleEnabled(p)}
-                />
-                <span class="toggle-slider"></span>
-              </label>
+              <Toggle
+                aria-label={$t('smartproxy.profile_active')}
+                checked={p.enabled}
+                onchange={() => toggleEnabled(p)}
+              />
 
               <div class="dropdown-container">
                 <button
@@ -767,15 +764,11 @@
       </div>
 
       <div class="form-group-checkbox" style="margin-top: 10px;">
-        <label class="toggle-switch">
-          <input
-            type="checkbox"
-            id="sp-enabled"
-            aria-label={$t('smartproxy.profile_active')}
-            bind:checked={formEnabled}
-          />
-          <span class="toggle-slider"></span>
-        </label>
+        <Toggle
+          id="sp-enabled"
+          aria-label={$t('smartproxy.profile_active')}
+          bind:checked={formEnabled}
+        />
         <label for="sp-enabled" class="checkbox-label">
           {$t('smartproxy.profile_active')}
         </label>

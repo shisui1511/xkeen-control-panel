@@ -223,7 +223,7 @@
         <label class="form-label" for="xray-new-dns-address">{$t('xray.server_address')}</label>
         <input
           id="xray-new-dns-address"
-          class="form-input"
+          class="input input-sm"
           bind:value={newDns.address}
           placeholder="8.8.8.8"
         />
@@ -231,13 +231,18 @@
       <div class="form-row2">
         <div class="form-col">
           <label class="form-label" for="xray-new-dns-port">{$t('xray.port')}</label>
-          <input id="xray-new-dns-port" class="form-input" type="number" bind:value={newDns.port} />
+          <input
+            id="xray-new-dns-port"
+            class="input input-sm"
+            type="number"
+            bind:value={newDns.port}
+          />
         </div>
         <div class="form-col">
           <label class="form-label" for="xray-new-dns-tag">{$t('xray.tag_optional')}</label>
           <input
             id="xray-new-dns-tag"
-            class="form-input"
+            class="input input-sm"
             bind:value={newDns.tag}
             placeholder="dns-in-ytb"
           />
@@ -248,7 +253,7 @@
           <label class="form-label" for="xray-new-dns-domains">{$t('xray.redirect_domains')}</label>
           <input
             id="xray-new-dns-domains"
-            class="form-input"
+            class="input input-sm"
             bind:value={newDns.domainsRaw}
             placeholder="geosite:youtube, google.com"
           />
@@ -302,7 +307,7 @@
           <label class="form-label" for="xray-new-host-domain">{$t('xray.domain')}</label>
           <input
             id="xray-new-host-domain"
-            class="form-input"
+            class="input input-sm"
             bind:value={newHost.domain}
             placeholder="dns.google"
           />
@@ -311,7 +316,7 @@
           <label class="form-label" for="xray-new-host-ip">IP</label>
           <input
             id="xray-new-host-ip"
-            class="form-input"
+            class="input input-sm"
             bind:value={newHost.ip}
             placeholder="8.8.8.8"
           />
@@ -419,20 +424,6 @@
     font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
-  }
-
-  .form-input {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: var(--spacing-1-5) var(--spacing-2-5);
-    font-size: var(--font-size-sm);
-    color: var(--fg-primary);
-  }
-
-  .form-input:focus {
-    outline: none;
-    border-color: var(--accent);
   }
 
   :global(.form-select) {

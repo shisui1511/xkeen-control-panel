@@ -116,7 +116,7 @@
         <label class="form-label" for="listener-name">{$t('mihomo.listener_name')}</label>
         <input
           id="listener-name"
-          class="form-input"
+          class="input input-sm"
           bind:value={newListener.name}
           placeholder="my-listener"
         />
@@ -153,7 +153,7 @@
           <label class="form-label" for="listener-listen">{$t('mihomo.listener_listen')}</label>
           <input
             id="listener-listen"
-            class="form-input"
+            class="input input-sm"
             bind:value={newListener.listen}
             placeholder="0.0.0.0"
           />
@@ -166,7 +166,7 @@
             type="number"
             min="1"
             max="65535"
-            class="form-input"
+            class="input input-sm"
             bind:value={newListener.port}
             placeholder="7890"
           />
@@ -244,7 +244,7 @@
           <input
             id="listener-password"
             type="password"
-            class="form-input"
+            class="input input-sm"
             bind:value={newListener.password}
           />
           {#if !listenerSSPasswordValid}
@@ -273,14 +273,14 @@
                 <div class="form-user-row">
                   <input
                     type="text"
-                    class="form-input"
+                    class="input input-sm"
                     placeholder={$t('mihomo.listener_username')}
                     aria-label={$t('mihomo.listener_username')}
                     bind:value={user.username}
                   />
                   <input
                     type="password"
-                    class="form-input"
+                    class="input input-sm"
                     placeholder={$t('mihomo.listener_password')}
                     aria-label={$t('mihomo.listener_password')}
                     bind:value={user.password}
@@ -409,17 +409,6 @@
     font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
-  }
-
-  .form-input {
-    width: 100%;
-    box-sizing: border-box;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: var(--spacing-2);
-    color: var(--fg-primary);
-    font-size: var(--font-size-xs);
   }
 
   .form-validation-msg {

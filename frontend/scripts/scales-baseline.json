@@ -16,7 +16,6 @@
     "XrayRoutingConstructor.svelte": 2,
     "components/AuthLayout.svelte": 4,
     "components/BottomDock.svelte": 1,
-    "components/Button.svelte": 1,
     "components/Card.svelte": 2,
     "components/DraftRestoreBanner.svelte": 1,
     "components/GeoScanModal.svelte": 5,

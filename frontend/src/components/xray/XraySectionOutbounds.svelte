@@ -387,7 +387,7 @@
             <label for="import-link" class="form-label">{$t('subscr.import_link_label')}</label>
             <textarea
               id="import-link"
-              class="form-input textarea-link"
+              class="input input-sm textarea-link"
               aria-invalid={!!importErrorMsg}
               aria-describedby={importErrorMsg ? 'xray-import-error' : undefined}
               bind:value={importLink}
@@ -530,7 +530,7 @@
                     <input
                       id="import-tag-{idx}"
                       type="text"
-                      class="form-input"
+                      class="input input-sm"
                       bind:value={item.tag}
                       aria-invalid={!!importTagErrors[idx]}
                       aria-describedby={importTagErrors[idx]
@@ -660,20 +660,6 @@
     font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
-  }
-
-  .form-input {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: var(--spacing-1-5) var(--spacing-2-5);
-    font-size: var(--font-size-sm);
-    color: var(--fg-primary);
-  }
-
-  .form-input:focus {
-    outline: none;
-    border-color: var(--accent);
   }
 
   .add-btn {

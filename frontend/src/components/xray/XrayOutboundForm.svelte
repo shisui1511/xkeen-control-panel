@@ -171,7 +171,7 @@
 <div class="xray-outbound-form">
   <div class="form-row">
     <label class="form-label" for="outbound-tag">{$t('xray.tag_name')} *</label>
-    <input id="outbound-tag" class="form-input" bind:value={outbound.tag} placeholder="PROXY" />
+    <input id="outbound-tag" class="input input-sm" bind:value={outbound.tag} placeholder="PROXY" />
   </div>
 
   <div class="form-row">
@@ -193,7 +193,7 @@
         </label>
         <input
           id="outbound-address"
-          class="form-input"
+          class="input input-sm"
           bind:value={outbound.address}
           placeholder="server.com"
         />
@@ -202,7 +202,7 @@
         <label class="form-label" for="outbound-port">{$t('xray.port')} *</label>
         <input
           id="outbound-port"
-          class="form-input"
+          class="input input-sm"
           type="number"
           bind:value={outbound.port}
           min="1"
@@ -216,7 +216,7 @@
       <div class="input-with-btn">
         <input
           id="outbound-uuid"
-          class="form-input"
+          class="input input-sm"
           bind:value={outbound.uuid}
           placeholder="uuid"
         />
@@ -275,7 +275,7 @@
           <label class="form-label" for="outbound-alterid">AlterID</label>
           <input
             id="outbound-alterid"
-            class="form-input"
+            class="input input-sm"
             type="number"
             bind:value={outbound.alterId}
             min="0"
@@ -300,7 +300,7 @@
         <label class="form-label" for="outbound-sni">SNI (ServerName)</label>
         <input
           id="outbound-sni"
-          class="form-input"
+          class="input input-sm"
           bind:value={outbound.sni}
           placeholder="yahoo.com"
         />
@@ -412,7 +412,7 @@
             </label>
             <input
               id="outbound-pubkey"
-              class="form-input"
+              class="input input-sm"
               bind:value={outbound.publicKey}
               placeholder="base64"
             />
@@ -423,7 +423,7 @@
             </label>
             <input
               id="outbound-shortid"
-              class="form-input"
+              class="input input-sm"
               bind:value={outbound.shortId}
               placeholder="0123abcd"
             />
@@ -460,14 +460,19 @@
       <div class="form-col">
         {#if outbound.network === 'ws'}
           <label class="form-label" for="outbound-path">{$t('xray.ws_path')}</label>
-          <input id="outbound-path" class="form-input" bind:value={outbound.path} placeholder="/" />
+          <input
+            id="outbound-path"
+            class="input input-sm"
+            bind:value={outbound.path}
+            placeholder="/"
+          />
         {:else if outbound.network === 'grpc'}
           <label class="form-label" for="outbound-service">
             {$t('xray.grpc_service_name')}
           </label>
           <input
             id="outbound-service"
-            class="form-input"
+            class="input input-sm"
             bind:value={outbound.serviceName}
             placeholder="grpc-service"
           />
@@ -482,7 +487,7 @@
         </label>
         <input
           id="outbound-ss-address"
-          class="form-input"
+          class="input input-sm"
           bind:value={outbound.address}
           placeholder="server.com"
         />
@@ -491,7 +496,7 @@
         <label class="form-label" for="outbound-ss-port">{$t('xray.port')} *</label>
         <input
           id="outbound-ss-port"
-          class="form-input"
+          class="input input-sm"
           type="number"
           bind:value={outbound.port}
           min="1"
@@ -515,7 +520,7 @@
         <div class="input-with-btn">
           <input
             id="outbound-ss-password"
-            class="form-input"
+            class="input input-sm"
             bind:value={outbound.shadowsocksPassword}
             placeholder="base64"
           />
@@ -593,7 +598,7 @@
         </label>
         <input
           id="outbound-wg-endpoint"
-          class="form-input"
+          class="input input-sm"
           bind:value={outbound.endpoint}
           placeholder="server.com:51820"
         />
@@ -604,7 +609,7 @@
         </label>
         <input
           id="outbound-wg-address"
-          class="form-input"
+          class="input input-sm"
           bind:value={outbound.wireguardAddress}
           placeholder="10.0.0.2/32, fd00::2/128"
         />
@@ -617,7 +622,7 @@
         </label>
         <input
           id="outbound-wg-secret-key"
-          class="form-input"
+          class="input input-sm"
           bind:value={outbound.wireguardSecretKey}
           placeholder="base64"
         />
@@ -628,7 +633,7 @@
         </label>
         <input
           id="outbound-wg-public-key"
-          class="form-input"
+          class="input input-sm"
           bind:value={outbound.wireguardPublicKey}
           placeholder="base64"
         />
@@ -641,7 +646,7 @@
         </label>
         <input
           id="outbound-wg-psk"
-          class="form-input"
+          class="input input-sm"
           bind:value={outbound.wireguardPsk}
           placeholder="base64"
         />
@@ -652,7 +657,7 @@
         </label>
         <input
           id="outbound-wg-allowed-ips"
-          class="form-input"
+          class="input input-sm"
           bind:value={outbound.wireguardAllowedIPs}
           placeholder="0.0.0.0/0, ::/0"
         />
@@ -665,7 +670,7 @@
         </label>
         <input
           id="outbound-wg-keepalive"
-          class="form-input"
+          class="input input-sm"
           type="number"
           bind:value={outbound.wireguardKeepAlive}
           placeholder="25"
@@ -675,7 +680,7 @@
         <label class="form-label" for="outbound-wg-mtu">{$t('xray.mtu')}</label>
         <input
           id="outbound-wg-mtu"
-          class="form-input"
+          class="input input-sm"
           type="number"
           bind:value={outbound.wireguardMtu}
           min="1200"
@@ -694,7 +699,7 @@
         </label>
         <input
           id="outbound-wg-reserved"
-          class="form-input"
+          class="input input-sm"
           bind:value={outbound.wireguardReserved}
           placeholder="1, 2, 3"
         />
@@ -728,7 +733,7 @@
           <label class="form-label" for="sockopt-mark">{$t('xray.mark')}</label>
           <input
             id="sockopt-mark"
-            class="form-input"
+            class="input input-sm"
             type="number"
             bind:value={outbound.sockoptMark}
             placeholder="e.g. 255"
@@ -743,7 +748,7 @@
           </label>
           <input
             id="sockopt-keepalive"
-            class="form-input"
+            class="input input-sm"
             type="number"
             bind:value={outbound.sockoptTcpKeepAliveInterval}
             placeholder="seconds"
@@ -849,26 +854,6 @@
     font-weight: 500;
     color: var(--fg-secondary);
     margin-bottom: var(--spacing-1);
-  }
-
-  .form-input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: var(--spacing-1-5) var(--spacing-2-5);
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--fg-primary);
-    font-size: var(--font-size-sm);
-    outline: none;
-    transition:
-      border-color var(--transition-fast),
-      background-color var(--transition-fast);
-  }
-
-  .form-input:focus {
-    border-color: var(--accent);
-    background: var(--bg-card);
   }
 
   .input-with-btn {

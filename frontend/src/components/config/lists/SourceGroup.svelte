@@ -103,6 +103,7 @@
                   <span class="toggle-switch">
                     <input
                       type="checkbox"
+                      role="switch"
                       checked={isOn(s)}
                       disabled={disabled ||
                         !!s.draft ||

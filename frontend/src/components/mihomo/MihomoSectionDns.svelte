@@ -112,7 +112,7 @@
         <label class="form-label" for="mihomo-dns-fakeip-range">Fake-IP Range</label>
         <input
           id="mihomo-dns-fakeip-range"
-          class="form-input"
+          class="input input-sm"
           bind:value={ctx.dns.fakeIPRange}
           oninput={() => ctx.markDirty()}
         />
@@ -138,7 +138,7 @@
         >
         <input
           id="mihomo-dns-proxy-server-ns"
-          class="form-input"
+          class="input input-sm"
           value={(ctx.dns.proxyServerNameservers?.length
             ? ctx.dns.proxyServerNameservers
             : DEFAULT_PROXY_SERVER_NAMESERVERS
@@ -210,7 +210,6 @@
     color: var(--fg-secondary);
   }
 
-  .form-input,
   .form-textarea {
     width: 100%;
     box-sizing: border-box;

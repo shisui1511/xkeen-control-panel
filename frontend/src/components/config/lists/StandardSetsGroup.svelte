@@ -81,6 +81,7 @@
                   <span class="toggle-switch">
                     <input
                       type="checkbox"
+                      role="switch"
                       checked={isOn(s)}
                       disabled={disabled || !!s.draft || (isOn(s) && !onoff)}
                       aria-label={$t('cfg.geo.switch_aria', { provider: p.name, kind: s.kind })}

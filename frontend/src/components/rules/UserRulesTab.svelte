@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from '../Toggle.svelte';
   import { t } from '../../i18n';
   import type { UserRule } from '../../lib/api';
   import Select from '../Select.svelte';
@@ -316,20 +317,12 @@
 
                 <!-- Toggle Switch -->
                 <td class="col-status">
-                  <label
-                    class="toggle-switch"
+                  <Toggle
                     title={rule.enabled ? $t('rules.rule_enabled') : $t('rules.rule_disabled')}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={rule.enabled}
-                      onchange={() => toggleRule(rule.id)}
-                      aria-label={rule.enabled
-                        ? $t('rules.rule_enabled')
-                        : $t('rules.rule_disabled')}
-                    />
-                    <span class="toggle-slider"></span>
-                  </label>
+                    checked={rule.enabled}
+                    onchange={() => toggleRule(rule.id)}
+                    ariaLabel={rule.enabled ? $t('rules.rule_enabled') : $t('rules.rule_disabled')}
+                  />
                 </td>
 
                 <!-- Rule Type Badge -->

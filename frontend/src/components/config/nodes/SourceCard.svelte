@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from '../../Toggle.svelte';
   import { t, tp } from '../../../i18n';
   import { showConfirm, showToast } from '../../../stores';
   import { formatBytes } from '../../../lib/format';
@@ -301,17 +302,14 @@
           {$t('cfg.nodes.expired')}
         </span>
       {/if}
-      <label class="toggle-switch sc-switch">
-        <input
-          type="checkbox"
-          checked={source.enabled}
-          disabled={toggling || $applyRunning}
-          aria-label={$t('cfg.nodes.source_enabled')}
-          data-testid="nodes-enabled-{source.id}"
-          onchange={toggleEnabled}
-        />
-        <span class="toggle-slider"></span>
-      </label>
+      <Toggle
+        class="sc-switch"
+        checked={source.enabled}
+        disabled={toggling || $applyRunning}
+        aria-label={$t('cfg.nodes.source_enabled')}
+        data-testid="nodes-enabled-{source.id}"
+        onchange={toggleEnabled}
+      />
     </div>
 
     <p class="sc-summary" data-testid="nodes-source-counts-{source.id}">{summary}</p>
@@ -620,7 +618,7 @@
     color: var(--fg-dim);
   }
 
-  .sc-switch {
+  :global(.sc-switch) {
     flex-shrink: 0;
     margin-left: auto;
   }

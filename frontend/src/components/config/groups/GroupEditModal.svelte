@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from '../../Toggle.svelte';
   import { untrack } from 'svelte';
   import { t, tp } from '../../../i18n';
   import Modal from '../../Modal.svelte';
@@ -719,10 +720,7 @@
 
     <!-- Эксперт -->
     <div class="gm-expert">
-      <label class="toggle-switch">
-        <input type="checkbox" id="{uid}-expert" bind:checked={expert} data-testid="group-expert" />
-        <span class="toggle-slider"></span>
-      </label>
+      <Toggle id="{uid}-expert" bind:checked={expert} data-testid="group-expert" />
       <label class="gm-expert-label" for="{uid}-expert">{$t('cfg.groups.expert')}</label>
     </div>
 

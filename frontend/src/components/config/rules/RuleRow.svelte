@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from '../../Toggle.svelte';
   import { t } from '../../../i18n';
   import { showConfirm, showToast } from '../../../stores';
   import Icon from '../../../lib/components/Icon.svelte';
@@ -273,17 +274,14 @@
     </span>
   </span>
 
-  <label class="toggle-switch rr-switch">
-    <input
-      type="checkbox"
-      checked={rule.enabled}
-      disabled={locked}
-      aria-label={$t('cfg.rules.enabled_aria', { n: rule.index })}
-      data-testid="rule-enabled-{rule.id}"
-      onchange={toggleEnabled}
-    />
-    <span class="toggle-slider"></span>
-  </label>
+  <Toggle
+    class="rr-switch"
+    checked={rule.enabled}
+    disabled={locked}
+    aria-label={$t('cfg.rules.enabled_aria', { n: rule.index })}
+    data-testid="rule-enabled-{rule.id}"
+    onchange={toggleEnabled}
+  />
 
   <span class="rr-actions">
     <button
@@ -506,7 +504,7 @@
     font-family: var(--font-family-mono);
   }
 
-  .rr-switch {
+  :global(.rr-switch) {
     grid-area: toggle;
     flex-shrink: 0;
   }

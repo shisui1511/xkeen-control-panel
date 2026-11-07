@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from './components/Toggle.svelte';
   import { onMount } from 'svelte';
   import { setAnimationsEnabled } from './lib/motion.svelte';
   import Modal from './components/Modal.svelte';
@@ -1121,15 +1122,11 @@
                 <span class="field-row-name">{$t('settings.animations')}</span>
                 <div class="field-row-desc">{$t('settings.animations_desc')}</div>
               </div>
-              <label class="toggle-switch">
-                <input
-                  type="checkbox"
-                  aria-label={$t('settings.animations')}
-                  bind:checked={animationsEnabled}
-                  onchange={() => setAnimationsEnabled(animationsEnabled)}
-                />
-                <span class="toggle-slider"></span>
-              </label>
+              <Toggle
+                aria-label={$t('settings.animations')}
+                bind:checked={animationsEnabled}
+                onchange={() => setAnimationsEnabled(animationsEnabled)}
+              />
             </div>
           </div>
         </div>
@@ -1143,16 +1140,12 @@
                 <span class="field-row-name">{$t('settings.capsule_visible')}</span>
                 <div class="field-row-desc">{$t('settings.capsule_visible_desc')}</div>
               </div>
-              <label class="toggle-switch">
-                <input
-                  type="checkbox"
-                  aria-label={$t('settings.capsule_visible')}
-                  checked={$capsuleConfigStore.visible}
-                  onchange={(e) =>
-                    updateCapsuleConfig({ visible: (e.target as HTMLInputElement).checked })}
-                />
-                <span class="toggle-slider"></span>
-              </label>
+              <Toggle
+                aria-label={$t('settings.capsule_visible')}
+                checked={$capsuleConfigStore.visible}
+                onchange={(e) =>
+                  updateCapsuleConfig({ visible: (e.target as HTMLInputElement).checked })}
+              />
             </div>
             {#if $capsuleConfigStore.visible}
               <div class="field-row">
@@ -1160,34 +1153,26 @@
                   <span class="field-row-name">{$t('settings.capsule_traffic')}</span>
                   <div class="field-row-desc">{$t('settings.capsule_traffic_desc')}</div>
                 </div>
-                <label class="toggle-switch">
-                  <input
-                    type="checkbox"
-                    aria-label={$t('settings.capsule_traffic')}
-                    checked={$capsuleConfigStore.showTraffic}
-                    onchange={(e) =>
-                      updateCapsuleConfig({ showTraffic: (e.target as HTMLInputElement).checked })}
-                  />
-                  <span class="toggle-slider"></span>
-                </label>
+                <Toggle
+                  aria-label={$t('settings.capsule_traffic')}
+                  checked={$capsuleConfigStore.showTraffic}
+                  onchange={(e) =>
+                    updateCapsuleConfig({ showTraffic: (e.target as HTMLInputElement).checked })}
+                />
               </div>
               <div class="field-row">
                 <div>
                   <span class="field-row-name">{$t('settings.capsule_resources')}</span>
                   <div class="field-row-desc">{$t('settings.capsule_resources_desc')}</div>
                 </div>
-                <label class="toggle-switch">
-                  <input
-                    type="checkbox"
-                    aria-label={$t('settings.capsule_resources')}
-                    checked={$capsuleConfigStore.showResources}
-                    onchange={(e) =>
-                      updateCapsuleConfig({
-                        showResources: (e.target as HTMLInputElement).checked
-                      })}
-                  />
-                  <span class="toggle-slider"></span>
-                </label>
+                <Toggle
+                  aria-label={$t('settings.capsule_resources')}
+                  checked={$capsuleConfigStore.showResources}
+                  onchange={(e) =>
+                    updateCapsuleConfig({
+                      showResources: (e.target as HTMLInputElement).checked
+                    })}
+                />
               </div>
             {/if}
           </div>
@@ -1202,60 +1187,44 @@
                 <span class="field-row-name">{$t('settings.auto_refresh')}</span>
                 <div class="field-row-desc">{$t('settings.auto_refresh_desc')}</div>
               </div>
-              <label class="toggle-switch">
-                <input
-                  type="checkbox"
-                  aria-label={$t('settings.auto_refresh')}
-                  bind:checked={autoRefresh}
-                  onchange={() => saveSetting('autoRefresh', String(autoRefresh))}
-                />
-                <span class="toggle-slider"></span>
-              </label>
+              <Toggle
+                aria-label={$t('settings.auto_refresh')}
+                bind:checked={autoRefresh}
+                onchange={() => saveSetting('autoRefresh', String(autoRefresh))}
+              />
             </div>
             <div class="field-row">
               <div>
                 <span class="field-row-name">{$t('settings.confirm_dangerous')}</span>
                 <div class="field-row-desc">{$t('settings.confirm_dangerous_desc')}</div>
               </div>
-              <label class="toggle-switch">
-                <input
-                  type="checkbox"
-                  aria-label={$t('settings.confirm_dangerous')}
-                  bind:checked={confirmDangerous}
-                  onchange={() => saveSetting('confirmDangerous', String(confirmDangerous))}
-                />
-                <span class="toggle-slider"></span>
-              </label>
+              <Toggle
+                aria-label={$t('settings.confirm_dangerous')}
+                bind:checked={confirmDangerous}
+                onchange={() => saveSetting('confirmDangerous', String(confirmDangerous))}
+              />
             </div>
             <div class="field-row">
               <div>
                 <span class="field-row-name">{$t('settings.notification_sound')}</span>
                 <div class="field-row-desc">{$t('settings.notification_sound_desc')}</div>
               </div>
-              <label class="toggle-switch">
-                <input
-                  type="checkbox"
-                  aria-label={$t('settings.notification_sound')}
-                  bind:checked={notificationSound}
-                  onchange={() => saveSetting('notificationSound', String(notificationSound))}
-                />
-                <span class="toggle-slider"></span>
-              </label>
+              <Toggle
+                aria-label={$t('settings.notification_sound')}
+                bind:checked={notificationSound}
+                onchange={() => saveSetting('notificationSound', String(notificationSound))}
+              />
             </div>
             <div class="field-row">
               <div>
                 <span class="field-row-name">{$t('settings.dev_mode')}</span>
                 <div class="field-row-desc">{$t('settings.dev_mode_desc')}</div>
               </div>
-              <label class="toggle-switch">
-                <input
-                  type="checkbox"
-                  aria-label={$t('settings.dev_mode')}
-                  checked={$devMode}
-                  onchange={(e) => setDevMode((e.target as HTMLInputElement).checked)}
-                />
-                <span class="toggle-slider"></span>
-              </label>
+              <Toggle
+                aria-label={$t('settings.dev_mode')}
+                checked={$devMode}
+                onchange={(e) => setDevMode((e.target as HTMLInputElement).checked)}
+              />
             </div>
             <div class="field-row" data-testid="config-layer-row">
               <div>
@@ -1266,19 +1235,13 @@
                 {#if configLayerPending}
                   <span class="spinner" aria-hidden="true"></span>
                 {/if}
-                <label
-                  class="toggle-switch"
+                <Toggle
                   title={$applyRunning ? $t('settings.config_layer_busy_hint') : undefined}
-                >
-                  <input
-                    type="checkbox"
-                    aria-label={$t('settings.config_layer')}
-                    checked={$configLayerEnabled}
-                    disabled={configLayerPending || $applyRunning}
-                    onchange={onToggleConfigLayer}
-                  />
-                  <span class="toggle-slider"></span>
-                </label>
+                  ariaLabel={$t('settings.config_layer')}
+                  checked={$configLayerEnabled}
+                  disabled={configLayerPending || $applyRunning}
+                  onchange={onToggleConfigLayer}
+                />
               </div>
             </div>
           </div>

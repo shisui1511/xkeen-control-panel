@@ -71,7 +71,7 @@
           >
           <input
             id="xray-inbound-port-{inbound.tag}"
-            class="form-input"
+            class="input input-sm"
             type="number"
             bind:value={inbound.port}
             oninput={markChanged}
@@ -85,7 +85,7 @@
           >
           <input
             id="xray-inbound-listen-{inbound.tag}"
-            class="form-input"
+            class="input input-sm"
             bind:value={inbound.listen}
             oninput={markChanged}
           />
@@ -100,7 +100,7 @@
         <label class="form-label" for="xray-new-inbound-tag">{$t('xray.tag')}</label>
         <input
           id="xray-new-inbound-tag"
-          class="form-input"
+          class="input input-sm"
           bind:value={newInbound.tag}
           placeholder="socks-in"
         />
@@ -110,7 +110,7 @@
           <label class="form-label" for="xray-new-inbound-port">{$t('xray.port')}</label>
           <input
             id="xray-new-inbound-port"
-            class="form-input"
+            class="input input-sm"
             type="number"
             bind:value={newInbound.port}
             min="1"
@@ -232,20 +232,6 @@
     font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
-  }
-
-  .form-input {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: var(--spacing-1-5) var(--spacing-2-5);
-    font-size: var(--font-size-sm);
-    color: var(--fg-primary);
-  }
-
-  .form-input:focus {
-    outline: none;
-    border-color: var(--accent);
   }
 
   :global(.form-select) {

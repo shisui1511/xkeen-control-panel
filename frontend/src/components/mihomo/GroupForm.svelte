@@ -53,7 +53,7 @@
     <label class="form-label" for="group-name">{$t('groups.group_name')}</label>
     <input
       id="group-name"
-      class="form-input"
+      class="input input-sm"
       bind:value={ng.name}
       placeholder={$t('groups.select_proxy_placeholder')}
     />
@@ -149,11 +149,11 @@
     <div class="form-row2">
       <div class="form-col">
         <label class="form-label" for="group-url">URL</label>
-        <input id="group-url" class="form-input" bind:value={ng.url} />
+        <input id="group-url" class="input input-sm" bind:value={ng.url} />
       </div>
       <div class="form-col form-col-sm">
         <label class="form-label" for="group-interval">{$t('groups.interval_sec')}</label>
-        <input id="group-interval" class="form-input" type="number" bind:value={ng.interval} />
+        <input id="group-interval" class="input input-sm" type="number" bind:value={ng.interval} />
       </div>
     </div>
   {/if}
@@ -200,21 +200,6 @@
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-weight: 500;
-  }
-
-  .form-input {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--fg-primary);
-    font-size: var(--font-size-sm);
-    padding: var(--spacing-1-5) var(--spacing-2-5);
-    width: 100%;
-    transition: border-color var(--transition-fast);
-  }
-
-  .form-input:focus {
-    border-color: var(--accent);
   }
 
   .tag-input-wrap :global(.xcp-select) {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from '../../../Toggle.svelte';
   import { tick } from 'svelte';
   import { t } from '../../../../i18n';
   import {
@@ -285,17 +286,13 @@
         />
       {:else}
         <span class="xf-switch">
-          <label class="toggle-switch">
-            <input
-              id="{uid}-cache"
-              type="checkbox"
-              checked={cacheOff}
-              aria-describedby={cacheSet ? undefined : `${uid}-cache-hint`}
-              data-testid={fieldTestId(kernel, ID, 'disablecache')}
-              onchange={onCache}
-            />
-            <span class="toggle-slider"></span>
-          </label>
+          <Toggle
+            id="{uid}-cache"
+            checked={cacheOff}
+            aria-describedby={cacheSet ? undefined : `${uid}-cache-hint`}
+            data-testid={fieldTestId(kernel, ID, 'disablecache')}
+            onchange={onCache}
+          />
         </span>
         {#if !cacheSet}
           <span class="xf-hint" id="{uid}-cache-hint">

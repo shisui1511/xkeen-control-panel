@@ -85,7 +85,7 @@
           <label class="form-label" for="bal-tag-{i}">{$t('xray.balancer_tag')}</label>
           <input
             id="bal-tag-{i}"
-            class="form-input font-mono"
+            class="input input-sm font-mono"
             bind:value={b.tag}
             oninput={() => onchange?.()}
           />
@@ -103,7 +103,7 @@
           <label class="form-label" for="bal-selector-{i}">{$t('xray.balancer_selector')}</label>
           <input
             id="bal-selector-{i}"
-            class="form-input font-mono"
+            class="input input-sm font-mono"
             value={b.selector.join(', ')}
             placeholder="vless-, trojan-"
             onchange={(e) => setSelector(b, (e.currentTarget as HTMLInputElement).value)}
@@ -142,7 +142,7 @@
           <label class="form-label" for="obs-url">{$t('xray.observatory_url')}</label>
           <input
             id="obs-url"
-            class="form-input font-mono"
+            class="input input-sm font-mono"
             bind:value={observatorySettings.probeUrl}
             oninput={() => onchange?.()}
           />
@@ -151,7 +151,7 @@
           <label class="form-label" for="obs-interval">{$t('xray.observatory_interval')}</label>
           <input
             id="obs-interval"
-            class="form-input font-mono"
+            class="input input-sm font-mono"
             bind:value={observatorySettings.probeInterval}
             placeholder="1m"
             oninput={() => onchange?.()}

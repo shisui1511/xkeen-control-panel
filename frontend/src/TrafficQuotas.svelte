@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from './components/Toggle.svelte';
   import { onMount } from 'svelte';
   import Modal from './components/Modal.svelte';
   import Section from './components/Section.svelte';
@@ -642,21 +643,15 @@
                     </td>
                     <td>
                       <div class="actions-wrapper">
-                        <label
-                          class="toggle-switch"
-                          class:loading={togglingQuotas[q.id]}
-                          style="margin-right: 12px;"
+                        <Toggle
+                          class="tq-toggle"
+                          loading={togglingQuotas[q.id]}
                           title={$t('trafficquotas.toggle_limit')}
-                        >
-                          <input
-                            type="checkbox"
-                            aria-label={$t('trafficquotas.toggle_limit')}
-                            checked={q.enabled}
-                            disabled={togglingQuotas[q.id]}
-                            onchange={() => toggleEnabled(q)}
-                          />
-                          <span class="toggle-slider"></span>
-                        </label>
+                          ariaLabel={$t('trafficquotas.toggle_limit')}
+                          checked={q.enabled}
+                          disabled={togglingQuotas[q.id]}
+                          onchange={() => toggleEnabled(q)}
+                        />
 
                         <div class="dropdown-container">
                           <button
@@ -834,15 +829,11 @@
     </div>
 
     <div class="form-group-checkbox">
-      <label class="toggle-switch">
-        <input
-          type="checkbox"
-          id="form-enabled"
-          aria-label={$t('trafficquotas.status_enabled')}
-          bind:checked={formEnabled}
-        />
-        <span class="toggle-slider"></span>
-      </label>
+      <Toggle
+        id="form-enabled"
+        aria-label={$t('trafficquotas.status_enabled')}
+        bind:checked={formEnabled}
+      />
       <label for="form-enabled" class="checkbox-label">
         {$t('trafficquotas.status_enabled')}
       </label>
@@ -1160,20 +1151,7 @@
     font-size: var(--font-size-lg);
     color: var(--fg-secondary);
   }
-  .toggle-switch.loading {
-    opacity: 0.6;
-    pointer-events: none;
-  }
-  .toggle-switch.loading .toggle-slider {
-    animation: toggle-pulse 1.2s infinite ease-in-out;
-  }
-  @keyframes toggle-pulse {
-    0%,
-    100% {
-      background: var(--bg-elevated);
-    }
-    50% {
-      background: var(--accent-soft);
-    }
+  :global(.tq-toggle) {
+    margin-right: var(--spacing-3);
   }
 </style>
