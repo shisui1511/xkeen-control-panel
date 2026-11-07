@@ -16,9 +16,18 @@
 //   - «## Тесты Парето (80% времени Go)» — тесты Go верхнего уровня всех ветвей по убыванию
 //     секунд до накопленных 80% суммарного времени Go: строка «- Всего Go: N тестов, M с;
 //     Парето: K тестов» и таблица Тест, Ядро, с, доля %, перезапуски;
+//   - «## Превышен бюджет gate» (D-15) — тесты верхнего уровня этого прогона дольше бюджета (Go 60 с,
+//     Playwright 30 с), кроме ярусов full и тестов с меткой Slow (Go — core-marks.cjs testFacts,
+//     Playwright — теги и аннотации JSON-отчёта): таблица Тест, Ядро, с, бюджет с либо «- нет».
+//     Только предупреждение: итог прогона не меняется; решение (full, Slow с причиной или todo) —
+//     на ship:pre;
 //   - «## Нужна метка ядра» (только --suite full) — страховка D-05б: проверка go:/pw: без метки
 //     ядра, чей исход в ветвях xray и mihomo различается как класс (PASS / SKIP / KNOWN /
-//     FAIL и XPASS), либо «- нет».
+//     FAIL и XPASS), либо «- нет»;
+//   - «## Тренд набора» (только --suite full, D-16) — число проверок go:/pw: и время тестов этого
+//     отчёта против прошлого полного прогона истории (history.mjs, lastFull строго до начала
+//     отчёта из meta) и до 5 самых долгих новых тестов; нет истории — «- Тренд: история
+//     недоступна», сбой чтения не роняет сводку.
 // Имена тестов: в ячейках таблиц — mdName (cleanName плюс экранирование `\` и `|`), в пунктах
 // списков — cleanName без экранирования (текст совпадает с именем проверки в results.tsv).
 // cleanName убирает ANSI, сводит пробельные символы к одному пробелу и режет до 300 знаков.
@@ -362,12 +371,14 @@ for (const line of raw.split("\n")) {
 // Тесты по ключу «ядро\tcleanName»: { name, core, sec, kind (go|pw), restarts (число или null) }.
 // Секунды и перезапуски суммируются по нормализованному имени (WR-01).
 const testMap = new Map();
-function addTest(kind, core, name, sec, restarts) {
+function addTest(kind, core, name, sec, restarts, flags = {}) {
   const clean = cleanName(name);
   const key = `${kind}\t${core}\t${clean}`;
-  if (!testMap.has(key)) testMap.set(key, { name: clean, core, sec: 0, kind, restarts: null });
+  if (!testMap.has(key)) testMap.set(key, { name: clean, core, sec: 0, kind, restarts: null, full: false, slow: false });
   const t = testMap.get(key);
   t.sec += sec;
+  if (flags.full) t.full = true;
+  if (flags.slow) t.slow = true;
   if (restarts !== null) t.restarts = (t.restarts || 0) + restarts;
 }
 
@@ -427,6 +438,12 @@ for (const core of coreDirs) {
           for (const test of spec.tests || []) {
             let ms = 0;
             let restarts = null;
+            // ярус full и Slow: тег @full / аннотации tier-full и slow (lib/known.ts)
+            const notes = new Set((test.annotations || []).map((a) => String(a && a.type)));
+            const flags = {
+              full: (spec.tags || []).some((tag) => String(tag).replace(/^@/, "") === "full") || notes.has("tier-full"),
+              slow: notes.has("slow"),
+            };
             for (const r of test.results || []) {
               const dur = Number(r.duration) || 0;
               ms += dur;
@@ -436,7 +453,7 @@ for (const core of coreDirs) {
                 if (n !== null) restarts = (restarts || 0) + n;
               }
             }
-            addTest("pw", core, name, ms / 1000, restarts);
+            addTest("pw", core, name, ms / 1000, restarts, flags);
           }
         }
         for (const child of suiteNode.suites || []) visit(child, [...titles, child.title]);
@@ -474,6 +491,48 @@ if (goTests.length > 0) {
   for (const t of pareto) {
     const share = goTotal > 0 ? ((t.sec / goTotal) * 100).toFixed(1) : "0.0";
     out.push(`| ${mdName(t.name)} | ${t.core} | ${Math.round(t.sec)} | ${share} | ${restartsCell(t)} |`);
+  }
+  out.push("");
+}
+
+// --- бюджет gate (D-15) ------------------------------------------------------------------
+
+// Бюджет теста gate: Go 60 с, Playwright 30 с. Тесты яруса full и с меткой Slow бюджетом не
+// ограничены. Только предупреждение: итог прогона не меняется.
+const BUDGET = { go: 60, pw: 30 };
+if (testMap.size > 0) {
+  // факты Go: имя теста -> { full, slow }; не прочитаны - null (разметка Go не учитывается)
+  let goFacts = null;
+  try {
+    goFacts = new Map();
+    for (const r of coreMarks.testFacts(ROOT)) {
+      if (r.kind !== "go") continue;
+      const prev = goFacts.get(r.test);
+      goFacts.set(r.test, { full: r.tier === "full" || (prev && prev.full), slow: !!r.slowReason || (prev && prev.slow) });
+    }
+  } catch {
+    goFacts = null;
+  }
+  const over = longest
+    .filter((t) => {
+      if (t.kind === "go" && goFacts) {
+        const f = goFacts.get(t.name);
+        if (f && (f.full || f.slow)) return false;
+      }
+      if (t.full || t.slow) return false;
+      return t.sec > BUDGET[t.kind];
+    })
+    .sort((a, b) => b.sec - a.sec);
+  out.push("## Превышен бюджет gate", "");
+  out.push(
+    "Предупреждение: итог прогона не меняется; на ship:pre — full (по виду), Slow с причиной или todo (D-15).",
+    ""
+  );
+  if (!goFacts) out.push("- Разметка Go не прочитана: full и Slow Go-тестов не учтены.", "");
+  if (over.length === 0) out.push("- нет");
+  else {
+    out.push("| Тест | Ядро | с | бюджет с |", "|---|---|---:|---:|");
+    for (const t of over) out.push(`| ${mdName(t.name)} | ${t.core} | ${Math.round(t.sec)} | ${BUDGET[t.kind]} |`);
   }
   out.push("");
 }
@@ -546,6 +605,70 @@ if (suite === "full") {
   for (const n of needMark) {
     out.push(`- core-mark:${cleanName(n.check)}: нужна метка ядра: xray ${n.xray}, mihomo ${n.mihomo}`);
   }
+  out.push("");
+}
+
+// --- тренд набора против прошлого полного прогона (D-16) ------------------------------------
+
+async function trendSection() {
+  try {
+    const started = (fs.readFileSync(path.join(report, "meta"), "utf8").match(/^started=(\S+)\s*$/m) || [])[1];
+    if (!started) return ["- Тренд: время начала отчёта неизвестно"];
+    const hist = await import("./history.mjs");
+    const rows = hist.readHistory();
+    const prevRef = hist.lastFull(rows, { before: started });
+    if (!prevRef) return ["- Тренд: прошлого полного прогона в истории нет"];
+    // текущие проверки: верхние go: и pw: этого отчёта с ядром, секунды по всем ядрам
+    const cur = new Set();
+    const curSecs = new Map();
+    for (const t of testMap.values()) {
+      const check = `${t.kind}:${t.name}`;
+      cur.add(`${check}\t${t.core}`);
+      curSecs.set(check, (curSecs.get(check) || 0) + t.sec);
+    }
+    const old = new Set();
+    const oldChecks = new Set();
+    let oldTotal = 0;
+    let oldTimed = false;
+    for (const r of rows) {
+      if (r.report !== prevRef.report || r.target !== target || r.core === "-") continue;
+      const top = (r.check.startsWith("go:") && !r.check.includes("/")) || r.check.startsWith("pw:");
+      if (!top) continue;
+      old.add(`${r.check}\t${r.core}`);
+      oldChecks.add(r.check);
+      if (r.seconds !== null) {
+        oldTotal += r.seconds;
+        oldTimed = true;
+      }
+    }
+    if (old.size === 0) return ["- Тренд: в прошлом полном прогоне нет данных этой цели"];
+    let curTotal = 0;
+    for (const v of curSecs.values()) curTotal += v;
+    const signed = (n, places = 0) => {
+      const v = places ? Number(n.toFixed(places)) : Math.round(n);
+      const str = places ? v.toFixed(places) : String(v);
+      return v >= 0 ? `+${str}` : str;
+    };
+    const mins = (sec) => `${(sec / 60).toFixed(1)} мин`;
+    const was = oldTimed ? `${mins(oldTotal)}, ${signed((curTotal - oldTotal) / 60, 1)}` : "н/д";
+    const lines = [
+      `- Тренд: тестов ${cur.size} (было ${old.size}, ${signed(cur.size - old.size)}), время тестов ${mins(curTotal)} (было ${was}); прошлый полный — ${prevRef.report}`
+    ];
+    const fresh = [...curSecs]
+      .filter(([check]) => !oldChecks.has(check))
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([check, sec]) => `${cleanName(check)} (${Math.round(sec)} с)`);
+    lines.push(`- Новые тесты: ${fresh.length > 0 ? fresh.join(", ") : "нет"}`);
+    return lines;
+  } catch {
+    return ["- Тренд: история недоступна"];
+  }
+}
+
+if (suite === "full") {
+  out.push("## Тренд набора", "");
+  out.push(...(await trendSection()));
   out.push("");
 }
 
