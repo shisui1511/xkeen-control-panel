@@ -255,6 +255,15 @@ else
 fi
 
 # 4. Ядро: переключение, если активное на цели не то (как session.mjs switchTo).
+# deploy.sh сверяет только xcp -v бинарника: новая панель ещё может подниматься (прежняя только
+# что остановлена), а переключение идёт через её API — сначала дождаться ответа /api/version.
+if ! RT_REBOOT_WAIT=${RT_TREE_PANEL_WAIT:-120} rt_wait_back "$ID"; then
+  if ! rt_ssh "$ID" true >/dev/null 2>&1; then
+    exit 3
+  fi
+  echo "tree-step: панель сборки $SHORT не ответила на /api/version за $RT_BACK_SECS с после деплоя" >&2
+  exit 1
+fi
 _src=0
 _now=$(rt_ssh "$ID" 'x=$(pidof xray | cut -d" " -f1); m=$(pidof mihomo | cut -d" " -f1); if [ -n "$x" ] && [ -n "$m" ]; then echo both; elif [ -n "$x" ]; then echo xray; elif [ -n "$m" ]; then echo mihomo; else echo none; fi' 2>/dev/null) || _src=$?
 [ "$_src" != 3 ] || exit 3
