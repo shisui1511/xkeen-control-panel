@@ -221,6 +221,7 @@ func TestRouterProfileActivatePID(t *testing.T) {
 }
 
 func TestRouterProfileActivateRollback(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "внесение сбоя: гашение Mihomo при активации профиля, откат перехода")
 	tg := routertest.CoreSpecific(t)
 	if tg.Core != "mihomo" {
 		t.Skip("нужен активный Mihomo")

@@ -250,6 +250,7 @@ func rtUpdRestore(t *testing.T, p *routertest.Panel) {
 // (кандидат автоустановки) панели с реальными релизами GitHub и часами
 // устройства для обоих каналов.
 func TestRouterUpdateAutoState(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "реальная загрузка: релизы GitHub по обоим каналам, лимит запросов API стенда")
 	utils.ApplySystemTimezone()
 	p := routertest.NewPanel(t)
 	rtUpdRestore(t, p)

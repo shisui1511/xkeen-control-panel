@@ -93,6 +93,7 @@ func rtOpsBlocks(lines []string, name string) int {
 // сообщает об этом, второй `-ug` качает файл один раз по стандартной ветке XKeen.
 // xkeen.json стенда возвращается целиком, файл набора — как был.
 func TestRouterGeodataEnableStandard(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "реальная загрузка: два настоящих xkeen -ug качают файл стандартного набора")
 	tg := routertest.Current(t)
 	if _, err := os.Stat(rtRunXKeenBin); err != nil {
 		t.Skipf("нет %s: XKeen не установлен", rtRunXKeenBin)

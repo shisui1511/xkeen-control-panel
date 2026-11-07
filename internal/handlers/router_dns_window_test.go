@@ -209,6 +209,7 @@ func TestRouterDNSWindowKeep(t *testing.T) {
 // закрыт → исход timeout, уведомление, outcome-seen, следующее включение снимает
 // исход. Метка ядра: откат перезапускает активное ядро.
 func TestRouterDNSWindowTimeout(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "реальное время: окно подтверждения перехвата DNS ждёт дедлайн и откат по таймеру")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)

@@ -133,6 +133,7 @@ func (e *rtSrc) rtDNSRestoreSection(section string, orig json.RawMessage) {
 // ядро, исход timeout. Подтест keep: то же «Применить» → окно apply → «Оставить» →
 // Applied содержит сервер. Метка ядра: DNS-секция и перехват — у активного ядра.
 func TestRouterDNSApplyWindow(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "реальное время: окно «Применить» DNS без «Оставить» ждёт откат по таймеру")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)
@@ -297,6 +298,7 @@ func (e *rtSrc) rtDNSSaveGroup(group map[string]any) {
 // черновик содержит правку (draft_changes > 0). Метка ядра: перехват и DNS-секция
 // — у активного ядра.
 func TestRouterDNSApplyProbe(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "внесение сбоя: мёртвый узел группы-цели обрывает пробу после «Применить» DNS")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)

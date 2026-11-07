@@ -133,6 +133,7 @@ func (e *rtSrc) rtDNSExpectOff(v map[string]any, kernel string, overrideBefore b
 // замок → state off без сбоя, слушателя в файлах ядра нет. Метка ядра: перехват
 // ведёт активное ядро, слушатель — в его файлах.
 func TestRouterDNSDisableRetry(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "внесение сбоя: закрытый порт 53 обрывает выключение перехвата DNS, затем повтор")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)
@@ -202,6 +203,7 @@ func TestRouterDNSDisableRetry(t *testing.T) {
 // Слой включается обратно до возврата стенда. Метка ядра: возврат перезапускает
 // активное ядро.
 func TestRouterDNSFlagOffRetry(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "внесение сбоя: закрытый порт 53 обрывает выключение флага слоя, затем повтор")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)
@@ -310,6 +312,7 @@ func (e *rtSrc) rtDNSWaitSettled(limit time.Duration) map[string]any {
 // как до включения, :53 у прошивки. Метка ядра: DNS-секция и перехват — у
 // активного ядра.
 func TestRouterDNSApplyReleaseWindow(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "внесение сбоя: закрытый порт 53 и две пробы мимо, откат по дедлайну окна")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)

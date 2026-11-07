@@ -249,6 +249,7 @@ var rtGeoRoutes = []struct{ method, path string }{
 // проверка источника, запись, расписание, влияние, пометка и возврат, теги, записи,
 // поиск, защита маршрутов и настоящий запуск -ug с занятостью замка и выводом по смещениям.
 func TestRouterGeodataAPI(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "реальная загрузка: настоящий запуск xkeen -ug скачивает базы из интернета")
 	e := rtNewSrc(t)
 
 	// Флаг слоя выключен: каждый маршрут менеджера отвечает 404 config_layer_disabled.

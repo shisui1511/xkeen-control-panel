@@ -3,6 +3,7 @@
 import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
+import { FULL_TAG, TIER_FULL_ANNOTATION } from './lib/known';
 import { api, layerFlag, resetDraft, withPanel } from './lib/nodes-api';
 
 // Верх вкладки «Списки» (менеджер geodata XKeen, фаза 146.1, план 12): «Обновить сейчас» с
@@ -84,97 +85,107 @@ async function expectRunStatusGone(page: Page): Promise<void> {
   await expect(page.getByTestId('geo-run-now')).toBeEnabled({ timeout: 15_000 });
 }
 
-test('lists-actions: обновить сейчас', async ({ page }) => {
-  // два настоящих запуска -ug подряд
-  test.setTimeout(2 * RUN_LIMIT_MS + 5 * 60_000);
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await openLists(page);
+test(
+  'lists-actions: обновить сейчас',
+  {
+    tag: FULL_TAG,
+    annotation: {
+      type: TIER_FULL_ANNOTATION,
+      description: 'реальная загрузка: настоящий xkeen -ug качает базы из интернета'
+    }
+  },
+  async ({ page }) => {
+    // два настоящих запуска -ug подряд
+    test.setTimeout(2 * RUN_LIMIT_MS + 5 * 60_000);
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openLists(page);
 
-  const before = await snapshot(page);
-  test.skip(!before.xkeen.installed, 'на стенде нет XKeen: xkeen -ug запустить нечем');
-  expect(before.run.running, 'на входе в сценарий запуск не идёт').toBe(false);
-  const started = Date.now();
+    const before = await snapshot(page);
+    test.skip(!before.xkeen.installed, 'на стенде нет XKeen: xkeen -ug запустить нечем');
+    expect(before.run.running, 'на входе в сценарий запуск не идёт').toBe(false);
+    const started = Date.now();
 
-  // кнопка просит подтверждение: перезапуск ядра нельзя запустить одним кликом
-  await page.getByTestId('geo-run-now').click();
-  const dialog = page.getByRole('dialog');
-  await expect(dialog).toBeVisible({ timeout: T.action });
-  await expect(dialog).toContainText(/xkeen -ug/);
-  await dialog.getByRole('button', { name: /Обновить базы|Update databases/ }).click();
+    // кнопка просит подтверждение: перезапуск ядра нельзя запустить одним кликом
+    await page.getByTestId('geo-run-now').click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible({ timeout: T.action });
+    await expect(dialog).toContainText(/xkeen -ug/);
+    await dialog.getByRole('button', { name: /Обновить базы|Update databases/ }).click();
 
-  // идёт настоящий запуск: полоса статуса видна, вывод раскрыт и наполняется
-  await expect(page.getByTestId('geo-run-status')).toBeVisible({ timeout: T.action });
-  const output = page.getByTestId('geo-output');
-  await expect(output).toBeVisible({ timeout: T.action });
-  await expect(output).not.toHaveText('', { timeout: T.network + T.action });
+    // идёт настоящий запуск: полоса статуса видна, вывод раскрыт и наполняется
+    await expect(page.getByTestId('geo-run-status')).toBeVisible({ timeout: T.action });
+    const output = page.getByTestId('geo-output');
+    await expect(output).toBeVisible({ timeout: T.action });
+    await expect(output).not.toHaveText('', { timeout: T.network + T.action });
 
-  // второй запуск и «Применить» во время -ug отклоняются замком менеджера
-  const busy = await api(page, 'POST', '/api/configlayer/apply');
-  expect(busy.status, 'POST /api/configlayer/apply во время -ug').toBe(409);
-  expect(busy.data?.code).toBe('geodata_busy');
+    // второй запуск и «Применить» во время -ug отклоняются замком менеджера
+    const busy = await api(page, 'POST', '/api/configlayer/apply');
+    expect(busy.status, 'POST /api/configlayer/apply во время -ug').toBe(409);
+    expect(busy.data?.code).toBe('geodata_busy');
 
-  // вывод переживает перезагрузку страницы: блок раскрывается сам и снова непуст
-  await page.reload({ timeout: T.page, waitUntil: 'domcontentloaded' });
-  await expect(page.getByTestId('lists-tab')).toBeVisible({ timeout: T.page });
-  const afterReload = await snapshot(page);
-  if (afterReload.run.running) {
-    await expect(page.getByTestId('geo-output')).toBeVisible({ timeout: T.page });
-  } else {
-    // запуск успел закончиться до перезагрузки: вывод открывается кнопкой
-    await page.getByTestId('geo-output-toggle').click();
+    // вывод переживает перезагрузку страницы: блок раскрывается сам и снова непуст
+    await page.reload({ timeout: T.page, waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('lists-tab')).toBeVisible({ timeout: T.page });
+    const afterReload = await snapshot(page);
+    if (afterReload.run.running) {
+      await expect(page.getByTestId('geo-output')).toBeVisible({ timeout: T.page });
+    } else {
+      // запуск успел закончиться до перезагрузки: вывод открывается кнопкой
+      await page.getByTestId('geo-output-toggle').click();
+    }
+    await expect(page.getByTestId('geo-output')).not.toHaveText('', { timeout: T.page });
+
+    // ждём конца запуска по снимку менеджера
+    await expect
+      .poll(async () => (await snapshot(page)).run.running, {
+        timeout: RUN_LIMIT_MS,
+        intervals: [3_000]
+      })
+      .toBe(false);
+
+    // конец запуска виден на карточке без перезагрузки страницы
+    await expectRunStatusGone(page);
+
+    const after = await snapshot(page);
+    expect(after.last_run, 'после запуска есть итог последнего запуска').toBeTruthy();
+    expect(Date.parse(after.last_run?.at ?? '')).toBeGreaterThanOrEqual(started - 60_000);
+    await expect(page.getByTestId('geo-last-run')).toContainText(/Последний запуск|Last run/, {
+      timeout: T.action
+    });
+    await expect(page.getByTestId('geo-run-now')).toBeEnabled({ timeout: T.action });
+
+    // второй запуск без перезагрузки страницы: журнал показывает вывод только нового запуска
+    await page.getByTestId('geo-run-now').click();
+    const again = page.getByRole('dialog');
+    await expect(again).toBeVisible({ timeout: T.action });
+    await again.getByRole('button', { name: /Обновить базы|Update databases/ }).click();
+    await expect(page.getByTestId('geo-run-status')).toBeVisible({ timeout: T.action });
+    await expect
+      .poll(async () => (await snapshot(page)).run.running, {
+        timeout: RUN_LIMIT_MS,
+        intervals: [3_000]
+      })
+      .toBe(false);
+    await expectRunStatusGone(page);
+    await expect(page.getByTestId('geo-output')).toBeVisible({ timeout: T.action });
+    await expect
+      .poll(
+        async () => {
+          const server = await api(page, 'GET', `${BASE}/output?job=ug&from=0`);
+          const shown = (await page.getByTestId('geo-output').textContent()) ?? '';
+          return shown.trim() === String(server.data?.text ?? '').trim();
+        },
+        {
+          message: 'журнал на странице совпадает с выводом текущего запуска',
+          timeout: T.action
+        }
+      )
+      .toBe(true);
+
+    await guard.assertClean();
   }
-  await expect(page.getByTestId('geo-output')).not.toHaveText('', { timeout: T.page });
-
-  // ждём конца запуска по снимку менеджера
-  await expect
-    .poll(async () => (await snapshot(page)).run.running, {
-      timeout: RUN_LIMIT_MS,
-      intervals: [3_000]
-    })
-    .toBe(false);
-
-  // конец запуска виден на карточке без перезагрузки страницы
-  await expectRunStatusGone(page);
-
-  const after = await snapshot(page);
-  expect(after.last_run, 'после запуска есть итог последнего запуска').toBeTruthy();
-  expect(Date.parse(after.last_run?.at ?? '')).toBeGreaterThanOrEqual(started - 60_000);
-  await expect(page.getByTestId('geo-last-run')).toContainText(/Последний запуск|Last run/, {
-    timeout: T.action
-  });
-  await expect(page.getByTestId('geo-run-now')).toBeEnabled({ timeout: T.action });
-
-  // второй запуск без перезагрузки страницы: журнал показывает вывод только нового запуска
-  await page.getByTestId('geo-run-now').click();
-  const again = page.getByRole('dialog');
-  await expect(again).toBeVisible({ timeout: T.action });
-  await again.getByRole('button', { name: /Обновить базы|Update databases/ }).click();
-  await expect(page.getByTestId('geo-run-status')).toBeVisible({ timeout: T.action });
-  await expect
-    .poll(async () => (await snapshot(page)).run.running, {
-      timeout: RUN_LIMIT_MS,
-      intervals: [3_000]
-    })
-    .toBe(false);
-  await expectRunStatusGone(page);
-  await expect(page.getByTestId('geo-output')).toBeVisible({ timeout: T.action });
-  await expect
-    .poll(
-      async () => {
-        const server = await api(page, 'GET', `${BASE}/output?job=ug&from=0`);
-        const shown = (await page.getByTestId('geo-output').textContent()) ?? '';
-        return shown.trim() === String(server.data?.text ?? '').trim();
-      },
-      {
-        message: 'журнал на странице совпадает с выводом текущего запуска',
-        timeout: T.action
-      }
-    )
-    .toBe(true);
-
-  await guard.assertClean();
-});
+);
 
 type Schedule = Snapshot['schedule'];
 
@@ -473,141 +484,151 @@ test.describe('включение набора', () => {
     });
   });
 
-  test('lists-actions: включить стандартный набор', async ({ page }) => {
-    // подготовка (убрать лежащий набор) и возможный возврат в afterEach — по запуску на каждую
-    test.setTimeout(3 * RUN_LIMIT_MS + 10 * 60_000);
-    const guard = attachConsoleGuard(page);
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await openLists(page);
-
-    let before = await snapshot(page);
-    test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
-    test.skip(!before.xkeen.user_geodata, 'XKeen старее 2.0.1: панель записи не делает');
-    test.skip(!before.download.jq, 'на стенде нет jq: XKeen не читает записи geodata');
-    test.skip(!before.download.geofile_update, 'на стенде выключено обновление баз XKeen');
-    expect(before.run.running, 'на входе в сценарий запуск не идёт').toBe(false);
-    const isFree = (x: SnapSource): boolean =>
-      x.origin === 'standard' && !x.present && !x.entry && STANDARD_SETS.includes(x.set_id ?? '');
-    let found = before.sources.find(isFree);
-
-    if (found === undefined) {
-      // Самоподготовка: все три набора лежат. Убирается лежащий набор без ссылок (ни правил
-      // панели, ни сырых правил, ни чужих конфигов), чтобы ни один конфиг ядра не указывал на
-      // отсутствующий dat; в конце сценария набор снова лежит
-      let spare: SnapSource | undefined;
-      for (const c of before.sources.filter(
-        (x) =>
-          x.origin === 'standard' &&
-          x.present &&
-          !x.entry &&
-          x.pending !== true &&
-          !x.draft &&
-          STANDARD_SETS.includes(x.set_id ?? '')
-      )) {
-        const imp = await api(page, 'GET', `${BASE}/impact?file=${encodeURIComponent(c.file)}`);
-        const refs = (k: string): number => ((imp.data?.[k] as unknown[] | null) ?? []).length;
-        if (
-          imp.status === 200 &&
-          refs('lists') === 0 &&
-          refs('raw') === 0 &&
-          refs('foreign') === 0
-        ) {
-          spare = c;
-          break;
-        }
+  test(
+    'lists-actions: включить стандартный набор',
+    {
+      tag: FULL_TAG,
+      annotation: {
+        type: TIER_FULL_ANNOTATION,
+        description: 'реальная загрузка: два настоящих xkeen -ug качают файл набора'
       }
-      test.skip(
-        spare === undefined,
-        'на стенде нет стандартного набора без ссылок: самоподготовка невозможна'
-      );
-      if (spare === undefined) return;
-      const spareFile = spare.file;
-      restoreSet = { file: spareFile, set: spare.set_id ?? spare.id };
-      await removeSource(page, spareFile);
+    },
+    async ({ page }) => {
+      // подготовка (убрать лежащий набор) и возможный возврат в afterEach — по запуску на каждую
+      test.setTimeout(3 * RUN_LIMIT_MS + 10 * 60_000);
+      const guard = attachConsoleGuard(page);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await openLists(page);
+
+      let before = await snapshot(page);
+      test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
+      test.skip(!before.xkeen.user_geodata, 'XKeen старее 2.0.1: панель записи не делает');
+      test.skip(!before.download.jq, 'на стенде нет jq: XKeen не читает записи geodata');
+      test.skip(!before.download.geofile_update, 'на стенде выключено обновление баз XKeen');
+      expect(before.run.running, 'на входе в сценарий запуск не идёт').toBe(false);
+      const isFree = (x: SnapSource): boolean =>
+        x.origin === 'standard' && !x.present && !x.entry && STANDARD_SETS.includes(x.set_id ?? '');
+      let found = before.sources.find(isFree);
+
+      if (found === undefined) {
+        // Самоподготовка: все три набора лежат. Убирается лежащий набор без ссылок (ни правил
+        // панели, ни сырых правил, ни чужих конфигов), чтобы ни один конфиг ядра не указывал на
+        // отсутствующий dat; в конце сценария набор снова лежит
+        let spare: SnapSource | undefined;
+        for (const c of before.sources.filter(
+          (x) =>
+            x.origin === 'standard' &&
+            x.present &&
+            !x.entry &&
+            x.pending !== true &&
+            !x.draft &&
+            STANDARD_SETS.includes(x.set_id ?? '')
+        )) {
+          const imp = await api(page, 'GET', `${BASE}/impact?file=${encodeURIComponent(c.file)}`);
+          const refs = (k: string): number => ((imp.data?.[k] as unknown[] | null) ?? []).length;
+          if (
+            imp.status === 200 &&
+            refs('lists') === 0 &&
+            refs('raw') === 0 &&
+            refs('foreign') === 0
+          ) {
+            spare = c;
+            break;
+          }
+        }
+        test.skip(
+          spare === undefined,
+          'на стенде нет стандартного набора без ссылок: самоподготовка невозможна'
+        );
+        if (spare === undefined) return;
+        const spareFile = spare.file;
+        restoreSet = { file: spareFile, set: spare.set_id ?? spare.id };
+        await removeSource(page, spareFile);
+        await expect
+          .poll(
+            async () => {
+              const row = (await snapshot(page)).sources.find((x) => x.file === spareFile);
+              return row !== undefined && (row.present || row.entry);
+            },
+            { timeout: RUN_LIMIT_MS, intervals: [3_000] }
+          )
+          .toBe(false);
+        before = await snapshot(page);
+        await openLists(page);
+        found = before.sources.find((x) => x.file === spareFile);
+        expect(found, 'набор после подготовки не лежит на диске').toBeDefined();
+        if (found === undefined) return;
+      } else {
+        // файла на стенде до сценария не было: сценарий убирает его сам
+        enabledFile = found.file;
+      }
+      const target: SnapSource = found;
+      const setId = target.set_id ?? target.id;
+
+      // переключатель выключен; клик открывает диалог с записью geodata в diff
+      const row = page.getByTestId(`geo-source-${target.id}`);
+      const sw = page.getByTestId(`geo-set-switch-${setId}`);
+      await expect(sw).not.toBeChecked();
+      await row.locator('label.toggle-label').click();
+      const modal = page.getByTestId('geodata-add-modal');
+      await expect(modal).toBeVisible({ timeout: T.action });
+      await expect(modal.getByTestId('geodata-add-loading')).toHaveCount(0, { timeout: T.page });
+      const diff = modal.getByTestId('geodata-add-diff');
+      await expect(diff).toContainText(target.file, { timeout: T.action });
+      await expect(diff.locator('.diff-line-added').first()).toBeVisible();
+      // клик не включил набор сам: до подтверждения переключатель выключен
+      await expect(sw).not.toBeChecked();
+
+      // «Обновить сейчас»: запись и настоящий xkeen -ug
+      await modal.getByTestId('geodata-update-now').check();
+      const confirm = modal.getByTestId('geodata-add-confirm');
+      await expect(confirm).toBeEnabled({ timeout: T.action });
+      await confirm.click();
+      // в xkeen.json есть комментарии: запись просит подтвердить их потерю
+      await settleWrite(page, modal);
+
+      // файла ещё нет: на строке «ждёт скачивания», переключатель включён
+      await expect(page.getByTestId(`geo-source-pending-${target.id}`)).toBeVisible({
+        timeout: T.action
+      });
+      await expect(sw).toBeChecked();
+
+      // XKeen скачал файл, панель убрала временную запись: чип пропал без перезагрузки страницы
+      await expect(page.getByTestId(`geo-source-pending-${target.id}`)).toHaveCount(0, {
+        timeout: RUN_LIMIT_MS
+      });
       await expect
         .poll(
           async () => {
-            const row = (await snapshot(page)).sources.find((x) => x.file === spareFile);
-            return row !== undefined && (row.present || row.entry);
+            const row = (await snapshot(page)).sources.find((x) => x.file === target.file);
+            return row !== undefined && row.present && !row.entry && row.pending !== true;
           },
           { timeout: RUN_LIMIT_MS, intervals: [3_000] }
         )
+        .toBe(true);
+      // запуск закончился: карточка «Обновление баз» снимает «Идёт обновление баз…» сама,
+      // страница не перезагружалась
+      await expect
+        .poll(async () => (await snapshot(page)).run.running, {
+          timeout: RUN_LIMIT_MS,
+          intervals: [3_000]
+        })
         .toBe(false);
-      before = await snapshot(page);
-      await openLists(page);
-      found = before.sources.find((x) => x.file === spareFile);
-      expect(found, 'набор после подготовки не лежит на диске').toBeDefined();
-      if (found === undefined) return;
-    } else {
-      // файла на стенде до сценария не было: сценарий убирает его сам
-      enabledFile = found.file;
+      await expectRunStatusGone(page);
+      await expect(sw).toBeChecked();
+      await expect(page.getByTestId(`geo-source-open-${target.id}`)).toBeVisible({
+        timeout: T.action
+      });
+
+      // в xkeen.json записи с этим файлом не осталось: XKeen дальше обновляет файл сам
+      expect(
+        (await snapshot(page)).sources.some((x) => x.file === target.file && x.entry),
+        'временная запись убрана'
+      ).toBe(false);
+
+      await guard.assertClean();
     }
-    const target: SnapSource = found;
-    const setId = target.set_id ?? target.id;
-
-    // переключатель выключен; клик открывает диалог с записью geodata в diff
-    const row = page.getByTestId(`geo-source-${target.id}`);
-    const sw = page.getByTestId(`geo-set-switch-${setId}`);
-    await expect(sw).not.toBeChecked();
-    await row.locator('label.toggle-label').click();
-    const modal = page.getByTestId('geodata-add-modal');
-    await expect(modal).toBeVisible({ timeout: T.action });
-    await expect(modal.getByTestId('geodata-add-loading')).toHaveCount(0, { timeout: T.page });
-    const diff = modal.getByTestId('geodata-add-diff');
-    await expect(diff).toContainText(target.file, { timeout: T.action });
-    await expect(diff.locator('.diff-line-added').first()).toBeVisible();
-    // клик не включил набор сам: до подтверждения переключатель выключен
-    await expect(sw).not.toBeChecked();
-
-    // «Обновить сейчас»: запись и настоящий xkeen -ug
-    await modal.getByTestId('geodata-update-now').check();
-    const confirm = modal.getByTestId('geodata-add-confirm');
-    await expect(confirm).toBeEnabled({ timeout: T.action });
-    await confirm.click();
-    // в xkeen.json есть комментарии: запись просит подтвердить их потерю
-    await settleWrite(page, modal);
-
-    // файла ещё нет: на строке «ждёт скачивания», переключатель включён
-    await expect(page.getByTestId(`geo-source-pending-${target.id}`)).toBeVisible({
-      timeout: T.action
-    });
-    await expect(sw).toBeChecked();
-
-    // XKeen скачал файл, панель убрала временную запись: чип пропал без перезагрузки страницы
-    await expect(page.getByTestId(`geo-source-pending-${target.id}`)).toHaveCount(0, {
-      timeout: RUN_LIMIT_MS
-    });
-    await expect
-      .poll(
-        async () => {
-          const row = (await snapshot(page)).sources.find((x) => x.file === target.file);
-          return row !== undefined && row.present && !row.entry && row.pending !== true;
-        },
-        { timeout: RUN_LIMIT_MS, intervals: [3_000] }
-      )
-      .toBe(true);
-    // запуск закончился: карточка «Обновление баз» снимает «Идёт обновление баз…» сама,
-    // страница не перезагружалась
-    await expect
-      .poll(async () => (await snapshot(page)).run.running, {
-        timeout: RUN_LIMIT_MS,
-        intervals: [3_000]
-      })
-      .toBe(false);
-    await expectRunStatusGone(page);
-    await expect(sw).toBeChecked();
-    await expect(page.getByTestId(`geo-source-open-${target.id}`)).toBeVisible({
-      timeout: T.action
-    });
-
-    // в xkeen.json записи с этим файлом не осталось: XKeen дальше обновляет файл сам
-    expect(
-      (await snapshot(page)).sources.some((x) => x.file === target.file && x.entry),
-      'временная запись убрана'
-    ).toBe(false);
-
-    await guard.assertClean();
-  });
+  );
 });
 
 test.describe('группы источников', () => {

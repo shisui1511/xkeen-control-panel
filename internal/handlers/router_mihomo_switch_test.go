@@ -384,6 +384,7 @@ func TestRouterMihomoSwitch(t *testing.T) {
 // профиля панели прежний, секции Mihomo под управлением, черновик чистый, Mihomo
 // работает на прежнем профиле с новым процессом. Метка ядра: нужен активный Mihomo.
 func TestRouterMihomoSwitchRollback(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "внесение сбоя: гашение Mihomo сигналом KILL, откат перехода по сроку подтверждения")
 	tg := routertest.CoreSpecific(t)
 	if tg.Core != "mihomo" {
 		t.Skip("нужен активный Mihomo: отказ запуска подтверждается погашенным процессом")

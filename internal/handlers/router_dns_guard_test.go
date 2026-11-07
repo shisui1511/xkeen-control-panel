@@ -129,6 +129,7 @@ func rtDNSOtherKernel(t *testing.T, kernel string) string {
 // ядра, внешнее имя разрешается, в истории действий — успешный перезапуск ядра
 // сторожем. Метка ядра: сценарий гасит активное ядро.
 func TestRouterDNSGuard(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "внесение сбоя: kill -9 ядра-перехватчика, сторож перезапускает ядро")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)

@@ -909,6 +909,7 @@ func (e *rtSrc) rtDNSDeadGroup(t *testing.T) {
 // до включения, proxy_dns on, прежний перехват XKeen с :53. Метка ядра: сбой
 // вызывается на процессах активного ядра.
 func TestRouterDNSTxnRollback(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "внесение сбоя: гашение процессов и мёртвый узел обрывают включение перехвата DNS")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)

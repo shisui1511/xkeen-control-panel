@@ -214,6 +214,7 @@ func rtDNSKernelSwitchPrepare(t *testing.T, e *rtSrc, kernel string) string {
 // прошивки, активным осталось переключённое ядро. Стенд возвращает исходное ядро
 // и выключает перехват. Метка ядра: сценарий меняет активное ядро.
 func TestRouterDNSKernelSwitch(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "реальное время: окно переноса DNS при смене ядра ждёт откат по таймеру")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)
