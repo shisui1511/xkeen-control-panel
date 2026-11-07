@@ -36,6 +36,16 @@
 //                                           не сочетается с product и с проходом-прогоном; номер
 //                                           живёт только в деплое прохода: XCP_VERSION снимается
 //                                           со всех этапов, возврат стенда собирает HEAD без номера
+//         "tree": "71c55fea",               необязательно: продукт и тесты прохода — из дерева
+//                                           коммита (ссылка git, коммит есть): отдельный worktree
+//                                           tree-step.sh prepare, деплой и смоук, Go и Playwright
+//                                           идут из его каталога (скрипты этапов — из HEAD, имена
+//                                           и метки ядра тестов — из дерева; спеки прохода
+//                                           проверяются в нём). Сборка ставится один раз на проход,
+//                                           следующий проход с другим ключом ставит свою; не сочетается
+//                                           с product, version и проходом-прогоном. Нужен для повтора
+//                                           случая до исправления целиком (воспроизведение 148-25).
+//                                           Worktree снимает tree-step.sh cleanup в конце сессии
 //         "cores": ["mihomo"],              необязательно: ядра прохода, на каждом все тесты
 //                                           (перекрывает правило «ядра как в гейте», см. ниже)
 //         "go": { "pkgs": "./internal/x", "run": "^TestRouterX$" },    необязательно
@@ -248,6 +258,8 @@ import {
   readSync,
   realpathSync,
   rmSync,
+  symlinkSync,
+  unlinkSync,
   writeFileSync
 } from 'node:fs';
 import { constants as osConstants } from 'node:os';
@@ -622,6 +634,21 @@ function loadSpec(file, root, nested = false) {
       }
       version = p.version;
     }
+    // дерево коммита: продукт и тесты из коммита (worktree), обвязка (скрипты этапов) — из HEAD
+    let tree = null;
+    let treeSha = null;
+    if (p.tree !== undefined) {
+      if (p.product || version !== null) die(`${where}: tree не сочетается с product и version`);
+      if (typeof p.tree !== 'string' || !SAFE_REF.test(p.tree)) {
+        die(`${where}.tree: недопустимая ссылка`);
+      }
+      try {
+        treeSha = git('rev-parse', '--verify', '--quiet', `${p.tree}^{commit}`);
+      } catch {
+        die(`${where}.tree: коммит ${p.tree} не найден`);
+      }
+      tree = p.tree;
+    }
     let product = null;
     if (p.product) {
       const { ref, files } = p.product;
@@ -656,12 +683,15 @@ function loadSpec(file, root, nested = false) {
     const specs = p.specs ?? [];
     if (!Array.isArray(specs)) die(`${where}.specs: список путей от frontend/`);
     for (const s of specs) {
-      if (
-        typeof s !== 'string' ||
-        !SAFE_PATH.test(s) ||
-        !existsSync(path.join(root, 'frontend', s))
-      ) {
-        die(`${where}.specs: нет спека frontend/${s}`);
+      // спек прохода tree берётся из дерева коммита: в HEAD его может уже не быть
+      const present =
+        typeof s === 'string' && SAFE_PATH.test(s) && !s.includes('..')
+          ? treeSha
+            ? spawnSync('git', ['cat-file', '-e', `${treeSha}:frontend/${s}`]).status === 0
+            : existsSync(path.join(root, 'frontend', s))
+          : false;
+      if (!present) {
+        die(`${where}.specs: нет спека frontend/${s}${treeSha ? ` в ${tree}` : ''}`);
       }
     }
     const grep = p.grep === undefined ? '' : String(p.grep);
@@ -695,7 +725,7 @@ function loadSpec(file, root, nested = false) {
       if (new Set(p.cores).size !== p.cores.length) die(`${where}.cores: ядро указано дважды`);
       pcores = [...p.cores];
     }
-    return { name: p.name, version, product, go, specs, grep, expect, cores: pcores };
+    return { name: p.name, version, tree, treeSha, product, go, specs, grep, expect, cores: pcores };
   });
   return { target: spec.target, cores, keepGoing, budgetReason, passes };
 }
@@ -991,7 +1021,6 @@ function localTagExists(tag) {
   );
 }
 
-// Новейший опубликованный (не draft) релиз GitHub; при сбое gh бросает.
 // Номер последнего перепрогона в отчёте: наибольшее N среди rerun-N.meta (run.sh пишет его при старте
 // перепрогона); 0 — перепрогонов не было.
 function rerunNumber(dir) {
@@ -1007,6 +1036,7 @@ function rerunNumber(dir) {
   return n;
 }
 
+// Новейший опубликованный (не draft) релиз GitHub; при сбое gh бросает.
 function latestReleaseTag() {
   return execFileSync(
     'gh',
@@ -1028,6 +1058,7 @@ function latestReleaseTag() {
 // Ключ сборки: HEAD@<номер> всегда отличается от HEAD, поэтому смена номера вызывает деплой,
 // а завершающий возврат стенда (deployed !== 'HEAD') ставит HEAD со своей версией.
 function productKey(p) {
+  if (p.tree) return `tree:${p.treeSha}`;
   if (p.version) return `HEAD@${p.resolved ?? p.version}`;
   return p.product ? `${p.product.sha}:${p.product.files.join(',')}` : 'HEAD';
 }
@@ -1087,11 +1118,13 @@ function planSession(spec, specFile, root) {
     }
     const key = productKey(p);
     if (key !== deployed) {
-      const target = p.version
-        ? `HEAD под номером ${p.version}`
-        : p.product
-          ? `${p.product.files.join(' ')} из ${p.product.ref}`
-          : 'HEAD';
+      const target = p.tree
+        ? `дерево ${p.tree}`
+        : p.version
+          ? `HEAD под номером ${p.version}`
+          : p.product
+            ? `${p.product.files.join(' ')} из ${p.product.ref}`
+            : 'HEAD';
       step(`деплой и смоук: ${target}`, EST.deploy);
       deployed = key;
     }
@@ -1179,6 +1212,11 @@ class Session {
     this.suiteFails = new Map();
     // имя прохода-прогона -> каталог его отчёта (для rerun.from)
     this.suiteDirs = new Map();
+    // проход tree: worktree дерева коммита, пока он идёт (этапы запускаются с его каталогом); treeUsed —
+    // worktree создавались, нужен tree-step.sh cleanup
+    this.treeWt = null;
+    this.treeSha = null;
+    this.treeUsed = false;
     this.notes = [];
     this.n = 0;
     this.c0 = null;
@@ -1266,10 +1304,22 @@ class Session {
     const full = { ...base, RT_LOCK_HELD: '1', ROUTERS: this.t, ...env };
     // undefined в env — снять переменную (вложенный прогон набора не наследует настройки сессии)
     for (const k of Object.keys(full)) if (full[k] === undefined) delete full[k];
+    // проход tree: скрипты этапов — из HEAD (SCRIPT_DIR), каталог запуска — worktree дерева коммита,
+    // поэтому deploy.sh, go-suite.sh и pw-suite.sh собирают и гоняют продукт и тесты коммита; отчёт этапа
+    // rt_report_use принимает только под build/router каталога запуска — путь переписывается на ссылку
+    // build/router worktree (enterTree направляет её на build/router этой копии)
+    let cwd = this.root;
+    if (this.treeWt) {
+      cwd = this.treeWt;
+      const prefix = path.join(this.root, 'build', 'router') + path.sep;
+      if (typeof full.RT_REPORT === 'string' && full.RT_REPORT.startsWith(prefix)) {
+        full.RT_REPORT = path.join(this.treeWt, 'build', 'router', full.RT_REPORT.slice(prefix.length));
+      }
+    }
     appendFileSync(this.log, `\n$ ${[cmd, ...args].join(' ')}\n`);
     return new Promise((resolve) => {
       const child = spawn(cmd, args, {
-        cwd: this.root,
+        cwd,
         env: full,
         stdio: ['ignore', 'pipe', 'pipe'],
         // каждый этап — своя группа процессов: сигнал прерывания уходит всей группе (этап и
@@ -1393,6 +1443,80 @@ class Session {
       else rmSync(path.join(this.root, f), { force: true });
     }
     this.overridden = null;
+  }
+
+  // Проход tree: worktree дерева коммита (tree-step.sh prepare печатает его путь) и ссылка build/router
+  // в нём на отчёты этой копии, чтобы отчёт этапа, записанный через worktree, лёг в каталог сессии.
+  // Тот же коммит подряд — worktree и сборка переиспользуются. Код: true — worktree готов.
+  enterTree(p) {
+    if (this.treeWt && this.treeSha === p.treeSha) return true;
+    this.leaveTree();
+    this.say(`проход ${p.name}: дерево коммита ${p.tree} (worktree)`);
+    const r = spawnSync('sh', [path.join(SCRIPT_DIR, 'tree-step.sh'), 'prepare', p.treeSha], {
+      cwd: this.root,
+      env: { ...process.env, ROUTERS: this.t },
+      encoding: 'utf8'
+    });
+    this.treeUsed = true;
+    appendFileSync(
+      this.log,
+      `\n$ tree-step.sh prepare ${p.treeSha}\n${r.stdout || ''}${r.stderr || ''}`
+    );
+    const wt = (r.stdout || '').trim().split('\n').pop() ?? '';
+    if (r.status !== 0 || !wt || !existsSync(wt)) {
+      const why = `tree-step.sh prepare вернул код ${r.status ?? 'сигнал'}`;
+      this.say(`проход ${p.name} не начат: worktree дерева ${p.tree} не подготовлен (${why})`);
+      this.verdicts.push({
+        pass: p.name,
+        core: '-',
+        test: 'tree: worktree',
+        expected: ['готов'],
+        actual: 'не создан',
+        detail: why,
+        ok: false,
+        report: '-'
+      });
+      this.broken = true;
+      return false;
+    }
+    try {
+      const link = path.join(wt, 'build', 'router');
+      try {
+        unlinkSync(link);
+      } catch {
+        // ссылки ещё нет
+      }
+      symlinkSync(path.join(this.root, 'build', 'router'), link);
+    } catch (e) {
+      this.notes.push(`ссылка build/router в worktree дерева ${p.tree} не создана: ${e.message}`);
+      this.broken = true;
+      return false;
+    }
+    this.treeWt = wt;
+    this.treeSha = p.treeSha;
+    return true;
+  }
+
+  // Этапы снова запускаются из корня рабочей копии; worktree остаётся до конца сессии (cleanupTrees).
+  leaveTree() {
+    this.treeWt = null;
+    this.treeSha = null;
+  }
+
+  // Снятие worktree деревьев коммитов (tree-step.sh cleanup) — только если сессия их создавала.
+  cleanupTrees() {
+    if (!this.treeUsed) return;
+    this.treeUsed = false;
+    const r = spawnSync('sh', [path.join(SCRIPT_DIR, 'tree-step.sh'), 'cleanup'], {
+      cwd: this.root,
+      env: { ...process.env, ROUTERS: this.t },
+      encoding: 'utf8'
+    });
+    if (r.status !== 0) {
+      this.notes.push(
+        `tree-step.sh cleanup вернул код ${r.status ?? 'сигнал'}: worktree деревьев коммитов проверить вручную (build/bisect)`
+      );
+    }
   }
 
   // Деплой сборки рабочего дерева и смоук в один каталог этапа. Ядро, найденное смоуком,
@@ -2487,6 +2611,16 @@ class Session {
   // --- возврат стенда ---
 
   async cleanup() {
+    // возврат стенда идёт из корня рабочей копии; worktree деревьев коммитов снимаются при любом исходе
+    this.leaveTree();
+    try {
+      await this.cleanupStand();
+    } finally {
+      this.cleanupTrees();
+    }
+  }
+
+  async cleanupStand() {
     this.cleaning = true;
     try {
       this.restoreProduct();
@@ -2603,7 +2737,7 @@ class Session {
           // номер сборки каждого прохода go/specs: разрешённый тег вышедшего релиза или null
           passes: this.spec.passes
             .filter((p) => !p.suite)
-            .map((p) => ({ name: p.name, version: p.resolved ?? null })),
+            .map((p) => ({ name: p.name, version: p.resolved ?? null, tree: p.tree ?? null })),
           suites: this.suites,
           steps: this.steps.map((s) => ({
             ...s,
@@ -2694,20 +2828,29 @@ async function main() {
       if (s.aborted || s.network || s.broken || s.stopped) break;
       if (p.suite) {
         // вложенный прогон деплоит рабочее дерево: файлы продукта прежнего прохода — к HEAD
+        s.leaveTree();
         s.restoreProduct();
         await s.runSuite(p);
         if (s.checkStop()) stopAt(i);
         continue;
       }
       if (p.version && !s.resolveVersion(p)) break;
+      // проход tree: продукт и тесты из worktree дерева коммита, остальные проходы — из корня копии
+      if (p.tree) {
+        if (!s.enterTree(p)) break;
+      } else {
+        s.leaveTree();
+      }
       s.applyProduct(p);
       const key = productKey(p);
       if (s.deployed !== key) {
-        const label = p.version
-          ? `${p.name}-${p.resolved}`
-          : p.product
-            ? `${p.name}-${p.product.ref.slice(0, 8)}`
-            : 'head';
+        const label = p.tree
+          ? `${p.name}-tree-${p.treeSha.slice(0, 8)}`
+          : p.version
+            ? `${p.name}-${p.resolved}`
+            : p.product
+              ? `${p.name}-${p.product.ref.slice(0, 8)}`
+              : 'head';
         const rc = await s.deployAndSmoke(key, label, p.resolved ?? null);
         if (rc === 3 || s.broken) break;
         if (!s.c0) {
@@ -2730,7 +2873,8 @@ async function main() {
       for (let j = 0; j < order.length; j++) {
         const core = order[j];
         if (s.aborted || s.network || s.broken) break;
-        const comp = composition(p, Boolean(p.cores) || j === 0, root, core, s.h);
+        // метки ядра и имена тестов — из дерева, которое идёт на стенд
+        const comp = composition(p, Boolean(p.cores) || j === 0, p.tree ? s.treeWt : root, core, s.h);
         if (comp.empty) {
           s.say(`проход ${p.name} на ${core}: тестов с меткой ядра нет — ядро не важно, пропуск`);
           continue;
