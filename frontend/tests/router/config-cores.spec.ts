@@ -6,6 +6,7 @@ import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
 import { settleMotion } from './lib/motion';
 import { api, layerFlag, resetDraft } from './lib/nodes-api';
+import { SLOW_ANNOTATION } from './lib/known';
 
 // Вкладка «Xray │ Mihomo» раздела «Конфигурация» на настоящей панели (фаза 147, план 09):
 // маршрут #/config/cores, переключатель ядра, строка состояния, пустое состояние
@@ -336,97 +337,104 @@ async function xraySections(page: Page): Promise<SectionBrief[]> {
   }));
 }
 
-test('cores: взять секцию DNS Xray с комментариями — подтверждение, «Применить», отпустить', async ({
-  page
-}) => {
-  test.setTimeout(T.save * 12);
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await startPage(page);
-  test.skip(!(await installedOf(page, 'xray')), 'Xray не установлен');
-  await resetDraft(page);
-  const dns = (await xraySections(page)).find((s) => s.id === 'dns');
-  test.skip(dns?.owner === 'panel' || dns?.owner === 'pending', 'секция DNS уже у панели');
-
-  const original = await readConfig(page, DNS_FILE);
-  try {
-    await writeConfig(page, DNS_FILE, DNS_CONTENT);
-
-    await openConfig(page, '#/config/cores');
-    await tabReady(page, 'cores-tab');
-    await page.getByTestId('kernel-switch-xray').click();
-    await page.getByTestId('section-toggle-xray-dns').click();
-
-    // секцию ведёт XKeen или пользователь: «Управлять в панели»
-    const owner = page.getByTestId('section-owner-xray-dns');
-    await expect(owner).toHaveAttribute('data-owner', /^(xkeen|user)$/, { timeout: T.action });
-    await page.getByTestId('section-take-xray-dns').click();
-
-    // диалог: список файлов, комментарии JSONC, кнопка неактивна без согласия
-    const modal = page.getByTestId('take-section-modal');
-    await expect(modal).toBeVisible({ timeout: T.action });
-    await expect(modal.getByTestId('take-section-files')).toContainText('02_dns.json', {
-      timeout: T.action
-    });
-    await expect(modal.getByTestId('take-section-comments')).toBeVisible();
-    const confirm = modal.getByTestId('take-section-confirm');
-    await expect(confirm).toBeDisabled();
-    const before = await layerProbe(page);
-    expect(before.dnsTaken, 'диалог сам секцию не взял').toBe(false);
-
-    // согласие снимает блокировку; диалог до подтверждения в черновик ничего не записал
-    await modal.getByTestId('take-section-comments-ack').check();
-    await expect(confirm).toBeEnabled();
-    expect((await layerProbe(page)).revision, 'диалог ничего не записал (draft_revision)').toBe(
-      before.revision
-    );
-    await confirm.click();
-    await expect(modal).toHaveCount(0, { timeout: T.action });
-    await expect(owner).toHaveAttribute('data-owner', 'pending', { timeout: T.action });
-    expect((await layerProbe(page)).dnsTaken, 'до «Применить» файлы не тронуты').toBe(false);
-    expect(await readConfig(page, DNS_FILE), 'файл секции не тронут до «Применить»').toBe(
-      DNS_CONTENT
-    );
-
-    // «Применить»: секция у панели
-    await page.getByTestId('config-apply').click();
-    await expect(owner).toHaveAttribute('data-owner', 'panel', { timeout: T.save * 3 });
-    expect((await layerProbe(page)).dnsTaken).toBe(true);
-
-    // «Отпустить»: подтверждение, затем «Применить» возвращает исходный файл
-    await page.getByTestId('section-release-xray-dns').click();
-    const dialog = page.getByRole('dialog');
-    await expect(dialog).toBeVisible({ timeout: T.action });
-    await dialog.getByRole('button', { name: /^(Отпустить секцию|Release section)$/ }).click();
-
-    // отпускание ждёт «Применить»: секция показана только для чтения со значениями панели,
-    // правки закрыты, а «Управлять» отменяет отпускание
-    await expect(owner).toHaveAttribute('data-owner', 'releasing', { timeout: T.action });
-    await expect(page.getByTestId('section-releasing-xray-dns')).toBeVisible();
-    await expect(page.getByTestId('section-advanced-xray-dns')).toHaveAttribute('readonly', /.*/);
-    await expect(page.getByTestId('section-preset-xray-dns')).toHaveCount(0);
-    await page.getByTestId('section-manage-xray-dns').click();
-    await expect(owner).toHaveAttribute('data-owner', 'panel', { timeout: T.action });
-    expect((await layerProbe(page)).dnsTaken, 'отмена отпускания файлов не трогает').toBe(true);
-
-    await page.getByTestId('section-release-xray-dns').click();
-    await expect(dialog).toBeVisible({ timeout: T.action });
-    await dialog.getByRole('button', { name: /^(Отпустить секцию|Release section)$/ }).click();
-    await expect(owner).toHaveAttribute('data-owner', 'releasing', { timeout: T.action });
-    await expect(page.getByTestId('config-apply')).toBeEnabled({ timeout: T.action });
-    await page.getByTestId('config-apply').click();
-    await expect(owner).toHaveAttribute('data-owner', /^(xkeen|user)$/, { timeout: T.save * 3 });
-    expect((await layerProbe(page)).dnsTaken).toBe(false);
-    expect(await readConfig(page, DNS_FILE), 'исходный файл вернулся побайтно').toBe(DNS_CONTENT);
-
-    await guard.assertClean();
-  } finally {
+test(
+  'cores: взять секцию DNS Xray с комментариями — подтверждение, «Применить», отпустить',
+  {
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description: 'взятие, «Применить» и отпускание секции DNS Xray: серия перезапусков Xray'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.save * 12);
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await startPage(page);
+    test.skip(!(await installedOf(page, 'xray')), 'Xray не установлен');
     await resetDraft(page);
-    await releaseDnsViaApi(page);
-    if (original === null) await removeConfig(page, DNS_FILE);
-    else await writeConfig(page, DNS_FILE, original);
+    const dns = (await xraySections(page)).find((s) => s.id === 'dns');
+    test.skip(dns?.owner === 'panel' || dns?.owner === 'pending', 'секция DNS уже у панели');
+
+    const original = await readConfig(page, DNS_FILE);
+    try {
+      await writeConfig(page, DNS_FILE, DNS_CONTENT);
+
+      await openConfig(page, '#/config/cores');
+      await tabReady(page, 'cores-tab');
+      await page.getByTestId('kernel-switch-xray').click();
+      await page.getByTestId('section-toggle-xray-dns').click();
+
+      // секцию ведёт XKeen или пользователь: «Управлять в панели»
+      const owner = page.getByTestId('section-owner-xray-dns');
+      await expect(owner).toHaveAttribute('data-owner', /^(xkeen|user)$/, { timeout: T.action });
+      await page.getByTestId('section-take-xray-dns').click();
+
+      // диалог: список файлов, комментарии JSONC, кнопка неактивна без согласия
+      const modal = page.getByTestId('take-section-modal');
+      await expect(modal).toBeVisible({ timeout: T.action });
+      await expect(modal.getByTestId('take-section-files')).toContainText('02_dns.json', {
+        timeout: T.action
+      });
+      await expect(modal.getByTestId('take-section-comments')).toBeVisible();
+      const confirm = modal.getByTestId('take-section-confirm');
+      await expect(confirm).toBeDisabled();
+      const before = await layerProbe(page);
+      expect(before.dnsTaken, 'диалог сам секцию не взял').toBe(false);
+
+      // согласие снимает блокировку; диалог до подтверждения в черновик ничего не записал
+      await modal.getByTestId('take-section-comments-ack').check();
+      await expect(confirm).toBeEnabled();
+      expect((await layerProbe(page)).revision, 'диалог ничего не записал (draft_revision)').toBe(
+        before.revision
+      );
+      await confirm.click();
+      await expect(modal).toHaveCount(0, { timeout: T.action });
+      await expect(owner).toHaveAttribute('data-owner', 'pending', { timeout: T.action });
+      expect((await layerProbe(page)).dnsTaken, 'до «Применить» файлы не тронуты').toBe(false);
+      expect(await readConfig(page, DNS_FILE), 'файл секции не тронут до «Применить»').toBe(
+        DNS_CONTENT
+      );
+
+      // «Применить»: секция у панели
+      await page.getByTestId('config-apply').click();
+      await expect(owner).toHaveAttribute('data-owner', 'panel', { timeout: T.save * 3 });
+      expect((await layerProbe(page)).dnsTaken).toBe(true);
+
+      // «Отпустить»: подтверждение, затем «Применить» возвращает исходный файл
+      await page.getByTestId('section-release-xray-dns').click();
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toBeVisible({ timeout: T.action });
+      await dialog.getByRole('button', { name: /^(Отпустить секцию|Release section)$/ }).click();
+
+      // отпускание ждёт «Применить»: секция показана только для чтения со значениями панели,
+      // правки закрыты, а «Управлять» отменяет отпускание
+      await expect(owner).toHaveAttribute('data-owner', 'releasing', { timeout: T.action });
+      await expect(page.getByTestId('section-releasing-xray-dns')).toBeVisible();
+      await expect(page.getByTestId('section-advanced-xray-dns')).toHaveAttribute('readonly', /.*/);
+      await expect(page.getByTestId('section-preset-xray-dns')).toHaveCount(0);
+      await page.getByTestId('section-manage-xray-dns').click();
+      await expect(owner).toHaveAttribute('data-owner', 'panel', { timeout: T.action });
+      expect((await layerProbe(page)).dnsTaken, 'отмена отпускания файлов не трогает').toBe(true);
+
+      await page.getByTestId('section-release-xray-dns').click();
+      await expect(dialog).toBeVisible({ timeout: T.action });
+      await dialog.getByRole('button', { name: /^(Отпустить секцию|Release section)$/ }).click();
+      await expect(owner).toHaveAttribute('data-owner', 'releasing', { timeout: T.action });
+      await expect(page.getByTestId('config-apply')).toBeEnabled({ timeout: T.action });
+      await page.getByTestId('config-apply').click();
+      await expect(owner).toHaveAttribute('data-owner', /^(xkeen|user)$/, { timeout: T.save * 3 });
+      expect((await layerProbe(page)).dnsTaken).toBe(false);
+      expect(await readConfig(page, DNS_FILE), 'исходный файл вернулся побайтно').toBe(DNS_CONTENT);
+
+      await guard.assertClean();
+    } finally {
+      await resetDraft(page);
+      await releaseDnsViaApi(page);
+      if (original === null) await removeConfig(page, DNS_FILE);
+      else await writeConfig(page, DNS_FILE, original);
+    }
   }
-});
+);
 
 test('cores: взять все секции Xray — диалог по секциям', async ({ page }) => {
   const guard = attachConsoleGuard(page);

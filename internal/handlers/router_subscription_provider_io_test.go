@@ -34,6 +34,7 @@ import (
 // с fsync рядом с журналом панели нагружает флешку. Ядро не участвует: вердикт — время
 // до полного тела адаптера, ответ Mihomo на PUT от собственной записи на диск не зависит.
 func TestRouterProviderAdapterUnderDiskLoad(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "нагрузка на диск: фоновая запись с fsync при отдаче провайдера адаптером")
 	p := routertest.NewPanel(t)
 
 	var subs []services.Subscription

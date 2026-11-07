@@ -5,7 +5,7 @@ import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { knownFailure } from './lib/known';
+import { FULL_TAG, TIER_FULL_ANNOTATION, knownFailure } from './lib/known';
 import { api } from './lib/nodes-api';
 
 // Каналы и тип версии на карточке «Обновление» настоящей панели (D-28, D-29, D-32): страница
@@ -196,93 +196,103 @@ async function expectStateText(
 }
 
 for (const channel of ['stable', 'beta'] as const) {
-  test(`update auto-status: ${channel}`, async ({ page }) => {
-    test.setTimeout(T.page * 4 + T.action * 10);
-    const guard = attachConsoleGuard(page);
-    await page.addInitScript(() => localStorage.removeItem('xcp.update.dismissed'));
-    await page.addInitScript(() => localStorage.setItem('lang', 'ru'));
+  test(
+    `update auto-status: ${channel}`,
+    {
+      tag: FULL_TAG,
+      annotation: {
+        type: TIER_FULL_ANNOTATION,
+        description: 'реальная загрузка: релизы GitHub, лимит запросов API стенда'
+      }
+    },
+    async ({ page }) => {
+      test.setTimeout(T.page * 4 + T.action * 10);
+      const guard = attachConsoleGuard(page);
+      await page.addInitScript(() => localStorage.removeItem('xcp.update.dismissed'));
+      await page.addInitScript(() => localStorage.setItem('lang', 'ru'));
 
-    // Настройки меняются со страницы, которая обращений к GitHub не делает: токен CSRF уже есть
-    await page.goto('/#/dashboard');
-    await page.waitForFunction(() => !!localStorage.getItem('csrf_token'), null, {
-      timeout: T.page
-    });
-    autoTouched = true;
-    const ch = await api(page, 'POST', '/api/update/channel', { channel });
-    expect(ch.status, 'POST /api/update/channel').toBe(200);
-    const win = farWindow();
-    const set = await api(page, 'POST', '/api/update/settings', {
-      auto_install: true,
-      install_window: win
-    });
-    expect(set.status, 'POST /api/update/settings').toBe(200);
-
-    // загрузка вкладки сама проверяет релизы и обновляет состояние планировщика
-    await page.goto('/#/settings?tab=updates');
-    await expect(page.locator('[data-testid="update-channel-row"]')).toBeVisible({
-      timeout: T.page
-    });
-    await waitCheckDone(page);
-    const st = await readUpdateState(page);
-    const code = shownCode(st);
-
-    const card = page.locator('[data-testid="update-auto-status"]');
-    if (code) {
-      await expect(card, `карточка автообновлений: ожидалась строка ${code}`).toBeVisible({
-        timeout: T.action
+      // Настройки меняются со страницы, которая обращений к GitHub не делает: токен CSRF уже есть
+      await page.goto('/#/dashboard');
+      await page.waitForFunction(() => !!localStorage.getItem('csrf_token'), null, {
+        timeout: T.page
       });
-      await expect(card).toHaveAttribute('data-state', code);
-      await expect(card).toHaveAttribute('role', 'status');
-      await expectStateText(card, code, st);
-    } else {
-      await expect(
-        card,
-        `карточка автообновлений: строки быть не должно (auto_state=${st.auto_state ?? 'нет'})`
-      ).toHaveCount(0);
-    }
+      autoTouched = true;
+      const ch = await api(page, 'POST', '/api/update/channel', { channel });
+      expect(ch.status, 'POST /api/update/channel').toBe(200);
+      const win = farWindow();
+      const set = await api(page, 'POST', '/api/update/settings', {
+        auto_install: true,
+        install_window: win
+      });
+      expect(set.status, 'POST /api/update/settings').toBe(200);
 
-    // Блок «Доступна версия»: строка и «Срочное» только у версии и канала из состояния
-    const avail = page.locator('.update-available');
-    const availAuto = page.locator('[data-testid="update-available-auto"]');
-    const urgentBadge = page.locator('[data-testid="update-urgent-badge"]');
-    if ((await avail.count()) > 0 && (await avail.isVisible())) {
-      const title = (await avail.locator('.available-title').textContent()) ?? '';
-      const same =
-        !!st.latest_version && title.includes(st.latest_version) && st.channel === channel;
-      if (same && code && code !== 'dev_build') {
-        await expect(availAuto).toBeVisible({ timeout: T.action });
-        await expect(availAuto).toHaveAttribute('data-state', code);
-        await expectStateText(availAuto, code, st);
+      // загрузка вкладки сама проверяет релизы и обновляет состояние планировщика
+      await page.goto('/#/settings?tab=updates');
+      await expect(page.locator('[data-testid="update-channel-row"]')).toBeVisible({
+        timeout: T.page
+      });
+      await waitCheckDone(page);
+      const st = await readUpdateState(page);
+      const code = shownCode(st);
+
+      const card = page.locator('[data-testid="update-auto-status"]');
+      if (code) {
+        await expect(card, `карточка автообновлений: ожидалась строка ${code}`).toBeVisible({
+          timeout: T.action
+        });
+        await expect(card).toHaveAttribute('data-state', code);
+        await expect(card).toHaveAttribute('role', 'status');
+        await expectStateText(card, code, st);
+      } else {
+        await expect(
+          card,
+          `карточка автообновлений: строки быть не должно (auto_state=${st.auto_state ?? 'нет'})`
+        ).toHaveCount(0);
+      }
+
+      // Блок «Доступна версия»: строка и «Срочное» только у версии и канала из состояния
+      const avail = page.locator('.update-available');
+      const availAuto = page.locator('[data-testid="update-available-auto"]');
+      const urgentBadge = page.locator('[data-testid="update-urgent-badge"]');
+      if ((await avail.count()) > 0 && (await avail.isVisible())) {
+        const title = (await avail.locator('.available-title').textContent()) ?? '';
+        const same =
+          !!st.latest_version && title.includes(st.latest_version) && st.channel === channel;
+        if (same && code && code !== 'dev_build') {
+          await expect(availAuto).toBeVisible({ timeout: T.action });
+          await expect(availAuto).toHaveAttribute('data-state', code);
+          await expectStateText(availAuto, code, st);
+        } else {
+          await expect(availAuto).toHaveCount(0);
+        }
+        if (same && st.auto_state === 'urgent' && !otherVersion(st)) {
+          await expect(urgentBadge).toBeVisible({ timeout: T.action });
+        } else {
+          await expect(urgentBadge).toHaveCount(0);
+        }
+        // ручная установка доступна при любом состоянии
+        await expect(
+          avail.getByRole('button', { name: text('ru', 'settings.install_update') })
+        ).toBeEnabled();
       } else {
         await expect(availAuto).toHaveCount(0);
-      }
-      if (same && st.auto_state === 'urgent' && !otherVersion(st)) {
-        await expect(urgentBadge).toBeVisible({ timeout: T.action });
-      } else {
         await expect(urgentBadge).toHaveCount(0);
       }
-      // ручная установка доступна при любом состоянии
-      await expect(
-        avail.getByRole('button', { name: text('ru', 'settings.install_update') })
-      ).toBeEnabled();
-    } else {
-      await expect(availAuto).toHaveCount(0);
-      await expect(urgentBadge).toHaveCount(0);
-    }
 
-    // Баннер на главной: код состояния или manual
-    await page.goto('/#/dashboard');
-    const banner = page.locator('[data-testid="update-banner-auto"]');
-    const after = await readUpdateState(page);
-    if (after.has_update) {
-      await expect(banner).toBeVisible({ timeout: T.page });
-      const bannerCode = shownCode(after) ?? 'manual';
-      await expect(banner).toHaveAttribute('data-state', bannerCode, { timeout: T.action });
-      if (bannerCode !== 'manual') await expectStateText(banner, bannerCode, after);
-    }
+      // Баннер на главной: код состояния или manual
+      await page.goto('/#/dashboard');
+      const banner = page.locator('[data-testid="update-banner-auto"]');
+      const after = await readUpdateState(page);
+      if (after.has_update) {
+        await expect(banner).toBeVisible({ timeout: T.page });
+        const bannerCode = shownCode(after) ?? 'manual';
+        await expect(banner).toHaveAttribute('data-state', bannerCode, { timeout: T.action });
+        if (bannerCode !== 'manual') await expectStateText(banner, bannerCode, after);
+      }
 
-    await guard.assertClean();
-  });
+      await guard.assertClean();
+    }
+  );
 }
 
 for (const theme of ['light', 'dark'] as const) {
@@ -290,89 +300,101 @@ for (const theme of ['light', 'dark'] as const) {
     { width: 1280, height: 900 },
     { width: 390, height: 844 }
   ]) {
-    test(`update axe: theme:${theme} vp:${vp.width}`, async ({ page }) => {
-      test.setTimeout(T.page * 3 + T.action * 4);
-      const guard = attachConsoleGuard(page);
-      const problems: string[] = [];
-      await page.setViewportSize(vp);
-      await page.addInitScript(
-        ({ th }) => {
-          localStorage.setItem('theme', th);
-          localStorage.setItem('lang', 'ru');
-        },
-        { th: theme }
-      );
-      await page.goto('/#/settings?tab=updates');
-      await expect(page.locator('[data-testid="update-channel-row"]')).toBeVisible({
-        timeout: T.page
-      });
-      await waitCheckDone(page);
-      // переходы между вкладками идут с затуханием: axe не должен видеть полупрозрачный кадр
-      await page.waitForTimeout(500);
-
-      await guard.assertClean().catch((e: Error) => problems.push(e.message));
-
-      const scan = await new AxeBuilder({ page })
-        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
-        .exclude('.cm-editor')
-        .exclude('.xterm')
-        .analyze();
-      const severe = scan.violations.filter(
-        (v) => v.impact === 'critical' || v.impact === 'serious'
-      );
-      // Метка только когда axe сам нашёл контраст на .badge-primary и такой бейдж есть на
-      // странице: без бейджа нарушения нет, и метка дала бы XPASS
-      if (
-        theme === 'light' &&
-        severe.some(
-          (v) =>
-            v.id === 'color-contrast' &&
-            v.nodes.some((n) => n.target.join(' ').includes('.badge-primary'))
-        ) &&
-        (await page.locator('.badge-primary').count()) > 0
-      ) {
-        knownFailure('*', 'light-tinted-badge-text-contrast');
-      }
-      // Капсула состояния на узком экране в светлой теме: метка только когда axe нашёл
-      // контраст на самом .mobile-traffic
-      if (
-        theme === 'light' &&
-        vp.width === 390 &&
-        severe.some(
-          (v) =>
-            v.id === 'color-contrast' &&
-            v.nodes.some((n) => n.target.join(' ').includes('.mobile-traffic'))
-        )
-      ) {
-        knownFailure('*', 'status-capsule-mobile-traffic-contrast');
-      }
-      if (severe.length > 0) {
-        // Только правило, селекторы и числа контраста: HTML узлов в вывод не попадает
-        const list = severe.map((v) => {
-          const nodes = v.nodes.slice(0, 3).map((n) => {
-            const msg = (n.any[0]?.message ?? '')
-              .replace(/^Element has insufficient color contrast of /, 'контраст ')
-              .replace(/, font size:.*?\)/, ')')
-              .replace(/\. Expected contrast ratio of /, ', нужно ');
-            return `${n.target.join(' ')} [${msg}]`;
-          });
-          return `${v.id} (${v.impact}, узлов ${v.nodes.length}): ${nodes.join(' | ')}`;
-        });
-        problems.push(`axe: нарушений critical/serious ${severe.length}:\n- ${list.join('\n- ')}`);
-      }
-
-      if (vp.width === 390) {
-        const wide = await page.evaluate(() => ({
-          scroll: document.documentElement.scrollWidth,
-          inner: window.innerWidth
-        }));
-        if (wide.scroll > wide.inner + 1) {
-          problems.push(`прокрутка: scrollWidth ${wide.scroll} шире окна ${wide.inner}`);
+    test(
+      `update axe: theme:${theme} vp:${vp.width}`,
+      {
+        tag: FULL_TAG,
+        annotation: {
+          type: TIER_FULL_ANNOTATION,
+          description: 'реальная загрузка: релизы GitHub, лимит запросов API стенда'
         }
-      }
+      },
+      async ({ page }) => {
+        test.setTimeout(T.page * 3 + T.action * 4);
+        const guard = attachConsoleGuard(page);
+        const problems: string[] = [];
+        await page.setViewportSize(vp);
+        await page.addInitScript(
+          ({ th }) => {
+            localStorage.setItem('theme', th);
+            localStorage.setItem('lang', 'ru');
+          },
+          { th: theme }
+        );
+        await page.goto('/#/settings?tab=updates');
+        await expect(page.locator('[data-testid="update-channel-row"]')).toBeVisible({
+          timeout: T.page
+        });
+        await waitCheckDone(page);
+        // переходы между вкладками идут с затуханием: axe не должен видеть полупрозрачный кадр
+        await page.waitForTimeout(500);
 
-      if (problems.length > 0) throw new Error(problems.join('\n'));
-    });
+        await guard.assertClean().catch((e: Error) => problems.push(e.message));
+
+        const scan = await new AxeBuilder({ page })
+          .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+          .exclude('.cm-editor')
+          .exclude('.xterm')
+          .analyze();
+        const severe = scan.violations.filter(
+          (v) => v.impact === 'critical' || v.impact === 'serious'
+        );
+        // Метка только когда axe сам нашёл контраст на .badge-primary и такой бейдж есть на
+        // странице: без бейджа нарушения нет, и метка дала бы XPASS
+        if (
+          theme === 'light' &&
+          severe.some(
+            (v) =>
+              v.id === 'color-contrast' &&
+              v.nodes.some((n) => n.target.join(' ').includes('.badge-primary'))
+          ) &&
+          (await page.locator('.badge-primary').count()) > 0
+        ) {
+          knownFailure('*', 'light-tinted-badge-text-contrast');
+        }
+        // Капсула состояния на узком экране в светлой теме: метка только когда axe нашёл
+        // контраст на самом .mobile-traffic
+        if (
+          theme === 'light' &&
+          vp.width === 390 &&
+          severe.some(
+            (v) =>
+              v.id === 'color-contrast' &&
+              v.nodes.some((n) => n.target.join(' ').includes('.mobile-traffic'))
+          )
+        ) {
+          knownFailure('*', 'status-capsule-mobile-traffic-contrast');
+        }
+        if (severe.length > 0) {
+          // Только правило, селекторы и числа контраста: HTML узлов в вывод не попадает
+          const list = severe.map((v) => {
+            const nodes = v.nodes.slice(0, 3).map((n) => {
+              const msg = (n.any[0]?.message ?? '')
+                .replace(/^Element has insufficient color contrast of /, 'контраст ')
+                .replace(/, font size:.*?\)/, ')')
+                .replace(/\. Expected contrast ratio of /, ', нужно ');
+              return `${n.target.join(' ')} [${msg}]`;
+            });
+            return `${v.id} (${v.impact}, узлов ${v.nodes.length}): ${nodes.join(' | ')}`;
+          });
+          problems.push(
+            `axe: нарушений critical/serious ${severe.length}:\n- ${list.join('\n- ')}`
+          );
+        }
+
+        if (vp.width === 390) {
+          const wide = await page.evaluate(() => ({
+            scroll: document.documentElement.scrollWidth,
+            inner: window.innerWidth
+          }));
+          if (wide.scroll > wide.inner + 1) {
+            problems.push(`прокрутка: scrollWidth ${wide.scroll} шире окна ${wide.inner}`);
+          }
+        }
+
+        if (problems.length > 0) throw new Error(problems.join('\n'));
+      }
+    );
   }
 }
 

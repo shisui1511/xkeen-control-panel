@@ -282,6 +282,7 @@ func rtSwExpectKernel(t *testing.T, core string, res map[string]any, active stri
 // каждом шаге; активное Xray — профиль сохраняется, PID Xray прежний. Метка ядра:
 // сценарий читает активное ядро и проверяет его процесс.
 func TestRouterMihomoSwitch(t *testing.T) {
+	routertest.Slow(t, "активация, возврат и отпускание профиля: полный перезапуск Mihomo на каждом шаге")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
 	e.enableLayer()
@@ -384,6 +385,7 @@ func TestRouterMihomoSwitch(t *testing.T) {
 // профиля панели прежний, секции Mihomo под управлением, черновик чистый, Mihomo
 // работает на прежнем профиле с новым процессом. Метка ядра: нужен активный Mihomo.
 func TestRouterMihomoSwitchRollback(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "внесение сбоя: гашение Mihomo сигналом KILL, откат перехода по сроку подтверждения")
 	tg := routertest.CoreSpecific(t)
 	if tg.Core != "mihomo" {
 		t.Skip("нужен активный Mihomo: отказ запуска подтверждается погашенным процессом")
@@ -505,6 +507,7 @@ func TestRouterMihomoSwitchRollback(t *testing.T) {
 // Область взятия: неизвестное значение scope — 400 scope_invalid, допустимые
 // принимаются; без X-CSRF-Token — 403. Без метки ядра: исход не зависит от активного.
 func TestRouterMihomoSwitchDraftOpen(t *testing.T) {
+	routertest.Slow(t, "серия отказов при открытом черновике и release с перезапуском Mihomo")
 	tg := routertest.Current(t)
 	e := rtNewSrc(t)
 	e.enableLayer()

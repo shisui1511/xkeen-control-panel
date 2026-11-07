@@ -291,6 +291,7 @@ func (e *rtSrc) rtRtExpectReleased(tg routertest.Target, before rtRtDiskState) {
 // маршрутизация активного ядра у панели → release → «Применить» → всё как было.
 // Метка ядра: тест читает активное ядро и меняет его маршрутизацию.
 func TestRouterRoutingAPIFlow(t *testing.T) {
+	routertest.Slow(t, "серия «Применить» по API маршрутизации с перезапуском ядра")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
 	e.enableLayer()
@@ -674,6 +675,7 @@ func rtRtNodeOptions(group map[string]any) (members []string, labels map[string]
 // в Xray (с перезапуском запущенного Xray) → правка правила и «Применить» не
 // сбрасывают выбор. Метка ядра: тест читает активное ядро и ставит выбор в нём.
 func TestRouterRoutingSelectLive(t *testing.T) {
+	routertest.Slow(t, "серия «Применить» и переключение группы на живом ядре")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
 	e.enableLayer()

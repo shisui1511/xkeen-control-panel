@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
+	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 )
 
 // Расписание обновления баз панелью на настоящем устройстве, в настоящем времени и
@@ -266,6 +267,7 @@ func (e *rtSrc) rtGeoToggleNode(link string) {
 // закончиться своим итогом. Применение закончилось раньше слота — слот сдвигается
 // на следующий запуск, один повтор.
 func TestRouterGeodataScheduleWaitsApply(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "реальное время: слот расписания geodata наступает через 90 с и больше по часам роутера")
 	rtGeoNeedXKeen(t)
 	e := rtNewSrc(t)
 	e.enableLayer()
@@ -397,6 +399,7 @@ func TestRouterGeodataScheduleWaitsApply(t *testing.T) {
 // запускается — пропущенный слот запускается через 3 минуты после старта, ровно один раз
 // за период (повторного запуска нет).
 func TestRouterGeodataCatchUp(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "реальное время: догоняющее обновление geodata ждёт минуты")
 	rtGeoNeedXKeen(t)
 	e := rtNewSrc(t)
 	e.enableLayer()
@@ -519,6 +522,7 @@ func rtGeoCronLines(t *testing.T) []string {
 // возвращает строку в crontab дословно; включение оставляет расписание приостановленным —
 // само оно не запускается и строку не снимает, пока не нажато «Перенять расписание».
 func TestRouterGeodataFlagCron(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "реальное время: ждёт тик сервиса 40 с, проверяя, что приостановленное расписание не запускается")
 	if _, err := os.Stat(filepath.Dir(rtGeoCronFile)); err != nil {
 		t.Skipf("каталога crontab нет: %v", err)
 	}

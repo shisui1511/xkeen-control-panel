@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
+	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
 
@@ -55,6 +56,7 @@ const (
 )
 
 func TestRouterDraftEditWithDirtyDisk(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "нагрузка на диск: грязные страницы носителя при правке черновика")
 	e := rtNewSrc(t)
 	e.enableLayer()
 	// Включение слоя запускает фоновую сборку; её запись состояния держит замок

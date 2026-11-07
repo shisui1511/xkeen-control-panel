@@ -277,6 +277,7 @@ func rtAccReleaseLog(t *testing.T, e *rtSrc, want map[string]string) {
 // none, путь в статусе помнится → снова enabled:true: тот же путь, каталог журнала
 // создан. Метка ядра: исход перезапуска зависит от активного ядра.
 func TestRouterAccessLogEnable(t *testing.T) {
+	routertest.Slow(t, "включение и выключение журнала доступа: «Применить» с перезапуском Xray на каждом шаге")
 	tg := routertest.CoreSpecific(t)
 	core := tg.Core
 	if core != "xray" && core != "mihomo" {
@@ -438,6 +439,7 @@ func rtAccFixtures(t *testing.T) {
 // панели хранит access; «Отпустить» возвращает файлы побайтно. Метка ядра: исход
 // перезапуска зависит от активного ядра.
 func TestRouterAccessLogForeignTake(t *testing.T) {
+	routertest.Slow(t, "взятие чужой секции log и «Применить» с перезапуском Xray, отпускание")
 	tg := routertest.CoreSpecific(t)
 	core := tg.Core
 	if core != "xray" && core != "mihomo" {
@@ -621,6 +623,7 @@ func (e *rtSrc) rtAccExpectDisabled(label string) {
 // панель каталог и файл не создаёт. Метка ядра: исход перезапуска и поведение
 // консольного журнала зависят от активного ядра.
 func TestRouterAccessLogEmptyAccess(t *testing.T) {
+	routertest.Slow(t, "серия «Применить» с перезапуском Xray на каждом из четырёх подтестов")
 	tg := routertest.CoreSpecific(t)
 	core := tg.Core
 	e := rtNewSrc(t)

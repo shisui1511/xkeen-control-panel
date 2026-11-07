@@ -221,6 +221,7 @@ func TestRouterProfileActivatePID(t *testing.T) {
 }
 
 func TestRouterProfileActivateRollback(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "внесение сбоя: гашение Mihomo при активации профиля, откат перехода")
 	tg := routertest.CoreSpecific(t)
 	if tg.Core != "mihomo" {
 		t.Skip("нужен активный Mihomo")
@@ -385,6 +386,7 @@ func (e *rtSrc) rtOwnActivate(name string) map[string]any {
 // с новым PID, ветка xray — outcome saved_kernel_inactive. Метка ядра: сценарий читает
 // активное ядро и проверяет его процесс.
 func TestRouterProfileActivateOwnership(t *testing.T) {
+	routertest.Slow(t, "активации профилей Mihomo с полным перезапуском и новым PID на каждом шаге")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
 	e.enableLayer()
@@ -493,6 +495,7 @@ func rtNamesProfile(list map[string]any, name string) map[string]any {
 // Список отдаёт owner и return_target; удаление профиля пользователя оставляет копию.
 // Метка ядра: отпускание проверяется по процессу активного ядра.
 func TestRouterProfileNames(t *testing.T) {
+	routertest.Slow(t, "отпускание и возврат Mihomo с перезапуском ядра, проверки имён профилей")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
 	e.enableLayer()
@@ -675,6 +678,7 @@ func rtPlainKept(s *rtSwStand) []string {
 // файле — 409, adopt работает. Метка ядра: сценарий читает активное ядро и проверяет его
 // процесс. Вид config.yaml и файлы config-xkeen* возвращает rtSwPrepare.
 func TestRouterProfileActivatePlain(t *testing.T) {
+	routertest.Slow(t, "adopt обычного файла и активации профилей с перезапуском Mihomo")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
 	e.enableLayer()

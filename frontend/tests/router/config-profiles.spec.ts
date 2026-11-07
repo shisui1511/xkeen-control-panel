@@ -6,7 +6,7 @@ import { attachConsoleGuard } from './lib/console';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { RT, T } from './lib/env';
-import { CORE_TAG } from './lib/known';
+import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
 import {
   addToDraft,
   api,
@@ -294,134 +294,165 @@ function confirmDialog(page: Page) {
   return page.getByRole('dialog');
 }
 
-test('profiles: активация и возврат', { tag: CORE_TAG }, async ({ page }) => {
-  test.setTimeout(T.save * 16);
-  test.skip(initial === null, 'Mihomo не установлен');
-  test.skip(initial?.plain === true, 'config.yaml — обычный файл: переход его усыновит');
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await startPage(page);
-  await resetDraft(page);
-  await createProfile(page, `${PREFIX}a`);
-  await ensurePanelOwns(page);
+test(
+  'profiles: активация и возврат',
+  {
+    tag: CORE_TAG,
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description: 'активация профиля Mihomo и возврат: полный перезапуск Mihomo на каждом шаге'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.save * 16);
+    test.skip(initial === null, 'Mihomo не установлен');
+    test.skip(initial?.plain === true, 'config.yaml — обычный файл: переход его усыновит');
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await startPage(page);
+    await resetDraft(page);
+    await createProfile(page, `${PREFIX}a`);
+    await ensurePanelOwns(page);
 
-  // Mihomo у панели: строка панели активна, у своего профиля есть «Сделать активным»
-  await openCores(page);
-  await expect(page.getByTestId('profile-panel-row')).toHaveAttribute('data-active', 'true');
-  const row = page.getByTestId(`profile-row-${PREFIX}a`);
-  await expect(row).toBeVisible({ timeout: T.page });
-  await expect(row).toHaveAttribute('data-owner', 'user');
-  await expect(row).toHaveAttribute('data-active', 'false');
-  await page.getByTestId(`profile-activate-${PREFIX}a`).click();
+    // Mihomo у панели: строка панели активна, у своего профиля есть «Сделать активным»
+    await openCores(page);
+    await expect(page.getByTestId('profile-panel-row')).toHaveAttribute('data-active', 'true');
+    const row = page.getByTestId(`profile-row-${PREFIX}a`);
+    await expect(row).toBeVisible({ timeout: T.page });
+    await expect(row).toHaveAttribute('data-owner', 'user');
+    await expect(row).toHaveAttribute('data-active', 'false');
+    await page.getByTestId(`profile-activate-${PREFIX}a`).click();
 
-  // подтверждение перехода панель → свой профиль называет перезапуск и обрыв соединений
-  const dialog = confirmDialog(page);
-  await expect(dialog).toBeVisible({ timeout: T.action });
-  await expect(dialog).toContainText(startOf('cfg.prof.to_user_body'));
-  await dialog.getByRole('button', { name: exactOf('cfg.prof.to_user_confirm') }).click();
+    // подтверждение перехода панель → свой профиль называет перезапуск и обрыв соединений
+    const dialog = confirmDialog(page);
+    await expect(dialog).toBeVisible({ timeout: T.action });
+    await expect(dialog).toContainText(startOf('cfg.prof.to_user_body'));
+    await dialog.getByRole('button', { name: exactOf('cfg.prof.to_user_confirm') }).click();
 
-  await expect(page.locator('.toast').first()).toBeVisible({ timeout: T.save * 2 });
-  await expect(row).toHaveAttribute('data-active', 'true', { timeout: T.save * 2 });
-  await expect(page.getByTestId('profile-panel-row')).toHaveAttribute('data-active', 'false');
-  await expect(row.getByTestId(`profile-active-${PREFIX}a`)).toBeVisible();
+    await expect(page.locator('.toast').first()).toBeVisible({ timeout: T.save * 2 });
+    await expect(row).toHaveAttribute('data-active', 'true', { timeout: T.save * 2 });
+    await expect(page.getByTestId('profile-panel-row')).toHaveAttribute('data-active', 'false');
+    await expect(row.getByTestId(`profile-active-${PREFIX}a`)).toBeVisible();
 
-  // «Группы» и «Правила» сообщают, что для профиля пользователя они не действуют
-  await openConfig(page, '#/config/rules');
-  await expect(page.getByTestId('routing-mihomo-own-profile')).toBeVisible({ timeout: T.page });
+    // «Группы» и «Правила» сообщают, что для профиля пользователя они не действуют
+    await openConfig(page, '#/config/rules');
+    await expect(page.getByTestId('routing-mihomo-own-profile')).toBeVisible({ timeout: T.page });
 
-  // возврат строкой панели: подтверждение возврата и панель снова активна
-  await openCores(page);
-  await page.getByTestId('profile-panel-take').click();
-  await expect(dialog).toBeVisible({ timeout: T.action });
-  await expect(dialog).toContainText(startOf('cfg.prof.to_panel_body'));
-  await dialog.getByRole('button', { name: exactOf('cfg.prof.to_panel_confirm') }).click();
-  await expect(page.getByTestId('profile-panel-row')).toHaveAttribute('data-active', 'true', {
-    timeout: T.save * 2
-  });
-  await expect(page.getByTestId(`profile-row-${PREFIX}a`)).toHaveAttribute('data-active', 'false');
+    // возврат строкой панели: подтверждение возврата и панель снова активна
+    await openCores(page);
+    await page.getByTestId('profile-panel-take').click();
+    await expect(dialog).toBeVisible({ timeout: T.action });
+    await expect(dialog).toContainText(startOf('cfg.prof.to_panel_body'));
+    await dialog.getByRole('button', { name: exactOf('cfg.prof.to_panel_confirm') }).click();
+    await expect(page.getByTestId('profile-panel-row')).toHaveAttribute('data-active', 'true', {
+      timeout: T.save * 2
+    });
+    await expect(page.getByTestId(`profile-row-${PREFIX}a`)).toHaveAttribute(
+      'data-active',
+      'false'
+    );
 
-  await guard.assertClean();
-});
+    await guard.assertClean();
+  }
+);
 
-test('profiles: черновик блокирует переход', async ({ page }) => {
-  test.setTimeout(T.save * 16);
-  test.skip(initial === null, 'Mihomo не установлен');
-  test.skip(initial?.plain === true, 'config.yaml — обычный файл: переход его усыновит');
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await startPage(page);
-  await resetDraft(page);
-  await createProfile(page, `${PREFIX}b`);
-  await createProfile(page, `${PREFIX}c`);
-  await ensurePanelOwns(page);
+test(
+  'profiles: черновик блокирует переход',
+  {
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description: 'отказы при открытом черновике и активация профиля Mihomo с перезапуском'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.save * 16);
+    test.skip(initial === null, 'Mihomo не установлен');
+    test.skip(initial?.plain === true, 'config.yaml — обычный файл: переход его усыновит');
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await startPage(page);
+    await resetDraft(page);
+    await createProfile(page, `${PREFIX}b`);
+    await createProfile(page, `${PREFIX}c`);
+    await ensurePanelOwns(page);
 
-  // открытый черновик при управлении панели: переход недоступен, причина написана строкой
-  await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), 'RtUiDraft'));
-  await openCores(page);
-  const hint = page.getByTestId('profiles-draft-hint');
-  await expect(hint).toBeVisible({ timeout: T.page });
-  const activate = page.getByTestId(`profile-activate-${PREFIX}b`);
-  await expect(activate).toBeDisabled();
-  await expect(activate).toHaveAttribute('aria-describedby', /.+/);
+    // открытый черновик при управлении панели: переход недоступен, причина написана строкой
+    await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), 'RtUiDraft'));
+    await openCores(page);
+    const hint = page.getByTestId('profiles-draft-hint');
+    await expect(hint).toBeVisible({ timeout: T.page });
+    const activate = page.getByTestId(`profile-activate-${PREFIX}b`);
+    await expect(activate).toBeDisabled();
+    await expect(activate).toHaveAttribute('aria-describedby', /.+/);
 
-  // сброс черновика снимает блокировку
-  await resetDraft(page);
-  await expect(hint).toBeHidden({ timeout: T.page });
-  await expect(activate).toBeEnabled();
+    // сброс черновика снимает блокировку
+    await resetDraft(page);
+    await expect(hint).toBeHidden({ timeout: T.page });
+    await expect(activate).toBeEnabled();
 
-  // смена своего профиля на другой своего профиля черновика не касается и не блокируется
-  await activateViaApi(page, `${PREFIX}b`);
-  await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), 'RtUiDraftTwo'));
-  await page.reload();
-  await expect(page.getByTestId('config-page')).toBeVisible({ timeout: T.page });
-  await page.getByTestId('kernel-switch-mihomo').click();
-  const other = page.getByTestId(`profile-activate-${PREFIX}c`);
-  await expect(other).toBeEnabled({ timeout: T.page });
-  await resetDraft(page);
+    // смена своего профиля на другой своего профиля черновика не касается и не блокируется
+    await activateViaApi(page, `${PREFIX}b`);
+    await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), 'RtUiDraftTwo'));
+    await page.reload();
+    await expect(page.getByTestId('config-page')).toBeVisible({ timeout: T.page });
+    await page.getByTestId('kernel-switch-mihomo').click();
+    const other = page.getByTestId(`profile-activate-${PREFIX}c`);
+    await expect(other).toBeEnabled({ timeout: T.page });
+    await resetDraft(page);
 
-  await guard.assertClean();
-});
+    await guard.assertClean();
+  }
+);
 
-test('profiles: цель возврата', async ({ page }) => {
-  test.setTimeout(T.save * 16);
-  test.skip(initial === null, 'Mihomo не установлен');
-  test.skip(initial?.plain === true, 'config.yaml — обычный файл: переход его усыновит');
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await startPage(page);
-  await resetDraft(page);
+test(
+  'profiles: цель возврата',
+  {
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description: 'активация профиля Mihomo и возврат: полный перезапуск Mihomo на каждом шаге'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.save * 16);
+    test.skip(initial === null, 'Mihomo не установлен');
+    test.skip(initial?.plain === true, 'config.yaml — обычный файл: переход его усыновит');
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await startPage(page);
+    await resetDraft(page);
 
-  // профиль, на котором стоял Mihomo перед возвратом панели, становится целью возврата
-  await createProfile(page, `${PREFIX}prev`);
-  await activateViaApi(page, `${PREFIX}prev`);
-  await ensurePanelOwns(page);
-  expect((await standState(page)).returnTarget, 'цель возврата').toBe(`${PREFIX}prev`);
+    // профиль, на котором стоял Mihomo перед возвратом панели, становится целью возврата
+    await createProfile(page, `${PREFIX}prev`);
+    await activateViaApi(page, `${PREFIX}prev`);
+    await ensurePanelOwns(page);
+    expect((await standState(page)).returnTarget, 'цель возврата').toBe(`${PREFIX}prev`);
 
-  await openCores(page);
-  const row = page.getByTestId(`profile-row-${PREFIX}prev`);
-  await expect(row).toBeVisible({ timeout: T.page });
-  const remove = page.getByTestId(`profile-delete-${PREFIX}prev`);
-  await expect(remove).toBeDisabled();
-  await expect(remove).toHaveAttribute('aria-describedby', /.+/);
-  await expect(page.getByTestId(`profile-prev-target-${PREFIX}prev`)).toBeVisible();
+    await openCores(page);
+    const row = page.getByTestId(`profile-row-${PREFIX}prev`);
+    await expect(row).toBeVisible({ timeout: T.page });
+    const remove = page.getByTestId(`profile-delete-${PREFIX}prev`);
+    await expect(remove).toBeDisabled();
+    await expect(remove).toHaveAttribute('aria-describedby', /.+/);
+    await expect(page.getByTestId(`profile-prev-target-${PREFIX}prev`)).toBeVisible();
 
-  // переименование цели возврата — отказ под полем; Esc закрывает поле, фокус возвращается
-  const rename = page.getByTestId(`profile-rename-${PREFIX}prev`);
-  await rename.click();
-  const input = page.getByTestId(`profile-rename-input-${PREFIX}prev`);
-  await expect(input).toBeFocused();
-  await input.fill(`${PREFIX}prev-new`);
-  await input.press('Enter');
-  const error = page.getByTestId(`profile-rename-error-${PREFIX}prev`);
-  await expect(error).toBeVisible({ timeout: T.action });
-  await expect(error).toHaveText(startOf('cfg.prof.err_prev_target'));
-  await expect(error).toHaveAttribute('role', 'alert');
-  await input.press('Escape');
-  await expect(input).toBeHidden();
-  await expect(rename).toBeFocused();
+    // переименование цели возврата — отказ под полем; Esc закрывает поле, фокус возвращается
+    const rename = page.getByTestId(`profile-rename-${PREFIX}prev`);
+    await rename.click();
+    const input = page.getByTestId(`profile-rename-input-${PREFIX}prev`);
+    await expect(input).toBeFocused();
+    await input.fill(`${PREFIX}prev-new`);
+    await input.press('Enter');
+    const error = page.getByTestId(`profile-rename-error-${PREFIX}prev`);
+    await expect(error).toBeVisible({ timeout: T.action });
+    await expect(error).toHaveText(startOf('cfg.prof.err_prev_target'));
+    await expect(error).toHaveAttribute('role', 'alert');
+    await input.press('Escape');
+    await expect(input).toBeHidden();
+    await expect(rename).toBeFocused();
 
-  await guard.assertClean();
-});
+    await guard.assertClean();
+  }
+);
 
 test('profiles: имя и удаление', async ({ page }) => {
   test.setTimeout(T.save * 4);
@@ -458,26 +489,36 @@ test('profiles: имя и удаление', async ({ page }) => {
   await guard.assertClean();
 });
 
-test('profiles: профиль без API', { tag: CORE_TAG }, async ({ page }) => {
-  test.setTimeout(T.save * 16);
-  test.skip(initial === null, 'Mihomo не установлен');
-  test.skip(RT.core !== 'mihomo', 'пометка «API не настроен» видна, пока работает ядро Mihomo');
-  test.skip(initial?.plain === true, 'config.yaml — обычный файл: переход его усыновит');
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await startPage(page);
-  await resetDraft(page);
+test(
+  'profiles: профиль без API',
+  {
+    tag: CORE_TAG,
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description: 'подготовка профилей Mihomo с перезапуском ядра'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.save * 16);
+    test.skip(initial === null, 'Mihomo не установлен');
+    test.skip(RT.core !== 'mihomo', 'пометка «API не настроен» видна, пока работает ядро Mihomo');
+    test.skip(initial?.plain === true, 'config.yaml — обычный файл: переход его усыновит');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await startPage(page);
+    await resetDraft(page);
 
-  // профиль без контроллера: активен, ядро работает, API недоступен
-  await createProfile(page, `${PREFIX}noapi`, 'empty');
-  await activateViaApi(page, `${PREFIX}noapi`);
+    // профиль без контроллера: активен, ядро работает, API недоступен
+    await createProfile(page, `${PREFIX}noapi`, 'empty');
+    await activateViaApi(page, `${PREFIX}noapi`);
 
-  // сам переход уже сделан API; консоль проверяется на странице «Службы»
-  const guard = attachConsoleGuard(page);
-  await page.goto('/#/services', { timeout: T.page, waitUntil: 'domcontentloaded' });
-  await expect(page.getByTestId('mihomo-no-api-note')).toBeVisible({ timeout: T.save * 2 });
+    // сам переход уже сделан API; консоль проверяется на странице «Службы»
+    const guard = attachConsoleGuard(page);
+    await page.goto('/#/services', { timeout: T.page, waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('mihomo-no-api-note')).toBeVisible({ timeout: T.save * 2 });
 
-  await guard.assertClean();
-});
+    await guard.assertClean();
+  }
+);
 
 // --- Диалоги «Новый профиль» и «Заполнить из профиля» ---
 
@@ -597,33 +638,42 @@ test('profiles: копия профиля панели', async ({ page }) => {
   await guard.assertClean();
 });
 
-test('profiles: копия недоступна без файла', async ({ page }) => {
-  test.setTimeout(T.save * 16);
-  test.skip(initial === null, 'Mihomo не установлен');
-  test.skip(initial?.plain === true, 'config.yaml — обычный файл: переход его усыновит');
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await startPage(page);
-  await resetDraft(page);
+test(
+  'profiles: копия недоступна без файла',
+  {
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description: 'подготовка профилей Mihomo с перезапуском ядра'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.save * 16);
+    test.skip(initial === null, 'Mihomo не установлен');
+    test.skip(initial?.plain === true, 'config.yaml — обычный файл: переход его усыновит');
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await startPage(page);
+    await resetDraft(page);
 
-  // Mihomo на своём профиле: файла xcp-main.yaml нет
-  await createProfile(page, `${PREFIX}own`);
-  await activateViaApi(page, `${PREFIX}own`);
-  await openCores(page);
-  await expect(page.getByTestId('profile-panel-copy')).toBeDisabled();
-  await expect(page.getByTestId('profile-panel-copy-off')).toBeVisible();
+    // Mihomo на своём профиле: файла xcp-main.yaml нет
+    await createProfile(page, `${PREFIX}own`);
+    await activateViaApi(page, `${PREFIX}own`);
+    await openCores(page);
+    await expect(page.getByTestId('profile-panel-copy')).toBeDisabled();
+    await expect(page.getByTestId('profile-panel-copy-off')).toBeVisible();
 
-  // в диалоге пункт «Профиль панели» есть, но недоступен, под полем пояснение
-  await page.getByTestId(`profile-copy-${PREFIX}own`).click();
-  await expect(page.getByTestId('new-profile-modal')).toBeVisible({ timeout: T.action });
-  await expect(page.getByTestId('new-profile-source')).toHaveValue(`${PREFIX}own`);
-  const panelOption = page.getByTestId('new-profile-source').locator('option[value="xcp-main"]');
-  await expect(panelOption).toBeDisabled();
-  await expect(panelOption).toHaveText(exactOf('cfg.prof.copy_panel_opt_off'));
-  await expect(page.getByTestId('new-profile-source-hint')).toBeVisible();
+    // в диалоге пункт «Профиль панели» есть, но недоступен, под полем пояснение
+    await page.getByTestId(`profile-copy-${PREFIX}own`).click();
+    await expect(page.getByTestId('new-profile-modal')).toBeVisible({ timeout: T.action });
+    await expect(page.getByTestId('new-profile-source')).toHaveValue(`${PREFIX}own`);
+    const panelOption = page.getByTestId('new-profile-source').locator('option[value="xcp-main"]');
+    await expect(panelOption).toBeDisabled();
+    await expect(panelOption).toHaveText(exactOf('cfg.prof.copy_panel_opt_off'));
+    await expect(page.getByTestId('new-profile-source-hint')).toBeVisible();
 
-  await guard.assertClean();
-});
+    await guard.assertClean();
+  }
+);
 
 test('profiles: имя', async ({ page }) => {
   test.setTimeout(T.save * 4);

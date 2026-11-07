@@ -11,7 +11,13 @@ import {
   releaseDnsTarget,
   type DnsTargetPrep
 } from './lib/dns-target';
-import { CORE_TAG, knownFailure } from './lib/known';
+import {
+  CORE_TAG,
+  knownFailure,
+  SLOW_ANNOTATION,
+  FULL_TAG,
+  TIER_FULL_ANNOTATION
+} from './lib/known';
 import {
   addToDraft,
   api,
@@ -1011,7 +1017,13 @@ test.describe('dns-flow', () => {
 
   test(
     'dns-flow: включение — шаги транзакции, окно, DNS у ядра',
-    { tag: CORE_TAG },
+    {
+      tag: CORE_TAG,
+      annotation: {
+        type: SLOW_ANNOTATION,
+        description: 'включение перехвата DNS с перезапуском ядра и окном подтверждения'
+      }
+    },
     async ({ page }) => {
       test.setTimeout(T.save * 5);
       test.skip(flow.skip !== '', flow.skip);
@@ -1115,7 +1127,13 @@ test.describe('dns-flow', () => {
 
   test(
     'dns-flow: выключение — подтверждение, DNS у прошивки, тост',
-    { tag: CORE_TAG },
+    {
+      tag: CORE_TAG,
+      annotation: {
+        type: SLOW_ANNOTATION,
+        description: 'включение и выключение перехвата DNS с перезапуском ядра'
+      }
+    },
     async ({ page }) => {
       test.setTimeout(T.save * 4);
       test.skip(flow.skip !== '', flow.skip);
@@ -1160,7 +1178,13 @@ test.describe('dns-flow', () => {
 
   test(
     'dns-outcome: откат без пользователя — строка в карточке, уведомление и один тост',
-    { tag: CORE_TAG },
+    {
+      tag: [CORE_TAG, FULL_TAG],
+      annotation: {
+        type: TIER_FULL_ANNOTATION,
+        description: 'реальное время: окно перехвата DNS откатывается по таймеру без пользователя'
+      }
+    },
     async ({ page }) => {
       test.setTimeout(T.save * 4 + 120_000);
       test.skip(flow.skip !== '', flow.skip);
@@ -1270,7 +1294,13 @@ test.describe('dns-flow', () => {
 
   test(
     'dns-flow: сбой пробы — причина, откат, DNS у прошивки',
-    { tag: CORE_TAG },
+    {
+      tag: [CORE_TAG, FULL_TAG],
+      annotation: {
+        type: TIER_FULL_ANNOTATION,
+        description: 'внесение сбоя: мёртвый узел группы-цели обрывает пробу, откат перехвата DNS'
+      }
+    },
     async ({ page }) => {
       test.setTimeout(T.save * 8);
       test.skip(flow.skip !== '', flow.skip);

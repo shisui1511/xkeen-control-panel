@@ -93,6 +93,7 @@ func rtRunUserEntries(t *testing.T) []string {
 // что перезапущенное ядро поднялось. Ядро не переключается и не читается для выбора
 // поведения, поэтому метки ядра нет; на обоих ядрах сценарий идёт в сессиях стенда.
 func TestRouterXKeenUpdateRun(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "реальная загрузка: настоящий xkeen -ug панельным запускателем")
 	routertest.Current(t)
 	if !rtRunExists(rtRunXKeenBin) {
 		t.Skipf("нет %s: XKeen не установлен", rtRunXKeenBin)

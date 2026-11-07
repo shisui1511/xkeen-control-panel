@@ -371,6 +371,7 @@ func rtCpExists(path string) bool {
 // при отпущенном — 409 panel_absent; копия профиля пользователя и обычного config.yaml
 // побайтная. Метки ядра нет: взятие идёт при любом активном ядре.
 func TestRouterProfileCopyPanel(t *testing.T) {
+	routertest.Slow(t, "взятие маршрутизации Mihomo с «Применить», перезапуском и проверками mihomo -t")
 	tg := routertest.Current(t)
 	if _, err := os.Stat(rtSaveBinary); err != nil {
 		t.Skip("Mihomo не установлен на стенде")
@@ -738,6 +739,7 @@ func rtFillHasSkip(sniffer map[string]any) bool {
 // набор правил rule-set:..., которого в профиле панели нет. Метки ядра нет: взятие идёт
 // при любом активном ядре.
 func TestRouterCoresFill(t *testing.T) {
+	routertest.Slow(t, "«Применить» с перезапуском Mihomo после fill шаблона и отпускание")
 	tg := routertest.Current(t)
 	if _, err := os.Stat(rtSaveBinary); err != nil {
 		t.Skip("Mihomo не установлен на стенде")

@@ -137,6 +137,7 @@ func rtGeoWaitRun(t *testing.T, svc *Service, limit time.Duration) LastRun {
 // синхронно, настоящий `xkeen -ug` идёт в фоне, итоги по файлам и вывод переживают
 // перезапуск панели.
 func TestRouterGeodataRunNow(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "реальная загрузка: настоящий xkeen -ug в фоне качает базы")
 	tg := routertest.Current(t)
 	if _, err := os.Stat(rtRunXKeenBin); err != nil {
 		t.Skipf("нет %s: XKeen не установлен", rtRunXKeenBin)
