@@ -438,5 +438,10 @@
         "go:TestRouterRoutingSelectLive"
       ]
     }
+  },
+  "harness": {
+    "go": ["internal/services:TestRouterPanelSession", "internal/services/configlayer:TestRouterTakeoverApplyAndRelease"],
+    "specs": ["tests/router/mihomo-undo-profile.spec.ts", "tests/router/config-profiles-deps.spec.ts"],
+    "session": "scripts/router/harness-session.json"
   }
 }
