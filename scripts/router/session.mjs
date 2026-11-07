@@ -2280,6 +2280,15 @@ class Session {
       }
       if (!CORES.includes(core) && existsSync(coreFile))
         core = readFileSync(coreFile, 'utf8').trim();
+      if (!CORES.includes(core) && !existsSync(snap) && !this.network && !this.aborted) {
+        // вложенный прогон вышел до снимка (отказ проверок до блокировки, код 2) и стенд не
+        // трогал: исходное ядро — то, что активно на цели сейчас
+        const r = this.remote(
+          'x=$(pidof xray); m=$(pidof mihomo); [ -n "$x" ] && [ -z "$m" ] && echo xray; [ -n "$m" ] && [ -z "$x" ] && echo mihomo; true'
+        );
+        if (r.rc === 3) this.network = true;
+        else if (r.rc === 0) core = r.out.trim();
+      }
       if (CORES.includes(core)) {
         // восстановление вложенного прогона вернуло ядро снимка; позже снимок берёт активное
         // ядро как есть, поэтому this.cur после первого прогона не трогаем
