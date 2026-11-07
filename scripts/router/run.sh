@@ -70,6 +70,22 @@
 #                не меняются; служебные файлы цели (snapshot.log, restore.log, deploy.rc, core,
 #                timings.tsv) перепрогон перезаписывает или дополняет. Нет упавших тестов — код 0
 #                с сообщением, стенд не трогается. Окно смоука 30 с. Статус релиза не публикуется.
+#   bisect       поиск виновного коммита (RTR-11, D-22): TEST=<go:Имя|pw:название> CORE=<ядро>
+#                FROM=<ссылка> [TO=<ссылка>, по умолчанию HEAD] [MODE=regress|fix] [SPEC=<спек>]
+#                [GREP=<регэксп>]. Деплой HEAD (или RELEASE) и смоук цели, затем bisect.mjs двоичным
+#                поиском по first-parent коммитам (по ancestry-path, если FROM не на first-parent
+#                цепочке TO) ставит на стенд сборку дерева коммита и гонит один тест (tree-step.sh:
+#                продукт и тест из дерева коммита, обвязка из HEAD, отдельный worktree
+#                build/bisect/wt-<sha>). MODE=regress ищет первый коммит, где тест падает, MODE=fix —
+#                первый, где проходит; концы проверяются; шаг, который нельзя проверить (теста нет
+#                в дереве, сборка не удалась), пропускается. Для pw: нужен SPEC; GREP по умолчанию —
+#                экранированное название из TEST; для go: пакет определяется по рабочему дереву, для
+#                теста, которого в дереве уже нет, — TEST=go:<пакет>:TestRouterИмя. Итог — раздел
+#                «## Поиск виновного коммита» summary.md со строкой «- Итог bisect <тест>: <sha>
+#                <тема>» (или «… между <a> и <b>», «… не воспроизводится»). В конце ставятся обратно
+#                сборка, стоявшая до поиска (HEAD или RELEASE), и исходное ядро. Одна цель
+#                (ROUTERS=<id>). Статус релиза не публикуется. Код выхода — код bisect.mjs: 0 —
+#                вердикт есть и стенд вернулся, 1 — нет вердикта, 2 — неверные значения, 3 — связь.
 #   reboot       холодный старт (D-24): деплой, предполёт и снимок параллельно, затем
 #                по одной цели в порядке XCP_REBOOT_ORDER (нижестоящая цель каскада первой):
 #                перезагрузка, ожидание возврата, проверки автозапуска (xcp той же версии,
@@ -88,6 +104,17 @@
 # при потере связи, не догнанной после возврата связи. Счётчики report.md и summary.md показывают
 # QPASS и QFAIL (карантин). В конце каждого прогона с отчётом (кроме session) отчёт добавляется в
 # историю — node history.mjs append, класс падения попадает в колонку class (D-20).
+#
+# Поиск виновного коммита в конце полного прогона (RTR-11, D-22): для тестов класса new из
+# <цель>/classes.tsv без класса flaky в истории за 30 дней (поиск по нестабильному тесту даёт ложного
+# виновника) — не больше 3 тестов (RT_BISECT_MAX), по порядку классов — запускается bisect.mjs от
+# sha прошлого зелёного полного прогона в истории (lastFull green), иначе от новейшего stable-тега
+# (git tag --merged HEAD), до HEAD, с --assume-to: падение только что видели. Подбор тестов и записей
+# для них — bisect.mjs pick (через rerun-plan.mjs). Поиск идёт до статуса релиза и удержания блокировки,
+# после каждого поиска стенд возвращается к сборке прогона (RELEASE или HEAD) и исходному ядру; код
+# выхода прогона не меняется. Прерванный прогон и тесты flaky поиска не получают. Итог — раздел
+# «## Поиск виновного коммита» summary.md и строки «- Итог bisect …» (их подхватывает latest.md прогона
+# без присмотра).
 #
 # Порядок: check-known.sh (метки известных падений) -> цели из локального конфига ->
 # блокировка на весь прогон -> отчёт -> ротация build/router (tidy-lib.sh; сборки ротирует
@@ -113,7 +140,9 @@
 #                        контекста)
 #   SPEC=<файл>          спека набора session (путь от корня рабочей копии или абсолютный)
 #   FROM=<отчёт>         отчёт прогона или сессии набора rerun (путь от корня рабочей копии или
-#                        абсолютный, только под build/router; проверка до блокировки, иначе код 2)
+#                        абсолютный, только под build/router; проверка до блокировки, иначе код 2).
+#                        У набора bisect FROM — ссылка git, с которой искать (TEST, CORE, TO, MODE, SPEC,
+#                        GREP — там же; все значения проверяются до блокировки, иначе код 2)
 #   RT_SEL_DIR=<каталог> состав ветви из файлов <ядро>.sel (rerun-plan.mjs): вместо выбора набора
 #                        ветвь берёт GO_SEQ, SPECS и GREP из <ядро>.sel, а ветвь без файла
 #                        пропускается; читается построчно, без eval, по шаблонам безопасных символов.
@@ -176,9 +205,9 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 SUITE=${1:-}
 case "$SUITE" in
-  smoke | changed | harness | reboot | session | rerun | full | '') ;;
+  smoke | changed | harness | reboot | session | rerun | bisect | full | '') ;;
   *)
-    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke, changed, harness, reboot, session, rerun и full (полный, можно без SUITE)" >&2
+    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke, changed, harness, reboot, session, rerun, bisect и full (полный, можно без SUITE)" >&2
     echo "router-test: пример: make router-test SUITE=smoke" >&2
     exit 2
     ;;
@@ -269,6 +298,95 @@ if [ "$SUITE" = rerun ]; then
   rt_report_use || exit 2
 fi
 
+# Набор bisect: значения проверяются до check-known.sh, целей и блокировки (код 2, стенд не трогается).
+# TEST — go:TestRouterИмя (пакет определяется по рабочему дереву; можно go:<каталог пакета>:TestRouterИмя
+# для теста, которого в дереве уже нет) либо pw:название; для pw: нужен SPEC. FROM — ссылка, TO — по
+# умолчанию HEAD, CORE — ядро, на котором тест падает, MODE — regress (по умолчанию) или fix.
+RT_BS_GO=""
+RT_BS_SPEC=""
+RT_BS_GREP=""
+RT_BS_LABEL=""
+RT_BS_FROM=""
+RT_BS_TO=""
+RT_BS_MODE=""
+BISECT_RC=0
+rt_bs_die() {
+  echo "router-test: SUITE=bisect: $*" >&2
+  exit 2
+}
+if [ "$SUITE" = bisect ]; then
+  _bs_ref_re='^[A-Za-z0-9_.][A-Za-z0-9_./~^-]*$'
+  [ -n "${TEST:-}" ] || rt_bs_die "нужен TEST=<go:Имя|pw:название>"
+  case "${CORE:-}" in
+    xray | mihomo) ;;
+    *) rt_bs_die "нужен CORE=xray|mihomo" ;;
+  esac
+  RT_BS_MODE=${MODE:-regress}
+  case "$RT_BS_MODE" in
+    regress | fix) ;;
+    *) rt_bs_die "MODE: regress или fix" ;;
+  esac
+  [ -n "${FROM:-}" ] || rt_bs_die "нужен FROM=<ссылка: с какого коммита искать>"
+  RT_BS_FROM=$FROM
+  RT_BS_TO=${TO:-HEAD}
+  for _bs_r in "$RT_BS_FROM" "$RT_BS_TO"; do
+    printf '%s\n' "$_bs_r" | grep -Eq "$_bs_ref_re" || rt_bs_die "FROM и TO: недопустимая ссылка"
+    git rev-parse --verify --quiet "$_bs_r^{commit}" >/dev/null 2>&1 || rt_bs_die "FROM и TO: '$_bs_r' не указывает на коммит"
+  done
+  case "$TEST" in
+    go:?*)
+      _bs_name=${TEST#go:}
+      case "$_bs_name" in
+        *:*)
+          RT_BS_GO=$_bs_name
+          printf '%s\n' "$RT_BS_GO" | grep -Eq '^[A-Za-z0-9_./-]+:TestRouter[A-Za-z0-9_]+$' || rt_bs_die "TEST: ожидается go:<пакет>:TestRouter<Имя>"
+          RT_BS_LABEL="go:${RT_BS_GO#*:}"
+          ;;
+        *)
+          _bs_name=${_bs_name%%/*}
+          printf '%s\n' "$_bs_name" | grep -Eq '^TestRouter[A-Za-z0-9_]+$' || rt_bs_die "TEST: ожидается go:TestRouter<Имя>"
+          RT_BS_GO=$(node -e '
+const cm = require(process.argv[1] + "/scripts/router/core-marks.cjs");
+for (const t of cm.testFacts(process.argv[1])) {
+  if (t.kind === "go" && t.test === process.argv[2] && t.pkg) {
+    console.log(t.pkg + ":" + t.test);
+    process.exit(0);
+  }
+}
+process.exit(1);
+' "$(rt_repo_root)" "$_bs_name" 2>/dev/null) || rt_bs_die "тест $_bs_name не найден в рабочем дереве: укажите TEST=go:<пакет>:$_bs_name"
+          RT_BS_LABEL="go:$_bs_name"
+          ;;
+      esac
+      ;;
+    pw:?*)
+      _bs_title=${TEST#pw:}
+      case "$_bs_title" in
+        *"
+"*) rt_bs_die "TEST: перевод строки недопустим" ;;
+      esac
+      [ -n "${SPEC:-}" ] || rt_bs_die "для pw: нужен SPEC=<tests/router/спек.spec.ts>"
+      case "$SPEC" in
+        */*) RT_BS_SPEC=$SPEC ;;
+        *) RT_BS_SPEC="tests/router/$SPEC" ;;
+      esac
+      printf '%s\n' "$RT_BS_SPEC" | grep -Eq '^tests/router/[A-Za-z0-9_.-]+\.spec\.ts$' || rt_bs_die "SPEC: ожидается tests/router/<имя>.spec.ts"
+      if [ -n "${GREP:-}" ]; then
+        RT_BS_GREP=$GREP
+      else
+        # название «описание > тест» -> «описание тест» с экранированными символами регэкспа
+        RT_BS_GREP=$(printf '%s' "$_bs_title" | sed -e 's/ > / /g' -e 's/[][\.*^$(){}?+|]/\\&/g')
+      fi
+      case "$RT_BS_GREP" in
+        *"'"* | *"
+"*) rt_bs_die "GREP: одинарная кавычка и перевод строки недопустимы" ;;
+      esac
+      RT_BS_LABEL=$TEST
+      ;;
+    *) rt_bs_die "TEST: ожидается go:Имя или pw:название" ;;
+  esac
+fi
+
 # Виды спеков рабочего дерева (WR-04): незакоммиченный спек read не уходит в несколько воркеров
 # без проверки. До блокировки и деплоя, только для наборов с Playwright.
 case "$SUITE" in
@@ -287,6 +405,14 @@ if ! sh "$SCRIPT_DIR/check-known.sh"; then
 fi
 
 rt_load_targets
+
+# Набор bisect идёт на одной цели (ядро и сборка стенда возвращаются для неё).
+if [ "$SUITE" = bisect ]; then
+  # shellcheck disable=SC2086
+  if [ "$(printf '%s\n' $RT_TARGETS | grep -c .)" != 1 ]; then
+    rt_bs_die "нужна одна цель (ROUTERS=<id>), выбрано: $RT_TARGETS"
+  fi
+fi
 
 # Набор rerun: состав перепрогона считается до блокировки (только чтение отчёта): в перепрогон
 # идут цели, у которых есть упавшие тесты; нет ни одной — стенд не трогается, код 0.
@@ -2256,9 +2382,128 @@ fi
 # История результатов (D-20): отчёт со строками и классами добавляется в build/router/history.tsv.
 # Сбой записи прогон не краснит и код выхода не меняет.
 rt_history_append
+
+# --- поиск виновного коммита (RTR-11, D-22, todo 11) ----------------------------------------
+# Набор bisect: после деплоя и смоука bisect.mjs ищет коммит для заданного теста. Полный прогон:
+# в конце, до статуса релиза и до hold_lock, поиск идёт для новых падений (класс new в
+# <цель>/classes.tsv). Вне окна поиска не запускается при прерванном прогоне (выход 130 раньше) и
+# для теста с классом flaky в истории за 30 дней (отбор — bisect.mjs pick). Раздел «## Поиск
+# виновного коммита» и строки «- Итог bisect» пишет bisect.mjs в summary.md, их подхватывает latest.md
+# прогона без присмотра. Поиск код выхода полного прогона не меняет.
+
+# Потолок автоматического поиска в конце полного прогона: не больше 3 тестов (D-22) — каждый поиск
+# это несколько сборок на стенде, а виновник новых падений обычно общий.
+RT_BISECT_MAX=3
+
+# Строка в разделе «## Поиск виновного коммита» summary.md (заголовок один на отчёт).
+bs_note() {
+  grep -q '^## Поиск виновного коммита$' "$RT_REPORT/summary.md" 2>/dev/null || printf '\n## Поиск виновного коммита\n' >>"$RT_REPORT/summary.md"
+  printf '%s\n' "$1" >>"$RT_REPORT/summary.md"
+}
+
+# Набор bisect: код — код bisect.mjs (BISECT_RC). Деплой или смоук цели не прошли — поиска нет.
+bisect_suite() {
+  BISECT_RC=1
+  _bs_t=${RT_TARGETS%% *}
+  case " ${DEPLOYED:-} " in
+    *" $_bs_t "*) ;;
+    *)
+      echo "router-test: красный — деплой цели не выполнен, поиск не запускался" >&2
+      return 0
+      ;;
+  esac
+  if [ ! -f "$RT_REPORT/$_bs_t/results.tsv" ] || awk -F'\t' '$1 == "FAIL" {f = 1} END {exit !f}' "$RT_REPORT/$_bs_t/results.tsv"; then
+    echo "router-test: красный — смоук цели не прошёл, поиск не запускался" >&2
+    return 0
+  fi
+  # исходное ядро стенда — по смоуку (<отчёт>/<цель>/core)
+  _bs_orig=""
+  [ ! -s "$RT_REPORT/$_bs_t/core" ] || _bs_orig=$(head -n 1 "$RT_REPORT/$_bs_t/core")
+  set -- --target "$_bs_t" --core "$CORE" --from "$RT_BS_FROM" --to "$RT_BS_TO" --mode "$RT_BS_MODE" --report "$RT_REPORT" --label "$RT_BS_LABEL"
+  if [ -n "$RT_BS_GO" ]; then
+    set -- "$@" --go "$RT_BS_GO"
+  else
+    set -- "$@" --spec "$RT_BS_SPEC"
+    [ -z "$RT_BS_GREP" ] || set -- "$@" --grep "$RT_BS_GREP"
+  fi
+  [ -z "${RELEASE:-}" ] || set -- "$@" --restore-release "$RELEASE"
+  [ -z "$_bs_orig" ] || set -- "$@" --restore-core "$_bs_orig"
+  BISECT_RC=0
+  node "$SCRIPT_DIR/bisect.mjs" "$@" || BISECT_RC=$?
+}
+
+# Полный прогон: поиск для новых падений без класса flaky в истории за 30 дней.
+auto_bisect() {
+  [ "$SUITE_NAME" = full ] || return 0
+  _ab_left=$RT_BISECT_MAX
+  for _ab_t in $RT_TARGETS; do
+    [ "$_ab_left" -gt 0 ] || break
+    _ab_cls="$RT_REPORT/$_ab_t/classes.tsv"
+    [ -s "$_ab_cls" ] || continue
+    awk -F'\t' '$1 == "new" {f = 1} END {exit !f}' "$_ab_cls" || continue
+    if ! rt_ssh "$_ab_t" true >/dev/null 2>&1; then
+      bs_note "- Цель $_ab_t: поиск не запускался — нет связи со стендом"
+      continue
+    fi
+    _ab_orig=""
+    [ ! -s "$RT_REPORT/$_ab_t/core" ] || _ab_orig=$(head -n 1 "$RT_REPORT/$_ab_t/core")
+    _ab_tsv="$RT_REPORT/$_ab_t/bisect-pick.tsv"
+    _ab_rc=0
+    node "$SCRIPT_DIR/bisect.mjs" pick --report "$RT_REPORT" --target "$_ab_t" --max "$_ab_left" >"$_ab_tsv" 2>"$_ab_tsv.err" || _ab_rc=$?
+    if [ "$_ab_rc" != 0 ]; then
+      bs_note "- Цель $_ab_t: поиск не запускался — подбор тестов не удался (код $_ab_rc)"
+      continue
+    fi
+    _ab_from=""
+    _ab_tab=$(printf '\t')
+    while IFS="$_ab_tab" read -r _ab_k _ab_a _ab_b _ab_c _ab_d _ab_e || [ -n "$_ab_k" ]; do
+      case "$_ab_k" in
+        skip) bs_note "- Цель $_ab_t: поиск не запускался — $_ab_a" ;;
+        from) _ab_from=$_ab_a ;;
+        skipped) bs_note "- Пропущено: $_ab_a ($_ab_b)" ;;
+        test)
+          [ "$_ab_left" -gt 0 ] || continue
+          [ -n "$_ab_from" ] || continue
+          # _ab_a ядро, _ab_b go|pw, _ab_c запись теста, _ab_d grep или -, _ab_e имя теста
+          set -- --target "$_ab_t" --core "$_ab_a" --from "$_ab_from" --to HEAD --mode regress --assume-to --report "$RT_REPORT" --label "$_ab_e"
+          if [ "$_ab_b" = go ]; then
+            set -- "$@" --go "$_ab_c"
+          else
+            set -- "$@" --spec "$_ab_c"
+            [ "$_ab_d" = - ] || set -- "$@" --grep "$_ab_d"
+          fi
+          [ -z "${RELEASE:-}" ] || set -- "$@" --restore-release "$RELEASE"
+          [ -z "$_ab_orig" ] || set -- "$@" --restore-core "$_ab_orig"
+          _ab_left=$((_ab_left - 1))
+          node "$SCRIPT_DIR/bisect.mjs" "$@" || echo "router-test: поиск виновного коммита для $_ab_e завершился с кодом $? (итог — summary.md)" >&2
+          ;;
+      esac
+    done <"$_ab_tsv"
+    rm -f "$_ab_tsv" "$_ab_tsv.err"
+  done
+}
+
+if [ "$SUITE" = bisect ]; then
+  bisect_suite
+elif [ -z "$SUITE" ]; then
+  auto_bisect
+fi
+if [ "$RT_INTR" = 1 ]; then
+  echo "router-test: прерван (код 130), итог — $RT_REPORT/summary.md" >&2
+  exit 130
+fi
 publish_release_status
 
 hold_lock
+
+if [ "$SUITE" = bisect ]; then
+  if [ "$BISECT_RC" = 0 ]; then
+    echo "router-test: поиск завершён (итог — строки «Итог bisect» в $RT_REPORT/summary.md)"
+  else
+    echo "router-test: поиск завершился с кодом $BISECT_RC (итог — $RT_REPORT/summary.md)" >&2
+  fi
+  exit "$BISECT_RC"
+fi
 
 if [ "$FAILS" -gt 0 ] || [ "$XPASSES" -gt 0 ]; then
   # причина — строки «- Итог:» целей (branch-report.mjs), иначе счётчики
