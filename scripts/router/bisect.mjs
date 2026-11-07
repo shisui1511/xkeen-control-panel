@@ -502,8 +502,10 @@ const CORE_CMD =
 const isBad = (result) => (mode === 'regress' ? result === 'FAIL' : result === 'PASS');
 
 // Сбой связи внутри теста (таймаут клиента, отказ соединения, TLS): такой FAIL шага говорит о
-// сети стенда, а не о коде коммита. Если падение на «падающем» конце диапазона (эталон) не
-// такое, шаг с сетевым FAIL засчитывается как SKIP — иначе поиск сдвигает границу по сбою сети.
+// сети стенда, а не о коде коммита. Шаг с сетевым FAIL засчитывается как SKIP, если падение на
+// «падающем» конце диапазона (эталон) не такое или эталона нет (--assume-to: TO не проверяется;
+// fix с SKIP на FROM) — иначе поиск сдвигает границу по сбою сети. Сетевой FAIL остаётся падением,
+// только когда эталон сам сетевой.
 const NET_FAIL =
   /context deadline exceeded|Client\.Timeout|connection refused|connection reset|i\/o timeout|TLS handshake|net::ERR_|ECONNRESET|socket hang up/;
 let refNet = null;
@@ -565,7 +567,7 @@ async function probe(sha, searchStep) {
     if (!searchStep) {
       // эталон — конец диапазона, где тест обязан падать (FROM в fix, TO в regress)
       if (refNet === null) refNet = net;
-    } else if (net && refNet === false) {
+    } else if (net && refNet !== true) {
       r.result = 'SKIP';
       r.reason = 'сбой связи в тесте (не то падение, что на конце диапазона)';
     }
