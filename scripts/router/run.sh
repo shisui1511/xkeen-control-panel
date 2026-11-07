@@ -76,6 +76,17 @@
 #                XKeen, то же ядро, правила iptables), смоук, сверка со снимком. В конце
 #                все цели снова отвечают (reboot-reachable-end). Матрица ядер не применяется.
 #
+# Разбор падений (RTR-05, D-19…D-21), наборы full, changed и harness. Каждое новое падение теста
+# (FAIL проверок go: и pw:, кроме известных, карантина и признаков потери связи) после всех ветвей и до
+# восстановления стенда, в той же блокировке и в тот же отчёт, перегоняется один раз только для
+# классификации (confirm-go-<ядро>, confirm-pw-<ядро>; строки — в <цель>/confirm.tsv, артефакты — в
+# <цель>/<ядро>/confirm/): прошёл — класс flaky, упал снова — new. Основной проход идёт без повторов
+# (retries: 0), прошедший со второго раза тест красный. Потолок — RT_CONFIRM_MAX тестов (10) на цель:
+# новых падений больше — перепрогона нет вовсе (общая причина), все они new, в plan.txt строка
+# «подтверждающий перепрогон пропущен». Классы падений — <цель>/classes.tsv и раздел «Классы падений»
+# summary.md (branch-report.mjs), итог — строка «- Итог:»; код выхода красный при new, flaky, xpass и
+# при потере связи, не догнанной после возврата связи.
+#
 # Порядок: check-known.sh (метки известных падений) -> цели из локального конфига ->
 # блокировка на весь прогон -> отчёт -> ротация build/router (tidy-lib.sh; сборки ротирует
 # make router-<арх>) -> проверка связи -> deploy.sh -> по целям
@@ -104,6 +115,7 @@
 #                        ветвь берёт GO_SEQ, SPECS и GREP из <ядро>.sel, а ветвь без файла
 #                        пропускается; читается построчно, без eval, по шаблонам безопасных символов.
 #                        Набор rerun задаёт его сам (<цель>/rerun-N.sel.d)
+#   RT_LINK_WAIT=<с>     ожидание возврата связи после обрыва (rt_wait_link), 60…7200, по умолчанию 600
 #   RT_HOLD_MINUTES=<N>  после прогона держать блокировку N минут для ручной
 #                        проверки; снять раньше: touch <git-common-dir>/router-test.release
 #   RT_LOCK_WAIT=<с>     ожидание очереди на роутеры (по умолчанию 3600)
@@ -129,7 +141,11 @@
 # settle-<ядро>, pw-<ядро> (часть state). Хвост xcp.log ветви пишет наблюдатель окна.
 # Этап, оборванный сигналом, — строка с кодом 130 (её пишет _term), начало и ядро ветви те же.
 #
-# Код выхода: 0 — нет строк FAIL и XPASS, 2 — неизвестный набор, иначе 1. Набор session —
+# Файлы разбора падений в <отчёт>/<цель>/: confirm.tsv, confirm-count (сколько тестов подлежало
+# перепрогону), confirm-skip (причина, если перепрогона не было), confirm-plan.txt, classes.tsv.
+#
+# Код выхода: 0 — нет красных классов (new, flaky, xpass, не догнанный stand), 2 — неизвестный
+# набор, иначе 1. Набор session —
 # код session.mjs: 0 — ожидания совпали и стенд вернулся, 3 — сбой связи ПК↔стенд, иначе 1 или 2.
 # Набор rerun: 0 — все перегнанные тесты прошли (PASS, KNOWN, QPASS, QFAIL) или упавших нет,
 # 1 — есть FAIL или XPASS, 2 — неверный FROM, 3 — сбой связи ПК↔стенд.
@@ -642,6 +658,47 @@ rt_sel_ok() {
   esac
 }
 
+# Потолок подтверждающего перепрогона (D-19): новых падений цели больше — общая причина
+# (случай 148-25), перепрогона нет вовсе, все падения остаются new. Решение принимается одним
+# сравнением общего числа новых падений по всем ветвям цели с этим значением (full_target).
+RT_CONFIRM_MAX=10
+
+# Признаки потери связи в детали строки результата (класс stand, D-21); тот же список — в
+# branch-report.mjs (STAND_RE). Такие падения в подтверждающий перепрогон не идут.
+RT_STAND_RE='нет связи|связь потеряна|ERR_NETWORK_CHANGED|net::ERR_INTERNET_DISCONNECTED|net::ERR_NAME_NOT_RESOLVED|ECONNRESET|ETIMEDOUT'
+
+# Красные классы цели одной строкой «new flaky xpass stand_open»: из classes.tsv (stand_open — класс
+# stand с причиной «не догнан…»: связь не вернулась или догона не было), без него — прежний подсчёт
+# по results.tsv (FAIL как new, XPASS как xpass); нет результатов — «1 0 0 0».
+rt_class_counts() {
+  if [ -f "$RT_REPORT/$1/classes.tsv" ]; then
+    # подтест Go и его родитель — один тест
+    awk -F'\t' '
+      { c = $3; if (c ~ /^go:/) sub(/\/.*/, "", c); k = $1 "\t" $2 "\t" c }
+      k in seen { next }
+      { seen[k] = 1 }
+      $1 == "new" {n++}
+      $1 == "flaky" {f++}
+      $1 == "xpass" {x++}
+      $1 == "stand" && $4 ~ /^не догнан/ {s++}
+      END {printf "%d %d %d %d\n", n, f, x, s}' "$RT_REPORT/$1/classes.tsv"
+  elif [ -f "$RT_REPORT/$1/results.tsv" ]; then
+    awk -F'\t' '$1 == "FAIL" {n++} $1 == "XPASS" {x++} END {printf "%d 0 %d 0\n", n, x}' "$RT_REPORT/$1/results.tsv"
+  else
+    echo "1 0 0 0"
+  fi
+}
+
+# Красные классы цели в переменных: RT_RC_NEW (new), RT_RC_RED (new, flaky и не догнанный stand),
+# RT_RC_XPASS (xpass). Разбор счётчиков — в функции: set -- не должен менять позиционные параметры
+# вызывающего.
+rt_red_counts() {
+  set -- $(rt_class_counts "$1")
+  RT_RC_NEW=$1
+  RT_RC_RED=$(($1 + $2 + $4))
+  RT_RC_XPASS=$3
+}
+
 # --- проверка связи -----------------------------------------------------------
 
 REACHABLE=""
@@ -926,6 +983,96 @@ EOF
     _bg_stage=""
     return "$_brc"
   }
+  # Подтверждающий перепрогон новых падений (RTR-05, D-19). Идёт после цикла ветвей и до
+  # восстановления стенда (его делает _finish в EXIT-ловушке), в той же блокировке и в тот же отчёт.
+  # Вход — FAIL проверок go: и pw: без признаков потери связи (confirm-src.tsv). Решение принимается
+  # по общему числу таких падений цели, одним сравнением с RT_CONFIRM_MAX: больше — перепрогона нет
+  # ни на одном ядре (confirm-skip, строка в plan.txt), падения остаются new. Иначе для каждого
+  # ядра с падениями (сначала то, что сейчас на стенде) rerun-plan.mjs --core <ядро> --max <остаток
+  # потолка> собирает состав, ядро переключается так же, как в ветвях, и тесты идут этапами
+  # confirm-go-<ядро> и confirm-pw-<ядро> со строками в confirm.tsv и артефактами в <ядро>/confirm/.
+  # Прошедший тест — flaky, упавший снова — new (branch-report.mjs); retries основного прохода не
+  # меняются, результат перепрогона не делает тест зелёным.
+  _confirm_run() {
+    [ -f "$RT_REPORT/$_t/results.tsv" ] || return 0
+    awk -F'\t' -v re="$RT_STAND_RE" '$1 == "FAIL" && $3 ~ /^(go|pw):/ && $4 !~ re' "$RT_REPORT/$_t/results.tsv" >"$RT_REPORT/$_t/confirm-src.tsv"
+    _cf_cd="$RT_REPORT/$_t/confirm-count.d"
+    rm -rf "$_cf_cd"
+    _cf_prc=0
+    node "$SCRIPT_DIR/rerun-plan.mjs" "$RT_REPORT" "$_t" --results confirm-src.tsv --out-dir "$_cf_cd" >"$RT_REPORT/$_t/confirm-plan.txt" 2>&1 || _cf_prc=$?
+    if [ "$_cf_prc" != 0 ]; then
+      rm -rf "$_cf_cd"
+      [ "$_cf_prc" = 1 ] || echo "router-test: цель $_t: rerun-plan.mjs не составил состав подтверждающего перепрогона (код $_cf_prc, confirm-plan.txt), падения остаются new" >&2
+      return 0
+    fi
+    _cf_n=0
+    for _cf_s in "$_cf_cd"/*.sel; do
+      [ -f "$_cf_s" ] || continue
+      _cf_v=$(rt_sel_val "$_cf_s" COUNT | tr -dc '0-9')
+      _cf_n=$((_cf_n + ${_cf_v:-0}))
+    done
+    rm -rf "$_cf_cd"
+    printf '%s\n' "$_cf_n" >"$RT_REPORT/$_t/confirm-count"
+    if [ "$_cf_n" -gt "$RT_CONFIRM_MAX" ]; then
+      printf '%s\n' "без перепрогона: падений больше $RT_CONFIRM_MAX" >"$RT_REPORT/$_t/confirm-skip"
+      echo "- Цель $_t: подтверждающий перепрогон пропущен: новых падений $_cf_n больше $RT_CONFIRM_MAX — общая причина" >>"$RT_REPORT/plan.txt"
+      echo "router-test: цель $_t: подтверждающий перепрогон пропущен: новых падений $_cf_n больше $RT_CONFIRM_MAX — общая причина" >&2
+      return 0
+    fi
+    _cf_left=$RT_CONFIRM_MAX
+    _cf_order=""
+    [ -z "$_cur" ] || _cf_order=$_cur
+    for _cf_k in xray mihomo; do
+      [ "$_cf_k" = "$_cur" ] || _cf_order="$_cf_order $_cf_k"
+    done
+    _cf_sd="$RT_REPORT/$_t/confirm.sel.d"
+    rm -rf "$_cf_sd"
+    # строки результатов и артефакты перепрогона — отдельно от основного прохода (в том числе
+    # stand-ready после Go-тестов перепрогона)
+    RT_RESULTS_NAME=confirm.tsv
+    RT_ART_SUB=confirm
+    export RT_RESULTS_NAME RT_ART_SUB
+    for _cf_k in $_cf_order; do
+      [ "$_cf_left" -gt 0 ] || break
+      _cf_prc=0
+      node "$SCRIPT_DIR/rerun-plan.mjs" "$RT_REPORT" "$_t" --core "$_cf_k" --max "$_cf_left" --results confirm-src.tsv --out-dir "$_cf_sd" >>"$RT_REPORT/$_t/confirm-plan.txt" 2>&1 || _cf_prc=$?
+      if [ "$_cf_prc" != 0 ] || [ ! -f "$_cf_sd/$_cf_k.sel" ]; then
+        continue
+      fi
+      _cf_f="$_cf_sd/$_cf_k.sel"
+      _cf_seq=$(rt_sel_val "$_cf_f" GO_SEQ)
+      _cf_specs=$(rt_sel_val "$_cf_f" SPECS)
+      _cf_grep=$(rt_sel_val "$_cf_f" GREP)
+      _cf_cnt=$(rt_sel_val "$_cf_f" COUNT)
+      if ! rt_sel_ok GO_SEQ "$_cf_seq" || ! rt_sel_ok SPECS "$_cf_specs" || ! rt_sel_ok COUNT "$_cf_cnt"; then
+        echo "router-test: цель $_t: файл состава $_cf_k.sel подтверждающего перепрогона не прошёл проверку, ядро пропущено" >&2
+        continue
+      fi
+      _cf_left=$((_cf_left - _cf_cnt))
+      RT_CORE=$_cf_k
+      export RT_CORE
+      mkdir -p "$RT_REPORT/$_t/$_cf_k/confirm"
+      if [ "$_cur" != "$_cf_k" ]; then
+        rt_stage "$_t" "confirm-switch-$_cf_k" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_cf_k" --switch "$_cf_k" || true
+        if [ "$_brc" != 0 ]; then
+          echo "router-test: цель $_t: переключение на $_cf_k для подтверждающего перепрогона не удалось" >&2
+          _cur=""
+          continue
+        fi
+        _cur=$_cf_k
+        printf '%s\n' "$_cf_k" >"$RT_REPORT/$_t/core"
+      fi
+      if [ -n "$_cf_seq" ]; then
+        rt_stage "$_t" "confirm-go-$_cf_k" _bg env "RT_GO_PKGS=" "RT_GO_RUN=" "RT_GO_RUN_SEQ=$_cf_seq" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_cf_k" || true
+        rt_stage "$_t" "confirm-settle-$_cf_k" _bg _settle "$_t" || true
+      fi
+      if [ -n "$_cf_specs" ]; then
+        rt_stage "$_t" "confirm-pw-$_cf_k" _bg env "RT_SPECS=$_cf_specs" "RT_PW_GREP=$_cf_grep" "RT_PW_GREP_INVERT=" "RT_PW_CORE_ONLY=" "RT_SPECS_FIRST=" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_cf_k" || true
+      fi
+    done
+    unset RT_RESULTS_NAME RT_ART_SUB
+    RT_CORE=""
+  }
   trap '_finish' EXIT
   trap '_term' INT TERM HUP
   # Флаг ставится до снимка: сигнал, пришедший сразу после возврата ssh снимка, обрабатывается
@@ -940,6 +1087,9 @@ EOF
   _orig=$(sed -n 's/^core=//p' "$RT_REPORT/$_t/snapshot.log" | tail -n 1)
 
   _first=1
+  # ядро, которое сейчас на стенде (после последнего успешного переключения): с него начинается
+  # подтверждающий перепрогон
+  _cur=""
   for _c in $RT_CORES; do
     # Состав из <ядро>.sel: у ветви без файла тестов нет — она пропускается целиком
     if [ -n "$_sel_dir" ] && [ ! -f "$_sel_dir/$_c.sel" ]; then
@@ -1057,6 +1207,7 @@ EOF
       done
       continue
     fi
+    _cur=$_c
 
     # 2. смоук без окна (только чтение; строки лога — после начала ветви). Ключи --from-* общие
     # для проверок и наблюдателя: числа и шестнадцатеричный отпечаток, кавычки не нужны.
@@ -1146,6 +1297,10 @@ EOF
     _ks=""
   done
   RT_CORE=""
+  # подтверждающий перепрогон новых падений (D-19): до восстановления стенда, кроме набора rerun
+  if [ "$SUITE" != rerun ]; then
+    _confirm_run
+  fi
   exit 0
 }
 
@@ -1805,15 +1960,12 @@ done
   done
 } >"$RT_REPORT/summary.md"
 
+# Красные классы (D-19…D-21): new, flaky и не догнанный stand — в FAILS, xpass — в XPASSES. Нет
+# classes.tsv (разбор не сработал) — прежний подсчёт FAIL и XPASS по results.tsv.
 for t in $RT_TARGETS; do
-  if [ -f "$RT_REPORT/$t/results.tsv" ]; then
-    f=$(awk -F'\t' '$1 == "FAIL" {n++} END {print n + 0}' "$RT_REPORT/$t/results.tsv")
-    x=$(awk -F'\t' '$1 == "XPASS" {n++} END {print n + 0}' "$RT_REPORT/$t/results.tsv")
-    FAILS=$((FAILS + f))
-    XPASSES=$((XPASSES + x))
-  else
-    FAILS=$((FAILS + 1))
-  fi
+  rt_red_counts "$t"
+  FAILS=$((FAILS + RT_RC_RED))
+  XPASSES=$((XPASSES + RT_RC_XPASS))
 done
 
 echo
@@ -1865,8 +2017,12 @@ publish_release_status() {
       fi
     fi
     if [ -z "$_preason" ]; then
-      _pf=$(awk -F'\t' '$1 == "FAIL" {n++} END {print n + 0}' "$_pres")
-      _px=$(awk -F'\t' '$1 == "XPASS" {n++} END {print n + 0}' "$_pres")
+      # красные классы цели: new, flaky, не догнанный stand (_pf) и xpass (_px); «новых падений» в
+      # описании — new плюс xpass
+      rt_red_counts "$_pt"
+      _pnew=$RT_RC_NEW
+      _pf=$RT_RC_RED
+      _px=$RT_RC_XPASS
       # Красный прогон без связи в конце — вероятный обрыв посреди прогона, а не регрессия
       if [ "$_pf" -gt 0 ] && ! rt_ssh "$_pt" true >/dev/null 2>&1; then
         _preason="сбой связи ПК↔стенд"
@@ -1883,7 +2039,7 @@ publish_release_status() {
         _pstate=failure
         _pverdict="красный"
       fi
-      _pdesc="$_pword $_parch: $_pverdict, ядро $_pcore, новых падений $((_pf + _px))"
+      _pdesc="$_pword $_parch: $_pverdict, ядро $_pcore, новых падений $((_pnew + _px))"
       _prc=0
       sh "$SCRIPT_DIR/release-status.sh" "$RELEASE" "$_pctx" "$_pstate" "$_pdesc" || _prc=$?
       if [ "$_prc" -eq 0 ]; then
@@ -1913,7 +2069,9 @@ publish_release_status
 hold_lock
 
 if [ "$FAILS" -gt 0 ] || [ "$XPASSES" -gt 0 ]; then
-  echo "router-test: красный (FAIL: $FAILS, XPASS: $XPASSES)" >&2
+  # причина — строки «- Итог:» целей (branch-report.mjs), иначе счётчики
+  _itog=$(grep -h '^- Итог: красный' "$RT_REPORT"/summary.md | sed 's/^- Итог: //' | paste -sd ';' - | sed 's/;/; /g' || true)
+  echo "router-test: ${_itog:-красный (FAIL: $FAILS, XPASS: $XPASSES)}" >&2
   exit 1
 fi
 echo "router-test: зелёный"

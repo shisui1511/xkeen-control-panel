@@ -24,6 +24,17 @@
 //   - «## Нужна метка ядра» (только --suite full) — страховка D-05б: проверка go:/pw: без метки
 //     ядра, чей исход в ветвях xray и mihomo различается как класс (PASS / SKIP / KNOWN /
 //     FAIL и XPASS), либо «- нет»;
+//   - «## Классы падений» (RTR-05, D-19…D-21) — класс каждого падения: new (находка по продукту),
+//     flaky (упал в основном проходе и прошёл при подтверждающем перепрогоне, <цель>/confirm.tsv),
+//     known (метка известного падения), xpass, stand (потеря связи со стендом), quarantine
+//     (карантин). Таблица Класс, Проверка, Ядро, Причина класса, В истории (падений/прогонов за 30
+//     дней по history.mjs failFreq; ошибка истории — «-»), затем строка итога по классам:
+//       - Итог: зелёный
+//       - Итог: красный (новых N, нестабильных N, xpass N, обрывов N)
+//       - Итог: красный: нестабильный (нестабильных N)       (одни flaky)
+//     Падения без confirm.tsv (старый отчёт, потолок перепрогона, проверка вне go:/pw:) — new.
+//     Причина класса — короткая фраза без текста ошибки; причина открытого stand (связь не
+//     вернулась, догона не было) начинается со слов «не догнан» (run.sh считает их красными).
 //   - «## Тренд набора» (только --suite full, D-16) — число проверок go:/pw: и время тестов этого
 //     отчёта против прошлого полного прогона истории (history.mjs, lastFull строго до начала
 //     отчёта из meta) и до 5 самых долгих новых тестов; нет истории — «- Тренд: история
@@ -48,6 +59,9 @@
 // на каждую такую проверку (повторный запуск не дублирует строки) и пишет <цель>/layout.tsv:
 // «проверка<TAB>ядра через пробел<TAB>причина» (метка ядра | метка падения с ядром | ротация —
 // ядро из SHA | полная матрица | отладка RT_CORES; причина берётся по plan.txt).
+// Он же пишет <цель>/classes.tsv: «класс<TAB>ядро<TAB>проверка<TAB>причина» на каждую строку
+// FAIL, XPASS, KNOWN, QFAIL и QPASS (читают run.sh, history.mjs, unattended.sh, rerun-plan.mjs);
+// повторный запуск перезаписывает файл.
 // В вывод попадают лишь имена этапов и тестов, ядра, статусы и секунды: деталь результатов,
 // адреса и тексты ошибок не выводятся.
 // Без зависимостей: только встроенные модули Node и core-marks.cjs.
@@ -672,6 +686,123 @@ if (suite === "full") {
   out.push("");
 }
 
+// --- классы падений (RTR-05, D-19…D-21) -----------------------------------------------------
+
+// Признаки потери связи в детали строки результата (D-21); тот же список — в run.sh (RT_STAND_RE).
+const STAND_RE =
+  /нет связи|связь потеряна|ERR_NETWORK_CHANGED|net::ERR_INTERNET_DISCONNECTED|net::ERR_NAME_NOT_RESOLVED|ECONNRESET|ETIMEDOUT/;
+// от худшего статуса к лучшему; прочие значения в разбор не берутся
+const WORST = ["FAIL", "XPASS", "QFAIL", "KNOWN", "QPASS", "SKIP", "PASS"];
+const PASSED = new Set(["PASS", "QPASS"]);
+
+function readText(name) {
+  try {
+    return fs.readFileSync(path.join(report, target, name), "utf8");
+  } catch {
+    return null;
+  }
+}
+// строки файла результатов цели: статус, ядро, проверка, деталь (деталь в вывод не идёт)
+function readRows(name) {
+  const text = readText(name);
+  if (!text) return [];
+  const rows = [];
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    const f = line.split("\t");
+    if (f.length < 3 || !WORST.includes(f[0])) continue;
+    rows.push({ st: f[0], core: f[1], check: f[2], detail: f[3] || "" });
+  }
+  return rows;
+}
+// семья проверки: подтест Go сводится к родителю (перепрогон гонит родительский TestRouter*)
+const famOf = (core, check) => `${core}\t${check.startsWith("go:") ? "go:" + check.slice(3).split("/")[0] : check}`;
+const exactOf = (core, check) => `${core}\t${check}`;
+// ключ -> { st: худший статус, detail: деталь первой худшей строки }
+function worstBy(rows, keyOf) {
+  const m = new Map();
+  for (const r of rows) {
+    const k = keyOf(r.core, r.check);
+    const prev = m.get(k);
+    if (!prev || WORST.indexOf(r.st) < WORST.indexOf(prev.st)) m.set(k, { st: r.st, detail: r.detail });
+  }
+  return m;
+}
+
+const mainRows = readRows("results.tsv");
+// строки core-mark:… попадают в results.tsv только с --write: в сводке без него они учитываются здесь
+for (const n of needMark) {
+  if (!existingMarks.has(n.check)) mainRows.push({ st: "FAIL", core: "-", check: `core-mark:${n.check}`, detail: "" });
+}
+const mainWorst = worstBy(mainRows, exactOf);
+const confirmWorst = worstBy(
+  readRows("confirm.tsv").filter((r) => /^(go|pw):/.test(r.check)),
+  famOf
+);
+// «без перепрогона: …» — перепрогон пропущен из-за потолка (run.sh пишет причину в confirm-skip)
+const confirmSkipText = readText("confirm-skip");
+const confirmSkipWhy = confirmSkipText === null ? null : confirmSkipText.split("\n")[0].trim() || "без перепрогона";
+
+// Класс одной проверки. stand — потеря связи; open — связь не вернулась или догона не было
+// (причина начинается со слов «не догнан»: run.sh краснит такие строки).
+function classify(core, check, st, detail) {
+  if (st === "XPASS") return { cls: "xpass", why: "метка известного падения больше не нужна" };
+  if (st === "KNOWN") return { cls: "known", why: "метка известного падения" };
+  if (st === "QFAIL") return { cls: "quarantine", why: "карантин: упал" };
+  if (st === "QPASS") return { cls: "quarantine", why: "карантин: прошёл", quiet: true };
+  if (st !== "FAIL") return null;
+  if (check === "reachable" || STAND_RE.test(detail)) {
+    return { cls: "stand", why: "не догнан: потеря связи со стендом", open: true };
+  }
+  if (!/^(go|pw):/.test(check)) return { cls: "new", why: "падение проверки" };
+  if (confirmSkipWhy !== null) return { cls: "new", why: confirmSkipWhy };
+  const c = confirmWorst.get(famOf(core, check));
+  if (c && PASSED.has(c.st)) return { cls: "flaky", why: "прошёл при подтверждающем перепрогоне" };
+  if (c && (c.st === "FAIL" || c.st === "XPASS")) return { cls: "new", why: "упал снова при подтверждающем перепрогоне" };
+  return { cls: "new", why: "без подтверждающего перепрогона" };
+}
+
+const classRows = [];
+for (const [key, v] of mainWorst) {
+  const [core, check] = key.split("\t");
+  const c = classify(core, check, v.st, v.detail);
+  if (c) classRows.push({ core, check, ...c });
+}
+// счёт по тестам: подтест Go и его родитель — один тест
+const nOf = (pred) => new Set(classRows.filter(pred).map((r) => `${r.cls}\t${famOf(r.core, r.check)}`)).size;
+const nNew = nOf((r) => r.cls === "new");
+const nFlaky = nOf((r) => r.cls === "flaky");
+const nXpass = nOf((r) => r.cls === "xpass");
+const nOpen = nOf((r) => r.open);
+const haveResults = readText("results.tsv") !== null;
+
+// «падений/прогонов за 30 дней» по истории; ошибка истории — «-»
+let freq = null;
+try {
+  const hist = await import("./history.mjs");
+  freq = hist.failFreq(hist.readHistory(), { days: 30 });
+} catch {
+  freq = null;
+}
+const histCell = (check) => {
+  const v = freq && freq.get(check);
+  return v ? `${v.fails}/${v.runs}` : "-";
+};
+
+out.push("## Классы падений", "");
+const shown = classRows.filter((r) => !r.quiet);
+if (shown.length === 0) out.push("- падений нет");
+else {
+  out.push("| Класс | Проверка | Ядро | Причина класса | В истории |", "|---|---|---|---|---:|");
+  for (const r of shown) out.push(`| ${r.cls} | ${mdName(r.check)} | ${r.core} | ${r.why} | ${histCell(r.check)} |`);
+}
+out.push("");
+if (!haveResults) out.push("- Итог: красный (результатов нет)");
+else if (nNew + nFlaky + nXpass + nOpen === 0) out.push("- Итог: зелёный");
+else if (nNew + nXpass + nOpen === 0) out.push(`- Итог: красный: нестабильный (нестабильных ${nFlaky})`);
+else out.push(`- Итог: красный (новых ${nNew}, нестабильных ${nFlaky}, xpass ${nXpass}, обрывов ${nOpen})`);
+out.push("");
+
 if (write) {
   // строки FAIL core-mark:<проверка> в results.tsv (без дублей при повторном запуске)
   const rows = needMark.filter((n) => !existingMarks.has(n.check));
@@ -683,6 +814,15 @@ if (write) {
       fs.appendFileSync(resultsFile, text);
     } catch {
       // отчёта цели нет — писать некуда
+    }
+  }
+  // classes.tsv: класс, ядро, проверка, причина класса (без текста ошибки); файл пишется и пустым
+  if (haveResults) {
+    try {
+      const body = classRows.map((r) => `${r.cls}\t${r.core}\t${r.check}\t${r.why}`).join("\n");
+      fs.writeFileSync(path.join(report, target, "classes.tsv"), body ? body + "\n" : "");
+    } catch {
+      // каталог цели недоступен
     }
   }
   // layout.tsv: проверка, ядра, причина раскладки
