@@ -160,7 +160,7 @@
   .lc-failed,
   .lc-empty,
   .lc-more {
-    padding: 12px var(--card-pad);
+    padding: var(--spacing-3) var(--card-pad);
   }
 
   .lc-failed {
@@ -190,7 +190,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--spacing-2);
-    padding: 10px var(--card-pad);
+    padding: var(--spacing-2-5) var(--card-pad);
     border-top: 1px solid var(--border);
     min-width: 0;
   }

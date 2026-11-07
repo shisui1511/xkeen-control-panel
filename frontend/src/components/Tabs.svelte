@@ -146,7 +146,7 @@
     flex-shrink: 0;
     background: transparent;
     border: 0;
-    padding: 11px 16px;
+    padding: 11px var(--spacing-4);
     font-family: inherit;
     font-size: var(--font-size-sm);
     font-weight: 600;
@@ -179,7 +179,7 @@
     border-bottom: none;
     margin-bottom: 0;
     border-radius: var(--radius-sm);
-    padding: 4px 12px;
+    padding: var(--spacing-1) var(--spacing-3);
     height: 28px;
     display: inline-flex;
     align-items: center;

@@ -488,7 +488,7 @@
 
   .ts-alert :global(.ts-alert-icon) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .ts-ack {

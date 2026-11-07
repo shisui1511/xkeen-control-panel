@@ -112,7 +112,7 @@
   .subscription-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     align-items: center;
   }
 </style>

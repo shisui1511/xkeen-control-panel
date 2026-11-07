@@ -82,8 +82,8 @@
   .confirm-body {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    margin-bottom: 24px;
+    gap: var(--spacing-3);
+    margin-bottom: var(--spacing-6);
   }
 
   .confirm-object {
@@ -91,7 +91,7 @@
     font-weight: 600;
     color: var(--fg-primary);
     word-break: break-word;
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
     background: var(--bg-card);
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
@@ -108,10 +108,10 @@
   .confirm-consequence {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
+    gap: var(--spacing-2);
     font-size: var(--font-size-sm);
     line-height: 1.4;
-    padding: 10px 12px;
+    padding: var(--spacing-2-5) var(--spacing-3);
     border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--danger) 12%, transparent);
     color: var(--danger);
@@ -126,12 +126,12 @@
 
   .confirm-consequence svg {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .confirm-actions {
     display: flex;
-    gap: 12px;
+    gap: var(--spacing-3);
     justify-content: flex-end;
   }
 </style>

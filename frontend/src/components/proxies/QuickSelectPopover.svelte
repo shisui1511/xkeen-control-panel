@@ -382,7 +382,7 @@
 <style>
   .qs-popover {
     position: fixed;
-    z-index: 1100;
+    z-index: var(--z-popover);
     width: 280px;
     max-height: 320px;
     background: var(--bg-elevated, var(--bg-card));
@@ -413,7 +413,7 @@
   /* В листе список занимает всю высоту листа, низ — над полоской «домой» */
   .qs-bottom-sheet .qs-list {
     max-height: none;
-    padding-bottom: calc(4px + env(safe-area-inset-bottom));
+    padding-bottom: calc(var(--spacing-1) + env(safe-area-inset-bottom));
   }
 
   .qs-scrim {
@@ -434,8 +434,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    padding: 4px 14px 8px;
+    gap: var(--spacing-3);
+    padding: var(--spacing-1) var(--spacing-3-5) var(--spacing-2);
     background: var(--bg-elevated);
   }
 
@@ -451,10 +451,10 @@
   .qs-test-all {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     flex-shrink: 0;
     min-height: 36px;
-    padding: 0 12px;
+    padding: 0 var(--spacing-3);
     border: 1px solid var(--border);
     border-radius: var(--radius-full);
     background: var(--bg-card);
@@ -472,7 +472,7 @@
 
   .qs-drag-handle {
     width: 100%;
-    padding: 8px 0 2px;
+    padding: var(--spacing-2) 0 var(--spacing-0-5);
     display: flex;
     justify-content: center;
     align-items: center;
@@ -489,14 +489,14 @@
   }
 
   .qs-header {
-    padding: 8px 10px;
+    padding: var(--spacing-2) var(--spacing-2-5);
     border-bottom: 1px solid var(--border);
     background: var(--bg-elevated);
   }
 
   .qs-search {
     width: 100%;
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     font-size: var(--font-size-sm);
     border-radius: var(--radius-md, 6px);
     border: 1px solid var(--border);
@@ -511,7 +511,7 @@
   }
 
   .qs-auto-note {
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     font-size: var(--font-size-xs);
     color: var(--warning);
     background: color-mix(in srgb, var(--warning) 8%, transparent);
@@ -523,7 +523,7 @@
     flex: 1;
     overflow-y: auto;
     scrollbar-width: thin;
-    padding: 4px 0;
+    padding: var(--spacing-1) 0;
     max-height: 260px;
   }
 
@@ -533,14 +533,14 @@
 
   .qs-list::-webkit-scrollbar-thumb {
     background: var(--scrollbar-thumb);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
   }
 
   .qs-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 10px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     min-height: 32px;
     cursor: pointer;
     font-size: var(--font-size-sm);
@@ -557,7 +557,7 @@
   @media (max-width: 768px) {
     .qs-item {
       min-height: 44px;
-      padding: 8px 12px;
+      padding: var(--spacing-2) var(--spacing-3);
     }
   }
 
@@ -600,12 +600,12 @@
     color: var(--success);
     font-weight: bold;
     font-size: var(--font-size-base);
-    margin-left: 4px;
+    margin-left: var(--spacing-1);
     flex-shrink: 0;
   }
 
   .qs-empty {
-    padding: 16px 12px;
+    padding: var(--spacing-4) var(--spacing-3);
     text-align: center;
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
@@ -615,8 +615,8 @@
     font-family: var(--font-family-sans);
     font-variant-numeric: tabular-nums;
     font-size: var(--font-size-xs);
-    padding: 2px 4px;
-    border-radius: 3px;
+    padding: var(--spacing-0-5) var(--spacing-1);
+    border-radius: var(--radius-xs);
     flex-shrink: 0;
   }
 

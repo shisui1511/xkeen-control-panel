@@ -914,7 +914,7 @@
   .profile-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 14px;
+    gap: var(--spacing-3-5);
   }
 
   @media (max-width: 768px) {
@@ -933,11 +933,11 @@
   }
 
   .profile-card-header {
-    padding: 16px 20px;
+    padding: var(--spacing-4) var(--spacing-5);
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
 
   .profile-card-name {
@@ -949,7 +949,7 @@
   .hint {
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
-    margin-top: 4px;
+    margin-top: var(--spacing-1);
   }
 
   /* Dropdown Styles */
@@ -959,7 +959,7 @@
   }
 
   .action-btn-dots {
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     font-size: var(--font-size-base);
     line-height: 1;
   }
@@ -968,12 +968,12 @@
     position: absolute;
     right: 0;
     top: 100%;
-    margin-top: 6px;
+    margin-top: var(--spacing-1-5);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
-    z-index: 100;
+    box-shadow: var(--shadow-lg);
+    z-index: var(--z-dropdown);
     min-width: 140px;
     overflow: hidden;
     display: flex;
@@ -983,7 +983,7 @@
   .dropdown-menu button {
     background: none;
     border: none;
-    padding: 10px 14px;
+    padding: var(--spacing-2-5) var(--spacing-3-5);
     text-align: left;
     font-size: var(--font-size-sm);
     color: var(--fg-primary);
@@ -1010,14 +1010,14 @@
     align-items: center;
     background: var(--bg-card);
     border-bottom: 1px solid var(--border);
-    padding: 12px 24px;
-    gap: 10px;
+    padding: var(--spacing-3) var(--spacing-6);
+    gap: var(--spacing-2-5);
   }
 
   .wizard-step-indicator {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     opacity: 0.45;
     transition: opacity var(--transition-normal);
   }
@@ -1060,8 +1060,8 @@
   /* 7x24 grid schedule styling */
   .grid-presets-toolbar {
     display: flex;
-    gap: 8px;
-    margin-bottom: 8px;
+    gap: var(--spacing-2);
+    margin-bottom: var(--spacing-2);
   }
 
   .grid-scrollbar-container {
@@ -1093,7 +1093,7 @@
     position: sticky;
     left: 0;
     background: var(--bg-card);
-    padding: 8px;
+    padding: var(--spacing-2);
     font-size: var(--font-size-xs);
     font-weight: 700;
     color: var(--fg-secondary);
@@ -1109,7 +1109,7 @@
   }
 
   .hour-header-cell {
-    padding: 6px 4px;
+    padding: var(--spacing-1-5) var(--spacing-1);
     font-size: var(--font-size-xs);
     font-weight: 700;
     text-align: center;
@@ -1151,7 +1151,7 @@
 
   /* Status Banner */
   .status-card {
-    padding: 14px 20px;
+    padding: var(--spacing-3-5) var(--spacing-5);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
@@ -1161,14 +1161,14 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
+    gap: var(--spacing-4);
     flex-wrap: wrap;
   }
 
   .status-indicator-group {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--spacing-3);
     flex-wrap: wrap;
   }
 
@@ -1185,14 +1185,14 @@
 
   .status-active-badges {
     display: flex;
-    gap: 8px;
+    gap: var(--spacing-2);
     flex-wrap: wrap;
   }
 
   .status-time-group {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     color: var(--fg-dim);
@@ -1214,7 +1214,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 32px 0 24px;
+    padding: var(--spacing-8) 0 var(--spacing-6);
     width: 100%;
   }
 
@@ -1228,7 +1228,7 @@
     font-size: var(--font-size-xl);
     font-weight: 700;
     color: var(--fg-primary);
-    margin-bottom: 8px;
+    margin-bottom: var(--spacing-2);
   }
 
   .empty-state-head p {
@@ -1240,7 +1240,7 @@
   .template-cards-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 16px;
+    gap: var(--spacing-4);
     width: 100%;
     max-width: 900px;
   }
@@ -1252,11 +1252,11 @@
   }
 
   .template-card {
-    padding: 20px;
+    padding: var(--spacing-5);
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 12px;
+    gap: var(--spacing-3);
     text-align: left;
     cursor: pointer;
     background: var(--bg-card);
@@ -1301,7 +1301,7 @@
     font-weight: 600;
     color: var(--fg-secondary);
     background: var(--surface-tint);
-    padding: 3px 8px;
+    padding: 3px var(--spacing-2);
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
   }
@@ -1325,8 +1325,8 @@
   .template-timeline {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    margin-top: 6px;
+    gap: var(--spacing-1-5);
+    margin-top: var(--spacing-1-5);
     width: 100%;
   }
 
@@ -1335,7 +1335,7 @@
     width: 100%;
     height: 6px;
     background: var(--surface-tint-strong);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     overflow: hidden;
   }
 
@@ -1344,7 +1344,7 @@
     top: 0;
     bottom: 0;
     background: var(--accent);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
   }
 
   .timeline-labels {
@@ -1362,7 +1362,7 @@
   }
 
   .manual-create-wrap {
-    margin-top: 24px;
+    margin-top: var(--spacing-6);
     text-align: center;
   }
 
@@ -1396,8 +1396,8 @@
     font-size: var(--font-size-xs);
     font-weight: 600;
     letter-spacing: 0.02em;
-    padding: 2px 7px;
-    border-radius: 4px;
+    padding: var(--spacing-0-5) 7px;
+    border-radius: var(--radius-sm);
   }
 
   :global(.sp-mode-scheduled) {

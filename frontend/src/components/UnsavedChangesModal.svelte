@@ -81,12 +81,12 @@
   .unsaved-modal-body {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: var(--spacing-5);
   }
 
   .warning-section {
     display: flex;
-    gap: 16px;
+    gap: var(--spacing-4);
     align-items: flex-start;
   }
 
@@ -115,10 +115,10 @@
   }
 
   .sources-list {
-    margin-top: 12px;
+    margin-top: var(--spacing-3);
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .sources-label {
@@ -129,12 +129,12 @@
   .sources-tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .source-badge {
     display: inline-block;
-    padding: 3px 8px;
+    padding: 3px var(--spacing-2);
     font-size: var(--font-size-xs);
     font-weight: 500;
     border-radius: var(--radius-sm);
@@ -147,9 +147,9 @@
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;
-    gap: 10px;
-    margin-top: 8px;
-    padding-top: 16px;
+    gap: var(--spacing-2-5);
+    margin-top: var(--spacing-2);
+    padding-top: var(--spacing-4);
     border-top: 1px solid var(--border);
   }
 

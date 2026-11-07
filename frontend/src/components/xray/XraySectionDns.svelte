@@ -342,7 +342,7 @@
   .sec-body {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .section-title {
@@ -355,7 +355,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 14px;
+    padding: var(--spacing-2-5) var(--spacing-3-5);
   }
 
   .item-name {
@@ -370,7 +370,7 @@
     cursor: pointer;
     color: var(--fg-secondary);
     font-size: var(--font-size-base);
-    padding: 4px 6px;
+    padding: var(--spacing-1) var(--spacing-1-5);
     border-radius: var(--radius-xs);
     transition:
       color var(--transition-fast),
@@ -385,16 +385,16 @@
   }
 
   .form-card {
-    padding: 16px;
+    padding: var(--spacing-4);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .form-row2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   @media (max-width: 768px) {
@@ -406,13 +406,13 @@
   .form-col {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .form-row {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .form-label {
@@ -425,7 +425,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
@@ -439,7 +439,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
@@ -447,7 +447,7 @@
   .checkbox-container {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     font-size: var(--font-size-sm);
     color: var(--fg-primary);
     cursor: pointer;
@@ -493,15 +493,15 @@
   .form-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 8px;
-    margin-top: 4px;
+    gap: var(--spacing-2);
+    margin-top: var(--spacing-1);
   }
 
   .add-btn {
     background: var(--bg-card);
     border: 1px dashed var(--border);
     border-radius: var(--radius);
-    padding: 10px 16px;
+    padding: var(--spacing-2-5) var(--spacing-4);
     color: var(--fg-secondary);
     font-size: var(--font-size-sm);
     font-weight: 500;
@@ -524,7 +524,7 @@
     font-size: var(--font-size-xs);
     color: var(--code-fg, var(--fg-primary));
     background: var(--code-bg, var(--bg-surface-active));
-    padding: 2px 4px;
+    padding: var(--spacing-0-5) var(--spacing-1);
     border-radius: var(--radius-xs);
   }
 

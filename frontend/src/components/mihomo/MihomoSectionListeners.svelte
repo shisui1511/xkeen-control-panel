@@ -369,36 +369,36 @@
 
 <style>
   .sec-body {
-    padding: 16px;
+    padding: var(--spacing-4);
   }
 
   .form-card {
     background: var(--bg-elevated);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius);
-    padding: 16px;
+    padding: var(--spacing-4);
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    margin-bottom: 16px;
+    gap: var(--spacing-2-5);
+    margin-bottom: var(--spacing-4);
   }
 
   .form-row {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .form-row2 {
     display: flex;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .form-col {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .form-col-sm {
@@ -417,7 +417,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 8px;
+    padding: var(--spacing-2);
     color: var(--fg-primary);
     font-size: var(--font-size-xs);
   }
@@ -433,7 +433,7 @@
   }
 
   .form-hint-spaced {
-    margin-bottom: 12px;
+    margin-bottom: var(--spacing-3);
     font-size: var(--font-size-sm);
     color: var(--fg-dim);
   }
@@ -442,42 +442,42 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 6px;
+    margin-bottom: var(--spacing-1-5);
   }
 
   .form-users-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    margin-bottom: 6px;
+    gap: var(--spacing-1-5);
+    margin-bottom: var(--spacing-1-5);
   }
 
   .form-user-row {
     display: flex;
-    gap: 8px;
+    gap: var(--spacing-2);
     align-items: center;
   }
 
   .form-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .form-actions-spaced {
-    margin-top: 12px;
+    margin-top: var(--spacing-3);
     border-top: 1px solid var(--border);
-    padding-top: 12px;
+    padding-top: var(--spacing-3);
   }
 
   .toggle-row {
-    margin-bottom: 8px;
+    margin-bottom: var(--spacing-2);
   }
 
   .toggle-label {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     font-size: var(--font-size-sm);
     cursor: pointer;
     user-select: none;
@@ -486,18 +486,18 @@
   .item-row {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
+    gap: var(--spacing-2-5);
+    padding: var(--spacing-2) var(--spacing-3);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    margin-bottom: 6px;
+    margin-bottom: var(--spacing-1-5);
   }
 
   .item-badge {
     font-size: var(--font-size-xs);
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
+    border-radius: var(--radius-sm);
     font-weight: 500;
     flex-shrink: 0;
   }
@@ -560,7 +560,7 @@
   .item-actions {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     margin-left: auto;
   }
 
@@ -571,7 +571,7 @@
     color: var(--fg-faint);
     cursor: pointer;
     font-size: var(--font-size-xs);
-    padding: 2px 4px;
+    padding: var(--spacing-0-5) var(--spacing-1);
     border-radius: var(--radius-sm);
     transition: color var(--transition-fast);
     flex-shrink: 0;
@@ -590,7 +590,7 @@
 
   .add-btn {
     font-size: var(--font-size-xs);
-    padding: 6px 12px;
+    padding: var(--spacing-1-5) var(--spacing-3);
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition:
@@ -613,9 +613,9 @@
   }
 
   .alert {
-    padding: 10px 12px;
+    padding: var(--spacing-2-5) var(--spacing-3);
     border-radius: var(--radius-sm);
-    margin-bottom: 12px;
+    margin-bottom: var(--spacing-3);
   }
 
   .alert-warning {
@@ -626,8 +626,8 @@
 
   .directive-tag {
     background: var(--bg-card);
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
+    border-radius: var(--radius-sm);
     font-size: var(--font-size-xs);
   }
 </style>

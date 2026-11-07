@@ -1953,8 +1953,8 @@
   .no-api-note {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    margin-top: 6px;
+    gap: var(--spacing-0-5);
+    margin-top: var(--spacing-1-5);
     font-size: var(--font-size-xs);
     line-height: 1.5;
     overflow-wrap: anywhere;
@@ -1963,7 +1963,7 @@
   .mihomo-no-api-line {
     display: flex;
     align-items: flex-start;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     color: var(--warning);
   }
 
@@ -1979,7 +1979,7 @@
   }
 
   .mihomo-api-badge-link {
-    margin-top: 6px;
+    margin-top: var(--spacing-1-5);
     display: inline-flex;
     text-decoration: none;
   }
@@ -2020,7 +2020,7 @@
     flex-wrap: wrap;
     align-items: center;
     justify-content: flex-end;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   /* Radio Grid for Kernel Selection (SRV-02) */
@@ -2034,8 +2034,8 @@
   .core-radio-card {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 14px var(--card-pad);
+    gap: var(--spacing-3);
+    padding: var(--spacing-3-5) var(--card-pad);
     border-bottom: 1px solid var(--border);
     cursor: pointer;
     text-align: left;
@@ -2071,8 +2071,8 @@
   .switch-wait-note.active {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 10px var(--card-pad);
+    gap: var(--spacing-2);
+    padding: var(--spacing-2-5) var(--card-pad);
     border-bottom: 1px solid var(--border);
   }
 
@@ -2115,7 +2115,7 @@
   .radio-name {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
@@ -2124,7 +2124,7 @@
   .active-pill {
     font-size: var(--font-size-xs);
     font-weight: 600;
-    padding: 1px 8px;
+    padding: 1px var(--spacing-2);
     border-radius: var(--radius-full);
     background: var(--accent-soft);
     color: var(--accent-text);
@@ -2133,7 +2133,7 @@
   .radio-desc {
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
     font-family: var(--font-family-mono);
   }
 
@@ -2148,9 +2148,9 @@
   .meta-item {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     min-width: 0;
-    padding: 12px var(--card-pad);
+    padding: var(--spacing-3) var(--card-pad);
     border-left: 1px solid var(--border);
   }
 
@@ -2192,7 +2192,7 @@
   }
 
   .card-subtitle {
-    margin: 2px 0 0;
+    margin: var(--spacing-0-5) 0 0;
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
@@ -2206,8 +2206,8 @@
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
-    padding: 12px var(--card-pad);
+    gap: var(--spacing-2);
+    padding: var(--spacing-3) var(--card-pad);
   }
 
   .channel-lbl {
@@ -2217,14 +2217,14 @@
   }
 
   .channel-mismatch-hint {
-    margin: -4px 0 0;
-    padding: 0 var(--card-pad) 12px;
+    margin: calc(-1 * var(--spacing-1)) 0 0;
+    padding: 0 var(--card-pad) var(--spacing-3);
     font-size: var(--font-size-xs);
     color: var(--warning);
   }
 
   .update-hint {
-    margin: 2px 0 0;
+    margin: var(--spacing-0-5) 0 0;
     padding: 0;
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
@@ -2240,8 +2240,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    padding: 10px var(--card-pad);
+    gap: var(--spacing-3);
+    padding: var(--spacing-2-5) var(--card-pad);
     background: var(--accent-soft);
     border-top: 1px solid var(--border);
     font-size: var(--font-size-sm);
@@ -2250,7 +2250,7 @@
   .banner-content {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     color: var(--accent-text);
     font-weight: 500;
   }
@@ -2266,8 +2266,8 @@
     align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: 10px 12px;
-    padding: 14px var(--card-pad);
+    gap: var(--spacing-2-5) var(--spacing-3);
+    padding: var(--spacing-3-5) var(--card-pad);
   }
 
   .update-item + .update-item {
@@ -2283,10 +2283,10 @@
   .update-version {
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .update-version > span:first-child {
@@ -2297,18 +2297,18 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   /* Restart Log & Entware Section */
   .empty-state {
-    padding: 28px 16px;
+    padding: 28px var(--spacing-4);
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     color: var(--fg-dim);
-    gap: 8px;
+    gap: var(--spacing-2);
     font-size: var(--font-size-sm);
   }
 
@@ -2320,7 +2320,7 @@
   /* Записи журнала — строки списка; исход виден по бейджу и цветной
      полосе слева, без собственной подложки. */
   .log-entry {
-    padding: 12px var(--card-pad);
+    padding: var(--spacing-3) var(--card-pad);
     border-bottom: 1px solid var(--border);
   }
 
@@ -2335,7 +2335,7 @@
   .log-meta {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .log-action {
@@ -2351,7 +2351,7 @@
   }
 
   .log-output {
-    margin: 6px 0 0;
+    margin: var(--spacing-1-5) 0 0;
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
     white-space: pre-wrap;
@@ -2359,7 +2359,7 @@
     max-height: 120px;
     overflow-y: auto;
     background: var(--surface-tint);
-    padding: 6px 8px;
+    padding: var(--spacing-1-5) var(--spacing-2);
     border-radius: var(--radius-sm);
   }
 
@@ -2372,8 +2372,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    padding: 14px var(--card-pad);
+    gap: var(--spacing-3);
+    padding: var(--spacing-3-5) var(--card-pad);
   }
 
   .entware-item + .entware-item {
@@ -2394,7 +2394,7 @@
   .entware-desc {
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .services-stack {

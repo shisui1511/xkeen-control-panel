@@ -126,7 +126,7 @@
 <style>
   .resizable-splitter {
     width: 12px;
-    margin: 0 4px;
+    margin: 0 var(--spacing-1);
     cursor: col-resize;
     position: relative;
     display: flex;

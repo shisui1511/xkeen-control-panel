@@ -449,7 +449,7 @@
     flex-direction: column;
     gap: var(--spacing-3);
     min-width: 0;
-    padding: 16px var(--card-pad);
+    padding: var(--spacing-4) var(--card-pad);
   }
 
   .gc-head {
@@ -557,7 +557,7 @@
   .gc-search {
     width: calc(100% - 2 * var(--card-pad));
     max-width: 360px;
-    margin: 12px var(--card-pad) 4px;
+    margin: var(--spacing-3) var(--card-pad) var(--spacing-1);
   }
 
   .gc-rows {
@@ -573,7 +573,7 @@
     align-items: center;
     gap: var(--spacing-1) var(--spacing-2);
     min-width: 0;
-    padding: 10px var(--card-pad);
+    padding: var(--spacing-2-5) var(--card-pad);
     border-top: 1px solid var(--border);
     font-size: var(--font-size-base);
     line-height: 1.4;
@@ -585,7 +585,7 @@
   }
 
   .gc-list > .gc-hint {
-    padding: 10px var(--card-pad);
+    padding: var(--spacing-2-5) var(--card-pad);
     border-top: 1px solid var(--border);
   }
 
@@ -603,7 +603,7 @@
     align-items: center;
     gap: var(--spacing-2);
     margin: 0;
-    padding: 14px var(--card-pad);
+    padding: var(--spacing-3-5) var(--card-pad);
     font-size: var(--font-size-base);
     color: var(--fg-dim);
     overflow-wrap: anywhere;
@@ -611,7 +611,7 @@
 
   .gc-more {
     display: flex;
-    padding: 4px var(--card-pad) 12px;
+    padding: var(--spacing-1) var(--card-pad) var(--spacing-3);
   }
 
   @media (pointer: coarse), (max-width: 768px) {

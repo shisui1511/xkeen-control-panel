@@ -73,17 +73,17 @@
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 10px 12px;
+    padding: var(--spacing-2-5) var(--spacing-3);
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    margin-top: 6px;
+    gap: var(--spacing-2);
+    margin-top: var(--spacing-1-5);
     font-size: var(--font-size-xs);
   }
 
   .awg-diff-card.compact {
-    padding: 6px 8px;
-    gap: 4px;
+    padding: var(--spacing-1-5) var(--spacing-2);
+    gap: var(--spacing-1);
     font-size: var(--font-size-xs);
   }
 
@@ -100,13 +100,13 @@
   .diff-sections {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .diff-row {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
+    gap: var(--spacing-2);
     flex-wrap: wrap;
   }
 
@@ -131,7 +131,7 @@
   .diff-badges {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: var(--spacing-1);
     align-items: center;
   }
 </style>

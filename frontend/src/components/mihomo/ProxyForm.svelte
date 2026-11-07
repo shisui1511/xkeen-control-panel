@@ -1192,24 +1192,24 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .imported-identity-box {
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 10px 12px;
+    padding: var(--spacing-2-5) var(--spacing-3);
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    margin-bottom: 4px;
+    gap: var(--spacing-1-5);
+    margin-bottom: var(--spacing-1);
   }
 
   .identity-badge-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     flex-wrap: wrap;
   }
 
@@ -1225,7 +1225,7 @@
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     background: var(--surface-tint);
-    padding: 2px 6px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
     border-radius: var(--radius-sm);
   }
 
@@ -1254,23 +1254,23 @@
     background: var(--surface-tint-faint);
     border: 1px dashed var(--border);
     border-radius: var(--radius-sm);
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
   }
 
   .form-row {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
   .form-row2 {
     display: flex;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
   .form-col {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
     flex: 1 1 140px;
     min-width: 140px;
   }
@@ -1292,7 +1292,7 @@
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
     font-size: var(--font-size-sm);
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     width: 100%;
     transition: border-color var(--transition-fast);
   }
@@ -1303,7 +1303,7 @@
 
   .input-with-btn {
     display: flex;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     align-items: center;
   }
 
@@ -1316,7 +1316,7 @@
     border: 1px solid var(--border);
     color: var(--fg-secondary);
     border-radius: var(--radius-sm);
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     cursor: pointer;
     font-size: var(--font-size-base);
     transition: background var(--transition-fast);
@@ -1333,7 +1333,7 @@
   .toggle-label {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     cursor: pointer;
     font-size: var(--font-size-sm);
     color: var(--fg-primary);
@@ -1343,11 +1343,11 @@
     position: sticky;
     bottom: -20px;
     background: var(--bg-card);
-    padding: 12px 0 0 0;
-    margin-top: 12px;
+    padding: var(--spacing-3) 0 0 0;
+    margin-top: var(--spacing-3);
     border-top: 1px solid var(--border);
     display: flex;
-    gap: 8px;
+    gap: var(--spacing-2);
     justify-content: flex-end;
     z-index: 10;
   }
@@ -1355,12 +1355,12 @@
   .awg-options-block {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 12px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-3);
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    margin-bottom: 12px;
+    margin-bottom: var(--spacing-3);
   }
 
   .awg-options-block.has-warning {
@@ -1370,7 +1370,7 @@
   .awg-headers-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   @media (max-width: 480px) {
@@ -1400,8 +1400,8 @@
   .awg-subgroup {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 10px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2-5);
     background: var(--surface-tint-faint);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -1410,7 +1410,7 @@
   .awg-tokens-grid {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   @media (max-width: 768px) {
@@ -1422,8 +1422,8 @@
   .awg-warning-banner {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2) var(--spacing-3);
     font-size: var(--font-size-xs);
     background: color-mix(in srgb, var(--warning) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
@@ -1434,32 +1434,32 @@
   .field-error-hint {
     font-size: var(--font-size-xs);
     color: var(--warning);
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .awg-preset-bar {
     display: flex;
     align-items: flex-end;
-    gap: 12px;
-    padding: 10px;
+    gap: var(--spacing-3);
+    padding: var(--spacing-2-5);
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    margin-bottom: 8px;
+    margin-bottom: var(--spacing-2);
   }
 
   .preset-select-wrap {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .regenerate-btn {
     white-space: nowrap;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     height: 34px;
     flex-shrink: 0;
   }

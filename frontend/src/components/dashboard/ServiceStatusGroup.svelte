@@ -280,24 +280,24 @@
   .sk-ident {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .status-error-card {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 18px;
+    padding: var(--spacing-3-5) 18px;
     background: color-mix(in srgb, var(--danger) 8%, transparent);
     border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
     border-radius: var(--radius-lg);
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .error-msg {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     font-size: var(--font-size-sm);
     color: var(--danger);
     font-weight: 500;

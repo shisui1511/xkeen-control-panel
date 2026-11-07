@@ -1587,7 +1587,7 @@
   .dash-watchdog-badge-row {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .dash-watchdog-label {
@@ -1599,7 +1599,7 @@
   /* Баннеры над содержимым вкладки: перезапуск службы (D-19) и переподключение
      к панели (D-20) — один рецепт, слот офлайн-баннера Mihomo — те же отступы */
   .shell-banner-slot {
-    margin: 12px 16px 0;
+    margin: var(--spacing-3) var(--spacing-4) 0;
   }
 
   /* Пустое место справа в мобильной шапке, пока капсула статуса не загрузилась:
@@ -1611,15 +1611,15 @@
 
   .service-restarting-banner,
   .panel-reconnect-banner {
-    margin: 12px 16px 0;
-    padding: 12px 18px;
+    margin: var(--spacing-3) var(--spacing-4) 0;
+    padding: var(--spacing-3) 18px;
     background: var(--accent-soft);
     border: 1px solid var(--accent);
     border-radius: var(--radius-md);
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: var(--spacing-3);
     font-size: var(--font-size-base);
     color: var(--fg-primary);
   }

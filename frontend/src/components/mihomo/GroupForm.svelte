@@ -172,23 +172,23 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .form-row {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
   .form-row2 {
     display: flex;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
   .form-col {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
     flex: 1 1 140px;
     min-width: 140px;
   }
@@ -208,7 +208,7 @@
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
     font-size: var(--font-size-sm);
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     width: 100%;
     transition: border-color var(--transition-fast);
   }
@@ -226,23 +226,23 @@
   :global(.form-select-inline) {
     height: 28px !important;
     font-size: var(--font-size-xs) !important;
-    padding: 2px 28px 2px 8px !important;
+    padding: var(--spacing-0-5) 28px var(--spacing-0-5) var(--spacing-2) !important;
   }
 
   .tag-input-wrap {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 6px 8px;
+    padding: var(--spacing-1-5) var(--spacing-2);
     align-items: center;
   }
 
   .relay-warning {
-    margin-top: 6px;
-    padding: 6px 10px;
+    margin-top: var(--spacing-1-5);
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     font-size: var(--font-size-xs);
     border-radius: var(--radius-xs);
   }
@@ -250,13 +250,13 @@
   .tag-pill {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     background: color-mix(in srgb, var(--accent) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
     color: var(--accent);
     font-size: var(--font-size-xs);
-    border-radius: 10px;
-    padding: 2px 8px;
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-0-5) var(--spacing-2);
   }
 
   .tag-pill--provider {
@@ -280,7 +280,7 @@
   .toggle-label {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     cursor: pointer;
     font-size: var(--font-size-sm);
     color: var(--fg-primary);
@@ -290,11 +290,11 @@
     position: sticky;
     bottom: -20px;
     background: var(--bg-card);
-    padding: 12px 0 0 0;
-    margin-top: 12px;
+    padding: var(--spacing-3) 0 0 0;
+    margin-top: var(--spacing-3);
     border-top: 1px solid var(--border);
     display: flex;
-    gap: 8px;
+    gap: var(--spacing-2);
     justify-content: flex-end;
     z-index: 10;
   }

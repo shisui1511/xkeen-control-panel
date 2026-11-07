@@ -424,7 +424,7 @@
   .provider-status {
     display: flex;
     align-items: flex-start;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     margin: 0;
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
@@ -451,7 +451,7 @@
   .providers-tab {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--spacing-4);
   }
 
   .tab-header {
@@ -459,13 +459,13 @@
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .header-info {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .header-title {
@@ -480,7 +480,7 @@
     justify-content: center;
     min-width: 20px;
     height: 20px;
-    padding: 0 6px;
+    padding: 0 var(--spacing-1-5);
     font-size: var(--font-size-xs);
     font-weight: 600;
     background: var(--bg-elevated);
@@ -508,7 +508,7 @@
   .providers-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .provider-card {
@@ -519,7 +519,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 14px 16px;
+    padding: var(--spacing-3-5) var(--spacing-4);
     transition: border-color var(--transition-fast);
   }
 
@@ -531,14 +531,14 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
 
   .provider-top {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .provider-name {
@@ -552,14 +552,14 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .badge {
     font-size: var(--font-size-xs);
     font-weight: 600;
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
+    border-radius: var(--radius-sm);
     letter-spacing: 0;
   }
 
@@ -578,14 +578,14 @@
   .provider-meta {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
     font-size: var(--font-size-xs);
   }
 
   .meta-item {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .meta-label {
@@ -607,10 +607,10 @@
   .provider-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     justify-content: flex-end;
-    margin-top: 12px;
-    padding-top: 10px;
+    margin-top: var(--spacing-3);
+    padding-top: var(--spacing-2-5);
     border-top: 1px solid var(--border-light, var(--border));
   }
 
@@ -619,7 +619,7 @@
   }
 
   .btn-icon {
-    margin-right: 4px;
+    margin-right: var(--spacing-1);
     flex-shrink: 0;
   }
 

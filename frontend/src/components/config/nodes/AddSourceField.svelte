@@ -452,7 +452,7 @@
     height: auto;
     min-height: calc(var(--add-line) * 3 + 18px);
     max-height: calc(var(--add-line) * 8 + 18px);
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
     line-height: var(--add-line);

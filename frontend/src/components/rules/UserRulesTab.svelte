@@ -407,11 +407,11 @@
   .user-rules-container {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--spacing-4);
   }
 
   .quick-add-card {
-    padding: 16px 20px;
+    padding: var(--spacing-4) var(--spacing-5);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
@@ -421,8 +421,8 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 14px;
+    gap: var(--spacing-3);
+    margin-bottom: var(--spacing-3-5);
   }
 
   /* Заголовок переносится сам, а кнопка «Расширенная форма» остаётся одной строкой */
@@ -443,7 +443,7 @@
     display: flex;
     flex-wrap: wrap;
     align-items: flex-start;
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
 
   .value-field {
@@ -451,7 +451,7 @@
     min-width: 240px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .type-field,
@@ -470,7 +470,7 @@
   .input {
     width: 100%;
     height: var(--input-h);
-    padding: 0 12px;
+    padding: 0 var(--spacing-3);
     border-radius: var(--radius-md);
     border: 1px solid var(--border);
     background: var(--bg-elevated);
@@ -516,7 +516,7 @@
   }
 
   .rules-table th {
-    padding: 12px 14px;
+    padding: var(--spacing-3) var(--spacing-3-5);
     background: var(--bg-elevated);
     color: var(--fg-secondary);
     font-weight: 600;
@@ -527,7 +527,7 @@
   }
 
   .rules-table td {
-    padding: 12px 14px;
+    padding: var(--spacing-3) var(--spacing-3-5);
     border-bottom: 1px solid var(--border);
     color: var(--fg-primary);
     vertical-align: middle;
@@ -554,7 +554,7 @@
   .order-controls {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .drag-handle {
@@ -562,7 +562,7 @@
     color: var(--fg-dim);
     font-size: var(--font-size-base);
     user-select: none;
-    padding: 2px 4px;
+    padding: var(--spacing-0-5) var(--spacing-1);
   }
 
   .drag-handle:active {
@@ -574,7 +574,7 @@
     border: none;
     color: var(--fg-secondary);
     cursor: pointer;
-    padding: 4px;
+    padding: var(--spacing-1);
     border-radius: var(--radius-sm);
     display: inline-flex;
     align-items: center;
@@ -620,7 +620,7 @@
 
   .type-badge {
     display: inline-block;
-    padding: 2px 8px;
+    padding: var(--spacing-0-5) var(--spacing-2);
     border-radius: var(--radius-sm);
     background: var(--bg-elevated);
     border: 1px solid var(--border);
@@ -641,7 +641,7 @@
   .target-badges {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     flex-wrap: wrap;
   }
 
@@ -665,14 +665,14 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .loading-card {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 12px;
+    gap: var(--spacing-3);
     padding: 48px;
     background: var(--bg-card);
     border: 1px solid var(--border);

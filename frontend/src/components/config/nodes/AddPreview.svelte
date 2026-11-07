@@ -414,7 +414,7 @@
   .pv-node {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     min-width: 0;
     padding-top: var(--spacing-2);
     border-top: 1px solid var(--border);
@@ -469,7 +469,7 @@
   .pv-err-text {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     min-width: 0;
     overflow-wrap: anywhere;
   }

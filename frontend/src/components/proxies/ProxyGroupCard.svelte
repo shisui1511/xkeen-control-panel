@@ -688,10 +688,10 @@
   }
   .group-card .gc-head {
     background: linear-gradient(135deg, var(--bg-group-head-from), var(--bg-group-head-to));
-    padding: 14px 18px;
+    padding: var(--spacing-3-5) 18px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
     border-bottom: 1px solid var(--border-strong);
     position: relative;
     overflow: hidden;
@@ -727,17 +727,17 @@
     display: flex;
     align-items: center;
     width: 100%;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
   .gc-head-row2 {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     width: 100%;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
   .group-card .gc-head .name {
     font-weight: 800;
@@ -764,12 +764,12 @@
     margin-left: auto;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
   .type-badge {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     font-size: var(--font-size-xs);
     padding: 0;
     color: var(--fg-dim);
@@ -815,13 +815,13 @@
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
     font-weight: 700;
-    padding: 2px 8px;
+    padding: var(--spacing-0-5) var(--spacing-2);
     border-radius: var(--radius-sm);
     background: var(--surface-tint);
     color: var(--fg-secondary);
   }
   .gc-lat-box {
-    padding: 3px 10px;
+    padding: 3px var(--spacing-2-5);
     border-radius: 99px;
     font-family: var(--font-family-sans);
     font-variant-numeric: tabular-nums;
@@ -860,7 +860,7 @@
   .gc-ping-btn {
     background: none;
     border: none;
-    padding: 2px 4px;
+    padding: var(--spacing-0-5) var(--spacing-1);
     cursor: pointer;
     color: var(--fg-faint);
     border-radius: var(--radius-sm);
@@ -887,7 +887,7 @@
   .gc-chevron-btn {
     background: none;
     border: none;
-    padding: 2px;
+    padding: var(--spacing-0-5);
     cursor: pointer;
     border-radius: var(--radius-sm);
     display: inline-flex;
@@ -912,8 +912,8 @@
     font-size: var(--font-size-2xs);
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 8%, transparent);
-    padding: 1px 6px;
-    border-radius: 4px;
+    padding: 1px var(--spacing-1-5);
+    border-radius: var(--radius-sm);
   }
   .gc-separator {
     color: var(--fg-faint);
@@ -924,7 +924,7 @@
   }
   .gc-arrow {
     color: var(--fg-faint);
-    margin: 0 2px;
+    margin: 0 var(--spacing-0-5);
   }
   .gc-chain-ellipsis {
     color: var(--fg-dim);
@@ -933,7 +933,7 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 2px 10px;
+    padding: var(--spacing-0-5) var(--spacing-2-5);
     border-radius: var(--radius-lg);
     background: var(--surface-tint);
     border: 1px solid var(--border);
@@ -1006,8 +1006,8 @@
   .proxy-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 8px;
-    padding: 12px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-3);
     content-visibility: auto;
     contain-intrinsic-size: 80px;
   }
@@ -1034,7 +1034,7 @@
     width: 100%;
     background: none;
     border: 0;
-    padding: 10px 12px 0;
+    padding: var(--spacing-2-5) var(--spacing-3) 0;
     color: inherit;
     font: inherit;
     text-align: left;
@@ -1086,8 +1086,8 @@
   .proxy-card .p-header {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    margin-bottom: 8px;
+    gap: var(--spacing-0-5);
+    margin-bottom: var(--spacing-2);
   }
   .proxy-card .p-name {
     font-weight: 600;
@@ -1116,19 +1116,19 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 6px;
-    padding: 4px 12px 10px;
+    gap: var(--spacing-1-5);
+    padding: var(--spacing-1) var(--spacing-3) var(--spacing-2-5);
     margin-top: auto;
   }
   .p-actions-wrap {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
   .btn-latency-test {
     background: transparent;
     border: none;
-    padding: 4px;
+    padding: var(--spacing-1);
     width: 24px;
     height: 24px;
     color: var(--fg-dim);
@@ -1154,15 +1154,15 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
-    padding: 8px 16px 10px;
+    gap: var(--spacing-1-5);
+    padding: var(--spacing-2) var(--spacing-4) var(--spacing-2-5);
     border-bottom: 1px solid var(--border);
   }
   .filter-chip {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 3px 10px;
+    gap: var(--spacing-1-5);
+    padding: 3px var(--spacing-2-5);
     border-radius: var(--radius-full);
     font-size: var(--font-size-xs);
     font-weight: 500;
@@ -1221,7 +1221,7 @@
     width: 26px;
     height: 26px;
     flex: 0 0 26px;
-    border-radius: 8px;
+    border-radius: var(--radius);
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     overflow: hidden;
@@ -1236,8 +1236,8 @@
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
     font-weight: 600;
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
+    border-radius: var(--radius-sm);
     white-space: nowrap;
   }
   button.lat {
@@ -1294,8 +1294,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
-    padding: 8px 12px 12px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2) var(--spacing-3) var(--spacing-3);
     border-top: 1px solid var(--border);
   }
   .proxy-grid-more {
@@ -1303,7 +1303,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--accent);
-    padding: 6px 12px;
+    padding: var(--spacing-1-5) var(--spacing-3);
     font-size: var(--font-size-xs);
     cursor: pointer;
     transition:
@@ -1330,13 +1330,13 @@
     flex-direction: row;
     align-items: center;
     height: 40px;
-    padding: 0 12px;
-    gap: 10px;
+    padding: 0 var(--spacing-3);
+    gap: var(--spacing-2-5);
   }
   :global(.group-list) .gc-head-row1 {
     flex: 0 1 auto;
     width: auto;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
   :global(.group-list) .gc-head-row2 {
     width: auto;
@@ -1344,7 +1344,7 @@
     flex: 1 1 auto;
     min-width: 0;
     justify-content: flex-end;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
   :global(.group-list) .gc-count-text,
   :global(.group-list) .gc-active-label,
@@ -1365,8 +1365,8 @@
   }
   :global(.group-list) .proxy-grid {
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
-    gap: 6px;
-    padding: 8px 12px;
+    gap: var(--spacing-1-5);
+    padding: var(--spacing-2) var(--spacing-3);
   }
   :global(.group-list) .gc-body {
     display: grid;

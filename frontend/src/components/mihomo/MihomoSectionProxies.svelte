@@ -668,12 +668,12 @@
 
 <style>
   .sec-body {
-    padding: 16px;
+    padding: var(--spacing-4);
   }
 
   .add-btn {
     font-size: var(--font-size-xs);
-    padding: 6px 12px;
+    padding: var(--spacing-1-5) var(--spacing-3);
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition:
@@ -720,12 +720,12 @@
   .item-row {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
+    gap: var(--spacing-2-5);
+    padding: var(--spacing-2) var(--spacing-3);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    margin-bottom: 6px;
+    margin-bottom: var(--spacing-1-5);
     transition:
       border-color var(--transition-fast),
       opacity var(--transition-fast);
@@ -741,8 +741,8 @@
 
   .item-badge {
     font-size: var(--font-size-xs);
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
+    border-radius: var(--radius-sm);
     font-weight: 500;
     flex-shrink: 0;
   }
@@ -802,7 +802,7 @@
   .item-actions {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     margin-left: auto;
   }
 
@@ -812,7 +812,7 @@
     color: var(--fg-faint);
     cursor: pointer;
     font-size: var(--font-size-xs);
-    padding: 4px 6px;
+    padding: var(--spacing-1) var(--spacing-1-5);
     border-radius: var(--radius-sm);
     transition:
       color var(--transition-fast),
@@ -832,7 +832,7 @@
   }
 
   .item-switch {
-    margin-left: 8px;
+    margin-left: var(--spacing-2);
   }
 
   .switch {
@@ -893,13 +893,13 @@
   .conf-dropzone {
     border: 2px dashed var(--border);
     border-radius: var(--radius);
-    padding: 24px 16px;
+    padding: var(--spacing-6) var(--spacing-4);
     text-align: center;
     background: var(--bg-elevated);
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
+    gap: var(--spacing-2-5);
     cursor: pointer;
   }
 
@@ -913,9 +913,9 @@
     color: var(--fg-primary);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 6px 12px;
+    padding: var(--spacing-1-5) var(--spacing-3);
     font-size: var(--font-size-xs);
     cursor: pointer;
-    margin-right: 8px;
+    margin-right: var(--spacing-2);
   }
 </style>

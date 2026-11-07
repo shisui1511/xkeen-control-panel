@@ -577,7 +577,7 @@
     flex-direction: column;
     gap: var(--spacing-3);
     min-width: 0;
-    padding: 16px var(--card-pad);
+    padding: var(--spacing-4) var(--card-pad);
   }
 
   .sc-head {
@@ -662,7 +662,7 @@
 
   .sc-bar {
     height: 6px;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     overflow: hidden;
@@ -670,7 +670,7 @@
 
   .sc-bar-fill {
     height: 100%;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
   }
 
   .level-normal {
@@ -690,7 +690,7 @@
     display: flex;
     gap: var(--spacing-2);
     min-width: 0;
-    padding: 12px var(--card-pad);
+    padding: var(--spacing-3) var(--card-pad);
     border-top: 1px solid var(--border);
     background: var(--surface-tint);
     color: var(--fg-secondary);
@@ -698,7 +698,7 @@
 
   .sc-announce :global(.sc-announce-icon) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .sc-announce-body {
@@ -813,11 +813,11 @@
   .sc-search {
     width: calc(100% - 2 * var(--card-pad));
     max-width: 360px;
-    margin: 12px var(--card-pad) 4px;
+    margin: var(--spacing-3) var(--card-pad) var(--spacing-1);
   }
 
   .sc-nodes :global(.node-row) {
-    padding: 10px var(--card-pad);
+    padding: var(--spacing-2-5) var(--card-pad);
   }
 
   .sc-nodes {
@@ -830,7 +830,7 @@
   .sc-empty,
   .sc-stubs {
     margin: 0;
-    padding: 12px var(--card-pad);
+    padding: var(--spacing-3) var(--card-pad);
     font-size: var(--font-size-base);
     color: var(--fg-dim);
     overflow-wrap: anywhere;
@@ -842,7 +842,7 @@
 
   .sc-more {
     display: flex;
-    padding: 4px var(--card-pad) 12px;
+    padding: var(--spacing-1) var(--card-pad) var(--spacing-3);
   }
 
   @media (pointer: coarse), (max-width: 768px) {

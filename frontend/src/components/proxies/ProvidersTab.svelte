@@ -131,9 +131,9 @@
   .confdir-warning {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
-    padding: 10px 14px;
-    margin-bottom: 16px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2-5) var(--spacing-3-5);
+    margin-bottom: var(--spacing-4);
     background: color-mix(in srgb, var(--warning) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
     border-radius: var(--radius-sm);
@@ -143,6 +143,6 @@
   }
   .confdir-warning svg {
     color: var(--warning);
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 </style>

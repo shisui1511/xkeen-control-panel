@@ -31,7 +31,7 @@
   .node-skeleton-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
     width: 100%;
   }
 
@@ -39,7 +39,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 10px 14px;
+    padding: var(--spacing-2-5) var(--spacing-3-5);
     background: var(--surface-tint-faint);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -48,7 +48,7 @@
   .left-section {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .skeleton-circle-wrapper {
@@ -65,6 +65,6 @@
   .right-section {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 </style>

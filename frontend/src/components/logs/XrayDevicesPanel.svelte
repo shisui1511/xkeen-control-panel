@@ -235,7 +235,7 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     padding: var(--spacing-2) var(--spacing-3);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -321,7 +321,7 @@
   }
 
   .xdev-table td {
-    padding: 4px var(--spacing-2);
+    padding: var(--spacing-1) var(--spacing-2);
     border-top: 1px solid var(--border-subtle);
     color: var(--fg-primary);
     vertical-align: top;

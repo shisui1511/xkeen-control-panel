@@ -164,7 +164,7 @@
 
   .qs-cta {
     font-size: var(--font-size-xs);
-    padding: 4px 8px;
+    padding: var(--spacing-1) var(--spacing-2);
     margin-left: auto;
     flex-shrink: 0;
   }

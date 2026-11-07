@@ -191,14 +191,14 @@
 
 <style>
   .gen-form-grid {
-    margin-bottom: 12px;
+    margin-bottom: var(--spacing-3);
     display: grid;
     grid-template-columns: 2fr 1fr;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .gen-form-grid-half {
-    margin-bottom: 16px;
+    margin-bottom: var(--spacing-4);
     grid-template-columns: 1fr 1fr;
   }
 

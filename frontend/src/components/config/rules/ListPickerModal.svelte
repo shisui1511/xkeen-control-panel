@@ -597,7 +597,7 @@
   .lp-main {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     min-width: 0;
   }
 

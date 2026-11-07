@@ -821,7 +821,7 @@
   .xray-outbound-form {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .form-row {
@@ -830,12 +830,12 @@
 
   .form-row2 {
     display: flex;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .form-row3 {
     display: flex;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .form-col {
@@ -848,13 +848,13 @@
     font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
-    margin-bottom: 4px;
+    margin-bottom: var(--spacing-1);
   }
 
   .form-input {
     width: 100%;
     box-sizing: border-box;
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -881,22 +881,22 @@
     position: absolute;
     right: 4px;
     height: 24px;
-    padding: 0 8px;
+    padding: 0 var(--spacing-2);
     display: flex;
     align-items: center;
     justify-content: center;
   }
 
   .security-tools-row {
-    margin-bottom: 4px;
+    margin-bottom: var(--spacing-1);
     display: flex;
     justify-content: flex-end;
-    gap: 8px;
+    gap: var(--spacing-2);
     flex-wrap: wrap;
   }
 
   .tls-ping-result {
-    padding: 12px;
+    padding: var(--spacing-3);
     background: var(--bg-page);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -906,7 +906,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 8px;
+    margin-bottom: var(--spacing-2);
   }
 
   .tls-ping-title {
@@ -918,12 +918,12 @@
   .tls-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-    gap: 8px;
+    gap: var(--spacing-2);
     font-size: var(--font-size-xs);
   }
 
   .tls-ping-dns {
-    margin-top: 8px;
+    margin-top: var(--spacing-2);
     font-size: var(--font-size-xs);
   }
 
@@ -940,14 +940,14 @@
   }
 
   .sockopt-summary {
-    padding: 10px var(--spacing-3);
+    padding: var(--spacing-2-5) var(--spacing-3);
     cursor: pointer;
     font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--fg-primary);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     user-select: none;
   }
 
@@ -956,19 +956,19 @@
     border-top: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .sockopt-checks {
     display: flex;
-    gap: 16px;
+    gap: var(--spacing-4);
     flex-wrap: wrap;
   }
 
   .checkbox-container {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     cursor: pointer;
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
@@ -976,15 +976,15 @@
   }
 
   .dialer-proxy-row {
-    margin-top: 4px;
+    margin-top: var(--spacing-1);
   }
 
   .dialer-chain-preview {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     flex-wrap: wrap;
-    margin-top: 8px;
+    margin-top: var(--spacing-2);
     font-size: var(--font-size-xs);
   }
 
@@ -995,15 +995,15 @@
   .form-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 8px;
-    margin-top: 16px;
+    gap: var(--spacing-2);
+    margin-top: var(--spacing-4);
   }
 
   .form-actions--sticky {
     position: sticky;
     bottom: 0;
     background: var(--bg-card);
-    padding-top: 12px;
+    padding-top: var(--spacing-3);
     border-top: 1px solid var(--border);
     z-index: 5;
   }
@@ -1012,7 +1012,7 @@
     .form-row2,
     .form-row3 {
       flex-direction: column;
-      gap: 8px;
+      gap: var(--spacing-2);
     }
   }
 </style>

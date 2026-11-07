@@ -240,7 +240,7 @@
   .sc-chevron {
     display: inline-flex;
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
     color: var(--fg-secondary);
   }
 
@@ -305,7 +305,7 @@
 
   .sc-issue :global(.sc-issue-icon) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .sc-issue-text {

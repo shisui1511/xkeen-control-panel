@@ -1231,29 +1231,29 @@
     align-items: start;
   }
   .proxy-section {
-    margin-bottom: 8px;
+    margin-bottom: var(--spacing-2);
   }
   .proxy-section-title {
     font-size: var(--font-size-sm);
     font-weight: 700;
     color: var(--fg-secondary);
-    margin: 0 0 10px;
+    margin: 0 0 var(--spacing-2-5);
   }
   .proxy-section-count {
-    margin-left: 8px;
+    margin-left: var(--spacing-2);
     font-weight: 500;
     color: var(--fg-faint);
     font-size: var(--font-size-xs);
   }
   .search-empty-state {
-    padding: 32px 16px;
+    padding: var(--spacing-8) var(--spacing-4);
     text-align: center;
     color: var(--fg-dim);
     font-size: var(--font-size-base);
     background: var(--bg-card);
     border: 1px dashed var(--border);
     border-radius: var(--radius-md);
-    margin-top: 8px;
+    margin-top: var(--spacing-2);
   }
   .proxy-section-system .group-grid {
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
@@ -1263,7 +1263,7 @@
   .group-grid.group-list {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   /* Skeleton styles */
@@ -1274,7 +1274,7 @@
     overflow: hidden;
   }
   .skeleton-card .gc-head {
-    padding: 14px 18px;
+    padding: var(--spacing-3-5) 18px;
     display: flex;
     align-items: center;
     border-bottom: 1px solid var(--border-strong);
@@ -1282,14 +1282,14 @@
   .skeleton-card .proxy-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 8px;
-    padding: 12px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-3);
   }
   .skeleton-card .proxy-card {
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 10px 12px;
+    padding: var(--spacing-2-5) var(--spacing-3);
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -1298,7 +1298,7 @@
   .skeleton-card .p-header {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
   }
   .skeleton-card .p-footer {
     display: flex;
@@ -1319,7 +1319,7 @@
       width: 100%;
     }
     .group-grid {
-      gap: 10px;
+      gap: var(--spacing-2-5);
     }
   }
 </style>

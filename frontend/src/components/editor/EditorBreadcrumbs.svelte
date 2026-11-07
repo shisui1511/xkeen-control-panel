@@ -28,8 +28,8 @@
     display: flex;
     flex-wrap: nowrap;
     align-items: center;
-    gap: 4px;
-    padding: 8px 14px;
+    gap: var(--spacing-1);
+    padding: var(--spacing-2) var(--spacing-3-5);
     background: var(--surface-tint);
     border-bottom: 1px solid var(--border);
     font-size: var(--font-size-xs);

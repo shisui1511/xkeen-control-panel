@@ -1073,8 +1073,8 @@
     flex-direction: column;
     height: 100vh;
     box-sizing: border-box;
-    padding: 24px 32px 16px;
-    gap: 14px;
+    padding: var(--spacing-6) var(--spacing-8) var(--spacing-4);
+    gap: var(--spacing-3-5);
     background: var(--bg);
   }
 
@@ -1098,7 +1098,7 @@
       max-height: 0;
       padding-top: 0;
       padding-bottom: 0;
-      margin-bottom: -10px;
+      margin-bottom: calc(-1 * var(--spacing-2-5));
       border-width: 0;
       opacity: 0;
       overflow: hidden;
@@ -1107,8 +1107,8 @@
 
     .logs-page {
       height: calc(100dvh - var(--mhdr-h) - env(safe-area-inset-top) - var(--dock-space));
-      padding: 12px 12px 8px;
-      gap: 8px;
+      padding: var(--spacing-3) var(--spacing-3) var(--spacing-2);
+      gap: var(--spacing-2);
     }
 
     .logs-page :global(.page-header-subtitle) {
@@ -1118,15 +1118,15 @@
     .logs-toolbar {
       flex-direction: column;
       align-items: stretch;
-      gap: 8px;
-      padding: 8px;
+      gap: var(--spacing-2);
+      padding: var(--spacing-2);
     }
 
     .tb-group.tb-stream {
       flex-wrap: nowrap;
       overflow-x: auto;
       scrollbar-width: none;
-      gap: 6px;
+      gap: var(--spacing-1-5);
     }
 
     .tb-stream::-webkit-scrollbar {
@@ -1167,7 +1167,7 @@
     .tb-group.tb-filters {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
-      gap: 8px;
+      gap: var(--spacing-2);
     }
 
     .tb-filters .search-wrap {
@@ -1194,7 +1194,7 @@
     }
 
     .source-pills .source-pill {
-      padding: 7px 10px;
+      padding: 7px var(--spacing-2-5);
     }
 
     .logs-console {
@@ -1208,7 +1208,7 @@
 
     /* Строка лога: меньше места под время и источник — больше под сообщение */
     .log-row {
-      padding: 0 4px 0 8px;
+      padding: 0 var(--spacing-1) 0 var(--spacing-2);
     }
 
     .log-row .col-ts {
@@ -1217,7 +1217,7 @@
 
     .log-row .col-src {
       width: 44px;
-      margin-right: 4px;
+      margin-right: var(--spacing-1);
       overflow: hidden;
     }
 
@@ -1230,7 +1230,7 @@
 
     .log-row .col-level {
       width: 34px;
-      margin-right: 4px;
+      margin-right: var(--spacing-1);
     }
   }
 
@@ -1238,15 +1238,15 @@
   @media (hover: none) {
     .copy-row-btn {
       opacity: 0.55;
-      padding: 4px 8px;
+      padding: var(--spacing-1) var(--spacing-2);
     }
   }
 
   .flash-health-badge {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
+    gap: var(--spacing-1-5);
+    padding: var(--spacing-1) var(--spacing-2-5);
     border-radius: var(--radius-sm);
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -1280,7 +1280,7 @@
     font-size: var(--font-size-xs);
     font-weight: 700;
     padding: 1px 5px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
   }
 
   .pressure-banner {
@@ -1290,7 +1290,7 @@
     background: color-mix(in srgb, var(--danger) 16%, transparent);
     border: 1px solid var(--danger);
     border-radius: var(--radius-md);
-    padding: 8px 14px;
+    padding: var(--spacing-2) var(--spacing-3-5);
     font-size: var(--font-size-sm);
     color: var(--danger);
     font-weight: 600;
@@ -1299,7 +1299,7 @@
   .logs-page-container {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--spacing-2-5);
     flex: 1;
     min-height: 0;
   }
@@ -1320,9 +1320,9 @@
     z-index: 3;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     min-height: 36px;
-    padding: 0 14px;
+    padding: 0 var(--spacing-3-5);
     border: 0;
     border-radius: var(--radius-full);
     background: var(--accent);
@@ -1344,18 +1344,18 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: var(--spacing-3);
     flex-wrap: wrap;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
   }
 
   .tb-group {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     flex-wrap: wrap;
   }
 
@@ -1380,13 +1380,13 @@
     border-top-left-radius: 0;
     border-bottom-left-radius: 0;
     border-left: 1px solid var(--border);
-    padding: 0 6px;
+    padding: 0 var(--spacing-1-5);
   }
 
   .runtime-level-control {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     font-size: var(--font-size-xs);
   }
 
@@ -1447,7 +1447,7 @@
     color: var(--fg-dim);
     cursor: pointer;
     font-size: var(--font-size-base);
-    padding: 0 4px;
+    padding: 0 var(--spacing-1);
     line-height: 1;
   }
 
@@ -1481,13 +1481,13 @@
   .source-pill {
     flex-shrink: 0;
     white-space: nowrap;
-    padding: 3px 8px;
+    padding: 3px var(--spacing-2);
     font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-secondary);
     background: transparent;
     border: none;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     cursor: pointer;
     transition:
       background var(--transition-fast),
@@ -1545,7 +1545,7 @@
   .log-row {
     display: flex;
     align-items: center;
-    padding: 0 12px;
+    padding: 0 var(--spacing-3);
     box-sizing: border-box;
     white-space: nowrap;
     border-bottom: 1px solid var(--border-light);
@@ -1554,7 +1554,7 @@
 
   .wrap-mode .log-row {
     white-space: normal;
-    padding: 6px 12px;
+    padding: var(--spacing-1-5) var(--spacing-3);
     align-items: flex-start;
   }
 
@@ -1601,7 +1601,7 @@
   .col-src {
     flex-shrink: 0;
     width: 75px;
-    margin-right: 6px;
+    margin-right: var(--spacing-1-5);
   }
 
   .src-tag {
@@ -1609,7 +1609,7 @@
     padding: 1px 5px;
     font-size: var(--font-size-xs);
     font-weight: 600;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     background: var(--surface-tint);
     color: var(--fg-dim);
     line-height: 18px;
@@ -1623,17 +1623,17 @@
   .col-level {
     flex-shrink: 0;
     width: 40px;
-    margin-right: 6px;
+    margin-right: var(--spacing-1-5);
   }
 
   .lvl-badge {
     display: inline-block;
     line-height: 18px;
     vertical-align: middle;
-    padding: 1px 4px;
+    padding: 1px var(--spacing-1);
     font-size: var(--font-size-xs);
     font-weight: 800;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     letter-spacing: 0.5px;
   }
 
@@ -1662,7 +1662,7 @@
     color: var(--accent);
     font-size: var(--font-size-xs);
     font-weight: 700;
-    margin-right: 8px;
+    margin-right: var(--spacing-2);
   }
 
   .col-msg {
@@ -1681,7 +1681,7 @@
   :global(.log-mark) {
     background: var(--warning);
     color: var(--btn-primary-text);
-    padding: 0 2px;
+    padding: 0 var(--spacing-0-5);
     border-radius: 2px;
     font-weight: 700;
   }
@@ -1692,12 +1692,12 @@
     border: none;
     color: var(--fg-dim);
     cursor: pointer;
-    padding: 2px 4px;
-    border-radius: 3px;
+    padding: var(--spacing-0-5) var(--spacing-1);
+    border-radius: var(--radius-xs);
     transition:
       opacity var(--transition-fast),
       color var(--transition-fast);
-    margin-left: 6px;
+    margin-left: var(--spacing-1-5);
     flex-shrink: 0;
   }
 
@@ -1716,7 +1716,7 @@
     min-height: 180px;
     color: var(--fg-dim);
     text-align: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .empty-title {
@@ -1741,10 +1741,10 @@
     border: 1px solid var(--accent);
     box-shadow: var(--shadow-md);
     border-radius: var(--radius-full);
-    padding: 6px 14px;
+    padding: var(--spacing-1-5) var(--spacing-3-5);
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--spacing-2-5);
     font-size: var(--font-size-xs);
     color: var(--fg-terminal);
     z-index: 10;
@@ -1767,8 +1767,8 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 16px;
-    padding: 2px 4px;
+    gap: var(--spacing-4);
+    padding: var(--spacing-0-5) var(--spacing-1);
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
@@ -1776,7 +1776,7 @@
   .footer-stat {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .footer-live {

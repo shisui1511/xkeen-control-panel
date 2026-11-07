@@ -119,13 +119,13 @@
   }
 
   .form-row {
-    margin-bottom: 12px;
+    margin-bottom: var(--spacing-3);
   }
 
   .form-row2 {
     display: flex;
-    gap: 12px;
-    margin-bottom: 12px;
+    gap: var(--spacing-3);
+    margin-bottom: var(--spacing-3);
   }
 
   .form-col {
@@ -138,13 +138,13 @@
     font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
-    margin-bottom: 4px;
+    margin-bottom: var(--spacing-1);
   }
 
   .form-input {
     width: 100%;
     box-sizing: border-box;
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -164,14 +164,14 @@
   .form-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 8px;
-    margin-top: 16px;
+    gap: var(--spacing-2);
+    margin-top: var(--spacing-4);
   }
 
   @media (max-width: 768px) {
     .form-row2 {
       flex-direction: column;
-      gap: 8px;
+      gap: var(--spacing-2);
     }
   }
 </style>

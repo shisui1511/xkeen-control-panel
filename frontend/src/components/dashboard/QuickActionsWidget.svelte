@@ -347,7 +347,7 @@
   .qa-content {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     flex: 1;
     min-width: 0;
   }

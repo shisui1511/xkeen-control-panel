@@ -662,7 +662,7 @@
   .sec-body {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .section-title {
@@ -679,11 +679,11 @@
   .routing-rules-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .rule-card {
-    padding: 12px;
+    padding: var(--spacing-3);
     transition:
       transform var(--transition-fast),
       border-color var(--transition-fast),
@@ -708,14 +708,14 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 8px;
+    gap: var(--spacing-2);
+    margin-bottom: var(--spacing-2);
   }
 
   .rule-head-left {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .drag-handle {
@@ -735,7 +735,7 @@
     height: 16px;
     background: var(--bg-surface-active);
     border: 1px solid var(--border);
-    border-radius: 9999px;
+    border-radius: var(--radius-full);
     padding: 0;
     cursor: pointer;
     position: relative;
@@ -766,11 +766,11 @@
 
   .badge-tag {
     font-size: var(--font-size-xs);
-    padding: 2px 6px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
     border-radius: var(--radius-xs);
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     font-weight: 500;
   }
 
@@ -792,14 +792,14 @@
   .rule-actions {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .btn-rule-action {
     background: none;
     border: 1px solid var(--border);
     border-radius: var(--radius-xs);
-    padding: 4px 6px;
+    padding: var(--spacing-1) var(--spacing-1-5);
     color: var(--fg-secondary);
     cursor: pointer;
     display: inline-flex;
@@ -831,7 +831,7 @@
   .rule-details {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
@@ -839,18 +839,18 @@
   .rule-detail-item {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     flex-wrap: wrap;
   }
 
   .rule-chips {
     display: inline-flex;
-    gap: 4px;
+    gap: var(--spacing-1);
     flex-wrap: wrap;
   }
 
   .chip {
-    padding: 1px 6px;
+    padding: 1px var(--spacing-1-5);
     border-radius: var(--radius-xs);
     font-size: var(--font-size-2xs);
     font-family: var(--font-family-mono);
@@ -869,7 +869,7 @@
   .form-row2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   @media (max-width: 768px) {
@@ -881,13 +881,13 @@
   .form-col {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .form-row {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
     max-width: 480px;
   }
 
@@ -901,7 +901,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
@@ -915,7 +915,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
@@ -924,7 +924,7 @@
     background: var(--bg-card);
     border: 1px dashed var(--border);
     border-radius: var(--radius);
-    padding: 10px 16px;
+    padding: var(--spacing-2-5) var(--spacing-4);
     color: var(--fg-secondary);
     font-size: var(--font-size-sm);
     font-weight: 500;
@@ -947,7 +947,7 @@
     font-size: var(--font-size-xs);
     color: var(--code-fg, var(--fg-primary));
     background: var(--code-bg, var(--bg-surface-active));
-    padding: 2px 4px;
+    padding: var(--spacing-0-5) var(--spacing-1);
     border-radius: var(--radius-xs);
   }
 </style>

@@ -323,11 +323,11 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md, 10px);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--shadow-lg);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
-    padding: 6px;
-    z-index: 1000;
+    padding: var(--spacing-1-5);
+    z-index: var(--z-overlay);
     user-select: none;
     animation: menu-pop var(--duration-fast) var(--ease-out);
   }
@@ -344,16 +344,16 @@
   }
 
   .menu-header {
-    padding: 6px 10px 8px;
+    padding: var(--spacing-1-5) var(--spacing-2-5) var(--spacing-2);
     border-bottom: 1px solid var(--border-light);
-    margin-bottom: 4px;
+    margin-bottom: var(--spacing-1);
   }
 
   .menu-title-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .menu-title {
@@ -366,8 +366,8 @@
   .badge-kernel {
     font-size: var(--font-size-xs);
     font-weight: 600;
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
+    border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--accent) 15%, transparent);
     color: var(--accent);
     border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
@@ -376,21 +376,21 @@
   .menu-section {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
   }
 
   .menu-divider {
     height: 1px;
     background: var(--border-light);
-    margin: 4px 0;
+    margin: var(--spacing-1) 0;
   }
 
   .menu-item {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--spacing-2-5);
     width: 100%;
-    padding: 7px 10px;
+    padding: 7px var(--spacing-2-5);
     background: transparent;
     border: none;
     border-radius: var(--radius-sm, 6px);

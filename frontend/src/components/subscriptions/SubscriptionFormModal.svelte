@@ -462,8 +462,8 @@
   .form-group-checkbox {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-top: 4px;
+    gap: var(--spacing-3);
+    margin-top: var(--spacing-1);
   }
 
   .checkbox-label {
@@ -483,9 +483,9 @@
     font-weight: 600;
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 0;
-    margin: 12px 0 6px 0;
+    gap: var(--spacing-2);
+    padding: var(--spacing-1-5) 0;
+    margin: var(--spacing-3) 0 var(--spacing-1-5) 0;
     width: 100%;
     text-align: left;
     transition: color var(--transition-fast);
@@ -502,18 +502,18 @@
   .advanced-fields-box {
     display: flex;
     flex-direction: column;
-    gap: 16px;
-    padding: 16px;
+    gap: var(--spacing-4);
+    padding: var(--spacing-4);
     background: rgba(0, 0, 0, 0.15);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    margin-top: 4px;
-    margin-bottom: 12px;
+    margin-top: var(--spacing-1);
+    margin-bottom: var(--spacing-3);
   }
 
   .missing-group-badge {
     font-size: var(--font-size-xs);
-    padding: 1px 6px;
+    padding: 1px var(--spacing-1-5);
     background: color-mix(in srgb, var(--danger) 15%, transparent);
     color: var(--danger);
     border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);

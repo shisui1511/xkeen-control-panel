@@ -940,7 +940,7 @@
 
   .re-dup :global(svg) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .re-net {

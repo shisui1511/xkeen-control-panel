@@ -258,8 +258,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    padding: 12px 16px;
+    gap: var(--spacing-4);
+    padding: var(--spacing-3) var(--spacing-4);
     border: 1px solid var(--border);
     box-shadow: var(--shadow-sm);
     font-size: var(--font-size-base);
@@ -268,8 +268,8 @@
 
   /* Пустой черновик — спокойная строка состояния без тени и лишней высоты */
   .draft-bar.draft-bar-idle {
-    padding-top: 10px;
-    padding-bottom: 10px;
+    padding-top: var(--spacing-2-5);
+    padding-bottom: var(--spacing-2-5);
     box-shadow: none;
     background: var(--surface-tint);
   }
@@ -277,14 +277,14 @@
   .draft-bar-status {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
     min-width: 0;
   }
 
   .status-line {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     color: var(--fg-primary);
   }
 
@@ -318,7 +318,7 @@
 
   .restart-note {
     margin-bottom: 0;
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
     font-size: var(--font-size-sm);
     min-width: 0;
   }
@@ -338,7 +338,7 @@
 
   .draft-bar-actions {
     display: flex;
-    gap: 8px;
+    gap: var(--spacing-2);
     flex-shrink: 0;
   }
 

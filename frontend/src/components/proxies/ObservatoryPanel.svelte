@@ -98,7 +98,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg, 10px);
-    margin-bottom: 16px;
+    margin-bottom: var(--spacing-4);
     overflow: hidden;
     box-shadow: var(--shadow-sm);
     padding: 0;
@@ -107,7 +107,7 @@
   .obs-head {
     display: flex;
     align-items: center;
-    padding: 6px 14px;
+    padding: var(--spacing-1-5) var(--spacing-3-5);
     background: linear-gradient(135deg, var(--bg-group-head-from), var(--bg-group-head-to));
     border-bottom: 1px solid var(--border-strong, var(--border));
   }
@@ -135,7 +135,7 @@
   }
 
   .obs-stat-box {
-    padding: 8px 14px 10px;
+    padding: var(--spacing-2) var(--spacing-3-5) var(--spacing-2-5);
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
@@ -150,14 +150,14 @@
   .obs-stat-box .stat-label {
     font-size: var(--font-size-2xs);
     letter-spacing: 0;
-    margin-bottom: 2px;
+    margin-bottom: var(--spacing-0-5);
     line-height: 1.2;
   }
 
   .obs-val-row {
     display: flex;
     align-items: baseline;
-    gap: 8px;
+    gap: var(--spacing-2);
     flex-wrap: wrap;
   }
 
@@ -232,7 +232,7 @@
 
   @media (max-width: 480px) {
     .obs-stat-box {
-      padding: 6px 10px 8px;
+      padding: var(--spacing-1-5) var(--spacing-2-5) var(--spacing-2);
     }
     .obs-stat-box .stat-value {
       font-size: var(--font-size-base);

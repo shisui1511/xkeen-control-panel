@@ -264,13 +264,13 @@
 
   .drift-alert :global(svg) {
     flex: none;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .drift-text {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
     min-width: 0;
     font-size: var(--font-size-base);
     line-height: 1.5;
@@ -298,9 +298,9 @@
     display: grid;
     grid-template-columns: subgrid;
     align-items: center;
-    column-gap: 12px;
-    row-gap: 8px;
-    padding: 14px var(--card-pad);
+    column-gap: var(--spacing-3);
+    row-gap: var(--spacing-2);
+    padding: var(--spacing-3-5) var(--card-pad);
     border-bottom: 1px solid var(--border);
     font-size: var(--font-size-sm);
     line-height: 1.5;
@@ -320,7 +320,7 @@
   .file-name {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
     min-width: 0;
   }
 
@@ -343,7 +343,7 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .file-owner {
@@ -355,7 +355,7 @@
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .file-diff {
@@ -366,13 +366,13 @@
   .files-skeleton {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .diff-loading {
     display: flex;
     justify-content: center;
-    padding: 16px;
+    padding: var(--spacing-4);
     color: var(--fg-dim);
   }
 

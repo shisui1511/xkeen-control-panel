@@ -869,7 +869,7 @@
   .alerts-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .alerts-list > :global(.alert) {
@@ -884,20 +884,20 @@
   }
 
   .stat-box {
-    padding: 16px var(--card-pad);
+    padding: var(--spacing-4) var(--card-pad);
     border-left: 1px solid var(--border);
     margin-left: -1px;
   }
 
   .tq-empty {
-    padding: 8px var(--card-pad) 16px;
+    padding: var(--spacing-2) var(--card-pad) var(--spacing-4);
   }
 
   .stat-label {
     font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-secondary);
-    margin-bottom: 6px;
+    margin-bottom: var(--spacing-1-5);
   }
 
   .stat-value {
@@ -917,7 +917,7 @@
   .stat-sub {
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
-    margin-top: 4px;
+    margin-top: var(--spacing-1);
   }
 
   .table-responsive {
@@ -934,7 +934,7 @@
 
   th {
     text-align: left;
-    padding: calc((var(--table-row-h, 44px) - 20px) / 2) 20px;
+    padding: calc((var(--table-row-h, 44px) - var(--spacing-5)) / 2) var(--spacing-5);
     font-weight: 600;
     color: var(--fg-secondary);
     border-bottom: 1px solid var(--border);
@@ -943,7 +943,7 @@
   }
 
   td {
-    padding: calc((var(--table-row-h, 44px) - 20px) / 2) 20px;
+    padding: calc((var(--table-row-h, 44px) - var(--spacing-5)) / 2) var(--spacing-5);
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
   }
@@ -964,14 +964,14 @@
   .stat-bar {
     height: 6px;
     background: var(--surface-tint);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     overflow: hidden;
   }
 
   .stat-bar-fill {
     height: 100%;
     background: var(--accent);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     transition: width var(--duration-slow) var(--ease-out);
   }
 
@@ -996,7 +996,7 @@
   }
 
   .action-btn-dots {
-    padding: 4px 8px;
+    padding: var(--spacing-1) var(--spacing-2);
     font-size: var(--font-size-base);
     line-height: 1;
     height: auto;
@@ -1006,16 +1006,16 @@
     position: absolute;
     right: 0;
     top: 100%;
-    margin-top: 4px;
+    margin-top: var(--spacing-1);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--shadow-lg);
     z-index: 10;
     min-width: 150px;
     display: flex;
     flex-direction: column;
-    padding: 4px;
+    padding: var(--spacing-1);
     animation: dropdown-anim var(--duration-fast) var(--ease-out);
   }
 
@@ -1034,11 +1034,11 @@
     background: none;
     border: none;
     color: var(--fg-secondary);
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
     text-align: left;
     font-size: var(--font-size-sm);
     cursor: pointer;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     width: 100%;
     transition:
       background var(--transition-normal),
@@ -1062,14 +1062,14 @@
   .form-row-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 16px;
+    gap: var(--spacing-4);
   }
 
   .form-group-checkbox {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-top: 4px;
+    gap: var(--spacing-3);
+    margin-top: var(--spacing-1);
   }
 
   .checkbox-label {
@@ -1114,12 +1114,12 @@
     border-color: var(--border);
     border-left: 3px solid var(--accent) !important;
     border-radius: var(--radius-lg);
-    padding: 16px 20px;
+    padding: var(--spacing-4) var(--spacing-5);
     position: relative;
   }
   .info-banner-content {
     display: flex;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
   .info-banner-icon {
     color: var(--accent);
@@ -1129,7 +1129,7 @@
   .info-banner-text {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
   .info-banner-title {
     margin: 0;
@@ -1155,7 +1155,7 @@
     font-size: var(--font-size-xl);
     cursor: pointer;
     line-height: 1;
-    padding: 4px 8px;
+    padding: var(--spacing-1) var(--spacing-2);
     transition: color var(--transition-normal);
   }
   .info-banner-close:hover {

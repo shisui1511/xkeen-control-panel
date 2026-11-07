@@ -53,7 +53,7 @@
   .diag-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   @media (max-width: 768px) {

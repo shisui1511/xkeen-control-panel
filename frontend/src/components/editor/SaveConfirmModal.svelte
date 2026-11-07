@@ -74,7 +74,7 @@
     font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-dim);
-    margin-bottom: 6px;
+    margin-bottom: var(--spacing-1-5);
     flex-shrink: 0;
   }
 
@@ -83,8 +83,8 @@
     overflow-y: auto;
     background: var(--cm-bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 10px;
+    border-radius: var(--radius-md);
+    padding: var(--spacing-2-5);
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
     line-height: 1.5;

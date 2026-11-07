@@ -127,7 +127,7 @@
   .telemetry-status {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-secondary);

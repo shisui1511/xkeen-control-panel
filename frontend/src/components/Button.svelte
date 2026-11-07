@@ -54,8 +54,8 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    padding: 9px 14px;
+    gap: var(--spacing-2);
+    padding: 9px var(--spacing-3-5);
     border-radius: var(--radius-md);
     font-family: var(--font-family-sans);
     font-size: var(--font-size-sm);

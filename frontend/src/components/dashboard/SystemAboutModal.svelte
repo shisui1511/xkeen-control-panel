@@ -146,10 +146,10 @@
   .about-modal-body {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: var(--spacing-5);
     max-height: 75vh;
     overflow-y: auto;
-    padding-right: 4px;
+    padding-right: var(--spacing-1);
     scrollbar-width: thin;
   }
 
@@ -157,16 +157,16 @@
     background: var(--surface-tint-faint);
     border: 1px solid var(--border);
     border-radius: var(--radius-md, 10px);
-    padding: 16px;
+    padding: var(--spacing-4);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .section-head {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .section-title {
@@ -179,14 +179,14 @@
   .section-desc {
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
-    margin: -6px 0 4px;
+    margin: calc(-1 * var(--spacing-1-5)) 0 var(--spacing-1);
     line-height: 1.4;
   }
 
   .diag-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
 
   @media (max-width: 480px) {
@@ -199,7 +199,7 @@
     background: rgba(0, 0, 0, 0.2);
     border: 1px solid var(--border-light);
     border-radius: var(--radius-sm, 6px);
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
     display: flex;
     flex-direction: column;
     gap: 3px;
@@ -228,8 +228,8 @@
 
   .status-pill {
     display: inline-block;
-    padding: 1px 6px;
-    border-radius: 4px;
+    padding: 1px var(--spacing-1-5);
+    border-radius: var(--radius-sm);
     font-size: var(--font-size-xs);
     font-weight: 600;
     background: var(--surface-tint-strong);
@@ -252,6 +252,6 @@
   .modal-actions-footer {
     display: flex;
     justify-content: flex-end;
-    padding-top: 4px;
+    padding-top: var(--spacing-1);
   }
 </style>

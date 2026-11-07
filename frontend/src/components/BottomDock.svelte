@@ -84,12 +84,12 @@
       left: 0;
       right: 0;
       bottom: 0;
-      z-index: 90;
+      z-index: var(--z-dock);
       display: grid;
       grid-template-columns: repeat(5, 1fr);
       height: calc(var(--dock-h) + env(safe-area-inset-bottom));
-      padding: 0 max(4px, env(safe-area-inset-left)) env(safe-area-inset-bottom)
-        max(4px, env(safe-area-inset-right));
+      padding: 0 max(var(--spacing-1), env(safe-area-inset-left)) env(safe-area-inset-bottom)
+        max(var(--spacing-1), env(safe-area-inset-right));
       /* Тёмная во всех темах, как шапка: светлые чернила задаются здесь, а не
          токенами текста, которые в «Тумане» тёмные */
       background: var(--bg-deep);
@@ -111,8 +111,8 @@
   @media (max-width: 768px) and (max-height: 480px) {
     .bottom-dock .dock-item {
       flex-direction: row;
-      gap: 6px;
-      padding: 0 4px;
+      gap: var(--spacing-1-5);
+      padding: 0 var(--spacing-1);
     }
   }
 
@@ -124,7 +124,7 @@
     justify-content: center;
     gap: 3px;
     min-width: 0;
-    padding: 6px 2px 4px;
+    padding: var(--spacing-1-5) var(--spacing-0-5) var(--spacing-1);
     border: 0;
     background: none;
     color: inherit;
@@ -148,7 +148,7 @@
     left: 50%;
     width: 12px;
     height: 3px;
-    border-radius: 0 0 3px 3px;
+    border-radius: 0 0 var(--radius-xs) var(--radius-xs);
     background: var(--on-deep-led);
     transform: translateX(-50%);
     transition:

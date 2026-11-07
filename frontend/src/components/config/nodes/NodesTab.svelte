@@ -109,7 +109,7 @@
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 8px 16px;
+    gap: var(--spacing-2) var(--spacing-4);
     min-height: var(--btn-h, 38px);
   }
 
@@ -135,7 +135,7 @@
     align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: var(--spacing-3);
     margin: 0;
   }
 

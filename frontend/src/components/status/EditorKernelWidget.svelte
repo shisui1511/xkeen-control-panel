@@ -83,15 +83,15 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm, 6px);
     height: 28px;
-    padding: 0 4px 0 8px;
-    gap: 6px;
+    padding: 0 var(--spacing-1) 0 var(--spacing-2);
+    gap: var(--spacing-1-5);
     user-select: none;
   }
 
   .widget-status {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .widget-name {
@@ -148,7 +148,7 @@
     padding: 0;
     background: transparent;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     color: var(--fg-dim);
     cursor: pointer;
     transition:

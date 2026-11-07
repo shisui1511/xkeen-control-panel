@@ -138,9 +138,9 @@
       --tone: var(--success);
       display: flex;
       flex-direction: column;
-      gap: 14px;
-      margin-bottom: 16px;
-      padding: 16px;
+      gap: var(--spacing-3-5);
+      margin-bottom: var(--spacing-4);
+      padding: var(--spacing-4);
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
       background: var(--bg-card);
@@ -167,7 +167,7 @@
   .pulse-head {
     display: flex;
     align-items: flex-start;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   /* Светодиод состояния — тот же язык, что у нижней панели и капсулы в шапке */
@@ -175,7 +175,7 @@
     flex-shrink: 0;
     width: 12px;
     height: 12px;
-    margin-top: 6px;
+    margin-top: var(--spacing-1-5);
     border-radius: 50%;
     background: var(--tone);
     box-shadow: 0 0 0 4px color-mix(in srgb, var(--tone) 18%, transparent);
@@ -192,7 +192,7 @@
   }
 
   .pulse-sub {
-    margin: 2px 0 0;
+    margin: var(--spacing-0-5) 0 0;
     font-size: var(--font-size-sm);
     color: var(--fg-secondary);
   }
@@ -200,7 +200,7 @@
   .pulse-metrics {
     display: grid;
     grid-template-columns: 1fr 1fr auto;
-    gap: 12px;
+    gap: var(--spacing-3);
     margin: 0;
   }
 
@@ -210,7 +210,7 @@
   }
 
   .pulse-metrics dd {
-    margin: 2px 0 0;
+    margin: var(--spacing-0-5) 0 0;
     font-size: var(--font-size-lg);
     font-weight: 700;
     font-variant-numeric: tabular-nums;
@@ -221,7 +221,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     min-height: 44px;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -246,10 +246,10 @@
   .pulse-problems {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     min-height: 40px;
-    margin: -4px -6px -6px;
-    padding: 0 6px;
+    margin: calc(-1 * var(--spacing-1)) calc(-1 * var(--spacing-1-5)) calc(-1 * var(--spacing-1-5));
+    padding: 0 var(--spacing-1-5);
     border: 0;
     border-radius: var(--radius-md);
     background: none;

@@ -327,7 +327,7 @@
 
   .pc-hint,
   .pc-unmanaged p {
-    margin: 2px 0 0;
+    margin: var(--spacing-0-5) 0 0;
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }

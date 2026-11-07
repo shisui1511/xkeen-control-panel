@@ -336,7 +336,7 @@
   .problem-content > div {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     min-width: 0;
     max-width: 68ch;
   }

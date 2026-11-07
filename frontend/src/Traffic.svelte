@@ -1283,11 +1283,11 @@
 <style>
   /* Xray live-stats slices (Phase 111) */
   .xray-stats-tabs {
-    margin-bottom: 12px;
+    margin-bottom: var(--spacing-3);
   }
 
   .xray-stats-empty {
-    padding: 16px 0;
+    padding: var(--spacing-4) 0;
     text-align: center;
   }
 
@@ -1302,9 +1302,9 @@
   .badge-live-indicator {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border-radius: 9999px;
+    gap: var(--spacing-1-5);
+    padding: var(--spacing-1) var(--spacing-2-5);
+    border-radius: var(--radius-full);
     font-size: var(--font-size-xs);
     font-weight: 600;
     border: 1px solid transparent;
@@ -1412,7 +1412,7 @@
   .stat-label {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-weight: 600;
@@ -1425,7 +1425,7 @@
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.01em;
     line-height: 1.2;
-    margin-top: 4px;
+    margin-top: var(--spacing-1);
   }
 
   .stat-session {
@@ -1433,7 +1433,7 @@
     font-family: var(--font-family-sans);
     font-variant-numeric: tabular-nums;
     color: var(--fg-dim);
-    margin-top: 4px;
+    margin-top: var(--spacing-1);
   }
 
   .conns-protocols {
@@ -1444,7 +1444,7 @@
   .conns-dynamics {
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .delta-up {
@@ -1479,35 +1479,35 @@
 
   /* Chart Card */
   .chart-card {
-    padding: 20px 24px;
+    padding: var(--spacing-5) var(--spacing-6);
   }
 
   .chart-header-toolbar {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 16px;
+    margin-bottom: var(--spacing-4);
     flex-wrap: wrap;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .chart-legend {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .key-btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-primary);
     background: transparent;
     border: none;
     cursor: pointer;
-    padding: 4px 8px;
+    padding: var(--spacing-1) var(--spacing-2);
     border-radius: var(--radius-sm, 6px);
     transition:
       opacity var(--transition-normal),
@@ -1543,8 +1543,8 @@
     background: var(--bg-card-hover);
     border: 1px solid var(--border);
     border-radius: var(--radius-md, 8px);
-    padding: 2px;
-    gap: 2px;
+    padding: var(--spacing-0-5);
+    gap: var(--spacing-0-5);
   }
 
   .chart-area-wrapper {
@@ -1559,7 +1559,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .chart-empty-title {
@@ -1577,7 +1577,7 @@
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    padding-right: 12px;
+    padding-right: var(--spacing-3);
     font-size: var(--font-size-xs);
     font-family: var(--font-family-sans);
     font-variant-numeric: tabular-nums;
@@ -1605,7 +1605,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md, 8px);
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
     box-shadow: var(--shadow-md);
     z-index: 10;
     min-width: 150px;
@@ -1615,7 +1615,7 @@
     font-size: var(--font-size-xs);
     font-weight: 700;
     color: var(--fg-dim);
-    margin-bottom: 4px;
+    margin-bottom: var(--spacing-1);
     font-family: var(--font-family-mono);
     border-bottom: 1px solid var(--border);
     padding-bottom: 3px;
@@ -1626,7 +1626,7 @@
     justify-content: space-between;
     align-items: center;
     font-size: var(--font-size-xs);
-    gap: 8px;
+    gap: var(--spacing-2);
     margin-top: 3px;
   }
 
@@ -1646,7 +1646,7 @@
   .chart-x {
     display: flex;
     justify-content: space-between;
-    padding: 8px 0 0 77px;
+    padding: var(--spacing-2) 0 0 77px;
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-family: var(--font-family-mono);
@@ -1703,10 +1703,10 @@
 
   /* Периоды — ячейки одной полосы, а не плитки внутри карточки. */
   .peak-period-card {
-    padding: 16px var(--card-pad);
+    padding: var(--spacing-4) var(--card-pad);
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
 
   .peak-period-card + .peak-period-card {
@@ -1731,7 +1731,7 @@
     .peak-period-card {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 8px 16px;
+      gap: var(--spacing-2) var(--spacing-4);
     }
 
     .peak-period-title {
@@ -1749,7 +1749,7 @@
     font-size: var(--font-size-xs);
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: var(--spacing-0-5);
   }
 
   .peak-val {
@@ -1776,8 +1776,8 @@
   .client-row {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding: 12px var(--card-pad);
+    gap: var(--spacing-1-5);
+    padding: var(--spacing-3) var(--card-pad);
   }
 
   .client-row + .client-row {
@@ -1793,7 +1793,7 @@
   .client-ip-box {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .client-icon {
@@ -1812,8 +1812,8 @@
     font-size: var(--font-size-xs);
     background: color-mix(in srgb, var(--accent) 12%, transparent);
     color: var(--accent);
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
+    border-radius: var(--radius-sm);
     font-weight: 600;
   }
 
@@ -1843,7 +1843,7 @@
   .client-meta-sub {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
   }

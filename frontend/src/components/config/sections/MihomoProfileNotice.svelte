@@ -176,7 +176,7 @@
 
   .mpn-alert :global(.mpn-icon) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .mpn-body {
@@ -230,7 +230,7 @@
 
   .mpn-hint :global(.mpn-hint-icon) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
     color: var(--warning);
   }
 

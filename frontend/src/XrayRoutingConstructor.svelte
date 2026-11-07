@@ -1339,9 +1339,9 @@
     align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: 16px;
-    padding: 12px 18px;
-    margin-bottom: 16px;
+    gap: var(--spacing-4);
+    padding: var(--spacing-3) 18px;
+    margin-bottom: var(--spacing-4);
     border: 1px solid var(--accent);
     border-radius: var(--radius-md);
     background: var(--accent-soft);
@@ -1350,7 +1350,7 @@
   .stub-banner-text {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     font-size: var(--font-size-base);
     color: var(--fg-secondary);
   }
@@ -1361,7 +1361,7 @@
 
   .stub-banner-actions {
     display: flex;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .container {
@@ -1374,15 +1374,15 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 16px;
-    margin-bottom: 20px;
+    gap: var(--spacing-4);
+    margin-bottom: var(--spacing-5);
     flex-wrap: wrap;
   }
 
   .constructor-title {
     font-size: var(--font-size-xl, 1.25rem);
     font-weight: 600;
-    margin: 0 0 4px 0;
+    margin: 0 0 var(--spacing-1) 0;
     color: var(--fg-primary);
   }
 
@@ -1437,8 +1437,8 @@
   .rule-providers-row {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 16px;
+    gap: var(--spacing-3);
+    margin-bottom: var(--spacing-4);
   }
 
   .rule-providers-row :global(.xcp-select) {
@@ -1463,7 +1463,7 @@
   }
 
   .sec-tab {
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
     background: transparent;
     border: none;
     border-bottom: 2px solid transparent;
@@ -1472,7 +1472,7 @@
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     margin-bottom: -1px;
     min-height: 36px;
     white-space: nowrap;
@@ -1489,7 +1489,7 @@
     color: var(--fg-primary);
     font-size: var(--font-size-xs, 0.6875rem);
     padding: 1px 5px;
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     font-weight: 600;
   }
 

@@ -111,7 +111,7 @@
   .sg-provider {
     min-width: 0;
     margin: 0;
-    padding: 14px var(--card-pad) 6px;
+    padding: var(--spacing-3-5) var(--card-pad) var(--spacing-1-5);
     border: none;
   }
 

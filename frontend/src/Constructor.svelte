@@ -154,7 +154,7 @@
   }
 
   .tab-btn {
-    padding: 8px 16px;
+    padding: var(--spacing-2) var(--spacing-4);
     background: transparent;
     border: none;
     border-bottom: 2px solid transparent;

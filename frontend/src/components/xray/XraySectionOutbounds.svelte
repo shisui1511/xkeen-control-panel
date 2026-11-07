@@ -596,7 +596,7 @@
   .sec-body {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .section-title {
@@ -608,22 +608,22 @@
   .outbounds-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .tag-card {
-    padding: 12px;
+    padding: var(--spacing-3);
     border-radius: var(--radius);
     transition: background var(--transition-fast);
   }
 
   .badge-tag {
     font-size: var(--font-size-xs);
-    padding: 2px 6px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
     border-radius: var(--radius-xs);
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     font-weight: 500;
     background: var(--accent-soft);
     color: var(--accent);
@@ -633,7 +633,7 @@
     background: none;
     border: 1px solid var(--border);
     border-radius: var(--radius-xs);
-    padding: 4px 8px;
+    padding: var(--spacing-1) var(--spacing-2);
     font-size: var(--font-size-xs);
     cursor: pointer;
     color: var(--fg-secondary);
@@ -664,7 +664,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
@@ -678,7 +678,7 @@
     background: var(--bg-card);
     border: 1px dashed var(--border);
     border-radius: var(--radius);
-    padding: 10px 16px;
+    padding: var(--spacing-2-5) var(--spacing-4);
     color: var(--fg-secondary);
     font-size: var(--font-size-sm);
     font-weight: 500;
@@ -710,7 +710,7 @@
   .conf-dropzone {
     border: 2px dashed var(--border);
     border-radius: var(--radius);
-    padding: 32px 16px;
+    padding: var(--spacing-8) var(--spacing-4);
     text-align: center;
     cursor: pointer;
     position: relative;

@@ -293,7 +293,7 @@
   .so-ok {
     display: inline-flex;
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
     color: var(--success);
   }
 
@@ -318,7 +318,7 @@
 
   .so-alert :global(.so-icon) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .so-actions {

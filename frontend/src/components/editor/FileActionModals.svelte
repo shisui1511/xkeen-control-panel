@@ -122,11 +122,11 @@
 
 <style>
   .name-field {
-    margin-bottom: 16px;
+    margin-bottom: var(--spacing-4);
   }
 
   .form-hint {
-    margin: 6px 0 0;
+    margin: var(--spacing-1-5) 0 0;
     font-size: var(--font-size-xs);
     line-height: 1.4;
     color: var(--fg-secondary);

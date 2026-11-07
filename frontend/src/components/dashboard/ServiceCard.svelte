@@ -298,14 +298,14 @@
     top: var(--spacing-3);
     bottom: var(--spacing-3);
     width: 3px;
-    border-radius: 0 3px 3px 0;
+    border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
     background: var(--accent);
   }
 
   .svc-ident {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     min-width: 0;
   }
 
@@ -377,8 +377,8 @@
     --tone: var(--fg-dim);
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 2px 9px 2px 8px;
+    gap: var(--spacing-1-5);
+    padding: var(--spacing-0-5) 9px var(--spacing-0-5) var(--spacing-2);
     border-radius: var(--radius-full);
     background: color-mix(in srgb, var(--tone) 12%, transparent);
     color: var(--tone);
@@ -436,7 +436,7 @@
     cursor: pointer;
     border: none;
     font-size: var(--font-size-xs);
-    padding: 1px 6px;
+    padding: 1px var(--spacing-1-5);
     border-radius: var(--radius-sm);
   }
 
@@ -461,8 +461,8 @@
   .install-link {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
-    padding: 6px var(--spacing-2);
+    gap: var(--spacing-0-5);
+    padding: var(--spacing-1-5) var(--spacing-2);
     border-radius: var(--radius-md);
     color: var(--accent-text);
     font-size: var(--font-size-sm);
@@ -532,16 +532,16 @@
   .svc-sheet {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .sheet-action {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: var(--spacing-3-5);
     width: 100%;
     min-height: 56px;
-    padding: 10px 14px;
+    padding: var(--spacing-2-5) var(--spacing-3-5);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--bg-elevated);
@@ -563,7 +563,7 @@
   .sheet-text {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     min-width: 0;
   }
 

@@ -102,7 +102,7 @@
 
   .preflight-warnings-list {
     margin: 0;
-    padding-left: 20px;
+    padding-left: var(--spacing-5);
     display: flex;
     flex-direction: column;
     gap: var(--spacing-xs, 4px);
@@ -115,7 +115,7 @@
   .warning-code-token {
     font-family: var(--font-mono, monospace);
     font-size: 0.85em;
-    padding: 1px 4px;
+    padding: 1px var(--spacing-1);
     border-radius: var(--radius-xs, 3px);
     background: color-mix(in srgb, var(--warning) 18%, transparent);
     color: var(--warning);

@@ -233,14 +233,14 @@
   .migrate-modal-body {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--spacing-4);
   }
 
   .info-banner {
     display: flex;
-    gap: 12px;
+    gap: var(--spacing-3);
     align-items: flex-start;
-    padding: 12px 14px;
+    padding: var(--spacing-3) var(--spacing-3-5);
     background: color-mix(in srgb, var(--accent) 10%, transparent);
     border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
     border-radius: var(--radius-md);
@@ -250,7 +250,7 @@
   .info-icon {
     color: var(--accent);
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .info-desc {
@@ -264,7 +264,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: var(--spacing-2-5);
     padding: 30px 0;
     color: var(--fg-dim);
     font-size: var(--font-size-sm);
@@ -280,7 +280,7 @@
   }
 
   .diff-header {
-    padding: 6px 12px;
+    padding: var(--spacing-1-5) var(--spacing-3);
     background: var(--surface-tint-faint);
     border-bottom: 1px solid var(--border);
     color: var(--fg-dim);
@@ -290,14 +290,14 @@
   }
 
   .diff-content {
-    padding: 8px 0;
+    padding: var(--spacing-2) 0;
   }
 
   .diff-line {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 3px 12px;
+    gap: var(--spacing-2);
+    padding: 3px var(--spacing-3);
     line-height: 1.4;
   }
 
@@ -320,11 +320,11 @@
   .guarantees-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     background: var(--surface-tint-faint);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 12px 14px;
+    padding: var(--spacing-3) var(--spacing-3-5);
   }
 
   .guarantees-title {
@@ -332,13 +332,13 @@
     font-weight: 600;
     color: var(--fg-dim);
     letter-spacing: 0.02em;
-    margin-bottom: 4px;
+    margin-bottom: var(--spacing-1);
   }
 
   .guarantee-item {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
@@ -346,8 +346,8 @@
   .error-banner {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 10px 12px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2-5) var(--spacing-3);
     background: color-mix(in srgb, var(--danger) 10%, transparent);
     border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
     border-radius: var(--radius-md);
@@ -358,8 +358,8 @@
   .success-banner {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 12px 14px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-3) var(--spacing-3-5);
     background: color-mix(in srgb, var(--success) 10%, transparent);
     border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
     border-radius: var(--radius-md);
@@ -370,18 +370,18 @@
   .step-progress {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     font-size: var(--font-size-xs);
     color: var(--accent);
-    padding: 4px 0;
+    padding: var(--spacing-1) 0;
   }
 
   .modal-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 10px;
-    margin-top: 8px;
-    padding-top: 12px;
+    gap: var(--spacing-2-5);
+    margin-top: var(--spacing-2);
+    padding-top: var(--spacing-3);
     border-top: 1px solid var(--border);
   }
 </style>

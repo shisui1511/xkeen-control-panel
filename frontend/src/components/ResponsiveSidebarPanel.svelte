@@ -402,8 +402,8 @@
   .responsive-sidebar-overlay-header {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 4px 4px 4px 12px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-1) var(--spacing-1) var(--spacing-1) var(--spacing-3);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
@@ -460,7 +460,7 @@
     -webkit-appearance: none;
     border: 0;
     padding: 0;
-    margin: 0 2px;
+    margin: 0 var(--spacing-0-5);
     background: transparent;
     box-sizing: border-box;
     width: 10px;

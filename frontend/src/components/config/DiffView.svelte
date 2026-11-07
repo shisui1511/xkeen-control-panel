@@ -67,7 +67,7 @@
   .diff-view {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
     min-width: 0;
   }
 
@@ -82,7 +82,7 @@
   .diff-body {
     max-height: 320px;
     overflow: auto;
-    padding: 10px 14px;
+    padding: var(--spacing-2-5) var(--spacing-3-5);
     background: var(--bg-page);
     border: 1px solid var(--border-light);
     border-radius: var(--radius-md);
@@ -114,14 +114,14 @@
     /* Чистый --success на подложке 12% в светлой теме даёт 3.96:1; смесь с основным текстом проходит AA */
     color: color-mix(in srgb, var(--success) 70%, var(--fg-primary));
     border-left: 3px solid var(--success);
-    padding-left: 6px;
+    padding-left: var(--spacing-1-5);
   }
 
   .diff-line-removed {
     background: color-mix(in srgb, var(--danger) 12%, transparent);
     color: color-mix(in srgb, var(--danger) 70%, var(--fg-primary));
     border-left: 3px solid var(--danger);
-    padding-left: 6px;
+    padding-left: var(--spacing-1-5);
   }
 
   .diff-line-collapsed {
@@ -130,10 +130,10 @@
     color: var(--fg-dim);
     text-align: center;
     font-style: italic;
-    padding: 4px 0;
+    padding: var(--spacing-1) 0;
     border-top: 1px dashed var(--border);
     border-bottom: 1px dashed var(--border);
-    margin: 4px 0;
+    margin: var(--spacing-1) 0;
   }
 
   .diff-line-unchanged {
