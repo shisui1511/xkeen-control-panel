@@ -501,6 +501,28 @@ const CORE_CMD =
 
 const isBad = (result) => (mode === 'regress' ? result === 'FAIL' : result === 'PASS');
 
+// Сбой связи внутри теста (таймаут клиента, отказ соединения, TLS): такой FAIL шага говорит о
+// сети стенда, а не о коде коммита. Если падение на «падающем» конце диапазона (эталон) не
+// такое, шаг с сетевым FAIL засчитывается как SKIP — иначе поиск сдвигает границу по сбою сети.
+const NET_FAIL =
+  /context deadline exceeded|Client\.Timeout|connection refused|connection reset|i\/o timeout|TLS handshake|net::ERR_|ECONNRESET|socket hang up/;
+let refNet = null;
+
+// Деталь первой упавшей строки шага (<каталог шага>/<цель>/test.tsv): статус FAIL или XPASS.
+function failDetail(dir) {
+  let text = '';
+  try {
+    text = readFileSync(path.join(dir, TARGET, 'test.tsv'), 'utf8');
+  } catch {
+    return '';
+  }
+  for (const line of text.split('\n')) {
+    const c = line.split('\t');
+    if (c[0] === 'FAIL' || c[0] === 'XPASS') return c.slice(3).join('\t');
+  }
+  return '';
+}
+
 const lines = [];
 let stepNo = 0;
 const cache = new Map();
@@ -538,8 +560,18 @@ async function probe(sha, searchStep) {
     return null;
   }
   const r = { result, reason };
+  if (result === 'FAIL') {
+    const net = NET_FAIL.test(failDetail(dir));
+    if (!searchStep) {
+      // эталон — конец диапазона, где тест обязан падать (FROM в fix, TO в regress)
+      if (refNet === null) refNet = net;
+    } else if (net && refNet === false) {
+      r.result = 'SKIP';
+      r.reason = 'сбой связи в тесте (не то падение, что на конце диапазона)';
+    }
+  }
   cache.set(sha, r);
-  lines.push(`${n}. ${short(sha)} ${subjectOf(sha, 60)}: ${result} (${reason || '-'})`);
+  lines.push(`${n}. ${short(sha)} ${subjectOf(sha, 60)}: ${r.result} (${r.reason || '-'})`);
   say(lines[lines.length - 1]);
   return r;
 }
