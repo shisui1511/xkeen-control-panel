@@ -80,8 +80,8 @@ for (const file of walk(SRC)) {
   if (OWN.has(rel)) continue;
   const text = fs.readFileSync(file, 'utf8');
   const markup = text
-    .replace(/<script[\s\S]*?<\/script>/g, blank)
-    .replace(/<style[\s\S]*?<\/style>/g, blank)
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script[^>]*>/gi, blank)
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style[^>]*>/gi, blank)
     .replace(/<!--[\s\S]*?-->/g, blank);
 
   for (const m of tags(markup)) {
@@ -110,7 +110,7 @@ for (const file of walk(SRC)) {
   }
 
   // Перекраска системных классов в стиле компонента
-  const style = text.replace(/<style[^>]*>([\s\S]*?)<\/style>|[\s\S]/g, (m, body) =>
+  const style = text.replace(/<style[^>]*>([\s\S]*?)<\/style>|[\s\S]/gi, (m, body) =>
     body !== undefined
       ? ' '.repeat(m.length - body.length - 8) + body + '        '
       : m === '\n'
@@ -124,7 +124,16 @@ for (const file of walk(SRC)) {
   }
 }
 
-const baseline = fs.existsSync(BASELINE) ? JSON.parse(fs.readFileSync(BASELINE, 'utf8')) : {};
+// База читается одним вызовом: нет файла — пустая база (первый запуск --update)
+function readBaseline() {
+  try {
+    return JSON.parse(fs.readFileSync(BASELINE, 'utf8'));
+  } catch (e) {
+    if (e.code === 'ENOENT') return {};
+    throw e;
+  }
+}
+const baseline = readBaseline();
 const total = (k) => Object.values(counts[k]).reduce((a, b) => a + b, 0);
 const summary = () => KINDS.map((k) => `${k} ${total(k)}`).join(', ');
 

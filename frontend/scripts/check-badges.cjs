@@ -56,7 +56,7 @@ for (const file of walk(SRC)) {
   // Стили: .svelte — блоки <style>, *.css — весь файл (с сохранением номеров строк)
   let css = '';
   if (file.endsWith('.svelte')) {
-    css = text.replace(/<style[^>]*>([\s\S]*?)<\/style>|[\s\S]/g, (m, body) =>
+    css = text.replace(/<style[^>]*>([\s\S]*?)<\/style>|[\s\S]/gi, (m, body) =>
       body !== undefined
         ? ' '.repeat(m.length - body.length - 8) + body + '        '
         : m === '\n'
@@ -88,7 +88,7 @@ for (const file of walk(SRC)) {
   // Разметка и строки скрипта: имена классов в class="…", class:…, и в строковых литералах
   if (!file.endsWith('.css')) {
     const scan = file.endsWith('.svelte')
-      ? text.replace(/<style[\s\S]*?<\/style>/g, (m) => m.replace(/[^\n]/g, ' '))
+      ? text.replace(/<style\b[^>]*>[\s\S]*?<\/style[^>]*>/gi, (m) => m.replace(/[^\n]/g, ' '))
       : text;
     const re = /class="([^"]*)"|class:([\w-]+)|(['"`])((?:(?!\3)[^\\\n]|\\.)*)\3/g;
     for (const m of scan.matchAll(re)) {
@@ -107,7 +107,16 @@ for (const file of walk(SRC)) {
   }
 }
 
-const baseline = fs.existsSync(BASELINE) ? JSON.parse(fs.readFileSync(BASELINE, 'utf8')) : {};
+// База читается одним вызовом: нет файла — пустая база (первый запуск --update)
+function readBaseline() {
+  try {
+    return JSON.parse(fs.readFileSync(BASELINE, 'utf8'));
+  } catch (e) {
+    if (e.code === 'ENOENT') return {};
+    throw e;
+  }
+}
+const baseline = readBaseline();
 const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
 if (process.argv.includes('--update')) {
