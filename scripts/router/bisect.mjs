@@ -37,7 +37,7 @@
 // pick. Читает <отчёт>/<цель>/classes.tsv, берёт тесты класса new (go:, pw:), отсеивает тесты с классом
 // flaky в истории за 30 дней (поиск по нестабильному тесту даёт ложного виновника, D-22), сопоставляет
 // проверку с записью теста через rerun-plan.mjs и печатает TSV: `from <sha> <откуда>` либо
-// `skip <причина>`; `test <ядро> go|pw <пакет:Тест|спек> <grep> <имя>` на тест (не больше --max,
+// `skip <причина>`; `test <ядро> go|pw <пакет:Тест|спек> <grep или -> <имя>` на тест (не больше --max,
 // по умолчанию 3); `skipped <проверка> <причина>`. FROM — прошлый зелёный полный прогон из истории
 // (lastFull green), иначе новейший stable-тег из `git tag --merged HEAD`.
 //
@@ -276,7 +276,7 @@ function pickMain(argv) {
         out.push(`skipped\t${parent}\tтест не сопоставлен с записью`);
         continue;
       }
-      out.push(`test\t${core}\tgo\t${entry}\t\t${parent}`);
+      out.push(`test\t${core}\tgo\t${entry}\t-\t${parent}`);
     } else {
       const spec = (sel.SPECS || '').split(' ')[0];
       const grep = sel.GREP || '';
@@ -284,7 +284,7 @@ function pickMain(argv) {
         out.push(`skipped\t${parent}\tтест не сопоставлен с записью`);
         continue;
       }
-      out.push(`test\t${core}\tpw\t${spec}\t${grep}\t${parent}`);
+      out.push(`test\t${core}\tpw\t${spec}\t${grep || '-'}\t${parent}`);
     }
     picked++;
   }
