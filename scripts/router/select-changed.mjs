@@ -1,23 +1,44 @@
 #!/usr/bin/env node
-// Выбор проверок на роутерах по diff (make router-test SUITE=changed, D-25).
+// Выбор проверок на роутерах по diff (make router-test SUITE=changed, D-25; области — 148.1-09).
 //
 // Что выбирается:
-//   Go         роутерные пакеты (каталоги с `_test.go`, у которого первая строка
-//              `//go:build router`), затронутые изменением: сам пакет изменён, либо в его
-//              зависимостях (`go list -tags router -test -deps`) есть изменённый пакет.
-//   Playwright роутерные спеки frontend/tests/router/*.spec.ts, затронутые страницы
-//              считаются по графу импортов frontend/src (логика scripts/router/import-graph.mjs):
-//              спек выбирается, если открывает затронутый маршрут (`#/<маршрут>` в тексте
-//              или `// e2e-pages: …`). `// e2e-pages: *` — спек обходит все страницы: он
-//              выбирается при любом затронутом маршруте и сужается до них через --grep.
-//              core-switch.spec.ts не выбирается: его запускает матрица ядер.
+//   Области     файл продукта (Go, setup.sh, контракты, testdata) относят к областям по карте
+//               scripts/router/areas.json (глобы paths). Правка файла области выбирает по
+//               ИМЕНАМ все Go-тесты области (строка `// router-area:` в файле теста) и все спеки
+//               области (D-12). Область с флагом shared (kernel, configlayer, server) добавляет
+//               канарейки всех областей, Go и спеки (D-10). Области contract-* выбирают проверки
+//               из поля tests. Изменённый роутерный тест выбирает тесты своего файла; файл без
+//               строки области, файл без тестов (помощники) и продукт без области — пакет целиком
+//               (откат, как раньше: пакет и пакеты, от которых он зависит, `go list -deps`).
+//   Go          записи RT_GO_SEQ `<каталог пакета>:<TestRouterИмя>`; пакеты — каталоги записей.
+//               Роутерный пакет — каталог с `_test.go`, у которого первая строка `//go:build router`.
+//   Playwright  роутерные спеки frontend/tests/router/*.spec.ts. Правка frontend/src — по графу
+//               импортов (scripts/router/import-graph.mjs): спек выбирается, если открывает
+//               затронутый маршрут (`#/<маршрут>` в тексте или `// e2e-pages: …`).
+//               `// e2e-pages: *` — спек обходит все страницы: при выборе только по маршрутам он
+//               сужается до них через --grep; выбранный по иной причине (область, зависимости,
+//               правка самого спека) идёт без сужения. core-switch.spec.ts не выбирается: его
+//               запускает матрица ядер.
 //
-// При сомнении выбор только расширяется до полного (D-25): неизвестный файл, небезопасное
-// имя, ошибка разбора, нет базы сравнения — RT_SELECT_ALL=1. Данные роутерных тестов
-// (`testdata/`, контракт источников frontend/src/lib/sourcesContract.json) — тоже полный выбор.
+// Триггеры (RTR-02). Полный выбор — только правка самого выбора (SELECTOR_SELF: этот файл,
+// areas.json, core-marks.cjs, import-graph.mjs). Обвязка стенда (HARNESS: прочие
+// scripts/router/**, frontend/tests/router/lib/**, playwright.router.config.ts, global-setup/
+// teardown, internal/routertest, цели стенда и VERSION в Makefile) — RT_HARNESS=1 без полного
+// выбора. Зависимости (DEPS: package.json, package-lock.json, go.mod, go.sum) — патч/минор:
+// pages.spec.ts без сужения и канарейки всех областей; мажор (D-13) — канарейки плюс все спеки
+// (npm) или все Go-тесты (go.mod). Неизвестный файл — только смоук и предупреждение в причинах.
 //
-// Вывод (stdout) — строки для eval в sh, значения в одинарных кавычках и только из
-// безопасных символов (T-144.1-23):
+// Порядок (RTR-03): сначала тесты затронутых областей, затем остальные выбранные; внутри группы —
+// по убыванию частоты падений из истории (history.mjs failFreq, окно 30 дней). Спеки затронутых
+// областей — RT_SPECS_FIRST. Ошибка истории — без сортировки (причина в stderr).
+//
+// При сомнении выбор только расширяется (D-25, T-148.1-24): небезопасное имя, ошибка карты,
+// фактов тестов или разбора, нет базы сравнения у зависимостей и Makefile — полный выбор или
+// расширение (пакет целиком, мажор, обвязка).
+//
+// Вывод (stdout) — 13 строк для eval в sh в фиксированном порядке, значения в одинарных
+// кавычках и только из безопасных символов (T-144.1-23, T-148.1-23); run.sh сверяет число и
+// форму каждой строки:
 //   RT_SELECT_ALL=0|1
 //   RT_GO_PKGS='./internal/services ./internal/utils/xtables'
 //   RT_SPECS='tests/router/pages.spec.ts'
@@ -26,8 +47,13 @@
 //   RT_GO_CORE_RUN='^(TestRouterA|TestRouterB)$'
 //   RT_SPECS_CORE='tests/router/pages.spec.ts'
 //   RT_KERNEL_TOUCHED=0|1
+//   RT_GO_SEQ='internal/handlers:TestRouterA internal/services:TestRouterB'
+//   RT_SPECS_FIRST='tests/router/access-log.spec.ts'
+//   RT_PW_INVERT=''
+//   RT_HARNESS=0|1
+//   RT_AREAS='access-log configlayer'
 // Строки 5–7 — тесты выбора, зависящие от ядра (D-01, D-03, D-04); по ним run.sh решает,
-// нужна ли вторая ветвь (второе ядро):
+// нужна ли вторая ветвь (второе ядро); при выборе по именам они берутся только из выбранных:
 //   RT_GO_CORE_PKGS  выбранные пакеты, где core-marks.cjs нашёл размеченные тесты (core,
 //                    known-core); при полном выборе — все такие пакеты
 //   RT_GO_CORE_RUN   выражение -test.run по именам этих тестов; пусто, если размеченных нет
@@ -35,12 +61,20 @@
 //                    с сужением RT_PW_GREP) находит тест; список не получен — все выбранные
 //   RT_KERNEL_TOUCHED  1, если изменён код запуска или перезапуска ядра либо watchdog
 //                    (KERNEL_PATHS, D-07) или выбор полный по любой причине; иначе 0
+// Строки 9–13: RT_GO_SEQ — порядок и состав Go первой ветви по именам (пусто — пакеты целиком,
+// откат); RT_SPECS_FIRST — спеки затронутых областей; RT_PW_INVERT — значение --grep-invert
+// (отсев яруса full, заполняет 148.1-12; здесь всегда пусто); RT_HARNESS — изменена обвязка
+// стенда; RT_AREAS — затронутые области.
 // Сбой расчёта ядра не роняет выбор: списки расширяются (все пакеты, все спеки), не сужаются.
-// Причины выбора — в stderr при --explain.
+// Причины выбора — в stderr при --explain; последняя строка «вид выбора: …» (полный | обвязка |
+// зависимости | области | смоук) читают run.sh и select-replay.mjs.
 //
 // Использование (из корня репозитория):
-//   node scripts/router/select-changed.mjs [--base <ref>] [--explain]
+//   node scripts/router/select-changed.mjs [--base <ref>] [--head <ref>] [--explain]
 //   node scripts/router/select-changed.mjs --files a,b,c [--explain]   # без git
+// --head <ref> — сравнивать <база>..<head> без рабочего дерева (прогон по слитым PR,
+// select-replay.mjs); карта областей, факты тестов и граф импортов при этом берутся из
+// рабочей копии. Без --base база — merge-base origin/main и head (или HEAD).
 //
 // RT_PW_GREP: для названий вида `page:<маршрут> theme:… vp:…` оставляет только затронутые
 // маршруты. Форма с отрицательным просмотром вперёд, а не `page:(a|b) `, чтобы тесты без
@@ -52,10 +86,12 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import coreMarks from './core-marks.cjs';
 
-const { goMarks, analyzeGo } = coreMarks;
+const { goMarks, analyzeGo, loadAreas, matchGlob, testFacts, goTestFacts, specTestFacts, areaOfText } = coreMarks;
 
 // Изменённые файлы текущего выбора: goMarks читает только индекс, новые тесты он не видит
 let changedFiles = [];
+// Границы сравнения: from — база (null без git), to — head (null — рабочее дерево)
+const ctx = { from: null, to: null };
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SPEC_DIR = 'frontend/tests/router';
@@ -63,19 +99,29 @@ const SPEC_DIR = 'frontend/tests/router';
 // Только безопасные имена путей: значения уходят в eval и в командную строку.
 const SAFE_PATH = /^[A-Za-z0-9_.][A-Za-z0-9_./-]*$/;
 const SAFE_ROUTE = /^[a-z][a-z0-9_-]*$/;
+const TEST_NAME = /^TestRouter[A-Za-z0-9_]+$/;
+const SEQ_ENTRY = /^[A-Za-z0-9_./-]+:TestRouter[A-Za-z0-9_]+$/;
 
-// Обвязка и сборка: изменение требует полного набора.
-const HARNESS_ALL = [
+// Правка самого выбора: единственная причина полного выбора (RTR-02).
+const SELECTOR_SELF = [/^scripts\/router\/(select-changed\.mjs|areas\.json|core-marks\.cjs|import-graph\.mjs)$/];
+
+// Обвязка стенда: RT_HARNESS=1 без полного выбора (набор обвязки — 148.1-11). Цели стенда в
+// Makefile разбирает makefileStand(), internal/routertest — ветка Go.
+const HARNESS = [
   /^scripts\/router\//,
-  /^Makefile$/,
+  /^scripts\/version\.sh$/,
   /^frontend\/playwright\.router\.config\.ts$/,
   /^frontend\/tests\/router\/lib\//,
-  /^frontend\/tests\/router\/global-(setup|teardown)\.ts$/,
-  /^frontend\/package\.json$/,
-  /^frontend\/package-lock\.json$/,
-  /^go\.mod$/,
-  /^go\.sum$/
+  /^frontend\/tests\/router\/global-(setup|teardown)\.ts$/
 ];
+
+// Зависимости: узкий набор (смоук, pages, канарейки), при мажоре — шире (D-13).
+const DEPS = [/^frontend\/package\.json$/, /^frontend\/package-lock\.json$/, /^go\.mod$/, /^go\.sum$/];
+// Смена версии этих пакетов npm считается мажорной (любая).
+const WATCHED_NPM = new Set(['svelte', 'vite', '@playwright/test']);
+
+// Цели Makefile, влияющие на стенд: сборка для роутеров и версия.
+const STAND_TARGET = /^(router-[A-Za-z0-9_-]+|update-version|version)$/;
 
 // Код запуска или перезапуска ядра и watchdog (D-07): изменение даёт RT_KERNEL_TOUCHED=1 —
 // run.sh берёт полное окно смоука. `_test.go` не считаются. Файл при этом разбирается как
@@ -95,16 +141,6 @@ const KERNEL_PATHS = [
   /^cmd\/xcp\/[\w]+\.go$/
 ];
 
-// Данные роутерных тестов: их получают Go-тесты через окружение go-suite.sh (XCP_RT_LINKS,
-// XCP_RT_INPUTS, XCP_RT_CONTRACT, XCP_RT_ROUTING_CONTRACT), а спеки — через lib/nodes-api.ts. Граф импортов и
-// `go list -deps` этих связей не видят, поэтому правка данных даёт полный выбор (D-25).
-// Новый путь данных для тестов добавлять сюда (см. комментарий в go-suite.sh).
-const TEST_DATA_ALL = [
-  /(^|\/)testdata\//,
-  /^frontend\/src\/lib\/sourcesContract\.json$/,
-  /^frontend\/src\/lib\/routingContract\.json$/
-];
-
 // Ничего не добавляют (смоук идёт всё равно): документация, CI, хуки, служебное.
 const IGNORED = [
   /\.md$/,
@@ -116,9 +152,11 @@ const IGNORED = [
   /^LICENSE/,
   /^\.gitignore$/,
   /^\.golangci\.ya?ml$/,
-  // уборка ПК и статическая проверка CI на роутер не влияют (D-25)
+  // уборка ПК и статические проверки CI на роутер не влияют (D-25)
   /^scripts\/tidy\.sh$/,
-  /^scripts\/check-report-paths\.js$/,
+  /^scripts\/check-[\w-]+\.js$/,
+  /^scripts\/release-guard\.js$/,
+  /^scripts\/lib\//,
   // Playwright-спеки с подменой сети и юнит-тесты фронтенда на роутерах не запускаются
   /^frontend\/tests\/(?!router\/)/,
   /^frontend\/src\/.*\.test\.ts$/,
@@ -138,7 +176,28 @@ const FRONTEND_ALL = [
 ];
 
 function git(args) {
-  return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' });
+  return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+}
+
+/** Текст файла в ref (null — нет файла или ref). */
+function gitShow(ref, file) {
+  try {
+    return execFileSync('git', ['show', `${ref}:${file}`], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      maxBuffer: 64 * 1024 * 1024
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** Текст файла на стороне head: в ref, если задан --head, иначе в рабочем дереве. */
+function headText(file) {
+  if (ctx.to) return gitShow(ctx.to, file);
+  const abs = path.join(ROOT, file);
+  return existsSync(abs) ? readFileSync(abs, 'utf8') : null;
 }
 
 function modulePath() {
@@ -216,21 +275,220 @@ function listRouterSpecs() {
     .map((f) => `tests/router/${f}`);
 }
 
-function changedFromGit(base) {
+/** Изменённые файлы: { files, from, to }. С head — только diff <база>..<head>, без рабочего дерева. */
+function changedFromGit(base, head) {
   let from = base;
   if (!from) {
-    from = git(['merge-base', 'origin/main', 'HEAD']).trim();
+    from = git(['merge-base', 'origin/main', head || 'HEAD']).trim();
   }
-  const files = git(['diff', '--name-only', '--no-renames', from]).split('\n').filter(Boolean);
-  const status = git(['status', '--porcelain', '--untracked-files=all'])
+  const files = git(['diff', '--name-only', '--no-renames', from, ...(head ? [head] : [])])
     .split('\n')
-    .filter(Boolean)
-    .map((l) => l.slice(3));
-  for (const s of status) {
-    // переименование «старое -> новое»: значимы оба имени
-    for (const part of s.split(' -> ')) files.push(part);
+    .filter(Boolean);
+  if (!head) {
+    const status = git(['status', '--porcelain', '--untracked-files=all'])
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => l.slice(3));
+    for (const s of status) {
+      // переименование «старое -> новое»: значимы оба имени
+      for (const part of s.split(' -> ')) files.push(part);
+    }
   }
-  return [...new Set(files.map((f) => path.posix.normalize(f)))];
+  return { files: [...new Set(files.map((f) => path.posix.normalize(f)))], from, to: head || null };
+}
+
+// --- зависимости: мажорное обновление (D-13) ----------------------------------------------
+
+/** Мажорная часть спецификации версии npm: `^5.1.0` → 5, `~0.4.2` → 0.4; нестандартная — вся строка. */
+function majorOf(spec) {
+  const m = /(\d+)(?:\.(\d+))?/.exec(String(spec));
+  if (!m) return String(spec);
+  return m[1] === '0' && m[2] !== undefined ? `0.${m[2]}` : m[1];
+}
+
+/** Мажор npm: причина (строка) или null. Нет базы или текста — мажор (расширение). */
+function npmMajorReason(files) {
+  if (!ctx.from) return 'нет базы сравнения — считается мажором';
+  const baseTxt = gitShow(ctx.from, 'frontend/package.json');
+  const headTxt = headText('frontend/package.json');
+  if (baseTxt === null || headTxt === null) return 'package.json не прочитан — считается мажором';
+  let a;
+  let b;
+  try {
+    a = JSON.parse(baseTxt);
+    b = JSON.parse(headTxt);
+  } catch {
+    return 'package.json не разобран — считается мажором';
+  }
+  const flat = (o) => ({
+    ...(o.optionalDependencies || {}),
+    ...(o.peerDependencies || {}),
+    ...(o.devDependencies || {}),
+    ...(o.dependencies || {})
+  });
+  const da = flat(a);
+  const db = flat(b);
+  for (const name of new Set([...Object.keys(da), ...Object.keys(db)])) {
+    if (da[name] === db[name] || da[name] === undefined || db[name] === undefined) continue;
+    if (WATCHED_NPM.has(name)) return `${name}: ${da[name]} → ${db[name]}`;
+    if (majorOf(da[name]) !== majorOf(db[name])) return `${name}: ${da[name]} → ${db[name]}`;
+  }
+  if (files.has('frontend/package-lock.json')) {
+    const baseLock = gitShow(ctx.from, 'frontend/package-lock.json');
+    const headLock = headText('frontend/package-lock.json');
+    if (baseLock === null || headLock === null) return 'package-lock.json не прочитан — считается мажором';
+    try {
+      const la = JSON.parse(baseLock).packages || {};
+      const lb = JSON.parse(headLock).packages || {};
+      for (const name of WATCHED_NPM) {
+        const va = (la[`node_modules/${name}`] || {}).version;
+        const vb = (lb[`node_modules/${name}`] || {}).version;
+        if (va !== vb) return `${name} (lock): ${va ?? '-'} → ${vb ?? '-'}`;
+      }
+    } catch {
+      return 'package-lock.json не разобран — считается мажором';
+    }
+  }
+  return null;
+}
+
+/** Мажор Go: смена `go`, `toolchain` или модуля с суффиксом /vN. Нет базы — мажор. */
+function goMajorReason() {
+  if (!ctx.from) return 'нет базы сравнения — считается мажором';
+  const baseTxt = gitShow(ctx.from, 'go.mod');
+  const headTxt = headText('go.mod');
+  if (baseTxt === null || headTxt === null) return 'go.mod не прочитан — считается мажором';
+  const keys = (text) => {
+    const set = new Set();
+    for (const line of text.split('\n')) {
+      const t = line.replace(/\/\/.*$/, '').trim();
+      let m = /^(go|toolchain)\s+(\S+)$/.exec(t);
+      if (m) set.add(`${m[1]} ${m[2]}`);
+      m = /^(?:require\s+)?(\S+\/v\d+)\s+v\S+/.exec(t);
+      if (m) set.add(`module ${m[1]}`);
+      m = /^module\s+(\S+)$/.exec(t);
+      if (m) set.add(`module ${m[1]}`);
+    }
+    return set;
+  };
+  const ka = keys(baseTxt);
+  const kb = keys(headTxt);
+  const diff = [...ka].filter((x) => !kb.has(x)).concat([...kb].filter((x) => !ka.has(x)));
+  return diff.length > 0 ? diff.join(', ') : null;
+}
+
+// --- Makefile ---------------------------------------------------------------------------
+
+/** Владельцы строк Makefile: 'comment' | 'blank' | имя цели | 'top' (переменные и условия). */
+function makefileOwners(text) {
+  const lines = text.split('\n');
+  const owners = [];
+  let cur = 'top';
+  let cont = false;
+  for (const line of lines) {
+    if (cont) {
+      owners.push(cur);
+    } else if (/^\s*$/.test(line)) {
+      owners.push('blank');
+    } else if (/^\s*#/.test(line)) {
+      owners.push('comment');
+    } else if (/^\t/.test(line)) {
+      owners.push(cur);
+    } else if (/^\s*[A-Za-z_][A-Za-z0-9_]*\s*[:?+]?=/.test(line) || /^\s*(ifeq|ifneq|ifdef|ifndef|else|endif|include)\b/.test(line)) {
+      cur = 'top';
+      owners.push('top');
+    } else {
+      const m = /^([^\s:=][^:=]*?)\s*:(?!=)/.exec(line);
+      if (m) cur = m[1].trim().split(/\s+/)[0];
+      owners.push(m ? cur : 'top');
+    }
+    cont = /\\\s*$/.test(line);
+  }
+  return owners;
+}
+
+/** Правка Makefile затрагивает цели стенда или VERSION: { stand, why }. Нет базы — стенд (расширение). */
+function makefileStand() {
+  if (!ctx.from) return { stand: true, why: 'нет базы сравнения — считается правкой обвязки' };
+  let diff;
+  try {
+    diff = git(['diff', '-U0', '--no-color', '--no-renames', ctx.from, ...(ctx.to ? [ctx.to] : []), '--', 'Makefile']);
+  } catch {
+    return { stand: true, why: 'diff Makefile не получен — считается правкой обвязки' };
+  }
+  const baseTxt = gitShow(ctx.from, 'Makefile');
+  const headTxt = headText('Makefile');
+  const baseLines = (baseTxt ?? '').split('\n');
+  const headLines = (headTxt ?? '').split('\n');
+  const baseOwn = makefileOwners(baseTxt ?? '');
+  const headOwn = makefileOwners(headTxt ?? '');
+  const standLine = (owner, text) => {
+    if (owner === 'comment' || owner === 'blank') return false;
+    if (STAND_TARGET.test(owner)) return true;
+    return owner === 'top' && /\b(VERSION|BINARY_NAME)\b/.test(text);
+  };
+  for (const m of diff.matchAll(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)) {
+    const oldStart = Number(m[1]);
+    const oldLen = m[2] === undefined ? 1 : Number(m[2]);
+    const newStart = Number(m[3]);
+    const newLen = m[4] === undefined ? 1 : Number(m[4]);
+    for (let i = 0; i < oldLen; i++) {
+      const idx = oldStart - 1 + i;
+      if (standLine(baseOwn[idx] ?? 'top', baseLines[idx] ?? '')) return { stand: true, why: `строка ${oldStart + i} (цель ${baseOwn[idx]})` };
+    }
+    for (let i = 0; i < newLen; i++) {
+      const idx = newStart - 1 + i;
+      if (standLine(headOwn[idx] ?? 'top', headLines[idx] ?? '')) return { stand: true, why: `строка ${newStart + i} (цель ${headOwn[idx]})` };
+    }
+  }
+  return { stand: false, why: '' };
+}
+
+// --- факты тестов и порядок -------------------------------------------------------------
+
+/** Факты роутерных тестов: индекс git плюс новые (ещё не в индексе) изменённые тесты с диска. */
+function buildFacts(changed) {
+  const rows = testFacts(ROOT);
+  const have = new Set(rows.map((r) => r.file));
+  for (const file of changed) {
+    if (!SAFE_PATH.test(file) || have.has(file)) continue;
+    const abs = path.join(ROOT, file);
+    if (!existsSync(abs)) continue;
+    if (/^(internal|cmd)\/.*_test\.go$/.test(file) && !file.startsWith('internal/routertest/')) {
+      const text = readFileSync(abs, 'utf8');
+      if (text.split('\n', 1)[0].trim() !== '//go:build router') continue;
+      const { area } = areaOfText(text);
+      for (const t of goTestFacts(text)) rows.push({ kind: 'go', file, pkg: path.posix.dirname(file), spec: null, area, ...t });
+    } else if (/^frontend\/tests\/router\/[\w.-]+\.spec\.ts$/.test(file)) {
+      const text = readFileSync(abs, 'utf8');
+      const { area } = areaOfText(text);
+      for (const t of specTestFacts(text)) rows.push({ kind: 'pw', file, pkg: null, spec: file.replace(/^frontend\//, ''), area, ...t });
+    }
+  }
+  return rows;
+}
+
+/** Падения Go-тестов по истории за 30 дней: Map 'go:<Имя>' → число падений (с подтестами) или null. */
+async function goFailScores(reasons) {
+  try {
+    const hist = await import(pathToFileURL(path.join(ROOT, 'scripts/router/history.mjs')));
+    const rows = hist.readHistory();
+    if (rows.length === 0) {
+      reasons.push('порядок: история пуста — без сортировки по частоте падений');
+      return null;
+    }
+    const scores = new Map();
+    for (const [check, v] of hist.failFreq(rows, { days: 30 })) {
+      if (!check.startsWith('go:')) continue;
+      const base = check.split('/', 1)[0];
+      scores.set(base, (scores.get(base) || 0) + v.fails);
+    }
+    reasons.push(`порядок: по частоте падений за 30 дней (строк истории ${rows.length})`);
+    return scores;
+  } catch (e) {
+    reasons.push(`порядок: история не прочитана (${String(e.message ?? e).split('\n', 1)[0]}) — без сортировки по частоте падений`);
+    return null;
+  }
 }
 
 /** Решение по списку изменённых файлов. */
@@ -240,43 +498,134 @@ async function select(changed) {
   const specsAll = listRouterSpecs();
   const res = {
     all: false,
-    goPkgs: new Set(),
-    specs: new Set(),
+    goSel: new Map(), // 'пакет:Тест' → true (затронутая область) | false (канарейка, зависимости)
+    goAllPkgs: false, // все роутерные пакеты целиком (откат, мажор Go)
+    specsDirect: new Set(), // спеки затронутых областей, правок и маршрутов — идут первыми
+    specsOther: new Set(), // канарейки и зависимости
+    specsForced: new Set(), // выбраны не по маршрутам: без сужения обхода
     grepRoutes: null, // null — без сужения
+    areas: new Set(), // затронутые области
+    harness: false,
+    deps: false,
     kernelTouched: false, // затронут код запуска ядра или watchdog (KERNEL_PATHS)
+    kind: 'смоук',
     reasons
   };
   const escalate = (why) => {
     res.all = true;
     reasons.push(`всё: ${why}`);
   };
+  const warnUnknown = (file) =>
+    reasons.push(`предупреждение: неизвестный файл ${file} — только смоук; добавьте путь в areas.json или в список не влияющих`);
+
+  // Карта областей и факты тестов: без них имена не выбрать — расширение до полного выбора
+  let areaMap;
+  let facts;
+  try {
+    areaMap = loadAreas(ROOT).areas;
+    facts = buildFacts(changed);
+  } catch (e) {
+    escalate(`карта областей или факты тестов не получены (${String(e.message ?? e).split('\n', 1)[0]})`);
+    return { res, routerPkgs, specsAll };
+  }
+  const areasOf = (file) => Object.keys(areaMap).filter((n) => areaMap[n].paths.some((g) => matchGlob(g, file)));
+  const goRows = facts.filter((r) => r.kind === 'go');
+  const specOfRow = (r) => r.spec;
+  const addGo = (pkg, test, direct) => {
+    const key = `${pkg}:${test}`;
+    res.goSel.set(key, direct || res.goSel.get(key) === true);
+  };
+  const addWholePkg = (pkg, direct) => {
+    for (const r of goRows) if (r.pkg === pkg) addGo(r.pkg, r.test, direct);
+  };
+  const specSelectable = (s) => specsAll.includes(s);
+
+  /** Тесты области: Go и спеки (факты + поле tests). Нет теста из tests — расширение. */
+  const addAreaTests = (name, direct) => {
+    const a = areaMap[name];
+    let go = 0;
+    const specs = new Set();
+    for (const r of goRows) if (r.area === name) { addGo(r.pkg, r.test, direct); go++; }
+    for (const r of facts) if (r.kind === 'pw' && r.area === name && specOfRow(r)) specs.add(specOfRow(r));
+    for (const t of a.tests || []) {
+      if (t.startsWith('go:')) {
+        const hit = goRows.filter((r) => r.test === t.slice(3));
+        if (hit.length === 0) escalate(`область ${name}: тест ${t} из поля tests не найден`);
+        for (const r of hit) { addGo(r.pkg, r.test, direct); go++; }
+      } else {
+        specs.add(t);
+      }
+    }
+    const pick = [...specs].filter(specSelectable);
+    for (const s of pick) {
+      (direct ? res.specsDirect : res.specsOther).add(s);
+      res.specsForced.add(s);
+    }
+    return { go, specs: pick.length };
+  };
+  /** Канарейки: по одному Go-тесту и спеку каждой области (D-11). */
+  const addCanaries = (why) => {
+    for (const [name, a] of Object.entries(areaMap)) {
+      if (a.canary.go) {
+        const hit = goRows.filter((r) => r.test === a.canary.go);
+        if (hit.length === 0) escalate(`канарейка ${a.canary.go} области ${name} не найдена`);
+        for (const r of hit) if (!res.goSel.has(`${r.pkg}:${r.test}`)) addGo(r.pkg, r.test, false);
+      }
+      if (a.canary.spec && specSelectable(a.canary.spec)) {
+        res.specsForced.add(a.canary.spec);
+        if (!res.specsDirect.has(a.canary.spec)) res.specsOther.add(a.canary.spec);
+      }
+    }
+    reasons.push(`канарейки всех областей (${why})`);
+  };
 
   const touchedSrc = [];
   const touchedSpecs = new Set();
-  const goChanged = new Set(); // каталоги изменённых Go-пакетов
-  const goTestDirs = new Set(); // каталоги с изменёнными _test.go
+  const goChanged = new Set(); // каталоги изменённых Go-пакетов без области (откат на пакет)
+  const goTestFiles = new Set(); // изменённые _test.go
+  const depFiles = new Set();
+  let makefile = false;
   let pwAll = false;
-  let goAll = false;
+  let sharedHit = false;
 
-  for (const raw of changed) {
-    const file = raw;
+  for (const file of changed) {
     if (!SAFE_PATH.test(file)) {
       escalate(`небезопасное имя файла ${JSON.stringify(file)}`);
       continue;
     }
-    // Признак не отменяет разбор файла: он идёт дальше как обычно (выбор пакетов)
+    // Признак не отменяет разбор файла: он идёт дальше как обычно (выбор тестов)
     if (!file.endsWith('_test.go') && KERNEL_PATHS.some((re) => re.test(file))) {
       res.kernelTouched = true;
       reasons.push(`${file}: код запуска или перезапуска ядра либо watchdog — полное окно смоука`);
     }
-    if (HARNESS_ALL.some((re) => re.test(file))) {
-      escalate(`${file}: обвязка проверки или сборка`);
+    if (SELECTOR_SELF.some((re) => re.test(file))) {
+      escalate(`${file}: правка самого выбора`);
       continue;
     }
-    if (TEST_DATA_ALL.some((re) => re.test(file))) {
-      escalate(
-        `${file}: данные роутерных тестов (Go-тесты получают их через окружение go-suite.sh, спеки — через lib/nodes-api.ts)`
-      );
+    if (HARNESS.some((re) => re.test(file))) {
+      res.harness = true;
+      reasons.push(`${file}: обвязка стенда — набор обвязки, полный выбор не нужен`);
+      continue;
+    }
+    if (DEPS.some((re) => re.test(file))) {
+      depFiles.add(file);
+      continue;
+    }
+    if (file === 'Makefile') {
+      makefile = true;
+      continue;
+    }
+    // Контракты и данные тестов — области contract-* (поле tests)
+    const contract = areasOf(file).filter((n) => areaMap[n].tests);
+    if (contract.length > 0) {
+      for (const n of contract) {
+        res.areas.add(n);
+        reasons.push(`${file}: область ${n} — проверки из поля tests`);
+      }
+      continue;
+    }
+    if (/(^|\/)testdata\//.test(file)) {
+      warnUnknown(file);
       continue;
     }
     if (IGNORED.some((re) => re.test(file))) {
@@ -301,60 +650,153 @@ async function select(changed) {
     }
     if (file.startsWith('frontend/src/')) {
       touchedSrc.push(file.slice('frontend/'.length));
+      for (const n of areasOf(file)) {
+        res.areas.add(n);
+        reasons.push(`${file}: область ${n} (выбор — по графу импортов)`);
+      }
       continue;
     }
     if (file.startsWith('frontend/')) {
-      escalate(`${file}: неизвестный файл фронтенда`);
+      warnUnknown(file);
       continue;
     }
     if (/^(internal|cmd)\//.test(file) || /^[\w.-]+\.go$/.test(file)) {
+      if (file.endsWith('_test.go')) {
+        goTestFiles.add(file);
+        continue;
+      }
+      if (file.startsWith('internal/routertest/')) {
+        res.harness = true;
+        reasons.push(`${file}: помощники роутерных тестов — обвязка; тесты пакетов, зависящих от них, выбираются как раньше`);
+      }
+      const hit = areasOf(file);
+      if (hit.length > 0) {
+        for (const n of hit) {
+          res.areas.add(n);
+          if (areaMap[n].shared) sharedHit = true;
+          reasons.push(`${file}: область ${n}${areaMap[n].shared ? ' (общий код)' : ''}`);
+        }
+        continue;
+      }
       const dir = goDirOf(file);
       if (dir === null) {
-        // Данные без пакета рядом (например, наборы для тестов другого пакета): владельца
-        // не определить — все роутерные пакеты
-        goAll = true;
+        // Данные без пакета рядом: владельца не определить — все роутерные пакеты
+        res.goAllPkgs = true;
         reasons.push(`${file}: нет пакета Go рядом — все роутерные пакеты`);
-      } else if (file.endsWith('_test.go')) {
-        goTestDirs.add(dir);
-        reasons.push(`${file}: тест пакета ${dir}`);
       } else {
         goChanged.add(dir);
-        reasons.push(`${file}: код пакета ${dir}`);
+        reasons.push(`${file}: нет области — пакет ${dir} целиком`);
       }
       continue;
     }
-    escalate(`${file}: неизвестный файл`);
+    // прочие файлы продукта, покрытые картой (scripts/setup.sh)
+    const hit = areasOf(file);
+    if (hit.length > 0) {
+      for (const n of hit) {
+        res.areas.add(n);
+        if (areaMap[n].shared) sharedHit = true;
+        reasons.push(`${file}: область ${n}`);
+      }
+      continue;
+    }
+    warnUnknown(file);
   }
 
-  // --- Go ---------------------------------------------------------------------
-  if (!res.all && goAll) {
-    routerPkgs.forEach((p) => res.goPkgs.add(p));
+  // --- Makefile ---------------------------------------------------------------
+  if (makefile && !res.all) {
+    const mk = makefileStand();
+    if (mk.stand) {
+      res.harness = true;
+      reasons.push(`Makefile: ${mk.why || 'изменены цели стенда или VERSION'} — обвязка стенда`);
+    } else {
+      reasons.push('Makefile: изменены цели и переменные вне стенда — на роутер не влияет');
+    }
   }
-  if (!res.all) {
-    for (const dir of goTestDirs) {
-      if (routerPkgs.includes(dir)) {
-        res.goPkgs.add(dir);
-        reasons.push(`${dir}: изменён тест роутерного пакета — пакет выбран`);
-      } else {
-        reasons.push(`${dir}: изменён обычный тест, роутерных тестов в пакете нет`);
+
+  // --- зависимости (D-13) -----------------------------------------------------
+  if (depFiles.size > 0 && !res.all) {
+    res.deps = true;
+    const npmTouched = depFiles.has('frontend/package.json') || depFiles.has('frontend/package-lock.json');
+    const goTouched = depFiles.has('go.mod') || depFiles.has('go.sum');
+    const files = [...depFiles].join(', ');
+    // патч и минор: pages.spec.ts без сужения и канарейки всех областей
+    const pages = 'tests/router/pages.spec.ts';
+    if (specSelectable(pages)) {
+      res.specsOther.add(pages);
+      res.specsForced.add(pages);
+    }
+    addCanaries(`зависимости: ${files}`);
+    reasons.push(`${files}: зависимости — смоук, pages без сужения и канарейки`);
+    if (npmTouched) {
+      const why = npmMajorReason(depFiles);
+      if (why) {
+        specsAll.forEach((s) => {
+          res.specsOther.add(s);
+          res.specsForced.add(s);
+        });
+        reasons.push(`npm: мажорное обновление или смена Svelte/Vite/Playwright (${why}) — канарейки и все спеки`);
       }
     }
-    if (goChanged.size > 0) {
+    if (depFiles.has('go.mod')) {
+      const why = goMajorReason();
+      if (why) {
+        res.goAllPkgs = true;
+        reasons.push(`go.mod: мажорное обновление или смена Go (${why}) — канарейки и все Go-тесты`);
+      }
+    } else if (goTouched) {
+      reasons.push('go.sum: без go.mod — патч/минор');
+    }
+  }
+
+  // --- области: тесты по именам -----------------------------------------------
+  if (!res.all) {
+    for (const name of [...res.areas].sort()) {
+      const n = addAreaTests(name, true);
+      reasons.push(`область ${name}: тестов Go ${n.go}, спеков ${n.specs}`);
+    }
+    if (sharedHit) addCanaries('правка общего кода');
+  }
+
+  // --- изменённые роутерные тесты ---------------------------------------------
+  if (!res.all) {
+    for (const file of [...goTestFiles].sort()) {
+      const dir = path.posix.dirname(file);
+      const fileRows = goRows.filter((r) => r.file === file);
+      if (fileRows.length > 0 && fileRows[0].area) {
+        for (const r of fileRows) addGo(r.pkg, r.test, true);
+        reasons.push(`${file}: изменён роутерный тест — тесты файла (${fileRows.length})`);
+      } else if (routerPkgs.includes(dir)) {
+        addWholePkg(dir, true);
+        reasons.push(
+          fileRows.length > 0
+            ? `${file}: нет строки router-area — пакет ${dir} целиком`
+            : `${file}: тестов TestRouter в файле нет (помощники, обычный тест или удалён) — пакет ${dir} целиком`
+        );
+      } else {
+        reasons.push(`${file}: изменён обычный тест, роутерных тестов в пакете ${dir} нет`);
+      }
+    }
+  }
+
+  // --- пакеты без области: зависимости go list --------------------------------
+  if (!res.all) {
+    if (res.goAllPkgs) {
+      reasons.push('Go: все роутерные пакеты целиком');
+    } else if (goChanged.size > 0) {
       const mod = modulePath();
       const changedImports = new Set([...goChanged].map((d) => (d === '.' ? mod : `${mod}/${d}`)));
+      let any = false;
       for (const pkg of routerPkgs) {
-        if (res.goPkgs.has(pkg)) continue;
         const own = `${mod}/${pkg}`;
         const deps = depsOf(pkg);
         const hit = [...changedImports].find((p) => p === own || deps.has(p));
         if (hit) {
-          res.goPkgs.add(pkg);
-          reasons.push(`${pkg}: зависит от изменённого пакета ${hit.slice(mod.length + 1) || '.'}`);
+          addWholePkg(pkg, true);
+          any = true;
+          reasons.push(`${pkg}: зависит от изменённого пакета ${hit.slice(mod.length + 1) || '.'} — пакет целиком`);
         }
       }
-      if (![...routerPkgs].some((p) => res.goPkgs.has(p))) {
-        reasons.push('Go: ни один роутерный пакет не затронут');
-      }
+      if (!any) reasons.push('Go: ни один роутерный пакет не затронут');
     }
   }
 
@@ -388,40 +830,46 @@ async function select(changed) {
       }
     }
 
+    for (const s of touchedSpecs) {
+      res.specsDirect.add(s);
+      res.specsForced.add(s);
+    }
+
+    // Обход всех страниц (`// e2e-pages: *`) сужается до маршрутов, только если ни одна
+    // причина, кроме маршрутов, его не выбрала
+    const star = new Set();
+    for (const spec of specsAll) {
+      const text = readFileSync(path.join(ROOT, 'frontend', spec), 'utf8');
+      const ann = [...text.matchAll(/\/\/\s*e2e-pages:\s*([^\n]+)/g)].flatMap((m) =>
+        m[1].split(',').map((r) => r.trim())
+      );
+      if (ann.includes('*')) star.add(spec);
+    }
+
     if (pwAll) {
-      specsAll.forEach((s) => res.specs.add(s));
-    } else if (affected.size > 0 || touchedSpecs.size > 0) {
-      const star = new Set();
+      specsAll.forEach((s) => res.specsDirect.add(s));
+    } else if (affected.size > 0) {
       for (const spec of specsAll) {
-        const text = readFileSync(path.join(ROOT, 'frontend', spec), 'utf8');
-        const ann = [...text.matchAll(/\/\/\s*e2e-pages:\s*([^\n]+)/g)].flatMap((m) =>
-          m[1].split(',').map((r) => r.trim())
-        );
-        const isStar = ann.includes('*');
-        if (isStar) star.add(spec);
-        if (touchedSpecs.has(spec)) {
-          res.specs.add(spec);
-          continue;
-        }
-        if (affected.size === 0) continue;
-        if (isStar) {
-          res.specs.add(spec);
+        if (res.specsForced.has(spec)) continue;
+        if (star.has(spec)) {
+          res.specsDirect.add(spec);
           reasons.push(`${spec}: обходит все страницы — сужается до затронутых`);
           continue;
         }
+        const text = readFileSync(path.join(ROOT, 'frontend', spec), 'utf8');
         const routes = specRoutes(text, model.routes);
         if (routes === null) {
-          res.specs.add(spec);
+          res.specsDirect.add(spec);
           reasons.push(`${spec}: маршруты не определены — запускается всегда`);
         } else if ([...routes].some((r) => affected.has(r))) {
-          res.specs.add(spec);
+          res.specsDirect.add(spec);
           reasons.push(`${spec}: открывает затронутые страницы`);
         }
       }
-      // Сужение по маршрутам, только если ни один спек обхода не изменён сам
-      const walkTouched = [...touchedSpecs].some((s) => star.has(s));
-      const walkSelected = [...res.specs].some((s) => star.has(s));
-      if (walkSelected && !walkTouched && affected.size > 0) {
+      const all = new Set([...res.specsDirect, ...res.specsOther]);
+      const walkSelected = [...all].some((s) => star.has(s));
+      const walkForced = [...res.specsForced].some((s) => star.has(s));
+      if (walkSelected && !walkForced) {
         const routes = [...affected].filter((r) => SAFE_ROUTE.test(r)).sort();
         if (routes.length !== affected.size) {
           reasons.push('маршрут с небезопасным именем — обход идёт целиком');
@@ -432,14 +880,14 @@ async function select(changed) {
     }
   }
 
-  return { res, routerPkgs, specsAll };
+  return { res, routerPkgs, specsAll, routerGoRows: goRows };
 }
 
 /** Размеченные тесты Go в пакетах `./internal/…`: { pkgs, run, rows } (rows — для причин). */
-function goCoreOf(goPkgs) {
+function goCoreOf(goPkgs, only) {
   const want = goPkgs.map((p) => p.replace(/^\.\//, ''));
   // Пустой список goMarks понимает как «все пакеты»: пустой выбор отдаём сами
-  const rows = want.length > 0 ? goMarks(ROOT, want) : [];
+  let rows = want.length > 0 ? goMarks(ROOT, want) : [];
   // Новые (ещё не в индексе) и изменённые роутерные тесты читаем с диска сами
   const seen = new Set(rows.map((r) => `${r.pkg}\t${r.test}`));
   for (const file of changedFiles) {
@@ -455,6 +903,8 @@ function goCoreOf(goPkgs) {
       rows.push({ pkg, test: m.test, reason: m.reason, file });
     }
   }
+  // Выбор по именам: вторая ветвь берёт только выбранные размеченные тесты
+  if (only) rows = rows.filter((r) => only.has(`${r.pkg}:${r.test}`));
   const names = [
     ...new Set(rows.map((r) => r.test).filter((t) => /^TestRouter[A-Za-z0-9_]+$/.test(t)))
   ].sort();
@@ -551,12 +1001,13 @@ function pwCoreOf(specs, grep) {
  * Тесты выбора, зависящие от ядра (D-01, D-03, D-04): Go — размеченные core/known-core,
  * Playwright — спеки с тегом @core. Ошибка расчёта не роняет выбор, а расширяет списки
  * до безопасных значений: все выбранные пакеты (без отбора по именам) и все выбранные спеки.
+ * only — множество 'пакет:Тест' выбора по именам (null — выбор пакетами).
  */
-function coreSelection(goPkgs, specs, grep) {
+function coreSelection(goPkgs, specs, grep, only) {
   const reasons = [];
   let go;
   try {
-    go = goCoreOf(goPkgs);
+    go = goCoreOf(goPkgs, only);
     for (const r of go.rows) reasons.push(`ядро: go ./${r.pkg} ${r.test} (${r.reason})`);
   } catch (e) {
     reasons.push(`ядро: разметка Go не получена (${e.message}) — берутся все выбранные пакеты`);
@@ -577,26 +1028,43 @@ function coreSelection(goPkgs, specs, grep) {
 function coreSafeAll(routerPkgs, specsAll, reasons) {
   const all = routerPkgs.map((p) => `./${p}`);
   try {
-    const go = goCoreOf(all);
+    const go = goCoreOf(all, null);
     return { goPkgs: go.pkgs, goRun: go.run, specs: specsAll, reasons };
   } catch {
     return { goPkgs: all, goRun: '', specs: specsAll, reasons };
   }
 }
 
-function emit(res, routerPkgs, specsAll) {
+async function emit(res, routerPkgs, specsAll) {
   const quote = (s) => `'${s}'`;
-  const goList = (set) => routerPkgs.filter((p) => set.has(p)).map((p) => `./${p}`);
   let all = res.all;
   let go;
+  let seq = [];
   let specs;
+  let first = [];
   let grep = '';
+  let names = null; // выбор Go по именам: множество 'пакет:Тест'
   if (all) {
     go = routerPkgs.map((p) => `./${p}`);
     specs = specsAll;
   } else {
-    go = goList(res.goPkgs);
-    specs = specsAll.filter((s) => res.specs.has(s));
+    if (res.goAllPkgs) {
+      go = routerPkgs.map((p) => `./${p}`);
+    } else {
+      names = new Set(res.goSel.keys());
+      const scores = names.size > 0 ? await goFailScores(res.reasons) : null;
+      const score = (key) => (scores ? scores.get(`go:${key.slice(key.indexOf(':') + 1)}`) || 0 : 0);
+      const order = [...res.goSel.entries()].sort((x, y) => {
+        if (x[1] !== y[1]) return x[1] ? -1 : 1; // затронутые области — первыми
+        return score(y[0]) - score(x[0]) || (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0);
+      });
+      seq = order.map(([k]) => k);
+      const dirs = new Set(seq.map((k) => k.slice(0, k.indexOf(':'))));
+      go = routerPkgs.filter((p) => dirs.has(p)).map((p) => `./${p}`);
+    }
+    const sel = new Set([...res.specsDirect, ...res.specsOther]);
+    specs = specsAll.filter((s) => sel.has(s));
+    first = specs.filter((s) => res.specsDirect.has(s));
     if (res.grepRoutes) {
       grep = `^(?!.*page:(?!(?:${res.grepRoutes.join('|')}) ))`;
     }
@@ -604,11 +1072,17 @@ function emit(res, routerPkgs, specsAll) {
   const okList = (l) => l.every((x) => SAFE_PATH.test(x.replace(/^\.\//, '')));
   const okGrep = (g) => /^[A-Za-z0-9_|()?!^*.: -]*$/.test(g);
   const okRun = (r) => /^[A-Za-z0-9_|^$()]*$/.test(r);
-  let core = coreSelection(go, specs, grep);
+  const okSeq = (l) => l.every((x) => SEQ_ENTRY.test(x));
+  const okAreas = (l) => l.every((x) => /^[a-z][a-z0-9-]*$/.test(x));
+  const areas = [...res.areas].sort();
+  let core = coreSelection(go, specs, grep, names);
   // Последняя проверка безопасности вывода: иначе — всё
   if (
     !okList(go) ||
     !okList(specs) ||
+    !okList(first) ||
+    !okSeq(seq) ||
+    !okAreas(areas) ||
     !okGrep(grep) ||
     !okList(core.goPkgs) ||
     !okList(core.specs) ||
@@ -616,12 +1090,25 @@ function emit(res, routerPkgs, specsAll) {
   ) {
     all = true;
     go = routerPkgs.map((p) => `./${p}`);
+    seq = [];
     specs = specsAll;
+    first = [];
     grep = '';
     core = coreSafeAll(routerPkgs, specsAll, core.reasons);
     res.reasons.push('всё: значение выбора не прошло проверку безопасных символов');
   }
   res.reasons.push(...core.reasons);
+  const nothing = !all && go.length === 0 && specs.length === 0;
+  const kind = all
+    ? 'полный'
+    : res.harness
+      ? 'обвязка'
+      : res.deps
+        ? 'зависимости'
+        : nothing
+          ? 'смоук'
+          : 'области';
+  res.reasons.push(`вид выбора: ${kind}`);
   return [
     `RT_SELECT_ALL=${all ? 1 : 0}`,
     `RT_GO_PKGS=${quote(go.join(' '))}`,
@@ -630,15 +1117,21 @@ function emit(res, routerPkgs, specsAll) {
     `RT_GO_CORE_PKGS=${quote(core.goPkgs.join(' '))}`,
     `RT_GO_CORE_RUN=${quote(core.goRun)}`,
     `RT_SPECS_CORE=${quote(core.specs.join(' '))}`,
-    `RT_KERNEL_TOUCHED=${all || res.kernelTouched ? 1 : 0}`
+    `RT_KERNEL_TOUCHED=${all || res.kernelTouched ? 1 : 0}`,
+    `RT_GO_SEQ=${quote(all ? '' : seq.join(' '))}`,
+    `RT_SPECS_FIRST=${quote(first.join(' '))}`,
+    `RT_PW_INVERT=${quote('')}`,
+    `RT_HARNESS=${res.harness ? 1 : 0}`,
+    `RT_AREAS=${quote(areas.join(' '))}`
   ].join('\n');
 }
 
 async function main(argv) {
-  const args = { base: null, files: null, explain: false };
+  const args = { base: null, head: null, files: null, explain: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--base') args.base = argv[++i];
+    else if (a === '--head') args.head = argv[++i];
     else if (a === '--files') args.files = (argv[++i] ?? '').split(',').filter(Boolean);
     else if (a === '--explain') args.explain = true;
     else {
@@ -650,12 +1143,18 @@ async function main(argv) {
   let out;
   let reasons;
   try {
-    const changed = args.files
-      ? args.files.map((f) => path.posix.normalize(f))
-      : changedFromGit(args.base);
+    let changed;
+    if (args.files) {
+      changed = args.files.map((f) => path.posix.normalize(f));
+    } else {
+      const g = changedFromGit(args.base, args.head);
+      changed = g.files;
+      ctx.from = g.from;
+      ctx.to = g.to;
+    }
     changedFiles = changed;
     const { res, routerPkgs, specsAll } = await select(changed);
-    out = emit(res, routerPkgs, specsAll);
+    out = await emit(res, routerPkgs, specsAll);
     reasons = res.reasons;
   } catch (e) {
     // Не смогли посчитать — безопасный вариант: всё
@@ -666,8 +1165,17 @@ async function main(argv) {
         return [];
       }
     };
-    const res = { all: true, reasons: [`всё: выбор не удался (${e.message})`] };
-    out = emit(res, orEmpty(routerPackages), orEmpty(listRouterSpecs));
+    const res = {
+      all: true,
+      goSel: new Map(),
+      specsDirect: new Set(),
+      specsOther: new Set(),
+      areas: new Set(),
+      harness: false,
+      deps: false,
+      reasons: [`всё: выбор не удался (${e.message})`]
+    };
+    out = await emit(res, orEmpty(routerPackages), orEmpty(listRouterSpecs));
     reasons = res.reasons;
   }
 
