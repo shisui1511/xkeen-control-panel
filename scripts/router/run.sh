@@ -56,6 +56,20 @@
 #                go-suite.sh. В конце рабочее дерево и стенд возвращаются: сборка HEAD,
 #                исходное ядро. Итог — summary.md и session.json отчёта. Нужно чистое
 #                рабочее дерево; снимка нет, как у ручной сессии на стенде.
+#   rerun        перепрогон упавших тестов (RTR-05): FROM=<отчёт прогона или сессии> под build/router.
+#                rerun-plan.mjs берёт из отчёта проверки go: и pw: со статусом FAIL и XPASS и
+#                собирает на каждое ядро их состав (<ядро>.sel: родительские TestRouter*, спеки и
+#                --grep по названиям); набор ставит сборку HEAD (или RELEASE), снимает снимок и
+#                гонит на каждом ядре, где тесты упали, только их, затем восстанавливает стенд.
+#                Запись — в тот же отчёт FROM, номер перепрогона N — следующий свободный:
+#                <цель>/rerun-N.tsv (все строки перепрогона, включая смоук и восстановление),
+#                <цель>/<ядро>/rerun-N/ (артефакты), <цель>/rerun-N.sel.d/ (состав),
+#                rerun-N.meta (sha, dirty, started) и rerun-N.md; в summary.md дописывается
+#                раздел «## Перепрогон N» с таблицей «проверка, ядро, было, стало» и строкой
+#                «- Перепрогон: K тестов из <отчёт>». meta, results.tsv и ссылка last отчёта FROM
+#                не меняются; служебные файлы цели (snapshot.log, restore.log, deploy.rc, core,
+#                timings.tsv) перепрогон перезаписывает или дополняет. Нет упавших тестов — код 0
+#                с сообщением, стенд не трогается. Окно смоука 30 с. Статус релиза не публикуется.
 #   reboot       холодный старт (D-24): деплой, предполёт и снимок параллельно, затем
 #                по одной цели в порядке XCP_REBOOT_ORDER (нижестоящая цель каскада первой):
 #                перезагрузка, ожидание возврата, проверки автозапуска (xcp той же версии,
@@ -84,6 +98,12 @@
 #                        статус; повторный прогон перекрывает его (побеждает последний статус
 #                        контекста)
 #   SPEC=<файл>          спека набора session (путь от корня рабочей копии или абсолютный)
+#   FROM=<отчёт>         отчёт прогона или сессии набора rerun (путь от корня рабочей копии или
+#                        абсолютный, только под build/router; проверка до блокировки, иначе код 2)
+#   RT_SEL_DIR=<каталог> состав ветви из файлов <ядро>.sel (rerun-plan.mjs): вместо выбора набора
+#                        ветвь берёт GO_SEQ, SPECS и GREP из <ядро>.sel, а ветвь без файла
+#                        пропускается; читается построчно, без eval, по шаблонам безопасных символов.
+#                        Набор rerun задаёт его сам (<цель>/rerun-N.sel.d)
 #   RT_HOLD_MINUTES=<N>  после прогона держать блокировку N минут для ручной
 #                        проверки; снять раньше: touch <git-common-dir>/router-test.release
 #   RT_LOCK_WAIT=<с>     ожидание очереди на роутеры (по умолчанию 3600)
@@ -111,6 +131,8 @@
 #
 # Код выхода: 0 — нет строк FAIL и XPASS, 2 — неизвестный набор, иначе 1. Набор session —
 # код session.mjs: 0 — ожидания совпали и стенд вернулся, 3 — сбой связи ПК↔стенд, иначе 1 или 2.
+# Набор rerun: 0 — все перегнанные тесты прошли (PASS, KNOWN, QPASS, QFAIL) или упавших нет,
+# 1 — есть FAIL или XPASS, 2 — неверный FROM, 3 — сбой связи ПК↔стенд.
 # 130 — прерван сигналом INT, TERM или HUP: этап остановлен, стенд восстановлен по снимку,
 # отчёт с пометкой «Прерван» написан, удержание блокировки (RT_HOLD_MINUTES) не применяется.
 
@@ -124,9 +146,9 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 SUITE=${1:-}
 case "$SUITE" in
-  smoke | changed | harness | reboot | session | full | '') ;;
+  smoke | changed | harness | reboot | session | rerun | full | '') ;;
   *)
-    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke, changed, harness, reboot, session и full (полный, можно без SUITE)" >&2
+    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke, changed, harness, reboot, session, rerun и full (полный, можно без SUITE)" >&2
     echo "router-test: пример: make router-test SUITE=smoke" >&2
     exit 2
     ;;
@@ -195,6 +217,28 @@ if [ "$SUITE" = session ]; then
   fi
 fi
 
+# Набор rerun: отчёт FROM проверяется до check-known.sh, целей и блокировки (код 2, стенд не
+# трогается). Путь приводит к абсолютному под build/router rt_report_use: вне build/router, с
+# «..» и служебные имена отвергаются. Существование каталога проверяется до неё: она создаёт его.
+RT_RERUN_N=""
+RT_RERUN_K=0
+if [ "$SUITE" = rerun ]; then
+  if [ -z "${FROM:-}" ]; then
+    echo "router-test: SUITE=rerun требует FROM=<отчёт прогона или сессии под build/router>" >&2
+    exit 2
+  fi
+  case "$FROM" in
+    /*) _rr_abs=$FROM ;;
+    *) _rr_abs="$(rt_repo_root)/$FROM" ;;
+  esac
+  if [ ! -d "$_rr_abs" ]; then
+    echo "router-test: FROM: отчёт не найден: $FROM" >&2
+    exit 2
+  fi
+  RT_REPORT=$FROM
+  rt_report_use || exit 2
+fi
+
 # Виды спеков рабочего дерева (WR-04): незакоммиченный спек read не уходит в несколько воркеров
 # без проверки. До блокировки и деплоя, только для наборов с Playwright.
 case "$SUITE" in
@@ -213,8 +257,56 @@ if ! sh "$SCRIPT_DIR/check-known.sh"; then
 fi
 
 rt_load_targets
+
+# Набор rerun: состав перепрогона считается до блокировки (только чтение отчёта): в перепрогон
+# идут цели, у которых есть упавшие тесты; нет ни одной — стенд не трогается, код 0.
+if [ "$SUITE" = rerun ]; then
+  _rr_keep=""
+  _rr_tmp=$(mktemp -d)
+  for _rr_t in $RT_TARGETS; do
+    _rr_rc=0
+    node "$SCRIPT_DIR/rerun-plan.mjs" "$RT_REPORT" "$_rr_t" --out-dir "$_rr_tmp/$_rr_t" >"$_rr_tmp/$_rr_t.out" 2>&1 || _rr_rc=$?
+    case "$_rr_rc" in
+      0) _rr_keep="$_rr_keep $_rr_t" ;;
+      1) ;;
+      *)
+        cat "$_rr_tmp/$_rr_t.out" >&2
+        rm -rf "$_rr_tmp"
+        echo "router-test: rerun-plan.mjs не разобрал отчёт $RT_REPORT (код $_rr_rc)" >&2
+        exit 2
+        ;;
+    esac
+  done
+  rm -rf "$_rr_tmp"
+  if [ -z "$_rr_keep" ]; then
+    echo "router-test: в отчёте $RT_REPORT нет упавших тестов (FAIL, XPASS проверок go: и pw:) для перепрогона, стенд не тронут"
+    exit 0
+  fi
+  RT_TARGETS=${_rr_keep# }
+fi
+
 rt_lock
-rt_report_init
+if [ "$SUITE" = rerun ]; then
+  # Перепрогон пишет в отчёт FROM: номер — следующий свободный, meta и ссылка last не меняются.
+  # Строки результатов всех стадий (включая смоук и восстановление) идут в rerun-N.tsv, артефакты
+  # тестов — в <ядро>/rerun-N/ (RT_RESULTS_NAME и RT_ART_SUB читают rt_result и этапы тестов).
+  RT_RERUN_N=1
+  while [ -e "$RT_REPORT/rerun-$RT_RERUN_N.meta" ]; do
+    RT_RERUN_N=$((RT_RERUN_N + 1))
+  done
+  _rr_dirty=false
+  [ -z "$(git status --porcelain --untracked-files=no)" ] || _rr_dirty=true
+  {
+    echo "sha=$(git rev-parse HEAD)"
+    echo "dirty=$_rr_dirty"
+    echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } >"$RT_REPORT/rerun-$RT_RERUN_N.meta"
+  RT_RESULTS_NAME="rerun-$RT_RERUN_N.tsv"
+  RT_ART_SUB="rerun-$RT_RERUN_N"
+  export RT_RESULTS_NAME RT_ART_SUB
+else
+  rt_report_init
+fi
 echo "router-test: отчёт $RT_REPORT"
 
 # Ротация отчётов build/router стоит здесь, а не в конце: у run.sh много выходов (130, 1, код
@@ -439,6 +531,33 @@ if [ "$SUITE" = harness ]; then
   fi
   export RT_SMOKE_WINDOW
   echo "router-test: ветви — $(head -n 1 "$RT_REPORT/plan.txt")"
+elif [ "$SUITE" = rerun ]; then
+  # набор rerun: состав по ядрам — файлы <ядро>.sel в <цель>/rerun-N.sel.d (plan.txt исходного
+  # отчёта не трогается); окно смоука 30 с, как у узкого выбора
+  _rr_keep=""
+  for _rr_t in $RT_TARGETS; do
+    mkdir -p "$RT_REPORT/$_rr_t"
+    _rr_rc=0
+    node "$SCRIPT_DIR/rerun-plan.mjs" "$RT_REPORT" "$_rr_t" --out-dir "$RT_REPORT/$_rr_t/rerun-$RT_RERUN_N.sel.d" >"$RT_REPORT/$_rr_t/rerun-$RT_RERUN_N.plan.txt" 2>&1 || _rr_rc=$?
+    if [ "$_rr_rc" = 0 ]; then
+      _rr_keep="$_rr_keep $_rr_t"
+      for _rr_s in "$RT_REPORT/$_rr_t/rerun-$RT_RERUN_N.sel.d"/*.sel; do
+        [ -f "$_rr_s" ] || continue
+        _rr_c=$(sed -n 's/^COUNT=//p' "$_rr_s" | head -n 1 | tr -dc '0-9')
+        RT_RERUN_K=$((RT_RERUN_K + ${_rr_c:-0}))
+      done
+      sed 's/^/router-test: перепрогон '"$_rr_t"' — /' "$RT_REPORT/$_rr_t/rerun-$RT_RERUN_N.plan.txt"
+    fi
+  done
+  if [ -z "$_rr_keep" ]; then
+    echo "router-test: упавших тестов для перепрогона не осталось, стенд не тронут"
+    exit 0
+  fi
+  RT_TARGETS=${_rr_keep# }
+  if [ -z "${RT_SMOKE_WINDOW:-}" ]; then
+    RT_SMOKE_WINDOW=30
+  fi
+  export RT_SMOKE_WINDOW
 elif [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
   : >"$RT_REPORT/plan.txt"
   if [ -n "$RT_CORES_SET" ] && [ "$SUITE" = changed ] && [ "$SEL_ANY" = 0 ]; then
@@ -505,6 +624,24 @@ RT_KPID=/opt/tmp/xcp-rt-kpid.tsv
 # Проверки смоука, которые пропускаются, если цель недоступна или деплой не удался.
 SKIP_CHECKS="kernel-running iptables-rules api-version version xcp-pid api-me api-service-status log-panic log-error kernel-restart"
 
+# Состав ветви из файла <ядро>.sel (rerun-plan.mjs, RT_SEL_DIR). Читается без eval: значение —
+# первая строка «КЛЮЧ=значение» (sed по ключу), безопасные символы проверяет rt_sel_ok.
+rt_sel_val() {
+  sed -n "s/^$2=//p" "$1" | head -n 1
+}
+# rt_sel_ok <GO_SEQ|SPECS|COUNT> <значение>: код 0 — значение состоит только из допустимых символов
+# (T-148.1-33). GREP не проверяется по шаблону: он уходит этапу аргументом env и не раскрывается
+# оболочкой; его экранирует rerun-plan.mjs, а запретные для строки символы (перевод строки)
+# исключены самим чтением одной строки.
+rt_sel_ok() {
+  case "$1" in
+    GO_SEQ) [ -z "$(printf '%s' "$2" | tr -d 'A-Za-z0-9_./: -')" ] ;;
+    SPECS) [ -z "$(printf '%s' "$2" | tr -d 'A-Za-z0-9_./ -')" ] ;;
+    COUNT) [ -n "$2" ] && [ -z "$(printf '%s' "$2" | tr -d '0-9')" ] ;;
+    *) return 1 ;;
+  esac
+}
+
 # --- проверка связи -----------------------------------------------------------
 
 REACHABLE=""
@@ -570,6 +707,10 @@ full_target() {
     [ -n "${RT_GO_PKGS:-}" ] || _do_go=0
     [ -n "${RT_SPECS:-}" ] || _do_pw=0
   fi
+  # Состав ветвей из файлов <ядро>.sel (rerun-plan.mjs): набор rerun берёт каталог своей цели,
+  # иначе — RT_SEL_DIR из окружения; нет каталога — выбор набора, как раньше.
+  _sel_dir=${RT_SEL_DIR:-}
+  [ "$SUITE" != rerun ] || _sel_dir="$RT_REPORT/$_t/rerun-$RT_RERUN_N.sel.d"
   # Повторный сигнал (TERM группе плюс TERM, пересланный верхним run.sh, или второй Ctrl+C) не
   # должен обрывать восстановление: игнорирование наследуют rt_restore, _after_restore и ssh.
   _finish() {
@@ -800,11 +941,20 @@ EOF
 
   _first=1
   for _c in $RT_CORES; do
+    # Состав из <ядро>.sel: у ветви без файла тестов нет — она пропускается целиком
+    if [ -n "$_sel_dir" ] && [ ! -f "$_sel_dir/$_c.sel" ]; then
+      continue
+    fi
     # Ядро ветви: колонка results.tsv и файл core (селекторы меток arch/core)
     RT_CORE=$_c
     export RT_CORE
     printf '%s\n' "$_c" >"$RT_REPORT/$_t/core"
     mkdir -p "$RT_REPORT/$_t/$_c"
+    # Каталог ветви для файлов сэмплера и хвоста лога: перепрогон — внутри <ядро>/rerun-N/,
+    # чтобы не затирать файлы исходного отчёта
+    _bdir="$RT_REPORT/$_t/$_c"
+    [ "$SUITE" != rerun ] || _bdir="$_bdir/rerun-$RT_RERUN_N"
+    mkdir -p "$_bdir"
 
     # Тесты ветви. Гибрид (changed): в ветви второго ядра идут только тесты с меткой ядра
     # (Go — RT_GO_CORE_PKGS по RT_GO_CORE_RUN, Playwright — RT_SPECS_CORE с отбором @core);
@@ -833,6 +983,34 @@ EOF
       [ -n "$RT_SPECS_CORE" ] || _b_pw=0
       _b_skip="во второй ветви нет тестов с меткой ядра"
       _b_skip_pw="во второй ветви нет тестов с меткой ядра"
+    fi
+
+    # Состав ветви из <ядро>.sel: Go по именам (GO_SEQ), спеки (SPECS) и --grep (GREP) заменяют
+    # выбор набора; значения проверяются по шаблонам, не прошло — ветвь пропускается с FAIL rerun:sel.
+    _p_grep=${RT_PW_GREP:-}
+    if [ -n "$_sel_dir" ]; then
+      _sel_f="$_sel_dir/$_c.sel"
+      _sel_seq=$(rt_sel_val "$_sel_f" GO_SEQ)
+      _sel_specs=$(rt_sel_val "$_sel_f" SPECS)
+      _sel_grep=$(rt_sel_val "$_sel_f" GREP)
+      _sel_cnt=$(rt_sel_val "$_sel_f" COUNT)
+      if ! rt_sel_ok GO_SEQ "$_sel_seq" || ! rt_sel_ok SPECS "$_sel_specs" || ! rt_sel_ok COUNT "$_sel_cnt"; then
+        rt_result "$_t" FAIL rerun:sel "файл состава $_c.sel не прошёл проверку, ветвь пропущена"
+        continue
+      fi
+      _g_pkgs=""
+      _g_run=""
+      _g_seq=$_sel_seq
+      _p_specs=$_sel_specs
+      _p_first=""
+      _p_core=""
+      _p_grep=$_sel_grep
+      _b_go=0
+      [ -z "$_sel_seq" ] || _b_go=1
+      _b_pw=0
+      [ -z "$_sel_specs" ] || _b_pw=1
+      _b_skip="в перепрогоне нет Go-тестов этого ядра"
+      _b_skip_pw="в перепрогоне нет спеков этого ядра"
     fi
 
     # Выбор Go по именам (RT_GO_SEQ, первая ветвь): порядок и состав задаёт список, пакеты и
@@ -913,7 +1091,7 @@ EOF
       _osp=$!
       _sps="$_sps $_osp"
       if [ "$_b_pw" = 1 ]; then
-        rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+        rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
       fi
       _harness_pw read
       _orc=0
@@ -922,12 +1100,12 @@ EOF
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_t" "observe-$_c" "$(($(date +%s) - _ot0))" "$_orc" "$_ot0" "$_c" >>"$RT_REPORT/timings.tsv"
     else
       if [ "$_b_pw" = 1 ]; then
-        rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+        rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
       fi
       _harness_pw read
     fi
     # хвост xcp.log пишет наблюдатель (без него — смоук без окна не пишет)
-    [ ! -f "$RT_REPORT/$_t/xcp-log-tail.txt" ] || mv "$RT_REPORT/$_t/xcp-log-tail.txt" "$RT_REPORT/$_t/$_c/xcp-log-tail.txt"
+    [ ! -f "$RT_REPORT/$_t/xcp-log-tail.txt" ] || mv "$RT_REPORT/$_t/xcp-log-tail.txt" "$_bdir/xcp-log-tail.txt"
 
     # 2б. сэмплер PID ядра (см. _kpid_start) и сверка часов ПК и устройства: clock.tsv — середина
     # интервала вызова ssh на ПК и эпоха устройства. Нет связи (смоук вернул 3) — не запускается.
@@ -937,7 +1115,7 @@ EOF
         _kc0=$(date +%s)
         _kdev=$(rt_ssh "$_t" 'date +%s' 2>/dev/null | tr -dc '0-9') || _kdev=""
         _kc1=$(date +%s)
-        [ -z "$_kdev" ] || printf '%s\t%s\n' "$(((_kc0 + _kc1) / 2))" "$_kdev" >"$RT_REPORT/$_t/$_c/clock.tsv"
+        [ -z "$_kdev" ] || printf '%s\t%s\n' "$(((_kc0 + _kc1) / 2))" "$_kdev" >"$_bdir/clock.tsv"
       fi
     fi
 
@@ -954,7 +1132,7 @@ EOF
     # 4. Playwright, часть state: спеки, меняющие состояние стенда, один воркер. Часть только
     # чтения прошла в шаге 2а
     if [ "$_b_pw" = 1 ]; then
-      rt_stage "$_t" "pw-$_c" _bg env "RT_SPECS=$_p_specs" "RT_SPECS_FIRST=$_p_first" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part state || true
+      rt_stage "$_t" "pw-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_SPECS_FIRST=$_p_first" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part state || true
     else
       rt_result "$_t" SKIP pw "$_b_skip_pw"
     fi
@@ -964,7 +1142,7 @@ EOF
     _harness_pw state
 
     # 4а. остановка сэмплера и забор смен PID ядра ветви: до смоука следующей ветви
-    _kpid_stop "$_t" "$_ks" "$RT_REPORT/$_t/$_c"
+    _kpid_stop "$_t" "$_ks" "$_bdir"
     _ks=""
   done
   RT_CORE=""
@@ -1236,7 +1414,7 @@ else
   # стенд и выходит с кодом 130.
   trap 'RT_INTR=1; echo "router-test: прерывание — останавливаю этапы и жду восстановления стенда" >&2; for _kp in $PIDS; do kill -s TERM "$_kp" 2>/dev/null || true; done' INT TERM HUP
   for t in ${DEPLOYED:-}; do
-    if [ -z "$SUITE" ] || [ "$SUITE" = harness ] || { [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ]; }; then
+    if [ -z "$SUITE" ] || [ "$SUITE" = harness ] || [ "$SUITE" = rerun ] || { [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ]; }; then
       (full_target "$t") &
     else
       sh "$SCRIPT_DIR/smoke.sh" "$t" "$EXPECT" &
@@ -1264,6 +1442,116 @@ done
 # На время построения отчёта сигнал не убивает run.sh: он только запоминается (RT_INTR), отчёт
 # доводится до конца, и прогон выходит с кодом 130 без удержания блокировки.
 trap 'RT_INTR=1' INT TERM HUP
+
+# --- отчёт набора rerun -------------------------------------------------------------------
+# Итог перепрогона дописывается в отчёт FROM: раздел «## Перепрогон N» в summary.md (копия в
+# rerun-N.md) с таблицей «проверка, ядро, было, стало» и строкой «- Перепрогон: K тестов из
+# <отчёт>». «Было» — статус упавшей проверки в исходных результатах отчёта (results.tsv прогона или
+# всех этапов сессии), «стало» — худший статус той же проверки в rerun-N.tsv; подтест Go сводится к
+# родительскому TestRouter*. Остальные файлы отчёта (meta, report.md, results.tsv) не меняются.
+# Код выхода: 130 — прерван; 3 — сбой связи (FAIL reachable или код деплоя 3); 1 — есть FAIL или
+# XPASS в rerun-N.tsv (нет файла — тоже); иначе 0.
+rerun_finish() {
+  _rf_n=$RT_RERUN_N
+  _rf_name=$(basename "$RT_REPORT")
+  _rf_md="$RT_REPORT/rerun-$_rf_n.md"
+  _rf_bad=0
+  _rf_link=0
+  {
+    echo "## Перепрогон $_rf_n ($(date -u +%Y-%m-%dT%H:%M:%SZ), SHA $(git rev-parse --short HEAD))"
+    echo
+    echo "- Перепрогон: $RT_RERUN_K тестов из $_rf_name"
+    [ "$RT_INTR" != 1 ] || echo "- Прерван: да (сигнал)"
+    for _rf_t in $RT_TARGETS; do
+      _rf_res="$RT_REPORT/$_rf_t/rerun-$_rf_n.tsv"
+      echo
+      echo "### Цель $_rf_t"
+      echo
+      if [ ! -f "$_rf_res" ]; then
+        echo "- результатов нет"
+        _rf_bad=$((_rf_bad + 1))
+        continue
+      fi
+      awk -F'\t' '{c[$1]++} END {printf "- PASS: %d, FAIL: %d, KNOWN: %d, XPASS: %d, SKIP: %d\n", c["PASS"], c["FAIL"], c["KNOWN"], c["XPASS"], c["SKIP"]}' "$_rf_res"
+      _rf_orig=""
+      if [ -f "$RT_REPORT/$_rf_t/results.tsv" ]; then
+        _rf_orig="$RT_REPORT/$_rf_t/results.tsv"
+      else
+        for _rf_f in "$RT_REPORT"/[0-9]*-*/"$_rf_t"/results.tsv; do
+          if [ -f "$_rf_f" ]; then _rf_orig="$_rf_orig $_rf_f"; fi
+        done
+      fi
+      echo
+      echo "| Проверка | Ядро | Было | Стало |"
+      echo "|---|---|---|---|"
+      # shellcheck disable=SC2086
+      awk -F'\t' -v new="$_rf_res" '
+        function pkey(core, chk) { if (chk ~ /^go:/) sub(/\/.*$/, "", chk); return core "\t" chk }
+        function esc(s,   o, i, ch) {
+          o = ""
+          for (i = 1; i <= length(s); i++) {
+            ch = substr(s, i, 1)
+            if (ch == "\\" || ch == "|") o = o "\\"
+            o = o ch
+          }
+          return o
+        }
+        function bad(s) { return s == "FAIL" || s == "XPASS" }
+        FILENAME == new {
+          if ($3 !~ /^(go|pw):/) next
+          k = pkey($2, $3)
+          ran[$2] = 1
+          if (!(k in now) || (bad($1) && !bad(now[k]))) now[k] = $1
+          next
+        }
+        bad($1) && $3 ~ /^(go|pw):/ {
+          k = pkey($2, $3)
+          if (!(k in was)) { was[k] = $1; order[++n] = k }
+        }
+        END {
+          for (i = 1; i <= n; i++) {
+            k = order[i]
+            split(k, a, "\t")
+            if (!(a[1] in ran)) continue
+            printf "| %s | %s | %s | %s |\n", esc(a[2]), a[1], was[k], (k in now) ? now[k] : "нет строки"
+          }
+        }
+      ' $_rf_orig "$_rf_res"
+      if awk -F'\t' '$1 == "FAIL" && $3 == "reachable" {f = 1} END {exit !f}' "$_rf_res"; then
+        _rf_link=1
+      fi
+      if [ -f "$RT_REPORT/$_rf_t/deploy.rc" ] && [ "$(cat "$RT_REPORT/$_rf_t/deploy.rc")" = 3 ]; then
+        _rf_link=1
+      fi
+      _rf_b=$(awk -F'\t' '$1 == "FAIL" || $1 == "XPASS" {n++} END {print n + 0}' "$_rf_res")
+      _rf_bad=$((_rf_bad + _rf_b))
+    done
+  } >"$_rf_md"
+  {
+    echo
+    cat "$_rf_md"
+  } >>"$RT_REPORT/summary.md"
+  echo
+  cat "$_rf_md"
+  if [ "$RT_INTR" = 1 ]; then
+    echo "router-test: прерван (код 130), итог — $_rf_md" >&2
+    exit 130
+  fi
+  hold_lock
+  if [ "$_rf_link" = 1 ]; then
+    echo "router-test: сбой связи ПК↔стенд (итог — $_rf_md)" >&2
+    exit 3
+  fi
+  if [ "$_rf_bad" -gt 0 ]; then
+    echo "router-test: красный (FAIL и XPASS перепрогона: $_rf_bad)" >&2
+    exit 1
+  fi
+  echo "router-test: зелёный"
+  exit 0
+}
+if [ "$SUITE" = rerun ]; then
+  rerun_finish
+fi
 
 # --- самопроверка сессии (набор harness; changed при RT_HARNESS=1) ------------------------
 # Сама остановка на первом несовпадении — механика сессии (session.mjs), и править обвязку, не
