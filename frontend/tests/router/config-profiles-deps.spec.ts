@@ -1,4 +1,5 @@
 // e2e-pages: config/nodes settings
+// router-area: profiles
 import { createHash } from 'node:crypto';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';

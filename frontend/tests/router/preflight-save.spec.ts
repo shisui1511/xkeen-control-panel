@@ -1,4 +1,5 @@
 // e2e-pages: editor
+// router-area: configlayer
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';

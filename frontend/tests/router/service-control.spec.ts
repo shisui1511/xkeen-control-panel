@@ -1,8 +1,9 @@
 // e2e-pages: services
+// router-area: kernel
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
-import { CORE_TAG } from './lib/known';
+import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
 import { withPanel } from './lib/nodes-api';
 
 // Управление службой ядра через интерфейс настоящей панели (RT-05, D-04): остановка, запуск и
@@ -164,83 +165,94 @@ test.afterEach(async ({ browser }, testInfo) => {
   });
 });
 
-test(`service-control core:${RT.core || 'unknown'}`, { tag: CORE_TAG }, async ({ page }) => {
-  const core = RT.core;
-  test.skip(core !== 'xray' && core !== 'mihomo', 'активное ядро стенда не определено');
-  test.setTimeout(6 * ACTION);
+test(
+  `service-control core:${RT.core || 'unknown'}`,
+  {
+    tag: CORE_TAG,
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description:
+        'остановка, запуск и перезапуск ядра через интерфейс с проверкой состояния после каждого действия'
+    }
+  },
+  async ({ page }) => {
+    const core = RT.core;
+    test.skip(core !== 'xray' && core !== 'mihomo', 'активное ядро стенда не определено');
+    test.setTimeout(6 * ACTION);
 
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/#/services');
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/#/services');
 
-  const expectStopped = 'running=false kernels=[] pid=нет conflict=false';
-  const heroStatus = page.locator('.hero-status [data-status]').first();
-  const stopBtn = page.locator('.hero-actions .btn-danger-soft');
-  const restartBtn = page.locator('.hero-actions > button.btn-secondary').first();
-  const startBtn = page.getByTestId('hero-start');
+    const expectStopped = 'running=false kernels=[] pid=нет conflict=false';
+    const heroStatus = page.locator('.hero-status [data-status]').first();
+    const stopBtn = page.locator('.hero-actions .btn-danger-soft');
+    const restartBtn = page.locator('.hero-actions > button.btn-secondary').first();
+    const startBtn = page.getByTestId('hero-start');
 
-  /** Интерфейс и API говорят одно и то же о состоянии службы. */
-  async function expectState(running: boolean, what: string): Promise<void> {
-    await expect(heroStatus, `${what}: значок статуса в интерфейсе`).toHaveAttribute(
-      'data-status',
-      running ? 'running' : 'stopped',
-      { timeout: ACTION }
-    );
+    /** Интерфейс и API говорят одно и то же о состоянии службы. */
+    async function expectState(running: boolean, what: string): Promise<void> {
+      await expect(heroStatus, `${what}: значок статуса в интерфейсе`).toHaveAttribute(
+        'data-status',
+        running ? 'running' : 'stopped',
+        { timeout: ACTION }
+      );
+      await expect
+        .poll(async () => describe(await readStatus(page)), {
+          message: `${what}: /api/service/status не совпал с интерфейсом`,
+          timeout: ACTION,
+          intervals: [1000, 3000, 5000]
+        })
+        .toBe(running ? `running=true kernels=[${core}] pid=есть conflict=false` : expectStopped);
+    }
+    // --- исходное состояние: ядро работает (стенд пришёл в рабочее состояние) -----------
+    await expect(heroStatus).toBeVisible({ timeout: T.page });
+    await expectState(true, 'исходное состояние');
+    const first = (await readStatus(page)) as Status;
+    expect(first.active, 'активное ядро в статусе').toBe(core);
+
+    // --- остановка ------------------------------------------------------------------
+    await expect(stopBtn).toBeEnabled({ timeout: T.action });
+    await stopBtn.click();
+    await expectState(false, 'после остановки');
+    await expect(startBtn).toBeVisible({ timeout: T.action });
+    await expect(stopBtn).toHaveCount(0);
+
+    // --- запуск ----------------------------------------------------------------------
+    await expect(startBtn).toBeEnabled({ timeout: ACTION });
+    await startBtn.click();
+    await expectStartWithoutDialog(page, heroStatus);
+    await expectState(true, 'после запуска');
+    const started = (await readStatus(page)) as Status;
+    expect(started.active, 'ядро после запуска').toBe(core);
+
+    // --- перезапуск: процесс ядра заменён ------------------------------------------------
+    await waitStable(page, core, 'после запуска ядро не пришло в устойчивое состояние');
+    await expect(restartBtn).toBeEnabled({ timeout: ACTION });
+    // процесс ядра мог смениться за время ожидания: сравнение идёт с PID устойчивого состояния
+    const pidBefore = ((await readStatus(page)) as Status).pid;
+    await restartBtn.click();
     await expect
-      .poll(async () => describe(await readStatus(page)), {
-        message: `${what}: /api/service/status не совпал с интерфейсом`,
-        timeout: ACTION,
-        intervals: [1000, 3000, 5000]
-      })
-      .toBe(running ? `running=true kernels=[${core}] pid=есть conflict=false` : expectStopped);
+      .poll(
+        async () => {
+          const s = await readStatus(page);
+          if (typeof s === 'string') return s;
+          return s.running && s.kernels.join(',') === core && s.pid !== 0 && s.pid !== pidBefore
+            ? 'перезапущено'
+            : describe(s);
+        },
+        {
+          message: 'перезапуск не сменил процесс ядра',
+          timeout: ACTION,
+          intervals: [1000, 3000, 5000]
+        }
+      )
+      .toBe('перезапущено');
+    await expectState(true, 'после перезапуска');
+
+    // --- устойчивость: после перезапуска ядро держится, PID не меняется ------------------
+    await waitStable(page, core, 'ядро не пришло в устойчивое состояние');
+
+    await guard.assertClean();
   }
-  // --- исходное состояние: ядро работает (стенд пришёл в рабочее состояние) -----------
-  await expect(heroStatus).toBeVisible({ timeout: T.page });
-  await expectState(true, 'исходное состояние');
-  const first = (await readStatus(page)) as Status;
-  expect(first.active, 'активное ядро в статусе').toBe(core);
-
-  // --- остановка ------------------------------------------------------------------
-  await expect(stopBtn).toBeEnabled({ timeout: T.action });
-  await stopBtn.click();
-  await expectState(false, 'после остановки');
-  await expect(startBtn).toBeVisible({ timeout: T.action });
-  await expect(stopBtn).toHaveCount(0);
-
-  // --- запуск ----------------------------------------------------------------------
-  await expect(startBtn).toBeEnabled({ timeout: ACTION });
-  await startBtn.click();
-  await expectStartWithoutDialog(page, heroStatus);
-  await expectState(true, 'после запуска');
-  const started = (await readStatus(page)) as Status;
-  expect(started.active, 'ядро после запуска').toBe(core);
-
-  // --- перезапуск: процесс ядра заменён ------------------------------------------------
-  await waitStable(page, core, 'после запуска ядро не пришло в устойчивое состояние');
-  await expect(restartBtn).toBeEnabled({ timeout: ACTION });
-  // процесс ядра мог смениться за время ожидания: сравнение идёт с PID устойчивого состояния
-  const pidBefore = ((await readStatus(page)) as Status).pid;
-  await restartBtn.click();
-  await expect
-    .poll(
-      async () => {
-        const s = await readStatus(page);
-        if (typeof s === 'string') return s;
-        return s.running && s.kernels.join(',') === core && s.pid !== 0 && s.pid !== pidBefore
-          ? 'перезапущено'
-          : describe(s);
-      },
-      {
-        message: 'перезапуск не сменил процесс ядра',
-        timeout: ACTION,
-        intervals: [1000, 3000, 5000]
-      }
-    )
-    .toBe('перезапущено');
-  await expectState(true, 'после перезапуска');
-
-  // --- устойчивость: после перезапуска ядро держится, PID не меняется ------------------
-  await waitStable(page, core, 'ядро не пришло в устойчивое состояние');
-
-  await guard.assertClean();
-});
+);

@@ -1,5 +1,7 @@
 //go:build router
 
+// router-area: routing
+
 package handlers
 
 import (
@@ -115,6 +117,7 @@ func rtProvDiskCount(t *testing.T) int {
 // API три узла. Активный Xray: Mihomo не перезагружается, файл провайдера на диске
 // обновлён. Метка ядра: тест читает активное ядро и меняет его маршрутизацию.
 func TestRouterRoutingProviderTargeted(t *testing.T) {
+	routertest.Slow(t, "серия «Применить» с перезапуском Xray: провайдеры правил")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
 	e.enableLayer()

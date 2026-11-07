@@ -1,5 +1,7 @@
 //go:build router
 
+// router-area: geodata
+
 package geodata
 
 import (
@@ -35,6 +37,7 @@ func rtJobsJobNow(s *Service) (running bool, job string) {
 // удаление» отказывают geodata_busy и не держат замок слоя; фоновый -ug ждёт конца
 // установки, не ставит waiting_apply и не идёт вместе с opkg.
 func TestRouterGeodataJobSlot(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "реальная загрузка: настоящая установка jq через opkg держит слот задания")
 	tg := routertest.Current(t)
 	for _, bin := range []string{rtRunXKeenBin, opkgBin} {
 		if _, err := os.Stat(bin); err != nil {

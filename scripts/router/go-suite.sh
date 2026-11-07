@@ -26,12 +26,45 @@
 #   RT_GO_RUN     регэксп -test.run (по умолчанию ^TestRouter): отладка одного теста и вторая
 #                 ветвь набора changed (только тесты с меткой ядра, RT_GO_CORE_RUN выбора);
 #                 одинарная кавычка и перевод строки недопустимы (строка FAIL go:setup)
+#   RT_GO_RUN_SEQ упорядоченный список `<каталог пакета>:<TestRouterИмя>` через пробел
+#                 (например `internal/handlers:TestRouterA internal/handlers:TestRouterB`);
+#                 каждая запись — по шаблону ^[A-Za-z0-9_./-]+:TestRouter[A-Za-z0-9_]+$, иначе
+#                 строка FAIL go:setup и выход 1. Задан — RT_GO_PKGS и RT_GO_RUN не используются
+#                 (сообщение в stderr): пакеты — каталоги записей в порядке первого появления,
+#                 каждый собирается и копируется на устройство один раз, подряд идущие записи
+#                 одного пакета — один запуск `-test.run '^(A|B)$'`, запуски идут в порядке списка
+#                 (порядок гейта по частоте падений, дешёвые тесты первыми в сессии)
+#   RT_ART_SUB    подкаталог артефактов ветви ([a-z0-9-]+, иначе FAIL go:setup): артефакты —
+#                 в <отчёт>/<id>/<ядро>/<RT_ART_SUB>/ (перепрогон в тот же отчёт не затирает
+#                 основной проход)
+#   RT_RESULTS_NAME  имя файла результатов вместо results.tsv (lib.sh, rt_result)
 #   RT_REPORT     каталог отчёта (если не задан, создаётся новый); относительный — от корня
 #                 рабочей копии, вне build/router — код 2
 #   ROUTERS       игнорируется: цель задана первым аргументом
 #
 # Артефакты этапа (go-<пакет>.jsonl, .build.log, .stderr, .parsed, .hwm) лежат в
-# <отчёт>/<id>/<ядро>/ (матрица ядер, D-20); строки результатов — в <отчёт>/<id>/results.tsv.
+# <отчёт>/<id>/<ядро>/[<RT_ART_SUB>/] (матрица ядер, D-20); строки результатов — в
+# <отчёт>/<id>/results.tsv (или RT_RESULTS_NAME). Этапы времени — go-build-<пакет> и go-run-<пакет>.
+# С RT_GO_RUN_SEQ сборка та же (go-<пакет>.build.log, этап go-build-<пакет>), а у k-го запуска
+# пакета (k от 1 по пакету) — этап go-run-<пакет>-<k> и файлы go-<пакет>-<k>.raw, .jsonl, .parsed,
+# .stderr, .hwm. Строка результата провала запуска — go:<пакет>, в детали — номер запуска и тесты.
+#
+# Потребители файлов этапа: results.tsv — run.sh, branch-report.mjs, session.mjs; go-*.jsonl в
+# <ядро>/ — branch-report.mjs (самые долгие тесты; go-<пакет>-<k>.jsonl под шаблон попадает);
+# go-*.raw в <ядро>/ — триггер interrupt и сторож остановки в session.mjs (в режиме
+# последовательности — go-<пакет>-<k>.raw; проходы сессии идут через RT_GO_RUN_SEQ); этапы go-build-*, go-run-* в
+# timings.tsv — подэтапы, таблица branch-report.mjs их не берёт; go-done.txt — догон класса stand.
+# Файлы в <ядро>/<RT_ART_SUB>/ эти обходы не видят: подкаталог читает тот, кто его задал.
+#
+# go-done.txt в каталоге артефактов: по строке (каталог пакета) на пакет, обработка которого
+# закончилась без обрыва связи — все запуски пакета прошли, либо сборка или копирование не
+# удались по другой причине (повтор после обрыва их не изменит). Файл обнуляется в начале этапа;
+# пакеты вне него догоняются после возврата связи (класс stand).
+#
+# Падения считаются на запуск: PKG_BAD (FAIL и XPASS) и PKG_QFAIL (QFAIL — упавший тест в
+# карантине, в BAD не входит и код этапа не меняет). Строка «бинарник завершился с кодом …
+# без упавших тестов» пишется только при PKG_BAD=0 и PKG_QFAIL=0: прежний общий счётчик BAD
+# прятал её, если упал любой предыдущий пакет.
 #
 # Код выхода: 0 — нет FAIL и XPASS, 3 — цель недоступна, иначе 1.
 
@@ -55,10 +88,21 @@ export ROUTERS
 rt_load_targets
 rt_report_use
 mkdir -p "$RT_REPORT/$ID"
-ART="$RT_REPORT/$ID/${CORE:-unknown}"
-mkdir -p "$ART"
 RT_CORE=$CORE
 export RT_CORE
+ART="$RT_REPORT/$ID/${CORE:-unknown}"
+# Подкаталог артефактов ветви: только [a-z0-9-]+ (имя становится путём, T-148.1-07).
+if [ -n "${RT_ART_SUB:-}" ]; then
+  case "$RT_ART_SUB" in
+    *[!a-z0-9-]*)
+      rt_result "$ID" FAIL "go:setup" "RT_ART_SUB с недопустимыми символами"
+      exit 1
+      ;;
+  esac
+  ART="$ART/$RT_ART_SUB"
+fi
+mkdir -p "$ART"
+: >"$ART/go-done.txt"
 
 # RT_GO_RUN встраивается в скрипт запуска на устройстве в одинарных кавычках (T-145.1-19):
 # одинарная кавычка или перевод строки вывели бы значение из кавычек. Проверка — до всякой
@@ -70,6 +114,48 @@ case "${RT_GO_RUN:-}" in
     exit 1
     ;;
 esac
+
+# RT_GO_RUN_SEQ: каждая запись — <каталог пакета>:TestRouter<Имя> из [A-Za-z0-9_./-] и
+# [A-Za-z0-9_] (T-148.1-06): регэксп -test.run собирается только из проверенных имён.
+# Разбиение без раскрытия шаблонов имён файлов (set -f). Итог — GROUPS: строки
+# «пакет<TAB>A|B» по группам подряд идущих записей одного пакета, в порядке списка.
+TAB=$(printf '\t')
+GROUPS=""
+if [ -n "${RT_GO_RUN_SEQ:-}" ]; then
+  set -f
+  _g_pkg=""
+  _g_run=""
+  _seq_bad=""
+  for _e in $RT_GO_RUN_SEQ; do
+    _d=${_e%%:*}
+    _t=${_e#*:}
+    case "$_e" in *:*) ;; *) _seq_bad=$_e ;; esac
+    case "$_d" in '' | *[!A-Za-z0-9_./-]*) _seq_bad=$_e ;; esac
+    case "$_t" in TestRouter?*) ;; *) _seq_bad=$_e ;; esac
+    case "${_t#TestRouter}" in *[!A-Za-z0-9_]*) _seq_bad=$_e ;; esac
+    _d=${_d#./}
+    [ -n "$_d" ] || _seq_bad=$_e
+    [ -z "$_seq_bad" ] || break
+    if [ "$_d" = "$_g_pkg" ]; then
+      _g_run="$_g_run|$_t"
+    else
+      [ -z "$_g_pkg" ] || GROUPS="$GROUPS$_g_pkg$TAB$_g_run
+"
+      _g_pkg=$_d
+      _g_run=$_t
+    fi
+  done
+  set +f
+  if [ -n "$_seq_bad" ]; then
+    rt_result "$ID" FAIL "go:setup" "RT_GO_RUN_SEQ: запись не по шаблону <каталог пакета>:TestRouter<Имя>"
+    exit 1
+  fi
+  [ -z "$_g_pkg" ] || GROUPS="$GROUPS$_g_pkg$TAB$_g_run
+"
+  if [ -n "${RT_GO_PKGS:-}" ] || [ -n "${RT_GO_RUN:-}" ]; then
+    echo "go-suite: задан RT_GO_RUN_SEQ — RT_GO_PKGS и RT_GO_RUN не используются" >&2
+  fi
+fi
 
 ARCH=$(rt_get "$ID" ARCH)
 RWD=/opt/tmp/xcp-rt
@@ -100,8 +186,14 @@ trap cleanup EXIT
 # на ПК, рабочий каталог на устройстве).
 trap 'exit 130' INT TERM HUP
 
-# Список пакетов: RT_GO_PKGS или все каталоги, где у _test.go первая строка `//go:build router`.
-if [ -n "${RT_GO_PKGS:-}" ]; then
+# Список пакетов: каталоги записей RT_GO_RUN_SEQ, RT_GO_PKGS или все каталоги, где у _test.go
+# первая строка `//go:build router`. Без RT_GO_RUN_SEQ группа запусков — одна на пакет.
+SEQ=0
+if [ -n "$GROUPS" ]; then
+  SEQ=1
+  PKGS=$(printf '%s' "$GROUPS" | cut -f1 | awk '!seen[$0]++' | tr '\n' ' ')
+  PKGS=${PKGS% }
+elif [ -n "${RT_GO_PKGS:-}" ]; then
   # select-changed.mjs выдаёт пути вида ./internal/pkg
   PKGS=""
   for d in $RT_GO_PKGS; do
@@ -125,6 +217,12 @@ if [ -z "$PKGS" ]; then
   rt_result "$ID" SKIP "go:suite" "нет пакетов с тегом router"
   exit 0
 fi
+if [ "$SEQ" = 0 ]; then
+  for pkg in $PKGS; do
+    GROUPS="$GROUPS$pkg$TAB
+"
+  done
+fi
 
 # Сборка под архитектуру цели.
 build_pkg() {
@@ -142,8 +240,6 @@ build_pkg() {
 parse_jsonl() {
   awk -v pkg="$1" -f "$SCRIPT_DIR/go-parse.awk"
 }
-
-TAB=$(printf '\t')
 
 # --- каталог на устройстве -----------------------------------------------------
 rc=0
@@ -313,82 +409,149 @@ if [ -n "${XCP_SUBSCRIPTION_URL:-}" ]; then
 fi
 
 # --- пакеты --------------------------------------------------------------------
-for pkg in $PKGS; do
+# Группы запусков идут в порядке GROUPS. Пакет собирается и копируется на устройство при первой
+# своей группе (PREPARED — бинарник на устройстве, FAILED — сборка или копирование не удались:
+# остальные группы пакета пропускаются). После последней группы пакета без обрыва связи его
+# каталог дописывается в go-done.txt. Строки GROUPS разбиваются по переводу строки без
+# раскрытия шаблонов; в теле цикла IFS и раскрытие прежние.
+PREPARED=" "
+FAILED=" "
+RUNS=""
+_gi=0
+_ifs=$IFS
+IFS='
+'
+set -f
+for _grp in $GROUPS; do
+  IFS=$_ifs
+  set +f
+  _gi=$((_gi + 1))
+  pkg=${_grp%%"$TAB"*}
+  grun=${_grp#*"$TAB"}
   name=$(printf '%s' "${pkg#internal/}" | tr '/' '-')
   bin="$BIN_DIR/$name.test"
-  buildlog="$ART/go-$name.build.log"
+  ready=1
 
-  rc=0
-  rt_stage "$ID" "go-build-$name" build_pkg "$pkg" "$bin" >"$buildlog" 2>&1 || rc=$?
-  if [ "$rc" != 0 ]; then
-    rt_result "$ID" FAIL "go:build:$name" "сборка под $ARCH не удалась: $(tail -n 3 "$buildlog" | tr '\n' ' ')"
-    BAD=$((BAD + 1))
-    continue
-  fi
+  case "$FAILED" in *" $pkg "*) ready=0 ;; esac
+  case "$PREPARED" in
+    *" $pkg "*) ;;
+    *)
+      if [ "$ready" = 1 ]; then
+        buildlog="$ART/go-$name.build.log"
+        rc=0
+        rt_stage "$ID" "go-build-$name" build_pkg "$pkg" "$bin" >"$buildlog" 2>&1 || rc=$?
+        if [ "$rc" != 0 ]; then
+          rt_result "$ID" FAIL "go:build:$name" "сборка под $ARCH не удалась: $(tail -n 3 "$buildlog" | tr '\n' ' ')"
+          BAD=$((BAD + 1))
+          ready=0
+        else
+          rc=0
+          rt_scp "$ID" "$bin" "$RWD/$name.test" || rc=$?
+          if [ "$rc" = 3 ]; then
+            LOST=1
+            break
+          elif [ "$rc" != 0 ]; then
+            rt_result "$ID" FAIL "go:upload:$name" "копирование бинарника на устройство не удалось (код $rc)"
+            BAD=$((BAD + 1))
+            ready=0
+          fi
+        fi
+        if [ "$ready" = 1 ]; then
+          PREPARED="$PREPARED$pkg "
+        else
+          FAILED="$FAILED$pkg "
+        fi
+      fi
+      ;;
+  esac
 
-  rc=0
-  rt_scp "$ID" "$bin" "$RWD/$name.test" || rc=$?
-  if [ "$rc" = 3 ]; then
-    LOST=1
-    break
-  elif [ "$rc" != 0 ]; then
-    rt_result "$ID" FAIL "go:upload:$name" "копирование бинарника на устройство не удалось (код $rc)"
-    BAD=$((BAD + 1))
-    continue
-  fi
-
-  raw="$ART/go-$name.raw"
-  jsonl="$ART/go-$name.jsonl"
-  errlog="$ART/go-$name.stderr"
-  # Запуск идёт через небольшой скрипт: рядом с тестом работает опрос VmHWM (пиковая
-  # память тестового бинарника), последняя строка попадает в go-<имя>.hwm отчёта.
-  runner="$RT_REPORT/$ID/.go-run.sh"
-  cat >"$runner" <<EOF
+  if [ "$ready" = 1 ]; then
+    # Имена файлов и этапа: без RT_GO_RUN_SEQ — <пакет>, с ним — <пакет>-<k> (k-й запуск пакета).
+    if [ "$SEQ" = 1 ]; then
+      k=$(($(printf '%s' "$RUNS" | grep -cxF -e "$pkg" || true) + 1))
+      RUNS="$RUNS$pkg
+"
+      tag="$name-$k"
+      runre="^($grun)\$"
+      where=" (запуск $k: $grun)"
+    else
+      tag=$name
+      runre=${RT_GO_RUN:-^TestRouter}
+      where=""
+    fi
+    raw="$ART/go-$tag.raw"
+    jsonl="$ART/go-$tag.jsonl"
+    errlog="$ART/go-$tag.stderr"
+    parsed="$ART/go-$tag.parsed"
+    # Запуск идёт через небольшой скрипт: рядом с тестом работает опрос VmHWM (пиковая
+    # память тестового бинарника), последняя строка попадает в go-<имя>.hwm отчёта.
+    runner="$RT_REPORT/$ID/.go-run.sh"
+    cat >"$runner" <<EOF
 cd $RWD
-XCP_RT_ARCH=$ARCH XCP_RT_CORE=$CORE XCP_RT_WORKDIR=$RWD $SESSION_ENV $LINKS_ENV $INPUTS_ENV $CONTRACT_ENV $ROUTING_CONTRACT_ENV $SETUP_ENV $SUB_ENV ./$name.test -test.v=test2json -test.run '${RT_GO_RUN:-^TestRouter}' -test.timeout 120m &
+XCP_RT_ARCH=$ARCH XCP_RT_CORE=$CORE XCP_RT_WORKDIR=$RWD $SESSION_ENV $LINKS_ENV $INPUTS_ENV $CONTRACT_ENV $ROUTING_CONTRACT_ENV $SETUP_ENV $SUB_ENV ./$name.test -test.v=test2json -test.run '$runre' -test.timeout 120m &
 T=\$!
-( while kill -0 \$T 2>/dev/null; do grep VmHWM /proc/\$T/status > $RWD/$name.hwm 2>/dev/null; sleep 1; done ) &
+( while kill -0 \$T 2>/dev/null; do grep VmHWM /proc/\$T/status > $RWD/$tag.hwm 2>/dev/null; sleep 1; done ) &
 W=\$!
 wait \$T
 rc=\$?
 kill \$W 2>/dev/null
 exit \$rc
 EOF
-  rc=0
-  rt_scp "$ID" "$runner" "$RWD/run-$name.sh" || rc=$?
-  rm -f "$runner"
-  if [ "$rc" = 3 ]; then
-    LOST=1
-    break
-  fi
-  rc=0
-  rt_stage "$ID" "go-run-$name" rt_ssh "$ID" "sh $RWD/run-$name.sh" >"$raw" 2>"$errlog" || rc=$?
-  if [ "$rc" = 3 ]; then
-    LOST=1
-    rt_result "$ID" FAIL "go:$name" "связь потеряна во время запуска тестов"
-    break
-  fi
-  # stderr устройства: адреса и токены скрыты
-  rt_redact <"$errlog" >"$errlog.red" && mv "$errlog.red" "$errlog"
+    rc=0
+    rt_scp "$ID" "$runner" "$RWD/run-$tag.sh" || rc=$?
+    rm -f "$runner"
+    if [ "$rc" = 3 ]; then
+      LOST=1
+      break
+    fi
+    rc=0
+    rt_stage "$ID" "go-run-$tag" rt_ssh "$ID" "sh $RWD/run-$tag.sh" >"$raw" 2>"$errlog" || rc=$?
+    if [ "$rc" = 3 ]; then
+      LOST=1
+      rt_result "$ID" FAIL "go:$name" "связь потеряна во время запуска тестов$where"
+      break
+    fi
+    # stderr устройства: адреса и токены скрыты
+    rt_redact <"$errlog" >"$errlog.red" && mv "$errlog.red" "$errlog"
 
-  rt_ssh "$ID" "cat $RWD/$name.hwm" >"$ART/go-$name.hwm" 2>/dev/null || true
-  go tool test2json -t -p "$pkg" <"$raw" >"$jsonl"
-  found=0
-  parse_jsonl "$pkg" <"$jsonl" >"$ART/go-$name.parsed"
-  while IFS="$TAB" read -r st chk det || [ -n "$st" ]; do
-    found=$((found + 1))
-    rt_result "$ID" "$st" "$chk" "$det"
-    case "$st" in FAIL | XPASS) BAD=$((BAD + 1)) ;; esac
-  done <"$ART/go-$name.parsed"
-  if [ "$found" = 0 ]; then
-    rt_result "$ID" FAIL "go:$name" "тесты не найдены или бинарник не запустился (код $rc): $(tail -n 2 "$errlog" | tr '\n' ' ')"
-    BAD=$((BAD + 1))
-  elif [ "$rc" != 0 ] && [ "$BAD" = 0 ]; then
-    rt_result "$ID" FAIL "go:$name" "бинарник завершился с кодом $rc без упавших тестов"
-    BAD=$((BAD + 1))
+    rt_ssh "$ID" "cat $RWD/$tag.hwm" >"$ART/go-$tag.hwm" 2>/dev/null || true
+    go tool test2json -t -p "$pkg" <"$raw" >"$jsonl"
+    # Счёт на запуск (todo go-suite-cumulative-bad-hides-binary-exit): PKG_BAD — FAIL и XPASS
+    # этого запуска, PKG_QFAIL — упавшие тесты в карантине (в BAD и PKG_BAD не входят, D-17).
+    found=0
+    PKG_BAD=0
+    PKG_QFAIL=0
+    parse_jsonl "$pkg" <"$jsonl" >"$parsed"
+    while IFS="$TAB" read -r st chk det || [ -n "$st" ]; do
+      found=$((found + 1))
+      rt_result "$ID" "$st" "$chk" "$det"
+      case "$st" in
+        FAIL | XPASS)
+          BAD=$((BAD + 1))
+          PKG_BAD=$((PKG_BAD + 1))
+          ;;
+        QFAIL) PKG_QFAIL=$((PKG_QFAIL + 1)) ;;
+      esac
+    done <"$parsed"
+    if [ "$found" = 0 ]; then
+      rt_result "$ID" FAIL "go:$name" "тесты не найдены или бинарник не запустился (код $rc)$where: $(tail -n 2 "$errlog" | tr '\n' ' ')"
+      BAD=$((BAD + 1))
+    elif [ "$rc" != 0 ] && [ "$PKG_BAD" = 0 ] && [ "$PKG_QFAIL" = 0 ]; then
+      # ненулевой код без упавших тестов этого запуска (panic в TestMain, os.Exit); упавший тест
+      # в карантине объясняет код 1 и строки FAIL не даёт
+      rt_result "$ID" FAIL "go:$name" "бинарник завершился с кодом $rc без упавших тестов$where"
+      BAD=$((BAD + 1))
+    fi
+    rm -f "$raw"
   fi
-  rm -f "$raw"
+
+  # последняя группа пакета прошла без обрыва связи — пакет в go-done.txt
+  if ! printf '%s' "$GROUPS" | sed -n "$((_gi + 1)),\$p" | cut -f1 | grep -qxF -e "$pkg"; then
+    printf '%s\n' "$pkg" >>"$ART/go-done.txt"
+  fi
 done
+IFS=$_ifs
+set +f
 
 if [ "$LOST" = 1 ]; then
   rt_result "$ID" FAIL reachable "нет связи в ходе Go-тестов"

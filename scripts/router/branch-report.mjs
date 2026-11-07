@@ -10,10 +10,52 @@
 //   - «- Строк времени без начала или ядра: N» — строки timings.tsv короче шести колонок;
 //   - «- Восстановление: N с, путь: …» — этап restore и разбивка расхождений из restore.log
 //     (D-15: быстрый путь без перезапуска ядра или перезапуск);
-//   - «## 10 самых долгих тестов» — по Go (go-*.jsonl) и Playwright (pw*/report*.json);
+//   - «## 10 самых долгих тестов» — по Go (go-*.jsonl) и Playwright (pw*/report*.json), секунды
+//     суммируются по нормализованному имени (cleanName); колонка «перезапуски» — смены PID ядра
+//     на стенде в окне теста (D-06);
+//   - «## Тесты Парето (80% времени Go)» — тесты Go верхнего уровня всех ветвей по убыванию
+//     секунд до накопленных 80% суммарного времени Go: строка «- Всего Go: N тестов, M с;
+//     Парето: K тестов» и таблица Тест, Ядро, с, доля %, перезапуски;
+//   - «## Превышен бюджет gate» (D-15) — тесты верхнего уровня этого прогона дольше бюджета (Go 60 с,
+//     Playwright 30 с), кроме ярусов full и тестов с меткой Slow (Go — core-marks.cjs testFacts,
+//     Playwright — теги и аннотации JSON-отчёта): таблица Тест, Ядро, с, бюджет с либо «- нет».
+//     Только предупреждение: итог прогона не меняется; решение (full, Slow с причиной или todo) —
+//     на ship:pre;
 //   - «## Нужна метка ядра» (только --suite full) — страховка D-05б: проверка go:/pw: без метки
 //     ядра, чей исход в ветвях xray и mihomo различается как класс (PASS / SKIP / KNOWN /
-//     FAIL и XPASS), либо «- нет».
+//     FAIL и XPASS), либо «- нет»; проверки с QPASS или QFAIL (карантин) в раздел не входят;
+//   - «## Классы падений» (RTR-05, D-19…D-21) — класс каждого падения: new (находка по продукту),
+//     flaky (упал в основном проходе и прошёл при подтверждающем перепрогоне, <цель>/confirm.tsv),
+//     known (метка известного падения), xpass, stand (потеря связи со стендом), quarantine
+//     (карантин). Таблица Класс, Проверка, Ядро, Причина класса, В истории (падений/прогонов за 30
+//     дней по history.mjs failFreq; ошибка истории — «-»), затем строка итога по классам:
+//       - Итог: зелёный
+//       - Итог: красный (новых N, нестабильных N, xpass N, обрывов N)
+//       - Итог: красный: нестабильный (нестабильных N)       (одни flaky)
+//     Падения без confirm.tsv (старый отчёт, потолок перепрогона, проверка вне go:/pw:) — new.
+//     Потеря связи (проверка reachable или признаки в детали: «нет связи», ERR_NETWORK_CHANGED и
+//     т. п.) — stand; догнанная проверка (строка в <цель>/catchup.tsv, run.sh) получает класс по
+//     результату догона: прошла — stand (итог не краснит), упала не из-за связи — new, снова из-за
+//     связи — открытый stand. reachable считается догнанным, если catchup.tsv есть, а notrun.txt
+//     пуст. Непустой notrun.txt (связь не вернулась, часть набора не выполнена) без открытых строк
+//     stand добавляет строку notrun:связь, итог остаётся красным.
+//   - «- Обрывы связи: N, догнано: M» (при N > 0, по <цель>/link-loss.tsv) и «## Не выполнено из-за
+//     обрыва связи» (по <цель>/notrun.txt, D-26).
+//     Причина класса — короткая фраза без текста ошибки; причина открытого stand (связь не
+//     вернулась, догона не было) начинается со слов «не догнан» (run.sh считает их красными).
+//   - «## Тренд набора» (только --suite full, D-16) — число проверок go:/pw: и время тестов этого
+//     отчёта против прошлого полного прогона истории (history.mjs, lastFull строго до начала
+//     отчёта из meta) и до 5 самых долгих новых тестов; нет истории — «- Тренд: история
+//     недоступна», сбой чтения не роняет сводку.
+// Имена тестов: в ячейках таблиц — mdName (cleanName плюс экранирование `\` и `|`), в пунктах
+// списков — cleanName без экранирования (текст совпадает с именем проверки в results.tsv).
+// cleanName убирает ANSI, сводит пробельные символы к одному пробелу и режет до 300 знаков.
+// Перезапуски: <цель>/<ядро>/kernel-pids.tsv («<эпоха устройства>\t<PID через запятую или ->» при
+// каждой смене; пишет сэмплер run.sh) и clock.tsv («<эпоха ПК>\t<эпоха устройства>»). Перезапуск —
+// строка со значением, отличным от предыдущей, и не «-», попавшая в окно теста на часах ПК. Окно
+// Go-теста — начало этапа go-run-<имя> (или go-run-<имя>-<k>) из timings.tsv плюс сумма Elapsed
+// предыдущих тестов верхнего уровня файла go-<имя>[-<k>].jsonl; окно Playwright — startTime и
+// duration результатов изменяющих частей (pw, pw-2). Нет файлов ветви или окна — «-».
 // Формат timings.tsv: <цель> <этап> <секунды> <код> <начало> <ядро ветви или ->. У старых
 // отчётов колонок пять или четыре: ядро берётся из суффикса имени этапа, иначе — по
 // интервалу ветви.
@@ -25,6 +67,9 @@
 // на каждую такую проверку (повторный запуск не дублирует строки) и пишет <цель>/layout.tsv:
 // «проверка<TAB>ядра через пробел<TAB>причина» (метка ядра | метка падения с ядром | ротация —
 // ядро из SHA | полная матрица | отладка RT_CORES; причина берётся по plan.txt).
+// Он же пишет <цель>/classes.tsv: «класс<TAB>ядро<TAB>проверка<TAB>причина» на каждую строку
+// FAIL, XPASS, KNOWN, QFAIL и QPASS (читают run.sh, history.mjs, unattended.sh, rerun-plan.mjs);
+// повторный запуск перезаписывает файл.
 // В вывод попадают лишь имена этапов и тестов, ядра, статусы и секунды: деталь результатов,
 // адреса и тексты ошибок не выводятся.
 // Без зависимостей: только встроенные модули Node и core-marks.cjs.
@@ -66,8 +111,22 @@ const COMMON = new Set([
   "restore",
   "verify",
 ]);
-const BRANCH = ["sync", "switch", "smoke", "observe", "pw-read", "go", "settle", "pw"];
-const TEST_STAGES = new Set(["go", "pw-read", "pw"]);
+const BRANCH = [
+  "sync",
+  "switch",
+  "smoke",
+  "observe",
+  "pw-read",
+  "go",
+  "settle",
+  "pw",
+  "catchup-go",
+  "catchup-pw",
+  "confirm-switch",
+  "confirm-go",
+  "confirm-pw",
+];
+const TEST_STAGES = new Set(["go", "pw-read", "pw", "catchup-go", "catchup-pw", "confirm-go", "confirm-pw"]);
 const CORE_SUFFIX = /-(xray|mihomo)$/;
 
 function isCommon(name) {
@@ -257,19 +316,25 @@ if (haveStages) {
   out.push("", ...recoveryLines(), "");
 }
 
-// --- 10 самых долгих тестов --------------------------------------------------------
+// --- 10 самых долгих тестов, перезапуски ядра, тесты Парето ----------------------------
 
-const longest = [];
 // теги спеков Playwright по имени проверки (как в pw-parse.js, без «pw:»): `core`, `core-label`
 const pwTags = new Map();
 // eslint-disable-next-line no-control-regex
 const ANSI = /\u001b\[[0-9;]*m/g;
+// Нормализованное имя теста: без ANSI, пробельные символы (в том числе переводы строки и
+// табуляции) — один пробел, не длиннее 300 знаков. Это представление — в пунктах списков.
 function cleanName(text) {
   const flat = String(text || "")
     .replace(ANSI, "")
     .replace(/\s+/g, " ")
     .trim();
   return flat.length > 300 ? flat.slice(0, 300) + "…" : flat;
+}
+// Имя теста для ячейки таблицы Markdown: cleanName плюс экранирование `\` и `|`. Все таблицы
+// сводки берут имя только через эту функцию.
+function mdName(text) {
+  return cleanName(text).replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 }
 const coreDir = path.join(report, target);
 let coreDirs = [];
@@ -290,9 +355,75 @@ function list(dir, re) {
   }
 }
 
+// Перезапуски ядра ветви (D-06): смены PID из <ядро>/kernel-pids.tsv («<эпоха устройства>\t<PID
+// через запятую или ->») в часах ПК — через смещение из clock.tsv («<эпоха ПК>\t<эпоха
+// устройства>»). Перезапуск — строка, чьё значение отличается от предыдущей и не равно «-»
+// (первая строка — исходное состояние). Нет файлов ветви — null: в таблицах «-».
+function kernelRestarts(core) {
+  let pids = "";
+  let clock = "";
+  try {
+    pids = fs.readFileSync(path.join(coreDir, core, "kernel-pids.tsv"), "utf8");
+    clock = fs.readFileSync(path.join(coreDir, core, "clock.tsv"), "utf8");
+  } catch {
+    return null;
+  }
+  const c = clock.split("\n")[0].split("\t").map(Number);
+  if (c.length < 2 || !Number.isFinite(c[0]) || !Number.isFinite(c[1])) return null;
+  const shift = c[1] - c[0];
+  const events = [];
+  let prev = null;
+  for (const line of pids.split("\n")) {
+    if (!line) continue;
+    const [t, v] = line.split("\t");
+    const dev = Number(t);
+    if (!Number.isFinite(dev) || v === undefined) continue;
+    if (prev !== null && v !== prev && v !== "-") events.push(dev - shift);
+    prev = v;
+  }
+  return events;
+}
+// Число перезапусков в окне [начало, конец] (секунды эпохи ПК); нет данных ветви — null.
+function restartsIn(events, start, end) {
+  if (!events) return null;
+  const a = Math.floor(start);
+  const b = Math.ceil(end);
+  return events.filter((t) => t >= a && t <= b).length;
+}
+
+// Начала этапов go-run-<имя> (и go-run-<имя>-<k> режима последовательности) цели по ядру:
+// 5-я колонка timings.tsv, часы ПК.
+const goRunStart = new Map();
+for (const line of raw.split("\n")) {
+  if (!line) continue;
+  const f = line.split("\t");
+  if (f[0] !== target || !f[1] || !f[1].startsWith("go-run-")) continue;
+  const start = Number(f[4]);
+  if (!Number.isFinite(start)) continue;
+  const key = `${f[5] && f[5] !== "-" ? f[5] : ""}\t${f[1]}`;
+  if (!goRunStart.has(key)) goRunStart.set(key, start);
+}
+
+// Тесты по ключу «ядро\tcleanName»: { name, core, sec, kind (go|pw), restarts (число или null) }.
+// Секунды и перезапуски суммируются по нормализованному имени (WR-01).
+const testMap = new Map();
+function addTest(kind, core, name, sec, restarts, flags = {}) {
+  const clean = cleanName(name);
+  const key = `${kind}\t${core}\t${clean}`;
+  if (!testMap.has(key)) testMap.set(key, { name: clean, core, sec: 0, kind, restarts: null, full: false, slow: false });
+  const t = testMap.get(key);
+  t.sec += sec;
+  if (flags.full) t.full = true;
+  if (flags.slow) t.slow = true;
+  if (restarts !== null) t.restarts = (t.restarts || 0) + restarts;
+}
+
 for (const core of coreDirs) {
   const base = path.join(coreDir, core);
-  // Go: событие test2json pass/fail/skip верхнего теста (без «/») несёт Elapsed
+  const events = kernelRestarts(core);
+  // Go: событие test2json pass/fail/skip верхнего теста (без «/») несёт Elapsed. Тесты верхнего
+  // уровня идут последовательно: начало теста — начало этапа go-run-<имя> плюс сумма Elapsed
+  // предыдущих тестов верхнего уровня этого файла.
   for (const f of list(base, /^go-.*\.jsonl$/)) {
     let text = "";
     try {
@@ -300,6 +431,9 @@ for (const core of coreDirs) {
     } catch {
       continue;
     }
+    const stage = `go-run-${f.slice(3, -".jsonl".length)}`;
+    const stageStart = goRunStart.has(`${core}\t${stage}`) ? goRunStart.get(`${core}\t${stage}`) : goRunStart.get(`\t${stage}`);
+    let offset = 0;
     for (const line of text.split("\n")) {
       if (!line.includes('"Elapsed"')) continue;
       let ev;
@@ -311,11 +445,19 @@ for (const core of coreDirs) {
       if (!["pass", "fail", "skip"].includes(ev.Action)) continue;
       if (!ev.Test || ev.Test.includes("/")) continue;
       if (typeof ev.Elapsed !== "number") continue;
-      longest.push({ name: ev.Test, core, sec: ev.Elapsed });
+      let restarts = null;
+      if (stageStart !== undefined) {
+        const s = stageStart + offset;
+        restarts = restartsIn(events, s, s + ev.Elapsed);
+      }
+      offset += ev.Elapsed;
+      addTest("go", core, ev.Test, ev.Elapsed, restarts);
     }
   }
-  // Playwright: сумма длительностей прогонов теста; имя — как в pw-parse.js
+  // Playwright: сумма длительностей прогонов теста; имя — как в pw-parse.js. Окна перезапусков —
+  // только у изменяющих частей (pw, pw-2): часть только чтения идёт до запуска сэмплера.
   for (const dir of list(base, /^pw/)) {
+    const windows = /^pw(-\d+)?$/.test(dir);
     for (const f of list(path.join(base, dir), /^report.*\.json$/)) {
       let rep;
       try {
@@ -323,7 +465,6 @@ for (const core of coreDirs) {
       } catch {
         continue;
       }
-      const sums = new Map();
       const visit = (suiteNode, titles) => {
         for (const spec of suiteNode.specs || []) {
           const name = [...titles, spec.title].join(" > ");
@@ -332,32 +473,111 @@ for (const core of coreDirs) {
           for (const tag of spec.tags || []) pwTags.get(tagKey).add(String(tag).replace(/^@/, ""));
           for (const test of spec.tests || []) {
             let ms = 0;
-            for (const r of test.results || []) ms += Number(r.duration) || 0;
-            sums.set(name, (sums.get(name) || 0) + ms);
+            let restarts = null;
+            // ярус full и Slow: тег @full / аннотации tier-full и slow (lib/known.ts)
+            const notes = new Set((test.annotations || []).map((a) => String(a && a.type)));
+            const flags = {
+              full: (spec.tags || []).some((tag) => String(tag).replace(/^@/, "") === "full") || notes.has("tier-full"),
+              slow: notes.has("slow"),
+            };
+            for (const r of test.results || []) {
+              const dur = Number(r.duration) || 0;
+              ms += dur;
+              const st = Date.parse(r.startTime || "");
+              if (windows && Number.isFinite(st)) {
+                const n = restartsIn(events, st / 1000, (st + dur) / 1000);
+                if (n !== null) restarts = (restarts || 0) + n;
+              }
+            }
+            addTest("pw", core, name, ms / 1000, restarts, flags);
           }
         }
         for (const child of suiteNode.suites || []) visit(child, [...titles, child.title]);
       };
       for (const top of rep.suites || []) visit(top, top.file === top.title ? [] : [top.title]);
-      for (const [name, ms] of sums) longest.push({ name, core, sec: ms / 1000 });
     }
   }
 }
 
+const restartsCell = (t) => (t.restarts === null ? "-" : String(t.restarts));
+const longest = [...testMap.values()].sort((a, b) => b.sec - a.sec);
 if (longest.length > 0) {
-  longest.sort((a, b) => b.sec - a.sec);
-  out.push("## 10 самых долгих тестов", "", "| Тест | Ядро | с |", "|---|---|---:|");
+  out.push("## 10 самых долгих тестов", "", "| Тест | Ядро | с | перезапуски |", "|---|---|---:|---:|");
   for (const t of longest.slice(0, 10)) {
-    const name = t.name.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
-    out.push(`| ${name} | ${t.core} | ${Math.round(t.sec)} |`);
+    out.push(`| ${mdName(t.name)} | ${t.core} | ${Math.round(t.sec)} | ${restartsCell(t)} |`);
+  }
+  out.push("");
+}
+
+// Тесты Парето (todo 01): тесты Go верхнего уровня всех ветвей по убыванию секунд, пока
+// накопленное время не достигнет 80% суммарного времени тестов Go.
+const goTests = longest.filter((t) => t.kind === "go");
+if (goTests.length > 0) {
+  const goTotal = goTests.reduce((s, t) => s + t.sec, 0);
+  const pareto = [];
+  let acc = 0;
+  for (const t of goTests) {
+    if (goTotal > 0 && acc >= 0.8 * goTotal) break;
+    pareto.push(t);
+    acc += t.sec;
+  }
+  out.push("## Тесты Парето (80% времени Go)", "");
+  out.push(`- Всего Go: ${goTests.length} тестов, ${Math.round(goTotal)} с; Парето: ${pareto.length} тестов`, "");
+  out.push("| Тест | Ядро | с | доля % | перезапуски |", "|---|---|---:|---:|---:|");
+  for (const t of pareto) {
+    const share = goTotal > 0 ? ((t.sec / goTotal) * 100).toFixed(1) : "0.0";
+    out.push(`| ${mdName(t.name)} | ${t.core} | ${Math.round(t.sec)} | ${share} | ${restartsCell(t)} |`);
+  }
+  out.push("");
+}
+
+// --- бюджет gate (D-15) ------------------------------------------------------------------
+
+// Бюджет теста gate: Go 60 с, Playwright 30 с. Тесты яруса full и с меткой Slow бюджетом не
+// ограничены. Только предупреждение: итог прогона не меняется.
+const BUDGET = { go: 60, pw: 30 };
+if (testMap.size > 0) {
+  // факты Go: имя теста -> { full, slow }; не прочитаны - null (разметка Go не учитывается)
+  let goFacts = null;
+  try {
+    goFacts = new Map();
+    for (const r of coreMarks.testFacts(ROOT)) {
+      if (r.kind !== "go") continue;
+      const prev = goFacts.get(r.test);
+      goFacts.set(r.test, { full: r.tier === "full" || (prev && prev.full), slow: !!r.slowReason || (prev && prev.slow) });
+    }
+  } catch {
+    goFacts = null;
+  }
+  const over = longest
+    .filter((t) => {
+      if (t.kind === "go" && goFacts) {
+        const f = goFacts.get(t.name);
+        if (f && (f.full || f.slow)) return false;
+      }
+      if (t.full || t.slow) return false;
+      return t.sec > BUDGET[t.kind];
+    })
+    .sort((a, b) => b.sec - a.sec);
+  out.push("## Превышен бюджет gate", "");
+  out.push(
+    "Предупреждение: итог прогона не меняется; на ship:pre — full (по виду), Slow с причиной или todo (D-15).",
+    ""
+  );
+  if (!goFacts) out.push("- Разметка Go не прочитана: full и Slow Go-тестов не учтены.", "");
+  if (over.length === 0) out.push("- нет");
+  else {
+    out.push("| Тест | Ядро | с | бюджет с |", "|---|---|---:|---:|");
+    for (const t of over) out.push(`| ${mdName(t.name)} | ${t.core} | ${Math.round(t.sec)} | ${BUDGET[t.kind]} |`);
   }
   out.push("");
 }
 
 // --- метки ядра: страховка D-05б и раскладка тестов по ветвям (D-19) ----------------------
 
-const RESULT_ORDER = ["FAIL", "XPASS", "KNOWN", "SKIP", "PASS"];
-const classOf = (st) => (st === "FAIL" || st === "XPASS" ? "FAIL" : st);
+// QFAIL и QPASS — исход теста в карантине (D-17): отдельный класс, на итог не влияет
+const RESULT_ORDER = ["FAIL", "XPASS", "QFAIL", "KNOWN", "QPASS", "SKIP", "PASS"];
+const classOf = (st) => (st === "FAIL" || st === "XPASS" ? "FAIL" : st === "QFAIL" || st === "QPASS" ? "quarantine" : st);
 const resultsFile = path.join(report, target, "results.tsv");
 let resultsRaw = "";
 try {
@@ -409,6 +629,8 @@ const bothBranches = [...byCheck.values()].some((m) => m.has("xray")) && [...byC
 if (suite === "full" && bothBranches) {
   for (const [check, perCore] of byCheck) {
     if (!perCore.has("xray") || !perCore.has("mihomo")) continue;
+    // проверка в карантине хоть в одной ветви метки ядра не требует (D-17)
+    if (classOf(perCore.get("xray")) === "quarantine" || classOf(perCore.get("mihomo")) === "quarantine") continue;
     if (classOf(perCore.get("xray")) === classOf(perCore.get("mihomo"))) continue;
     if (markOf(check) !== "") continue; // размечен или Go-разметка не прочитана
     needMark.push({ check, xray: perCore.get("xray"), mihomo: perCore.get("mihomo") });
@@ -418,10 +640,243 @@ if (suite === "full" && bothBranches) {
 if (suite === "full") {
   out.push("## Нужна метка ядра", "");
   if (needMark.length === 0) out.push("- нет");
+  // пункт списка: cleanName без экранирования — текст совпадает с именем проверки в results.tsv
   for (const n of needMark) {
-    const name = n.check.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
-    out.push(`- core-mark:${name}: нужна метка ядра: xray ${n.xray}, mihomo ${n.mihomo}`);
+    out.push(`- core-mark:${cleanName(n.check)}: нужна метка ядра: xray ${n.xray}, mihomo ${n.mihomo}`);
   }
+  out.push("");
+}
+
+// --- тренд набора против прошлого полного прогона (D-16) ------------------------------------
+
+async function trendSection() {
+  try {
+    const started = (fs.readFileSync(path.join(report, "meta"), "utf8").match(/^started=(\S+)\s*$/m) || [])[1];
+    if (!started) return ["- Тренд: время начала отчёта неизвестно"];
+    const hist = await import("./history.mjs");
+    const rows = hist.readHistory();
+    const prevRef = hist.lastFull(rows, { before: started });
+    if (!prevRef) return ["- Тренд: прошлого полного прогона в истории нет"];
+    // текущие проверки: верхние go: и pw: этого отчёта с ядром, секунды по всем ядрам
+    const cur = new Set();
+    const curSecs = new Map();
+    for (const t of testMap.values()) {
+      const check = `${t.kind}:${t.name}`;
+      cur.add(`${check}\t${t.core}`);
+      curSecs.set(check, (curSecs.get(check) || 0) + t.sec);
+    }
+    const old = new Set();
+    const oldChecks = new Set();
+    let oldTotal = 0;
+    let oldTimed = false;
+    for (const r of rows) {
+      if (r.report !== prevRef.report || r.target !== target || r.core === "-") continue;
+      const top = (r.check.startsWith("go:") && !r.check.includes("/")) || r.check.startsWith("pw:");
+      if (!top) continue;
+      old.add(`${r.check}\t${r.core}`);
+      oldChecks.add(r.check);
+      if (r.seconds !== null) {
+        oldTotal += r.seconds;
+        oldTimed = true;
+      }
+    }
+    if (old.size === 0) return ["- Тренд: в прошлом полном прогоне нет данных этой цели"];
+    let curTotal = 0;
+    for (const v of curSecs.values()) curTotal += v;
+    const signed = (n, places = 0) => {
+      const v = places ? Number(n.toFixed(places)) : Math.round(n);
+      const str = places ? v.toFixed(places) : String(v);
+      return v >= 0 ? `+${str}` : str;
+    };
+    const mins = (sec) => `${(sec / 60).toFixed(1)} мин`;
+    const was = oldTimed ? `${mins(oldTotal)}, ${signed((curTotal - oldTotal) / 60, 1)}` : "н/д";
+    const lines = [
+      `- Тренд: тестов ${cur.size} (было ${old.size}, ${signed(cur.size - old.size)}), время тестов ${mins(curTotal)} (было ${was}); прошлый полный — ${prevRef.report}`
+    ];
+    const fresh = [...curSecs]
+      .filter(([check]) => !oldChecks.has(check))
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([check, sec]) => `${cleanName(check)} (${Math.round(sec)} с)`);
+    lines.push(`- Новые тесты: ${fresh.length > 0 ? fresh.join(", ") : "нет"}`);
+    return lines;
+  } catch {
+    return ["- Тренд: история недоступна"];
+  }
+}
+
+if (suite === "full") {
+  out.push("## Тренд набора", "");
+  out.push(...(await trendSection()));
+  out.push("");
+}
+
+// --- классы падений (RTR-05, D-19…D-21) -----------------------------------------------------
+
+// Признаки потери связи в детали строки результата (D-21); тот же список — в run.sh (RT_STAND_RE).
+const STAND_RE =
+  /нет связи|связь потеряна|ERR_NETWORK_CHANGED|net::ERR_INTERNET_DISCONNECTED|net::ERR_NAME_NOT_RESOLVED|ECONNRESET|ETIMEDOUT/;
+// от худшего статуса к лучшему; прочие значения в разбор не берутся
+const WORST = ["FAIL", "XPASS", "QFAIL", "KNOWN", "QPASS", "SKIP", "PASS"];
+const PASSED = new Set(["PASS", "QPASS"]);
+
+function readText(name) {
+  try {
+    return fs.readFileSync(path.join(report, target, name), "utf8");
+  } catch {
+    return null;
+  }
+}
+// строки файла результатов цели: статус, ядро, проверка, деталь (деталь в вывод не идёт)
+function readRows(name) {
+  const text = readText(name);
+  if (!text) return [];
+  const rows = [];
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    const f = line.split("\t");
+    if (f.length < 3 || !WORST.includes(f[0])) continue;
+    rows.push({ st: f[0], core: f[1], check: f[2], detail: f[3] || "" });
+  }
+  return rows;
+}
+// семья проверки: подтест Go сводится к родителю (перепрогон гонит родительский TestRouter*)
+const famOf = (core, check) => `${core}\t${check.startsWith("go:") ? "go:" + check.slice(3).split("/")[0] : check}`;
+const exactOf = (core, check) => `${core}\t${check}`;
+// ключ -> { st: худший статус, detail: деталь первой худшей строки }
+function worstBy(rows, keyOf) {
+  const m = new Map();
+  for (const r of rows) {
+    const k = keyOf(r.core, r.check);
+    const prev = m.get(k);
+    if (!prev || WORST.indexOf(r.st) < WORST.indexOf(prev.st)) m.set(k, { st: r.st, detail: r.detail });
+  }
+  return m;
+}
+
+const mainRows = readRows("results.tsv");
+// строки core-mark:… попадают в results.tsv только с --write: в сводке без него они учитываются здесь
+for (const n of needMark) {
+  if (!existingMarks.has(n.check)) mainRows.push({ st: "FAIL", core: "-", check: `core-mark:${n.check}`, detail: "" });
+}
+const mainWorst = worstBy(mainRows, exactOf);
+const confirmWorst = worstBy(
+  readRows("confirm.tsv").filter((r) => /^(go|pw):/.test(r.check)),
+  famOf
+);
+// «без перепрогона: …» — перепрогон пропущен из-за потолка (run.sh пишет причину в confirm-skip)
+const catchupExists = readText("catchup.tsv") !== null;
+const catchupRows = readRows("catchup.tsv");
+const catchupFam = worstBy(
+  catchupRows.filter((r) => /^(go|pw):/.test(r.check)),
+  famOf
+);
+const notrunLines = (readText("notrun.txt") || "")
+  .split("\n")
+  .map((l) => l.trim())
+  .filter(Boolean);
+const confirmSkipText = readText("confirm-skip");
+const confirmSkipWhy = confirmSkipText === null ? null : confirmSkipText.split("\n")[0].trim() || "без перепрогона";
+
+// Класс одной проверки. stand — потеря связи; open — связь не вернулась или догона не было
+// (причина начинается со слов «не догнан»: run.sh краснит такие строки).
+function classify(core, check, st, detail) {
+  if (st === "XPASS") return { cls: "xpass", why: "метка известного падения больше не нужна" };
+  if (st === "KNOWN") return { cls: "known", why: "метка известного падения" };
+  if (st === "QFAIL") return { cls: "quarantine", why: "карантин: упал" };
+  if (st === "QPASS") return { cls: "quarantine", why: "карантин: прошёл", quiet: true };
+  if (st !== "FAIL") return null;
+  if (check === "reachable" || STAND_RE.test(detail)) {
+    if (check === "reachable") {
+      if (catchupExists && notrunLines.length === 0) return { cls: "stand", why: "потеря связи, догон выполнен" };
+    } else {
+      const c = catchupFam.get(famOf(core, check));
+      if (c && (PASSED.has(c.st) || c.st === "KNOWN")) return { cls: "stand", why: "потеря связи, догнан: прошёл" };
+      if (c && c.st === "FAIL" && !STAND_RE.test(c.detail)) return { cls: "new", why: "упал при догоне после потери связи" };
+    }
+    return { cls: "stand", why: "не догнан: потеря связи со стендом", open: true };
+  }
+  if (!/^(go|pw):/.test(check)) return { cls: "new", why: "падение проверки" };
+  if (confirmSkipWhy !== null) return { cls: "new", why: confirmSkipWhy };
+  const c = confirmWorst.get(famOf(core, check));
+  if (c && PASSED.has(c.st)) return { cls: "flaky", why: "прошёл при подтверждающем перепрогоне" };
+  if (c && (c.st === "FAIL" || c.st === "XPASS")) return { cls: "new", why: "упал снова при подтверждающем перепрогоне" };
+  return { cls: "new", why: "без подтверждающего перепрогона" };
+}
+
+const classRows = [];
+for (const [key, v] of mainWorst) {
+  const [core, check] = key.split("\t");
+  const c = classify(core, check, v.st, v.detail);
+  if (c) classRows.push({ core, check, ...c });
+}
+// счёт по тестам: подтест Go и его родитель — один тест
+// строки догона, не бывшие падением основного прохода (набор не дошёл до них из-за обрыва)
+for (const [key, v] of worstBy(catchupRows, exactOf)) {
+  const [core, check] = key.split("\t");
+  const m = mainWorst.get(key);
+  if (m && (m.st === "FAIL" || m.st === "XPASS")) continue;
+  if (v.st === "XPASS") classRows.push({ core, check, cls: "xpass", why: "метка известного падения больше не нужна" });
+  else if (v.st === "FAIL") {
+    const standLike = STAND_RE.test(v.detail);
+    classRows.push({
+      core,
+      check,
+      cls: standLike ? "stand" : "new",
+      why: standLike ? "не догнан: потеря связи при догоне" : "упал при догоне после потери связи",
+      open: standLike,
+    });
+  }
+}
+// часть набора не выполнена, а строк открытого stand нет: итог всё равно красный
+if (notrunLines.length > 0 && !classRows.some((r) => r.open)) {
+  classRows.push({ core: "-", check: "notrun:связь", cls: "stand", why: "не догнан: часть набора не выполнена (notrun.txt)", open: true });
+}
+const nOf = (pred) => new Set(classRows.filter(pred).map((r) => `${r.cls}\t${famOf(r.core, r.check)}`)).size;
+const nNew = nOf((r) => r.cls === "new");
+const nFlaky = nOf((r) => r.cls === "flaky");
+const nXpass = nOf((r) => r.cls === "xpass");
+const nOpen = nOf((r) => r.open);
+const haveResults = readText("results.tsv") !== null;
+
+// «падений/прогонов за 30 дней» по истории; ошибка истории — «-»
+let freq = null;
+try {
+  const hist = await import("./history.mjs");
+  freq = hist.failFreq(hist.readHistory(), { days: 30 });
+} catch {
+  freq = null;
+}
+const histCell = (check) => {
+  const v = freq && freq.get(check);
+  return v ? `${v.fails}/${v.runs}` : "-";
+};
+
+out.push("## Классы падений", "");
+const lossRows = (readText("link-loss.tsv") || "").split("\n").filter(Boolean);
+if (lossRows.length > 0) {
+  const caught = lossRows.filter((l) => l.split("\t")[2] === "догон").length;
+  out.push(`- Обрывы связи: ${lossRows.length}, догнано: ${caught}`);
+}
+const confirmCount = Number((readText("confirm-count") || "").trim());
+if (confirmSkipWhy !== null) out.push(`- Подтверждающий перепрогон: пропущен (новых падений ${Number.isFinite(confirmCount) ? confirmCount : "-"}, ${confirmSkipWhy})`);
+else if (readText("confirm.tsv") !== null) out.push(`- Подтверждающий перепрогон: перегнано тестов ${Number.isFinite(confirmCount) ? confirmCount : "-"}`);
+if (out[out.length - 1] !== "") out.push("");
+const shown = classRows.filter((r) => !r.quiet);
+if (shown.length === 0) out.push("- падений нет");
+else {
+  out.push("| Класс | Проверка | Ядро | Причина класса | В истории |", "|---|---|---|---|---:|");
+  for (const r of shown) out.push(`| ${r.cls} | ${mdName(r.check)} | ${r.core} | ${r.why} | ${histCell(r.check)} |`);
+}
+out.push("");
+if (!haveResults) out.push("- Итог: красный (результатов нет)");
+else if (nNew + nFlaky + nXpass + nOpen === 0) out.push("- Итог: зелёный");
+else if (nNew + nXpass + nOpen === 0) out.push(`- Итог: красный: нестабильный (нестабильных ${nFlaky})`);
+else out.push(`- Итог: красный (новых ${nNew}, нестабильных ${nFlaky}, xpass ${nXpass}, обрывов ${nOpen})`);
+out.push("");
+if (notrunLines.length > 0) {
+  out.push("## Не выполнено из-за обрыва связи", "");
+  for (const l of notrunLines) out.push(`- ${cleanName(l)}`);
   out.push("");
 }
 
@@ -436,6 +891,15 @@ if (write) {
       fs.appendFileSync(resultsFile, text);
     } catch {
       // отчёта цели нет — писать некуда
+    }
+  }
+  // classes.tsv: класс, ядро, проверка, причина класса (без текста ошибки); файл пишется и пустым
+  if (haveResults) {
+    try {
+      const body = classRows.map((r) => `${r.cls}\t${r.core}\t${r.check}\t${r.why}`).join("\n");
+      fs.writeFileSync(path.join(report, target, "classes.tsv"), body ? body + "\n" : "");
+    } catch {
+      // каталог цели недоступен
     }
   }
   // layout.tsv: проверка, ядра, причина раскладки

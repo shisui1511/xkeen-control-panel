@@ -1,5 +1,7 @@
 //go:build router
 
+// router-area: dns
+
 package handlers
 
 import (
@@ -64,6 +66,7 @@ func rtDNSRestoreProxyLine(t *testing.T, e *rtSrc, before bool) {
 // перехват включён, :53 у ядра, правил XKeen с :53 нет. Метка ядра: перехват
 // ведёт активное ядро, правила XKeen строятся при его старте.
 func TestRouterDNSLegacyProxyDNS(t *testing.T) {
+	routertest.Slow(t, "три подсценария перехвата DNS: перезапуск ядра на каждом шаге и xkeen -dns on")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)
@@ -226,6 +229,7 @@ func rtDNSStateFile(t *testing.T) (desired bool, window bool) {
 // включается обратно до возврата стенда; флаг и строка — прежние. Метка ядра:
 // возврат перезапускает активное ядро, правила XKeen строятся при его старте.
 func TestRouterDNSFlagOff(t *testing.T) {
+	routertest.Slow(t, "выключение флага слоя с возвратом перехвата DNS и перезапуском ядра")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)

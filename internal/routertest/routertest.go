@@ -96,11 +96,89 @@ func (k KnownMark) Applies(tg Target) bool {
 	}
 }
 
-// Маркеры вывода, по которым go-suite.sh отличает KNOWN и XPASS от PASS и FAIL.
+// Маркеры вывода, по которым go-suite.sh отличает KNOWN, XPASS, QPASS и QFAIL от PASS
+// и FAIL; markerTierFull и markerSlow нужны отчёту (ярус и долгие тесты), на статус
+// теста не влияют.
 const (
-	markerKnown = "KNOWN-FAILURE slug="
-	markerXPass = "XPASS slug="
+	markerKnown      = "KNOWN-FAILURE slug="
+	markerXPass      = "XPASS slug="
+	markerQuarantine = "QUARANTINE slug="
+	markerTierFull   = "TIER full: "
+	markerSlow       = "SLOW: "
 )
+
+// Quarantine ставит тест в карантин: нестабильный тест (прошёл на подтверждающем
+// перепрогоне) продолжает идти, его исход виден в результатах как QPASS или QFAIL,
+// но на итог прогона не влияет. Метка — уровня теста: подтесты наследуют её.
+// Устойчивое падение продукта размечается не карантином, а Known и Verdict.
+//
+// Поведение теста метка не меняет: падение остаётся падением для go test, статус
+// меняет разбор (scripts/router/go-parse.awk). Вызывать прямо в теле TestRouter*,
+// slug — строковым литералом: его ищут scripts/router/check-known.sh (todo в pending
+// со сроком until) и scripts/router/core-marks.cjs.
+func Quarantine(t *testing.T, slug string) {
+	t.Helper()
+	if !validSlug(slug) {
+		t.Fatalf("недопустимый slug карантина %q: нужен [a-z0-9][a-z0-9-]*", slug)
+	}
+	t.Logf("%s%s: тест в карантине, исход не влияет на итог", markerQuarantine, slug)
+}
+
+// TierLevel — ярус роутерного теста: какой прогон его выбирает.
+type TierLevel int
+
+const (
+	// Gate — ярус по умолчанию: тест идёт в гейт PR (набор changed) и в полный прогон.
+	Gate TierLevel = iota
+	// Full — тест идёт только в полный прогон, а в гейте — при прямом затрагивании
+	// его области. Ярус full выбирается по виду теста, не по длительности: реальное
+	// время (cron, слот расписания), внесение сбоев, нагрузка на диск, реальные
+	// загрузки из интернета.
+	Full
+)
+
+// Tier задаёт ярус теста и причину. Метка статическая: её читают без запуска выбор
+// набора, страж scripts/check-router-tiers.js и сводка (scripts/router/core-marks.cjs);
+// маркер в выводе нужен только отчёту. Вызывать прямо в теле TestRouter*, причина —
+// непустой строковый литерал вида «реальное время: …», «внесение сбоя: …»,
+// «нагрузка на диск: …», «реальная загрузка: …». Gate с причиной допустим, но
+// ничего не меняет.
+func Tier(t *testing.T, level TierLevel, reason string) {
+	t.Helper()
+	if strings.TrimSpace(reason) == "" {
+		t.Fatalf("ярус теста без причины: нужна строка вида «реальное время: …»")
+	}
+	if level == Full {
+		t.Logf("%s%s", markerTierFull, reason)
+	}
+}
+
+// Slow помечает долгий тест яруса gate, который не относится к ярусу full по виду
+// (серии «Применить», активации профилей, смена ядра): время видно в сводке как кандидат
+// на ускорение. Причина называет источник времени. Вызывать прямо в теле TestRouter*,
+// причина — непустой строковый литерал; вместе с Tier(…, Full, …) метка не ставится
+// (страж scripts/check-router-tiers.js).
+func Slow(t *testing.T, reason string) {
+	t.Helper()
+	if strings.TrimSpace(reason) == "" {
+		t.Fatalf("метка Slow без причины: нужен источник времени теста")
+	}
+	t.Logf("%s%s", markerSlow, reason)
+}
+
+// validSlug проверяет slug по шаблону ^[a-z0-9][a-z0-9-]*$ (имя файла todo).
+func validSlug(s string) bool {
+	if s == "" || s[0] == '-' {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+			return false
+		}
+	}
+	return true
+}
 
 // Verdict фиксирует итог утверждения с учётом метки известного падения.
 //   - метка не применяется: ok=false — провал теста;

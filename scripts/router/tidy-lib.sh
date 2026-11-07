@@ -123,7 +123,7 @@ tidy_safe_rm() {
         router/* | router)
           _tls_n=${_tls_b#router/}
           case "$_tls_n" in
-            '' | router | */* | bin | release) ;;
+            '' | router | */* | bin | release | unattended | history.tsv | history.idx) ;;
             *) _tls_ok=1 ;;
           esac
           ;;
@@ -354,8 +354,10 @@ tidy_thin() {
       ;;
   esac
   _tlt_n=${_tlt_d#"$_tlt_root"/build/router/}
+  # служебные имена — не отчёты: каталог прогонов без присмотра (unattended) и файлы
+  # истории прогонов (history.tsv, history.idx) живут вне ротации (D-20)
   case "$_tlt_n" in
-    */* | bin | release | last | session-last | . | ..)
+    */* | bin | release | last | session-last | unattended | history.tsv | history.idx | . | ..)
       _tl_refuse "build/router/$_tlt_n" "не отчёт"
       return 1
       ;;
@@ -532,11 +534,13 @@ tidy_plan_reports() {
 # --- старый формат build/router ---------------------------------------------------------
 
 # Имена верхнего уровня build/router, не относящиеся ни к служебным (bin, release, last,
-# session-last), ни к отчётам нового формата: dbg*, session-2026…, скрытые .session-*.
+# session-last, каталог прогонов без присмотра unattended, история прогонов history.tsv и
+# history.idx — они вне ротации, D-20), ни к отчётам нового формата: dbg*, session-2026…,
+# скрытые .session-*.
 _tl_legacy_names() {
   LC_ALL=C ls -1A "$1" 2>/dev/null |
     sed -E "/^${_TL_KEY_RE}(-[0-9]{2}-.+)?\$/d" |
-    grep -vxE 'bin|release|last|session-last' || true
+    grep -vxE 'bin|release|last|session-last|unattended|history\.tsv|history\.idx' || true
 }
 
 # Нет ли во всём дереве пути (включая сам путь) ничего с mtime моложе N дней: тот же счёт

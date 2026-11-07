@@ -1,8 +1,9 @@
 // e2e-pages: config/lists
+// router-area: routing
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Browser, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
-import { knownFailure } from './lib/known';
+import { knownFailure, SLOW_ANNOTATION } from './lib/known';
 import { T } from './lib/env';
 import { api, layerFlag, withPanel } from './lib/nodes-api';
 
@@ -397,25 +398,34 @@ test.describe('флаг выключен', () => {
     await setLayerFlag(browser, true);
   });
 
-  test('lists: с выключенным флагом всё как раньше', async ({ page, browser }) => {
-    await setLayerFlag(browser, false);
-    const guard = attachConsoleGuard(page);
-    await page.setViewportSize({ width: 1440, height: 900 });
+  test(
+    'lists: с выключенным флагом всё как раньше',
+    {
+      annotation: {
+        type: SLOW_ANNOTATION,
+        description: 'переключение флага слоя и проверка прежней страницы DAT'
+      }
+    },
+    async ({ page, browser }) => {
+      await setLayerFlag(browser, false);
+      const guard = attachConsoleGuard(page);
+      await page.setViewportSize({ width: 1440, height: 900 });
 
-    // старая страница DAT на месте, пункт меню есть
-    await page.goto('/#/dat', { timeout: T.page, waitUntil: 'domcontentloaded' });
-    await expect(page.locator('.main-content .page-header h1').first()).toBeVisible({
-      timeout: T.page
-    });
-    await expect(page).toHaveURL(/#\/dat$/);
-    await expect(page.locator('a[href="#/dat"]').first()).toBeVisible({ timeout: T.action });
-    await expect(page.getByTestId('lists-tab')).toHaveCount(0);
+      // старая страница DAT на месте, пункт меню есть
+      await page.goto('/#/dat', { timeout: T.page, waitUntil: 'domcontentloaded' });
+      await expect(page.locator('.main-content .page-header h1').first()).toBeVisible({
+        timeout: T.page
+      });
+      await expect(page).toHaveURL(/#\/dat$/);
+      await expect(page.locator('a[href="#/dat"]').first()).toBeVisible({ timeout: T.action });
+      await expect(page.getByTestId('lists-tab')).toHaveCount(0);
 
-    // раздела «Конфигурация» нет: адрес вкладки уводит на обзор по общему правилу раздела
-    await page.goto('/#/config/lists', { timeout: T.page, waitUntil: 'domcontentloaded' });
-    await expect(page).toHaveURL(/#\/dashboard$/, { timeout: T.page });
-    await expect(page.getByTestId('lists-tab')).toHaveCount(0);
+      // раздела «Конфигурация» нет: адрес вкладки уводит на обзор по общему правилу раздела
+      await page.goto('/#/config/lists', { timeout: T.page, waitUntil: 'domcontentloaded' });
+      await expect(page).toHaveURL(/#\/dashboard$/, { timeout: T.page });
+      await expect(page.getByTestId('lists-tab')).toHaveCount(0);
 
-    await guard.assertClean();
-  });
+      await guard.assertClean();
+    }
+  );
 });

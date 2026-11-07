@@ -56,3 +56,26 @@ export function knownFailure(selector: string, slug: string): void {
   // pw-parse.js ищет именно эту аннотацию: по ней KNOWN отличается от обычного ожидаемого падения
   test.info().annotations.push({ type: 'known-failure', description: slug });
 }
+
+// Карантин (D-17): нестабильный тест (прошёл на подтверждающем перепрогоне) продолжает
+// идти, исход виден в отчёте как QPASS или QFAIL, но на итог прогона не влияет. Вызов
+// quarantine('<slug todo>') внутри теста; test.fail не ставится — поведение теста не
+// меняется, статус выводит pw-parse.js по аннотации quarantine. Slug — строковый литерал:
+// его ищет scripts/router/check-known.sh (todo в pending со сроком until). Устойчивое
+// падение продукта размечается не карантином, а knownFailure.
+export function quarantine(slug: string): void {
+  if (collected) return;
+  test.info().annotations.push({ type: 'quarantine', description: slug });
+}
+
+// Ярус и Slow (D-14, D-15). Ярус full — по виду теста (реальное время, внесение сбоев,
+// нагрузка на диск, реальные загрузки из интернета), не по длительности; Slow — долгий
+// тест gate другого вида. Метки статические: их читают выбор набора, страж
+// scripts/check-router-tiers.js и сводка (scripts/router/core-marks.cjs), поэтому причина —
+// строковый литерал в деталях test(…), а не вызов внутри теста:
+//   test('…', { tag: FULL_TAG, annotation: { type: TIER_FULL_ANNOTATION, description: '<причина>' } }, async …)
+//   test('…', { annotation: { type: SLOW_ANNOTATION, description: '<причина>' } }, async …)
+// При уже имеющемся теге ядра теги идут массивом: tag: [CORE_TAG, FULL_TAG].
+export const FULL_TAG = '@full';
+export const TIER_FULL_ANNOTATION = 'tier-full';
+export const SLOW_ANNOTATION = 'slow';

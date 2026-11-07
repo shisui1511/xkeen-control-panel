@@ -1,8 +1,9 @@
+// router-area: dns
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
 import { ensureDnsTarget, releaseDnsTarget } from './lib/dns-target';
-import { CORE_TAG, knownFailure } from './lib/known';
+import { CORE_TAG, knownFailure, SLOW_ANNOTATION } from './lib/known';
 import { api, installedKernels, resetDraft, withPanel, type Installed } from './lib/nodes-api';
 
 // Стык со старым перенаправлением DNS XKeen (фаза 148, D-34): при включённом слое
@@ -292,25 +293,35 @@ test('dns-legacy: без перехвата абзаца о DNS в выключ�
   await guard.assertClean();
 });
 
-test('dns-legacy: абзац о перехвате при выключении флага', { tag: CORE_TAG }, async ({ page }) => {
-  test.setTimeout(T.save * 12);
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await startPage(page);
-  await setLayer(page, true);
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  const skip = await enableTakeover(page);
-  test.skip(skip !== null, skip ?? '');
+test(
+  'dns-legacy: абзац о перехвате при выключении флага',
+  {
+    tag: CORE_TAG,
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description: 'включение перехвата DNS при proxy_dns on с перезапуском ядра'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.save * 12);
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await startPage(page);
+    await setLayer(page, true);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const skip = await enableTakeover(page);
+    test.skip(skip !== null, skip ?? '');
 
-  const { dialog, toggle } = await openFlagOffDialog(page);
-  const note = dialog.getByTestId('dns-flag-off-note');
-  await expect(note).toBeVisible({ timeout: T.action });
-  await expect(note).toHaveClass(/warning-text/);
-  await expect(note).toContainText(FLAG_NOTE);
-  // Действие не блокируется: кнопка подтверждения доступна
-  await expect(dialog.getByRole('button').last()).toBeEnabled();
-  await cancelFlagOff(page, dialog, toggle);
-  expect(takeoverActive(await dnsView(page)), 'перехват остался включённым').toBe(true);
+    const { dialog, toggle } = await openFlagOffDialog(page);
+    const note = dialog.getByTestId('dns-flag-off-note');
+    await expect(note).toBeVisible({ timeout: T.action });
+    await expect(note).toHaveClass(/warning-text/);
+    await expect(note).toContainText(FLAG_NOTE);
+    // Действие не блокируется: кнопка подтверждения доступна
+    await expect(dialog.getByRole('button').last()).toBeEnabled();
+    await cancelFlagOff(page, dialog, toggle);
+    expect(takeoverActive(await dnsView(page)), 'перехват остался включённым').toBe(true);
 
-  await guard.assertClean();
-});
+    await guard.assertClean();
+  }
+);

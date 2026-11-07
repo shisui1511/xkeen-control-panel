@@ -1,5 +1,7 @@
 //go:build router
 
+// router-area: dns
+
 package handlers
 
 import (
@@ -61,6 +63,7 @@ func (e *rtSrc) rtDNSExpectKernelStopped(kernel string, overrideBefore bool) map
 // возвращённой конфигурации актуален. Метка ядра: сценарий останавливает и
 // запускает активное ядро.
 func TestRouterDNSKernelStop(t *testing.T) {
+	routertest.Slow(t, "остановка и запуск ядра, возврат перехвата DNS в пределах 120 с")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)
@@ -212,6 +215,7 @@ func rtDNSKernelSwitchPrepare(t *testing.T, e *rtSrc, kernel string) string {
 // прошивки, активным осталось переключённое ядро. Стенд возвращает исходное ядро
 // и выключает перехват. Метка ядра: сценарий меняет активное ядро.
 func TestRouterDNSKernelSwitch(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "реальное время: окно переноса DNS при смене ядра ждёт откат по таймеру")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)
@@ -255,6 +259,7 @@ func TestRouterDNSKernelSwitch(t *testing.T) {
 // занимает доли секунды, а остановка панели на шаге перезапуска ядра не укладывается в
 // срок. Метка ядра: сценарий меняет активное ядро.
 func TestRouterDNSKernelSwitchWindowPanelRestart(t *testing.T) {
+	routertest.Slow(t, "смена ядра туда и обратно и перезапуск панели посреди окна переноса")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)
@@ -287,6 +292,7 @@ func TestRouterDNSKernelSwitchWindowPanelRestart(t *testing.T) {
 // probe, окна нет. Возврат живой группой без прерывания проверяет TestRouterDNSKernelStop.
 // Метка ядра: сценарий останавливает и запускает активное ядро.
 func TestRouterDNSRestorePanelRestart(t *testing.T) {
+	routertest.Slow(t, "остановка и запуск ядра, перезапуск панели посреди возврата перехвата DNS")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)

@@ -1,5 +1,7 @@
 //go:build router
 
+// router-area: geodata
+
 package geodata
 
 import (
@@ -161,6 +163,7 @@ func rtFailEntry(t *testing.T, store *lists.GeodataStore, file, url string) {
 // ошибки XKeen и уведомление раздела; в том же запуске маленький настоящий файл с
 // GitHub — updated.
 func TestRouterGeodataUpdateFailures(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "внесение сбоя: отказ загрузки через настоящий XKeen, плюс реальная загрузка небольшого файла")
 	tg := routertest.Current(t)
 	if _, err := os.Stat(rtRunXKeenBin); err != nil {
 		t.Skipf("нет %s: XKeen не установлен", rtRunXKeenBin)

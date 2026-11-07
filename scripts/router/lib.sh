@@ -19,6 +19,8 @@
 #                     ссылка build/router/last не переставляется (вложенные прогоны сессии);
 #                     путь вне build/router — ошибка и код 2
 #   RT_CORE           ядро (xray|mihomo) для колонки результатов
+#   RT_RESULTS_NAME   имя файла результатов в <отчёт>/<цель>/ (по умолчанию results.tsv; шаблон
+#                     [a-z0-9-]+.tsv): перепрогон пишет в тот же отчёт, не смешиваясь с основным проходом
 
 # Корень рабочей копии (основная копия или worktree).
 rt_repo_root() {
@@ -205,10 +207,11 @@ rt_report_use() {
       return 2
       ;;
   esac
-  # служебные имена верхнего уровня — не отчёты (кэш релизов, бинарники тестов, ссылки)
+  # служебные имена верхнего уровня — не отчёты (кэш релизов, бинарники тестов, ссылки,
+  # каталог прогонов без присмотра, история исходов тестов и её индекс)
   _rn=${RT_REPORT#"$_root"/build/router/}
   case "${_rn%%/*}" in
-    bin | release | last | session-last)
+    bin | release | last | session-last | unattended | history.tsv | history.idx)
       echo "RT_REPORT указывает на служебное имя build/router: $RT_REPORT" >&2
       return 2
       ;;
@@ -219,6 +222,8 @@ rt_report_use() {
 
 # Строка результата: rt_result <цель> <PASS|FAIL|KNOWN|XPASS|SKIP> <проверка> <деталь>.
 # Формат results.tsv: статус, ядро, проверка, деталь (разделитель — табуляция).
+# Файл — <отчёт>/<цель>/${RT_RESULTS_NAME:-results.tsv}; имя вне шаблона [a-z0-9-]+.tsv
+# (путь, пробел, другое расширение) отвергается сообщением в stderr, строка уходит в results.tsv.
 rt_result() {
   _id=$1
   _st=$2
@@ -230,7 +235,46 @@ rt_result() {
     _core=$(cat "$RT_REPORT/$_id/core")
   fi
   [ -n "$_core" ] || _core="-"
-  printf '%s\t%s\t%s\t%s\n' "$_st" "$_core" "$_chk" "$_det" >>"$RT_REPORT/$_id/results.tsv"
+  _rf=${RT_RESULTS_NAME:-results.tsv}
+  case "$_rf" in
+    *.tsv) _rb=${_rf%.tsv} ;;
+    *) _rb="" ;;
+  esac
+  case "$_rb" in
+    '' | *[!a-z0-9-]*)
+      echo "rt_result: недопустимое RT_RESULTS_NAME, строка записана в results.tsv" >&2
+      _rf=results.tsv
+      ;;
+  esac
+  printf '%s\t%s\t%s\t%s\n' "$_st" "$_core" "$_chk" "$_det" >>"$RT_REPORT/$_id/$_rf"
+}
+
+# Ожидание связи со стендом после обрыва: rt_wait_link <цель> <секунды>.
+# Раз в 15 с (последний опрос — ровно к сроку) проверяет `rt_ssh <цель> true`. Код 0 — ssh снова
+# отвечает, 3 — срок вышел (тот же код, что у rt_ssh при обрыве). Срок не число — одна проверка
+# без ожидания. В stderr — строки о начале ожидания и об итоге с секундами.
+rt_wait_link() {
+  _wl_id=$1
+  _wl_max=${2:-0}
+  case "$_wl_max" in
+    '' | *[!0-9]*) _wl_max=0 ;;
+  esac
+  _wl_t0=$(date +%s)
+  echo "цель $_wl_id: жду связь со стендом до $_wl_max с" >&2
+  while :; do
+    if rt_ssh "$_wl_id" true >/dev/null 2>&1; then
+      echo "цель $_wl_id: связь вернулась через $(($(date +%s) - _wl_t0)) с" >&2
+      return 0
+    fi
+    _wl_el=$(($(date +%s) - _wl_t0))
+    if [ "$_wl_el" -ge "$_wl_max" ]; then
+      echo "цель $_wl_id: связи нет $_wl_el с, срок $_wl_max с вышел" >&2
+      return 3
+    fi
+    _wl_nap=$((_wl_max - _wl_el))
+    [ "$_wl_nap" -le 15 ] || _wl_nap=15
+    sleep "$_wl_nap"
+  done
 }
 
 # Этап с замером времени: rt_stage <цель> <этап> <команда…>. Пишет в timings.tsv

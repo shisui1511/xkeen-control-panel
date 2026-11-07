@@ -1,5 +1,7 @@
 //go:build router
 
+// router-area: storage-auth
+
 package handlers
 
 import (
@@ -269,6 +271,7 @@ const rtStallHold = 3 * time.Second
 // доходит до конца: новая панель отвечает по прежней сессии, срок остановки не
 // истёк.
 func TestRouterPanelRestartWithStalledStorage(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "нагрузка на диск: застой записи на разделе панели при перезапуске")
 	p := routertest.NewPanel(t)
 	old := rtPanelCurrent(t, p)
 	addr := rtPanelAddr(t)
@@ -531,6 +534,7 @@ func rtWaitPollGap(pid int, limit time.Duration) string {
 // брошенных записей держат exit_group до возврата системного вызова). Сверх этого —
 // общий вердикт перезапуска.
 func TestRouterPanelRestartWithLongStall(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "нагрузка на диск: долгий застой записи на разделе панели при перезапуске")
 	p := routertest.NewPanel(t)
 	old := rtPanelCurrent(t, p)
 	quiet := rtWaitStorageQuiet(t, time.Minute)

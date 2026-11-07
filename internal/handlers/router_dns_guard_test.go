@@ -1,5 +1,7 @@
 //go:build router
 
+// router-area: dns
+
 package handlers
 
 import (
@@ -127,6 +129,7 @@ func rtDNSOtherKernel(t *testing.T, kernel string) string {
 // ядра, внешнее имя разрешается, в истории действий — успешный перезапуск ядра
 // сторожем. Метка ядра: сценарий гасит активное ядро.
 func TestRouterDNSGuard(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "внесение сбоя: kill -9 ядра-перехватчика, сторож перезапускает ядро")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)
@@ -178,6 +181,7 @@ func TestRouterDNSGuard(t *testing.T) {
 // возвращает исходное ядро через API служб и выключает перехват. Метка ядра:
 // сценарий меняет активное ядро.
 func TestRouterDNSGuardKernelChanged(t *testing.T) {
+	routertest.Slow(t, "смена ядра командой XKeen и возврат исходного ядра через API служб")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	other := rtDNSOtherKernel(t, kernel)
@@ -301,6 +305,7 @@ func rtDNSRestoreOverride(t *testing.T, before bool) {
 
 // Метка ядра: подтест reboot перезапускает активное ядро и ждёт его подъёма.
 func TestRouterDNSStartReconcile(t *testing.T) {
+	routertest.Slow(t, "перезапуск панели и ядра в подтестах, сверка перехвата DNS при старте")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 

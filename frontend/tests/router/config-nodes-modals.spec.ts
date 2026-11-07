@@ -1,4 +1,5 @@
 // e2e-pages: config config/nodes
+// router-area: sources
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';

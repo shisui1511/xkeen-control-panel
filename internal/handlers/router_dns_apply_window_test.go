@@ -1,5 +1,7 @@
 //go:build router
 
+// router-area: dns
+
 package handlers
 
 import (
@@ -98,6 +100,19 @@ func (e *rtSrc) rtDNSAddServer(kernel, server string) {
 	}
 }
 
+// rtDNSRemoveServer убирает сервер из списка серверов DNS-секции черновика ядра.
+func (e *rtSrc) rtDNSRemoveServer(kernel, server string) {
+	e.t.Helper()
+	form, advanced := e.rtDNSSectionForm(kernel)
+	key := rtDNSServersKey(kernel)
+	list, _ := form[key].([]any)
+	form[key] = slices.DeleteFunc(slices.Clone(list), func(v any) bool { s, _ := v.(string); return s == server })
+	r := e.rtCoresPost("/save", map[string]any{"kernel": kernel, "section": "dns", "form": form, "advanced": advanced})
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("save dns (%s): %d %s", kernel, r.Status, r.Code)
+	}
+}
+
 // rtDNSDraftHasServer — сервер есть в списке серверов DNS-секции черновика.
 func (e *rtSrc) rtDNSDraftHasServer(kernel, server string) bool {
 	e.t.Helper()
@@ -131,6 +146,7 @@ func (e *rtSrc) rtDNSRestoreSection(section string, orig json.RawMessage) {
 // ядро, исход timeout. Подтест keep: то же «Применить» → окно apply → «Оставить» →
 // Applied содержит сервер. Метка ядра: DNS-секция и перехват — у активного ядра.
 func TestRouterDNSApplyWindow(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "реальное время: окно «Применить» DNS без «Оставить» ждёт откат по таймеру")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)
@@ -139,6 +155,12 @@ func TestRouterDNSApplyWindow(t *testing.T) {
 	e.rtDNSEnableOK()
 	t.Cleanup(func() { e.with(t).rtDNSEnsureOff() })
 	section := configlayer.CoreSectionName(kernel, "dns")
+	if rtDNSAppliedHas(t, section, rtDNSApplyServer) {
+		// хвост прерванного прогона: тест остановлен посреди сценария, t.Cleanup не выполнялся
+		t.Logf("подготовка: сервер %s остался в применённой секции %s от прерванного прогона — убирается", rtDNSApplyServer, section)
+		e.rtDNSRemoveServer(kernel, rtDNSApplyServer)
+		e.rtDNSApplyKept("подготовка: оставшийся сервер")
+	}
 	orig := rtDNSLayerApplied(t)[section]
 	t.Cleanup(func() { e.with(t).rtDNSRestoreSection(section, orig) })
 	if rtDNSAppliedHas(t, section, rtDNSApplyServer) {
@@ -295,6 +317,7 @@ func (e *rtSrc) rtDNSSaveGroup(group map[string]any) {
 // черновик содержит правку (draft_changes > 0). Метка ядра: перехват и DNS-секция
 // — у активного ядра.
 func TestRouterDNSApplyProbe(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "внесение сбоя: мёртвый узел группы-цели обрывает пробу после «Применить» DNS")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)

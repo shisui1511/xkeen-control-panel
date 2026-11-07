@@ -1,5 +1,7 @@
 //go:build router
 
+// router-area: cores
+
 package handlers
 
 import (
@@ -172,6 +174,7 @@ func (e *rtSrc) rtCoresRelease(section string) {
 // «Применить» → исходные файлы побайтно; блок api Xray при взятой маршрутизации.
 // Метка ядра: сценарий читает активное ядро.
 func TestRouterCoresAPIFlow(t *testing.T) {
+	routertest.Slow(t, "две серии «Применить» с перезапуском ядра: взятие dns и отпускание")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
 

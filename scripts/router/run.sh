@@ -18,7 +18,13 @@
 #   full         то же, что запуск без SUITE: полный прогон (синоним для статуса релиза).
 #   smoke        деплой и смоук (только чтение, без снимка).
 #   changed      быстрый набор для каждой задачи (D-25): select-changed.mjs по diff от
-#                origin/main и незакоммиченным правкам выбирает Go-пакеты и роутерные спеки.
+#                origin/main и незакоммиченным правкам выбирает тесты затронутых областей
+#                (scripts/router/areas.json, строки router-area) по именам: Go через RT_GO_SEQ,
+#                спеки областей и канарейки; полный выбор — только при правке самого выбора,
+#                обвязка стенда даёт RT_HARNESS=1, зависимости — pages и канарейки (D-13).
+#                Порядок гейта: сначала тесты затронутых областей, затем по частоте падений из
+#                истории (RTR-03); гейт идёт до конца. Вывод выбора — 13 строк eval, run.sh
+#                сверяет число, порядок и форму строк. В summary.md строки «Области» и «Выбор».
 #                Ветви строятся гибридом (D-01…D-03): первая — ядро из SHA HEAD (cksum SHA
 #                чётный — xray, нечётный — mihomo; повтор на том же HEAD идёт под тем же
 #                ядром) со всем выбором; вторая — другое ядро и только тесты с меткой ядра
@@ -29,6 +35,20 @@
 #                Ничего не затронуто — деплой и смоук (без снимка). Причины выбора —
 #                <отчёт>/select.txt, план ветвей и окно — <отчёт>/plan.txt, оба в разделе
 #                «Выбор» отчёта; раскладка тестов по ветвям — <отчёт>/<цель>/layout.tsv.
+#   harness      короткая проверка механики стенда (T2h, RTR-02, D-07) для правок обвязки: деплой,
+#                смоук, снимок и восстановление, затем на каждом ядре (обе ветви, гибрида нет)
+#                по два Go-теста (только чтения и изменяющий) и по два спека (read и state) из
+#                блока harness файла scripts/router/areas.json, и самопроверка сессии: вложенная
+#                сессия по спеке блока (scripts/router/harness-session.json) обязана остановиться
+#                на первом несовпадении — выйти с кодом 1, написать раздел «Остановлено на первом
+#                несовпадении», не запускать второй проход и вернуть стенд. Результат цели —
+#                строка PASS|FAIL harness-session-fail-fast, в summary.md — «Самопроверка
+#                сессии: остановка на первом несовпадении — да|нет». Окно смоука 30 с. Нужно
+#                чистое рабочее дерево (вложенная сессия его требует). Статус релиза не
+#                публикуется. Тесты блока — без метки ядра, яруса full и дольше 30 с по истории.
+#                В наборе changed при RT_HARNESS=1 (правка обвязки) те же Go-тесты и спеки идут
+#                отдельными этапами go-harness, pw-harness-read и pw-harness-state в обеих ветвях
+#                (вторая ветвь обязательна), а после ветвей идёт та же самопроверка сессии.
 #   session      сессия на стенде по спеке (SPEC=<файл JSON>): проходы с ожиданиями на одной
 #                цели и ядрах спеки, в том числе на файлах продукта из другого коммита
 #                (воспроизведение до исправления). Проходы ведёт session.mjs (формат спеки —
@@ -36,11 +56,85 @@
 #                go-suite.sh. В конце рабочее дерево и стенд возвращаются: сборка HEAD,
 #                исходное ядро. Итог — summary.md и session.json отчёта. Нужно чистое
 #                рабочее дерево; снимка нет, как у ручной сессии на стенде.
+#   rerun        перепрогон упавших тестов (RTR-05): FROM=<отчёт прогона или сессии> под build/router.
+#                rerun-plan.mjs берёт из отчёта проверки go: и pw: со статусом FAIL и XPASS и
+#                собирает на каждое ядро их состав (<ядро>.sel: родительские TestRouter*, спеки и
+#                --grep по названиям); набор ставит сборку HEAD (или RELEASE), снимает снимок и
+#                гонит на каждом ядре, где тесты упали, только их, затем восстанавливает стенд.
+#                Запись — в тот же отчёт FROM, номер перепрогона N — следующий свободный:
+#                <цель>/rerun-N.tsv (все строки перепрогона, включая смоук и восстановление),
+#                <цель>/<ядро>/rerun-N/ (артефакты), <цель>/rerun-N.sel.d/ (состав),
+#                rerun-N.meta (sha, dirty, started) и rerun-N.md; в summary.md дописывается
+#                раздел «## Перепрогон N» с таблицей «проверка, ядро, было, стало» и строкой
+#                «- Перепрогон: K тестов из <отчёт>». meta, results.tsv и ссылка last отчёта FROM
+#                не меняются; служебные файлы цели (snapshot.log, restore.log, deploy.rc, core,
+#                timings.tsv) перепрогон перезаписывает или дополняет. Нет упавших тестов — код 0
+#                с сообщением, стенд не трогается. Окно смоука 30 с. Статус релиза не публикуется.
+#   bisect       поиск виновного коммита (RTR-11, D-22): TEST=<go:Имя|pw:название> CORE=<ядро>
+#                FROM=<ссылка> [TO=<ссылка>, по умолчанию HEAD] [MODE=regress|fix] [SPEC=<спек>]
+#                [GREP=<регэксп>]. Деплой HEAD (или RELEASE) и смоук цели, затем bisect.mjs двоичным
+#                поиском по first-parent коммитам (по ancestry-path, если FROM не на first-parent
+#                цепочке TO) ставит на стенд сборку дерева коммита и гонит один тест (tree-step.sh:
+#                продукт и тест из дерева коммита, обвязка из HEAD, отдельный worktree
+#                build/bisect/wt-<sha>). MODE=regress ищет первый коммит, где тест падает, MODE=fix —
+#                первый, где проходит; концы проверяются; шаг, который нельзя проверить (теста нет
+#                в дереве, сборка не удалась), пропускается. Для pw: нужен SPEC; GREP по умолчанию —
+#                экранированное название из TEST; для go: пакет определяется по рабочему дереву, для
+#                теста, которого в дереве уже нет, — TEST=go:<пакет>:TestRouterИмя. Итог — раздел
+#                «## Поиск виновного коммита» summary.md со строкой «- Итог bisect <тест>: <sha>
+#                <тема>» (или «… между <a> и <b>», «… не воспроизводится»). В конце ставятся обратно
+#                сборка, стоявшая до поиска (HEAD или RELEASE), и исходное ядро. Одна цель
+#                (ROUTERS=<id>). Статус релиза не публикуется. Код выхода — код bisect.mjs: 0 —
+#                вердикт есть и стенд вернулся, 1 — нет вердикта, 2 — неверные значения, 3 — связь.
+#   delta        добор stand/<arch>-full на новый тег без повторного полного прогона (RTR-11, D-24,
+#                D-25): RELEASE=<тег|latest> [DRY_RUN=1] [BASE_REPORT=<отчёт>]. Условия те же, что у
+#                полного прогона (todo 11): есть отчёт полного прогона по более старому тегу той же
+#                вехи (коммит — предок нового тега, новее последнего stable; delta-plan.mjs base),
+#                все упавшие в нём тесты (кроме known и карантина) зелёные на новом теге, зелёные все
+#                тесты, выбранные select-changed.mjs по диффу между тегами (с ярусом full для
+#                затронутых областей), и смоук нового тега в этом же прогоне зелёный. Состав по ядрам
+#                собирает delta-plan.mjs merge в <отчёт>/<цель>/delta.sel.d/<ядро>.sel (упавшие в базе
+#                плюс выбор по диффу; первая ветвь — ядро по SHA HEAD, как у changed, вторая — только
+#                тесты с меткой ядра); дальше прогон идёт как перепрогон через RT_SEL_DIR: деплой
+#                сборки нового тега, смоук, снимок, ветви, подтверждающий перепрогон новых падений,
+#                восстановление. Выбор по диффу полный (правка самого выбора), неизвестный файл,
+#                упавший в базе тест, который нельзя перегнать, — добор невозможен (код 1, стенд не
+#                трогается): нужен полный прогон. Решение — строки summary.md «- Добор: база …» и
+#                «- Решение добора: success|failure»; статус stand/<arch>-full на коммите нового
+#                тега публикуется с описанием «добор от <тег базы>: зелёный|красный, тестов N,
+#                новых падений M» (release-status.sh). DRY_RUN=1 — статус не отправляется
+#                (release-status.sh --dry-run), решение в summary.md с пометкой «dry_run: не
+#                отправлено». Тег проверяется до блокировки: шаблон, наличие локально, коммит —
+#                предок HEAD (иначе код 2: тесты старше релиза). Код выхода — как у полного прогона.
 #   reboot       холодный старт (D-24): деплой, предполёт и снимок параллельно, затем
 #                по одной цели в порядке XCP_REBOOT_ORDER (нижестоящая цель каскада первой):
 #                перезагрузка, ожидание возврата, проверки автозапуска (xcp той же версии,
 #                XKeen, то же ядро, правила iptables), смоук, сверка со снимком. В конце
 #                все цели снова отвечают (reboot-reachable-end). Матрица ядер не применяется.
+#
+# Разбор падений (RTR-05, D-19…D-21), наборы full, changed и harness. Каждое новое падение теста
+# (FAIL проверок go: и pw:, кроме известных, карантина и признаков потери связи) после всех ветвей и до
+# восстановления стенда, в той же блокировке и в тот же отчёт, перегоняется один раз только для
+# классификации (confirm-go-<ядро>, confirm-pw-<ядро>; строки — в <цель>/confirm.tsv, артефакты — в
+# <цель>/<ядро>/confirm/): прошёл — класс flaky, упал снова — new. Основной проход идёт без повторов
+# (retries: 0), прошедший со второго раза тест красный. Потолок — RT_CONFIRM_MAX тестов (10) на цель:
+# новых падений больше — перепрогона нет вовсе (общая причина), все они new, в plan.txt строка
+# «подтверждающий перепрогон пропущен». Классы падений — <цель>/classes.tsv и раздел «Классы падений»
+# summary.md (branch-report.mjs), итог — строка «- Итог:»; код выхода красный при new, flaky, xpass и
+# при потере связи, не догнанной после возврата связи. Счётчики report.md и summary.md показывают
+# QPASS и QFAIL (карантин). В конце каждого прогона с отчётом (кроме session) отчёт добавляется в
+# историю — node history.mjs append, класс падения попадает в колонку class (D-20).
+#
+# Поиск виновного коммита в конце полного прогона (RTR-11, D-22): для тестов класса new из
+# <цель>/classes.tsv без класса flaky в истории за 30 дней (поиск по нестабильному тесту даёт ложного
+# виновника) — не больше 3 тестов (RT_BISECT_MAX), по порядку классов — запускается bisect.mjs от
+# sha прошлого зелёного полного прогона в истории (lastFull green), иначе от новейшего stable-тега
+# (git tag --merged HEAD), до HEAD, с --assume-to: падение только что видели. Подбор тестов и записей
+# для них — bisect.mjs pick (через rerun-plan.mjs). Поиск идёт до статуса релиза и удержания блокировки,
+# после каждого поиска стенд возвращается к сборке прогона (RELEASE или HEAD) и исходному ядру; код
+# выхода прогона не меняется. Прерванный прогон и тесты flaky поиска не получают. Итог — раздел
+# «## Поиск виновного коммита» summary.md и строки «- Итог bisect …» (их подхватывает latest.md прогона
+# без присмотра).
 #
 # Порядок: check-known.sh (метки известных падений) -> цели из локального конфига ->
 # блокировка на весь прогон -> отчёт -> ротация build/router (tidy-lib.sh; сборки ротирует
@@ -54,16 +148,33 @@
 #
 # Окружение:
 #   ROUTERS=<id,id>      выбор целей (по умолчанию все из конфига)
-#   RELEASE=<тег>        ставить артефакт GitHub Release вместо сборки ветки. У наборов smoke и
-#                        full после прогона для каждой цели публикуется статус коммита тега
+#   RELEASE=<тег>        ставить артефакт GitHub Release вместо сборки ветки (у набора delta —
+#                        обязателен, latest — новейший релиз). У наборов smoke, full и delta (контекст
+#                        stand/<arch>-full, описание «добор от <тег базы>: …») после прогона для каждой цели публикуется статус коммита тега
 #                        stand/<arch>-<smoke|full> (release-status.sh): success при нуле FAIL и
-#                        XPASS цели, иначе failure. Статуса нет при незакоммиченных правках, сбое
-#                        связи ПК↔стенд, прерванном прогоне, а у full — когда коммит тега не
+#                        XPASS цели (по классам падений: красные new, flaky, xpass, не догнанный
+#                        stand), иначе failure. Статуса нет при незакоммиченных правках, сбое
+#                        связи ПК↔стенд (связь не вернулась или обрыв без догона), прерванном прогоне, а у full — когда коммит тега не
 #                        предок HEAD. Итог — строка «Статус на GitHub» в summary.md; код выхода
 #                        прогона от публикации не зависит. Сбой посреди прогона даёт красный
 #                        статус; повторный прогон перекрывает его (побеждает последний статус
-#                        контекста)
+#                        контекста). У full и delta с RELEASE состав не сужается: заданные
+#                        RT_CORES, RT_SEL_DIR, RT_GO_*, RT_SPECS*, RT_PW_GREP*, RT_PW_INVERT,
+#                        RT_RESULTS_NAME или RT_ART_SUB — отказ с кодом 2 до блокировки
 #   SPEC=<файл>          спека набора session (путь от корня рабочей копии или абсолютный)
+#   FROM=<отчёт>         отчёт прогона или сессии набора rerun (путь от корня рабочей копии или
+#                        абсолютный, только под build/router; проверка до блокировки, иначе код 2).
+#                        У набора bisect FROM — ссылка git, с которой искать (TEST, CORE, TO, MODE, SPEC,
+#                        GREP — там же; все значения проверяются до блокировки, иначе код 2)
+#   DRY_RUN=1            набор delta: статус на GitHub не отправляется (release-status.sh --dry-run),
+#                        состав и решение добора — в summary.md (0 по умолчанию)
+#   BASE_REPORT=<отчёт>  набор delta: отчёт полного прогона, от которого считается добор (имя каталога
+#                        под build/router или путь); по умолчанию — самый свежий подходящий в истории
+#   RT_SEL_DIR=<каталог> состав ветви из файлов <ядро>.sel (rerun-plan.mjs): вместо выбора набора
+#                        ветвь берёт GO_SEQ, SPECS и GREP из <ядро>.sel, а ветвь без файла
+#                        пропускается; читается построчно, без eval, по шаблонам безопасных символов.
+#                        Набор rerun задаёт его сам (<цель>/rerun-N.sel.d)
+#   RT_LINK_WAIT=<с>     ожидание возврата связи после обрыва (rt_wait_link), 60…7200, по умолчанию 600
 #   RT_HOLD_MINUTES=<N>  после прогона держать блокировку N минут для ручной
 #                        проверки; снять раньше: touch <git-common-dir>/router-test.release
 #   RT_LOCK_WAIT=<с>     ожидание очереди на роутеры (по умолчанию 3600)
@@ -81,14 +192,33 @@
 #
 # Раскладка отчёта: результаты всех ветвей — в <отчёт>/<id>/results.tsv (ядро ветви — во
 # второй колонке), артефакты ветви (go-*.jsonl, pw-read/, pw/, pw-switch/) — в
-# <отчёт>/<id>/<ядро>/: pw-read/ — часть Playwright только чтения, pw/ — изменяющая часть.
+# <отчёт>/<id>/<ядро>/: pw-read/ — часть Playwright только чтения, pw/ — изменяющая часть;
+# kernel-pids.tsv (смены PID ядра на стенде от Go-тестов до конца части state) и clock.tsv
+# (часы ПК и устройства) — для счёта перезапусков ядра на тест в summary.md.
 # Этапы ветви в timings.tsv: sync-<ядро>, switch-<ядро>, smoke-<ядро> (проверки без окна),
 # observe-<ядро> (окно, идёт параллельно pw-read-<ядро>), pw-read-<ядро>, go-<ядро>,
 # settle-<ядро>, pw-<ядро> (часть state). Хвост xcp.log ветви пишет наблюдатель окна.
 # Этап, оборванный сигналом, — строка с кодом 130 (её пишет _term), начало и ядро ветви те же.
 #
-# Код выхода: 0 — нет строк FAIL и XPASS, 2 — неизвестный набор, иначе 1. Набор session —
+# Потеря связи со стендом (класс stand, D-21, D-26), наборы full, changed и harness. Этап Go с
+# кодом 3 или этап Playwright с ненулевым кодом при молчащем ssh — обрыв: rt_wait_link ждёт связь до
+# RT_LINK_WAIT (600 с), затем один раз на ветвь догоняется сорванное — Go-пакеты вне go-done.txt
+# (catchup-go-<ядро>) или та же часть Playwright (catchup-pw-<ядро>), строки — в <цель>/catchup.tsv,
+# артефакты — в <цель>/<ядро>/catchup/ — и набор продолжается со следующего шага. Второй обрыв в
+# ветви не догоняется. Связь не вернулась — ветвь и цель останавливаются, несделанное — в
+# <цель>/notrun.txt (и в разделе «Не выполнено из-за обрыва связи» summary.md), стенд
+# восстанавливается по снимку, как при любом сбое. Обрывы — в <цель>/link-loss.tsv. Набор rerun связь
+# ждёт, но не догоняет.
+#
+# Файлы разбора падений в <отчёт>/<цель>/: confirm.tsv, confirm-count (сколько тестов подлежало
+# перепрогону), confirm-skip (причина, если перепрогона не было), confirm-plan.txt, classes.tsv,
+# catchup.tsv, link-loss.tsv, notrun.txt.
+#
+# Код выхода: 0 — нет красных классов (new, flaky, xpass, не догнанный stand), 2 — неизвестный
+# набор, иначе 1. Набор session —
 # код session.mjs: 0 — ожидания совпали и стенд вернулся, 3 — сбой связи ПК↔стенд, иначе 1 или 2.
+# Набор rerun: 0 — все перегнанные тесты прошли (PASS, KNOWN, QPASS, QFAIL) или упавших нет,
+# 1 — есть FAIL или XPASS, 2 — неверный FROM, 3 — сбой связи ПК↔стенд.
 # 130 — прерван сигналом INT, TERM или HUP: этап остановлен, стенд восстановлен по снимку,
 # отчёт с пометкой «Прерван» написан, удержание блокировки (RT_HOLD_MINUTES) не применяется.
 
@@ -102,9 +232,9 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 SUITE=${1:-}
 case "$SUITE" in
-  smoke | changed | reboot | session | full | '') ;;
+  smoke | changed | harness | reboot | session | rerun | bisect | delta | full | '') ;;
   *)
-    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke, changed, reboot, session и full (полный, можно без SUITE)" >&2
+    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke, changed, harness, reboot, session, rerun, bisect, delta и full (полный, можно без SUITE)" >&2
     echo "router-test: пример: make router-test SUITE=smoke" >&2
     exit 2
     ;;
@@ -135,6 +265,24 @@ for _c in $RT_CORES; do
   _seen="$_seen $_c"
 done
 
+# Сужение состава окружением: явный RT_CORES и непустые переменные отбора тестов, которые этапы
+# читают из окружения (отладка точечного прогона). Список имён пишется в meta отчёта строкой
+# narrow= (none — без сужения): базой добора годится только полный прогон с narrow=none
+# (delta-plan.mjs). Имена в цикле фиксированные, eval читает только их значения.
+RT_NARROW=""
+[ -z "$RT_CORES_SET" ] || RT_NARROW=" RT_CORES"
+for _nv in RT_SEL_DIR RT_GO_PKGS RT_GO_RUN RT_GO_RUN_SEQ RT_GO_SEQ RT_SPECS RT_SPECS_FIRST RT_PW_GREP RT_PW_GREP_INVERT RT_PW_INVERT RT_RESULTS_NAME RT_ART_SUB; do
+  eval "_nvv=\${$_nv:-}"
+  [ -z "$_nvv" ] || RT_NARROW="$RT_NARROW $_nv"
+done
+RT_NARROW=${RT_NARROW# }
+# full и delta с RELEASE публикуют stand/<arch>-full: после части набора это был бы ложный зелёный.
+# Сужение — только для отладки без RELEASE; отказ с кодом 2 до блокировки, стенд не трогается.
+if [ -n "${RELEASE:-}" ] && [ -n "$RT_NARROW" ] && { [ "$SUITE_NAME" = full ] || [ "$SUITE_NAME" = delta ]; }; then
+  echo "router-test: SUITE=$SUITE_NAME с RELEASE публикует stand/<arch>-full, а состав сужен окружением: $RT_NARROW — снимите эти переменные (сужение — только для отладки без RELEASE)" >&2
+  exit 2
+fi
+
 # Ядро первой ветви набора changed (D-02): чётная контрольная сумма cksum строки SHA HEAD
 # (без перевода строки) — xray, нечётная — mihomo. Зависит только от SHA: повтор на том же
 # HEAD идёт под тем же ядром, а на разных коммитах ядра чередуются.
@@ -148,6 +296,16 @@ rt_sha_core() {
 }
 
 cd "$(rt_repo_root)"
+
+# Начало прогона: время набора harness в summary.md
+RT_T0=$(date +%s)
+
+# Набор harness: самопроверка сессии идёт вложенной сессией, которой нужно чистое дерево;
+# узнавать об этом через десять минут прогона поздно — проверка до блокировки и деплоя.
+if [ "$SUITE" = harness ] && [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "router-test: SUITE=harness требует чистое рабочее дерево: самопроверка сессии меняет файлы продукта" >&2
+  exit 2
+fi
 
 # Набор session: спека и чистое дерево проверяются до блокировки, цель берётся из спеки.
 if [ "$SUITE" = session ]; then
@@ -163,6 +321,180 @@ if [ "$SUITE" = session ]; then
   fi
 fi
 
+# Набор rerun: отчёт FROM проверяется до check-known.sh, целей и блокировки (код 2, стенд не
+# трогается). Путь приводит к абсолютному под build/router rt_report_use: вне build/router, с
+# «..» и служебные имена отвергаются. Существование каталога проверяется до неё: она создаёт его.
+RT_RERUN_N=""
+RT_RERUN_K=0
+if [ "$SUITE" = rerun ]; then
+  if [ -z "${FROM:-}" ]; then
+    echo "router-test: SUITE=rerun требует FROM=<отчёт прогона или сессии под build/router>" >&2
+    exit 2
+  fi
+  case "$FROM" in
+    /*) _rr_abs=$FROM ;;
+    *) _rr_abs="$(rt_repo_root)/$FROM" ;;
+  esac
+  if [ ! -d "$_rr_abs" ]; then
+    echo "router-test: FROM: отчёт не найден: $FROM" >&2
+    exit 2
+  fi
+  RT_REPORT=$FROM
+  rt_report_use || exit 2
+fi
+
+# Набор bisect: значения проверяются до check-known.sh, целей и блокировки (код 2, стенд не трогается).
+# TEST — go:TestRouterИмя (пакет определяется по рабочему дереву; можно go:<каталог пакета>:TestRouterИмя
+# для теста, которого в дереве уже нет) либо pw:название; для pw: нужен SPEC. FROM — ссылка, TO — по
+# умолчанию HEAD, CORE — ядро, на котором тест падает, MODE — regress (по умолчанию) или fix.
+RT_BS_GO=""
+RT_BS_SPEC=""
+RT_BS_GREP=""
+RT_BS_LABEL=""
+RT_BS_FROM=""
+RT_BS_TO=""
+RT_BS_MODE=""
+BISECT_RC=0
+rt_bs_die() {
+  echo "router-test: SUITE=bisect: $*" >&2
+  exit 2
+}
+if [ "$SUITE" = bisect ]; then
+  _bs_ref_re='^[A-Za-z0-9_.][A-Za-z0-9_./~^-]*$'
+  [ -n "${TEST:-}" ] || rt_bs_die "нужен TEST=<go:Имя|pw:название>"
+  case "${CORE:-}" in
+    xray | mihomo) ;;
+    *) rt_bs_die "нужен CORE=xray|mihomo" ;;
+  esac
+  RT_BS_MODE=${MODE:-regress}
+  case "$RT_BS_MODE" in
+    regress | fix) ;;
+    *) rt_bs_die "MODE: regress или fix" ;;
+  esac
+  [ -n "${FROM:-}" ] || rt_bs_die "нужен FROM=<ссылка: с какого коммита искать>"
+  RT_BS_FROM=$FROM
+  RT_BS_TO=${TO:-HEAD}
+  for _bs_r in "$RT_BS_FROM" "$RT_BS_TO"; do
+    printf '%s\n' "$_bs_r" | grep -Eq "$_bs_ref_re" || rt_bs_die "FROM и TO: недопустимая ссылка"
+    git rev-parse --verify --quiet "$_bs_r^{commit}" >/dev/null 2>&1 || rt_bs_die "FROM и TO: '$_bs_r' не указывает на коммит"
+  done
+  case "$TEST" in
+    go:?*)
+      _bs_name=${TEST#go:}
+      case "$_bs_name" in
+        *:*)
+          RT_BS_GO=$_bs_name
+          printf '%s\n' "$RT_BS_GO" | grep -Eq '^[A-Za-z0-9_./-]+:TestRouter[A-Za-z0-9_]+$' || rt_bs_die "TEST: ожидается go:<пакет>:TestRouter<Имя>"
+          RT_BS_LABEL="go:${RT_BS_GO#*:}"
+          ;;
+        *)
+          _bs_name=${_bs_name%%/*}
+          printf '%s\n' "$_bs_name" | grep -Eq '^TestRouter[A-Za-z0-9_]+$' || rt_bs_die "TEST: ожидается go:TestRouter<Имя>"
+          RT_BS_GO=$(node -e '
+const cm = require(process.argv[1] + "/scripts/router/core-marks.cjs");
+for (const t of cm.testFacts(process.argv[1])) {
+  if (t.kind === "go" && t.test === process.argv[2] && t.pkg) {
+    console.log(t.pkg + ":" + t.test);
+    process.exit(0);
+  }
+}
+process.exit(1);
+' "$(rt_repo_root)" "$_bs_name" 2>/dev/null) || rt_bs_die "тест $_bs_name не найден в рабочем дереве: укажите TEST=go:<пакет>:$_bs_name"
+          RT_BS_LABEL="go:$_bs_name"
+          ;;
+      esac
+      ;;
+    pw:?*)
+      _bs_title=${TEST#pw:}
+      case "$_bs_title" in
+        *"
+"*) rt_bs_die "TEST: перевод строки недопустим" ;;
+      esac
+      [ -n "${SPEC:-}" ] || rt_bs_die "для pw: нужен SPEC=<tests/router/спек.spec.ts>"
+      case "$SPEC" in
+        */*) RT_BS_SPEC=$SPEC ;;
+        *) RT_BS_SPEC="tests/router/$SPEC" ;;
+      esac
+      printf '%s\n' "$RT_BS_SPEC" | grep -Eq '^tests/router/[A-Za-z0-9_.-]+\.spec\.ts$' || rt_bs_die "SPEC: ожидается tests/router/<имя>.spec.ts"
+      if [ -n "${GREP:-}" ]; then
+        RT_BS_GREP=$GREP
+      else
+        # название «описание > тест» -> «описание тест» с экранированными символами регэкспа
+        RT_BS_GREP=$(printf '%s' "$_bs_title" | sed -e 's/ > / /g' -e 's/[][\.*^$(){}?+|]/\\&/g')
+      fi
+      case "$RT_BS_GREP" in
+        *"'"* | *"
+"*) rt_bs_die "GREP: одинарная кавычка и перевод строки недопустимы" ;;
+      esac
+      RT_BS_LABEL=$TEST
+      ;;
+    *) rt_bs_die "TEST: ожидается go:Имя или pw:название" ;;
+  esac
+fi
+
+# Набор delta: тег, DRY_RUN, BASE_REPORT и база добора проверяются до check-known.sh, целей и блокировки
+# (код 2 на неверных значениях, код 1 — нет подходящей базы; стенд не трогается). RELEASE=latest — новейший
+# опубликованный релиз (как latestReleaseTag в session.mjs). Коммит тега обязан быть предком HEAD: тесты
+# берутся из рабочего дерева, оно не должно быть старше релиза. База — delta-plan.mjs base: отчёт полного
+# прогона по более старому тегу той же вехи (условия — в его заголовке).
+DELTA_BASE_DIR=""
+DELTA_BASE_TAG=""
+DELTA_BASE_NAME=""
+DELTA_DRY=0
+rt_dl_die() {
+  echo "router-test: SUITE=delta: $*" >&2
+  exit 2
+}
+if [ "$SUITE" = delta ]; then
+  [ -z "$RT_CORES_SET" ] || rt_dl_die "RT_CORES не применяется: добор идёт на обоих ядрах по составу"
+  [ -n "${RELEASE:-}" ] || rt_dl_die "нужен RELEASE=<тег|latest>"
+  if [ "$RELEASE" = latest ]; then
+    command -v gh >/dev/null 2>&1 || rt_dl_die "RELEASE=latest: нужен gh"
+    RELEASE=$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null) || RELEASE=""
+    [ -n "$RELEASE" ] || rt_dl_die "RELEASE=latest: новейший релиз не определён (gh release list)"
+  fi
+  printf '%s\n' "$RELEASE" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-z]+\.[0-9]+)?$' || rt_dl_die "RELEASE: ожидается vX.Y.Z или vX.Y.Z-<суффикс>.<N>"
+  git rev-parse -q --verify "refs/tags/$RELEASE^{commit}" >/dev/null 2>&1 || rt_dl_die "тег $RELEASE не найден локально (git fetch --tags)"
+  git merge-base --is-ancestor "$RELEASE" HEAD 2>/dev/null || rt_dl_die "тесты старше релиза: коммит $RELEASE не предок HEAD"
+  case "${DRY_RUN:-0}" in
+    0 | 1) DELTA_DRY=${DRY_RUN:-0} ;;
+    *) rt_dl_die "DRY_RUN: 0 или 1" ;;
+  esac
+  if [ -n "${BASE_REPORT:-}" ]; then
+    printf '%s\n' "$BASE_REPORT" | grep -Eq '^[A-Za-z0-9_./-]+$' || rt_dl_die "BASE_REPORT: недопустимые символы"
+  fi
+  _dl_rc=0
+  if [ -n "${BASE_REPORT:-}" ]; then
+    _dl_out=$(node "$SCRIPT_DIR/delta-plan.mjs" base --release "$RELEASE" --base-report "$BASE_REPORT") || _dl_rc=$?
+  else
+    _dl_out=$(node "$SCRIPT_DIR/delta-plan.mjs" base --release "$RELEASE") || _dl_rc=$?
+  fi
+  case "$_dl_rc" in
+    0) ;;
+    1)
+      echo "router-test: красный — нет базы добора: нужен полный прогон на пре-релизе этой вехи (make router-test SUITE=full RELEASE=<тег>)" >&2
+      exit 1
+      ;;
+    *) rt_dl_die "база добора не определена (delta-plan.mjs, код $_dl_rc)" ;;
+  esac
+  DELTA_BASE_DIR=$(printf '%s\n' "$_dl_out" | cut -f1)
+  DELTA_BASE_TAG=$(printf '%s\n' "$_dl_out" | cut -f2)
+  printf '%s\n' "$DELTA_BASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-z]+\.[0-9]+)?$' || rt_dl_die "тег базы добора не разобран"
+  [ -d "$DELTA_BASE_DIR" ] || rt_dl_die "отчёт базы добора не найден"
+  DELTA_BASE_NAME=$(basename "$DELTA_BASE_DIR")
+fi
+
+# Виды спеков рабочего дерева (WR-04): незакоммиченный спек read не уходит в несколько воркеров
+# без проверки. До блокировки и деплоя, только для наборов с Playwright.
+case "$SUITE" in
+  '' | changed | harness | session | delta)
+    if ! node scripts/check-router-kinds.js --worktree; then
+      echo "router-test: красный — виды роутерных спеков рабочего дерева не прошли проверку (check-router-kinds.js --worktree)" >&2
+      exit 1
+    fi
+    ;;
+esac
+
 # Метки известных падений должны ссылаться на живые todo (D-13): до блокировки и деплоя.
 if ! sh "$SCRIPT_DIR/check-known.sh"; then
   echo "router-test: красный — метки известных падений ссылаются на закрытые или несуществующие todo" >&2
@@ -170,8 +502,65 @@ if ! sh "$SCRIPT_DIR/check-known.sh"; then
 fi
 
 rt_load_targets
+
+# Набор bisect идёт на одной цели (ядро и сборка стенда возвращаются для неё).
+if [ "$SUITE" = bisect ]; then
+  # shellcheck disable=SC2086
+  if [ "$(printf '%s\n' $RT_TARGETS | grep -c .)" != 1 ]; then
+    rt_bs_die "нужна одна цель (ROUTERS=<id>), выбрано: $RT_TARGETS"
+  fi
+fi
+
+# Набор rerun: состав перепрогона считается до блокировки (только чтение отчёта): в перепрогон
+# идут цели, у которых есть упавшие тесты; нет ни одной — стенд не трогается, код 0.
+if [ "$SUITE" = rerun ]; then
+  _rr_keep=""
+  _rr_tmp=$(mktemp -d)
+  for _rr_t in $RT_TARGETS; do
+    _rr_rc=0
+    node "$SCRIPT_DIR/rerun-plan.mjs" "$RT_REPORT" "$_rr_t" --out-dir "$_rr_tmp/$_rr_t" >"$_rr_tmp/$_rr_t.out" 2>&1 || _rr_rc=$?
+    case "$_rr_rc" in
+      0) _rr_keep="$_rr_keep $_rr_t" ;;
+      1) ;;
+      *)
+        cat "$_rr_tmp/$_rr_t.out" >&2
+        rm -rf "$_rr_tmp"
+        echo "router-test: rerun-plan.mjs не разобрал отчёт $RT_REPORT (код $_rr_rc)" >&2
+        exit 2
+        ;;
+    esac
+  done
+  rm -rf "$_rr_tmp"
+  if [ -z "$_rr_keep" ]; then
+    echo "router-test: в отчёте $RT_REPORT нет упавших тестов (FAIL, XPASS проверок go: и pw:) для перепрогона, стенд не тронут"
+    exit 0
+  fi
+  RT_TARGETS=${_rr_keep# }
+fi
+
 rt_lock
-rt_report_init
+if [ "$SUITE" = rerun ]; then
+  # Перепрогон пишет в отчёт FROM: номер — следующий свободный, meta и ссылка last не меняются.
+  # Строки результатов всех стадий (включая смоук и восстановление) идут в rerun-N.tsv, артефакты
+  # тестов — в <ядро>/rerun-N/ (RT_RESULTS_NAME и RT_ART_SUB читают rt_result и этапы тестов).
+  RT_RERUN_N=1
+  while [ -e "$RT_REPORT/rerun-$RT_RERUN_N.meta" ]; do
+    RT_RERUN_N=$((RT_RERUN_N + 1))
+  done
+  _rr_dirty=false
+  [ -z "$(git status --porcelain --untracked-files=no)" ] || _rr_dirty=true
+  {
+    echo "sha=$(git rev-parse HEAD)"
+    echo "dirty=$_rr_dirty"
+    echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } >"$RT_REPORT/rerun-$RT_RERUN_N.meta"
+  RT_RESULTS_NAME="rerun-$RT_RERUN_N.tsv"
+  RT_ART_SUB="rerun-$RT_RERUN_N"
+  export RT_RESULTS_NAME RT_ART_SUB
+else
+  rt_report_init
+  echo "narrow=${RT_NARROW:-none}" >>"$RT_REPORT/meta"
+fi
 echo "router-test: отчёт $RT_REPORT"
 
 # Ротация отчётов build/router стоит здесь, а не в конце: у run.sh много выходов (130, 1, код
@@ -221,16 +610,80 @@ if [ "$SUITE" = session ]; then
   exit "$SRC"
 fi
 
+# --- блок harness (T2h, D-07) ---------------------------------------------------------
+# Блок harness файла areas.json (go, specs, grep, session) читает node через loadAreas
+# core-marks.cjs; run.sh сверяет вывод по числу строк, порядку имён и шаблону каждой перед eval
+# (T-148.1-28): значения уходят в окружение этапов и во вложенный run.sh. Не прошёл — код 1,
+# причина в <отчёт>/harness-load.err.
+RT_H_GO_SEQ=""
+RT_H_GO_PKGS=""
+RT_H_SPECS=""
+RT_H_GREP=""
+RT_H_SESSION=""
+# 1 — в changed к выбору добавлены этапы набора harness (RT_HARNESS=1)
+RT_H_EXTRA=0
+# итог самопроверки сессии для summary.md: «да», «нет» или пусто (не требовалась)
+RT_H_SELF=""
+RT_H_SELF_WHY=""
+rt_harness_load() {
+  _hl_rc=0
+  _hl_out=$(node -e '
+const cm = require(process.argv[1] + "/scripts/router/core-marks.cjs");
+const h = cm.loadAreas(process.argv[1]).harness;
+if (!h || !Array.isArray(h.go) || !h.go.length || !Array.isArray(h.specs) || !h.specs.length || !h.session) {
+  process.stderr.write("в areas.json нет блока harness с go, specs и session\n");
+  process.exit(1);
+}
+const pkgs = [...new Set(h.go.map((x) => "./" + x.split(":")[0]))];
+const Q = String.fromCharCode(39);
+console.log("RT_H_GO_SEQ=" + Q + h.go.join(" ") + Q);
+console.log("RT_H_GO_PKGS=" + Q + pkgs.join(" ") + Q);
+console.log("RT_H_SPECS=" + Q + h.specs.join(" ") + Q);
+console.log("RT_H_GREP=" + Q + (h.grep || "") + Q);
+console.log("RT_H_SESSION=" + Q + h.session + Q);
+' "$(rt_repo_root)" 2>"$RT_REPORT/harness-load.err") || _hl_rc=$?
+  _q="'"
+  if [ "$_hl_rc" != 0 ] ||
+    [ "$(printf '%s\n' "$_hl_out" | wc -l)" != 5 ] ||
+    [ "$(printf '%s\n' "$_hl_out" | sed 's/=.*//' | tr '\n' ' ')" != "RT_H_GO_SEQ RT_H_GO_PKGS RT_H_SPECS RT_H_GREP RT_H_SESSION " ] ||
+    printf '%s\n' "$_hl_out" | grep -qvE "^(RT_H_GO_SEQ=${_q}[A-Za-z0-9_./: -]+${_q}|RT_H_GO_PKGS=${_q}[A-Za-z0-9_./ -]+${_q}|RT_H_SPECS=${_q}[A-Za-z0-9_./ -]+${_q}|RT_H_GREP=${_q}[A-Za-z0-9_|()?!^*.: -]*${_q}|RT_H_SESSION=${_q}scripts/router/[A-Za-z0-9_./-]+${_q})\$"; then
+    echo "блок harness не прочитан или не прошёл проверку (код $_hl_rc)" >>"$RT_REPORT/harness-load.err"
+    return 1
+  fi
+  eval "$_hl_out"
+}
+
 # --- выбор проверок набора changed (D-25) ------------------------------------------
-# select-changed.mjs печатает восемь строк для eval; перед eval вывод проверяется по
-# строгому шаблону на каждую строку и по их числу (T-144.1-23, T-145.1-18), при любом
-# сомнении выбирается всё, а вторая ветвь идёт со всеми тестами (RT_SEL_BAD=1).
+# select-changed.mjs печатает тринадцать строк для eval; перед eval вывод проверяется по
+# строгому шаблону на каждую строку, по их числу и порядку имён (T-144.1-23, T-145.1-18,
+# T-148.1-23), при любом сомнении выбирается всё, а вторая ветвь идёт со всеми тестами
+# (RT_SEL_BAD=1).
 SEL_ANY=1
 RT_SEL_BAD=0
 RT_KERNEL_TOUCHED=0
 RT_GO_CORE_PKGS=""
 RT_GO_CORE_RUN=""
 RT_SPECS_CORE=""
+RT_GO_SEQ=""
+RT_SPECS_FIRST=""
+RT_PW_INVERT=""
+RT_HARNESS=0
+RT_AREAS=""
+RT_SEL_KIND=""
+if [ "$SUITE" = harness ]; then
+  if ! rt_harness_load; then
+    echo "router-test: красный — блок harness в scripts/router/areas.json не прочитан или не прошёл проверку (причина — $RT_REPORT/harness-load.err)" >&2
+    exit 1
+  fi
+  # Все тесты набора идут в каждой ветви основными этапами: Go по именам (go-<ядро>), спеки
+  # read и state (pw-read-<ядро>, pw-<ядро>); grep блока относится только к спекам набора.
+  RT_SELECT_ALL=0
+  RT_GO_SEQ=$RT_H_GO_SEQ
+  RT_GO_PKGS=$RT_H_GO_PKGS
+  RT_SPECS=$RT_H_SPECS
+  RT_PW_GREP=$RT_H_GREP
+  export RT_GO_PKGS RT_SPECS RT_PW_GREP
+fi
 if [ "$SUITE" = changed ]; then
   _sel_args=""
   [ -z "${RT_BASE:-}" ] || _sel_args="--base $RT_BASE"
@@ -240,29 +693,141 @@ if [ "$SUITE" = changed ]; then
   _sel=$(node "$SCRIPT_DIR/select-changed.mjs" --explain $_sel_args 2>"$RT_REPORT/select.txt") || _sel_rc=$?
   _q="'"
   if [ "$_sel_rc" != 0 ] ||
-    [ "$(printf '%s\n' "$_sel" | wc -l)" != 8 ] ||
-    printf '%s\n' "$_sel" | grep -qvE "^(RT_SELECT_ALL=[01]|RT_GO_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_SPECS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_PW_GREP=${_q}[A-Za-z0-9_|()?!^*.: -]*${_q}|RT_GO_CORE_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_GO_CORE_RUN=${_q}[A-Za-z0-9_|^\$()]*${_q}|RT_SPECS_CORE=${_q}[A-Za-z0-9_./ -]*${_q}|RT_KERNEL_TOUCHED=[01])\$"; then
+    [ "$(printf '%s\n' "$_sel" | wc -l)" != 13 ] ||
+    [ "$(printf '%s\n' "$_sel" | sed 's/=.*//' | tr '\n' ' ')" != "RT_SELECT_ALL RT_GO_PKGS RT_SPECS RT_PW_GREP RT_GO_CORE_PKGS RT_GO_CORE_RUN RT_SPECS_CORE RT_KERNEL_TOUCHED RT_GO_SEQ RT_SPECS_FIRST RT_PW_INVERT RT_HARNESS RT_AREAS " ] ||
+    printf '%s\n' "$_sel" | grep -qvE "^(RT_SELECT_ALL=[01]|RT_GO_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_SPECS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_PW_GREP=${_q}[A-Za-z0-9_|()?!^*.: -]*${_q}|RT_GO_CORE_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_GO_CORE_RUN=${_q}[A-Za-z0-9_|^\$()]*${_q}|RT_SPECS_CORE=${_q}[A-Za-z0-9_./ -]*${_q}|RT_KERNEL_TOUCHED=[01]|RT_GO_SEQ=${_q}[A-Za-z0-9_./: -]*${_q}|RT_SPECS_FIRST=${_q}[A-Za-z0-9_./ -]*${_q}|RT_PW_INVERT=${_q}[A-Za-z0-9_@|()?!^*.: -]*${_q}|RT_HARNESS=[01]|RT_AREAS=${_q}[a-z0-9 -]*${_q})\$"; then
     echo "всё: выбор не удался или его вывод не прошёл проверку (код $_sel_rc)" >>"$RT_REPORT/select.txt"
     RT_SELECT_ALL=1
     RT_SEL_BAD=1
     RT_KERNEL_TOUCHED=1
+    RT_SEL_KIND="полный"
   else
     eval "$_sel"
+    # вид выбора — строка причин «вид выбора: …» (select-changed.mjs --explain)
+    RT_SEL_KIND=$(sed -n 's/^  - вид выбора: //p' "$RT_REPORT/select.txt" | tail -n 1)
+    case "$RT_SEL_KIND" in
+      полный | обвязка | зависимости | области | смоук) ;;
+      *) RT_SEL_KIND="полный" ;;
+    esac
   fi
   if [ "$RT_SELECT_ALL" = 1 ]; then
     # полный набор: списки не нужны, этапы go и pw берут значения по умолчанию; списки тестов
     # с меткой ядра и RT_KERNEL_TOUCHED остаются: по ним строится вторая ветвь
     unset RT_GO_PKGS RT_SPECS RT_PW_GREP
+    RT_GO_SEQ=""
+    RT_SPECS_FIRST=""
+    RT_PW_INVERT=""
     echo "итог: полный набор" >>"$RT_REPORT/select.txt"
   elif [ -z "$RT_GO_PKGS" ] && [ -z "$RT_SPECS" ]; then
     SEL_ANY=0
     echo "итог: затронутого нет — деплой и смоук" >>"$RT_REPORT/select.txt"
   else
-    echo "итог: Go: ${RT_GO_PKGS:--}; спеки: ${RT_SPECS:--}" >>"$RT_REPORT/select.txt"
+    echo "итог: Go: ${RT_GO_PKGS:--}; спеки: ${RT_SPECS:--}; области: ${RT_AREAS:--}" >>"$RT_REPORT/select.txt"
     export RT_GO_PKGS RT_SPECS RT_PW_GREP
   fi
-  echo "router-test: выбор — $(tail -n 1 "$RT_REPORT/select.txt")"
+  # Правка обвязки стенда (RT_HARNESS=1): к выбору добавляется набор harness — его Go-тесты и
+  # спеки идут отдельными этапами в обеих ветвях (full_target, _harness_go и _harness_pw),
+  # а после ветвей идёт самопроверка сессии. Полный выбор набор уже содержит: этапы не добавляются.
+  # Блок не прочитан — выбор расширяется до полного, как при сбое самого выбора.
+  if [ "$RT_HARNESS" = 1 ]; then
+    if ! rt_harness_load; then
+      echo "всё: блок harness не прочитан (см. harness-load.err) — выбор расширен до полного" >>"$RT_REPORT/select.txt"
+      unset RT_GO_PKGS RT_SPECS RT_PW_GREP
+      RT_SELECT_ALL=1
+      RT_SEL_BAD=1
+      RT_KERNEL_TOUCHED=1
+      RT_SEL_KIND="полный"
+      RT_GO_SEQ=""
+      RT_SPECS_FIRST=""
+      RT_PW_INVERT=""
+      SEL_ANY=1
+    elif [ "$RT_SELECT_ALL" = 1 ]; then
+      echo "обвязка: набор harness входит в полный выбор, самопроверка сессии — в конце" >>"$RT_REPORT/select.txt"
+    else
+      RT_H_EXTRA=1
+      SEL_ANY=1
+      # shellcheck disable=SC2086
+      _hn_go=$(printf '%s\n' $RT_H_GO_SEQ | grep -c . || true)
+      # shellcheck disable=SC2086
+      _hn_pw=$(printf '%s\n' $RT_H_SPECS | grep -c . || true)
+      echo "обвязка: набор harness добавлен — Go: $_hn_go, спеков: $_hn_pw, оба ядра, самопроверка сессии — в конце" >>"$RT_REPORT/select.txt"
+    fi
+  fi
+  echo "router-test: выбор — $(grep '^итог:' "$RT_REPORT/select.txt" | tail -n 1)"
+  [ "$RT_HARNESS" != 1 ] || echo "router-test: $(grep '^\(обвязка\|всё\):' "$RT_REPORT/select.txt" | tail -n 1)"
 fi
+
+# --- состав набора delta (RTR-11, D-24, D-25) ------------------------------------------------
+# Добор честен только пока состав полон: невозможность составить его целиком (полный выбор по диффу,
+# неизвестный файл, упавший в базе тест, который нельзя перегнать) — не «зелёный по умолчанию», а
+# отказ с кодом 1 до деплоя: нужен полный прогон. Состав каждой цели — <цель>/delta.sel.d/<ядро>.sel
+# (формат rerun-plan.mjs плюс CORE_ONLY), пишет delta-plan.mjs merge; run.sh читает его как состав
+# перепрогона (full_target, _sel_dir). Ветвь первого ядра пишется всегда: в ней идёт смоук нового тега.
+DELTA_B1=""
+DELTA_B2=""
+delta_abort() {
+  echo "router-test: красный — добор невозможен: $*; нужен полный прогон (make router-test SUITE=full RELEASE=$RELEASE)" >&2
+  exit 1
+}
+delta_compose() {
+  _ds_rc=0
+  _ds=$(node "$SCRIPT_DIR/select-changed.mjs" --explain --base "$DELTA_BASE_TAG" --head "$RELEASE" 2>"$RT_REPORT/select.txt") || _ds_rc=$?
+  if [ "$_ds_rc" != 0 ] ||
+    [ "$(printf '%s\n' "$_ds" | wc -l)" != 13 ] ||
+    [ "$(printf '%s\n' "$_ds" | sed 's/=.*//' | tr '\n' ' ')" != "RT_SELECT_ALL RT_GO_PKGS RT_SPECS RT_PW_GREP RT_GO_CORE_PKGS RT_GO_CORE_RUN RT_SPECS_CORE RT_KERNEL_TOUCHED RT_GO_SEQ RT_SPECS_FIRST RT_PW_INVERT RT_HARNESS RT_AREAS " ]; then
+    delta_abort "выбор по диффу $DELTA_BASE_TAG..$RELEASE не удался (код $_ds_rc, причины — $RT_REPORT/select.txt)"
+  fi
+  _ds_all=$(printf '%s\n' "$_ds" | sed -n 's/^RT_SELECT_ALL=//p')
+  RT_HARNESS=$(printf '%s\n' "$_ds" | sed -n 's/^RT_HARNESS=//p')
+  case "$_ds_all" in 0 | 1) ;; *) delta_abort "выбор по диффу: RT_SELECT_ALL не разобран" ;; esac
+  case "$RT_HARNESS" in 0 | 1) ;; *) delta_abort "выбор по диффу: RT_HARNESS не разобран" ;; esac
+  [ "$_ds_all" = 0 ] || delta_abort "выбор по диффу $DELTA_BASE_TAG..$RELEASE полный (правка самого выбора), добор не годится"
+  if grep -q 'предупреждение: неизвестный файл' "$RT_REPORT/select.txt"; then
+    delta_abort "в диффе $DELTA_BASE_TAG..$RELEASE есть файл, неизвестный выбору (select.txt)"
+  fi
+  printf '%s\n' "$_ds" >"$RT_REPORT/delta-select.env"
+  DELTA_B1=$(rt_sha_core "$(git rev-parse HEAD)")
+  case "$DELTA_B1" in xray) DELTA_B2=mihomo ;; *) DELTA_B2=xray ;; esac
+  RT_CORES="$DELTA_B1 $DELTA_B2"
+  # Правка обвязки между тегами: тесты и спеки блока harness входят в обе ветви, самопроверка сессии идёт в конце
+  if [ "$RT_HARNESS" = 1 ]; then
+    rt_harness_load || delta_abort "блок harness в areas.json не прочитан (причина — $RT_REPORT/harness-load.err)"
+  fi
+  RT_PW_INVERT=""
+  _dc_first=1
+  for _dc_t in $RT_TARGETS; do
+    mkdir -p "$RT_REPORT/$_dc_t"
+    _dc_out="$RT_REPORT/$_dc_t/delta.plan.txt"
+    [ -f "$DELTA_BASE_DIR/$_dc_t/results.tsv" ] || delta_abort "в базе добора $DELTA_BASE_NAME нет результатов цели $_dc_t"
+    _dc_rc=0
+    if [ "$RT_HARNESS" = 1 ]; then
+      node "$SCRIPT_DIR/delta-plan.mjs" merge --release "$RELEASE" --base-report "$DELTA_BASE_DIR" --target "$_dc_t" \
+        --out-dir "$RT_REPORT/$_dc_t/delta.sel.d" --select-env "$RT_REPORT/delta-select.env" --b1 "$DELTA_B1" --b2 "$DELTA_B2" \
+        --extra-go-seq "$RT_H_GO_SEQ" --extra-specs "$RT_H_SPECS" --extra-grep "$RT_H_GREP" >"$_dc_out" 2>"$_dc_out.err" || _dc_rc=$?
+    else
+      node "$SCRIPT_DIR/delta-plan.mjs" merge --release "$RELEASE" --base-report "$DELTA_BASE_DIR" --target "$_dc_t" \
+        --out-dir "$RT_REPORT/$_dc_t/delta.sel.d" --select-env "$RT_REPORT/delta-select.env" --b1 "$DELTA_B1" --b2 "$DELTA_B2" \
+        >"$_dc_out" 2>"$_dc_out.err" || _dc_rc=$?
+    fi
+    if [ "$_dc_rc" != 0 ]; then
+      delta_abort "состав цели $_dc_t не составлен (delta-plan.mjs, код $_dc_rc): $(head -c 300 "$_dc_out.err" | tr '\n' ' ')"
+    fi
+    _dc_sk=$(awk -F'\t' '$1 == "skipped" {print $2; exit}' "$_dc_out")
+    [ -z "$_dc_sk" ] || delta_abort "упавший в базе тест нельзя перегнать на цели $_dc_t: $_dc_sk"
+    [ -f "$RT_REPORT/$_dc_t/delta.sel.d/$DELTA_B1.sel" ] || delta_abort "состав цели $_dc_t не записан"
+    # счётчики для строки «Добор»: упавших в базе, Go и спеков по диффу
+    awk -F'\t' '$1 == "base-failed" {f = $2} $1 == "diff-go" {g = $2} $1 == "diff-specs" {s = $2} END {printf "%d\t%d\t%d\n", f, g, s}' "$_dc_out" >"$RT_REPORT/$_dc_t/delta.counts"
+    # отсев яруса full выбора снимается, если в составе есть упавшие в базе спеки (они могли быть яруса full)
+    _dc_inv=$(awk -F'\t' '$1 == "pw-invert" {print $2}' "$_dc_out")
+    if [ "$_dc_first" = 1 ]; then
+      RT_PW_INVERT=$_dc_inv
+      _dc_first=0
+    elif [ -z "$_dc_inv" ]; then
+      RT_PW_INVERT=""
+    fi
+    awk -F'\t' -v t="$_dc_t" '{printf "router-test: добор %s — %s: %s\n", t, $1, $2}' "$_dc_out" >&2
+  done
+}
 
 # --- план ветвей и окно смоука (D-01…D-03, D-07) -----------------------------------------
 # changed без явного RT_CORES — гибрид: первая ветвь идёт под ядром из SHA HEAD со всем
@@ -275,7 +840,61 @@ RT_HYBRID=0
 RT_B1=""
 RT_B2=""
 RT_B2_RUN=0
-if [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
+if [ "$SUITE" = harness ]; then
+  # набор harness: оба ядра, все тесты набора в каждой ветви (гибрида нет), окно смоука 30 с
+  : >"$RT_REPORT/plan.txt"
+  # shellcheck disable=SC2086
+  _hn_go=$(printf '%s\n' $RT_H_GO_SEQ | grep -c . || true)
+  # shellcheck disable=SC2086
+  _hn_pw=$(printf '%s\n' $RT_H_SPECS | grep -c . || true)
+  echo "- Ветви: $RT_CORES (набор harness: все тесты набора в каждой ветви, гибрид выключен)" >>"$RT_REPORT/plan.txt"
+  echo "- Набор harness: Go: $_hn_go, спеков: $_hn_pw, самопроверка сессии: $RT_H_SESSION" >>"$RT_REPORT/plan.txt"
+  if [ -n "${RT_SMOKE_WINDOW:-}" ]; then
+    echo "- Окно смоука: $RT_SMOKE_WINDOW с (RT_SMOKE_WINDOW задан явно)" >>"$RT_REPORT/plan.txt"
+  else
+    RT_SMOKE_WINDOW=30
+    echo "- Окно смоука: 30 с (набор harness)" >>"$RT_REPORT/plan.txt"
+  fi
+  export RT_SMOKE_WINDOW
+  echo "router-test: ветви — $(head -n 1 "$RT_REPORT/plan.txt")"
+elif [ "$SUITE" = rerun ]; then
+  # набор rerun: состав по ядрам — файлы <ядро>.sel в <цель>/rerun-N.sel.d (plan.txt исходного
+  # отчёта не трогается); окно смоука 30 с, как у узкого выбора
+  _rr_keep=""
+  for _rr_t in $RT_TARGETS; do
+    mkdir -p "$RT_REPORT/$_rr_t"
+    _rr_rc=0
+    node "$SCRIPT_DIR/rerun-plan.mjs" "$RT_REPORT" "$_rr_t" --out-dir "$RT_REPORT/$_rr_t/rerun-$RT_RERUN_N.sel.d" >"$RT_REPORT/$_rr_t/rerun-$RT_RERUN_N.plan.txt" 2>&1 || _rr_rc=$?
+    if [ "$_rr_rc" = 0 ]; then
+      _rr_keep="$_rr_keep $_rr_t"
+      for _rr_s in "$RT_REPORT/$_rr_t/rerun-$RT_RERUN_N.sel.d"/*.sel; do
+        [ -f "$_rr_s" ] || continue
+        _rr_c=$(sed -n 's/^COUNT=//p' "$_rr_s" | head -n 1 | tr -dc '0-9')
+        RT_RERUN_K=$((RT_RERUN_K + ${_rr_c:-0}))
+      done
+      sed 's/^/router-test: перепрогон '"$_rr_t"' — /' "$RT_REPORT/$_rr_t/rerun-$RT_RERUN_N.plan.txt"
+    fi
+  done
+  if [ -z "$_rr_keep" ]; then
+    echo "router-test: упавших тестов для перепрогона не осталось, стенд не тронут"
+    exit 0
+  fi
+  RT_TARGETS=${_rr_keep# }
+  if [ -z "${RT_SMOKE_WINDOW:-}" ]; then
+    RT_SMOKE_WINDOW=30
+  fi
+  export RT_SMOKE_WINDOW
+elif [ "$SUITE" = delta ]; then
+  # набор delta: состав по ядрам — файлы <ядро>.sel в <цель>/delta.sel.d (упавшие в базе плюс выбор по
+  # диффу между тегами); ветвь без файла пропускается. Окно смоука — как у полного прогона.
+  delta_compose
+  : >"$RT_REPORT/plan.txt"
+  echo "- Ядро ветви: $DELTA_B1 (правило: cksum SHA HEAD чётный — xray, нечётный — mihomo)" >>"$RT_REPORT/plan.txt"
+  echo "- Состав добора: база $DELTA_BASE_TAG ($DELTA_BASE_NAME), упавшие в базе и выбор по диффу $DELTA_BASE_TAG..$RELEASE; вторая ветвь ($DELTA_B2) — по составу цели" >>"$RT_REPORT/plan.txt"
+  echo "- Окно смоука: ${RT_SMOKE_WINDOW:-120} с (добор: смоук нового тега $RELEASE в этом же прогоне)" >>"$RT_REPORT/plan.txt"
+  [ -z "${RT_SMOKE_WINDOW:-}" ] || export RT_SMOKE_WINDOW
+  echo "router-test: ветви — $(head -n 1 "$RT_REPORT/plan.txt")"
+elif [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
   : >"$RT_REPORT/plan.txt"
   if [ -n "$RT_CORES_SET" ] && [ "$SUITE" = changed ] && [ "$SEL_ANY" = 0 ]; then
     echo "- Ветви: нет (затронутого нет — деплой и смоук; RT_CORES=$RT_CORES не применяется)" >>"$RT_REPORT/plan.txt"
@@ -284,7 +903,7 @@ if [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
   elif [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ] && [ "$RT_SEL_BAD" = 0 ]; then
     RT_B1=$(rt_sha_core "$(git rev-parse HEAD)")
     case "$RT_B1" in xray) RT_B2=mihomo ;; *) RT_B2=xray ;; esac
-    if [ -n "$RT_GO_CORE_PKGS" ] || [ -n "$RT_SPECS_CORE" ]; then
+    if [ -n "$RT_GO_CORE_PKGS" ] || [ -n "$RT_SPECS_CORE" ] || [ "$RT_H_EXTRA" = 1 ]; then
       RT_B2_RUN=1
       RT_CORES="$RT_B1 $RT_B2"
     else
@@ -303,7 +922,7 @@ if [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
       fi
       # shellcheck disable=SC2086
       _n_pw=$(printf '%s\n' $RT_SPECS_CORE | grep -c . || true)
-      echo "- Вторая ветвь ($RT_B2): только тесты с меткой ядра (Go: $_n_go, Playwright: $_n_pw спеков)" >>"$RT_REPORT/plan.txt"
+      echo "- Вторая ветвь ($RT_B2): только тесты с меткой ядра (Go: $_n_go, Playwright: $_n_pw спеков)$([ "$RT_H_EXTRA" != 1 ] || printf ' и все тесты набора harness')" >>"$RT_REPORT/plan.txt"
     else
       echo "- Вторая ветвь ($RT_B2): не запускалась — в выборе нет тестов с меткой ядра" >>"$RT_REPORT/plan.txt"
     fi
@@ -330,11 +949,75 @@ if [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
     echo "- Окно смоука: ${RT_SMOKE_WINDOW:-120} с (полный прогон)" >>"$RT_REPORT/plan.txt"
   fi
   [ -z "${RT_SMOKE_WINDOW:-}" ] || export RT_SMOKE_WINDOW
+  [ "$RT_H_EXTRA" != 1 ] || echo "- Обвязка изменена: набор harness добавлен (в обеих ветвях и самопроверка сессии $RT_H_SESSION)" >>"$RT_REPORT/plan.txt"
   echo "router-test: ветви — $(head -n 1 "$RT_REPORT/plan.txt")"
 fi
 
+# Файл сэмплера PID ядра на устройстве (full_target, _kpid_start): вне /opt/tmp/xcp-rt, который
+# чистит смоук, и вне каталога снимка.
+RT_KPID=/opt/tmp/xcp-rt-kpid.tsv
+
 # Проверки смоука, которые пропускаются, если цель недоступна или деплой не удался.
 SKIP_CHECKS="kernel-running iptables-rules api-version version xcp-pid api-me api-service-status log-panic log-error kernel-restart"
+
+# Состав ветви из файла <ядро>.sel (rerun-plan.mjs, RT_SEL_DIR). Читается без eval: значение —
+# первая строка «КЛЮЧ=значение» (sed по ключу), безопасные символы проверяет rt_sel_ok.
+rt_sel_val() {
+  sed -n "s/^$2=//p" "$1" | head -n 1
+}
+# rt_sel_ok <GO_SEQ|SPECS|COUNT> <значение>: код 0 — значение состоит только из допустимых символов
+# (T-148.1-33). GREP не проверяется по шаблону: он уходит этапу аргументом env и не раскрывается
+# оболочкой; его экранирует rerun-plan.mjs, а запретные для строки символы (перевод строки)
+# исключены самим чтением одной строки.
+rt_sel_ok() {
+  case "$1" in
+    GO_SEQ) [ -z "$(printf '%s' "$2" | tr -d 'A-Za-z0-9_./: -')" ] ;;
+    SPECS) [ -z "$(printf '%s' "$2" | tr -d 'A-Za-z0-9_./ -')" ] ;;
+    COUNT) [ -n "$2" ] && [ -z "$(printf '%s' "$2" | tr -d '0-9')" ] ;;
+    *) return 1 ;;
+  esac
+}
+
+# Потолок подтверждающего перепрогона (D-19): новых падений цели больше — общая причина
+# (случай 148-25), перепрогона нет вовсе, все падения остаются new. Решение принимается одним
+# сравнением общего числа новых падений по всем ветвям цели с этим значением (full_target).
+RT_CONFIRM_MAX=10
+
+# Признаки потери связи в детали строки результата (класс stand, D-21); тот же список — в
+# branch-report.mjs (STAND_RE). Такие падения в подтверждающий перепрогон не идут.
+RT_STAND_RE='нет связи|связь потеряна|ERR_NETWORK_CHANGED|net::ERR_INTERNET_DISCONNECTED|net::ERR_NAME_NOT_RESOLVED|ECONNRESET|ETIMEDOUT'
+
+# Красные классы цели одной строкой «new flaky xpass stand_open»: из classes.tsv (stand_open — класс
+# stand с причиной «не догнан…»: связь не вернулась или догона не было), без него — прежний подсчёт
+# по results.tsv (FAIL как new, XPASS как xpass); нет результатов — «1 0 0 0».
+rt_class_counts() {
+  if [ -f "$RT_REPORT/$1/classes.tsv" ]; then
+    # подтест Go и его родитель — один тест
+    awk -F'\t' '
+      { c = $3; if (c ~ /^go:/) sub(/\/.*/, "", c); k = $1 "\t" $2 "\t" c }
+      k in seen { next }
+      { seen[k] = 1 }
+      $1 == "new" {n++}
+      $1 == "flaky" {f++}
+      $1 == "xpass" {x++}
+      $1 == "stand" && $4 ~ /^не догнан/ {s++}
+      END {printf "%d %d %d %d\n", n, f, x, s}' "$RT_REPORT/$1/classes.tsv"
+  elif [ -f "$RT_REPORT/$1/results.tsv" ]; then
+    awk -F'\t' '$1 == "FAIL" {n++} $1 == "XPASS" {x++} END {printf "%d 0 %d 0\n", n, x}' "$RT_REPORT/$1/results.tsv"
+  else
+    echo "1 0 0 0"
+  fi
+}
+
+# Красные классы цели в переменных: RT_RC_NEW (new), RT_RC_RED (new, flaky и не догнанный stand),
+# RT_RC_XPASS (xpass). Разбор счётчиков — в функции: set -- не должен менять позиционные параметры
+# вызывающего.
+rt_red_counts() {
+  set -- $(rt_class_counts "$1")
+  RT_RC_NEW=$1
+  RT_RC_RED=$(($1 + $2 + $4))
+  RT_RC_XPASS=$3
+}
 
 # --- проверка связи -----------------------------------------------------------
 
@@ -397,14 +1080,36 @@ full_target() {
   # набор changed: этап go или pw пропускается, если выбор его не затронул
   _do_go=1
   _do_pw=1
-  if [ "$SUITE" = changed ] && [ "${RT_SELECT_ALL:-1}" != 1 ]; then
+  if { [ "$SUITE" = changed ] || [ "$SUITE" = harness ]; } && [ "${RT_SELECT_ALL:-1}" != 1 ]; then
     [ -n "${RT_GO_PKGS:-}" ] || _do_go=0
     [ -n "${RT_SPECS:-}" ] || _do_pw=0
   fi
+  # Срок ожидания связи после обрыва (D-21): целое 60…7200, иначе 600 с.
+  _link_wait=${RT_LINK_WAIT:-600}
+  case "$_link_wait" in '' | *[!0-9]*) _link_wait=600 ;; esac
+  if [ "$_link_wait" -lt 60 ] || [ "$_link_wait" -gt 7200 ]; then
+    _link_wait=600
+  fi
+  # 1 — в ветви догон уже был (или набор rerun, где догона нет): второй обрыв не догоняется
+  _cu_done=0
+  # исход _stand_gate: none (обрыва не было), catchup (связь вернулась, догонять), nocatchup (связь
+  # вернулась, догона нет), gone (связь не вернулась, несделанное записано в notrun.txt)
+  _sg_state=none
+  # Состав ветвей из файлов <ядро>.sel (rerun-plan.mjs): набор rerun берёт каталог своей цели,
+  # иначе — RT_SEL_DIR из окружения; нет каталога — выбор набора, как раньше.
+  _sel_dir=${RT_SEL_DIR:-}
+  [ "$SUITE" != rerun ] || _sel_dir="$RT_REPORT/$_t/rerun-$RT_RERUN_N.sel.d"
+  # набор delta: состав цели — упавшие в базе плюс выбор по диффу (delta-plan.mjs merge)
+  [ "$SUITE" != delta ] || _sel_dir="$RT_REPORT/$_t/delta.sel.d"
   # Повторный сигнал (TERM группе плюс TERM, пересланный верхним run.sh, или второй Ctrl+C) не
   # должен обрывать восстановление: игнорирование наследуют rt_restore, _after_restore и ssh.
   _finish() {
     trap '' INT TERM HUP
+    # прерванный подтверждающий перепрогон не должен утащить строки восстановления в confirm.tsv
+    [ "$SUITE" = rerun ] || unset RT_RESULTS_NAME RT_ART_SUB
+    # сэмплер PID ядра (если ветвь оборвалась между Go-тестами и частью state) — до восстановления
+    _kpid_stop "$_t" "$_ks"
+    _ks=""
     if [ "$_snapped" = 1 ]; then
       _snapped=0
       # строки восстановления и сверки несут исходное ядро
@@ -451,6 +1156,63 @@ full_target() {
     else
       rt_result "$1" FAIL stand-ready "после Go-тестов стенд не пришёл в рабочее состояние за $_sl_dt с (код $_sl_rc)"
     fi
+  }
+  # Сэмплер PID ядра на стенде (D-06, todo 01): замер перезапусков ядра на тест. Фоновый цикл на
+  # устройстве раз в секунду берёт `pidof xray mihomo` и при смене значения дописывает строку
+  # «<эпоха устройства>\t<PID через запятую или ->» в $RT_KPID. Идёт от Go-тестов ветви до конца её
+  # части Playwright state: стартует после окна смоука и останавливается до смоука следующей ветви,
+  # поэтому проверки процессов смоука (pidof ядра и xcp) его не видят; имя процесса — sh. Файл
+  # забирается в <отчёт>/<цель>/<ядро>/kernel-pids.tsv, рядом clock.tsv — «<эпоха ПК>\t<эпоха
+  # устройства>» в момент запуска: по ним branch-report.mjs переводит смены PID на часы ПК и
+  # считает перезапуски в окне каждого теста. Нет связи — сэмплер не запускается, ветвь идёт как
+  # раньше. _ks — PID цикла на устройстве (пусто — сэмплер не идёт).
+  _ks=""
+  _kpid_start() {
+    RT_SSH_STDIN=1 rt_ssh "$1" "sh -s" 2>/dev/null <<EOF | sed -n 's/^kpid=//p' | tr -dc '0-9'
+F=$RT_KPID
+rm -f "\$F"
+kpid_loop() {
+  l=""
+  while :; do
+    p=\$(pidof xray mihomo | tr ' ' ',')
+    [ -n "\$p" ] || p=-
+    if [ "\$p" != "\$l" ]; then
+      printf '%s\t%s\n' "\$(date +%s)" "\$p" >>"\$F"
+      l=\$p
+    fi
+    sleep 1
+  done
+}
+(
+  trap '' HUP
+  kpid_loop
+) </dev/null >/dev/null 2>&1 &
+echo "kpid=\$!"
+EOF
+  }
+  # Остановка сэмплера: _kpid_stop <цель> <PID> [<каталог ветви>] — с каталогом файл забирается в
+  # kernel-pids.tsv; без него (_term, _finish) только остановка и удаление файла, best effort.
+  _kpid_stop() {
+    [ -n "$2" ] || return 0
+    if [ -n "${3:-}" ]; then
+      rt_ssh "$1" "kill $2 2>/dev/null; cat $RT_KPID 2>/dev/null; rm -f $RT_KPID" >"$3/kernel-pids.tsv" 2>/dev/null || true
+    else
+      rt_ssh "$1" "kill $2 2>/dev/null; rm -f $RT_KPID" >/dev/null 2>&1 || true
+    fi
+  }
+  # Этапы набора harness, добавленного к changed (RT_H_EXTRA=1, правка обвязки): Go-тесты блока
+  # (go-harness-<ядро>) и ожидание стенда, затем спеки блока частями read (в окне наблюдателя) и
+  # state (pw-harness-read-<ядро>, pw-harness-state-<ядро>) — в каждой ветви, без отбора @core.
+  # Артефакты — в <ядро>/harness/, чтобы не затирать этапы выбора. В самом наборе harness блок
+  # идёт основными этапами go, pw-read и pw. Вызываются из ветви, поэтому _t и _c видны.
+  _harness_go() {
+    [ "$RT_H_EXTRA" = 1 ] || return 0
+    rt_stage "$_t" "go-harness-$_c" _bg env "RT_GO_PKGS=" "RT_GO_RUN=" "RT_GO_RUN_SEQ=$RT_H_GO_SEQ" "RT_ART_SUB=harness" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
+    rt_stage "$_t" "settle-harness-$_c" _bg _settle "$_t" || true
+  }
+  _harness_pw() {
+    [ "$RT_H_EXTRA" = 1 ] || return 0
+    rt_stage "$_t" "pw-harness-$1-$_c" _bg env "RT_SPECS=$RT_H_SPECS" "RT_PW_GREP=$RT_H_GREP" "RT_PW_GREP_INVERT=" "RT_PW_CORE_ONLY=" "RT_SPECS_FIRST=" "RT_ART_SUB=harness" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part "$1" || true
   }
   _sp=""
   # имя и время начала этапа под _bg (см. _bg), время начала наблюдателя окна (шаг 2а)
@@ -525,6 +1287,8 @@ full_target() {
     if [ "$_tm_obs" = 1 ] && [ -n "$_ot0" ]; then
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_t" "observe-$_c" "$((_tm_now - _ot0))" 130 "$_ot0" "${RT_CORE:--}" >>"$RT_REPORT/timings.tsv"
     fi
+    _kpid_stop "$_t" "$_ks"
+    _ks=""
     exit 130
   }
   # Этап ветви в фоне с ожиданием: код этапа попадает в _brc и возвращается как код функции
@@ -554,6 +1318,181 @@ full_target() {
     _bg_stage=""
     return "$_brc"
   }
+  # --- потеря связи со стендом (класс stand, D-21, D-26) --------------------------------------
+  # Строка в <цель>/notrun.txt: несделанное из-за обрыва.
+  _notrun() {
+    printf '%s\n' "$1" >>"$RT_REPORT/$_t/notrun.txt"
+  }
+  # Обрыв связи после этапа ветви: _stand_gate <этап> <код этапа> <что не выполнено, если связь не
+  # вернётся>. Обрыв — код 3 либо ненулевой код этапа и молчащий ssh (Playwright кода 3 не даёт).
+  # Ждёт связь до _link_wait; результат — _sg_state: none, catchup (первый обрыв ветви: догнать),
+  # nocatchup (второй обрыв или набор rerun: связь вернулась, но сорванное не догоняется — оно в
+  # notrun.txt) или gone (связь не вернулась: несделанное, остальные ветви и подтверждающий
+  # перепрогон — в notrun.txt, вызывающий выходит из цикла ветвей). Каждый обрыв — строка в
+  # link-loss.tsv (ядро, этап, исход).
+  _stand_gate() {
+    _sg_state=none
+    if [ "$2" != 3 ]; then
+      [ "$2" != 0 ] || return 0
+      if rt_ssh "$_t" true >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
+    if rt_wait_link "$_t" "$_link_wait"; then
+      if [ "$_cu_done" = 0 ]; then
+        _cu_done=1
+        _sg_state=catchup
+        printf '%s\t%s\t%s\n' "$_c" "$1" "догон" >>"$RT_REPORT/$_t/link-loss.tsv"
+        # файл есть уже при пустом догоне: по нему видно, что связь возвращалась и догон был
+        : >>"$RT_REPORT/$_t/catchup.tsv"
+      else
+        _sg_state=nocatchup
+        printf '%s\t%s\t%s\n' "$_c" "$1" "без догона" >>"$RT_REPORT/$_t/link-loss.tsv"
+        _notrun "$_c: этап $1 оборван (код $2), связь вернулась, сорванное не догоняется (второй обрыв в ветви или набор rerun): $3"
+      fi
+      return 0
+    fi
+    _sg_state=gone
+    printf '%s\t%s\t%s\n' "$_c" "$1" "связь не вернулась" >>"$RT_REPORT/$_t/link-loss.tsv"
+    _notrun "$_c: этап $1 оборван (код $2), связь не вернулась за $_link_wait с: $3"
+    for _sg_k in ${RT_CORES#*"$_c"}; do
+      _notrun "ветвь $_sg_k: не выполнена"
+    done
+    if [ "$SUITE" != rerun ]; then
+      _notrun "подтверждающий перепрогон: не выполнен"
+    fi
+    return 0
+  }
+  # Что в Go-этапе ветви не доделано: записи RT_GO_RUN_SEQ (_gl_seq) или пакеты (_gl_pkgs), которых
+  # нет в go-done.txt этапа (go-suite.sh пишет его на пакет, обработка которого закончилась без
+  # обрыва). Нет файла — не доделано всё. Выбор ветви — _g_seq, _g_pkgs; без них — все пакеты с
+  # роутерными тестами (тот же поиск, что в go-suite.sh).
+  _go_left() {
+    _gl_seq=""
+    _gl_pkgs=""
+    _gl_done="$_bdir/go-done.txt"
+    if [ -n "$_g_seq" ]; then
+      for _gl_e in $_g_seq; do
+        grep -qxF -e "${_gl_e%%:*}" "$_gl_done" 2>/dev/null || _gl_seq="$_gl_seq $_gl_e"
+      done
+      _gl_seq=${_gl_seq# }
+      return 0
+    fi
+    _gl_all=""
+    if [ -n "$_g_pkgs" ]; then
+      for _gl_p in $_g_pkgs; do
+        _gl_all="$_gl_all ${_gl_p#./}"
+      done
+    else
+      for _gl_f in $(find internal cmd -name '*_test.go' 2>/dev/null | sort); do
+        if [ "$(head -n 1 "$_gl_f")" = "//go:build router" ]; then
+          _gl_d=$(dirname "$_gl_f")
+          case " $_gl_all " in
+            *" $_gl_d "*) ;;
+            *) _gl_all="$_gl_all $_gl_d" ;;
+          esac
+        fi
+      done
+    fi
+    for _gl_p in $_gl_all; do
+      grep -qxF -e "$_gl_p" "$_gl_done" 2>/dev/null || _gl_pkgs="$_gl_pkgs $_gl_p"
+    done
+    _gl_pkgs=${_gl_pkgs# }
+  }
+  # Догон части Playwright: _cu_pw <read|state> — та же часть набора ветви, строки в catchup.tsv.
+  _cu_pw() {
+    rt_stage "$_t" "catchup-pw-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_SPECS_FIRST=$2" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" "RT_RESULTS_NAME=catchup.tsv" "RT_ART_SUB=catchup" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part "$1" || true
+  }
+  # Подтверждающий перепрогон новых падений (RTR-05, D-19). Идёт после цикла ветвей и до
+  # восстановления стенда (его делает _finish в EXIT-ловушке), в той же блокировке и в тот же отчёт.
+  # Вход — FAIL проверок go: и pw: без признаков потери связи (confirm-src.tsv). Решение принимается
+  # по общему числу таких падений цели, одним сравнением с RT_CONFIRM_MAX: больше — перепрогона нет
+  # ни на одном ядре (confirm-skip, строка в plan.txt), падения остаются new. Иначе для каждого
+  # ядра с падениями (сначала то, что сейчас на стенде) rerun-plan.mjs --core <ядро> --max <остаток
+  # потолка> собирает состав, ядро переключается так же, как в ветвях, и тесты идут этапами
+  # confirm-go-<ядро> и confirm-pw-<ядро> со строками в confirm.tsv и артефактами в <ядро>/confirm/.
+  # Прошедший тест — flaky, упавший снова — new (branch-report.mjs); retries основного прохода не
+  # меняются, результат перепрогона не делает тест зелёным.
+  _confirm_run() {
+    [ -f "$RT_REPORT/$_t/results.tsv" ] || return 0
+    awk -F'\t' -v re="$RT_STAND_RE" '$1 == "FAIL" && $3 ~ /^(go|pw):/ && $4 !~ re' "$RT_REPORT/$_t/results.tsv" >"$RT_REPORT/$_t/confirm-src.tsv"
+    _cf_cd="$RT_REPORT/$_t/confirm-count.d"
+    rm -rf "$_cf_cd"
+    _cf_prc=0
+    node "$SCRIPT_DIR/rerun-plan.mjs" "$RT_REPORT" "$_t" --results confirm-src.tsv --out-dir "$_cf_cd" >"$RT_REPORT/$_t/confirm-plan.txt" 2>&1 || _cf_prc=$?
+    if [ "$_cf_prc" != 0 ]; then
+      rm -rf "$_cf_cd"
+      [ "$_cf_prc" = 1 ] || echo "router-test: цель $_t: rerun-plan.mjs не составил состав подтверждающего перепрогона (код $_cf_prc, confirm-plan.txt), падения остаются new" >&2
+      return 0
+    fi
+    _cf_n=0
+    for _cf_s in "$_cf_cd"/*.sel; do
+      [ -f "$_cf_s" ] || continue
+      _cf_v=$(rt_sel_val "$_cf_s" COUNT | tr -dc '0-9')
+      _cf_n=$((_cf_n + ${_cf_v:-0}))
+    done
+    rm -rf "$_cf_cd"
+    printf '%s\n' "$_cf_n" >"$RT_REPORT/$_t/confirm-count"
+    if [ "$_cf_n" -gt "$RT_CONFIRM_MAX" ]; then
+      printf '%s\n' "без перепрогона: падений больше $RT_CONFIRM_MAX" >"$RT_REPORT/$_t/confirm-skip"
+      echo "- Цель $_t: подтверждающий перепрогон пропущен: новых падений $_cf_n больше $RT_CONFIRM_MAX — общая причина" >>"$RT_REPORT/plan.txt"
+      echo "router-test: цель $_t: подтверждающий перепрогон пропущен: новых падений $_cf_n больше $RT_CONFIRM_MAX — общая причина" >&2
+      return 0
+    fi
+    _cf_left=$RT_CONFIRM_MAX
+    _cf_order=""
+    [ -z "$_cur" ] || _cf_order=$_cur
+    for _cf_k in xray mihomo; do
+      [ "$_cf_k" = "$_cur" ] || _cf_order="$_cf_order $_cf_k"
+    done
+    _cf_sd="$RT_REPORT/$_t/confirm.sel.d"
+    rm -rf "$_cf_sd"
+    # строки результатов и артефакты перепрогона — отдельно от основного прохода (в том числе
+    # stand-ready после Go-тестов перепрогона)
+    RT_RESULTS_NAME=confirm.tsv
+    RT_ART_SUB=confirm
+    export RT_RESULTS_NAME RT_ART_SUB
+    for _cf_k in $_cf_order; do
+      [ "$_cf_left" -gt 0 ] || break
+      _cf_prc=0
+      node "$SCRIPT_DIR/rerun-plan.mjs" "$RT_REPORT" "$_t" --core "$_cf_k" --max "$_cf_left" --results confirm-src.tsv --out-dir "$_cf_sd" >>"$RT_REPORT/$_t/confirm-plan.txt" 2>&1 || _cf_prc=$?
+      if [ "$_cf_prc" != 0 ] || [ ! -f "$_cf_sd/$_cf_k.sel" ]; then
+        continue
+      fi
+      _cf_f="$_cf_sd/$_cf_k.sel"
+      _cf_seq=$(rt_sel_val "$_cf_f" GO_SEQ)
+      _cf_specs=$(rt_sel_val "$_cf_f" SPECS)
+      _cf_grep=$(rt_sel_val "$_cf_f" GREP)
+      _cf_cnt=$(rt_sel_val "$_cf_f" COUNT)
+      if ! rt_sel_ok GO_SEQ "$_cf_seq" || ! rt_sel_ok SPECS "$_cf_specs" || ! rt_sel_ok COUNT "$_cf_cnt"; then
+        echo "router-test: цель $_t: файл состава $_cf_k.sel подтверждающего перепрогона не прошёл проверку, ядро пропущено" >&2
+        continue
+      fi
+      _cf_left=$((_cf_left - _cf_cnt))
+      RT_CORE=$_cf_k
+      export RT_CORE
+      mkdir -p "$RT_REPORT/$_t/$_cf_k/confirm"
+      if [ "$_cur" != "$_cf_k" ]; then
+        rt_stage "$_t" "confirm-switch-$_cf_k" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_cf_k" --switch "$_cf_k" || true
+        if [ "$_brc" != 0 ]; then
+          echo "router-test: цель $_t: переключение на $_cf_k для подтверждающего перепрогона не удалось" >&2
+          _cur=""
+          continue
+        fi
+        _cur=$_cf_k
+        printf '%s\n' "$_cf_k" >"$RT_REPORT/$_t/core"
+      fi
+      if [ -n "$_cf_seq" ]; then
+        rt_stage "$_t" "confirm-go-$_cf_k" _bg env "RT_GO_PKGS=" "RT_GO_RUN=" "RT_GO_RUN_SEQ=$_cf_seq" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_cf_k" || true
+        rt_stage "$_t" "confirm-settle-$_cf_k" _bg _settle "$_t" || true
+      fi
+      if [ -n "$_cf_specs" ]; then
+        rt_stage "$_t" "confirm-pw-$_cf_k" _bg env "RT_SPECS=$_cf_specs" "RT_PW_GREP=$_cf_grep" "RT_PW_GREP_INVERT=" "RT_PW_CORE_ONLY=" "RT_SPECS_FIRST=" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_cf_k" || true
+      fi
+    done
+    unset RT_RESULTS_NAME RT_ART_SUB
+    RT_CORE=""
+  }
   trap '_finish' EXIT
   trap '_term' INT TERM HUP
   # Флаг ставится до снимка: сигнал, пришедший сразу после возврата ssh снимка, обрабатывается
@@ -568,29 +1507,50 @@ full_target() {
   _orig=$(sed -n 's/^core=//p' "$RT_REPORT/$_t/snapshot.log" | tail -n 1)
 
   _first=1
+  # ядро, которое сейчас на стенде (после последнего успешного переключения): с него начинается
+  # подтверждающий перепрогон
+  _cur=""
+  # 1 — цикл ветвей прерван: связь со стендом не вернулась (подтверждающего перепрогона нет)
+  _stop=0
   for _c in $RT_CORES; do
+    # Состав из <ядро>.sel: у ветви без файла тестов нет — она пропускается целиком
+    if [ -n "$_sel_dir" ] && [ ! -f "$_sel_dir/$_c.sel" ]; then
+      continue
+    fi
     # Ядро ветви: колонка results.tsv и файл core (селекторы меток arch/core)
     RT_CORE=$_c
     export RT_CORE
     printf '%s\n' "$_c" >"$RT_REPORT/$_t/core"
     mkdir -p "$RT_REPORT/$_t/$_c"
+    # Каталог ветви для файлов сэмплера и хвоста лога: перепрогон — внутри <ядро>/rerun-N/,
+    # чтобы не затирать файлы исходного отчёта
+    _bdir="$RT_REPORT/$_t/$_c"
+    [ "$SUITE" != rerun ] || _bdir="$_bdir/rerun-$RT_RERUN_N"
+    mkdir -p "$_bdir"
 
     # Тесты ветви. Гибрид (changed): в ветви второго ядра идут только тесты с меткой ядра
     # (Go — RT_GO_CORE_PKGS по RT_GO_CORE_RUN, Playwright — RT_SPECS_CORE с отбором @core);
     # пустой список — этап пропускается. Значения этапам передаёт env: _bg запускает этап в
     # фоне отдельной группой процессов. Пустые значения этапы читают как «по умолчанию».
+    # догон после обрыва — один на ветвь; в наборе rerun его нет
+    _cu_done=0
+    [ "$SUITE" != rerun ] || _cu_done=1
     _b_go=$_do_go
     _b_pw=$_do_pw
     _b_skip="роутерные Go-пакеты набора changed не затронуты"
     _b_skip_pw="роутерные спеки набора changed не затронуты"
     _g_pkgs=${RT_GO_PKGS:-}
     _g_run=${RT_GO_RUN:-}
+    _g_seq=${RT_GO_SEQ:-}
     _p_specs=${RT_SPECS:-}
+    _p_first=${RT_SPECS_FIRST:-}
     _p_core=""
     if [ "${RT_HYBRID:-0}" = 1 ] && [ "$_c" = "$RT_B2" ]; then
       _g_pkgs=$RT_GO_CORE_PKGS
       _g_run=$RT_GO_CORE_RUN
+      _g_seq=""
       _p_specs=$RT_SPECS_CORE
+      _p_first=""
       _p_core=1
       _b_go=1
       _b_pw=1
@@ -598,6 +1558,43 @@ full_target() {
       [ -n "$RT_SPECS_CORE" ] || _b_pw=0
       _b_skip="во второй ветви нет тестов с меткой ядра"
       _b_skip_pw="во второй ветви нет тестов с меткой ядра"
+    fi
+
+    # Состав ветви из <ядро>.sel: Go по именам (GO_SEQ), спеки (SPECS) и --grep (GREP) заменяют
+    # выбор набора; значения проверяются по шаблонам, не прошло — ветвь пропускается с FAIL rerun:sel.
+    _p_grep=${RT_PW_GREP:-}
+    if [ -n "$_sel_dir" ]; then
+      _sel_f="$_sel_dir/$_c.sel"
+      _sel_seq=$(rt_sel_val "$_sel_f" GO_SEQ)
+      _sel_specs=$(rt_sel_val "$_sel_f" SPECS)
+      _sel_grep=$(rt_sel_val "$_sel_f" GREP)
+      _sel_cnt=$(rt_sel_val "$_sel_f" COUNT)
+      if ! rt_sel_ok GO_SEQ "$_sel_seq" || ! rt_sel_ok SPECS "$_sel_specs" || ! rt_sel_ok COUNT "$_sel_cnt"; then
+        rt_result "$_t" FAIL rerun:sel "файл состава $_c.sel не прошёл проверку, ветвь пропущена"
+        continue
+      fi
+      _g_pkgs=""
+      _g_run=""
+      _g_seq=$_sel_seq
+      _p_specs=$_sel_specs
+      _p_first=""
+      _p_core=""
+      # CORE_ONLY=1 (набор delta, вторая ветвь): из спеков идут только тесты с меткой ядра
+      [ "$(rt_sel_val "$_sel_f" CORE_ONLY)" != 1 ] || _p_core=1
+      _p_grep=$_sel_grep
+      _b_go=0
+      [ -z "$_sel_seq" ] || _b_go=1
+      _b_pw=0
+      [ -z "$_sel_specs" ] || _b_pw=1
+      _b_skip="в составе (перепрогон, добор) нет Go-тестов этого ядра"
+      _b_skip_pw="в составе (перепрогон, добор) нет спеков этого ядра"
+    fi
+
+    # Выбор Go по именам (RT_GO_SEQ, первая ветвь): порядок и состав задаёт список, пакеты и
+    # выражение отбора go-suite.sh не нужны. Пустой список — пакеты целиком, как раньше.
+    if [ -n "$_g_seq" ]; then
+      _g_pkgs=""
+      _g_run=""
     fi
 
     # Номер последней строки xcp.log до начала ветви: смоук смотрит только строки после неё,
@@ -637,6 +1634,7 @@ full_target() {
       done
       continue
     fi
+    _cur=$_c
 
     # 2. смоук без окна (только чтение; строки лога — после начала ветви). Ключи --from-* общие
     # для проверок и наблюдателя: числа и шестнадцатеричный отпечаток, кавычки не нужны.
@@ -654,6 +1652,7 @@ full_target() {
     # смоук записывает в core определённое им ядро: ветвь продолжается с ядром ветви
     printf '%s\n' "$_c" >"$RT_REPORT/$_t/core"
 
+    _pwr_rc=0
     # 2а. окно наблюдения (smoke.sh --observe-only: smoke-settle 30 с, окно RT_SMOKE_WINDOW, вердикт
     # kernel-restart и правила логов) фоном параллельно с частью Playwright только чтения
     # (D-07): окно перекрыто обходом страниц, а не простоем. Параллельно окну идут только спеки
@@ -671,21 +1670,71 @@ full_target() {
       _osp=$!
       _sps="$_sps $_osp"
       if [ "$_b_pw" = 1 ]; then
-        rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+        rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+        _pwr_rc=$_brc
       fi
+      _harness_pw read
       _orc=0
       wait "$_osp" || _orc=$?
       _sps=""
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_t" "observe-$_c" "$(($(date +%s) - _ot0))" "$_orc" "$_ot0" "$_c" >>"$RT_REPORT/timings.tsv"
-    elif [ "$_b_pw" = 1 ]; then
-      rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+    else
+      if [ "$_b_pw" = 1 ]; then
+        rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+        _pwr_rc=$_brc
+      fi
+      _harness_pw read
+    fi
+    # 2а'. обрыв связи в части read: ждём связь, один раз догоняем часть (D-21)
+    if [ "$_b_pw" = 1 ]; then
+      _stand_gate "pw-read-$_c" "$_pwr_rc" "часть read Playwright, Go-тесты, часть state Playwright"
+      if [ "$_sg_state" = gone ]; then
+        _stop=1
+        break
+      fi
+      if [ "$_sg_state" = catchup ]; then
+        _cu_pw read ""
+        _stand_gate "catchup-pw-$_c" "$_brc" "часть read Playwright (догон), Go-тесты, часть state Playwright"
+        if [ "$_sg_state" = gone ]; then
+          _stop=1
+          break
+        fi
+      fi
     fi
     # хвост xcp.log пишет наблюдатель (без него — смоук без окна не пишет)
-    [ ! -f "$RT_REPORT/$_t/xcp-log-tail.txt" ] || mv "$RT_REPORT/$_t/xcp-log-tail.txt" "$RT_REPORT/$_t/$_c/xcp-log-tail.txt"
+    [ ! -f "$RT_REPORT/$_t/xcp-log-tail.txt" ] || mv "$RT_REPORT/$_t/xcp-log-tail.txt" "$_bdir/xcp-log-tail.txt"
+
+    # 2б. сэмплер PID ядра (см. _kpid_start) и сверка часов ПК и устройства: clock.tsv — середина
+    # интервала вызова ssh на ПК и эпоха устройства. Нет связи (смоук вернул 3) — не запускается.
+    if [ "$_smrc" != 3 ]; then
+      _ks=$(_kpid_start "$_t") || _ks=""
+      if [ -n "$_ks" ]; then
+        _kc0=$(date +%s)
+        _kdev=$(rt_ssh "$_t" 'date +%s' 2>/dev/null | tr -dc '0-9') || _kdev=""
+        _kc1=$(date +%s)
+        [ -z "$_kdev" ] || printf '%s\t%s\n' "$(((_kc0 + _kc1) / 2))" "$_kdev" >"$_bdir/clock.tsv"
+      fi
+    fi
 
     # 3. Go-тесты на устройстве с этим ядром
     if [ "$_b_go" = 1 ]; then
-      rt_stage "$_t" "go-$_c" _bg env "RT_GO_PKGS=$_g_pkgs" "RT_GO_RUN=$_g_run" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
+      rt_stage "$_t" "go-$_c" _bg env "RT_GO_PKGS=$_g_pkgs" "RT_GO_RUN=$_g_run" "RT_GO_RUN_SEQ=$_g_seq" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
+      # обрыв связи в Go-этапе: ждём связь, один раз догоняем пакеты вне go-done.txt (D-21)
+      _gorc=$_brc
+      _go_left
+      _stand_gate "go-$_c" "$_gorc" "Go: ${_gl_seq:-${_gl_pkgs:--}}, часть state Playwright"
+      if [ "$_sg_state" = gone ]; then
+        _stop=1
+        break
+      fi
+      if [ "$_sg_state" = catchup ] && { [ -n "$_gl_seq" ] || [ -n "$_gl_pkgs" ]; }; then
+        rt_stage "$_t" "catchup-go-$_c" _bg env "RT_GO_PKGS=$_gl_pkgs" "RT_GO_RUN=$_g_run" "RT_GO_RUN_SEQ=$_gl_seq" "RT_RESULTS_NAME=catchup.tsv" "RT_ART_SUB=catchup" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
+        _stand_gate "catchup-go-$_c" "$_brc" "Go (догон): ${_gl_seq:-$_gl_pkgs}, часть state Playwright"
+        if [ "$_sg_state" = gone ]; then
+          _stop=1
+          break
+        fi
+      fi
 
       # 3а. стенд после разрушающих тестов должен прийти в рабочее состояние
       rt_stage "$_t" "settle-$_c" _bg _settle "$_t" || true
@@ -696,12 +1745,38 @@ full_target() {
     # 4. Playwright, часть state: спеки, меняющие состояние стенда, один воркер. Часть только
     # чтения прошла в шаге 2а
     if [ "$_b_pw" = 1 ]; then
-      rt_stage "$_t" "pw-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part state || true
+      rt_stage "$_t" "pw-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_SPECS_FIRST=$_p_first" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part state || true
+      # обрыв связи в части state: ждём связь, один раз догоняем часть (D-21)
+      _stand_gate "pw-$_c" "$_brc" "часть state Playwright"
+      if [ "$_sg_state" = gone ]; then
+        _stop=1
+        break
+      fi
+      if [ "$_sg_state" = catchup ]; then
+        _cu_pw state "$_p_first"
+        _stand_gate "catchup-pw-$_c" "$_brc" "часть state Playwright (догон)"
+        if [ "$_sg_state" = gone ]; then
+          _stop=1
+          break
+        fi
+      fi
     else
       rt_result "$_t" SKIP pw "$_b_skip_pw"
     fi
+
+    # 4б. набор harness, добавленный к выбору changed (RT_H_EXTRA=1): Go, ожидание стенда, state
+    _harness_go
+    _harness_pw state
+
+    # 4а. остановка сэмплера и забор смен PID ядра ветви: до смоука следующей ветви
+    _kpid_stop "$_t" "$_ks" "$_bdir"
+    _ks=""
   done
   RT_CORE=""
+  # подтверждающий перепрогон новых падений (D-19): до восстановления стенда, кроме набора rerun
+  if [ "$SUITE" != rerun ] && [ "$_stop" = 0 ]; then
+    _confirm_run
+  fi
   exit 0
 }
 
@@ -970,7 +2045,7 @@ else
   # стенд и выходит с кодом 130.
   trap 'RT_INTR=1; echo "router-test: прерывание — останавливаю этапы и жду восстановления стенда" >&2; for _kp in $PIDS; do kill -s TERM "$_kp" 2>/dev/null || true; done' INT TERM HUP
   for t in ${DEPLOYED:-}; do
-    if [ -z "$SUITE" ] || { [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ]; }; then
+    if [ -z "$SUITE" ] || [ "$SUITE" = harness ] || [ "$SUITE" = rerun ] || [ "$SUITE" = delta ] || { [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ]; }; then
       (full_target "$t") &
     else
       sh "$SCRIPT_DIR/smoke.sh" "$t" "$EXPECT" &
@@ -998,6 +2073,240 @@ done
 # На время построения отчёта сигнал не убивает run.sh: он только запоминается (RT_INTR), отчёт
 # доводится до конца, и прогон выходит с кодом 130 без удержания блокировки.
 trap 'RT_INTR=1' INT TERM HUP
+
+# История результатов (D-20): history.mjs append добавляет отчёт (строки результатов и классы
+# падений) в build/router/history.tsv; повторное добавление того же отчёта ничего не пишет. Вызывается
+# в конце каждого прогона с отчётом (все наборы, кроме session: её историю пишет session.mjs) до
+# hold_lock; сбой — предупреждение, код выхода прогона не меняется.
+rt_history_append() {
+  node "$SCRIPT_DIR/history.mjs" append "$RT_REPORT" >/dev/null || echo "router-test: предупреждение: запись отчёта в историю не удалась (node scripts/router/history.mjs append $RT_REPORT)" >&2
+}
+
+# --- отчёт набора rerun -------------------------------------------------------------------
+# Итог перепрогона дописывается в отчёт FROM: раздел «## Перепрогон N» в summary.md (копия в
+# rerun-N.md) с таблицей «проверка, ядро, было, стало» и строкой «- Перепрогон: K тестов из
+# <отчёт>». «Было» — статус упавшей проверки в исходных результатах отчёта (results.tsv прогона или
+# всех этапов сессии), «стало» — худший статус той же проверки в rerun-N.tsv; подтест Go сводится к
+# родительскому TestRouter*. Остальные файлы отчёта (meta, report.md, results.tsv) не меняются.
+# Код выхода: 130 — прерван; 3 — сбой связи (FAIL reachable или код деплоя 3); 1 — есть FAIL или
+# XPASS в rerun-N.tsv (нет файла — тоже); иначе 0.
+rerun_finish() {
+  _rf_n=$RT_RERUN_N
+  _rf_name=$(basename "$RT_REPORT")
+  _rf_md="$RT_REPORT/rerun-$_rf_n.md"
+  _rf_bad=0
+  _rf_link=0
+  {
+    echo "## Перепрогон $_rf_n ($(date -u +%Y-%m-%dT%H:%M:%SZ), SHA $(git rev-parse --short HEAD))"
+    echo
+    echo "- Перепрогон: $RT_RERUN_K тестов из $_rf_name"
+    [ "$RT_INTR" != 1 ] || echo "- Прерван: да (сигнал)"
+    for _rf_t in $RT_TARGETS; do
+      _rf_res="$RT_REPORT/$_rf_t/rerun-$_rf_n.tsv"
+      echo
+      echo "### Цель $_rf_t"
+      echo
+      if [ ! -f "$_rf_res" ]; then
+        echo "- результатов нет"
+        _rf_bad=$((_rf_bad + 1))
+        continue
+      fi
+      awk -F'\t' '{c[$1]++} END {printf "- PASS: %d, FAIL: %d, KNOWN: %d, XPASS: %d, SKIP: %d\n", c["PASS"], c["FAIL"], c["KNOWN"], c["XPASS"], c["SKIP"]}' "$_rf_res"
+      _rf_orig=""
+      if [ -f "$RT_REPORT/$_rf_t/results.tsv" ]; then
+        _rf_orig="$RT_REPORT/$_rf_t/results.tsv"
+      else
+        for _rf_f in "$RT_REPORT"/[0-9]*-*/"$_rf_t"/results.tsv; do
+          if [ -f "$_rf_f" ]; then _rf_orig="$_rf_orig $_rf_f"; fi
+        done
+      fi
+      echo
+      echo "| Проверка | Ядро | Было | Стало |"
+      echo "|---|---|---|---|"
+      # shellcheck disable=SC2086
+      awk -F'\t' -v new="$_rf_res" '
+        function pkey(core, chk) { if (chk ~ /^go:/) sub(/\/.*$/, "", chk); return core "\t" chk }
+        function esc(s,   o, i, ch) {
+          o = ""
+          for (i = 1; i <= length(s); i++) {
+            ch = substr(s, i, 1)
+            if (ch == "\\" || ch == "|") o = o "\\"
+            o = o ch
+          }
+          return o
+        }
+        function bad(s) { return s == "FAIL" || s == "XPASS" }
+        FILENAME == new {
+          if ($3 !~ /^(go|pw):/) next
+          k = pkey($2, $3)
+          ran[$2] = 1
+          if (!(k in now) || (bad($1) && !bad(now[k]))) now[k] = $1
+          next
+        }
+        bad($1) && $3 ~ /^(go|pw):/ {
+          k = pkey($2, $3)
+          if (!(k in was)) { was[k] = $1; order[++n] = k }
+        }
+        END {
+          for (i = 1; i <= n; i++) {
+            k = order[i]
+            split(k, a, "\t")
+            if (!(a[1] in ran)) continue
+            printf "| %s | %s | %s | %s |\n", esc(a[2]), a[1], was[k], (k in now) ? now[k] : "нет строки"
+          }
+        }
+      ' $_rf_orig "$_rf_res"
+      if awk -F'\t' '$1 == "FAIL" && $3 == "reachable" {f = 1} END {exit !f}' "$_rf_res"; then
+        _rf_link=1
+      fi
+      if [ -f "$RT_REPORT/$_rf_t/deploy.rc" ] && [ "$(cat "$RT_REPORT/$_rf_t/deploy.rc")" = 3 ]; then
+        _rf_link=1
+      fi
+      _rf_b=$(awk -F'\t' '$1 == "FAIL" || $1 == "XPASS" {n++} END {print n + 0}' "$_rf_res")
+      _rf_bad=$((_rf_bad + _rf_b))
+    done
+  } >"$_rf_md"
+  {
+    echo
+    cat "$_rf_md"
+  } >>"$RT_REPORT/summary.md"
+  echo
+  cat "$_rf_md"
+  if [ "$RT_INTR" = 1 ]; then
+    echo "router-test: прерван (код 130), итог — $_rf_md" >&2
+    exit 130
+  fi
+  rt_history_append
+  hold_lock
+  if [ "$_rf_link" = 1 ]; then
+    echo "router-test: сбой связи ПК↔стенд (итог — $_rf_md)" >&2
+    exit 3
+  fi
+  if [ "$_rf_bad" -gt 0 ]; then
+    echo "router-test: красный (FAIL и XPASS перепрогона: $_rf_bad)" >&2
+    exit 1
+  fi
+  echo "router-test: зелёный"
+  exit 0
+}
+if [ "$SUITE" = rerun ]; then
+  rerun_finish
+fi
+
+# --- самопроверка сессии (набор harness; changed при RT_HARNESS=1) ------------------------
+# Сама остановка на первом несовпадении — механика сессии (session.mjs), и править обвязку, не
+# сломав её, нельзя. Вложенная сессия по спеке блока harness (проход fail-fast-probe нарочно ждёт
+# FAIL у проходящего дешёвого теста) обязана: выйти с кодом 1, написать в summary.md раздел
+# «Остановлено на первом несовпадении», не выполнить второй проход (must-not-run) и вернуть
+# стенд («## Стенд в конце» без «нет»). Иначе — FAIL harness-session-fail-fast. Вложенный run.sh
+# идёт под блокировкой этого процесса (RT_LOCK_HELD=1), настройки прогона не наследует, отчёт —
+# <отчёт>-01-harness-session (ключ отчёта tidy: <ключ>-NN-<имя>). Итог — RT_H_SELF (да|нет) и
+# причина в RT_H_SELF_WHY для summary.md; строка результата — в results.tsv цели.
+_hs_fail() {
+  RT_H_SELF=нет
+  RT_H_SELF_WHY=$1
+  rt_result "$_hs_rt" FAIL harness-session-fail-fast "$1"
+}
+harness_selfcheck() {
+  RT_H_SELF=нет
+  RT_H_SELF_WHY=""
+  _hs_rt=${RT_TARGETS%% *}
+  [ -n "$_hs_rt" ] || return 0
+  if [ -z "$RT_H_SESSION" ]; then
+    _hs_fail "блок harness в areas.json не прочитан: спеки самопроверки нет"
+    return 0
+  fi
+  _hs_tg=$(node "$SCRIPT_DIR/session.mjs" --target "$RT_H_SESSION" 2>/dev/null) || _hs_tg=""
+  if [ -z "$_hs_tg" ]; then
+    _hs_fail "спека самопроверки не разобрана (session.mjs --target)"
+    return 0
+  fi
+  # строка результата — в цели спеки, если она в прогоне, иначе в первой цели прогона
+  case " $RT_TARGETS " in *" $_hs_tg "*) _hs_rt=$_hs_tg ;; esac
+  if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    _hs_fail "рабочее дерево не чистое: вложенная сессия меняет файлы продукта"
+    return 0
+  fi
+  if [ -z "${DEPLOYED:-}" ]; then
+    _hs_fail "ни одна цель не развёрнута: проверять нечем"
+    return 0
+  fi
+  _hs_dir="$RT_REPORT-01-harness-session"
+  _hs_rel=${_hs_dir#"$(rt_repo_root)"/}
+  echo "router-test: самопроверка сессии (остановка на первом несовпадении) → $_hs_rel"
+  env -u RT_CORES -u RT_HOLD_MINUTES -u RT_BASE -u RT_FILES -u RELEASE -u SUITE \
+    -u RT_SMOKE_WINDOW -u RT_SMOKE_IPT_WAIT -u RT_GO_PKGS -u RT_GO_RUN -u RT_GO_RUN_SEQ \
+    -u RT_GO_CORE_PKGS -u RT_GO_CORE_RUN -u RT_SPECS -u RT_SPECS_CORE -u RT_SPECS_FIRST \
+    -u RT_PW_GREP -u RT_PW_GREP_INVERT -u RT_PW_CORE_ONLY -u RT_ART_SUB -u RT_KERNEL_TOUCHED \
+    -u RT_SEL_DIR -u RT_GO_SEQ -u RT_PW_INVERT -u RT_RESULTS_NAME \
+    -u RT_SELECT_ALL -u RT_CORE -u RT_REPORT -u XCP_WANT_CORE -u XCP_VERSION \
+    SPEC="$RT_H_SESSION" RT_LOCK_HELD=1 RT_REPORT_DIR="$_hs_dir" \
+    sh "$SCRIPT_DIR/run.sh" session >"$RT_REPORT/harness-session.log" 2>&1 &
+  _hs_pid=$!
+  trap 'RT_INTR=1; kill -TERM "$_hs_pid" 2>/dev/null || true' INT TERM HUP
+  _hs_rc=0
+  wait "$_hs_pid" || _hs_rc=$?
+  while kill -0 "$_hs_pid" 2>/dev/null; do
+    _hs_rc=0
+    wait "$_hs_pid" || _hs_rc=$?
+  done
+  trap 'RT_INTR=1' INT TERM HUP
+  # прерванный прогон отчёт доводит до конца без результата самопроверки
+  if [ "$RT_INTR" = 1 ]; then
+    RT_H_SELF=""
+    return 0
+  fi
+  if [ "$_hs_rc" = 3 ]; then
+    _hs_fail "сбой связи ПК↔стенд во вложенной сессии (код 3), отчёт $_hs_rel"
+    return 0
+  fi
+  if [ "$_hs_rc" != 1 ]; then
+    _hs_fail "вложенная сессия вышла с кодом $_hs_rc, ожидался 1 (остановка на первом несовпадении), отчёт $_hs_rel"
+    return 0
+  fi
+  if [ ! -f "$_hs_dir/summary.md" ] || [ ! -f "$_hs_dir/session.json" ]; then
+    _hs_fail "у вложенной сессии нет summary.md или session.json, отчёт $_hs_rel"
+    return 0
+  fi
+  if ! grep -q '^## Остановлено на первом несовпадении' "$_hs_dir/summary.md"; then
+    _hs_fail "в summary.md вложенной сессии нет раздела «Остановлено на первом несовпадении», отчёт $_hs_rel"
+    return 0
+  fi
+  if grep -q '^| must-not-run |' "$_hs_dir/summary.md"; then
+    _hs_fail "второй проход (must-not-run) выполнялся: сессия не остановилась, отчёт $_hs_rel"
+    return 0
+  fi
+  _hs_chk_rc=0
+  _hs_chk=$(node -e '
+const fs = require("fs");
+const s = JSON.parse(fs.readFileSync(process.argv[1] + "/session.json", "utf8"));
+const bad = [];
+if (!s.stopped) bad.push("сессия не остановилась на первом несовпадении");
+else if (s.stopped.pass !== "fail-fast-probe") bad.push("остановка не на проходе fail-fast-probe, а на " + s.stopped.pass);
+const ran = [...(s.verdicts || []), ...(s.steps || [])].filter((x) => x.pass === "must-not-run");
+if (ran.length) bad.push("второй проход (must-not-run) выполнялся");
+if (!s.stand_end || !s.stand_end.ok) bad.push("стенд не вернулся в исходное состояние");
+if (bad.length) {
+  console.log(bad.join("; "));
+  process.exit(1);
+}
+' "$_hs_dir" 2>&1 | head -c 400) || _hs_chk_rc=$?
+  if [ "$_hs_chk_rc" != 0 ] || [ -n "$_hs_chk" ]; then
+    _hs_fail "${_hs_chk:-session.json вложенной сессии не разобран}, отчёт $_hs_rel"
+    return 0
+  fi
+  if ! awk '/^## Стенд в конце/ {f = 1; next} /^## / {f = 0} f && /\*\*нет\*\*/ {bad = 1} END {exit bad}' "$_hs_dir/summary.md" ||
+    ! grep -q '^## Стенд в конце' "$_hs_dir/summary.md"; then
+    _hs_fail "раздел «Стенд в конце» вложенной сессии пуст или содержит «нет», отчёт $_hs_rel"
+    return 0
+  fi
+  RT_H_SELF=да
+  rt_result "$_hs_rt" PASS harness-session-fail-fast "сессия остановилась на первом несовпадении (код 1), второй проход не выполнялся, стенд вернулся; отчёт $_hs_rel"
+}
+
+if [ "$RT_INTR" != 1 ] && { [ "$SUITE" = harness ] || { { [ "$SUITE" = changed ] || [ "$SUITE" = delta ]; } && [ "$RT_HARNESS" = 1 ]; }; }; then
+  harness_selfcheck
+fi
 
 # --- отчёт -------------------------------------------------------------------------
 
@@ -1073,7 +2382,7 @@ done
     echo
     echo "- Версия xcp: ${ver:--}"
     if [ -f "$RT_REPORT/$t/results.tsv" ]; then
-      awk -F'\t' '{c[$1]++} END {printf "- PASS: %d, FAIL: %d, KNOWN: %d, XPASS: %d, SKIP: %d\n", c["PASS"], c["FAIL"], c["KNOWN"], c["XPASS"], c["SKIP"]}' "$RT_REPORT/$t/results.tsv"
+      awk -F'\t' '{c[$1]++} END {printf "- PASS: %d, FAIL: %d, KNOWN: %d, XPASS: %d, SKIP: %d, QPASS: %d, QFAIL: %d\n", c["PASS"], c["FAIL"], c["KNOWN"], c["XPASS"], c["SKIP"], c["QPASS"], c["QFAIL"]}' "$RT_REPORT/$t/results.tsv"
     else
       echo "- результатов нет"
     fi
@@ -1087,7 +2396,15 @@ done
     if [ -f "$RT_REPORT/$t/results.tsv" ] && awk -F'\t' '$1 == "FAIL" || $1 == "XPASS" {f = 1} END {exit !f}' "$RT_REPORT/$t/results.tsv"; then
       echo "Падения:"
       echo
-      awk -F'\t' '$1 == "FAIL" || $1 == "XPASS" {printf "- %s %s: %s\n", $1, $3, $4}' "$RT_REPORT/$t/results.tsv"
+      # класс падения — из classes.tsv цели (нет файла — без класса)
+      _cls_f="$RT_REPORT/$t/classes.tsv"
+      [ -f "$_cls_f" ] || _cls_f=/dev/null
+      awk -F'\t' -v cf="$_cls_f" '
+        FILENAME == cf { cls[$2 "\t" $3] = $1; next }
+        $1 == "FAIL" || $1 == "XPASS" {
+          c = cls[$2 "\t" $3]
+          printf "- %s %s%s: %s\n", $1, $3, (c != "" ? " [" c "]" : ""), $4
+        }' "$_cls_f" "$RT_REPORT/$t/results.tsv"
       echo
     fi
     if [ -f "$RT_REPORT/$t/results.tsv" ] && awk -F'\t' '$1 == "KNOWN" {f = 1} END {exit !f}' "$RT_REPORT/$t/results.tsv"; then
@@ -1103,6 +2420,19 @@ done
   echo "# Сводка прогона"
   echo
   echo "- Набор: $SUITE_NAME"
+  if [ "$SUITE" = changed ]; then
+    echo "- Области: ${RT_AREAS:-нет}"
+    echo "- Выбор: ${RT_SEL_KIND:-полный}"
+    [ "$RT_H_EXTRA" != 1 ] || echo "- Обвязка изменена: набор harness добавлен"
+  fi
+  if [ "$SUITE" = harness ]; then
+    _el=$(($(date +%s) - RT_T0))
+    echo "- Время набора: $((_el / 60)) мин $((_el % 60)) с ($_el с)"
+  fi
+  if [ -n "$RT_H_SELF" ]; then
+    echo "- Самопроверка сессии: остановка на первом несовпадении — $RT_H_SELF"
+    [ -z "$RT_H_SELF_WHY" ] || echo "- Самопроверка сессии, причина: $RT_H_SELF_WHY"
+  fi
   echo "- SHA: $SHA"
   [ -z "${RELEASE:-}" ] || echo "- Релиз: $RELEASE"
   echo "- Проверены цели: $(printf '%s' "$RT_TARGETS" | tr ' ' ',')"
@@ -1114,7 +2444,7 @@ done
     [ -f "$RT_REPORT/$t/xcp_version" ] && ver=$(cat "$RT_REPORT/$t/xcp_version")
     printf '%s: xcp %s, ' "$arch" "${ver:--}"
     if [ -f "$RT_REPORT/$t/results.tsv" ]; then
-      awk -F'\t' '{c[$1]++} END {printf "passed %d, failed %d, known %d, xpass %d, skipped %d\n", c["PASS"], c["FAIL"], c["KNOWN"], c["XPASS"], c["SKIP"]}' "$RT_REPORT/$t/results.tsv"
+      awk -F'\t' '{c[$1]++} END {printf "passed %d, failed %d, known %d, xpass %d, skipped %d, quarantine %d (QPASS %d, QFAIL %d)\n", c["PASS"], c["FAIL"], c["KNOWN"], c["XPASS"], c["SKIP"], c["QPASS"] + c["QFAIL"], c["QPASS"], c["QFAIL"]}' "$RT_REPORT/$t/results.tsv"
     else
       echo "результатов нет"
     fi
@@ -1124,16 +2454,61 @@ done
   done
 } >"$RT_REPORT/summary.md"
 
+# Красные классы (D-19…D-21): new, flaky и не догнанный stand — в FAILS, xpass — в XPASSES. Нет
+# classes.tsv (разбор не сработал) — прежний подсчёт FAIL и XPASS по results.tsv.
 for t in $RT_TARGETS; do
-  if [ -f "$RT_REPORT/$t/results.tsv" ]; then
-    f=$(awk -F'\t' '$1 == "FAIL" {n++} END {print n + 0}' "$RT_REPORT/$t/results.tsv")
-    x=$(awk -F'\t' '$1 == "XPASS" {n++} END {print n + 0}' "$RT_REPORT/$t/results.tsv")
-    FAILS=$((FAILS + f))
-    XPASSES=$((XPASSES + x))
-  else
-    FAILS=$((FAILS + 1))
-  fi
+  rt_red_counts "$t"
+  FAILS=$((FAILS + RT_RC_RED))
+  XPASSES=$((XPASSES + RT_RC_XPASS))
 done
+
+# --- решение добора (набор delta, RTR-11, D-24, D-25) --------------------------------------
+# Решение по цели: success только при всех условиях todo 11 — найденная база (иначе прогона не было),
+# нуль красных классов (new, flaky, не догнанный stand, xpass: упавшие в базе, тесты по диффу и
+# подтверждающий перепрогон), зелёный смоук нового тега (хотя бы одна пройденная проверка смоука этого
+# прогона и нет FAIL), полный состав (непустой notrun.txt — часть не выполнена из-за обрыва связи).
+# Результат — RT_DD_STATE (success|failure) и RT_DD_TESTS (число разных тестов go: и pw: прогона).
+DELTA_RED=0
+delta_decide() {
+  RT_DD_STATE=failure
+  RT_DD_TESTS=0
+  _dd_res="$RT_REPORT/$1/results.tsv"
+  [ -f "$_dd_res" ] || return 0
+  RT_DD_TESTS=$(awk -F'\t' '
+    $1 != "SKIP" && ($3 ~ /^go:/ || $3 ~ /^pw:/) && $3 != "go:setup" && $3 != "pw:run" && $3 !~ /^pw:core-switch:/ {
+      c = $3; if (c ~ /^go:/) sub(/\/.*/, "", c)
+      if (!(c in seen)) { seen[c] = 1; n++ }
+    }
+    END { print n + 0 }' "$_dd_res")
+  rt_red_counts "$1"
+  [ "$RT_RC_RED" -eq 0 ] && [ "$RT_RC_XPASS" -eq 0 ] || return 0
+  [ ! -s "$RT_REPORT/$1/notrun.txt" ] || return 0
+  awk -F'\t' '$1 == "PASS" && $3 == "kernel-running" {f = 1} END {exit !f}' "$_dd_res" || return 0
+  RT_DD_STATE=success
+}
+# Строки «- Добор:» и «- Решение добора:» в summary.md по каждой цели; при DRY_RUN=1 решение с пометкой
+# «dry_run: не отправлено» (статус на GitHub не отправляется).
+delta_report() {
+  for _dr_t in $RT_TARGETS; do
+    _dr_f=0
+    _dr_g=0
+    _dr_s=0
+    if [ -f "$RT_REPORT/$_dr_t/delta.counts" ]; then
+      IFS="$(printf '\t')" read -r _dr_f _dr_g _dr_s <"$RT_REPORT/$_dr_t/delta.counts" || true
+    fi
+    delta_decide "$_dr_t"
+    [ "$RT_DD_STATE" = success ] || DELTA_RED=1
+    echo "- Добор: база $DELTA_BASE_TAG ($DELTA_BASE_NAME), упавших в базе ${_dr_f:-0}, по диффу $((${_dr_g:-0} + ${_dr_s:-0})), всего тестов $RT_DD_TESTS" >>"$RT_REPORT/summary.md"
+    if [ "$DELTA_DRY" = 1 ]; then
+      echo "- Решение добора: $RT_DD_STATE (dry_run: не отправлено)" >>"$RT_REPORT/summary.md"
+    else
+      echo "- Решение добора: $RT_DD_STATE" >>"$RT_REPORT/summary.md"
+    fi
+  done
+}
+if [ "$SUITE" = delta ]; then
+  delta_report
+fi
 
 echo
 cat "$RT_REPORT/summary.md"
@@ -1142,8 +2517,10 @@ cat "$RT_REPORT/summary.md"
 
 # Для каждой цели ставит статус stand/<arch>-<smoke|full> на коммите RELEASE и дописывает в
 # summary.md строку «Статус на GitHub: <контекст> <состояние>» (при отказе — «не отправлен
-# (<причина>)»). Статуса нет при незакоммиченных правках, сбое связи ПК↔стенд (в том числе когда
-# у красного прогона в конце нет связи с целью), отсутствии результатов, деплое, не дошедшем до
+# (<причина>)»). Статуса нет при незакоммиченных правках, сбое связи ПК↔стенд (непустой
+# <цель>/notrun.txt, строка FAIL reachable без догона — нет catchup.tsv, а также когда у красного
+# прогона в конце нет связи с целью; обрыв, после которого связь вернулась и был догон, статус не
+# останавливает), отсутствии результатов, деплое, не дошедшем до
 # цели (сбой на ПК), сбое подготовки стенда (deploy.rc=2), у smoke — когда ветка меняла
 # scripts/router относительно origin/main (или сравнить не удалось), а у full — когда коммит
 # тега не предок HEAD. Прерванный прогон досюда не доходит (выход по RT_INTR раньше). Код выхода
@@ -1151,12 +2528,14 @@ cat "$RT_REPORT/summary.md"
 publish_release_status() {
   [ -n "${RELEASE:-}" ] || return 0
   case "$SUITE_NAME" in
-    smoke | full) ;;
+    smoke | full | delta) ;;
     *) return 0 ;;
   esac
   for _pt in $RT_TARGETS; do
     _parch=$(rt_get "$_pt" ARCH)
     _pctx="stand/${_parch}-${SUITE_NAME}"
+    # добор публикует тот же контекст, что полный прогон: хук закрытия вехи читает stand/arm64-full
+    [ "$SUITE_NAME" != delta ] || _pctx="stand/${_parch}-full"
     _preason=""
     _pres="$RT_REPORT/$_pt/results.tsv"
     if [ "$DIRTY" = true ]; then
@@ -1165,7 +2544,11 @@ publish_release_status() {
       _preason="сбой связи ПК↔стенд"
     elif [ ! -f "$_pres" ]; then
       _preason="результатов нет"
-    elif awk -F'\t' '$1 == "FAIL" && $3 == "reachable" {f = 1} END {exit !f}' "$_pres"; then
+    elif [ -s "$RT_REPORT/$_pt/notrun.txt" ]; then
+      # связь не вернулась или часть набора после обрыва не выполнена (D-21, D-26)
+      _preason="сбой связи ПК↔стенд"
+    elif awk -F'\t' '$1 == "FAIL" && $3 == "reachable" {f = 1} END {exit !f}' "$_pres" && [ ! -f "$RT_REPORT/$_pt/catchup.tsv" ]; then
+      # обрыв без догона; обрыв, после которого связь вернулась и был догон, статус не останавливает
       _preason="сбой связи ПК↔стенд"
     elif [ ! -f "$RT_REPORT/$_pt/deploy.rc" ]; then
       # deploy.sh вышел до установки на цель: нет ассета, сбой gh или sha256 на ПК
@@ -1176,7 +2559,7 @@ publish_release_status() {
       # Смоук ветки с изменённым кодом стенда проверяет не то, что идёт в main; не удалось
       # сравнить с origin/main (нет ссылки) — тоже не ставим
       _preason="код стенда ветки отличается от main"
-    elif [ "$SUITE_NAME" = full ]; then
+    elif [ "$SUITE_NAME" = full ] || [ "$SUITE_NAME" = delta ]; then
       if ! git rev-parse -q --verify "refs/tags/$RELEASE^{commit}" >/dev/null 2>&1; then
         _preason="тег релиза не найден локально"
       elif ! git merge-base --is-ancestor "$RELEASE" HEAD 2>/dev/null; then
@@ -1184,8 +2567,12 @@ publish_release_status() {
       fi
     fi
     if [ -z "$_preason" ]; then
-      _pf=$(awk -F'\t' '$1 == "FAIL" {n++} END {print n + 0}' "$_pres")
-      _px=$(awk -F'\t' '$1 == "XPASS" {n++} END {print n + 0}' "$_pres")
+      # красные классы цели: new, flaky, не догнанный stand (_pf) и xpass (_px); «новых падений» в
+      # описании — new плюс xpass
+      rt_red_counts "$_pt"
+      _pnew=$RT_RC_NEW
+      _pf=$RT_RC_RED
+      _px=$RT_RC_XPASS
       # Красный прогон без связи в конце — вероятный обрыв посреди прогона, а не регрессия
       if [ "$_pf" -gt 0 ] && ! rt_ssh "$_pt" true >/dev/null 2>&1; then
         _preason="сбой связи ПК↔стенд"
@@ -1202,13 +2589,31 @@ publish_release_status() {
         _pstate=failure
         _pverdict="красный"
       fi
-      _pdesc="$_pword $_parch: $_pverdict, ядро $_pcore, новых падений $((_pf + _px))"
+      _pdesc="$_pword $_parch: $_pverdict, ядро $_pcore, новых падений $((_pnew + _px))"
+      if [ "$SUITE_NAME" = delta ]; then
+        # добор: решение — delta_decide (все условия todo 11), описание называет тег базы (D-25)
+        delta_decide "$_pt"
+        _pstate=$RT_DD_STATE
+        _pverdict="красный"
+        [ "$_pstate" != success ] || _pverdict="зелёный"
+        _pdesc="добор от $DELTA_BASE_TAG: $_pverdict, тестов $RT_DD_TESTS, новых падений $((_pnew + _px))"
+      fi
       _prc=0
-      sh "$SCRIPT_DIR/release-status.sh" "$RELEASE" "$_pctx" "$_pstate" "$_pdesc" || _prc=$?
-      if [ "$_prc" -eq 0 ]; then
-        _pline="- Статус на GitHub: $_pctx $_pstate"
+      if [ "$DELTA_DRY" = 1 ]; then
+        # сухой режим: release-status.sh --dry-run проверяет коммит тега и текст, ничего не отправляя
+        sh "$SCRIPT_DIR/release-status.sh" --dry-run "$RELEASE" "$_pctx" "$_pstate" "$_pdesc" || _prc=$?
+        if [ "$_prc" -eq 0 ]; then
+          _pline="- Статус на GitHub: не отправлен (dry_run: $_pctx $_pstate)"
+        else
+          _pline="- Статус на GitHub: не отправлен (dry_run, проверка статуса не прошла)"
+        fi
       else
-        _pline="- Статус на GitHub: не отправлен (ошибка отправки)"
+        sh "$SCRIPT_DIR/release-status.sh" "$RELEASE" "$_pctx" "$_pstate" "$_pdesc" || _prc=$?
+        if [ "$_prc" -eq 0 ]; then
+          _pline="- Статус на GitHub: $_pctx $_pstate"
+        else
+          _pline="- Статус на GitHub: не отправлен (ошибка отправки)"
+        fi
       fi
     else
       _pline="- Статус на GitHub: не отправлен ($_preason)"
@@ -1227,12 +2632,143 @@ if [ "$RT_INTR" = 1 ]; then
   exit 130
 fi
 
+# История результатов (D-20): отчёт со строками и классами добавляется в build/router/history.tsv.
+# Сбой записи прогон не краснит и код выхода не меняет.
+rt_history_append
+
+# --- поиск виновного коммита (RTR-11, D-22, todo 11) ----------------------------------------
+# Набор bisect: после деплоя и смоука bisect.mjs ищет коммит для заданного теста. Полный прогон:
+# в конце, после статуса релиза и до hold_lock, поиск идёт для новых падений (класс new в
+# <цель>/classes.tsv). Вне окна поиска не запускается при прерванном прогоне (выход 130 раньше) и
+# для теста с классом flaky в истории за 30 дней (отбор — bisect.mjs pick). Раздел «## Поиск
+# виновного коммита» и строки «- Итог bisect» пишет bisect.mjs в summary.md, их подхватывает latest.md
+# прогона без присмотра. Поиск код выхода полного прогона не меняет.
+
+# Потолок автоматического поиска в конце полного прогона: не больше 3 тестов (D-22) — каждый поиск
+# это несколько сборок на стенде, а виновник новых падений обычно общий.
+RT_BISECT_MAX=3
+
+# Строка в разделе «## Поиск виновного коммита» summary.md (заголовок один на отчёт).
+bs_note() {
+  grep -q '^## Поиск виновного коммита$' "$RT_REPORT/summary.md" 2>/dev/null || printf '\n## Поиск виновного коммита\n' >>"$RT_REPORT/summary.md"
+  printf '%s\n' "$1" >>"$RT_REPORT/summary.md"
+}
+
+# Набор bisect: код — код bisect.mjs (BISECT_RC). Деплой или смоук цели не прошли — поиска нет.
+bisect_suite() {
+  BISECT_RC=1
+  _bs_t=${RT_TARGETS%% *}
+  case " ${DEPLOYED:-} " in
+    *" $_bs_t "*) ;;
+    *)
+      echo "router-test: красный — деплой цели не выполнен, поиск не запускался" >&2
+      return 0
+      ;;
+  esac
+  if [ ! -f "$RT_REPORT/$_bs_t/results.tsv" ] || awk -F'\t' '$1 == "FAIL" {f = 1} END {exit !f}' "$RT_REPORT/$_bs_t/results.tsv"; then
+    echo "router-test: красный — смоук цели не прошёл, поиск не запускался" >&2
+    return 0
+  fi
+  # исходное ядро стенда — по смоуку (<отчёт>/<цель>/core)
+  _bs_orig=""
+  [ ! -s "$RT_REPORT/$_bs_t/core" ] || _bs_orig=$(head -n 1 "$RT_REPORT/$_bs_t/core")
+  set -- --target "$_bs_t" --core "$CORE" --from "$RT_BS_FROM" --to "$RT_BS_TO" --mode "$RT_BS_MODE" --report "$RT_REPORT" --label "$RT_BS_LABEL"
+  if [ -n "$RT_BS_GO" ]; then
+    set -- "$@" --go "$RT_BS_GO"
+  else
+    set -- "$@" --spec "$RT_BS_SPEC"
+    [ -z "$RT_BS_GREP" ] || set -- "$@" --grep "$RT_BS_GREP"
+  fi
+  [ -z "${RELEASE:-}" ] || set -- "$@" --restore-release "$RELEASE"
+  [ -z "$_bs_orig" ] || set -- "$@" --restore-core "$_bs_orig"
+  BISECT_RC=0
+  node "$SCRIPT_DIR/bisect.mjs" "$@" || BISECT_RC=$?
+}
+
+# Полный прогон: поиск для новых падений без класса flaky в истории за 30 дней.
+auto_bisect() {
+  [ "$SUITE_NAME" = full ] || return 0
+  _ab_left=$RT_BISECT_MAX
+  for _ab_t in $RT_TARGETS; do
+    [ "$_ab_left" -gt 0 ] || break
+    _ab_cls="$RT_REPORT/$_ab_t/classes.tsv"
+    [ -s "$_ab_cls" ] || continue
+    awk -F'\t' '$1 == "new" {f = 1} END {exit !f}' "$_ab_cls" || continue
+    if ! rt_ssh "$_ab_t" true >/dev/null 2>&1; then
+      bs_note "- Цель $_ab_t: поиск не запускался — нет связи со стендом"
+      continue
+    fi
+    _ab_orig=""
+    [ ! -s "$RT_REPORT/$_ab_t/core" ] || _ab_orig=$(head -n 1 "$RT_REPORT/$_ab_t/core")
+    _ab_tsv="$RT_REPORT/$_ab_t/bisect-pick.tsv"
+    _ab_rc=0
+    node "$SCRIPT_DIR/bisect.mjs" pick --report "$RT_REPORT" --target "$_ab_t" --max "$_ab_left" >"$_ab_tsv" 2>"$_ab_tsv.err" || _ab_rc=$?
+    if [ "$_ab_rc" != 0 ]; then
+      bs_note "- Цель $_ab_t: поиск не запускался — подбор тестов не удался (код $_ab_rc)"
+      continue
+    fi
+    _ab_from=""
+    _ab_tab=$(printf '\t')
+    while IFS="$_ab_tab" read -r _ab_k _ab_a _ab_b _ab_c _ab_d _ab_e || [ -n "$_ab_k" ]; do
+      case "$_ab_k" in
+        skip) bs_note "- Цель $_ab_t: поиск не запускался — $_ab_a" ;;
+        from) _ab_from=$_ab_a ;;
+        skipped) bs_note "- Пропущено: $_ab_a ($_ab_b)" ;;
+        test)
+          [ "$_ab_left" -gt 0 ] || continue
+          [ -n "$_ab_from" ] || continue
+          # _ab_a ядро, _ab_b go|pw, _ab_c запись теста, _ab_d grep или -, _ab_e имя теста
+          set -- --target "$_ab_t" --core "$_ab_a" --from "$_ab_from" --to HEAD --mode regress --assume-to --report "$RT_REPORT" --label "$_ab_e"
+          if [ "$_ab_b" = go ]; then
+            set -- "$@" --go "$_ab_c"
+          else
+            set -- "$@" --spec "$_ab_c"
+            [ "$_ab_d" = - ] || set -- "$@" --grep "$_ab_d"
+          fi
+          [ -z "${RELEASE:-}" ] || set -- "$@" --restore-release "$RELEASE"
+          [ -z "$_ab_orig" ] || set -- "$@" --restore-core "$_ab_orig"
+          _ab_left=$((_ab_left - 1))
+          node "$SCRIPT_DIR/bisect.mjs" "$@" || echo "router-test: поиск виновного коммита для $_ab_e завершился с кодом $? (итог — summary.md)" >&2
+          ;;
+      esac
+    done <"$_ab_tsv"
+    rm -f "$_ab_tsv" "$_ab_tsv.err"
+  done
+}
+
+# Статус релиза от поиска не зависит и ставится до него: поиск меняет стенд (сборки старых коммитов),
+# и обрыв связи после многочасового поиска не должен отменять статус честного прогона.
 publish_release_status
+
+if [ "$SUITE" = bisect ]; then
+  bisect_suite
+elif [ -z "$SUITE" ]; then
+  auto_bisect
+fi
+if [ "$RT_INTR" = 1 ]; then
+  echo "router-test: прерван (код 130), итог — $RT_REPORT/summary.md" >&2
+  exit 130
+fi
 
 hold_lock
 
+if [ "$SUITE" = bisect ]; then
+  if [ "$BISECT_RC" = 0 ]; then
+    echo "router-test: поиск завершён (итог — строки «Итог bisect» в $RT_REPORT/summary.md)"
+  else
+    echo "router-test: поиск завершился с кодом $BISECT_RC (итог — $RT_REPORT/summary.md)" >&2
+  fi
+  exit "$BISECT_RC"
+fi
+
+if [ "$DELTA_RED" = 1 ] && [ "$FAILS" -eq 0 ] && [ "$XPASSES" -eq 0 ]; then
+  echo "router-test: красный — решение добора failure (строки «Решение добора» в $RT_REPORT/summary.md)" >&2
+  exit 1
+fi
 if [ "$FAILS" -gt 0 ] || [ "$XPASSES" -gt 0 ]; then
-  echo "router-test: красный (FAIL: $FAILS, XPASS: $XPASSES)" >&2
+  # причина — строки «- Итог:» целей (branch-report.mjs), иначе счётчики
+  _itog=$(grep -h '^- Итог: красный' "$RT_REPORT"/summary.md | sed 's/^- Итог: //' | paste -sd ';' - | sed 's/;/; /g' || true)
+  echo "router-test: ${_itog:-красный (FAIL: $FAILS, XPASS: $XPASSES)}" >&2
   exit 1
 fi
 echo "router-test: зелёный"

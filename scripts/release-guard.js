@@ -20,6 +20,9 @@
  *                              статус stand/arm64-full = success, ни один последний статус stand/*
  *                              не failure и не error: 0 — можно, 1 — нельзя, 2 — сверка
  *                              не выполнена (сеть, срок RELEASE_GUARD_DEADLINE_MS, по умолчанию 20000)
+ *   tail-tag                   печатает тег хвоста (новейший тег из origin/main), если он покрывает
+ *                              main (та же сверка, что в close-gate): 0 — тег напечатан, 1 — такого
+ *                              пре-релиза нет или сверка не выполнена (причина — в stderr)
  *   range --label <метка> [--planning <д>]
  *                              печатает строку `**Версии:** vA–vB` вехи
  *   post-hook [--planning <д>] событие PostToolUse: после закрытия вехи вписывает диапазон версий в
@@ -30,7 +33,10 @@
  *                              сводка выпуска только по делу (пре-релиз ждёт смоука, красный Auto
  *                              Release, стоп выпуска, невышедший номер в STATE/ROADMAP); нет сети —
  *                              одна строка «сверка выпуска не выполнена»; общий срок 7 с; UserPromptSubmit
- *                              отвечает только на /gsd-progress и /gsd-next; --plain — строки без JSON
+ *                              отвечает только на /gsd-progress и /gsd-next; --plain — строки без JSON.
+ *                              SessionStart добавляет непрочитанный итог полного прогона без присмотра
+ *                              (build/router/unattended/unread основной копии) одной строкой и снимает
+ *                              флаг; нет флага — ничего
  *
  * Невышедший номер — ядро строго больше наибольшего среди всех тегов `v*` (см. lib/release-versions.js);
  * при находке по локальным тегам номер перепроверяется по `git ls-remote --tags origin`, чтобы
@@ -415,6 +421,34 @@ function standState(sha) {
   return { full: last.get('stand/arm64-full') === 'success', red };
 }
 
+// Покрывает ли хвост main: после тега в origin/main нет «достойных» коммитов (WORTHY_RE).
+// Одна сверка для close-gate и tail-tag.
+function tailCovers(tail) {
+  const log = git(['log', '--format=%s%n%b', `${tail.sha}..origin/main`], 5000);
+  return !log.split('\n').some(l => WORTHY_RE.test(l));
+}
+
+// tail-tag: тег хвоста, покрывающего origin/main (RELEASE=auto прогона без присмотра).
+function cmdTailTag() {
+  setDeadline();
+  try {
+    const tail = findTail();
+    if (!tail) {
+      process.stderr.write('tail-tag: ни один тег не достижим из origin/main\n');
+      return 1;
+    }
+    if (!tailCovers(tail)) {
+      process.stderr.write(`tail-tag: после ${tail.tag} в main есть изменения для выпуска — нет пре-релиза, покрывающего origin/main\n`);
+      return 1;
+    }
+    process.stdout.write(`${tail.tag}\n`);
+    return 0;
+  } catch (err) {
+    process.stderr.write(`tail-tag: сверка не выполнена: ${err && err.message ? err.message : err}\n`);
+    return 1;
+  }
+}
+
 // Результат: { code, lines, reason }; 0 — можно закрывать, 1 — нельзя, 2 — сверка не выполнена.
 function closeGate() {
   if (deadlineAt === null) setDeadline();
@@ -428,9 +462,7 @@ function closeGate() {
         ]
       };
     }
-    const log = git(['log', '--format=%s%n%b', `${tail.sha}..origin/main`], 5000);
-    const covers = !log.split('\n').some(l => WORTHY_RE.test(l));
-    if (!covers) {
+    if (!tailCovers(tail)) {
       return {
         code: 1,
         lines: [
@@ -443,7 +475,7 @@ function closeGate() {
       return {
         code: 1,
         lines: [
-          `close-gate: нет зелёного полного прогона на ${tail.tag}: make router-test SUITE=full RELEASE=${tail.tag}`
+          `close-gate: нет зелёного полного прогона или добора на ${tail.tag}: make router-test SUITE=delta RELEASE=${tail.tag} (добор от прошлого полного прогона вехи) или SUITE=full RELEASE=${tail.tag}`
         ]
       };
     }
@@ -960,6 +992,41 @@ function statusText(lines, progress) {
   return `${progress ? 'Добавьте в итог строкой: ' : ''}Сверка выпуска: ${lines.join('\n')}`;
 }
 
+// Непрочитанный итог полного прогона без присмотра (D-28): файл build/router/unattended/unread
+// основной копии (её корень — родитель общего каталога git). Принимается одна строка не длиннее
+// 200 символов строго по шаблону; файл снимается в любом случае (неверный тоже). Нет файла — ''.
+const UNREAD_MAX = 200;
+const UNREAD_RE = /^полный прогон \d{4}-\d{2}-\d{2}: (зелёный|красный|пропущен)(, новых падений \d+)?$/;
+function takeUnread() {
+  let file;
+  try {
+    const common = git(['rev-parse', '--path-format=absolute', '--git-common-dir'], 3000).trim();
+    file = path.join(path.dirname(common), 'build', 'router', 'unattended', 'unread');
+  } catch {
+    return '';
+  }
+  let text = '';
+  try {
+    const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    try {
+      const st = fs.fstatSync(fd);
+      if (st.isFile() && st.size <= 4 * UNREAD_MAX) text = fs.readFileSync(fd, 'utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return '';
+  }
+  try {
+    fs.unlinkSync(file);
+  } catch {
+    // уже снят
+  }
+  text = text.replace(/\n$/, '');
+  if (text.includes('\n') || text.length > UNREAD_MAX || !UNREAD_RE.test(text)) return '';
+  return text;
+}
+
 async function cmdStatus(argv) {
   const event = flag(argv, '--event');
   if (!STATUS_EVENTS.includes(event)) {
@@ -967,6 +1034,9 @@ async function cmdStatus(argv) {
     return 2;
   }
   const plain = argv.includes('--plain');
+  // итог без присмотра читается до любых сетевых запросов: сбой сводки его не теряет
+  const unread = event === 'SessionStart' ? takeUnread() : '';
+  const parts = [];
   try {
     let progress = event !== 'SessionStart';
     if (!plain) {
@@ -983,12 +1053,14 @@ async function cmdStatus(argv) {
     }
     if (plain) progress = false;
     const lines = await collectStatus(flag(argv, '--planning') || defaultPlanning());
-    if (!lines.length) return 0;
-    if (plain) process.stdout.write(`${lines.join('\n')}\n`);
-    else emitContext(event, statusText(lines, progress));
+    if (lines.length) parts.push(plain ? lines.join('\n') : statusText(lines, progress));
   } catch {
     // сводка — подсказка: сбой не мешает работе
   }
+  if (unread) parts.push(unread);
+  if (!parts.length) return 0;
+  if (plain) process.stdout.write(`${parts.join('\n')}\n`);
+  else emitContext(event, parts.join('\n'));
   return 0;
 }
 
@@ -1054,6 +1126,8 @@ async function main() {
       return preHook(argv);
     case 'close-gate':
       return cmdCloseGate();
+    case 'tail-tag':
+      return cmdTailTag();
     case 'range':
       return cmdRange(argv);
     case 'post-hook':
@@ -1062,7 +1136,7 @@ async function main() {
       return cmdStatus(argv);
     default:
       process.stderr.write(
-        'Usage: node scripts/release-guard.js <scan|planning-check|pre-hook|close-gate|range|post-hook|status> [аргументы]\n'
+        'Usage: node scripts/release-guard.js <scan|planning-check|pre-hook|close-gate|tail-tag|range|post-hook|status> [аргументы]\n'
       );
       return 2;
   }

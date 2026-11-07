@@ -1,5 +1,7 @@
 //go:build router
 
+// router-area: dns
+
 package handlers
 
 import (
@@ -122,6 +124,10 @@ func rtDNSPrepare(t *testing.T, e *rtSrc, kernel string) *rtDNSStand {
 	}
 	e.enableLayer()
 	e.rtRstIdle()
+	// Перехват, оставшийся включённым от прерванного прогона (тест остановлен посреди
+	// сценария, t.Cleanup не выполнялся), блокирует очистку: применение без маршрутизации
+	// при включённом перехвате отвергается (dns_routing_required).
+	e.rtDNSEnsureOff()
 	e.rtRtPurge()
 	// Подписка, оставшаяся от прерванного прогона, не даёт группам по умолчанию
 	// появиться вместе с подпиской стенда: они создаются только с первым источником.
@@ -475,6 +481,7 @@ func (e *rtSrc) rtDNSExpectDefaults(kernel, run string) {
 // группам, слушатель в файлах ядра → выключение: :53 у прошивки, слушателя нет,
 // desired=false. Метка ядра: перехват ведёт активное ядро.
 func TestRouterDNSEnableDisable(t *testing.T) {
+	routertest.Slow(t, "включение и выключение перехвата DNS с перезапуском ядра на каждом шаге")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)
@@ -907,6 +914,7 @@ func (e *rtSrc) rtDNSDeadGroup(t *testing.T) {
 // до включения, proxy_dns on, прежний перехват XKeen с :53. Метка ядра: сбой
 // вызывается на процессах активного ядра.
 func TestRouterDNSTxnRollback(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "внесение сбоя: гашение процессов и мёртвый узел обрывают включение перехвата DNS")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)
@@ -1026,6 +1034,7 @@ func (e *rtSrc) rtDNSServiceControl(action string) {
 // Ядро возвращается
 // запущенным, маршрутизация — взятой в t.Cleanup. Метка ядра: ядро останавливается.
 func TestRouterDNSEnableRefused(t *testing.T) {
+	routertest.Slow(t, "остановка и запуск ядра через API служб, отпускание и возврат маршрутизации")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	e := rtNewSrc(t)

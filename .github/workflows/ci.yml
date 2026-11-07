@@ -312,6 +312,12 @@ jobs:
       - name: Check router spec kinds
         run: node scripts/check-router-kinds.js
 
+      - name: Check router areas
+        run: node scripts/check-router-areas.js
+
+      - name: Check router tiers
+        run: node scripts/check-router-tiers.js
+
       - name: Check report paths
         run: node scripts/check-report-paths.js
 

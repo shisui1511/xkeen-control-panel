@@ -1,4 +1,5 @@
 // e2e-pages: config/rules
+// router-area: routing
 import { randomInt } from 'node:crypto';
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';

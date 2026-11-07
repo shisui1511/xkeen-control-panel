@@ -1,4 +1,5 @@
 // e2e-pages: config/rules config/groups config/nodes
+// router-area: ui-shell
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';

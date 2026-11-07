@@ -1,5 +1,7 @@
 //go:build router
 
+// router-area: cores
+
 package handlers
 
 import (
@@ -318,6 +320,7 @@ func rtCoresCtlUnmanage(t *testing.T, e *rtSrc, section string) {
 // секции, отклонён в raw/parse и save кодом root_key_duplicate; дубль, записанный
 // мимо save, блокирует «Применить» этим же кодом в checks снимка.
 func TestRouterCoresMihomoControllerSecret(t *testing.T) {
+	routertest.Slow(t, "серия «Применить» с перезапуском Mihomo: external-controller и secret секций")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
 	e.enableLayer()

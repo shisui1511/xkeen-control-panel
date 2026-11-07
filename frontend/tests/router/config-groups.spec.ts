@@ -1,9 +1,10 @@
 // e2e-pages: config/groups
+// router-area: routing
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
-import { CORE_TAG, knownFailure } from './lib/known';
+import { CORE_TAG, knownFailure, SLOW_ANNOTATION } from './lib/known';
 import {
   addToDraft,
   api,
@@ -178,7 +179,13 @@ test('groups: группы по умолчанию — «Авто» и «Про�
 
 test(
   'groups: «Сейчас» — выбор участника ручной группы без черновика, подсказка о перезапуске Xray',
-  { tag: CORE_TAG },
+  {
+    tag: CORE_TAG,
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description: 'выбор участника группы «Сейчас» с перезапуском Xray и ожиданием живого ядра'
+    }
+  },
   async ({ page }) => {
     test.setTimeout(T.save * 10);
     const guard = attachConsoleGuard(page);

@@ -1,9 +1,10 @@
 // e2e-pages: logs
+// router-area: access-log
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Browser, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { CORE_TAG } from './lib/known';
+import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
 import { api, layerFlag, resetDraft, withPanel } from './lib/nodes-api';
 
 // Блок access-лога Xray на «Логах» (фаза 147.1, план 20): секция у панели включается и выключается
@@ -277,111 +278,132 @@ test('access-log: чужая секция и черновик', { tag: CORE_TAG 
 
 // --- Секция у панели -------------------------------------------------------------------------
 
-test('access-log: включение и выключение на секции панели', { tag: CORE_TAG }, async ({ page }) => {
-  test.setTimeout(T.save * 10);
-  test.skip(!before.installed, 'Xray не установлен');
-  test.skip(before.blocked !== '' && before.owner !== 'panel', 'секция «Лог» не берётся');
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await startPage(page);
-  await resetDraft(page);
-  await takeLog(page);
-  await accessOffViaApi(page);
-  const running = await isXrayRunning(page);
+test(
+  'access-log: включение и выключение на секции панели',
+  {
+    tag: CORE_TAG,
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description:
+        'включение и выключение журнала доступа: «Применить» с перезапуском Xray на каждом шаге'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.save * 10);
+    test.skip(!before.installed, 'Xray не установлен');
+    test.skip(before.blocked !== '' && before.owner !== 'panel', 'секция «Лог» не берётся');
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await startPage(page);
+    await resetDraft(page);
+    await takeLog(page);
+    await accessOffViaApi(page);
+    const running = await isXrayRunning(page);
 
-  await openDevices(page);
-  await expect(page.getByTestId('xlog-off')).toBeVisible({ timeout: T.page });
-  await expect(page.getByTestId('xlog-will-write')).toContainText('/');
-  await expect(page.getByTestId('xlog-owner')).toHaveText(/^(Панель|Panel)$/);
+    await openDevices(page);
+    await expect(page.getByTestId('xlog-off')).toBeVisible({ timeout: T.page });
+    await expect(page.getByTestId('xlog-will-write')).toContainText('/');
+    await expect(page.getByTestId('xlog-owner')).toHaveText(/^(Панель|Panel)$/);
 
-  // включение: подтверждение с путём записи; при запущенном Xray — с перезапуском
-  await page.getByTestId('xlog-enable').click();
-  const dialog = page.getByRole('dialog');
-  await expect(dialog).toBeVisible({ timeout: T.action });
-  await expect(dialog).toContainText(running ? RE_RESTART : RE_STOPPED);
-  await expect(dialog).toContainText('/opt/var/log');
-  await dialog.getByRole('button', { name: RE_ENABLE }).click();
-  await expect(page.getByTestId('xlog-path')).toBeVisible({ timeout: T.save * 2 });
-  await expect(
-    page
-      .locator('.toast')
-      .filter({ hasText: running ? RE_TOAST_ON : RE_STOPPED })
-      .last()
-  ).toBeVisible({ timeout: T.save });
-
-  // выключение: Xray запущен — подтверждение, остановлен — сразу
-  await page.getByTestId('xlog-disable').click();
-  if (running) {
+    // включение: подтверждение с путём записи; при запущенном Xray — с перезапуском
+    await page.getByTestId('xlog-enable').click();
+    const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: T.action });
-    await expect(dialog).toContainText(RE_RESTART);
-    await dialog.getByRole('button', { name: RE_DISABLE }).click();
-  } else {
-    await expect(dialog).toHaveCount(0);
-  }
-  await expect(page.getByTestId('xlog-enable')).toBeVisible({ timeout: T.save * 2 });
-  await expect(
-    // при остановленном Xray текст тот же, что после включения: прежний тост ещё на экране
-    page
-      .locator('.toast')
-      .filter({ hasText: running ? RE_TOAST_OFF : RE_STOPPED })
-      .last()
-  ).toBeVisible({ timeout: T.save });
+    await expect(dialog).toContainText(running ? RE_RESTART : RE_STOPPED);
+    await expect(dialog).toContainText('/opt/var/log');
+    await dialog.getByRole('button', { name: RE_ENABLE }).click();
+    await expect(page.getByTestId('xlog-path')).toBeVisible({ timeout: T.save * 2 });
+    await expect(
+      page
+        .locator('.toast')
+        .filter({ hasText: running ? RE_TOAST_ON : RE_STOPPED })
+        .last()
+    ).toBeVisible({ timeout: T.save });
 
-  await guard.assertClean();
-});
+    // выключение: Xray запущен — подтверждение, остановлен — сразу
+    await page.getByTestId('xlog-disable').click();
+    if (running) {
+      await expect(dialog).toBeVisible({ timeout: T.action });
+      await expect(dialog).toContainText(RE_RESTART);
+      await dialog.getByRole('button', { name: RE_DISABLE }).click();
+    } else {
+      await expect(dialog).toHaveCount(0);
+    }
+    await expect(page.getByTestId('xlog-enable')).toBeVisible({ timeout: T.save * 2 });
+    await expect(
+      // при остановленном Xray текст тот же, что после включения: прежний тост ещё на экране
+      page
+        .locator('.toast')
+        .filter({ hasText: running ? RE_TOAST_OFF : RE_STOPPED })
+        .last()
+    ).toBeVisible({ timeout: T.save });
+
+    await guard.assertClean();
+  }
+);
 
 // --- Путь вне разрешённых --------------------------------------------------------------------
 
-test('access-log: путь вне разрешённых', { tag: CORE_TAG }, async ({ page }) => {
-  test.setTimeout(T.save * 12);
-  test.skip(!before.installed, 'Xray не установлен');
-  test.skip(before.blocked !== '' && before.owner !== 'panel', 'секция «Лог» не берётся');
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await startPage(page);
-  await resetDraft(page);
-  await takeLog(page);
+test(
+  'access-log: путь вне разрешённых',
+  {
+    tag: CORE_TAG,
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description: 'серия действий через интерфейс с «Применить» и перезапуском Xray'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.save * 12);
+    test.skip(!before.installed, 'Xray не установлен');
+    test.skip(before.blocked !== '' && before.owner !== 'panel', 'секция «Лог» не берётся');
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await startPage(page);
+    await resetDraft(page);
+    await takeLog(page);
 
-  const section = await logSection(page);
-  const original = String(section.form.access ?? '');
-  const save = async (access: string): Promise<void> => {
-    const res = await api(page, 'POST', '/api/configlayer/cores/save', {
-      revision: (await layerProbe(page)).revision,
-      kernel: 'xray',
-      section: 'log',
-      form: { ...section.form, access },
-      advanced: section.advanced
-    });
-    expect(res.status, `сохранение секции «Лог» с путём ${access}`).toBe(200);
-    await applyAndWait(page);
-  };
+    const section = await logSection(page);
+    const original = String(section.form.access ?? '');
+    const save = async (access: string): Promise<void> => {
+      const res = await api(page, 'POST', '/api/configlayer/cores/save', {
+        revision: (await layerProbe(page)).revision,
+        kernel: 'xray',
+        section: 'log',
+        form: { ...section.form, access },
+        advanced: section.advanced
+      });
+      expect(res.status, `сохранение секции «Лог» с путём ${access}`).toBe(200);
+      await applyAndWait(page);
+    };
 
-  try {
-    await save(DENIED_PATH);
-    await openDevices(page);
-    const denied = page.getByTestId('xlog-path-denied');
-    await expect(denied).toBeVisible({ timeout: T.page });
-    await expect(denied).toContainText(DENIED_PATH);
-    await expect(page.getByTestId('xlog-disable')).toBeVisible();
-    await expect(denied.getByRole('link')).toHaveAttribute('href', '#/config/cores');
+    try {
+      await save(DENIED_PATH);
+      await openDevices(page);
+      const denied = page.getByTestId('xlog-path-denied');
+      await expect(denied).toBeVisible({ timeout: T.page });
+      await expect(denied).toContainText(DENIED_PATH);
+      await expect(page.getByTestId('xlog-disable')).toBeVisible();
+      await expect(denied.getByRole('link')).toHaveAttribute('href', '#/config/cores');
 
-    // форма секции предупреждает без блокировки сохранения
-    await denied.getByRole('link').click();
-    await expect(page.getByTestId('cores-tab')).toBeVisible({ timeout: T.page });
-    await page.getByTestId('kernel-switch-xray').click();
-    const toggle = page.getByTestId('section-toggle-xray-log');
-    await expect(toggle).toBeVisible({ timeout: T.page });
-    if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
-    await expect(page.getByTestId('section-field-xray-log-access')).toHaveValue(DENIED_PATH);
-    await expect(page.getByTestId('section-field-xray-log-access-denied')).toBeVisible();
-    await expect(page.getByTestId('section-field-xray-log-access')).toBeEditable();
-  } finally {
-    await save(original === '' ? 'none' : original);
-    await putConfig(page, DENIED_PATH, before.files[DENIED_PATH] ?? null);
+      // форма секции предупреждает без блокировки сохранения
+      await denied.getByRole('link').click();
+      await expect(page.getByTestId('cores-tab')).toBeVisible({ timeout: T.page });
+      await page.getByTestId('kernel-switch-xray').click();
+      const toggle = page.getByTestId('section-toggle-xray-log');
+      await expect(toggle).toBeVisible({ timeout: T.page });
+      if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+      await expect(page.getByTestId('section-field-xray-log-access')).toHaveValue(DENIED_PATH);
+      await expect(page.getByTestId('section-field-xray-log-access-denied')).toBeVisible();
+      await expect(page.getByTestId('section-field-xray-log-access')).toBeEditable();
+    } finally {
+      await save(original === '' ? 'none' : original);
+      await putConfig(page, DENIED_PATH, before.files[DENIED_PATH] ?? null);
+    }
+
+    await guard.assertClean();
   }
-
-  await guard.assertClean();
-});
+);
 
 // --- Доступность и 390 px --------------------------------------------------------------------
 

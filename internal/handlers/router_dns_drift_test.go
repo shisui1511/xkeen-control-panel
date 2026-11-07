@@ -1,5 +1,7 @@
 //go:build router
 
+// router-area: dns
+
 package handlers
 
 import (
@@ -24,6 +26,7 @@ import (
 // файл, содержимое которого не меняется от включения (хэши до и после), иначе перехват
 // законно переписал бы его сам. Метка ядра: цель привязана к активному ядру.
 func TestRouterDNSDisableDrift(t *testing.T) {
+	routertest.Slow(t, "включение и выключение перехвата DNS с перезапуском ядра на каждом шаге")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	if kernel != configlayer.KernelXray {

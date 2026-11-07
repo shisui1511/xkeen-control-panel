@@ -1,4 +1,5 @@
 // e2e-pages: config/cores
+// router-area: dns
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard, type ConsoleGuard } from './lib/console';
@@ -9,7 +10,7 @@ import {
   releaseDnsTarget,
   type DnsTargetPrep
 } from './lib/dns-target';
-import { CORE_TAG } from './lib/known';
+import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
 import { api, layerFlag, resetDraft, withPanel } from './lib/nodes-api';
 
 // Общий баннер окна подтверждения перехвата DNS на настоящей панели (фаза 148, DNSF-05,
@@ -162,7 +163,13 @@ async function bannerSeconds(page: Page): Promise<number> {
 
 test(
   'dns-banner: окно видно на разных страницах, «Оставить» подтверждает',
-  { tag: CORE_TAG },
+  {
+    tag: CORE_TAG,
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description: 'включение перехвата DNS с перезапуском ядра и окном подтверждения'
+    }
+  },
   async ({ page }) => {
     test.setTimeout(TEST_TIMEOUT);
     let guard = attachConsoleGuard(page);
@@ -221,7 +228,13 @@ test(
 
 test(
   'dns-banner: «Откатить сейчас» возвращает DNS прошивке',
-  { tag: CORE_TAG },
+  {
+    tag: CORE_TAG,
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description: 'включение перехвата DNS и откат с перезапуском ядра'
+    }
+  },
   async ({ page }) => {
     test.setTimeout(TEST_TIMEOUT);
     const guard = attachConsoleGuard(page);
@@ -249,7 +262,14 @@ test(
 
 test(
   'dns-banner: решение в одной вкладке снимает баннер в другой',
-  { tag: CORE_TAG },
+  {
+    tag: CORE_TAG,
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description:
+        'включение перехвата DNS с перезапуском ядра и окном подтверждения в двух вкладках'
+    }
+  },
   async ({ page }) => {
     test.setTimeout(TEST_TIMEOUT);
     const guard = attachConsoleGuard(page);
@@ -288,7 +308,14 @@ test(
 
 test(
   'dns-banner: 390 px — под мобильной шапкой, над полосой черновика, цели 44 px',
-  { tag: CORE_TAG },
+  {
+    tag: CORE_TAG,
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description:
+        'включение перехвата DNS с перезапуском ядра и окном подтверждения на узком экране'
+    }
+  },
   async ({ page }) => {
     test.setTimeout(TEST_TIMEOUT);
     const guard = attachConsoleGuard(page);
@@ -393,25 +420,37 @@ async function axeSevere(page: Page, scope: string): Promise<string[]> {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`dns-banner: dns axe: баннер окна, тема ${theme}`, { tag: CORE_TAG }, async ({ page }) => {
-    test.setTimeout(TEST_TIMEOUT);
-    const guard = attachConsoleGuard(page);
-    await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await startPage(page);
-    await openWindow(page);
+  test(
+    `dns-banner: dns axe: баннер окна, тема ${theme}`,
+    {
+      tag: CORE_TAG,
+      annotation: {
+        type: SLOW_ANNOTATION,
+        description: 'включение перехвата DNS с перезапуском ядра на каждую тему'
+      }
+    },
+    async ({ page }) => {
+      test.setTimeout(TEST_TIMEOUT);
+      const guard = attachConsoleGuard(page);
+      await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await startPage(page);
+      await openWindow(page);
 
-    await gotoRoute(page, 'services');
-    await expect(banner(page)).toBeVisible({ timeout: T.action });
+      await gotoRoute(page, 'services');
+      await expect(banner(page)).toBeVisible({ timeout: T.action });
 
-    const problems: string[] = [];
-    const applied = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
-    if (applied !== theme) problems.push(`тема применена ${applied}, ожидалась ${theme}`);
-    for (const v of await axeSevere(page, '[data-testid="dns-confirm-banner"]')) {
-      problems.push(`axe ${v}`);
+      const problems: string[] = [];
+      const applied = await page.evaluate(() =>
+        document.documentElement.getAttribute('data-theme')
+      );
+      if (applied !== theme) problems.push(`тема применена ${applied}, ожидалась ${theme}`);
+      for (const v of await axeSevere(page, '[data-testid="dns-confirm-banner"]')) {
+        problems.push(`axe ${v}`);
+      }
+      expect(problems, problems.join('\n')).toEqual([]);
+
+      await guard.assertClean();
     }
-    expect(problems, problems.join('\n')).toEqual([]);
-
-    await guard.assertClean();
-  });
+  );
 }

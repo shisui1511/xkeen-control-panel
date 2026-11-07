@@ -1,5 +1,7 @@
 //go:build router
 
+// router-area: dns
+
 package handlers
 
 import (
@@ -71,6 +73,7 @@ func rtDNSMihomoListening(addr string) bool {
 // «Дополнительно» → при активном Mihomo слушатель DNS поднят на выбранном порту.
 // Метка ядра: исход перезапуска после «Применить» зависит от активного ядра.
 func TestRouterDNSMihomoSection(t *testing.T) {
+	routertest.Slow(t, "«Применить» секции DNS Mihomo с перезапуском ядра")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
 	e.enableLayer()

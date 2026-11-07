@@ -2,13 +2,19 @@
 // scripts/router/pw-parse.js <json-отчёт Playwright> — разбор отчёта в строки результатов.
 //
 // Вывод: «статус<TAB>проверка<TAB>деталь», по строке на тест, где статус — одно из
-// PASS, FAIL, KNOWN, XPASS, SKIP; проверка — название теста (pw-suite.sh добавляет «pw:»).
+// PASS, FAIL, KNOWN, XPASS, QPASS, QFAIL, SKIP; проверка — название теста (pw-suite.sh
+// добавляет «pw:»).
 //   - тест с аннотацией known-failure, упавший как ожидалось -> KNOWN, деталь — slug todo;
 //   - тест с аннотацией known-failure, который прошёл (test.fail не сработал: последний результат
 //     passed) -> XPASS;
 //   - тест с аннотацией known-failure, не дошедший до ожидаемого падения (тайм-аут, прерывание:
 //     последний результат не passed) -> FAIL со статусом и текстом ошибки, а не XPASS — это не
 //     повод снимать метку;
+//   - тест с аннотацией quarantine (карантин, D-17; без test.fail): expected -> QPASS, иначе
+//     (unexpected, flaky, тайм-аут) -> QFAIL; деталь — «карантин: <slug>» и текст падения.
+//     Описание аннотации — slug вида [a-z0-9][a-z0-9-]*; иначе карантин не признаётся и
+//     падение остаётся FAIL с деталью «карантин без slug».
+//     QPASS и QFAIL на итог не влияют: pw-suite.sh считает в итог только FAIL и XPASS;
 //   - остальные: expected -> PASS, unexpected/flaky -> FAIL, skipped -> SKIP (деталь — описание
 //     аннотации 'skip', то есть причина test.skip(условие, причина); без неё — «пропущен»).
 // Ошибки вне тестов (глобальная настройка: панель не отвечает, вход не удался) -> FAIL global-setup.
@@ -59,6 +65,23 @@ function knownSlug(test) {
   return null;
 }
 
+// slug карантина: null — аннотации нет, "" — аннотация без допустимого slug (карантин не
+// признаётся: check-known.sh не видит такого вызова, todo и срока у него нет)
+function quarantineSlug(test) {
+  const lists = [test.annotations || []];
+  for (const r of test.results || []) lists.push(r.annotations || []);
+  for (const list of lists) {
+    for (const a of list) {
+      if (a && a.type === "quarantine")
+        return typeof a.description === "string" &&
+          /^[a-z0-9][a-z0-9-]*$/.test(a.description)
+          ? a.description
+          : "";
+    }
+  }
+  return null;
+}
+
 function skipReason(test) {
   const lists = [test.annotations || []];
   for (const r of test.results || []) lists.push(r.annotations || []);
@@ -83,7 +106,11 @@ function visit(suite, titles) {
     const name = [...titles, spec.title].join(" > ");
     for (const test of spec.tests || []) {
       const slug = knownSlug(test);
+      const qslug = quarantineSlug(test);
       const st = test.status;
+      // test.fail() даёт unexpected и при прошедшем тесте, и при тайм-ауте: различает статус
+      // последнего результата
+      const last = (test.results || []).at(-1);
       if (st === "skipped") {
         out("SKIP", name, skipReason(test) || "пропущен");
       } else if (
@@ -92,23 +119,39 @@ function visit(suite, titles) {
         test.expectedStatus === "failed"
       ) {
         out("KNOWN", name, slug);
+      } else if (
+        slug &&
+        st === "unexpected" &&
+        last &&
+        last.status === "passed"
+      ) {
+        out(
+          "XPASS",
+          name,
+          `${slug}: тест прошёл, метка известного падения больше не нужна`,
+        );
+      } else if (qslug === "" && st !== "expected") {
+        // аннотация quarantine без slug: падение не глушится
+        out(
+          "FAIL",
+          name,
+          `карантин без slug: ${errorText(test) || last?.status || st}`,
+        );
+      } else if (qslug) {
+        // карантин (D-17): исход виден, на итог не влияет
+        if (st === "expected") out("QPASS", name, `карантин: ${qslug}`);
+        else
+          out(
+            "QFAIL",
+            name,
+            `карантин: ${qslug}: ${errorText(test) || last?.status || st}`,
+          );
       } else if (slug && st === "unexpected") {
-        // test.fail() даёт unexpected и при прошедшем тесте, и при тайм-ауте: различает статус
-        // последнего результата
-        const last = (test.results || []).at(-1);
-        if (last && last.status === "passed") {
-          out(
-            "XPASS",
-            name,
-            `${slug}: тест прошёл, метка известного падения больше не нужна`,
-          );
-        } else {
-          out(
-            "FAIL",
-            name,
-            `${slug}: ${last?.status ?? "unexpected"}: ${errorText(test)}`,
-          );
-        }
+        out(
+          "FAIL",
+          name,
+          `${slug}: ${last?.status ?? "unexpected"}: ${errorText(test)}`,
+        );
       } else if (st === "expected") {
         out("PASS", name, "");
       } else {
