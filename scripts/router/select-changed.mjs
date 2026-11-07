@@ -448,20 +448,22 @@ function makefileStand() {
 
 /** Факты роутерных тестов: индекс git плюс новые (ещё не в индексе) изменённые тесты с диска. */
 function buildFacts(changed) {
-  const rows = testFacts(ROOT);
+  let rows = testFacts(ROOT);
+  const isGoTest = (f) => /^(internal|cmd)\/.*_test\.go$/.test(f) && !f.startsWith('internal/routertest/');
+  const isSpec = (f) => /^frontend\/tests\/router\/[\w.-]+\.spec\.ts$/.test(f);
+  const own = new Set(changed.filter((f) => SAFE_PATH.test(f) && (isGoTest(f) || isSpec(f))));
+  // С --head изменённые тесты берутся из коммита слияния, а не из рабочей копии
+  if (ctx.to) rows = rows.filter((r) => !own.has(r.file));
   const have = new Set(rows.map((r) => r.file));
-  for (const file of changed) {
-    if (!SAFE_PATH.test(file) || have.has(file)) continue;
-    const abs = path.join(ROOT, file);
-    if (!existsSync(abs)) continue;
-    if (/^(internal|cmd)\/.*_test\.go$/.test(file) && !file.startsWith('internal/routertest/')) {
-      const text = readFileSync(abs, 'utf8');
+  for (const file of own) {
+    if (have.has(file)) continue;
+    const text = headText(file);
+    if (text === null) continue;
+    const { area } = areaOfText(text);
+    if (isGoTest(file)) {
       if (text.split('\n', 1)[0].trim() !== '//go:build router') continue;
-      const { area } = areaOfText(text);
       for (const t of goTestFacts(text)) rows.push({ kind: 'go', file, pkg: path.posix.dirname(file), spec: null, area, ...t });
-    } else if (/^frontend\/tests\/router\/[\w.-]+\.spec\.ts$/.test(file)) {
-      const text = readFileSync(abs, 'utf8');
-      const { area } = areaOfText(text);
+    } else {
       for (const t of specTestFacts(text)) rows.push({ kind: 'pw', file, pkg: null, spec: file.replace(/^frontend\//, ''), area, ...t });
     }
   }
@@ -635,7 +637,7 @@ async function select(changed) {
     if (/^frontend\/tests\/router\/[\w.-]+\.spec\.ts$/.test(file)) {
       if (file.endsWith('/core-switch.spec.ts')) {
         reasons.push(`${file}: спек матрицы ядер, запускается в каждой ветви`);
-      } else if (existsSync(path.join(ROOT, file))) {
+      } else if (headText(file) !== null) {
         touchedSpecs.add(`tests/router/${path.posix.basename(file)}`);
         reasons.push(`${file}: изменён сам спек`);
       } else {
@@ -762,6 +764,16 @@ async function select(changed) {
     for (const file of [...goTestFiles].sort()) {
       const dir = path.posix.dirname(file);
       const fileRows = goRows.filter((r) => r.file === file);
+      if (headText(file) === null) {
+        // Удалён: роутерные тесты файла исчезли — запускать нечего; иначе (помощники, обычный
+        // тест, база неизвестна) — пакет целиком, как для изменённого
+        const baseText = ctx.from ? gitShow(ctx.from, file) : null;
+        const tagged = baseText !== null && baseText.split('\n', 1)[0].trim() === '//go:build router';
+        if (tagged && goTestFacts(baseText).length > 0) {
+          reasons.push(`${file}: файл роутерных тестов удалён — запускать нечего`);
+          continue;
+        }
+      }
       if (fileRows.length > 0 && fileRows[0].area) {
         for (const r of fileRows) addGo(r.pkg, r.test, true);
         reasons.push(`${file}: изменён роутерный тест — тесты файла (${fileRows.length})`);
