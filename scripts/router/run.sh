@@ -797,6 +797,8 @@ full_target() {
   # должен обрывать восстановление: игнорирование наследуют rt_restore, _after_restore и ssh.
   _finish() {
     trap '' INT TERM HUP
+    # прерванный подтверждающий перепрогон не должен утащить строки восстановления в confirm.tsv
+    [ "$SUITE" = rerun ] || unset RT_RESULTS_NAME RT_ART_SUB
     # сэмплер PID ядра (если ветвь оборвалась между Go-тестами и частью state) — до восстановления
     _kpid_stop "$_t" "$_ks"
     _ks=""
