@@ -51,8 +51,8 @@
 #
 # Потребители файлов этапа: results.tsv — run.sh, branch-report.mjs, session.mjs; go-*.jsonl в
 # <ядро>/ — branch-report.mjs (самые долгие тесты; go-<пакет>-<k>.jsonl под шаблон попадает);
-# go-*.raw в <ядро>/ — триггер interrupt в session.mjs (в режиме последовательности файл-триггер —
-# go-<пакет>-1.raw; сессия RT_GO_RUN_SEQ пока не передаёт); этапы go-build-*, go-run-* в
+# go-*.raw в <ядро>/ — триггер interrupt и сторож остановки в session.mjs (в режиме
+# последовательности — go-<пакет>-<k>.raw; проходы сессии идут через RT_GO_RUN_SEQ); этапы go-build-*, go-run-* в
 # timings.tsv — подэтапы, таблица branch-report.mjs их не берёт; go-done.txt — догон класса stand.
 # Файлы в <ядро>/<RT_ART_SUB>/ эти обходы не видят: подкаталог читает тот, кто его задал.
 #

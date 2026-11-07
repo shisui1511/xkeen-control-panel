@@ -128,7 +128,8 @@
 //
 // Остановка на первом несовпадении (по умолчанию; "keep_going": true её выключает): красная
 // сессия не дожидается конца, когда итог уже ясен. Первое несовпадение с ожиданиями:
-//   - Go-этап — по мере вывода: сессия раз в секунду дочитывает файлы go-*.raw этапа в
+//   - Go-этап — по мере вывода: сессия раз в секунду дочитывает файлы go-*.raw этапа (с
+//     RT_GO_RUN_SEQ — go-<пакет>-<k>.raw) в
 //     <этап>/<цель>/<ядро>/ (вывод -test.v=test2json, пока бинарник работает на цели) и готовые
 //     go-*.parsed пакетов; строка `--- FAIL: <тест>`, чей статус (XPASS при маркере
 //     `XPASS slug=`, QFAIL при маркере `QUARANTINE slug=` у теста или предка, иначе FAIL)
@@ -136,8 +137,8 @@
 //     прерывании), ожидание выхода и опустения группы, затем добивание тестовых бинарников на
 //     цели. Родитель, упавший из-за подтеста, отдельно не сверяется (как в go-parse.awk);
 //     деталь (detail) по ходу вывода не сверяется — её сверяет разбор после этапа;
-//   - Playwright, деплой со смоуком и прогоны наборов — после этапа (сверка results.tsv);
-//     несовпадение в Go-части прохода со спеками не пускает этап Playwright.
+//   - Playwright — после каждого спека (сверка results.tsv), деплой со смоуком и прогоны
+//     наборов — после этапа; несовпадение в Go-части прохода со спеками не пускает спеки.
 // Остановленный проход сверяется по уже записанным результатам: тест, на котором остановились, —
 // несовпадение, невыполненные тесты не сверяются. Следующие ядра и проходы не запускаются,
 // стенд возвращается как при любом исходе (сборка HEAD, исходное ядро). В summary.md — раздел
@@ -157,6 +158,16 @@
 // Go-часть идёт прежним способом (RT_GO_PKGS и RT_GO_RUN) на всех ядрах.
 // Поле прохода "cores": ["mihomo"] (непустой список из xray, mihomo без повторов) перекрывает
 // правило: проход идёт на этих ядрах, на каждом — все тесты.
+//
+// Дешёвые тесты первыми (todo 12 п. 3): медианы длительности — из истории прогонов
+// (history.mjs: окно 30 дней, без строк в окне — вся история; ключ — проверка и ядро). Go-тесты
+// прохода на ядре идут одним этапом go-suite.sh через RT_GO_RUN_SEQ (`<каталог пакета>:<Имя>`):
+// неизвестные истории — в начале в исходном порядке, затем по возрастанию медианы. Спеки — по
+// одному запуску pw-suite.sh на спек, каждый в свой каталог этапа <NN>-<проход>-<ядро>-pw<k>, в
+// том же порядке; медиана спека — сумма медиан его тестов (список — `playwright test --list` без
+// стенда), спек с неизвестным тестом или без списка — неизвестный. Без списка размеченный спек
+// на ядре без полного состава определяется по specFacts. Settle после Go — один раз перед первым
+// спеком. Несовпадение после спека останавливает проход до следующего спека.
 //
 // Порядок: проходы по очереди; внутри прохода ядра змейкой, первым — активное. На N проходов
 // приходится не больше N переключений, и ещё одно в конце, если стенд не на исходном ядре.
@@ -201,6 +212,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
 
 import coreMarks from './core-marks.cjs';
+import { durations, readHistory } from './history.mjs';
 
 const { goMarks, specFacts } = coreMarks;
 const SCRIPT = fileURLToPath(import.meta.url);
@@ -218,6 +230,8 @@ const RELEASE_TAG = /^v\d+\.\d+\.\d+(-[a-z]+\.\d+)?$/;
 const SNAP_BASE = '/opt/tmp/xcp-rt-snap/baseline';
 // Служебные строки этапов: всегда расхождение, если их FAIL не ожидался явно.
 const SERVICE = new Set(['pw:run', 'pw:setup']);
+// Окно истории для медиан длительности (дни); проверки без строк в окне берут всю историю.
+const HISTORY_DAYS = 30;
 
 // Префикс ошибок разбора вложенной спеки (проход-прогон session).
 let dieCtx = '';
@@ -621,21 +635,153 @@ function passFacts(p, root) {
   return p.facts;
 }
 
+// --- порядок по истории: дешёвые тесты первыми ------------------------------------
+
+// Медианы длительности из истории прогонов (history.mjs): окно HISTORY_DAYS и вся история.
+// Истории нет или она не читается — медиан нет, все тесты неизвестные.
+function loadMedians() {
+  let rows = [];
+  try {
+    rows = readHistory();
+  } catch {
+    rows = [];
+  }
+  return { recent: durations(rows, { days: HISTORY_DAYS }), all: durations(rows) };
+}
+
+// Медиана проверки на ядре (секунды) или null — проверка истории неизвестна.
+function medianOf(h, check, core) {
+  const k = `${check}\t${core}`;
+  return h.recent.get(k)?.median ?? h.all.get(k)?.median ?? null;
+}
+
+// Тесты спеков по `playwright test --list` (без стенда; XCP_CORE — ядро: названия некоторых
+// тестов содержат ядро): Map путь спека → [{ name: 'pw:…' как в results.tsv, core: тег ядра }]
+// или null — список не получен. Адрес и пароль панели в окружение не передаются.
+const pwListCache = new Map();
+function pwList(root, specs, grep, core) {
+  const key = JSON.stringify([specs, grep, core]);
+  if (pwListCache.has(key)) return pwListCache.get(key);
+  let out = null;
+  const frontend = path.join(root, 'frontend');
+  const bin = path.join(frontend, 'node_modules', '.bin', 'playwright');
+  if (specs.length && existsSync(bin)) {
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([k]) => !k.startsWith('XCP_'))
+    );
+    env.XCP_CORE = core;
+    const args = ['test', '-c', 'playwright.router.config.ts', '--list', '--reporter=json'];
+    if (grep) args.push('--grep', grep);
+    let text = '';
+    try {
+      text = execFileSync(bin, [...args, ...specs], {
+        cwd: frontend,
+        env,
+        encoding: 'utf8',
+        timeout: 60000,
+        maxBuffer: 64 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'ignore']
+      });
+    } catch (e) {
+      // «No tests found» — код 1 с JSON в stdout
+      text = typeof e.stdout === 'string' ? e.stdout : '';
+    }
+    try {
+      const json = JSON.parse(text);
+      const errors = Array.isArray(json.errors) ? json.errors : [];
+      if (
+        Array.isArray(json.suites) &&
+        errors.every((er) => /No tests found/.test(String(er.message ?? '')))
+      ) {
+        out = new Map(specs.map((s) => [s, []]));
+        const bySuite = new Map(specs.map((s) => [s.replace(/^tests\/router\//, ''), s]));
+        // имя — как в pw-parse.js и history.mjs: заголовки через « > », верхний набор с title,
+        // равным file, пропускается
+        const clean = (t) => {
+          const flat = String(t || '')
+            .replace(/\s+/g, ' ')
+            .trim();
+          return flat.length > 300 ? flat.slice(0, 300) + '…' : flat;
+        };
+        const visit = (node, titles, list) => {
+          for (const sp of node.specs || []) {
+            const name = `pw:${clean([...titles, sp.title].join(' > '))}`;
+            const tagged =
+              (sp.tags || []).some((t) => /^@?core/.test(t)) || /@core/.test(sp.title);
+            list.push({ name, core: tagged });
+          }
+          for (const child of node.suites || []) visit(child, [...titles, child.title], list);
+        };
+        let matched = 0;
+        for (const top of json.suites) {
+          const s = bySuite.get(top.file);
+          if (!s) continue;
+          matched++;
+          visit(top, top.file === top.title ? [] : [top.title], out.get(s));
+        }
+        // наборы есть, но ни один не сопоставился со спеком — форма ответа не та
+        if (json.suites.length && !matched) out = null;
+      }
+    } catch {
+      out = null;
+    }
+  }
+  pwListCache.set(key, out);
+  return out;
+}
+
+// Порядок: неизвестные истории (нет медианы для проверки и ядра) первыми в исходном порядке,
+// затем по возрастанию медианы.
+function cheapFirst(items) {
+  const unknown = items.filter((x) => x.median === null);
+  const known = items.filter((x) => x.median !== null).sort((a, b) => a.median - b.median);
+  return [...unknown, ...known];
+}
+
 // Состав прохода на ядре. full — все тесты (первое ядро прохода или поле cores прохода), иначе
-// только тесты с меткой ядра. Итог: { full, go: null | { legacy, tests }, specs: [спек],
-// coreOnly: спеки идут с --grep @core, empty: на ядре нечего запускать }.
-function composition(p, full, root) {
+// только тесты с меткой ядра. Итог: { full, go: null | { legacy, tests }, specs: [{ spec, names,
+// median }], coreOnly: спеки идут с --grep @core, empty: на ядре нечего запускать }. Go-тесты и
+// спеки упорядочены: дешёвые первыми (cheapFirst; медиана спека — сумма медиан его тестов, спек с
+// неизвестным тестом или без списка — неизвестный). На ядре без полного состава размеченный спек —
+// по списку Playwright (тест с тегом ядра есть после --grep), без списка — по specFacts.
+function composition(p, full, root, core, h) {
   const f = passFacts(p, root);
   let go = null;
   if (f.go?.legacy) {
     // состав не определён: Go-часть на каждом ядре целиком, как до правила
     go = { legacy: f.go.legacy, tests: [] };
   } else if (f.go) {
-    const tests = f.go.tests.filter((t) => full || t.marked);
-    if (tests.length) go = { legacy: null, tests };
+    const tests = f.go.tests
+      .filter((t) => full || t.marked)
+      .map((t) => ({ ...t, median: medianOf(h, `go:${t.test}`, core) }));
+    if (tests.length) go = { legacy: null, tests: cheapFirst(tests) };
   }
-  const specs = p.specs.filter((s) => full || f.specs.get(s));
-  return { full, go, specs, coreOnly: !full, empty: !go && !specs.length };
+  const list = p.specs.length ? pwList(root, p.specs, p.grep, core) : null;
+  let specs = full
+    ? p.specs
+    : list
+      ? p.specs.filter((s) => list.get(s).some((t) => t.core))
+      : p.specs.filter((s) => f.specs.get(s));
+  specs = specs.map((s) => {
+    const names = list ? list.get(s).filter((t) => full || t.core) : null;
+    const ms = names ? names.map((t) => medianOf(h, t.name, core)) : [];
+    const median =
+      names && names.length && ms.every((m) => m !== null) ? ms.reduce((a, b) => a + b, 0) : null;
+    return { spec: s, names, median };
+  });
+  return {
+    full,
+    go,
+    specs: cheapFirst(specs),
+    coreOnly: !full,
+    empty: !go && !specs.length
+  };
+}
+
+// Имена до 10 первых и «… ещё N».
+function headList(names) {
+  const head = names.slice(0, 10).join(', ');
+  return names.length > 10 ? `${head}, … ещё ${names.length - 10}` : head;
 }
 
 // Ядра прохода go/specs: поле cores прохода или ядра спеки.
@@ -687,12 +833,14 @@ function productKey(p) {
 // cores, на стенде с другим активным ядром порядок ядер зеркальный.
 function dryRun(spec, specFile, root) {
   const c0 = spec.cores[0];
+  const h = loadMedians();
   const lines = [
     `Сессия по ${specFile}: цель ${spec.target}, ядра ${spec.cores.join(', ')} (исходное считается ${c0})`,
     spec.keepGoing
       ? 'keep_going: все проходы до конца, полный список падений'
       : 'остановка на первом несовпадении (keep_going: false): Go — по ходу вывода, остальное — после этапа',
-    'ядра как в гейте: на первом ядре прохода — все тесты, на остальных — только с меткой ядра; поле cores прохода — все тесты на своих ядрах'
+    'ядра как в гейте: на первом ядре прохода — все тесты, на остальных — только с меткой ядра; поле cores прохода — все тесты на своих ядрах',
+    'дешёвые тесты первыми: неизвестные истории («?») в начале, затем по возрастанию медианы'
   ];
   let n = 0;
   const step = (s) => lines.push(`${++n}. ${s}`);
@@ -741,14 +889,14 @@ function dryRun(spec, specFile, root) {
           : `go ${[...new Set(comp.go.tests.map((t) => `./${t.pkg}`))].join(' ')}`;
       const grep = comp.coreOnly ? (p.grep ? `(?=.*@core)${p.grep}` : '@core') : p.grep;
       const pwPart = comp.specs.length
-        ? `pw ${comp.specs.join(' ')}${grep ? ` --grep '${grep}'` : ''}`
+        ? `pw ${comp.specs.map((s) => s.spec).join(' ')}${grep ? ` --grep '${grep}'` : ''}`
         : '';
       return [goPart, pwPart].filter(Boolean).join(' + ');
     };
     const order = coreOrder(passCores(spec, p), cur);
     for (let j = 0; j < order.length; j++) {
       const c = order[j];
-      const comp = composition(p, Boolean(p.cores) || j === 0, root);
+      const comp = composition(p, Boolean(p.cores) || j === 0, root, c, h);
       if (comp.empty) {
         lines.push(`   проход ${p.name} на ${c}: пропуск — тестов с меткой ядра нет (ядро не важно)`);
         continue;
@@ -756,6 +904,17 @@ function dryRun(spec, specFile, root) {
       if (c !== cur) step(`переключение на ${c}`);
       cur = c;
       step(`проход ${p.name} на ${c}: ${compositionTitle(comp)} — ${what(comp)}`);
+      const mark = (x) => (x.median === null ? '?' : `${Math.round(x.median)} с`);
+      if (comp.go && !comp.go.legacy) {
+        lines.push(
+          `   порядок Go (RT_GO_RUN_SEQ): ${headList(comp.go.tests.map((t) => `${t.test} ${mark(t)}`))}`
+        );
+      }
+      if (comp.specs.length) {
+        lines.push(
+          `   порядок спеков (по запуску pw-suite на спек): ${headList(comp.specs.map((s) => `${path.basename(s.spec)} ${mark(s)}`))}`
+        );
+      }
     }
   }
   if (deployed !== 'HEAD') step('деплой и смоук: HEAD (возврат продукта)');
@@ -778,6 +937,8 @@ class Session {
     mkdirSync(this.dir, { recursive: true });
     writeFileSync(path.join(this.dir, 'spec.json'), readFileSync(specFile));
     this.log = path.join(this.dir, 'session.log');
+    // медианы длительности из истории: порядок «дешёвые первыми»
+    this.h = loadMedians();
     this.steps = [];
     this.verdicts = [];
     this.suites = [];
@@ -1123,22 +1284,26 @@ class Session {
   }
 
   // Проход на ядре по составу comp (composition): на ядре без полного состава Go — только
-  // тесты с меткой ядра, спеки — только размеченные и с --grep @core.
+  // тесты с меткой ядра, спеки — только размеченные и с --grep @core. Порядок — дешёвые
+  // первыми: Go-тесты одним этапом через RT_GO_RUN_SEQ, спеки — по запуску pw-suite.sh на спек,
+  // каждый в свой каталог этапа (<проход>-<ядро>-pw<k>); несовпадение после спека останавливает
+  // проход до следующего спека.
   async runPass(p, core, comp) {
-    const dir = this.stepDir(`${p.name}-${core}`);
-    this.say(
-      `проход ${p.name} на ${core} (${compositionTitle(comp)}) → ${path.relative(this.root, dir)}`
-    );
-    let rc = 0;
+    const tag = `${p.name}-${core}`;
+    const dirs = [];
+    this.say(`проход ${p.name} на ${core}: ${compositionTitle(comp)}`);
     if (comp.go) {
+      const dir = this.stepDir(tag);
+      dirs.push(dir);
+      this.say(`проход ${p.name} на ${core}, Go → ${path.relative(this.root, dir)}`);
       const env = { RT_REPORT: dir };
-      if (comp.go.legacy || comp.full) {
+      if (comp.go.legacy) {
         env.RT_GO_PKGS = p.go.pkgs;
         if (p.go.run) env.RT_GO_RUN = p.go.run;
       } else {
-        // имена из исходников по шаблону TestRouter[A-Za-z0-9_]+ — безопасны в -test.run
-        env.RT_GO_PKGS = [...new Set(comp.go.tests.map((t) => `./${t.pkg}`))].join(' ');
-        env.RT_GO_RUN = `^(${comp.go.tests.map((t) => t.test).join('|')})$`;
+        // имена из исходников по шаблону TestRouter[A-Za-z0-9_]+ (T-148.1-21), история задаёт
+        // только порядок; go-suite.sh проверяет каждую запись по шаблону
+        env.RT_GO_RUN_SEQ = comp.go.tests.map((t) => `${t.pkg}:${t.test}`).join(' ');
       }
       const watch = this.spec.keepGoing ? {} : this.goWatch(p, core, dir);
       const g = await this.run(
@@ -1159,9 +1324,11 @@ class Session {
         // этап остановлен посреди пакета: тестовый бинарник на цели мог пережить обрыв ssh
         if (this.stopped.live) this.killRemoteTests();
         if (comp.specs.length) {
-          this.stopped.todo.push(`проход ${p.name} на ${core}: этап Playwright`);
+          this.stopped.todo.push(
+            `проход ${p.name} на ${core}: спеки ${comp.specs.map((s) => path.basename(s.spec)).join(', ')}`
+          );
         }
-        this.judge(p, core, dir, comp);
+        this.judge(p, core, dirs, comp);
         return 0;
       }
       if (comp.specs.length) {
@@ -1188,16 +1355,35 @@ class Session {
         );
       }
     }
-    if (comp.specs.length) {
-      const env = { RT_REPORT: dir, RT_SPECS: comp.specs.join(' ') };
+    for (let k = 0; k < comp.specs.length; k++) {
+      if (this.aborted) break;
+      const sp = comp.specs[k];
+      const dir = this.stepDir(`${tag}-pw${k + 1}`);
+      dirs.push(dir);
+      this.say(
+        `проход ${p.name} на ${core}, спек ${sp.spec} → ${path.relative(this.root, dir)}`
+      );
+      const env = { RT_REPORT: dir, RT_SPECS: sp.spec };
       if (p.grep) env.RT_PW_GREP = p.grep;
       // только тесты с тегом @core, как во второй ветви changed
       if (comp.coreOnly) env.RT_PW_CORE_ONLY = '1';
-      rc = await this.run('sh', [path.join(SCRIPT_DIR, 'pw-suite.sh'), this.t, core], env);
+      const rc = await this.run('sh', [path.join(SCRIPT_DIR, 'pw-suite.sh'), this.t, core], env);
       this.record({ kind: 'pw', pass: p.name, core, dir, rc, version: p.resolved ?? null });
       if (rc === 3) return 3;
+      const rest = comp.specs.slice(k + 1);
+      if (rest.length && !this.spec.keepGoing && !this.aborted) {
+        // остановка между спеками: следующие спеки прохода не запускаются
+        const m = this.firstMismatch(p, dir);
+        if (m) {
+          this.setStopped({ pass: p.name, core, ...m, how: 'после спека', live: false });
+          this.stopped.todo.push(
+            `проход ${p.name} на ${core}: спеки ${rest.map((s) => path.basename(s.spec)).join(', ')}`
+          );
+          break;
+        }
+      }
     }
-    this.judge(p, core, dir, comp);
+    this.judge(p, core, dirs, comp);
     return 0;
   }
 
@@ -1897,21 +2083,30 @@ class Session {
     return name.startsWith('pw:');
   }
 
-  // Сверка results.tsv этапа с ожиданиями прохода. comp — состав прохода на ядре.
-  judge(p, core, dir, comp = null) {
-    const rel = path.relative(this.root, dir);
-    const file = path.join(dir, this.t, 'results.tsv');
+  // Сверка results.tsv этапов прохода на ядре (Go и спеки — каждый в своём каталоге) с
+  // ожиданиями прохода. comp — состав прохода на ядре.
+  judge(p, core, dirs, comp = null) {
+    const rel0 = dirs.length ? path.relative(this.root, dirs[0]) : '-';
     const got = new Map();
     const extra = [];
-    if (existsSync(file)) {
+    for (const dir of dirs) {
+      const file = path.join(dir, this.t, 'results.tsv');
+      if (!existsSync(file)) continue;
+      const rel = path.relative(this.root, dir);
       for (const line of readFileSync(file, 'utf8').split('\n')) {
         if (!line) continue;
         const [status, , check, detail = ''] = line.split('\t');
-        if (/^(pw|go):/.test(check)) got.set(check, { status, detail });
-        else if (status === 'FAIL' || status === 'XPASS') extra.push({ check, status, detail });
+        if (/^(pw|go):/.test(check)) {
+          // служебная строка (pw:run) есть у каждого запуска pw-suite: FAIL не затирается
+          if (!(SERVICE.has(check) && got.get(check)?.status === 'FAIL')) {
+            got.set(check, { status, detail, rel });
+          }
+        } else if (status === 'FAIL' || status === 'XPASS') {
+          extra.push({ check, status, detail, rel });
+        }
       }
     }
-    const push = (test, expected, actual, detail, ok) =>
+    const push = (test, expected, actual, detail, ok, rel = rel0) =>
       this.verdicts.push({
         pass: p.name,
         core,
@@ -1927,6 +2122,8 @@ class Session {
     // тесты, до которых этап не дошёл, не сверяются
     const st = this.stopped;
     const stop = st && st.live && st.pass === p.name && st.core === core ? st : null;
+    // проход на этом ядре остановлен (по ходу Go или между этапами): невыполненное не сверяется
+    const halted = Boolean(st && st.pass === p.name && st.core === core);
     if (stop) {
       push(
         stop.test,
@@ -1940,7 +2137,7 @@ class Session {
       if (stop && name === stop.test) continue;
       const r = got.get(name);
       if (!r) {
-        if (stop) continue;
+        if (halted) continue;
         if (this.notOnCore(comp, name)) {
           push(name, want.status, 'не шёл', 'не шёл на ядре — ядро не важно', true);
           continue;
@@ -1951,25 +2148,25 @@ class Session {
       const okStatus = want.status.includes(r.status);
       const okDetail = want.detail === null || r.detail.includes(want.detail);
       const why = okStatus && !okDetail ? `в детали нет «${want.detail}»: ${r.detail}` : r.detail;
-      push(name, want.status, r.status, why, okStatus && okDetail);
+      push(name, want.status, r.status, why, okStatus && okDetail, r.rel);
     }
     for (const [name, r] of got) {
       if (expect.tests.has(name) || (stop && name === stop.test)) continue;
       if (SERVICE.has(name)) {
-        push(name, ['PASS'], r.status, r.detail, r.status === 'PASS');
+        push(name, ['PASS'], r.status, r.detail, r.status === 'PASS', r.rel);
       } else if (QUARANTINE.has(r.status)) {
         // карантин (D-17): исход виден, на итог не влияет
-        push(name, ['карантин'], r.status, r.detail, true);
+        push(name, ['карантин'], r.status, r.detail, true, r.rel);
       } else if (expect.def) {
-        push(name, expect.def, r.status, r.detail, expect.def.includes(r.status));
+        push(name, expect.def, r.status, r.detail, expect.def.includes(r.status), r.rel);
       } else if (r.status === 'FAIL' || r.status === 'XPASS') {
-        push(name, ['справочно'], r.status, `неожиданное падение: ${r.detail}`, false);
+        push(name, ['справочно'], r.status, `неожиданное падение: ${r.detail}`, false, r.rel);
       } else {
-        push(name, ['справочно'], r.status, r.detail, true);
+        push(name, ['справочно'], r.status, r.detail, true, r.rel);
       }
     }
-    for (const e of extra) push(e.check, ['PASS'], e.status, e.detail, false);
-    if (expect.count !== null && !stop) {
+    for (const e of extra) push(e.check, ['PASS'], e.status, e.detail, false, e.rel);
+    if (expect.count !== null && !halted) {
       // count — по тестам, шедшим на ядре; на ядре без полного состава (только тесты с меткой
       // ядра) число справочное: count задаёт число тестов прохода целиком
       const n = [...got.keys()].filter((k) => !SERVICE.has(k)).length;
@@ -2208,7 +2405,7 @@ async function main() {
       for (let j = 0; j < order.length; j++) {
         const core = order[j];
         if (s.aborted || s.network || s.broken) break;
-        const comp = composition(p, Boolean(p.cores) || j === 0, root);
+        const comp = composition(p, Boolean(p.cores) || j === 0, root, core, s.h);
         if (comp.empty) {
           s.say(`проход ${p.name} на ${core}: тестов с меткой ядра нет — ядро не важно, пропуск`);
           continue;
