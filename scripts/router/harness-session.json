@@ -1,0 +1,19 @@
+{
+  "target": "arm64",
+  "passes": [
+    {
+      "name": "fail-fast-probe",
+      "go": { "pkgs": "./internal/services", "run": "^TestRouterPanelSession$" },
+      "expect": {
+        "tests": {
+          "go:TestRouterPanelSession": { "status": "FAIL", "detail": "намеренное несовпадение: тест проходит, самопроверка остановки сессии" }
+        }
+      }
+    },
+    {
+      "name": "must-not-run",
+      "go": { "pkgs": "./internal/services", "run": "^TestRouterPanelSession$" },
+      "expect": { "default": "PASS" }
+    }
+  ]
+}

@@ -35,6 +35,17 @@
 #                Ничего не затронуто — деплой и смоук (без снимка). Причины выбора —
 #                <отчёт>/select.txt, план ветвей и окно — <отчёт>/plan.txt, оба в разделе
 #                «Выбор» отчёта; раскладка тестов по ветвям — <отчёт>/<цель>/layout.tsv.
+#   harness      короткая проверка механики стенда (T2h, RTR-02, D-07) для правок обвязки: деплой,
+#                смоук, снимок и восстановление, затем на каждом ядре (обе ветви, гибрида нет)
+#                по два Go-теста (только чтения и изменяющий) и по два спека (read и state) из
+#                блока harness файла scripts/router/areas.json, и самопроверка сессии: вложенная
+#                сессия по спеке блока (scripts/router/harness-session.json) обязана остановиться
+#                на первом несовпадении — выйти с кодом 1, написать раздел «Остановлено на первом
+#                несовпадении», не запускать второй проход и вернуть стенд. Результат цели —
+#                строка PASS|FAIL harness-session-fail-fast, в summary.md — «Самопроверка
+#                сессии: остановка на первом несовпадении — да|нет». Окно смоука 30 с. Нужно
+#                чистое рабочее дерево (вложенная сессия его требует). Статус релиза не
+#                публикуется. Тесты блока — без метки ядра, яруса full и дольше 30 с по истории.
 #   session      сессия на стенде по спеке (SPEC=<файл JSON>): проходы с ожиданиями на одной
 #                цели и ядрах спеки, в том числе на файлах продукта из другого коммита
 #                (воспроизведение до исправления). Проходы ведёт session.mjs (формат спеки —
@@ -110,9 +121,9 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 SUITE=${1:-}
 case "$SUITE" in
-  smoke | changed | reboot | session | full | '') ;;
+  smoke | changed | harness | reboot | session | full | '') ;;
   *)
-    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke, changed, reboot, session и full (полный, можно без SUITE)" >&2
+    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke, changed, harness, reboot, session и full (полный, можно без SUITE)" >&2
     echo "router-test: пример: make router-test SUITE=smoke" >&2
     exit 2
     ;;
@@ -157,6 +168,16 @@ rt_sha_core() {
 
 cd "$(rt_repo_root)"
 
+# Начало прогона: время набора harness в summary.md
+RT_T0=$(date +%s)
+
+# Набор harness: самопроверка сессии идёт вложенной сессией, которой нужно чистое дерево;
+# узнавать об этом через десять минут прогона поздно — проверка до блокировки и деплоя.
+if [ "$SUITE" = harness ] && [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "router-test: SUITE=harness требует чистое рабочее дерево: самопроверка сессии меняет файлы продукта" >&2
+  exit 2
+fi
+
 # Набор session: спека и чистое дерево проверяются до блокировки, цель берётся из спеки.
 if [ "$SUITE" = session ]; then
   if [ -z "${SPEC:-}" ]; then
@@ -174,7 +195,7 @@ fi
 # Виды спеков рабочего дерева (WR-04): незакоммиченный спек read не уходит в несколько воркеров
 # без проверки. До блокировки и деплоя, только для наборов с Playwright.
 case "$SUITE" in
-  '' | changed | session)
+  '' | changed | harness | session)
     if ! node scripts/check-router-kinds.js --worktree; then
       echo "router-test: красный — виды роутерных спеков рабочего дерева не прошли проверку (check-router-kinds.js --worktree)" >&2
       exit 1
@@ -240,6 +261,49 @@ if [ "$SUITE" = session ]; then
   exit "$SRC"
 fi
 
+# --- блок harness (T2h, D-07) ---------------------------------------------------------
+# Блок harness файла areas.json (go, specs, grep, session) читает node через loadAreas
+# core-marks.cjs; run.sh сверяет вывод по числу строк, порядку имён и шаблону каждой перед eval
+# (T-148.1-28): значения уходят в окружение этапов и во вложенный run.sh. Не прошёл — код 1,
+# причина в <отчёт>/harness-load.err.
+RT_H_GO_SEQ=""
+RT_H_GO_PKGS=""
+RT_H_SPECS=""
+RT_H_GREP=""
+RT_H_SESSION=""
+# 1 — в changed к выбору добавлены этапы набора harness (правка обвязки, RT_HARNESS=1)
+RT_H_EXTRA=0
+# итог самопроверки сессии для summary.md: «да», «нет» или пусто (не требовалась)
+RT_H_SELF=""
+RT_H_SELF_WHY=""
+rt_harness_load() {
+  _hl_rc=0
+  _hl_out=$(node -e '
+const cm = require(process.argv[1] + "/scripts/router/core-marks.cjs");
+const h = cm.loadAreas(process.argv[1]).harness;
+if (!h || !Array.isArray(h.go) || !h.go.length || !Array.isArray(h.specs) || !h.specs.length || !h.session) {
+  process.stderr.write("в areas.json нет блока harness с go, specs и session\n");
+  process.exit(1);
+}
+const pkgs = [...new Set(h.go.map((x) => "./" + x.split(":")[0]))];
+const Q = String.fromCharCode(39);
+console.log("RT_H_GO_SEQ=" + Q + h.go.join(" ") + Q);
+console.log("RT_H_GO_PKGS=" + Q + pkgs.join(" ") + Q);
+console.log("RT_H_SPECS=" + Q + h.specs.join(" ") + Q);
+console.log("RT_H_GREP=" + Q + (h.grep || "") + Q);
+console.log("RT_H_SESSION=" + Q + h.session + Q);
+' "$(rt_repo_root)" 2>"$RT_REPORT/harness-load.err") || _hl_rc=$?
+  _q="'"
+  if [ "$_hl_rc" != 0 ] ||
+    [ "$(printf '%s\n' "$_hl_out" | wc -l)" != 5 ] ||
+    [ "$(printf '%s\n' "$_hl_out" | sed 's/=.*//' | tr '\n' ' ')" != "RT_H_GO_SEQ RT_H_GO_PKGS RT_H_SPECS RT_H_GREP RT_H_SESSION " ] ||
+    printf '%s\n' "$_hl_out" | grep -qvE "^(RT_H_GO_SEQ=${_q}[A-Za-z0-9_./: -]+${_q}|RT_H_GO_PKGS=${_q}[A-Za-z0-9_./ -]+${_q}|RT_H_SPECS=${_q}[A-Za-z0-9_./ -]+${_q}|RT_H_GREP=${_q}[A-Za-z0-9_|()?!^*.: -]*${_q}|RT_H_SESSION=${_q}scripts/router/[A-Za-z0-9_./-]+${_q})\$"; then
+    echo "блок harness не прочитан или не прошёл проверку (код $_hl_rc)" >>"$RT_REPORT/harness-load.err"
+    return 1
+  fi
+  eval "$_hl_out"
+}
+
 # --- выбор проверок набора changed (D-25) ------------------------------------------
 # select-changed.mjs печатает тринадцать строк для eval; перед eval вывод проверяется по
 # строгому шаблону на каждую строку, по их числу и порядку имён (T-144.1-23, T-145.1-18,
@@ -257,6 +321,20 @@ RT_PW_INVERT=""
 RT_HARNESS=0
 RT_AREAS=""
 RT_SEL_KIND=""
+if [ "$SUITE" = harness ]; then
+  if ! rt_harness_load; then
+    echo "router-test: красный — блок harness в scripts/router/areas.json не прочитан или не прошёл проверку (причина — $RT_REPORT/harness-load.err)" >&2
+    exit 1
+  fi
+  # Все тесты набора идут в каждой ветви основными этапами: Go по именам (go-<ядро>), спеки
+  # read и state (pw-read-<ядро>, pw-<ядро>); grep блока относится только к спекам набора.
+  RT_SELECT_ALL=0
+  RT_GO_SEQ=$RT_H_GO_SEQ
+  RT_GO_PKGS=$RT_H_GO_PKGS
+  RT_SPECS=$RT_H_SPECS
+  RT_PW_GREP=$RT_H_GREP
+  export RT_GO_PKGS RT_SPECS RT_PW_GREP
+fi
 if [ "$SUITE" = changed ]; then
   _sel_args=""
   [ -z "${RT_BASE:-}" ] || _sel_args="--base $RT_BASE"
@@ -312,7 +390,24 @@ RT_HYBRID=0
 RT_B1=""
 RT_B2=""
 RT_B2_RUN=0
-if [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
+if [ "$SUITE" = harness ]; then
+  # набор harness: оба ядра, все тесты набора в каждой ветви (гибрида нет), окно смоука 30 с
+  : >"$RT_REPORT/plan.txt"
+  # shellcheck disable=SC2086
+  _hn_go=$(printf '%s\n' $RT_H_GO_SEQ | grep -c . || true)
+  # shellcheck disable=SC2086
+  _hn_pw=$(printf '%s\n' $RT_H_SPECS | grep -c . || true)
+  echo "- Ветви: $RT_CORES (набор harness: все тесты набора в каждой ветви, гибрид выключен)" >>"$RT_REPORT/plan.txt"
+  echo "- Набор harness: Go: $_hn_go, спеков: $_hn_pw, самопроверка сессии: $RT_H_SESSION" >>"$RT_REPORT/plan.txt"
+  if [ -n "${RT_SMOKE_WINDOW:-}" ]; then
+    echo "- Окно смоука: $RT_SMOKE_WINDOW с (RT_SMOKE_WINDOW задан явно)" >>"$RT_REPORT/plan.txt"
+  else
+    RT_SMOKE_WINDOW=30
+    echo "- Окно смоука: 30 с (набор harness)" >>"$RT_REPORT/plan.txt"
+  fi
+  export RT_SMOKE_WINDOW
+  echo "router-test: ветви — $(head -n 1 "$RT_REPORT/plan.txt")"
+elif [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
   : >"$RT_REPORT/plan.txt"
   if [ -n "$RT_CORES_SET" ] && [ "$SUITE" = changed ] && [ "$SEL_ANY" = 0 ]; then
     echo "- Ветви: нет (затронутого нет — деплой и смоук; RT_CORES=$RT_CORES не применяется)" >>"$RT_REPORT/plan.txt"
@@ -438,7 +533,7 @@ full_target() {
   # набор changed: этап go или pw пропускается, если выбор его не затронул
   _do_go=1
   _do_pw=1
-  if [ "$SUITE" = changed ] && [ "${RT_SELECT_ALL:-1}" != 1 ]; then
+  if { [ "$SUITE" = changed ] || [ "$SUITE" = harness ]; } && [ "${RT_SELECT_ALL:-1}" != 1 ]; then
     [ -n "${RT_GO_PKGS:-}" ] || _do_go=0
     [ -n "${RT_SPECS:-}" ] || _do_pw=0
   fi
@@ -1086,7 +1181,7 @@ else
   # стенд и выходит с кодом 130.
   trap 'RT_INTR=1; echo "router-test: прерывание — останавливаю этапы и жду восстановления стенда" >&2; for _kp in $PIDS; do kill -s TERM "$_kp" 2>/dev/null || true; done' INT TERM HUP
   for t in ${DEPLOYED:-}; do
-    if [ -z "$SUITE" ] || { [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ]; }; then
+    if [ -z "$SUITE" ] || [ "$SUITE" = harness ] || { [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ]; }; then
       (full_target "$t") &
     else
       sh "$SCRIPT_DIR/smoke.sh" "$t" "$EXPECT" &
@@ -1114,6 +1209,120 @@ done
 # На время построения отчёта сигнал не убивает run.sh: он только запоминается (RT_INTR), отчёт
 # доводится до конца, и прогон выходит с кодом 130 без удержания блокировки.
 trap 'RT_INTR=1' INT TERM HUP
+
+# --- самопроверка сессии (набор harness; changed при RT_HARNESS=1) ------------------------
+# Сама остановка на первом несовпадении — механика сессии (session.mjs), и править обвязку, не
+# сломав её, нельзя. Вложенная сессия по спеке блока harness (проход fail-fast-probe нарочно ждёт
+# FAIL у проходящего дешёвого теста) обязана: выйти с кодом 1, написать в summary.md раздел
+# «Остановлено на первом несовпадении», не выполнить второй проход (must-not-run) и вернуть
+# стенд («## Стенд в конце» без «нет»). Иначе — FAIL harness-session-fail-fast. Вложенный run.sh
+# идёт под блокировкой этого процесса (RT_LOCK_HELD=1), настройки прогона не наследует, отчёт —
+# <отчёт>-01-harness-session (ключ отчёта tidy: <ключ>-NN-<имя>). Итог — RT_H_SELF (да|нет) и
+# причина в RT_H_SELF_WHY для summary.md; строка результата — в results.tsv цели.
+_hs_fail() {
+  RT_H_SELF=нет
+  RT_H_SELF_WHY=$1
+  rt_result "$_hs_rt" FAIL harness-session-fail-fast "$1"
+}
+harness_selfcheck() {
+  RT_H_SELF=нет
+  RT_H_SELF_WHY=""
+  _hs_rt=${RT_TARGETS%% *}
+  [ -n "$_hs_rt" ] || return 0
+  if [ -z "$RT_H_SESSION" ]; then
+    _hs_fail "блок harness в areas.json не прочитан: спеки самопроверки нет"
+    return 0
+  fi
+  _hs_tg=$(node "$SCRIPT_DIR/session.mjs" --target "$RT_H_SESSION" 2>/dev/null) || _hs_tg=""
+  if [ -z "$_hs_tg" ]; then
+    _hs_fail "спека самопроверки не разобрана (session.mjs --target)"
+    return 0
+  fi
+  # строка результата — в цели спеки, если она в прогоне, иначе в первой цели прогона
+  case " $RT_TARGETS " in *" $_hs_tg "*) _hs_rt=$_hs_tg ;; esac
+  if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    _hs_fail "рабочее дерево не чистое: вложенная сессия меняет файлы продукта"
+    return 0
+  fi
+  if [ -z "${DEPLOYED:-}" ]; then
+    _hs_fail "ни одна цель не развёрнута: проверять нечем"
+    return 0
+  fi
+  _hs_dir="$RT_REPORT-01-harness-session"
+  _hs_rel=${_hs_dir#"$(rt_repo_root)"/}
+  echo "router-test: самопроверка сессии (остановка на первом несовпадении) → $_hs_rel"
+  env -u RT_CORES -u RT_HOLD_MINUTES -u RT_BASE -u RT_FILES -u RELEASE -u SUITE \
+    -u RT_SMOKE_WINDOW -u RT_SMOKE_IPT_WAIT -u RT_GO_PKGS -u RT_GO_RUN -u RT_GO_RUN_SEQ \
+    -u RT_GO_CORE_PKGS -u RT_GO_CORE_RUN -u RT_SPECS -u RT_SPECS_CORE -u RT_SPECS_FIRST \
+    -u RT_PW_GREP -u RT_PW_GREP_INVERT -u RT_PW_CORE_ONLY -u RT_ART_SUB -u RT_KERNEL_TOUCHED \
+    -u RT_SELECT_ALL -u RT_CORE -u RT_REPORT -u XCP_WANT_CORE -u XCP_VERSION \
+    SPEC="$RT_H_SESSION" RT_LOCK_HELD=1 RT_REPORT_DIR="$_hs_dir" \
+    sh "$SCRIPT_DIR/run.sh" session >"$RT_REPORT/harness-session.log" 2>&1 &
+  _hs_pid=$!
+  trap 'RT_INTR=1; kill -TERM "$_hs_pid" 2>/dev/null || true' INT TERM HUP
+  _hs_rc=0
+  wait "$_hs_pid" || _hs_rc=$?
+  while kill -0 "$_hs_pid" 2>/dev/null; do
+    _hs_rc=0
+    wait "$_hs_pid" || _hs_rc=$?
+  done
+  trap 'RT_INTR=1' INT TERM HUP
+  # прерванный прогон отчёт доводит до конца без результата самопроверки
+  if [ "$RT_INTR" = 1 ]; then
+    RT_H_SELF=""
+    return 0
+  fi
+  if [ "$_hs_rc" = 3 ]; then
+    _hs_fail "сбой связи ПК↔стенд во вложенной сессии (код 3), отчёт $_hs_rel"
+    return 0
+  fi
+  if [ "$_hs_rc" != 1 ]; then
+    _hs_fail "вложенная сессия вышла с кодом $_hs_rc, ожидался 1 (остановка на первом несовпадении), отчёт $_hs_rel"
+    return 0
+  fi
+  if [ ! -f "$_hs_dir/summary.md" ] || [ ! -f "$_hs_dir/session.json" ]; then
+    _hs_fail "у вложенной сессии нет summary.md или session.json, отчёт $_hs_rel"
+    return 0
+  fi
+  if ! grep -q '^## Остановлено на первом несовпадении' "$_hs_dir/summary.md"; then
+    _hs_fail "в summary.md вложенной сессии нет раздела «Остановлено на первом несовпадении», отчёт $_hs_rel"
+    return 0
+  fi
+  if grep -q '^| must-not-run |' "$_hs_dir/summary.md"; then
+    _hs_fail "второй проход (must-not-run) выполнялся: сессия не остановилась, отчёт $_hs_rel"
+    return 0
+  fi
+  _hs_chk_rc=0
+  _hs_chk=$(node -e '
+const fs = require("fs");
+const s = JSON.parse(fs.readFileSync(process.argv[1] + "/session.json", "utf8"));
+const bad = [];
+if (!s.stopped) bad.push("сессия не остановилась на первом несовпадении");
+else if (s.stopped.pass !== "fail-fast-probe") bad.push("остановка не на проходе fail-fast-probe, а на " + s.stopped.pass);
+const ran = [...(s.verdicts || []), ...(s.steps || [])].filter((x) => x.pass === "must-not-run");
+if (ran.length) bad.push("второй проход (must-not-run) выполнялся");
+if (!s.stand_end || !s.stand_end.ok) bad.push("стенд не вернулся в исходное состояние");
+if (bad.length) {
+  console.log(bad.join("; "));
+  process.exit(1);
+}
+' "$_hs_dir" 2>&1 | head -c 400) || _hs_chk_rc=$?
+  if [ "$_hs_chk_rc" != 0 ] || [ -n "$_hs_chk" ]; then
+    _hs_fail "${_hs_chk:-session.json вложенной сессии не разобран}, отчёт $_hs_rel"
+    return 0
+  fi
+  if ! awk '/^## Стенд в конце/ {f = 1; next} /^## / {f = 0} f && /\*\*нет\*\*/ {bad = 1} END {exit bad}' "$_hs_dir/summary.md" ||
+    ! grep -q '^## Стенд в конце' "$_hs_dir/summary.md"; then
+    _hs_fail "раздел «Стенд в конце» вложенной сессии пуст или содержит «нет», отчёт $_hs_rel"
+    return 0
+  fi
+  RT_H_SELF=да
+  rt_result "$_hs_rt" PASS harness-session-fail-fast "сессия остановилась на первом несовпадении (код 1), второй проход не выполнялся, стенд вернулся; отчёт $_hs_rel"
+}
+
+if [ "$RT_INTR" != 1 ] && [ "$SUITE" = harness ]; then
+  harness_selfcheck
+fi
 
 # --- отчёт -------------------------------------------------------------------------
 
@@ -1222,6 +1431,14 @@ done
   if [ "$SUITE" = changed ]; then
     echo "- Области: ${RT_AREAS:-нет}"
     echo "- Выбор: ${RT_SEL_KIND:-полный}"
+  fi
+  if [ "$SUITE" = harness ]; then
+    _el=$(($(date +%s) - RT_T0))
+    echo "- Время набора: $((_el / 60)) мин $((_el % 60)) с ($_el с)"
+  fi
+  if [ -n "$RT_H_SELF" ]; then
+    echo "- Самопроверка сессии: остановка на первом несовпадении — $RT_H_SELF"
+    [ -z "$RT_H_SELF_WHY" ] || echo "- Самопроверка сессии, причина: $RT_H_SELF_WHY"
   fi
   echo "- SHA: $SHA"
   [ -z "${RELEASE:-}" ] || echo "- Релиз: $RELEASE"
