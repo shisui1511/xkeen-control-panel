@@ -46,6 +46,9 @@
 #                сессии: остановка на первом несовпадении — да|нет». Окно смоука 30 с. Нужно
 #                чистое рабочее дерево (вложенная сессия его требует). Статус релиза не
 #                публикуется. Тесты блока — без метки ядра, яруса full и дольше 30 с по истории.
+#                В наборе changed при RT_HARNESS=1 (правка обвязки) те же Go-тесты и спеки идут
+#                отдельными этапами go-harness, pw-harness-read и pw-harness-state в обеих ветвях
+#                (вторая ветвь обязательна), а после ветвей идёт та же самопроверка сессии.
 #   session      сессия на стенде по спеке (SPEC=<файл JSON>): проходы с ожиданиями на одной
 #                цели и ядрах спеки, в том числе на файлах продукта из другого коммита
 #                (воспроизведение до исправления). Проходы ведёт session.mjs (формат спеки —
@@ -271,7 +274,7 @@ RT_H_GO_PKGS=""
 RT_H_SPECS=""
 RT_H_GREP=""
 RT_H_SESSION=""
-# 1 — в changed к выбору добавлены этапы набора harness (правка обвязки, RT_HARNESS=1)
+# 1 — в changed к выбору добавлены этапы набора harness (RT_HARNESS=1)
 RT_H_EXTRA=0
 # итог самопроверки сессии для summary.md: «да», «нет» или пусто (не требовалась)
 RT_H_SELF=""
@@ -376,7 +379,36 @@ if [ "$SUITE" = changed ]; then
     echo "итог: Go: ${RT_GO_PKGS:--}; спеки: ${RT_SPECS:--}; области: ${RT_AREAS:--}" >>"$RT_REPORT/select.txt"
     export RT_GO_PKGS RT_SPECS RT_PW_GREP
   fi
-  echo "router-test: выбор — $(tail -n 1 "$RT_REPORT/select.txt")"
+  # Правка обвязки стенда (RT_HARNESS=1): к выбору добавляется набор harness — его Go-тесты и
+  # спеки идут отдельными этапами в обеих ветвях (full_target, _harness_go и _harness_pw),
+  # а после ветвей идёт самопроверка сессии. Полный выбор набор уже содержит: этапы не добавляются.
+  # Блок не прочитан — выбор расширяется до полного, как при сбое самого выбора.
+  if [ "$RT_HARNESS" = 1 ]; then
+    if ! rt_harness_load; then
+      echo "всё: блок harness не прочитан (см. harness-load.err) — выбор расширен до полного" >>"$RT_REPORT/select.txt"
+      unset RT_GO_PKGS RT_SPECS RT_PW_GREP
+      RT_SELECT_ALL=1
+      RT_SEL_BAD=1
+      RT_KERNEL_TOUCHED=1
+      RT_SEL_KIND="полный"
+      RT_GO_SEQ=""
+      RT_SPECS_FIRST=""
+      RT_PW_INVERT=""
+      SEL_ANY=1
+    elif [ "$RT_SELECT_ALL" = 1 ]; then
+      echo "обвязка: набор harness входит в полный выбор, самопроверка сессии — в конце" >>"$RT_REPORT/select.txt"
+    else
+      RT_H_EXTRA=1
+      SEL_ANY=1
+      # shellcheck disable=SC2086
+      _hn_go=$(printf '%s\n' $RT_H_GO_SEQ | grep -c . || true)
+      # shellcheck disable=SC2086
+      _hn_pw=$(printf '%s\n' $RT_H_SPECS | grep -c . || true)
+      echo "обвязка: набор harness добавлен — Go: $_hn_go, спеков: $_hn_pw, оба ядра, самопроверка сессии — в конце" >>"$RT_REPORT/select.txt"
+    fi
+  fi
+  echo "router-test: выбор — $(grep '^итог:' "$RT_REPORT/select.txt" | tail -n 1)"
+  [ "$RT_HARNESS" != 1 ] || echo "router-test: $(grep '^\(обвязка\|всё\):' "$RT_REPORT/select.txt" | tail -n 1)"
 fi
 
 # --- план ветвей и окно смоука (D-01…D-03, D-07) -----------------------------------------
@@ -416,7 +448,7 @@ elif [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
   elif [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ] && [ "$RT_SEL_BAD" = 0 ]; then
     RT_B1=$(rt_sha_core "$(git rev-parse HEAD)")
     case "$RT_B1" in xray) RT_B2=mihomo ;; *) RT_B2=xray ;; esac
-    if [ -n "$RT_GO_CORE_PKGS" ] || [ -n "$RT_SPECS_CORE" ]; then
+    if [ -n "$RT_GO_CORE_PKGS" ] || [ -n "$RT_SPECS_CORE" ] || [ "$RT_H_EXTRA" = 1 ]; then
       RT_B2_RUN=1
       RT_CORES="$RT_B1 $RT_B2"
     else
@@ -435,7 +467,7 @@ elif [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
       fi
       # shellcheck disable=SC2086
       _n_pw=$(printf '%s\n' $RT_SPECS_CORE | grep -c . || true)
-      echo "- Вторая ветвь ($RT_B2): только тесты с меткой ядра (Go: $_n_go, Playwright: $_n_pw спеков)" >>"$RT_REPORT/plan.txt"
+      echo "- Вторая ветвь ($RT_B2): только тесты с меткой ядра (Go: $_n_go, Playwright: $_n_pw спеков)$([ "$RT_H_EXTRA" != 1 ] || printf ' и все тесты набора harness')" >>"$RT_REPORT/plan.txt"
     else
       echo "- Вторая ветвь ($RT_B2): не запускалась — в выборе нет тестов с меткой ядра" >>"$RT_REPORT/plan.txt"
     fi
@@ -462,6 +494,7 @@ elif [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
     echo "- Окно смоука: ${RT_SMOKE_WINDOW:-120} с (полный прогон)" >>"$RT_REPORT/plan.txt"
   fi
   [ -z "${RT_SMOKE_WINDOW:-}" ] || export RT_SMOKE_WINDOW
+  [ "$RT_H_EXTRA" != 1 ] || echo "- Обвязка изменена: набор harness добавлен (в обеих ветвях и самопроверка сессии $RT_H_SESSION)" >>"$RT_REPORT/plan.txt"
   echo "router-test: ветви — $(head -n 1 "$RT_REPORT/plan.txt")"
 fi
 
@@ -633,6 +666,20 @@ EOF
     else
       rt_ssh "$1" "kill $2 2>/dev/null; rm -f $RT_KPID" >/dev/null 2>&1 || true
     fi
+  }
+  # Этапы набора harness, добавленного к changed (RT_H_EXTRA=1, правка обвязки): Go-тесты блока
+  # (go-harness-<ядро>) и ожидание стенда, затем спеки блока частями read (в окне наблюдателя) и
+  # state (pw-harness-read-<ядро>, pw-harness-state-<ядро>) — в каждой ветви, без отбора @core.
+  # Артефакты — в <ядро>/harness/, чтобы не затирать этапы выбора. В самом наборе harness блок
+  # идёт основными этапами go, pw-read и pw. Вызываются из ветви, поэтому _t и _c видны.
+  _harness_go() {
+    [ "$RT_H_EXTRA" = 1 ] || return 0
+    rt_stage "$_t" "go-harness-$_c" _bg env "RT_GO_PKGS=" "RT_GO_RUN=" "RT_GO_RUN_SEQ=$RT_H_GO_SEQ" "RT_ART_SUB=harness" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
+    rt_stage "$_t" "settle-harness-$_c" _bg _settle "$_t" || true
+  }
+  _harness_pw() {
+    [ "$RT_H_EXTRA" = 1 ] || return 0
+    rt_stage "$_t" "pw-harness-$1-$_c" _bg env "RT_SPECS=$RT_H_SPECS" "RT_PW_GREP=$RT_H_GREP" "RT_PW_GREP_INVERT=" "RT_PW_CORE_ONLY=" "RT_SPECS_FIRST=" "RT_ART_SUB=harness" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part "$1" || true
   }
   _sp=""
   # имя и время начала этапа под _bg (см. _bg), время начала наблюдателя окна (шаг 2а)
@@ -868,12 +915,16 @@ EOF
       if [ "$_b_pw" = 1 ]; then
         rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
       fi
+      _harness_pw read
       _orc=0
       wait "$_osp" || _orc=$?
       _sps=""
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_t" "observe-$_c" "$(($(date +%s) - _ot0))" "$_orc" "$_ot0" "$_c" >>"$RT_REPORT/timings.tsv"
-    elif [ "$_b_pw" = 1 ]; then
-      rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+    else
+      if [ "$_b_pw" = 1 ]; then
+        rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+      fi
+      _harness_pw read
     fi
     # хвост xcp.log пишет наблюдатель (без него — смоук без окна не пишет)
     [ ! -f "$RT_REPORT/$_t/xcp-log-tail.txt" ] || mv "$RT_REPORT/$_t/xcp-log-tail.txt" "$RT_REPORT/$_t/$_c/xcp-log-tail.txt"
@@ -907,6 +958,10 @@ EOF
     else
       rt_result "$_t" SKIP pw "$_b_skip_pw"
     fi
+
+    # 4б. набор harness, добавленный к выбору changed (RT_H_EXTRA=1): Go, ожидание стенда, state
+    _harness_go
+    _harness_pw state
 
     # 4а. остановка сэмплера и забор смен PID ядра ветви: до смоука следующей ветви
     _kpid_stop "$_t" "$_ks" "$RT_REPORT/$_t/$_c"
@@ -1320,7 +1375,7 @@ if (bad.length) {
   rt_result "$_hs_rt" PASS harness-session-fail-fast "сессия остановилась на первом несовпадении (код 1), второй проход не выполнялся, стенд вернулся; отчёт $_hs_rel"
 }
 
-if [ "$RT_INTR" != 1 ] && [ "$SUITE" = harness ]; then
+if [ "$RT_INTR" != 1 ] && { [ "$SUITE" = harness ] || { [ "$SUITE" = changed ] && [ "$RT_HARNESS" = 1 ]; }; }; then
   harness_selfcheck
 fi
 
@@ -1431,6 +1486,7 @@ done
   if [ "$SUITE" = changed ]; then
     echo "- Области: ${RT_AREAS:-нет}"
     echo "- Выбор: ${RT_SEL_KIND:-полный}"
+    [ "$RT_H_EXTRA" != 1 ] || echo "- Обвязка изменена: набор harness добавлен"
   fi
   if [ "$SUITE" = harness ]; then
     _el=$(($(date +%s) - RT_T0))
