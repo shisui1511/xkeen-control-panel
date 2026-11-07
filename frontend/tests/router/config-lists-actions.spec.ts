@@ -1,4 +1,5 @@
 // e2e-pages: config/lists
+// router-area: geodata
 import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';

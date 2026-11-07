@@ -1,4 +1,5 @@
 // e2e-pages: logs
+// router-area: access-log
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Browser, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';

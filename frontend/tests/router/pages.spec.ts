@@ -1,5 +1,6 @@
 // e2e-pages: *
 // e2e-kind: read
+// router-area: ui-shell
 import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { attachConsoleGuard } from './lib/console';

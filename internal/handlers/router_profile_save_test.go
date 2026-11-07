@@ -1,5 +1,7 @@
 //go:build router
 
+// router-area: profiles
+
 package handlers
 
 import (
