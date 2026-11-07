@@ -1,5 +1,7 @@
 //go:build router
 
+// router-area: access-log
+
 package services
 
 import (

@@ -1,5 +1,7 @@
 //go:build router
 
+// router-area: geodata
+
 package geodata
 
 import (

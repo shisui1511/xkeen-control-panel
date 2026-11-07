@@ -1,4 +1,5 @@
 // e2e-pages: config/cores, config/rules, services
+// router-area: profiles
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';

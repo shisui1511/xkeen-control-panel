@@ -1,4 +1,5 @@
 // e2e-pages: config config/nodes
+// router-area: sources
 import { randomInt } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

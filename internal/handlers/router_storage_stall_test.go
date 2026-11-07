@@ -1,5 +1,7 @@
 //go:build router
 
+// router-area: storage-auth
+
 package handlers
 
 import (

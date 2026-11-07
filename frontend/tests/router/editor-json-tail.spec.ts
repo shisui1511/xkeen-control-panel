@@ -1,4 +1,5 @@
 // e2e-pages: editor
+// router-area: ui-shell
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { randomInt } from 'node:crypto';
 import { attachConsoleGuard } from './lib/console';

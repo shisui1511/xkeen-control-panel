@@ -1,4 +1,5 @@
 // e2e-pages: proxies
+// router-area: sources
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Request } from '@playwright/test';

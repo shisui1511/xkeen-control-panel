@@ -18,6 +18,9 @@
  * обязаны нести тег ядра (CORE_TAG) на каждом таком test(...),
  * а метки knownFailure с ядром в селекторе — идти через coreTagsOf. core-switch.spec.ts
  * исключён: он идёт в каждой ветви.
+ * Области router-area и факты тестов (loadAreas, matchGlob, areaOfText, testFacts — ярус,
+ * Slow, карантин, метка ядра, область файла) — в конце файла; их читают
+ * scripts/check-router-areas.js, выбор changed, страж ярусов и бюджет.
  * Потребители: scripts/check-core-marks.js (страж в CI), выбор набора в changed
  * и сводка прогона. Имя теста принимается только по шаблону ^TestRouter[A-Za-z0-9_]+$
  * (имя попадает в -test.run).
@@ -449,7 +452,387 @@ function specViolations(root) {
   return rows;
 }
 
-module.exports = { analyzeGo, goMarks, goViolations, specFacts, specIssues, specViolations };
+/*
+ * Области router-area (RTR-03, D-09…D-11): карта scripts/router/areas.json и строка
+ * `// router-area: <область>` в первых пяти строках каждого роутерного Go-файла и спека.
+ * Потребители: scripts/check-router-areas.js (страж), выбор changed (148.1-09), страж
+ * ярусов и бюджет — через testFacts(root).
+ */
+const AREAS_FILE = 'scripts/router/areas.json';
+const AREA_NAME = /^[a-z][a-z0-9-]*$/;
+const AREA_LINE = /^\/\/ router-area: ([a-z][a-z0-9-]*)$/;
+const AREA_LINE_ANY = /^\s*\/\/\s*router-area\b/;
+const SAFE_GLOB = /^[A-Za-z0-9_.*][A-Za-z0-9_.*/-]*$/;
+const SPEC_PATH = /^tests\/router\/[A-Za-z0-9_.-]+\.spec\.ts$/;
+const HARNESS_GO = /^(?:internal|cmd)(?:\/[A-Za-z0-9_.-]+)*:TestRouter[A-Za-z0-9_]+$/;
+const SAFE_REPO_PATH = /^[A-Za-z0-9_.][A-Za-z0-9_./-]*$/;
+
+/** Глоб карты в регулярное выражение: `*` — любой сегмент без «/», `**` — любые сегменты. */
+function globRegExp(glob) {
+  let re = '';
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === '*' && glob[i + 1] === '*') {
+      if (glob[i + 2] === '/') {
+        re += '(?:[^/]+/)*';
+        i += 2;
+      } else {
+        re += '.*';
+        i += 1;
+      }
+    } else if (c === '*') {
+      re += '[^/]*';
+    } else {
+      re += c.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+    }
+  }
+  return new RegExp('^' + re + '$');
+}
+
+/** Путь от корня репозитория подходит под глоб карты областей. */
+function matchGlob(glob, file) {
+  return globRegExp(glob).test(file);
+}
+
+/**
+ * Строка области в тексте файла: { area, issues }. Строка допустима только в первых пяти
+ * строках, ровно в форме `// router-area: <область>` и один раз; любое другое упоминание
+ * в виде строки-комментария — нарушение. Нет строки — { area: null, issues: [] }.
+ */
+function areaOfText(text) {
+  const issues = [];
+  const found = [];
+  text.split('\n').forEach((line, idx) => {
+    if (!AREA_LINE_ANY.test(line)) return;
+    if (idx >= 5) {
+      issues.push(`строка области на строке ${idx + 1}: допустима только в первых пяти строках`);
+      return;
+    }
+    const m = AREA_LINE.exec(line);
+    if (!m) {
+      issues.push(`строка области ${JSON.stringify(line.trim())}: нужна форма «// router-area: <область>», одна область`);
+      return;
+    }
+    found.push(m[1]);
+  });
+  if (found.length > 1) issues.push(`строка области повторяется (${found.join(', ')}): одна область на файл`);
+  return { area: issues.length === 0 && found.length === 1 ? found[0] : null, issues };
+}
+
+/** Проверка схемы карты областей: список нарушений (пустой — карта годна). */
+function validateAreas(data, root) {
+  const issues = [];
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return ['карта не объект JSON'];
+  for (const k of Object.keys(data)) {
+    if (!['version', 'areas', 'harness'].includes(k)) issues.push(`неизвестный ключ верхнего уровня ${JSON.stringify(k)}`);
+  }
+  if (data.version !== 1) issues.push('version должен быть 1');
+  const areas = data.areas;
+  if (!areas || typeof areas !== 'object' || Array.isArray(areas) || Object.keys(areas).length === 0) {
+    issues.push('areas — непустой объект «имя → область»');
+    return issues;
+  }
+  for (const [name, a] of Object.entries(areas)) {
+    const at = `область ${name}`;
+    if (!AREA_NAME.test(name)) issues.push(`${at}: имя не по шаблону [a-z][a-z0-9-]*`);
+    if (!a || typeof a !== 'object' || Array.isArray(a)) {
+      issues.push(`${at}: не объект`);
+      continue;
+    }
+    for (const k of Object.keys(a)) {
+      if (!['title', 'shared', 'paths', 'canary', 'tests'].includes(k)) issues.push(`${at}: неизвестный ключ ${JSON.stringify(k)}`);
+    }
+    if (typeof a.title !== 'string' || !a.title.trim()) issues.push(`${at}: нет title`);
+    if (typeof a.shared !== 'boolean') issues.push(`${at}: shared — true или false`);
+    if (!Array.isArray(a.paths) || a.paths.length === 0) issues.push(`${at}: paths — непустой список глобов`);
+    else {
+      for (const g of a.paths) {
+        if (typeof g !== 'string' || !SAFE_GLOB.test(g) || g.split('/').includes('..') || g.includes('***')) {
+          issues.push(`${at}: недопустимый глоб ${JSON.stringify(g)}`);
+        }
+      }
+    }
+    const c = a.canary;
+    if (!c || typeof c !== 'object' || Array.isArray(c)) issues.push(`${at}: нет canary { go, spec, reason? }`);
+    else {
+      for (const k of Object.keys(c)) {
+        if (!['go', 'spec', 'reason'].includes(k)) issues.push(`${at}: canary — неизвестный ключ ${JSON.stringify(k)}`);
+      }
+      if (!('go' in c) || (c.go !== null && (typeof c.go !== 'string' || !TEST_NAME.test(c.go)))) {
+        issues.push(`${at}: canary.go — имя TestRouter* или null`);
+      }
+      if (!('spec' in c) || (c.spec !== null && (typeof c.spec !== 'string' || !SPEC_PATH.test(c.spec)))) {
+        issues.push(`${at}: canary.spec — путь tests/router/<спек>.spec.ts или null`);
+      }
+      if ('reason' in c && typeof c.reason !== 'string') issues.push(`${at}: canary.reason — строка`);
+      if ((c.go === null || c.spec === null) && !(typeof c.reason === 'string' && c.reason.trim())) {
+        issues.push(`${at}: канарейка null без reason`);
+      }
+    }
+    if ('tests' in a) {
+      if (!Array.isArray(a.tests) || a.tests.length === 0) issues.push(`${at}: tests — непустой список`);
+      else {
+        for (const t of a.tests) {
+          const ok = typeof t === 'string' && ((t.startsWith('go:') && TEST_NAME.test(t.slice(3))) || SPEC_PATH.test(t));
+          if (!ok) issues.push(`${at}: tests — запись ${JSON.stringify(t)} не go:TestRouter* и не tests/router/<спек>.spec.ts`);
+        }
+      }
+    }
+  }
+  if ('harness' in data) {
+    const h = data.harness;
+    if (!h || typeof h !== 'object' || Array.isArray(h)) issues.push('harness — объект');
+    else {
+      for (const k of Object.keys(h)) {
+        if (!['go', 'specs', 'grep', 'session'].includes(k)) issues.push(`harness: неизвестный ключ ${JSON.stringify(k)}`);
+      }
+      if ('go' in h && (!Array.isArray(h.go) || h.go.some((x) => typeof x !== 'string' || !HARNESS_GO.test(x)))) {
+        issues.push('harness.go — список «<каталог пакета>:<TestRouterИмя>»');
+      }
+      if ('specs' in h && (!Array.isArray(h.specs) || h.specs.some((x) => typeof x !== 'string' || !SPEC_PATH.test(x)))) {
+        issues.push('harness.specs — список tests/router/<спек>.spec.ts');
+      }
+      if ('grep' in h && (typeof h.grep !== 'string' || /[\r\n]/.test(h.grep))) {
+        issues.push('harness.grep — строка без перевода строки');
+      }
+      if ('session' in h) {
+        const s = h.session;
+        if (
+          typeof s !== 'string' ||
+          !SAFE_REPO_PATH.test(s) ||
+          !s.startsWith('scripts/router/') ||
+          s.split('/').includes('..') ||
+          (root && !fs.existsSync(path.join(root, s)))
+        ) {
+          issues.push('harness.session — путь к существующему файлу под scripts/router/');
+        }
+      }
+    }
+  }
+  return issues;
+}
+
+/** Карта областей: { version, areas, harness }. Ошибка чтения или схемы — исключение. */
+function loadAreas(root) {
+  const file = path.join(root, AREAS_FILE);
+  const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const issues = validateAreas(data, root);
+  if (issues.length > 0) throw new Error(`${AREAS_FILE}: ${issues.join('; ')}`);
+  return { version: data.version, areas: data.areas, harness: data.harness || null };
+}
+
+/** Аргументы вызова от открывающей скобки (в тексте без комментариев): [{text, start}] или null. */
+function splitArgs(code, open) {
+  const list = [];
+  let depth = 0;
+  let start = open + 1;
+  const n = code.length;
+  for (let i = open; i < n; i++) {
+    const c = code[i];
+    if (c === '"' || c === "'" || c === '`') {
+      let j = i + 1;
+      while (j < n && code[j] !== c && (c === '`' || code[j] !== '\n')) j += code[j] === '\\' ? 2 : 1;
+      i = j;
+    } else if (c === '/' && isRegexStart(code, i)) {
+      i = regexEnd(code, i);
+    } else if (c === '(' || c === '[' || c === '{') {
+      depth++;
+    } else if (c === ')' || c === ']' || c === '}') {
+      depth--;
+      if (depth === 0) {
+        const last = code.slice(start, i);
+        if (last.trim() || list.length > 0) list.push({ text: last.trim(), start });
+        return list;
+      }
+    } else if (c === ',' && depth === 1) {
+      list.push({ text: code.slice(start, i).trim(), start });
+      start = i + 1;
+    }
+  }
+  return null;
+}
+
+/** Строковый литерал без подстановок: значение или null. */
+function literalValue(s) {
+  const m = /^(['"`])((?:[^\\\n]|\\.)*)\1$/s.exec(s.trim());
+  if (!m || (m[1] === '`' && m[2].includes('${'))) return null;
+  return m[2].replace(/\\(.)/g, '$1');
+}
+
+/** n-й (с нуля) аргумент вызова Go в позиции open: строковое значение литерала или null. */
+function goStringArg(code, open, n) {
+  const args = splitArgs(code, open);
+  if (!args || args.length <= n) return null;
+  return literalValue(args[n].text);
+}
+
+/** Факты тестов одного роутерного Go-файла (без области): [{test, tier, tierReason, slowReason, quarantine, coreMarked}]. */
+function goTestFacts(text) {
+  const decls = declarations(text);
+  const fileKnown = decls.some((d) => d.kind !== 'func' && KNOWN_WITH_SLASH.test(d.code));
+  const rows = [];
+  for (const d of decls) {
+    if (d.kind !== 'func' || d.receiver || !TEST_NAME.test(d.name)) continue;
+    const call = (re) => {
+      const m = re.exec(d.masked);
+      return m ? m.index + m[0].length - 1 : -1;
+    };
+    const tierAt = call(/\broutertest\.Tier\(/);
+    let tier = 'gate';
+    let tierReason = null;
+    if (tierAt >= 0) {
+      const args = splitArgs(d.code, tierAt);
+      if (args && args.length >= 2 && /^routertest\.Full$/.test(args[1].text)) {
+        tier = 'full';
+        tierReason = goStringArg(d.code, tierAt, 2) || null;
+      }
+    }
+    const slowAt = call(/\broutertest\.Slow\(/);
+    const quarAt = call(/\broutertest\.Quarantine\(/);
+    rows.push({
+      test: d.name,
+      tier,
+      tierReason,
+      slowReason: slowAt >= 0 ? goStringArg(d.code, slowAt, 1) || null : null,
+      quarantine: quarAt >= 0 ? goStringArg(d.code, quarAt, 1) || '' : null,
+      coreMarked: CORE_SPECIFIC.test(d.masked) || KNOWN_WITH_SLASH.test(d.code) || fileKnown
+    });
+  }
+  return rows;
+}
+
+const SPEC_FULL_TAG = /\bFULL_TAG\b|['"`]@full['"`]/;
+
+/** Описание аннотации заданного типа в тексте деталей test(…): строка, '' (без описания) или null. */
+function annotationOf(seg, type) {
+  const re = new RegExp(
+    `\\{\\s*type:\\s*(['"\`])${type}\\1\\s*,\\s*description:\\s*(['"\`])((?:[^\\\\\\n]|\\\\.)*?)\\2\\s*,?\\s*\\}`
+  );
+  const m = re.exec(seg);
+  if (m) return m[3];
+  return new RegExp(`\\btype:\\s*(['"\`])${type}\\1`).test(seg) ? '' : null;
+}
+
+/** Факты тестов одного спека (без области): [{test, tier, tierReason, slowReason, quarantine, coreMarked}]. */
+function specTestFacts(text) {
+  const code = stripTs(text);
+  const tagVarCore = /\b(?:const|let)\s+tag\s*=[^;]*?(?:CORE_TAG|CORE_LABEL_TAG|coreTagsOf)/s.test(code);
+  const rows = [];
+  for (const m of code.matchAll(/(?<![\w.$])test\(/g)) {
+    const open = m.index + m[0].length - 1;
+    const args = splitArgs(code, open);
+    if (!args || args.length === 0) continue;
+    const details = args.length >= 3 ? args[1].text : '';
+    const body = args[args.length - 1].text;
+    const tierReason = annotationOf(details, 'tier-full');
+    const slow = annotationOf(details, 'slow');
+    const q = /\bquarantine\(\s*(['"`])([^'"`\n]*)\1/.exec(body);
+    const tpl = /^`((?:[^`\\]|\\.)*)`$/s.exec(args[0].text);
+    rows.push({
+      test: literalValue(args[0].text),
+      // название-шаблон с подстановками (`axe: тема ${theme}`): для сверки с историей
+      titleTemplate: tpl && tpl[1].includes('${') ? tpl[1] : null,
+      tier: SPEC_FULL_TAG.test(details) ? 'full' : 'gate',
+      tierReason: SPEC_FULL_TAG.test(details) ? tierReason || null : null,
+      slowReason: slow === null ? null : slow || null,
+      quarantine: q ? q[2] : null,
+      coreMarked: SPEC_CORE_TAGGED.test(details) || (tagVarCore && /\{\s*tag\s*[,}]|\btag:\s*tag\b/.test(details))
+    });
+  }
+  return rows;
+}
+
+/**
+ * Факты всех роутерных тестов репозитория (по индексу git): массив
+ * { kind: 'go'|'pw', file, pkg|null, spec|null, test (имя или null у PW с вычисляемым
+ *   названием), area (null — нет строки области), tier: 'gate'|'full', tierReason,
+ *   slowReason, quarantine (slug или null), coreMarked }.
+ */
+function testFacts(root) {
+  const rows = [];
+  for (const f of routerGoFiles(root)) {
+    const { area } = areaOfText(f.text);
+    for (const t of goTestFacts(f.text)) rows.push({ kind: 'go', file: f.file, pkg: f.pkg, spec: null, area, ...t });
+  }
+  for (const file of trackedFiles(root, 'frontend/tests/router/*.spec.ts')) {
+    const text = fs.readFileSync(path.join(root, file), 'utf8');
+    const { area } = areaOfText(text);
+    const spec = file.replace(/^frontend\//, '');
+    for (const t of specTestFacts(text)) rows.push({ kind: 'pw', file, pkg: null, spec, area, ...t });
+  }
+  return rows;
+}
+
+/*
+ * Читатели данных контрактов: тесты, которые читают файл контракта или testdata прямо или
+ * через помощника своего пакета (транзитивно), и спеки, читающие testdata (в том числе через
+ * nodeLink из lib/nodes-api.ts). Граф импортов и `go list -deps` этих связей не видят, поэтому
+ * области contract-* перечисляют их в поле tests, а страж сверяет список с этим разбором.
+ */
+const CONTRACT_READS = {
+  'contract-sources': {
+    go: /\bContractFile\(|\bLinksDir\(|\bInputsDir\(|"testdata"|testdata\//,
+    spec: /testdata\/|\bnodeLink\b|sourcesContract/
+  },
+  'contract-routing': { go: /\bRoutingContractFile\(/, spec: /routingContract/ }
+};
+
+/** { '<область contract-*>': Set('go:<Имя>' | 'tests/router/<спек>') } по индексу git. */
+function contractReaders(root) {
+  const byPkg = new Map();
+  for (const f of routerGoFiles(root)) {
+    if (!byPkg.has(f.pkg)) byPkg.set(f.pkg, []);
+    for (const d of declarations(f.text)) if (d.kind === 'func') byPkg.get(f.pkg).push(d);
+  }
+  const specs = trackedFiles(root, 'frontend/tests/router/*.spec.ts').map((file) => ({
+    spec: file.replace(/^frontend\//, ''),
+    code: stripTs(fs.readFileSync(path.join(root, file), 'utf8'))
+  }));
+  const out = {};
+  for (const [area, re] of Object.entries(CONTRACT_READS)) {
+    const set = new Set();
+    for (const decls of byPkg.values()) {
+      const tainted = new Set(decls.filter((d) => re.go.test(d.code)).map((d) => d.name));
+      for (let grew = true; grew; ) {
+        grew = false;
+        for (const d of decls) {
+          if (tainted.has(d.name)) continue;
+          for (const n of tainted) {
+            if (new RegExp('\\b' + n + '\\(').test(d.masked)) {
+              tainted.add(d.name);
+              grew = true;
+              break;
+            }
+          }
+        }
+      }
+      for (const d of decls) if (!d.receiver && TEST_NAME.test(d.name) && tainted.has(d.name)) set.add('go:' + d.name);
+    }
+    for (const s of specs) if (re.spec.test(s.code)) set.add(s.spec);
+    out[area] = set;
+  }
+  return out;
+}
+
+module.exports = {
+  analyzeGo,
+  contractReaders,
+  goMarks,
+  goViolations,
+  specFacts,
+  specIssues,
+  specViolations,
+  routerGoFiles,
+  trackedFiles,
+  AREAS_FILE,
+  loadAreas,
+  validateAreas,
+  matchGlob,
+  areaOfText,
+  goTestFacts,
+  specTestFacts,
+  testFacts
+};
 
 if (require.main === module) {
   const argv = process.argv.slice(2);

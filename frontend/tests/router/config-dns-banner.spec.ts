@@ -1,4 +1,5 @@
 // e2e-pages: config/cores
+// router-area: dns
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard, type ConsoleGuard } from './lib/console';
