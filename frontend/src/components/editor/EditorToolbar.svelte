@@ -109,7 +109,7 @@
       {#if hasDraft}
         <div class="editor-draft-bar" style="display: inline-flex; align-items: center; gap: 4px;">
           <span
-            class="badge badge-warning"
+            class="badge badge--tag badge-warning"
             style="font-size: var(--font-size-xs); padding: 2px 6px;"
           >
             {$t('editor.has_draft')}
@@ -216,7 +216,7 @@
     background: var(--bg-card);
     min-height: 36px;
     gap: 0;
-    padding-right: 8px;
+    padding-right: var(--spacing-2);
     flex-shrink: 0;
   }
 
@@ -260,8 +260,8 @@
   .subhead-meta-container {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-left: 8px;
+    gap: var(--spacing-2);
+    margin-left: var(--spacing-2);
     flex-shrink: 0;
   }
 
@@ -270,7 +270,7 @@
     font-family: var(--font-family-mono);
     color: var(--fg-secondary);
     background: var(--surface-tint);
-    padding: 2px 6px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
   }
@@ -307,23 +307,23 @@
     top: calc(100% + 4px);
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius);
     box-shadow: var(--shadow-md);
     min-width: 180px;
-    z-index: 100;
+    z-index: var(--z-dropdown);
     overflow: hidden;
-    padding: 4px;
+    padding: var(--spacing-1);
   }
 
   .kebab-item {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     width: 100%;
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     cursor: pointer;
     font-size: var(--font-size-xs);
     color: var(--fg-primary);
@@ -347,12 +347,12 @@
   .kebab-divider {
     height: 1px;
     background: var(--border);
-    margin: 4px 0;
+    margin: var(--spacing-1) 0;
   }
 
   @media (max-width: 768px) {
     .editor-subhead-bar {
-      padding-right: 6px;
+      padding-right: var(--spacing-1-5);
     }
 
     /* Тип файла и виджет ядра есть в шапке и дереве файлов; на узком экране они вытесняют вкладки и меню */
@@ -362,8 +362,8 @@
     }
 
     .subhead-meta-container {
-      margin-left: 6px;
-      gap: 6px;
+      margin-left: var(--spacing-1-5);
+      gap: var(--spacing-1-5);
     }
   }
 
@@ -371,11 +371,11 @@
   @media (max-width: 768px), (pointer: coarse) {
     .editor-subhead-bar {
       min-height: 48px;
-      padding-right: 10px;
+      padding-right: var(--spacing-2-5);
     }
 
     .subhead-meta-container {
-      margin-left: 10px;
+      margin-left: var(--spacing-2-5);
     }
   }
 </style>

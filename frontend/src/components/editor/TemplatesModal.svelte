@@ -13,19 +13,19 @@
   }
 
   interface Props {
-    isOpen: boolean;
+    open: boolean;
     selectedFile?: string;
     hasEditorView?: boolean;
     onApplyTemplate: (template: Template) => void | Promise<void>;
-    onClose: () => void;
+    onclose: () => void;
   }
 
   let {
-    isOpen,
+    open: isOpen,
     selectedFile = '',
     hasEditorView = false,
     onApplyTemplate,
-    onClose
+    onclose: onClose
   }: Props = $props();
 
   let templates = $state<Template[]>([]);
@@ -89,7 +89,7 @@
 </script>
 
 <Modal
-  {isOpen}
+  open={isOpen}
   title={$t('editor.templates')}
   maxWidth="900px"
   class="templates-wide-modal"
@@ -181,7 +181,7 @@
   }
 
   :global(.templates-wide-modal .modal-header) {
-    padding: 20px 20px 12px;
+    padding: var(--spacing-5) var(--spacing-5) var(--spacing-3);
     border-bottom: 1px solid var(--border);
     display: flex;
     justify-content: space-between;
@@ -216,17 +216,17 @@
 
   .templates-col-list :global(.tabs) {
     margin-bottom: 0;
-    padding: 0 12px;
+    padding: 0 var(--spacing-3);
   }
 
   .templates-col-list .template-list {
-    padding: 12px;
+    padding: var(--spacing-3);
   }
 
   .template-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
     overflow-y: auto;
     flex: 1;
     scrollbar-width: thin;
@@ -246,7 +246,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px;
+    padding: var(--spacing-3);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -272,7 +272,7 @@
   .template-info {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .template-name {
@@ -290,8 +290,8 @@
     font-size: var(--font-size-xs);
     font-weight: 600;
     background: var(--bg-card);
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
+    border-radius: var(--radius-sm);
     border: 1px solid var(--border);
     color: var(--fg-dim);
     font-family: var(--font-family-mono);
@@ -307,7 +307,7 @@
 
   .template-preview-code {
     margin: 0;
-    padding: 16px;
+    padding: var(--spacing-4);
     font-family: var(--font-family-mono);
     font-size: var(--font-size-base);
     line-height: 1.5;
@@ -340,7 +340,7 @@
   }
 
   .templates-empty-state {
-    padding: 24px 16px;
+    padding: var(--spacing-6) var(--spacing-4);
     text-align: center;
   }
 
@@ -348,7 +348,7 @@
     font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-secondary);
-    margin: 0 0 6px;
+    margin: 0 0 var(--spacing-1-5);
   }
 
   .templates-empty-hint {
@@ -358,7 +358,7 @@
   }
 
   .templates-modal-footer {
-    padding: 12px 20px;
+    padding: var(--spacing-3) var(--spacing-5);
     border-top: 1px solid var(--border);
     display: flex;
     justify-content: flex-end;

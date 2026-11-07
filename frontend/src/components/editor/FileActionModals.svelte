@@ -62,7 +62,7 @@
   }
 </script>
 
-<Modal isOpen={createOpen} title={$t('editor.create_file')} onclose={onCloseCreate}>
+<Modal open={createOpen} title={$t('editor.create_file')} onclose={onCloseCreate}>
   <label for="new-file-name" class="sr-only">{$t('editor.file_name')}</label>
   <div class="name-field">
     <input
@@ -91,7 +91,7 @@
   </div>
 </Modal>
 
-<Modal isOpen={renameOpen} title={$t('editor.rename_file')} onclose={onCloseRename}>
+<Modal open={renameOpen} title={$t('editor.rename_file')} onclose={onCloseRename}>
   <label for="rename-target" class="sr-only">{$t('editor.new_name')}</label>
   <div class="name-field">
     <input
@@ -122,11 +122,11 @@
 
 <style>
   .name-field {
-    margin-bottom: 16px;
+    margin-bottom: var(--spacing-4);
   }
 
   .form-hint {
-    margin: 6px 0 0;
+    margin: var(--spacing-1-5) 0 0;
     font-size: var(--font-size-xs);
     line-height: 1.4;
     color: var(--fg-secondary);

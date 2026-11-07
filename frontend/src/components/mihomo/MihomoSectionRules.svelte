@@ -1,6 +1,6 @@
 <script lang="ts">
   import Modal from '../Modal.svelte';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import RuleForm from './RuleForm.svelte';
   import { t } from '../../i18n';
   import { getMihomoContext } from './MihomoContext.svelte';
@@ -92,7 +92,7 @@
       <span class="item-name rule-value">{r.value}</span>
       <span class="item-meta">→ {r.outbound}</span>
       <button type="button" class="item-btn" onclick={() => editRule(r)} title={$t('app.edit')}>
-        <Icon name="edit" />
+        <Icon name="edit" size={13} />
       </button>
       <button
         type="button"
@@ -116,7 +116,7 @@
         onclick={() => editRule(matchRule)}
         title={$t('app.edit')}
       >
-        <Icon name="edit" />
+        <Icon name="edit" size={13} />
       </button>
       <button
         type="button"
@@ -130,7 +130,7 @@
 
 <!-- Modal Rule Form -->
 <Modal
-  isOpen={showRuleForm}
+  open={showRuleForm}
   title={editingRuleId ? $t('mihomo.edit_rule_title') : $t('mihomo.add_rule_title')}
   onclose={() => {
     showRuleForm = false;
@@ -150,24 +150,24 @@
 
 <style>
   .sec-body {
-    padding: 16px;
+    padding: var(--spacing-4);
   }
 
   .item-row {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
+    gap: var(--spacing-2-5);
+    padding: var(--spacing-2) var(--spacing-3);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    margin-bottom: 6px;
+    margin-bottom: var(--spacing-1-5);
   }
 
   .item-badge {
     font-size: var(--font-size-xs);
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
+    border-radius: var(--radius-sm);
     font-weight: 500;
     flex-shrink: 0;
   }
@@ -185,7 +185,7 @@
   }
 
   .match-rule-row {
-    margin-top: 8px;
+    margin-top: var(--spacing-2);
     border-top: 1px dashed var(--border);
     background: var(--bg-elevated);
     border-left: 3px solid var(--seq-5);
@@ -203,7 +203,7 @@
   }
 
   .rule-value {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: var(--font-size-xs);
   }
 
@@ -225,7 +225,7 @@
     color: var(--fg-faint);
     cursor: pointer;
     font-size: var(--font-size-xs);
-    padding: 4px 6px;
+    padding: var(--spacing-1) var(--spacing-1-5);
     border-radius: var(--radius-sm);
     transition:
       color var(--transition-fast),
@@ -245,7 +245,7 @@
     color: var(--fg-faint);
     cursor: pointer;
     font-size: var(--font-size-xs);
-    padding: 2px 4px;
+    padding: var(--spacing-0-5) var(--spacing-1);
     border-radius: var(--radius-sm);
     transition: color var(--transition-fast);
     flex-shrink: 0;
@@ -289,7 +289,7 @@
 
   .add-btn {
     font-size: var(--font-size-xs);
-    padding: 6px 12px;
+    padding: var(--spacing-1-5) var(--spacing-3);
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition:

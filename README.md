@@ -265,3 +265,6 @@ make router-mips
 # Frontend dev-сервер (proxy /api → :8090)
 cd frontend && npm run dev
 ```
+
+Токены, компоненты и стражи интерфейса описаны в [frontend/DESIGN_SYSTEM.md](frontend/DESIGN_SYSTEM.md);
+проверки дизайн-системы — `cd frontend && npm run check:contrast`.

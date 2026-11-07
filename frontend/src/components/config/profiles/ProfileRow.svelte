@@ -89,7 +89,7 @@
     )
   );
   const ownerClass = $derived(
-    kind === 'panel' ? 'badge-primary' : kind === 'user' ? 'badge-type' : ''
+    kind === 'panel' ? 'badge-info' : kind === 'user' ? 'badge-emphasis' : ''
   );
   const meta = $derived(
     entry ? `${formatDate(entry.mtime * 1000)} · ${formatBytes(entry.size)}` : ''
@@ -182,14 +182,14 @@
         <span class="pr-name">{name}</span>
       {/if}
       <span class="pr-badges">
-        <span class="badge {ownerClass}">{ownerLabel}</span>
+        <span class="badge badge--tag {ownerClass}">{ownerLabel}</span>
         {#if active}
-          <span class="badge badge-success" data-testid="profile-active-{name}">
+          <span class="badge badge--tag badge-success" data-testid="profile-active-{name}">
             {$t('cfg.prof.active')}
           </span>
         {/if}
         {#if kind === 'panel' && panelPending}
-          <span class="badge badge-warning">{$t('cfg.sec.owner_pending')}</span>
+          <span class="badge badge--tag badge-warning">{$t('cfg.sec.owner_pending')}</span>
         {/if}
       </span>
     </div>

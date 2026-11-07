@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from './components/Toggle.svelte';
   import { onMount } from 'svelte';
   import { setAnimationsEnabled } from './lib/motion.svelte';
   import Modal from './components/Modal.svelte';
@@ -1121,15 +1122,11 @@
                 <span class="field-row-name">{$t('settings.animations')}</span>
                 <div class="field-row-desc">{$t('settings.animations_desc')}</div>
               </div>
-              <label class="toggle-switch">
-                <input
-                  type="checkbox"
-                  aria-label={$t('settings.animations')}
-                  bind:checked={animationsEnabled}
-                  onchange={() => setAnimationsEnabled(animationsEnabled)}
-                />
-                <span class="toggle-slider"></span>
-              </label>
+              <Toggle
+                aria-label={$t('settings.animations')}
+                bind:checked={animationsEnabled}
+                onchange={() => setAnimationsEnabled(animationsEnabled)}
+              />
             </div>
           </div>
         </div>
@@ -1143,16 +1140,12 @@
                 <span class="field-row-name">{$t('settings.capsule_visible')}</span>
                 <div class="field-row-desc">{$t('settings.capsule_visible_desc')}</div>
               </div>
-              <label class="toggle-switch">
-                <input
-                  type="checkbox"
-                  aria-label={$t('settings.capsule_visible')}
-                  checked={$capsuleConfigStore.visible}
-                  onchange={(e) =>
-                    updateCapsuleConfig({ visible: (e.target as HTMLInputElement).checked })}
-                />
-                <span class="toggle-slider"></span>
-              </label>
+              <Toggle
+                aria-label={$t('settings.capsule_visible')}
+                checked={$capsuleConfigStore.visible}
+                onchange={(e) =>
+                  updateCapsuleConfig({ visible: (e.target as HTMLInputElement).checked })}
+              />
             </div>
             {#if $capsuleConfigStore.visible}
               <div class="field-row">
@@ -1160,34 +1153,26 @@
                   <span class="field-row-name">{$t('settings.capsule_traffic')}</span>
                   <div class="field-row-desc">{$t('settings.capsule_traffic_desc')}</div>
                 </div>
-                <label class="toggle-switch">
-                  <input
-                    type="checkbox"
-                    aria-label={$t('settings.capsule_traffic')}
-                    checked={$capsuleConfigStore.showTraffic}
-                    onchange={(e) =>
-                      updateCapsuleConfig({ showTraffic: (e.target as HTMLInputElement).checked })}
-                  />
-                  <span class="toggle-slider"></span>
-                </label>
+                <Toggle
+                  aria-label={$t('settings.capsule_traffic')}
+                  checked={$capsuleConfigStore.showTraffic}
+                  onchange={(e) =>
+                    updateCapsuleConfig({ showTraffic: (e.target as HTMLInputElement).checked })}
+                />
               </div>
               <div class="field-row">
                 <div>
                   <span class="field-row-name">{$t('settings.capsule_resources')}</span>
                   <div class="field-row-desc">{$t('settings.capsule_resources_desc')}</div>
                 </div>
-                <label class="toggle-switch">
-                  <input
-                    type="checkbox"
-                    aria-label={$t('settings.capsule_resources')}
-                    checked={$capsuleConfigStore.showResources}
-                    onchange={(e) =>
-                      updateCapsuleConfig({
-                        showResources: (e.target as HTMLInputElement).checked
-                      })}
-                  />
-                  <span class="toggle-slider"></span>
-                </label>
+                <Toggle
+                  aria-label={$t('settings.capsule_resources')}
+                  checked={$capsuleConfigStore.showResources}
+                  onchange={(e) =>
+                    updateCapsuleConfig({
+                      showResources: (e.target as HTMLInputElement).checked
+                    })}
+                />
               </div>
             {/if}
           </div>
@@ -1202,60 +1187,44 @@
                 <span class="field-row-name">{$t('settings.auto_refresh')}</span>
                 <div class="field-row-desc">{$t('settings.auto_refresh_desc')}</div>
               </div>
-              <label class="toggle-switch">
-                <input
-                  type="checkbox"
-                  aria-label={$t('settings.auto_refresh')}
-                  bind:checked={autoRefresh}
-                  onchange={() => saveSetting('autoRefresh', String(autoRefresh))}
-                />
-                <span class="toggle-slider"></span>
-              </label>
+              <Toggle
+                aria-label={$t('settings.auto_refresh')}
+                bind:checked={autoRefresh}
+                onchange={() => saveSetting('autoRefresh', String(autoRefresh))}
+              />
             </div>
             <div class="field-row">
               <div>
                 <span class="field-row-name">{$t('settings.confirm_dangerous')}</span>
                 <div class="field-row-desc">{$t('settings.confirm_dangerous_desc')}</div>
               </div>
-              <label class="toggle-switch">
-                <input
-                  type="checkbox"
-                  aria-label={$t('settings.confirm_dangerous')}
-                  bind:checked={confirmDangerous}
-                  onchange={() => saveSetting('confirmDangerous', String(confirmDangerous))}
-                />
-                <span class="toggle-slider"></span>
-              </label>
+              <Toggle
+                aria-label={$t('settings.confirm_dangerous')}
+                bind:checked={confirmDangerous}
+                onchange={() => saveSetting('confirmDangerous', String(confirmDangerous))}
+              />
             </div>
             <div class="field-row">
               <div>
                 <span class="field-row-name">{$t('settings.notification_sound')}</span>
                 <div class="field-row-desc">{$t('settings.notification_sound_desc')}</div>
               </div>
-              <label class="toggle-switch">
-                <input
-                  type="checkbox"
-                  aria-label={$t('settings.notification_sound')}
-                  bind:checked={notificationSound}
-                  onchange={() => saveSetting('notificationSound', String(notificationSound))}
-                />
-                <span class="toggle-slider"></span>
-              </label>
+              <Toggle
+                aria-label={$t('settings.notification_sound')}
+                bind:checked={notificationSound}
+                onchange={() => saveSetting('notificationSound', String(notificationSound))}
+              />
             </div>
             <div class="field-row">
               <div>
                 <span class="field-row-name">{$t('settings.dev_mode')}</span>
                 <div class="field-row-desc">{$t('settings.dev_mode_desc')}</div>
               </div>
-              <label class="toggle-switch">
-                <input
-                  type="checkbox"
-                  aria-label={$t('settings.dev_mode')}
-                  checked={$devMode}
-                  onchange={(e) => setDevMode((e.target as HTMLInputElement).checked)}
-                />
-                <span class="toggle-slider"></span>
-              </label>
+              <Toggle
+                aria-label={$t('settings.dev_mode')}
+                checked={$devMode}
+                onchange={(e) => setDevMode((e.target as HTMLInputElement).checked)}
+              />
             </div>
             <div class="field-row" data-testid="config-layer-row">
               <div>
@@ -1266,19 +1235,13 @@
                 {#if configLayerPending}
                   <span class="spinner" aria-hidden="true"></span>
                 {/if}
-                <label
-                  class="toggle-switch"
+                <Toggle
                   title={$applyRunning ? $t('settings.config_layer_busy_hint') : undefined}
-                >
-                  <input
-                    type="checkbox"
-                    aria-label={$t('settings.config_layer')}
-                    checked={$configLayerEnabled}
-                    disabled={configLayerPending || $applyRunning}
-                    onchange={onToggleConfigLayer}
-                  />
-                  <span class="toggle-slider"></span>
-                </label>
+                  ariaLabel={$t('settings.config_layer')}
+                  checked={$configLayerEnabled}
+                  disabled={configLayerPending || $applyRunning}
+                  onchange={onToggleConfigLayer}
+                />
               </div>
             </div>
           </div>
@@ -1765,7 +1728,8 @@
                     <div class="session-name-row">
                       <span class="field-row-name session-name-text">{sessionDeviceLabel(s)}</span>
                       {#if s.current}
-                        <span class="badge badge-info">{$t('settings.sessions_current_badge')}</span
+                        <span class="badge badge--tag badge-info"
+                          >{$t('settings.sessions_current_badge')}</span
                         >
                       {/if}
                     </div>
@@ -1897,9 +1861,9 @@
   .settings-list-item {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: var(--spacing-3-5);
     min-height: 64px;
-    padding: 10px 14px;
+    padding: var(--spacing-2-5) var(--spacing-3-5);
     border: 0;
     border-bottom: 1px solid var(--border-light);
     background: none;
@@ -1932,7 +1896,7 @@
   .sli-text {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     flex: 1;
     min-width: 0;
   }
@@ -1953,16 +1917,16 @@
   }
 
   .settings-back-row {
-    margin: -4px 0 12px;
+    margin: calc(-1 * var(--spacing-1)) 0 var(--spacing-3);
   }
 
   .settings-back {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     min-height: 40px;
-    margin-left: -8px;
-    padding: 0 10px 0 4px;
+    margin-left: calc(-1 * var(--spacing-2));
+    padding: 0 var(--spacing-2-5) 0 var(--spacing-1);
     border: 0;
     border-radius: var(--radius-md);
     background: none;
@@ -1973,7 +1937,7 @@
   }
 
   .settings-section-title {
-    margin: 4px 0 0;
+    margin: var(--spacing-1) 0 0;
     font-size: var(--font-size-xl);
   }
 
@@ -1987,9 +1951,9 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 0;
+    padding: var(--spacing-2-5) 0;
     border-bottom: 1px solid var(--border);
-    gap: 16px;
+    gap: var(--spacing-4);
   }
 
   .field-row:last-child {
@@ -2035,13 +1999,13 @@
   .field-row--stack {
     flex-direction: column;
     align-items: stretch;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .theme-picker {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
 
   .theme-option {
@@ -2052,8 +2016,8 @@
     --pv-text: var(--fg-primary);
     position: relative;
     display: grid;
-    gap: 6px;
-    padding: 6px;
+    gap: var(--spacing-1-5);
+    padding: var(--spacing-1-5);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     cursor: pointer;
@@ -2084,7 +2048,7 @@
     font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-primary);
-    padding: 0 2px 2px;
+    padding: 0 var(--spacing-0-5) var(--spacing-0-5);
   }
 
   .theme-preview {
@@ -2111,7 +2075,7 @@
   .pv-side {
     display: grid;
     align-content: start;
-    gap: 4px;
+    gap: var(--spacing-1);
     padding: 7px 5px;
     background: var(--pv-card);
   }
@@ -2135,7 +2099,7 @@
     grid-template-columns: 1fr 1fr;
     align-content: start;
     gap: 5px;
-    padding: 7px 6px;
+    padding: 7px var(--spacing-1-5);
     min-width: 0;
   }
 
@@ -2145,11 +2109,11 @@
 
   .pv-card {
     display: grid;
-    gap: 4px;
+    gap: var(--spacing-1);
     align-content: start;
     padding: 5px;
     height: 26px;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     background: var(--pv-card);
   }
 
@@ -2166,7 +2130,7 @@
   /* accent color picker */
   .accent-picker {
     display: flex;
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
 
   .accent-swatch {
@@ -2217,23 +2181,23 @@
   }
 
   .field-row-val.mono {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: var(--font-size-xs);
   }
 
   .mono {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: var(--font-size-xs);
   }
 
   .field-value-badge {
     font-size: var(--font-size-sm);
-    padding: 5px 10px;
+    padding: 5px var(--spacing-2-5);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     background: var(--bg-card);
     color: var(--fg-primary);
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     display: inline-flex;
     align-items: center;
   }
@@ -2241,8 +2205,8 @@
   .field-row-info {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 10px var(--card-pad);
+    gap: var(--spacing-2);
+    padding: var(--spacing-2-5) var(--card-pad);
     font-size: var(--font-size-sm);
     color: var(--fg-secondary);
     border-bottom: 1px solid var(--border);
@@ -2256,7 +2220,7 @@
   .card-rows > .field-error,
   .card-rows > .field-success,
   .card-rows > .field-row-desc {
-    margin: 0 var(--card-pad) 12px;
+    margin: 0 var(--card-pad) var(--spacing-3);
   }
 
   .card-rows > .field-group + .field-row-desc {
@@ -2264,7 +2228,7 @@
   }
 
   .field-group > .field-error {
-    margin: 0 var(--card-pad) 12px;
+    margin: 0 var(--card-pad) var(--spacing-3);
   }
 
   .status-ok {
@@ -2276,38 +2240,38 @@
   }
 
   .field-error {
-    margin-top: 8px;
+    margin-top: var(--spacing-2);
     font-size: var(--font-size-sm);
     color: var(--danger);
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     background: color-mix(in srgb, var(--danger) 8%, transparent);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
   }
 
   .field-success {
-    margin-top: 8px;
+    margin-top: var(--spacing-2);
     font-size: var(--font-size-sm);
     color: var(--success);
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     background: color-mix(in srgb, var(--success) 8%, transparent);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
   }
 
   .field-row-desc {
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
     overflow-wrap: anywhere;
   }
 
   /* Резервные копии: создание снимка, таблица, загрузка архива */
   .snapshot-create {
     display: flex;
-    gap: 12px;
+    gap: var(--spacing-3);
     align-items: center;
-    padding: 14px var(--card-pad);
+    padding: var(--spacing-3-5) var(--card-pad);
     border-bottom: 1px solid var(--border);
   }
 
@@ -2320,7 +2284,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     padding: 28px var(--card-pad);
     text-align: center;
   }
@@ -2374,7 +2338,7 @@
 
   .snap-actions {
     display: flex;
-    gap: 8px;
+    gap: var(--spacing-2);
     justify-content: flex-end;
   }
 
@@ -2385,7 +2349,7 @@
   }
 
   .snapshot-upload {
-    padding: 12px var(--card-pad);
+    padding: var(--spacing-3) var(--card-pad);
   }
 
   .backup-dropzone {
@@ -2394,8 +2358,8 @@
     align-items: center;
     justify-content: center;
     flex-wrap: wrap;
-    gap: 6px 10px;
-    padding: 14px 16px;
+    gap: var(--spacing-1-5) var(--spacing-2-5);
+    padding: var(--spacing-3-5) var(--spacing-4);
     border: 1px dashed var(--border);
     border-radius: var(--radius-md);
     background: transparent;
@@ -2458,7 +2422,7 @@
   .session-info {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     min-width: 0;
     flex: 1;
   }
@@ -2466,7 +2430,7 @@
   .session-name-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     min-width: 0;
   }
 
@@ -2522,7 +2486,7 @@
     .password-row {
       flex-direction: column;
       align-items: stretch;
-      gap: 6px;
+      gap: var(--spacing-1-5);
     }
 
     .password-row .password-field-wrap {
@@ -2538,14 +2502,14 @@
   .password-field-with-meter {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   /* Время жизни сессии (D-06) */
   .ttl-input-group {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .ttl-input-group .input {
@@ -2568,7 +2532,7 @@
   .field-row-val--inline {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   /* Имена архивов длинные: список не сжимается до нечитаемого */

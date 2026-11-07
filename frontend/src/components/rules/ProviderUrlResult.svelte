@@ -114,8 +114,8 @@
   .url-result {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    padding: 8px 16px;
+    gap: var(--spacing-1);
+    padding: var(--spacing-2) var(--spacing-4);
     background: var(--bg-elevated);
     border-radius: var(--radius-md);
     min-width: 0;
@@ -124,7 +124,7 @@
   .row {
     display: flex;
     align-items: flex-start;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     margin: 0;
     font-size: var(--font-size-sm);
     font-weight: 600;
@@ -134,7 +134,7 @@
 
   .row :global(svg) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .row-ok :global(svg) {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '../../i18n';
   import Select from '../Select.svelte';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import type { XrayInbound } from './XrayContext.svelte';
 
   let {
@@ -52,7 +52,7 @@
   {#each inbounds as inbound (inbound.tag)}
     <div class="card inbound-card">
       <div class="inbound-title">
-        <span class="badge type-{inbound.protocol}">{inbound.protocol}</span>
+        <span class="badge badge--tag type-{inbound.protocol}">{inbound.protocol}</span>
         <strong>{inbound.tag}</strong>
         <button
           type="button"
@@ -64,14 +64,14 @@
           <Icon name="close" size={12} />
         </button>
       </div>
-      <div class="form-row2" style="margin-top:var(--spacing-2, 8px)">
+      <div class="form-row2" style="margin-top:var(--spacing-2)">
         <div class="form-col">
           <label class="form-label" for="xray-inbound-port-{inbound.tag}"
             >{$t('xray.inbound_port')}</label
           >
           <input
             id="xray-inbound-port-{inbound.tag}"
-            class="form-input"
+            class="input input-sm"
             type="number"
             bind:value={inbound.port}
             oninput={markChanged}
@@ -85,7 +85,7 @@
           >
           <input
             id="xray-inbound-listen-{inbound.tag}"
-            class="form-input"
+            class="input input-sm"
             bind:value={inbound.listen}
             oninput={markChanged}
           />
@@ -100,7 +100,7 @@
         <label class="form-label" for="xray-new-inbound-tag">{$t('xray.tag')}</label>
         <input
           id="xray-new-inbound-tag"
-          class="form-input"
+          class="input input-sm"
           bind:value={newInbound.tag}
           placeholder="socks-in"
         />
@@ -110,7 +110,7 @@
           <label class="form-label" for="xray-new-inbound-port">{$t('xray.port')}</label>
           <input
             id="xray-new-inbound-port"
-            class="form-input"
+            class="input input-sm"
             type="number"
             bind:value={newInbound.port}
             min="1"
@@ -158,7 +158,7 @@
   .sec-body {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .section-title {
@@ -168,13 +168,13 @@
   }
 
   .inbound-card {
-    padding: 12px;
+    padding: var(--spacing-3);
   }
 
   .inbound-title {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .item-del {
@@ -183,7 +183,7 @@
     cursor: pointer;
     color: var(--fg-secondary);
     font-size: var(--font-size-base);
-    padding: 4px 6px;
+    padding: var(--spacing-1) var(--spacing-1-5);
     border-radius: var(--radius-xs);
     transition:
       color var(--transition-fast),
@@ -198,16 +198,16 @@
   }
 
   .form-card {
-    padding: 16px;
+    padding: var(--spacing-4);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .form-row2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   @media (max-width: 768px) {
@@ -219,13 +219,13 @@
   .form-col {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .form-row {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .form-label {
@@ -234,25 +234,11 @@
     color: var(--fg-secondary);
   }
 
-  .form-input {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 6px 10px;
-    font-size: var(--font-size-sm);
-    color: var(--fg-primary);
-  }
-
-  .form-input:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-
   :global(.form-select) {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
@@ -260,7 +246,7 @@
   .checkbox-container {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     font-size: var(--font-size-sm);
     color: var(--fg-primary);
     cursor: pointer;
@@ -306,15 +292,15 @@
   .form-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 8px;
-    margin-top: 4px;
+    gap: var(--spacing-2);
+    margin-top: var(--spacing-1);
   }
 
   .add-btn {
     background: var(--bg-card);
     border: 1px dashed var(--border);
     border-radius: var(--radius);
-    padding: 10px 16px;
+    padding: var(--spacing-2-5) var(--spacing-4);
     color: var(--fg-secondary);
     font-size: var(--font-size-sm);
     font-weight: 500;

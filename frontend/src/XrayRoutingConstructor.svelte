@@ -1227,12 +1227,12 @@
         content={activePreviewText}
         language="json"
         storageKey="xray_constructor_preview_width"
-        isOpen={showPreviewPane}
-        onClose={() => (showPreviewPane = false)}
+        open={showPreviewPane}
+        onclose={() => (showPreviewPane = false)}
         tabs={previewTabs}
         activeTab={activePreviewTab}
         onTabChange={(tabId) => (activePreviewTab = tabId)}
-        testId="xray-json-preview"
+        testid="xray-json-preview"
       >
         {#if validationError}
           <div
@@ -1278,9 +1278,9 @@
 </div>
 
 <Modal
-  isOpen={showApplyConfirm}
+  open={showApplyConfirm}
   title={$t('editor.apply_confirm_title')}
-  dataTestid="apply-confirm-dialog"
+  testid="apply-confirm-dialog"
   onclose={() => (showApplyConfirm = false)}
 >
   <p>{willRestart ? $t('editor.apply_confirm_body') : $t('apply.confirm_body_no_restart')}</p>
@@ -1339,9 +1339,9 @@
     align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: 16px;
-    padding: 12px 18px;
-    margin-bottom: 16px;
+    gap: var(--spacing-4);
+    padding: var(--spacing-3) 18px;
+    margin-bottom: var(--spacing-4);
     border: 1px solid var(--accent);
     border-radius: var(--radius-md);
     background: var(--accent-soft);
@@ -1350,7 +1350,7 @@
   .stub-banner-text {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     font-size: var(--font-size-base);
     color: var(--fg-secondary);
   }
@@ -1361,7 +1361,7 @@
 
   .stub-banner-actions {
     display: flex;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .container {
@@ -1374,20 +1374,20 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 16px;
-    margin-bottom: 20px;
+    gap: var(--spacing-4);
+    margin-bottom: var(--spacing-5);
     flex-wrap: wrap;
   }
 
   .constructor-title {
-    font-size: var(--font-size-xl, 1.25rem);
+    font-size: var(--font-size-xl);
     font-weight: 600;
-    margin: 0 0 4px 0;
+    margin: 0 0 var(--spacing-1) 0;
     color: var(--fg-primary);
   }
 
   .constructor-sub {
-    font-size: var(--font-size-sm, 0.8125rem);
+    font-size: var(--font-size-sm);
     color: var(--fg-secondary);
     margin: 0;
   }
@@ -1396,19 +1396,19 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: var(--spacing-3, 12px);
-    padding-bottom: var(--spacing-2, 8px);
+    margin-bottom: var(--spacing-3);
+    padding-bottom: var(--spacing-2);
     border-bottom: 1px solid var(--border);
   }
 
   .embedded-title-tag {
-    font-size: var(--font-size-sm, 0.8125rem);
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
 
   .constructor-header-actions {
     display: flex;
-    gap: var(--spacing-2, 8px);
+    gap: var(--spacing-2);
   }
 
   .gen-layout {
@@ -1423,7 +1423,7 @@
   .gen-left {
     flex: 1;
     min-width: 320px;
-    padding-right: var(--spacing-3, 12px);
+    padding-right: var(--spacing-3);
     display: flex;
     flex-direction: column;
   }
@@ -1437,8 +1437,8 @@
   .rule-providers-row {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 16px;
+    gap: var(--spacing-3);
+    margin-bottom: var(--spacing-4);
   }
 
   .rule-providers-row :global(.xcp-select) {
@@ -1451,9 +1451,9 @@
     display: flex;
     max-width: 100%;
     min-width: 0;
-    gap: var(--spacing-2, 8px);
+    gap: var(--spacing-2);
     border-bottom: 1px solid var(--border);
-    margin-bottom: var(--spacing-4, 16px);
+    margin-bottom: var(--spacing-4);
     overflow-x: auto;
     scrollbar-width: none;
   }
@@ -1463,16 +1463,16 @@
   }
 
   .sec-tab {
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
     background: transparent;
     border: none;
     border-bottom: 2px solid transparent;
     color: var(--fg-secondary);
-    font-size: var(--font-size-sm, 0.8125rem);
+    font-size: var(--font-size-sm);
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     margin-bottom: -1px;
     min-height: 36px;
     white-space: nowrap;
@@ -1487,9 +1487,9 @@
   .sec-count {
     background: var(--bg-surface-active);
     color: var(--fg-primary);
-    font-size: var(--font-size-xs, 0.6875rem);
+    font-size: var(--font-size-xs);
     padding: 1px 5px;
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     font-weight: 600;
   }
 

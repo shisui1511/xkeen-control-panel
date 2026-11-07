@@ -199,10 +199,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={$t('cfg.geo.url_title', { file })}
   maxWidth="640px"
-  dataTestid="geo-url-modal"
+  testid="geo-url-modal"
   onclose={close}
 >
   <div class="eu-body">

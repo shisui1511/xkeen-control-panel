@@ -91,7 +91,7 @@
   .cmn-list {
     display: flex;
     flex-direction: column;
-    margin-bottom: 16px;
+    margin-bottom: var(--spacing-4);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     background: var(--bg-card);
@@ -101,9 +101,9 @@
   .cmn-item {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--spacing-2-5);
     min-height: 52px;
-    padding: 8px 12px 8px 16px;
+    padding: var(--spacing-2) var(--spacing-3) var(--spacing-2) var(--spacing-4);
     border: 0;
     border-bottom: 1px solid var(--border-light);
     background: none;
@@ -136,16 +136,16 @@
   }
 
   .cmn-back-row {
-    margin: 0 0 12px;
+    margin: 0 0 var(--spacing-3);
   }
 
   .cmn-back {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     min-height: 40px;
-    margin-left: -8px;
-    padding: 0 10px 0 4px;
+    margin-left: calc(-1 * var(--spacing-2));
+    padding: 0 var(--spacing-2-5) 0 var(--spacing-1);
     border: 0;
     border-radius: var(--radius-md);
     background: none;
@@ -156,7 +156,7 @@
   }
 
   .cmn-title {
-    margin: 2px 0 0;
+    margin: var(--spacing-0-5) 0 0;
     font-size: var(--font-size-xl);
   }
 
@@ -169,8 +169,8 @@
     z-index: 80;
     display: grid;
     grid-template-columns: auto 1fr;
-    gap: 8px;
-    padding: 8px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     background: var(--bg-card);

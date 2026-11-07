@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from '../../Toggle.svelte';
   import { t } from '../../../i18n';
   import MihomoField, { describedBy } from './MihomoField.svelte';
 
@@ -36,23 +37,20 @@
       data-testid={testid}
     />
   {:else}
-    <label class="toggle-switch">
-      <input
-        {id}
-        type="checkbox"
-        {checked}
-        aria-describedby={describedBy(id, '', hint)}
-        data-testid={testid}
-        onchange={(e) => onchange(e.currentTarget.checked)}
-      />
-      <span class="toggle-slider"></span>
-    </label>
+    <Toggle
+      class="mt-switch"
+      {id}
+      {checked}
+      aria-describedby={describedBy(id, '', hint)}
+      data-testid={testid}
+      onchange={(e) => onchange(e.currentTarget.checked)}
+    />
   {/if}
 </MihomoField>
 
 <style>
   /* Сенсорная зона .toggle-switch выходит за 34x18; запас по высоте не даёт строкам слипаться */
-  .toggle-switch {
+  :global(.mt-switch) {
     margin: var(--spacing-2) 0;
   }
 </style>

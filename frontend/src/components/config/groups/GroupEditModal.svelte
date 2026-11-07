@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from '../../Toggle.svelte';
   import { untrack } from 'svelte';
   import { t, tp } from '../../../i18n';
   import Modal from '../../Modal.svelte';
@@ -413,10 +414,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={group ? $t('cfg.groups.modal_edit') : $t('cfg.groups.modal_new')}
   maxWidth={mode === 'manual' ? '720px' : '640px'}
-  dataTestid="group-modal"
+  testid="group-modal"
   onclose={close}
 >
   <div class="gm-body">
@@ -444,7 +445,7 @@
       <p class="gm-hint" data-testid="group-mode-desc">{$t(`cfg.groups.mode_${mode}_desc`)}</p>
       {#each versionWarnings as text (text)}
         <p class="gm-warn" data-testid="group-version-warning">
-          <span class="chip chip-warning">{text}</span>
+          <span class="badge badge-warning">{text}</span>
         </p>
       {/each}
     </div>
@@ -710,7 +711,7 @@
       {/if}
       {#each emptyOne as r (r.id)}
         <p class="gm-warn" data-testid="group-empty-{r.id}">
-          <span class="chip chip-warning">
+          <span class="badge badge-warning">
             {$t('cfg.groups.empty_one_kernel', { kernel: r.name })}
           </span>
         </p>
@@ -719,10 +720,7 @@
 
     <!-- Эксперт -->
     <div class="gm-expert">
-      <label class="toggle-switch">
-        <input type="checkbox" id="{uid}-expert" bind:checked={expert} data-testid="group-expert" />
-        <span class="toggle-slider"></span>
-      </label>
+      <Toggle id="{uid}-expert" bind:checked={expert} data-testid="group-expert" />
       <label class="gm-expert-label" for="{uid}-expert">{$t('cfg.groups.expert')}</label>
     </div>
 
@@ -799,7 +797,7 @@
     overflow-wrap: anywhere;
   }
 
-  .gm-warn .chip {
+  .gm-warn .badge {
     white-space: normal;
     max-width: 100%;
     overflow-wrap: anywhere;

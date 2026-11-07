@@ -81,6 +81,7 @@
                   <span class="toggle-switch">
                     <input
                       type="checkbox"
+                      role="switch"
                       checked={isOn(s)}
                       disabled={disabled || !!s.draft || (isOn(s) && !onoff)}
                       aria-label={$t('cfg.geo.switch_aria', { provider: p.name, kind: s.kind })}
@@ -111,7 +112,7 @@
   .sg-provider {
     min-width: 0;
     margin: 0;
-    padding: 14px var(--card-pad) 6px;
+    padding: var(--spacing-3-5) var(--card-pad) var(--spacing-1-5);
     border: none;
   }
 
@@ -144,7 +145,7 @@
   }
 
   .sg-toggle {
-    min-height: var(--btn-h, 32px);
+    min-height: var(--btn-h);
     font-size: var(--font-size-xs);
     font-weight: 600;
   }

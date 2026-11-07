@@ -399,10 +399,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={$t('cfg.preset.title')}
   maxWidth="720px"
-  dataTestid="preset-modal"
+  testid="preset-modal"
   onclose={() => void close()}
 >
   <div class="pm-body" data-mode={mode}>

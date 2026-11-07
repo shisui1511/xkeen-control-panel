@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '../../i18n';
   import Modal from '../Modal.svelte';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import XrayOutboundForm from './XrayOutboundForm.svelte';
   import type { OutboundDetail } from './XrayContext.svelte';
   import { apiFetchJSON } from '../../lib/api';
@@ -250,7 +250,7 @@
         style="margin-bottom: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between;"
       >
         <div>
-          <span class="badge badge-tag">{item.tag}</span>
+          <span class="badge badge--tag badge-tag">{item.tag}</span>
           <span
             style="font-size: var(--font-size-xs); color: var(--fg-secondary); margin-left: 8px;"
           >
@@ -264,7 +264,7 @@
             onclick={() => openEditOutbound(idx)}
             title={$t('app.edit')}
           >
-            <Icon name="edit" />
+            <Icon name="edit" size={13} />
           </button>
           <button
             type="button"
@@ -285,7 +285,9 @@
         style="margin-bottom: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between; opacity: 0.75; background: var(--bg-surface-active);"
       >
         <div>
-          <span class="badge badge-tag" style="background: var(--bg-card);">{item.tag}</span>
+          <span class="badge badge--tag badge-tag" style="background: var(--bg-card);"
+            >{item.tag}</span
+          >
           {#if item.server}
             <span
               style="font-size: var(--font-size-xs); color: var(--fg-secondary); margin-left: 8px;"
@@ -312,7 +314,7 @@
 
   <!-- Outbound Modal using XrayOutboundForm -->
   <Modal
-    isOpen={showOutboundForm}
+    open={showOutboundForm}
     title={editingOutboundIndex !== null
       ? $t('xray.edit_outbound_title', { tag: currentEditingOutbound.tag || 'outbound' })
       : $t('xray.add_outbound_title')}
@@ -329,11 +331,7 @@
   </Modal>
 
   <!-- Node Import Modal -->
-  <Modal
-    isOpen={showImportModal}
-    title={$t('subscr.import_modal_title')}
-    onclose={closeImportModal}
-  >
+  <Modal open={showImportModal} title={$t('subscr.import_modal_title')} onclose={closeImportModal}>
     <div style="display: flex; flex-direction: column; gap: 16px;">
       {#if importErrorMsg}
         <div
@@ -385,7 +383,7 @@
             <label for="import-link" class="form-label">{$t('subscr.import_link_label')}</label>
             <textarea
               id="import-link"
-              class="form-input textarea-link"
+              class="input input-sm textarea-link"
               aria-invalid={!!importErrorMsg}
               aria-describedby={importErrorMsg ? 'xray-import-error' : undefined}
               bind:value={importLink}
@@ -528,7 +526,7 @@
                     <input
                       id="import-tag-{idx}"
                       type="text"
-                      class="form-input"
+                      class="input input-sm"
                       bind:value={item.tag}
                       aria-invalid={!!importTagErrors[idx]}
                       aria-describedby={importTagErrors[idx]
@@ -596,7 +594,7 @@
   .sec-body {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .section-title {
@@ -608,22 +606,22 @@
   .outbounds-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .tag-card {
-    padding: 12px;
+    padding: var(--spacing-3);
     border-radius: var(--radius);
     transition: background var(--transition-fast);
   }
 
   .badge-tag {
     font-size: var(--font-size-xs);
-    padding: 2px 6px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
     border-radius: var(--radius-xs);
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     font-weight: 500;
     background: var(--accent-soft);
     color: var(--accent);
@@ -633,7 +631,7 @@
     background: none;
     border: 1px solid var(--border);
     border-radius: var(--radius-xs);
-    padding: 4px 8px;
+    padding: var(--spacing-1) var(--spacing-2);
     font-size: var(--font-size-xs);
     cursor: pointer;
     color: var(--fg-secondary);
@@ -660,25 +658,11 @@
     color: var(--fg-secondary);
   }
 
-  .form-input {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 6px 10px;
-    font-size: var(--font-size-sm);
-    color: var(--fg-primary);
-  }
-
-  .form-input:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-
   .add-btn {
     background: var(--bg-card);
     border: 1px dashed var(--border);
     border-radius: var(--radius);
-    padding: 10px 16px;
+    padding: var(--spacing-2-5) var(--spacing-4);
     color: var(--fg-secondary);
     font-size: var(--font-size-sm);
     font-weight: 500;
@@ -710,7 +694,7 @@
   .conf-dropzone {
     border: 2px dashed var(--border);
     border-radius: var(--radius);
-    padding: 32px 16px;
+    padding: var(--spacing-8) var(--spacing-4);
     text-align: center;
     cursor: pointer;
     position: relative;

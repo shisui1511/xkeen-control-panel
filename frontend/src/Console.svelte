@@ -316,7 +316,7 @@
   {/if}
 </div>
 
-<Modal isOpen={!!confirmPending} title={$t('console.confirm_title')} onclose={cancelConfirm}>
+<Modal open={!!confirmPending} title={$t('console.confirm_title')} onclose={cancelConfirm}>
   {#if confirmPending}
     <p style="margin: 0; line-height: 1.5; color: var(--fg-secondary);">
       {$t('console.confirm_desc', { name: formatCommandLine(confirmPending.command) })}
@@ -336,7 +336,7 @@
   .console-grid {
     display: grid;
     grid-template-columns: 2fr 3fr;
-    gap: 14px;
+    gap: var(--spacing-3-5);
     align-items: start;
   }
 
@@ -345,27 +345,27 @@
   }
 
   .cmd-cat-head {
-    padding: 11px 14px;
+    padding: 11px var(--spacing-3-5);
     background: rgba(0, 0, 0, 0.18);
     font-size: var(--font-size-xs);
     letter-spacing: 0.04em;
     color: var(--fg-dim);
     font-weight: 600;
     border-bottom: 1px solid var(--border);
-    margin-bottom: 8px;
+    margin-bottom: var(--spacing-2);
   }
 
   .cmd-tile-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: var(--spacing-2, 8px);
+    gap: var(--spacing-2);
   }
 
   .cmd-tile {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-1, 4px);
-    padding: 8px 12px;
+    gap: var(--spacing-1);
+    padding: var(--spacing-2) var(--spacing-3);
     border-radius: var(--radius-md);
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -411,7 +411,7 @@
     color: var(--fg-primary);
     display: flex;
     align-items: center;
-    gap: var(--spacing-1, 4px);
+    gap: var(--spacing-1);
   }
 
   .cmd-tile .tile-name.dangerous-text {
@@ -419,7 +419,7 @@
   }
 
   .cmd-tile .tile-desc {
-    font-size: var(--font-size-xs, 11px);
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     line-height: 1.3;
   }
@@ -428,7 +428,7 @@
     background: var(--bg-terminal);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 14px 18px;
+    padding: var(--spacing-3-5) 18px;
     font-family: var(--font-family-mono);
     font-size: var(--font-size-sm);
     line-height: 1.6;
@@ -446,17 +446,17 @@
   .history-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     max-height: 200px;
     overflow-y: auto;
-    margin-top: 8px;
+    margin-top: var(--spacing-2);
   }
 
   .history-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);

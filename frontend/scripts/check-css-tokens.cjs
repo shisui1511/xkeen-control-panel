@@ -3,7 +3,8 @@
 // (молча ломают стили) и устаревшие имена-алиасы в frontend/src.
 //  1) var(--x) без запасного значения, где --x нигде не объявлен — ошибка;
 //  2) устаревшие алиасы из global.css (--primary, --fg-muted, ...) в новом
-//     коде запрещены — используйте канонические имена токенов.
+//     коде запрещены — используйте канонические имена токенов;
+//  2а) var(--x, запасное) для токена из :root запрещено — запасное не срабатывает.
 // Сами объявления алиасов в src/styles/global.css не проверяются.
 const fs = require('fs');
 const path = require('path');
@@ -22,7 +23,10 @@ const DEPRECATED = {
   '--card-bg': '--bg-card',
   '--bg-secondary': '--bg-elevated',
   '--border-color': '--border',
-  '--error': '--danger'
+  '--error': '--danger',
+  '--spacing-sm': '--spacing-2',
+  '--spacing-xs': '--spacing-1',
+  '--space-lg': '--spacing-6'
 };
 
 function walk(dir, out = []) {
@@ -45,6 +49,15 @@ for (const f of files) {
   for (const m of s.matchAll(/['"`](--[a-zA-Z0-9-]+)['"`]\s*[:,\]]/g)) defined.add(m[1]);
 }
 
+// Токены первого блока :root в global.css объявлены всегда — запасное значение у них
+// никогда не срабатывает и только вводит в заблуждение (было: var(--radius-sm, 6px) при 4px).
+const globalCss = fs.readFileSync(GLOBAL, 'utf8');
+const rootStart = globalCss.indexOf(':root {');
+const rootEnd = globalCss.indexOf('\n}', rootStart);
+const ROOT_TOKENS = new Set(
+  [...globalCss.slice(rootStart, rootEnd).matchAll(/(--[a-zA-Z0-9-]+)\s*:/g)].map((m) => m[1])
+);
+
 const problems = [];
 for (const [f, s] of sources) {
   const rel = path.relative(path.join(__dirname, '..'), f);
@@ -53,7 +66,11 @@ for (const [f, s] of sources) {
     for (const m of line.matchAll(/var\(\s*(--[a-zA-Z0-9-]+)\s*([,)])/g)) {
       const name = m[1];
       const hasFallback = m[2] === ',';
-      if (DEPRECATED[name] && f !== GLOBAL) {
+      if (hasFallback && ROOT_TOKENS.has(name)) {
+        problems.push(
+          `${rel}:${i + 1}: у ${name} запасное значение не нужно — токен объявлен в :root`
+        );
+      } else if (DEPRECATED[name] && f !== GLOBAL) {
         problems.push(`${rel}:${i + 1}: устаревший токен ${name} → ${DEPRECATED[name]}`);
       } else if (!defined.has(name) && !hasFallback) {
         problems.push(

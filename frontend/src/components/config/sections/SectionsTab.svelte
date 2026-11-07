@@ -289,7 +289,7 @@
   .cores-tab {
     display: flex;
     flex-direction: column;
-    gap: var(--grid-gap, 16px);
+    gap: var(--grid-gap);
     min-width: 0;
   }
 
@@ -353,7 +353,7 @@
 
   .cores-api :global(.cores-api-icon) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .cores-panel[hidden] {
@@ -363,7 +363,7 @@
   .cores-panel:not([hidden]) {
     display: flex;
     flex-direction: column;
-    gap: var(--grid-gap, 16px);
+    gap: var(--grid-gap);
     min-width: 0;
   }
 
@@ -371,7 +371,7 @@
   .cores-sections {
     display: flex;
     flex-direction: column;
-    gap: var(--grid-gap, 16px);
+    gap: var(--grid-gap);
     min-width: 0;
   }
 </style>

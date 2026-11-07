@@ -1,6 +1,6 @@
 <script lang="ts">
   import Modal from '../Modal.svelte';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import ProxyForm from './ProxyForm.svelte';
   import AwgDiffCard from '../awg/AwgDiffCard.svelte';
   import { t } from '../../i18n';
@@ -335,7 +335,7 @@
 
       <div class="item-actions">
         <button type="button" class="item-btn" onclick={() => editProxy(p)} title={$t('app.edit')}>
-          <Icon name="edit" />
+          <Icon name="edit" size={13} />
         </button>
         <button
           type="button"
@@ -343,7 +343,7 @@
           onclick={() => ctx.duplicateProxy(p.id)}
           title={$t('app.duplicate')}
         >
-          <Icon name="copy" />
+          <Icon name="copy" size={13} />
         </button>
         <button
           type="button"
@@ -351,7 +351,7 @@
           onclick={() => ctx.removeProxy(p.id)}
           title={$t('app.delete')}
         >
-          <Icon name="close" />
+          <Icon name="close" size={13} />
         </button>
       </div>
     </div>
@@ -385,7 +385,7 @@
           onclick={loadSubscriptions}
           title={$t('mihomo.refresh_provider')}
         >
-          <Icon name="refresh" />
+          <Icon name="refresh" size={13} />
         </button>
       </div>
     {/each}
@@ -394,7 +394,7 @@
 
 <!-- Modal Proxy Form -->
 <Modal
-  isOpen={showProxyForm}
+  open={showProxyForm}
   title={editingProxyId
     ? $t('mihomo.edit_proxy_title', { name: np.name || 'proxy' })
     : $t('mihomo.new_proxy_title')}
@@ -419,7 +419,7 @@
 </Modal>
 
 <!-- Modal Import Nodes -->
-<Modal isOpen={showImportModal} title={$t('subscr.import_modal_title')} onclose={closeImportModal}>
+<Modal open={showImportModal} title={$t('subscr.import_modal_title')} onclose={closeImportModal}>
   <div style="display: flex; flex-direction: column; gap: 16px;">
     {#if importErrorMsg}
       <div
@@ -668,12 +668,12 @@
 
 <style>
   .sec-body {
-    padding: 16px;
+    padding: var(--spacing-4);
   }
 
   .add-btn {
     font-size: var(--font-size-xs);
-    padding: 6px 12px;
+    padding: var(--spacing-1-5) var(--spacing-3);
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition:
@@ -720,12 +720,12 @@
   .item-row {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
+    gap: var(--spacing-2-5);
+    padding: var(--spacing-2) var(--spacing-3);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    margin-bottom: 6px;
+    margin-bottom: var(--spacing-1-5);
     transition:
       border-color var(--transition-fast),
       opacity var(--transition-fast);
@@ -741,8 +741,8 @@
 
   .item-badge {
     font-size: var(--font-size-xs);
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
+    border-radius: var(--radius-sm);
     font-weight: 500;
     flex-shrink: 0;
   }
@@ -802,7 +802,7 @@
   .item-actions {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     margin-left: auto;
   }
 
@@ -812,7 +812,7 @@
     color: var(--fg-faint);
     cursor: pointer;
     font-size: var(--font-size-xs);
-    padding: 4px 6px;
+    padding: var(--spacing-1) var(--spacing-1-5);
     border-radius: var(--radius-sm);
     transition:
       color var(--transition-fast),
@@ -832,7 +832,7 @@
   }
 
   .item-switch {
-    margin-left: 8px;
+    margin-left: var(--spacing-2);
   }
 
   .switch {
@@ -893,13 +893,13 @@
   .conf-dropzone {
     border: 2px dashed var(--border);
     border-radius: var(--radius);
-    padding: 24px 16px;
+    padding: var(--spacing-6) var(--spacing-4);
     text-align: center;
     background: var(--bg-elevated);
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
+    gap: var(--spacing-2-5);
     cursor: pointer;
   }
 
@@ -913,9 +913,9 @@
     color: var(--fg-primary);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 6px 12px;
+    padding: var(--spacing-1-5) var(--spacing-3);
     font-size: var(--font-size-xs);
     cursor: pointer;
-    margin-right: 8px;
+    margin-right: var(--spacing-2);
   }
 </style>

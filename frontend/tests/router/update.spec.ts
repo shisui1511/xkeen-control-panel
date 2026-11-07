@@ -339,16 +339,16 @@ for (const theme of ['light', 'dark'] as const) {
         const severe = scan.violations.filter(
           (v) => v.impact === 'critical' || v.impact === 'serious'
         );
-        // Метка только когда axe сам нашёл контраст на .badge-primary и такой бейдж есть на
+        // Метка только когда axe сам нашёл контраст на .badge-info и такой бейдж есть на
         // странице: без бейджа нарушения нет, и метка дала бы XPASS
         if (
           theme === 'light' &&
           severe.some(
             (v) =>
               v.id === 'color-contrast' &&
-              v.nodes.some((n) => n.target.join(' ').includes('.badge-primary'))
+              v.nodes.some((n) => n.target.join(' ').includes('.badge-info'))
           ) &&
-          (await page.locator('.badge-primary').count()) > 0
+          (await page.locator('.badge-info').count()) > 0
         ) {
           knownFailure('*', 'light-tinted-badge-text-contrast');
         }
@@ -455,7 +455,7 @@ test('update kinds: бейдж текущей версии', async ({ page }) =>
   await expect(badge).toHaveText(text('ru', `settings.update_kind_${kind}`), {
     timeout: T.page
   });
-  const cls = { stable: 'badge-success', beta: 'badge-primary', alpha: 'badge-warning' }[kind];
+  const cls = { stable: 'badge-success', beta: 'badge-info', alpha: 'badge-warning' }[kind];
   await expect(badge).toHaveClass(new RegExp(`\\b${cls}\\b`));
 
   await guard.assertClean();

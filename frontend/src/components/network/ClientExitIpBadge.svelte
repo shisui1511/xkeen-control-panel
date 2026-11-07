@@ -335,10 +335,10 @@
     display: inline-flex;
     align-items: center;
     height: 30px;
-    padding: 0 4px 0 0;
+    padding: 0 var(--spacing-1) 0 0;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
     font-size: var(--font-size-xs);
     color: var(--fg-primary);
     transition:
@@ -352,9 +352,9 @@
   .pill-main {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     height: 100%;
-    padding: 0 6px 0 10px;
+    padding: 0 var(--spacing-1-5) 0 var(--spacing-2-5);
     background: transparent;
     border: none;
     font: inherit;
@@ -364,7 +364,7 @@
 
   .client-ip-pill:hover {
     border-color: var(--accent);
-    background: var(--bg-card-hover, var(--bg-hover));
+    background: var(--bg-card-hover);
   }
 
   .client-ip-pill.is-open {
@@ -378,7 +378,7 @@
   }
 
   .pill-ip {
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
     font-weight: 500;
     font-size: var(--font-size-xs);
     letter-spacing: -0.2px;
@@ -399,9 +399,9 @@
   .routing-badge {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 1.5px 6px;
-    border-radius: 9999px;
+    gap: var(--spacing-1);
+    padding: 1.5px var(--spacing-1-5);
+    border-radius: var(--radius-full);
     font-size: var(--font-size-2xs);
     font-weight: 600;
   }
@@ -456,16 +456,7 @@
   }
 
   .spinning {
-    animation: spin 0.85s linear infinite;
-  }
-
-  @keyframes spin {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
+    animation: spin var(--duration-spin) linear infinite;
   }
 
   /* Popover */
@@ -476,11 +467,11 @@
     width: 290px;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg, 12px);
+    border-radius: var(--radius-lg);
     box-shadow:
       0 10px 25px -5px rgba(0, 0, 0, 0.25),
       0 8px 10px -6px rgba(0, 0, 0, 0.15);
-    z-index: 100;
+    z-index: var(--z-dropdown);
     animation: popoverFadeIn var(--duration-fast) var(--ease-out);
     overflow: hidden;
   }
@@ -497,7 +488,7 @@
   }
 
   .popover-header {
-    padding: 12px 14px 10px;
+    padding: var(--spacing-3) var(--spacing-3-5) var(--spacing-2-5);
     border-bottom: 1px solid var(--border);
     background: color-mix(in srgb, var(--bg-card) 95%, var(--bg-hover));
   }
@@ -506,7 +497,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .popover-title {
@@ -518,13 +509,13 @@
   .popover-subtitle {
     font-size: var(--font-size-2xs);
     color: var(--fg-dim);
-    margin: 2px 0 0;
+    margin: var(--spacing-0-5) 0 0;
     line-height: 1.35;
   }
 
   .popover-status-chip {
-    padding: 2px 7px;
-    border-radius: 9999px;
+    padding: var(--spacing-0-5) 7px;
+    border-radius: var(--radius-full);
     font-size: var(--font-size-2xs);
     font-weight: 600;
   }
@@ -542,23 +533,23 @@
   }
 
   .popover-body {
-    padding: 10px 14px;
+    padding: var(--spacing-2-5) var(--spacing-3-5);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .detail-row {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
   }
 
   .detail-meta {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .detail-label {
@@ -571,7 +562,7 @@
   .detail-val-copy {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .detail-value {
@@ -584,7 +575,7 @@
   }
 
   .detail-value.mono {
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
   }
 
   .detail-value.text-muted {
@@ -601,7 +592,7 @@
     background: transparent;
     border: none;
     color: var(--fg-dim);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     transition:
       color var(--transition-fast),
@@ -616,12 +607,12 @@
   .routing-explainer {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
-    padding: 8px 10px;
-    border-radius: var(--radius-md, 8px);
+    gap: var(--spacing-2);
+    padding: var(--spacing-2) var(--spacing-2-5);
+    border-radius: var(--radius-md);
     font-size: var(--font-size-2xs);
     line-height: 1.4;
-    margin-top: 4px;
+    margin-top: var(--spacing-1);
   }
 
   .routing-explainer.is-proxy {
@@ -657,13 +648,13 @@
   .popover-footer {
     display: flex;
     justify-content: flex-end;
-    padding: 8px 14px;
+    padding: var(--spacing-2) var(--spacing-3-5);
     border-top: 1px solid var(--border);
     background: color-mix(in srgb, var(--bg-card) 98%, var(--bg-hover));
   }
 
   .btn-sm {
-    padding: 4px 10px;
+    padding: var(--spacing-1) var(--spacing-2-5);
     font-size: var(--font-size-xs);
     height: 26px;
     display: inline-flex;

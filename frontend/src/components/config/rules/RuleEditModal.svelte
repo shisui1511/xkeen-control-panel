@@ -483,10 +483,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={$t(rule === null ? 'cfg.rules.modal_new' : 'cfg.rules.modal_edit')}
   maxWidth="720px"
-  dataTestid="rule-modal"
+  testid="rule-modal"
   onclose={close}
 >
   <div class="re-body">
@@ -507,6 +507,7 @@
         <span class="toggle-switch">
           <input
             type="checkbox"
+            role="switch"
             bind:checked={expert}
             disabled={saving}
             data-testid="rule-expert"
@@ -674,7 +675,7 @@
             {:else}
               <div class="re-lists" data-testid="rule-cond-lists-{i}">
                 {#each c.lists as list, li (`${list.file}:${list.tag}`)}
-                  <span class="chip chip-default re-list-chip">
+                  <span class="badge badge-neutral re-list-chip">
                     <span class="re-mono">{list.file} · {list.tag}</span>
                     <button
                       type="button"
@@ -940,7 +941,7 @@
 
   .re-dup :global(svg) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .re-net {
@@ -980,7 +981,7 @@
     background: none;
     color: inherit;
     cursor: pointer;
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
   }
 
   .re-list-remove:disabled {

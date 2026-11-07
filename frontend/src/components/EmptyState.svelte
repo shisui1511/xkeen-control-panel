@@ -46,11 +46,11 @@
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 40px 24px;
+    padding: var(--spacing-10) var(--spacing-6);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
 
   .empty-state.empty-state--plain,
@@ -62,7 +62,7 @@
     border: none;
     border-radius: 0;
     box-shadow: none;
-    padding: 32px 16px;
+    padding: var(--spacing-8) var(--spacing-4);
   }
 
   .empty-state__icon {
@@ -74,7 +74,7 @@
     color: var(--accent);
     background: var(--accent-soft);
     border: 1px solid var(--accent-line);
-    margin-bottom: 8px;
+    margin-bottom: var(--spacing-2);
     box-shadow: 0 0 24px -4px var(--accent-soft);
   }
   .empty-state__title {
@@ -84,7 +84,7 @@
     margin: 0;
   }
   .empty-state > :global(.btn) {
-    margin-top: 6px;
+    margin-top: var(--spacing-1-5);
   }
   .empty-state__description {
     font-size: var(--font-size-sm);

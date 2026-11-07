@@ -824,7 +824,7 @@
                 </div>
               </div>
               <div class="grp-metrics">
-                <span class="badge badge-neutral">
+                <span class="badge badge--tag badge-neutral">
                   {pluralize(
                     grp.activeCount,
                     $t('conn.sessions_count_one', { count: String(grp.activeCount) }),
@@ -1114,7 +1114,7 @@
 
     <!-- Rule Column -->
     <td class="col-rule">
-      <span class="badge badge-rule">{conn.rule || 'Match'}</span>
+      <span class="badge badge--tag badge-rule">{conn.rule || 'Match'}</span>
       {#if conn.rulePayload}
         <div class="rule-payload monospace">{conn.rulePayload}</div>
       {/if}
@@ -1123,7 +1123,7 @@
     <!-- Chain / Route Column (CONN-03) -->
     <td class="col-chain">
       {#if isDirect(conn)}
-        <span class="badge badge-direct">DIRECT</span>
+        <span class="badge badge--tag badge-direct">DIRECT</span>
       {:else}
         <div class="chain-flow">
           {#each nodes as node, idx (idx)}
@@ -1139,7 +1139,7 @@
     <!-- Network Column -->
     <td class="col-network">
       <span
-        class="badge net-badge"
+        class="badge badge--tag net-badge"
         class:net-tcp={conn.metadata.network?.toUpperCase() === 'TCP'}
         class:net-udp={conn.metadata.network?.toUpperCase() === 'UDP'}
       >
@@ -1265,7 +1265,7 @@
         <div class="meta-grid">
           <div class="m-row">
             <span class="m-key">{$t('conn.rule')}:</span>
-            <span class="m-val badge badge-rule">{conn.rule || 'Match'}</span>
+            <span class="m-val badge badge--tag badge-rule">{conn.rule || 'Match'}</span>
           </div>
           {#if conn.rulePayload}
             <div class="m-row">
@@ -1335,20 +1335,20 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: var(--spacing-3);
     flex-wrap: wrap;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 8px 12px;
-    margin-bottom: 16px;
+    padding: var(--spacing-2) var(--spacing-3);
+    margin-bottom: var(--spacing-4);
   }
 
   .search-wrap {
     position: relative;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .search-field {
@@ -1402,7 +1402,7 @@
     cursor: pointer;
     font-size: var(--font-size-base);
     line-height: 1;
-    padding: 0 4px;
+    padding: 0 var(--spacing-1);
   }
 
   /* Filter Chips */
@@ -1422,7 +1422,7 @@
   .grouping-control {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .grouping-control :global(.xcp-select) {
@@ -1438,9 +1438,9 @@
   .metrics-pill {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     font-size: var(--font-size-xs);
-    padding: 4px 10px;
+    padding: var(--spacing-1) var(--spacing-2-5);
     background: var(--bg-elevated);
     border: 1px solid var(--border-light);
     border-radius: var(--radius-sm);
@@ -1468,7 +1468,7 @@
   .grouped-container {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .group-card {
@@ -1483,7 +1483,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 16px;
+    padding: var(--spacing-3) var(--spacing-4);
     background: var(--bg-elevated);
     border: none;
     border-bottom: 1px solid var(--border);
@@ -1499,7 +1499,7 @@
   .grp-title-group {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
 
   .grp-chevron {
@@ -1527,7 +1527,7 @@
   .grp-metrics {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--spacing-3);
     font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
   }
@@ -1548,7 +1548,7 @@
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     font-weight: 600;
-    padding: 8px;
+    padding: var(--spacing-2);
     border-bottom: 1px solid var(--border);
     user-select: none;
   }
@@ -1591,7 +1591,7 @@
   }
 
   .conn-row td {
-    padding: 8px;
+    padding: var(--spacing-2);
     font-size: var(--font-size-sm);
     vertical-align: middle;
   }
@@ -1611,13 +1611,13 @@
   .src-cell {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
   }
 
   .src-main {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .src-name {
@@ -1639,8 +1639,8 @@
   .badge-process {
     font-size: var(--font-size-xs);
     font-weight: 700;
-    padding: 1px 4px;
-    border-radius: 3px;
+    padding: 1px var(--spacing-1);
+    border-radius: var(--radius-xs);
     background: color-mix(in srgb, var(--seq-5) 15%, transparent);
     color: var(--seq-5);
   }
@@ -1670,7 +1670,7 @@
   .rule-payload {
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
     max-width: 140px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1682,8 +1682,8 @@
     color: var(--success);
     font-size: var(--font-size-xs);
     font-weight: 700;
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
+    border-radius: var(--radius-sm);
   }
 
   td.col-duration {
@@ -1698,7 +1698,7 @@
   .chain-flow {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     flex-wrap: wrap;
   }
 
@@ -1712,7 +1712,7 @@
     color: var(--seq-1);
     background: color-mix(in srgb, var(--seq-1) 12%, transparent);
     padding: 1px 5px;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
   }
 
   .chain-sep {
@@ -1724,7 +1724,7 @@
     font-size: var(--font-size-xs);
     font-weight: 700;
     padding: 1px 5px;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
   }
 
   .net-tcp {
@@ -1742,7 +1742,7 @@
     font-size: var(--font-size-xs);
     color: var(--accent);
     font-weight: 600;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
     font-family: var(--font-family-sans);
     font-variant-numeric: tabular-nums;
   }
@@ -1760,7 +1760,7 @@
     width: 28px;
     height: 28px;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     background: transparent;
     color: var(--danger);
     font-size: var(--font-size-lg);
@@ -1789,7 +1789,7 @@
     background: rgba(0, 0, 0, 0.5);
     -webkit-backdrop-filter: blur(2px);
     backdrop-filter: blur(2px);
-    z-index: 100;
+    z-index: var(--z-drawer);
     animation: drawer-backdrop-in var(--duration-enter) var(--ease-out);
   }
 
@@ -1803,7 +1803,7 @@
     background: var(--bg-card);
     border-left: 1px solid var(--border);
     box-shadow: -8px 0 24px rgba(0, 0, 0, 0.5);
-    z-index: 101;
+    z-index: calc(var(--z-drawer) + 1);
     display: flex;
     flex-direction: column;
     animation: drawer-in var(--duration-move) var(--ease-out);
@@ -1827,7 +1827,7 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    padding: 20px 24px;
+    padding: var(--spacing-5) var(--spacing-6);
     border-bottom: 1px solid var(--border);
   }
 
@@ -1849,7 +1849,7 @@
     color: var(--fg-dim);
     font-size: var(--font-size-lg);
     cursor: pointer;
-    padding: 4px;
+    padding: var(--spacing-1);
   }
 
   .drawer-close:hover {
@@ -1859,16 +1859,16 @@
   .drawer-body {
     flex: 1;
     overflow-y: auto;
-    padding: 20px 24px;
+    padding: var(--spacing-5) var(--spacing-6);
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: var(--spacing-5);
   }
 
   .drawer-section {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
 
   .section-heading {
@@ -1881,9 +1881,9 @@
   .meta-grid {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
     background: var(--bg-card);
-    padding: 12px 14px;
+    padding: var(--spacing-3) var(--spacing-3-5);
     border-radius: var(--radius-sm);
     border: 1px solid var(--border-light);
   }
@@ -1892,7 +1892,7 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 8px;
+    gap: var(--spacing-2);
     font-size: var(--font-size-xs);
   }
 
@@ -1908,7 +1908,7 @@
   }
 
   .drawer-footer {
-    padding: 16px 24px;
+    padding: var(--spacing-4) var(--spacing-6);
     border-top: 1px solid var(--border);
   }
 
@@ -1934,7 +1934,7 @@
     }
 
     .drawer-header {
-      padding: 12px 8px 12px 16px;
+      padding: var(--spacing-3) var(--spacing-2) var(--spacing-3) var(--spacing-4);
     }
 
     .drawer-close {
@@ -1943,11 +1943,12 @@
     }
 
     .drawer-body {
-      padding: 16px;
+      padding: var(--spacing-4);
     }
 
     .drawer-footer {
-      padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+      padding: var(--spacing-3) var(--spacing-4)
+        calc(var(--spacing-3) + env(safe-area-inset-bottom));
     }
   }
 
@@ -1992,8 +1993,8 @@
         'rule chain chain chain'
         'up down speed speed';
       align-items: center;
-      gap: 4px 10px;
-      padding: 10px 4px 10px 12px;
+      gap: var(--spacing-1) var(--spacing-2-5);
+      padding: var(--spacing-2-5) var(--spacing-1) var(--spacing-2-5) var(--spacing-3);
     }
 
     .conn-row td {
@@ -2037,7 +2038,7 @@
       grid-area: rule;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: var(--spacing-1-5);
       min-width: 0;
     }
 
@@ -2113,14 +2114,14 @@
     .conn-row .btn-close-conn {
       width: 40px;
       height: 40px;
-      margin: -10px 0 -6px;
+      margin: calc(-1 * var(--spacing-2-5)) 0 calc(-1 * var(--spacing-1-5));
     }
 
     /* Поиск и фильтры — во всю ширину, группировка и сортировка — рядом в одну строку */
     .conn-toolbar {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      gap: 10px;
+      gap: var(--spacing-2-5);
     }
 
     .conn-toolbar > :not(.grouping-control) {

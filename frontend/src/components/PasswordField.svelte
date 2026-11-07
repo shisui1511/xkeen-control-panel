@@ -70,7 +70,7 @@
   }
 
   .password-field :global(input) {
-    padding-right: 40px;
+    padding-right: var(--spacing-10);
   }
 
   .password-toggle {

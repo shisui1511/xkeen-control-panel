@@ -195,12 +195,12 @@
             {@const ks = sub.kernels[k.id]}
             {#if ks}
               {#if ks.installed}
-                <span class="chip chip-info" data-testid="nodes-preview-count-{k.id}">
+                <span class="badge badge-info" data-testid="nodes-preview-count-{k.id}">
                   {$t(k.countKey, { n: ks.count })}
                 </span>
               {:else}
                 <span
-                  class="chip chip-default"
+                  class="badge badge-neutral"
                   title={$t('cfg.nodes.kernel_not_installed_hint')}
                   data-testid="nodes-preview-missing-{k.id}"
                 >
@@ -211,7 +211,7 @@
           {/each}
           {#if stubsOf(sub) > 0}
             <span
-              class="chip chip-warning"
+              class="badge badge-warning"
               title={$t('cfg.nodes.stubs_hint')}
               data-testid="nodes-preview-stubs"
             >
@@ -274,20 +274,20 @@
                 <div class="pv-node-main">
                   <span class="pv-node-name">{n.name}</span>
                   {#if n.marks.includes('dup_exists')}
-                    <span class="chip chip-default">{$t('cfg.nodes.dup_exists')}</span>
+                    <span class="badge badge-neutral">{$t('cfg.nodes.dup_exists')}</span>
                   {/if}
                   {#if n.marks.includes('dup_in_sub')}
-                    <span class="chip chip-warning pv-chip-wrap">
+                    <span class="badge badge-warning pv-chip-wrap">
                       {$t('cfg.nodes.dup_in_sub', { name: n.dup_sub_name ?? '' })}
                     </span>
                   {/if}
                   {#if only}
-                    <span class="chip chip-info" title={only.reason}>
+                    <span class="badge badge-info" title={only.reason}>
                       {$t('cfg.nodes.only_kernel', { kernel: only.name })}
                     </span>
                   {/if}
                   {#if unsupported}
-                    <span class="chip chip-warning pv-chip-wrap">
+                    <span class="badge badge-warning pv-chip-wrap">
                       {$t('cfg.nodes.unsupported', { reason: unsupportedReason(n) })}
                     </span>
                   {/if}
@@ -414,7 +414,7 @@
   .pv-node {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     min-width: 0;
     padding-top: var(--spacing-2);
     border-top: 1px solid var(--border);
@@ -469,7 +469,7 @@
   .pv-err-text {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     min-width: 0;
     overflow-wrap: anywhere;
   }

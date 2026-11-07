@@ -219,7 +219,7 @@
 
   .ro-notice :global(.ro-icon) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .ro-body {
@@ -276,7 +276,7 @@
   .ro-own-icon {
     display: inline-flex;
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .ro-own-body {

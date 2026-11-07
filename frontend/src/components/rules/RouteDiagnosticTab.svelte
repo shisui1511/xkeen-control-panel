@@ -174,11 +174,11 @@
               <span class="step-label">{$t('rules.diagnostic_step_rule')}</span>
               {#if result.source}
                 {@const sBadge = getSourceBadge(result.source)}
-                <span class="badge {sBadge.className}">{sBadge.label}</span>
+                <span class="badge badge--tag {sBadge.className}">{sBadge.label}</span>
               {/if}
             </div>
             <div class="rule-details">
-              <span class="badge rule-type-badge">{result.rule_type}</span>
+              <span class="badge badge--tag rule-type-badge">{result.rule_type}</span>
               <span class="step-value mono text-truncate" title={result.rule_payload}>
                 {result.rule_payload || '—'}
               </span>
@@ -205,7 +205,7 @@
           <div class="step-card">
             <span class="step-label">{$t('rules.diagnostic_step_group')}</span>
             <div class="group-details">
-              <span class="badge {getActionBadgeClass(result.target_action)}">
+              <span class="badge badge--tag {getActionBadgeClass(result.target_action)}">
                 {result.target_action}
               </span>
               {#if result.target_group && result.target_group !== result.target_action}
@@ -243,7 +243,7 @@
                 {result.selected_proxy || result.target_action}
               </span>
               {#if result.proxy_type}
-                <span class="badge proxy-type-badge">{result.proxy_type}</span>
+                <span class="badge badge--tag proxy-type-badge">{result.proxy_type}</span>
               {/if}
             </div>
           </div>
@@ -324,25 +324,25 @@
   .diagnostic-container {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--spacing-4);
   }
 
   .diagnostic-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 16px 20px;
+    padding: var(--spacing-4) var(--spacing-5);
   }
 
   .diagnostic-header {
-    margin-bottom: 12px;
+    margin-bottom: var(--spacing-3);
   }
 
   .diagnostic-title {
     font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
-    margin: 0 0 4px 0;
+    margin: 0 0 var(--spacing-1) 0;
   }
 
   .diagnostic-subtitle {
@@ -353,7 +353,7 @@
 
   .diagnostic-form {
     display: flex;
-    gap: 10px;
+    gap: var(--spacing-2-5);
     align-items: center;
   }
 
@@ -364,7 +364,7 @@
 
   .diagnostic-input {
     width: 100%;
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -381,15 +381,15 @@
   }
 
   .btn-icon {
-    margin-right: 6px;
+    margin-right: var(--spacing-1-5);
     flex-shrink: 0;
   }
 
   .alert {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 12px 16px;
+    gap: var(--spacing-2-5);
+    padding: var(--spacing-3) var(--spacing-4);
     border-radius: var(--radius-md);
     font-size: var(--font-size-sm);
   }
@@ -404,18 +404,18 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 20px;
+    padding: var(--spacing-5);
   }
 
   .result-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding-bottom: 14px;
-    margin-bottom: 16px;
+    padding-bottom: var(--spacing-3-5);
+    margin-bottom: var(--spacing-4);
     border-bottom: 1px solid var(--border);
     flex-wrap: wrap;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .result-title {
@@ -426,32 +426,32 @@
 
   .target-highlight {
     color: var(--accent);
-    padding: 2px 6px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
     background: var(--accent-soft);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
   }
 
   .trace-latency {
     font-size: var(--font-size-xs);
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
     color: var(--fg-secondary);
     background: var(--bg-elevated);
-    padding: 3px 8px;
+    padding: 3px var(--spacing-2);
     border-radius: var(--radius-sm);
-    border: 1px solid var(--border-light, var(--border));
+    border: 1px solid var(--border-light);
   }
 
   .flow-container {
     display: grid;
     grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .flow-step {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     min-width: 0;
   }
 
@@ -474,10 +474,10 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 12px;
+    padding: var(--spacing-3);
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     min-height: 72px;
     justify-content: center;
   }
@@ -493,7 +493,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .step-value {
@@ -512,7 +512,7 @@
   .node-details {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     min-width: 0;
     flex-wrap: wrap;
   }
@@ -527,8 +527,8 @@
   .badge {
     font-size: var(--font-size-xs);
     font-weight: 600;
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
+    border-radius: var(--radius-sm);
     letter-spacing: 0;
     white-space: nowrap;
   }
@@ -582,7 +582,7 @@
   }
 
   .mono {
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
   }
 
   .text-truncate {
@@ -597,7 +597,7 @@
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 40px 20px;
+    padding: var(--spacing-10) var(--spacing-5);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -612,14 +612,14 @@
     color: var(--accent);
     background: var(--accent-soft);
     border: 1px solid var(--accent-line);
-    margin-bottom: 12px;
+    margin-bottom: var(--spacing-3);
   }
 
   .guide-title {
     font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
-    margin: 0 0 6px 0;
+    margin: 0 0 var(--spacing-1-5) 0;
   }
 
   .guide-desc {
@@ -633,12 +633,12 @@
   @media (max-width: 1024px) {
     .flow-container {
       grid-template-columns: 1fr;
-      gap: 12px;
+      gap: var(--spacing-3);
     }
 
     .flow-arrow {
       transform: rotate(90deg);
-      padding: 4px 0;
+      padding: var(--spacing-1) 0;
     }
   }
 

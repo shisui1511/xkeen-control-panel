@@ -3,7 +3,7 @@
   import { capabilities, activeKernelState } from '../../stores';
   import { isMihomoAwg31Supported } from '../../lib/awgFields';
   import Select from '../Select.svelte';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import {
     AWG_PRESETS,
     getAwgPreset,
@@ -285,7 +285,7 @@
               <label class="form-label" for="proxy-awg-jc">Jc</label>
               <input
                 id="proxy-awg-jc"
-                class="form-input"
+                class="input input-sm"
                 type="number"
                 bind:value={np.awgJc}
                 min="1"
@@ -296,7 +296,7 @@
               <label class="form-label" for="proxy-awg-jmin">Jmin</label>
               <input
                 id="proxy-awg-jmin"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={isJInvalid}
                 aria-invalid={isJInvalid}
                 type="number"
@@ -308,7 +308,7 @@
               <label class="form-label" for="proxy-awg-jmax">Jmax</label>
               <input
                 id="proxy-awg-jmax"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={isJInvalid || isJunkMtuInvalid}
                 aria-invalid={isJInvalid || isJunkMtuInvalid}
                 type="number"
@@ -336,7 +336,7 @@
               <label class="form-label" for="proxy-awg-s1">S1</label>
               <input
                 id="proxy-awg-s1"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={isSInvalid || (hasHeaderProtection && Number(np.awgS1) < 12)}
                 aria-invalid={isSInvalid || (hasHeaderProtection && Number(np.awgS1) < 12)}
                 type="number"
@@ -348,7 +348,7 @@
               <label class="form-label" for="proxy-awg-s2">S2</label>
               <input
                 id="proxy-awg-s2"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={isSInvalid || (hasHeaderProtection && Number(np.awgS2) < 12)}
                 aria-invalid={isSInvalid || (hasHeaderProtection && Number(np.awgS2) < 12)}
                 type="number"
@@ -369,7 +369,7 @@
               <label class="form-label" for="proxy-awg-h1">H1</label>
               <input
                 id="proxy-awg-h1"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={isH1Invalid}
                 aria-invalid={isH1Invalid}
                 type="text"
@@ -381,7 +381,7 @@
               <label class="form-label" for="proxy-awg-h2">H2</label>
               <input
                 id="proxy-awg-h2"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={isH2Invalid}
                 aria-invalid={isH2Invalid}
                 type="text"
@@ -393,7 +393,7 @@
               <label class="form-label" for="proxy-awg-h3">H3</label>
               <input
                 id="proxy-awg-h3"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={isH3Invalid}
                 aria-invalid={isH3Invalid}
                 type="text"
@@ -405,7 +405,7 @@
               <label class="form-label" for="proxy-awg-h4">H4</label>
               <input
                 id="proxy-awg-h4"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={isH4Invalid}
                 aria-invalid={isH4Invalid}
                 type="text"
@@ -428,7 +428,7 @@
             <label class="form-label" for="proxy-awg-s3">{$t('proxies.awg_s3')}</label>
             <input
               id="proxy-awg-s3"
-              class="form-input"
+              class="input input-sm"
               class:input-warning={hasHeaderProtection &&
                 np.awgS3 !== undefined &&
                 np.awgS3 !== null &&
@@ -444,7 +444,7 @@
             <label class="form-label" for="proxy-awg-s4">{$t('proxies.awg_s4')}</label>
             <input
               id="proxy-awg-s4"
-              class="form-input"
+              class="input input-sm"
               class:input-warning={hasHeaderProtection &&
                 np.awgS4 !== undefined &&
                 np.awgS4 !== null &&
@@ -479,7 +479,7 @@
             <label class="form-label" for="proxy-awg-version">{$t('proxies.awg_version')}</label>
             <input
               id="proxy-awg-version"
-              class="form-input"
+              class="input input-sm"
               type="text"
               bind:value={np.awgVersion}
               disabled={!isAwg31Allowed}
@@ -492,7 +492,7 @@
             >
             <input
               id="proxy-awg-header-protection-key"
-              class="form-input"
+              class="input input-sm"
               type="text"
               bind:value={np.awgHeaderProtectionKey}
               disabled={!isAwg31Allowed}
@@ -508,7 +508,7 @@
               <label class="form-label" for="proxy-awg-i1">I1</label>
               <input
                 id="proxy-awg-i1"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={/<c>/i.test(np.awgI1 || '')}
                 type="text"
                 bind:value={np.awgI1}
@@ -520,7 +520,7 @@
               <label class="form-label" for="proxy-awg-i2">I2</label>
               <input
                 id="proxy-awg-i2"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={/<c>/i.test(np.awgI2 || '')}
                 type="text"
                 bind:value={np.awgI2}
@@ -532,7 +532,7 @@
               <label class="form-label" for="proxy-awg-i3">I3</label>
               <input
                 id="proxy-awg-i3"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={/<c>/i.test(np.awgI3 || '')}
                 type="text"
                 bind:value={np.awgI3}
@@ -544,7 +544,7 @@
               <label class="form-label" for="proxy-awg-i4">I4</label>
               <input
                 id="proxy-awg-i4"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={/<c>/i.test(np.awgI4 || '')}
                 type="text"
                 bind:value={np.awgI4}
@@ -556,7 +556,7 @@
               <label class="form-label" for="proxy-awg-i5">I5</label>
               <input
                 id="proxy-awg-i5"
-                class="form-input"
+                class="input input-sm"
                 class:input-warning={/<c>/i.test(np.awgI5 || '')}
                 type="text"
                 bind:value={np.awgI5}
@@ -579,7 +579,7 @@
             >
             <input
               id="proxy-awg-cpa"
-              class="form-input"
+              class="input input-sm"
               type="number"
               bind:value={np.awgContentPaddingAddition}
               disabled={!isAwg31Allowed}
@@ -593,7 +593,7 @@
             >
             <input
               id="proxy-awg-rekey"
-              class="form-input"
+              class="input input-sm"
               type="number"
               bind:value={np.awgRekeyAfterTime}
               disabled={!isAwg31Allowed}
@@ -648,7 +648,7 @@
       <label class="form-label" for="proxy-name-compact">{$t('subscr.name')}</label>
       <input
         id="proxy-name-compact"
-        class="form-input"
+        class="input input-sm"
         bind:value={np.name}
         placeholder="my-proxy"
       />
@@ -668,8 +668,8 @@
           <span class="chain-title">{$t('proxies.dialer_chain')}:</span>
           {#each dialerChain.chain as node, idx (idx)}
             <span
-              class="badge"
-              class:badge-primary={idx === 0}
+              class="badge badge--tag"
+              class:badge-info={idx === 0}
               class:badge-tag={node === 'DIRECT'}
               class:badge-secondary={idx > 0 && node !== 'DIRECT'}
             >
@@ -680,7 +680,7 @@
             {/if}
           {/each}
           {#if dialerChain.hasCycle}
-            <span class="badge badge-danger">
+            <span class="badge badge--tag badge-danger">
               {$t('proxies.dialer_cycle_detected')}
             </span>
           {/if}
@@ -693,7 +693,7 @@
         <label class="form-label" for="proxy-wg-mtu-compact">{$t('proxies.awg_mtu')}</label>
         <input
           id="proxy-wg-mtu-compact"
-          class="form-input"
+          class="input input-sm"
           type="number"
           bind:value={np.wgMtu}
           min="1200"
@@ -742,14 +742,14 @@
     </div>
     <div class="form-row">
       <label class="form-label" for="proxy-name">{$t('subscr.name')}</label>
-      <input id="proxy-name" class="form-input" bind:value={np.name} placeholder="my-proxy" />
+      <input id="proxy-name" class="input input-sm" bind:value={np.name} placeholder="my-proxy" />
     </div>
     <div class="form-row2">
       <div class="form-col">
         <label class="form-label" for="proxy-server">{$t('proxies.server')}</label>
         <input
           id="proxy-server"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.server}
           placeholder="example.com"
         />
@@ -758,7 +758,7 @@
         <label class="form-label" for="proxy-port">{$t('proxies.port')}</label>
         <input
           id="proxy-port"
-          class="form-input"
+          class="input input-sm"
           type="number"
           bind:value={np.port}
           min="1"
@@ -771,11 +771,16 @@
       <div class="form-row">
         <label class="form-label" for="proxy-vless-uuid">UUID</label>
         <div class="input-with-btn">
-          <input id="proxy-vless-uuid" class="form-input" bind:value={np.uuid} placeholder="uuid" />
+          <input
+            id="proxy-vless-uuid"
+            class="input input-sm"
+            bind:value={np.uuid}
+            placeholder="uuid"
+          />
           <button
             class="btn-gen"
             onclick={() => (np.uuid = crypto.randomUUID())}
-            title={$t('app.generate')}><Icon name="refresh" /></button
+            title={$t('app.generate')}><Icon name="refresh" size={13} /></button
           >
         </div>
       </div>
@@ -783,7 +788,7 @@
         <label class="form-label" for="proxy-vless-public-key">Reality Public Key</label>
         <input
           id="proxy-vless-public-key"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.publicKey}
           placeholder="public-key"
         />
@@ -793,7 +798,7 @@
           <label class="form-label" for="proxy-vless-short-id">Short ID</label>
           <input
             id="proxy-vless-short-id"
-            class="form-input"
+            class="input input-sm"
             bind:value={np.shortId}
             placeholder="short-id"
           />
@@ -802,7 +807,7 @@
           <label class="form-label" for="proxy-vless-sni">SNI</label>
           <input
             id="proxy-vless-sni"
-            class="form-input"
+            class="input input-sm"
             bind:value={np.servername}
             placeholder="www.apple.com"
           />
@@ -813,7 +818,7 @@
         <label class="form-label" for="proxy-hysteria2-password">{$t('proxies.password')}</label>
         <input
           id="proxy-hysteria2-password"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.password}
           placeholder="password"
         />
@@ -822,7 +827,7 @@
         <label class="form-label" for="proxy-hysteria2-sni">SNI</label>
         <input
           id="proxy-hysteria2-sni"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.sni}
           placeholder="example.com"
         />
@@ -841,7 +846,7 @@
           >
           <input
             id="proxy-hysteria2-obfs-password"
-            class="form-input"
+            class="input input-sm"
             bind:value={np.obfsPassword}
             placeholder="obfs password"
           />
@@ -860,9 +865,14 @@
       <div class="form-row">
         <label class="form-label" for="proxy-tuic-uuid">UUID</label>
         <div class="input-with-btn">
-          <input id="proxy-tuic-uuid" class="form-input" bind:value={np.uuid} placeholder="uuid" />
+          <input
+            id="proxy-tuic-uuid"
+            class="input input-sm"
+            bind:value={np.uuid}
+            placeholder="uuid"
+          />
           <button class="btn-gen" onclick={() => (np.uuid = crypto.randomUUID())} title="Generate"
-            ><Icon name="refresh" /></button
+            ><Icon name="refresh" size={13} /></button
           >
         </div>
       </div>
@@ -870,7 +880,7 @@
         <label class="form-label" for="proxy-tuic-password">{$t('proxies.password')}</label>
         <input
           id="proxy-tuic-password"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.password}
           placeholder="password"
         />
@@ -879,7 +889,7 @@
         <label class="form-label" for="proxy-tuic-sni">SNI</label>
         <input
           id="proxy-tuic-sni"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.sni}
           placeholder="example.com"
         />
@@ -895,7 +905,7 @@
         <label class="form-label" for="proxy-ss-password">{$t('proxies.password')}</label>
         <input
           id="proxy-ss-password"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.password}
           placeholder="password"
         />
@@ -904,9 +914,14 @@
       <div class="form-row">
         <label class="form-label" for="proxy-vmess-uuid">UUID</label>
         <div class="input-with-btn">
-          <input id="proxy-vmess-uuid" class="form-input" bind:value={np.uuid} placeholder="uuid" />
+          <input
+            id="proxy-vmess-uuid"
+            class="input input-sm"
+            bind:value={np.uuid}
+            placeholder="uuid"
+          />
           <button class="btn-gen" onclick={() => (np.uuid = crypto.randomUUID())} title="Generate"
-            ><Icon name="refresh" /></button
+            ><Icon name="refresh" size={13} /></button
           >
         </div>
       </div>
@@ -934,7 +949,7 @@
           <label class="form-label" for="proxy-vmess-ws-path">WS Path</label>
           <input
             id="proxy-vmess-ws-path"
-            class="form-input"
+            class="input input-sm"
             bind:value={np.wsPath}
             placeholder="/"
           />
@@ -945,7 +960,7 @@
           <label class="form-label" for="proxy-vmess-sni">SNI</label>
           <input
             id="proxy-vmess-sni"
-            class="form-input"
+            class="input input-sm"
             bind:value={np.sni}
             placeholder="example.com"
           />
@@ -956,7 +971,7 @@
         <label class="form-label" for="proxy-trojan-password">{$t('proxies.password')}</label>
         <input
           id="proxy-trojan-password"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.password}
           placeholder="password"
         />
@@ -965,7 +980,7 @@
         <label class="form-label" for="proxy-trojan-sni">SNI</label>
         <input
           id="proxy-trojan-sni"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.sni}
           placeholder="example.com"
         />
@@ -984,7 +999,7 @@
           <label class="form-label" for="proxy-trojan-ws-path">WS Path</label>
           <input
             id="proxy-trojan-ws-path"
-            class="form-input"
+            class="input input-sm"
             bind:value={np.wsPath}
             placeholder="/"
           />
@@ -1004,7 +1019,7 @@
         <label class="form-label" for="proxy-wg-private-key">{$t('proxies.wg_private_key')}</label>
         <input
           id="proxy-wg-private-key"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.wgPrivateKey}
           placeholder="private-key"
         />
@@ -1013,7 +1028,7 @@
         <label class="form-label" for="proxy-wg-public-key">{$t('proxies.wg_public_key')}</label>
         <input
           id="proxy-wg-public-key"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.wgPublicKey}
           placeholder="public-key"
         />
@@ -1023,7 +1038,7 @@
           <label class="form-label" for="proxy-wg-ip">{$t('proxies.wg_ip')}</label>
           <input
             id="proxy-wg-ip"
-            class="form-input"
+            class="input input-sm"
             bind:value={np.wgIp}
             placeholder="10.2.0.2/32"
           />
@@ -1032,7 +1047,7 @@
           <label class="form-label" for="proxy-wg-mtu">MTU</label>
           <input
             id="proxy-wg-mtu"
-            class="form-input"
+            class="input input-sm"
             type="number"
             bind:value={np.wgMtu}
             min="1200"
@@ -1050,7 +1065,7 @@
         <label class="form-label" for="proxy-wg-preshared-key">Pre-shared Key</label>
         <input
           id="proxy-wg-preshared-key"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.wgPresharedKey}
           placeholder="pre-shared-key (optional)"
         />
@@ -1080,7 +1095,7 @@
         >
         <input
           id="proxy-socks-username"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.username}
           placeholder="username"
         />
@@ -1091,7 +1106,7 @@
         >
         <input
           id="proxy-socks-password"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.password}
           placeholder="password"
         />
@@ -1102,7 +1117,7 @@
         >
         <input
           id="proxy-http-username"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.username}
           placeholder="username"
         />
@@ -1112,7 +1127,7 @@
         >
         <input
           id="proxy-http-password"
-          class="form-input"
+          class="input input-sm"
           bind:value={np.password}
           placeholder="password"
         />
@@ -1156,8 +1171,8 @@
           <span style="color: var(--fg-secondary);">{$t('proxies.dialer_chain')}:</span>
           {#each dialerChain.chain as node, idx (idx)}
             <span
-              class="badge"
-              class:badge-primary={idx === 0}
+              class="badge badge--tag"
+              class:badge-info={idx === 0}
               class:badge-tag={node === 'DIRECT'}
               class:badge-secondary={idx > 0 && node !== 'DIRECT'}
             >
@@ -1168,7 +1183,7 @@
             {/if}
           {/each}
           {#if dialerChain.hasCycle}
-            <span class="badge badge-danger" style="color: var(--danger);">
+            <span class="badge badge--tag badge-danger" style="color: var(--danger);">
               {$t('proxies.dialer_cycle_detected')}
             </span>
           {/if}
@@ -1192,24 +1207,24 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .imported-identity-box {
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 10px 12px;
+    padding: var(--spacing-2-5) var(--spacing-3);
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    margin-bottom: 4px;
+    gap: var(--spacing-1-5);
+    margin-bottom: var(--spacing-1);
   }
 
   .identity-badge-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     flex-wrap: wrap;
   }
 
@@ -1225,7 +1240,7 @@
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     background: var(--surface-tint);
-    padding: 2px 6px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
     border-radius: var(--radius-sm);
   }
 
@@ -1254,23 +1269,23 @@
     background: var(--surface-tint-faint);
     border: 1px dashed var(--border);
     border-radius: var(--radius-sm);
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
   }
 
   .form-row {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
   .form-row2 {
     display: flex;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
   .form-col {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
     flex: 1 1 140px;
     min-width: 140px;
   }
@@ -1286,28 +1301,13 @@
     text-transform: none;
   }
 
-  .form-input {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--fg-primary);
-    font-size: var(--font-size-sm);
-    padding: 6px 10px;
-    width: 100%;
-    transition: border-color var(--transition-fast);
-  }
-
-  .form-input:focus {
-    border-color: var(--accent);
-  }
-
   .input-with-btn {
     display: flex;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     align-items: center;
   }
 
-  .input-with-btn .form-input {
+  .input-with-btn .input {
     flex: 1;
   }
 
@@ -1316,7 +1316,7 @@
     border: 1px solid var(--border);
     color: var(--fg-secondary);
     border-radius: var(--radius-sm);
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     cursor: pointer;
     font-size: var(--font-size-base);
     transition: background var(--transition-fast);
@@ -1333,7 +1333,7 @@
   .toggle-label {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     cursor: pointer;
     font-size: var(--font-size-sm);
     color: var(--fg-primary);
@@ -1343,11 +1343,11 @@
     position: sticky;
     bottom: -20px;
     background: var(--bg-card);
-    padding: 12px 0 0 0;
-    margin-top: 12px;
+    padding: var(--spacing-3) 0 0 0;
+    margin-top: var(--spacing-3);
     border-top: 1px solid var(--border);
     display: flex;
-    gap: 8px;
+    gap: var(--spacing-2);
     justify-content: flex-end;
     z-index: 10;
   }
@@ -1355,12 +1355,12 @@
   .awg-options-block {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 12px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-3);
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    margin-bottom: 12px;
+    margin-bottom: var(--spacing-3);
   }
 
   .awg-options-block.has-warning {
@@ -1370,7 +1370,7 @@
   .awg-headers-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   @media (max-width: 480px) {
@@ -1400,8 +1400,8 @@
   .awg-subgroup {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 10px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2-5);
     background: var(--surface-tint-faint);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -1410,7 +1410,7 @@
   .awg-tokens-grid {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   @media (max-width: 768px) {
@@ -1422,8 +1422,8 @@
   .awg-warning-banner {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2) var(--spacing-3);
     font-size: var(--font-size-xs);
     background: color-mix(in srgb, var(--warning) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
@@ -1434,32 +1434,32 @@
   .field-error-hint {
     font-size: var(--font-size-xs);
     color: var(--warning);
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .awg-preset-bar {
     display: flex;
     align-items: flex-end;
-    gap: 12px;
-    padding: 10px;
+    gap: var(--spacing-3);
+    padding: var(--spacing-2-5);
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    margin-bottom: 8px;
+    margin-bottom: var(--spacing-2);
   }
 
   .preset-select-wrap {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .regenerate-btn {
     white-space: nowrap;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     height: 34px;
     flex-shrink: 0;
   }

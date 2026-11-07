@@ -48,7 +48,7 @@
       <label class="form-label" for="mihomo-tun-dns-hijack">DNS Hijack</label>
       <input
         id="mihomo-tun-dns-hijack"
-        class="form-input"
+        class="input input-sm"
         value={ctx.tun.dnsHijack.join(', ')}
         onchange={(e) => {
           ctx.tun.dnsHijack = e.currentTarget.value
@@ -137,7 +137,7 @@
       >
       <input
         id="mihomo-ctrl-target"
-        class="form-input"
+        class="input input-sm"
         bind:value={ctx.externalControllerTarget}
         placeholder="127.0.0.1:9090"
         oninput={() => ctx.markDirty()}
@@ -170,17 +170,17 @@
 
 <style>
   .sec-body {
-    padding: 16px;
+    padding: var(--spacing-4);
   }
 
   .toggle-row {
-    margin-bottom: 12px;
+    margin-bottom: var(--spacing-3);
   }
 
   .toggle-label {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     font-size: var(--font-size-sm);
     cursor: pointer;
     user-select: none;
@@ -188,26 +188,15 @@
   }
 
   .form-row {
-    margin-bottom: 12px;
+    margin-bottom: var(--spacing-3);
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .form-label {
     font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
-  }
-
-  .form-input {
-    width: 100%;
-    box-sizing: border-box;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 8px;
-    color: var(--fg-primary);
-    font-size: var(--font-size-xs);
   }
 </style>

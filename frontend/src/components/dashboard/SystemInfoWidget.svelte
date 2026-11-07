@@ -128,8 +128,8 @@
   .about-link {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px var(--spacing-2);
+    gap: var(--spacing-1-5);
+    padding: var(--spacing-1) var(--spacing-2);
     border: 0;
     border-radius: var(--radius-md);
     background: transparent;
@@ -160,7 +160,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 0;
+    padding: var(--spacing-2-5) 0;
     border-bottom: 1px solid var(--border-light);
     border-right: 0;
     font-size: var(--font-size-sm);
@@ -192,7 +192,7 @@
   }
 
   .mono {
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
   }
 
   .text-muted {
@@ -203,7 +203,7 @@
   .config-val {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .config-path {
@@ -215,9 +215,9 @@
     display: inline-block;
     font-size: var(--font-size-xs);
     font-weight: 600;
-    padding: 2px 7px;
-    border-radius: var(--radius-sm, 6px);
-    font-family: var(--font-family-mono, monospace);
+    padding: var(--spacing-0-5) 7px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-family-mono);
     letter-spacing: 0.02em;
     white-space: nowrap;
   }

@@ -452,7 +452,7 @@
 
   .pc-status :global(.pc-status-icon) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .pc-status :global(.pc-warn) {

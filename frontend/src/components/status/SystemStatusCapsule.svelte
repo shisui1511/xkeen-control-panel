@@ -146,11 +146,11 @@
     </button>
 
     <SystemQuickMenu
-      isOpen={isMenuOpen}
+      open={isMenuOpen}
       anchorEl={triggerEl}
       {activeKernel}
       {isXkeenRunning}
-      onClose={closeMenu}
+      onclose={closeMenu}
       {onSwitchTab}
     />
   </div>
@@ -173,11 +173,11 @@
     </button>
 
     <SystemQuickMenu
-      isOpen={isMenuOpen}
+      open={isMenuOpen}
       anchorEl={triggerEl}
       {activeKernel}
       {isXkeenRunning}
-      onClose={closeMenu}
+      onclose={closeMenu}
       {onSwitchTab}
     />
   </div>
@@ -251,11 +251,11 @@
     {/if}
 
     <SystemQuickMenu
-      isOpen={isMenuOpen}
+      open={isMenuOpen}
       anchorEl={triggerEl}
       {activeKernel}
       {isXkeenRunning}
-      onClose={closeMenu}
+      onclose={closeMenu}
       {onSwitchTab}
     />
   </div>
@@ -323,11 +323,11 @@
     </div>
 
     <SystemQuickMenu
-      isOpen={isMenuOpen}
+      open={isMenuOpen}
       anchorEl={triggerEl}
       {activeKernel}
       {isXkeenRunning}
-      onClose={closeMenu}
+      onclose={closeMenu}
       {onSwitchTab}
     />
   </div>
@@ -338,9 +338,9 @@
   .sidebar-status-card {
     background: var(--bg-elevated);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 8px);
-    margin: 6px 12px 8px;
-    padding: 4px;
+    border-radius: var(--radius-md);
+    margin: var(--spacing-1-5) var(--spacing-3) var(--spacing-2);
+    padding: var(--spacing-1);
     display: flex;
     flex-direction: column;
   }
@@ -348,15 +348,15 @@
   .sidebar-kernel-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--spacing-2-5);
     width: 100%;
     background: transparent;
     border: none;
-    padding: 6px 8px;
+    padding: var(--spacing-1-5) var(--spacing-2);
     cursor: pointer;
     color: var(--fg-primary);
     text-align: left;
-    border-radius: var(--radius-sm, 6px);
+    border-radius: var(--radius-sm);
     transition: background var(--transition-fast);
   }
 
@@ -404,20 +404,20 @@
     display: flex;
     flex-direction: column;
     border-top: 1px solid var(--border-light);
-    margin-top: 4px;
-    padding-top: 4px;
+    margin-top: var(--spacing-1);
+    padding-top: var(--spacing-1);
   }
 
   /* Две колонки одинаковой ширины: значения обеих строк стоят друг под другом */
   .sidebar-metric-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 8px;
+    gap: var(--spacing-2);
     width: 100%;
     background: transparent;
     border: 1px solid transparent;
-    border-radius: var(--radius-sm, 6px);
-    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    padding: var(--spacing-1) var(--spacing-2);
     color: var(--fg-secondary);
     font-size: var(--font-size-xs);
     text-align: left;
@@ -447,7 +447,7 @@
   .res-item {
     display: inline-flex;
     align-items: baseline;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     min-width: 0;
     white-space: nowrap;
   }
@@ -475,7 +475,7 @@
   .sidebar-rail-wrapper {
     display: flex;
     justify-content: center;
-    padding: 4px 0 8px;
+    padding: var(--spacing-1) 0 var(--spacing-2);
   }
 
   .rail-status-btn {
@@ -488,7 +488,7 @@
     gap: 3px;
     background: var(--bg-elevated);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 6px);
+    border-radius: var(--radius-md);
     cursor: pointer;
     padding: 0;
     color: var(--fg-primary);
@@ -506,7 +506,7 @@
     font-size: var(--font-size-xs);
     font-weight: 700;
     letter-spacing: 0.05em;
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
     color: var(--fg-secondary);
   }
 
@@ -593,13 +593,13 @@
   .capsule-mobile {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 3px 10px;
+    gap: var(--spacing-1-5);
+    padding: 3px var(--spacing-2-5);
     background: rgba(18, 28, 40, 0.72);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     border: 1px solid var(--border);
-    border-radius: 9999px;
+    border-radius: var(--radius-full);
     /* Pill background stays a fixed dark glass regardless of site theme
        (matches the always-dark mobile header), so its text stays fixed
        light too instead of flipping with theme tokens. */
@@ -643,12 +643,12 @@
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid var(--border);
-    border-radius: 9999px;
+    border-radius: var(--radius-full);
     box-shadow:
       0 2px 8px rgba(0, 0, 0, 0.25),
       inset 0 1px 0 rgba(255, 255, 255, 0.05);
     height: 32px;
-    padding: 2px;
+    padding: var(--spacing-0-5);
     gap: 1px;
     user-select: none;
   }
@@ -656,11 +656,11 @@
   .capsule-segment {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 0 10px;
+    gap: var(--spacing-1-5);
+    padding: 0 var(--spacing-2-5);
     background: transparent;
     border: none;
-    border-radius: 9999px;
+    border-radius: var(--radius-full);
     color: var(--fg-primary);
     font-size: var(--font-size-xs);
     font-weight: 500;
@@ -679,8 +679,8 @@
 
   .traffic-segment {
     border-left: 1px solid var(--border-light);
-    gap: 8px;
-    font-family: var(--font-family-mono, monospace);
+    gap: var(--spacing-2);
+    font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
   }
 

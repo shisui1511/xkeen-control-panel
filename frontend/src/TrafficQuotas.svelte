@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from './components/Toggle.svelte';
   import { onMount } from 'svelte';
   import Modal from './components/Modal.svelte';
   import Section from './components/Section.svelte';
@@ -10,6 +11,8 @@
   import Icon from './lib/components/Icon.svelte';
   import Select from './components/Select.svelte';
   import Button from './components/Button.svelte';
+  import Badge from './components/Badge.svelte';
+  import StatusBadge from './components/StatusBadge.svelte';
   import { apiFetch, apiFetchJSON } from './lib/api';
 
   interface Props {
@@ -348,15 +351,15 @@
   function getActionBadgeClass(action?: string): string {
     switch (action) {
       case 'throttle':
-        return 'badge tq-action-throttle';
+        return 'badge badge--tag tq-action-throttle';
       case 'log_only':
-        return 'badge tq-action-log';
+        return 'badge badge--tag tq-action-log';
       case 'block':
-        return 'badge tq-action-block';
+        return 'badge badge--tag tq-action-block';
       case 'redirect_direct':
-        return 'badge tq-action-redirect';
+        return 'badge badge--tag tq-action-redirect';
       default:
-        return 'badge tq-action-notify';
+        return 'badge badge--tag tq-action-notify';
     }
   }
 
@@ -567,14 +570,11 @@
                   <tr>
                     <td><b>{q.name}</b></td>
                     <td>
-                      <span
-                        class="status-badge"
-                        style="background: var(--surface-tint); color: var(--fg-secondary);"
-                      >
+                      <Badge>
                         {q.target_type === 'global'
                           ? $t('trafficquotas.target_global')
                           : q.target_id}
-                      </span>
+                      </Badge>
                     </td>
                     <td>
                       {q.period === 'daily'
@@ -611,57 +611,47 @@
                       </span>
                     </td>
                     <td>
-                      {#if q.enabled}
-                        <span class="status-badge active">
-                          <span class="status-dot success" style="margin: 0 4px 0 0;"></span>
-                          {$t('trafficquotas.status_active')}
-                        </span>
-                      {:else}
-                        <span class="status-badge stopped">
-                          <span class="status-dot error" style="margin: 0 4px 0 0;"></span>
-                          {$t('trafficquotas.status_disabled')}
-                        </span>
-                      {/if}
+                      <StatusBadge
+                        variant={q.enabled ? 'running' : 'stopped'}
+                        label={q.enabled
+                          ? $t('trafficquotas.status_active')
+                          : $t('trafficquotas.status_disabled')}
+                      />
                     </td>
                     <td>
                       {#if percent(q) >= 100}
                         {#if q.action === 'block'}
-                          <span class="badge badge-error"
+                          <span class="badge badge--tag badge-danger"
                             >{$t('trafficquotas.badge_status_blocked')}</span
                           >
                         {:else if q.action === 'redirect_direct'}
-                          <span class="badge badge-redirected"
+                          <span class="badge badge--tag badge-redirected"
                             >{$t('trafficquotas.badge_status_redirected')}</span
                           >
                         {:else}
-                          <span class="badge badge-error"
+                          <span class="badge badge--tag badge-danger"
                             >{$t('trafficquotas.status_exceeded')}</span
                           >
                         {/if}
                       {:else if percent(q) >= q.alert_threshold}
-                        <span class="badge badge-warning">{$t('trafficquotas.status_warning')}</span
+                        <span class="badge badge--tag badge-warning"
+                          >{$t('trafficquotas.status_warning')}</span
                         >
                       {:else}
-                        <span class="badge badge-success">OK</span>
+                        <span class="badge badge--tag badge-success">OK</span>
                       {/if}
                     </td>
                     <td>
                       <div class="actions-wrapper">
-                        <label
-                          class="toggle-switch"
-                          class:loading={togglingQuotas[q.id]}
-                          style="margin-right: 12px;"
+                        <Toggle
+                          class="tq-toggle"
+                          loading={togglingQuotas[q.id]}
                           title={$t('trafficquotas.toggle_limit')}
-                        >
-                          <input
-                            type="checkbox"
-                            aria-label={$t('trafficquotas.toggle_limit')}
-                            checked={q.enabled}
-                            disabled={togglingQuotas[q.id]}
-                            onchange={() => toggleEnabled(q)}
-                          />
-                          <span class="toggle-slider"></span>
-                        </label>
+                          ariaLabel={$t('trafficquotas.toggle_limit')}
+                          checked={q.enabled}
+                          disabled={togglingQuotas[q.id]}
+                          onchange={() => toggleEnabled(q)}
+                        />
 
                         <div class="dropdown-container">
                           <button
@@ -743,7 +733,7 @@
 
 <!-- Modal Form -->
 <Modal
-  isOpen={showForm}
+  open={showForm}
   title={editingQuota ? $t('trafficquotas.edit_quota') : $t('trafficquotas.new_quota')}
   onclose={cancelEdit}
 >
@@ -839,15 +829,11 @@
     </div>
 
     <div class="form-group-checkbox">
-      <label class="toggle-switch">
-        <input
-          type="checkbox"
-          id="form-enabled"
-          aria-label={$t('trafficquotas.status_enabled')}
-          bind:checked={formEnabled}
-        />
-        <span class="toggle-slider"></span>
-      </label>
+      <Toggle
+        id="form-enabled"
+        aria-label={$t('trafficquotas.status_enabled')}
+        bind:checked={formEnabled}
+      />
       <label for="form-enabled" class="checkbox-label">
         {$t('trafficquotas.status_enabled')}
       </label>
@@ -869,7 +855,7 @@
   .alerts-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .alerts-list > :global(.alert) {
@@ -884,20 +870,20 @@
   }
 
   .stat-box {
-    padding: 16px var(--card-pad);
+    padding: var(--spacing-4) var(--card-pad);
     border-left: 1px solid var(--border);
     margin-left: -1px;
   }
 
   .tq-empty {
-    padding: 8px var(--card-pad) 16px;
+    padding: var(--spacing-2) var(--card-pad) var(--spacing-4);
   }
 
   .stat-label {
     font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-secondary);
-    margin-bottom: 6px;
+    margin-bottom: var(--spacing-1-5);
   }
 
   .stat-value {
@@ -917,7 +903,7 @@
   .stat-sub {
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
-    margin-top: 4px;
+    margin-top: var(--spacing-1);
   }
 
   .table-responsive {
@@ -928,13 +914,13 @@
   table {
     width: 100%;
     border-collapse: collapse;
-    font-size: var(--font-size-table, 0.8125rem);
+    font-size: var(--font-size-table);
     color: var(--fg-secondary);
   }
 
   th {
     text-align: left;
-    padding: calc((var(--table-row-h, 44px) - 20px) / 2) 20px;
+    padding: calc((var(--table-row-h) - var(--spacing-5)) / 2) var(--spacing-5);
     font-weight: 600;
     color: var(--fg-secondary);
     border-bottom: 1px solid var(--border);
@@ -943,7 +929,7 @@
   }
 
   td {
-    padding: calc((var(--table-row-h, 44px) - 20px) / 2) 20px;
+    padding: calc((var(--table-row-h) - var(--spacing-5)) / 2) var(--spacing-5);
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
   }
@@ -953,7 +939,7 @@
   }
 
   .mono {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
   }
 
   .num {
@@ -964,14 +950,14 @@
   .stat-bar {
     height: 6px;
     background: var(--surface-tint);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     overflow: hidden;
   }
 
   .stat-bar-fill {
     height: 100%;
     background: var(--accent);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     transition: width var(--duration-slow) var(--ease-out);
   }
 
@@ -996,7 +982,7 @@
   }
 
   .action-btn-dots {
-    padding: 4px 8px;
+    padding: var(--spacing-1) var(--spacing-2);
     font-size: var(--font-size-base);
     line-height: 1;
     height: auto;
@@ -1006,16 +992,16 @@
     position: absolute;
     right: 0;
     top: 100%;
-    margin-top: 4px;
+    margin-top: var(--spacing-1);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--shadow-lg);
     z-index: 10;
     min-width: 150px;
     display: flex;
     flex-direction: column;
-    padding: 4px;
+    padding: var(--spacing-1);
     animation: dropdown-anim var(--duration-fast) var(--ease-out);
   }
 
@@ -1034,11 +1020,11 @@
     background: none;
     border: none;
     color: var(--fg-secondary);
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
     text-align: left;
     font-size: var(--font-size-sm);
     cursor: pointer;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     width: 100%;
     transition:
       background var(--transition-normal),
@@ -1062,14 +1048,14 @@
   .form-row-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 16px;
+    gap: var(--spacing-4);
   }
 
   .form-group-checkbox {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-top: 4px;
+    gap: var(--spacing-3);
+    margin-top: var(--spacing-1);
   }
 
   .checkbox-label {
@@ -1114,12 +1100,12 @@
     border-color: var(--border);
     border-left: 3px solid var(--accent) !important;
     border-radius: var(--radius-lg);
-    padding: 16px 20px;
+    padding: var(--spacing-4) var(--spacing-5);
     position: relative;
   }
   .info-banner-content {
     display: flex;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
   .info-banner-icon {
     color: var(--accent);
@@ -1129,7 +1115,7 @@
   .info-banner-text {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
   .info-banner-title {
     margin: 0;
@@ -1155,7 +1141,7 @@
     font-size: var(--font-size-xl);
     cursor: pointer;
     line-height: 1;
-    padding: 4px 8px;
+    padding: var(--spacing-1) var(--spacing-2);
     transition: color var(--transition-normal);
   }
   .info-banner-close:hover {
@@ -1165,20 +1151,7 @@
     font-size: var(--font-size-lg);
     color: var(--fg-secondary);
   }
-  .toggle-switch.loading {
-    opacity: 0.6;
-    pointer-events: none;
-  }
-  .toggle-switch.loading .toggle-slider {
-    animation: toggle-pulse 1.2s infinite ease-in-out;
-  }
-  @keyframes toggle-pulse {
-    0%,
-    100% {
-      background: var(--bg-elevated);
-    }
-    50% {
-      background: var(--accent-soft);
-    }
+  :global(.tq-toggle) {
+    margin-right: var(--spacing-3);
   }
 </style>

@@ -599,7 +599,7 @@
   :global(.cm-schema-tooltip-badges) {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     flex-wrap: wrap;
   }
   :global(.cm-schema-badge-type) {
@@ -607,7 +607,7 @@
     font-size: var(--font-size-2xs);
     font-weight: 600;
     padding: 1px 7px;
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
     background: color-mix(in srgb, var(--accent) 15%, transparent);
     color: var(--accent);
     border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
@@ -615,8 +615,8 @@
   :global(.cm-schema-badge-required) {
     font-size: var(--font-size-2xs);
     font-weight: 600;
-    padding: 1px 6px;
-    border-radius: var(--radius-full, 9999px);
+    padding: 1px var(--spacing-1-5);
+    border-radius: var(--radius-full);
     background: color-mix(in srgb, var(--danger) 15%, transparent);
     color: var(--danger);
     border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
@@ -624,10 +624,10 @@
   :global(.cm-schema-badge-default) {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     font-size: var(--font-size-2xs);
     padding: 1px 7px;
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
     background: var(--bg-surface-elevated);
     border: 1px solid var(--border);
     color: var(--fg-secondary);
@@ -692,7 +692,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     transition:
       border-color var(--transition-fast),
@@ -713,7 +713,7 @@
     padding: 1px 5px;
     border-radius: var(--radius-xs);
     display: inline-block;
-    margin-right: 4px;
+    margin-right: var(--spacing-1);
   }
 
   /* Warning / tip callouts for blockquotes */
@@ -725,7 +725,7 @@
     border-left: 3px solid var(--warning);
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
     line-height: 1.5;
   }
   :global(.cm-schema-tooltip-description blockquote p) {
@@ -759,15 +759,15 @@
   :global(.cm-schema-tooltip-enums-list) {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
   :global(.cm-schema-enum-pill) {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
-    padding: 2px 8px;
+    padding: var(--spacing-0-5) var(--spacing-2);
     border-radius: var(--radius-sm);
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -793,8 +793,8 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    padding: 0 4px;
-    border-radius: 3px;
+    padding: 0 var(--spacing-1);
+    border-radius: var(--radius-xs);
     background: color-mix(in srgb, var(--accent) 25%, transparent);
     color: var(--accent);
   }
@@ -808,13 +808,13 @@
     align-items: center;
     gap: var(--spacing-3);
     flex-wrap: wrap;
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
     flex-shrink: 0;
   }
   :global(.cm-schema-constraint) {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
   :global(.cm-constraint-label) {
     color: var(--fg-dim);
@@ -860,8 +860,8 @@
       display: none !important;
     }
     :global(.cm-panel.cm-search) {
-      padding: 8px;
-      gap: 6px;
+      padding: var(--spacing-2);
+      gap: var(--spacing-1-5);
       flex-wrap: wrap;
       background: var(--bg-card);
       border-bottom: 1px solid var(--border);

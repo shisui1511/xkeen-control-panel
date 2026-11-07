@@ -240,6 +240,7 @@
           <span class="toggle-switch">
             <input
               type="checkbox"
+              role="switch"
               bind:checked={enabled}
               disabled={saving}
               data-testid="geo-sched-enabled"

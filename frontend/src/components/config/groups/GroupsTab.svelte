@@ -229,14 +229,14 @@
   .groups-tab {
     display: flex;
     flex-direction: column;
-    gap: var(--grid-gap, 16px);
+    gap: var(--grid-gap);
     min-width: 0;
   }
 
   .groups-skeleton {
     display: flex;
     flex-direction: column;
-    gap: var(--grid-gap, 16px);
+    gap: var(--grid-gap);
   }
 
   .groups-panel {
@@ -245,7 +245,7 @@
     align-items: center;
     justify-content: flex-end;
     gap: var(--spacing-2) var(--spacing-4);
-    min-height: var(--btn-h, 38px);
+    min-height: var(--btn-h);
   }
 
   .groups-segment {
@@ -266,7 +266,7 @@
   .groups-list {
     display: flex;
     flex-direction: column;
-    gap: var(--grid-gap, 16px);
+    gap: var(--grid-gap);
     min-width: 0;
   }
 </style>

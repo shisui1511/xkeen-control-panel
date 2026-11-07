@@ -185,15 +185,16 @@ test(
     await page.goto('/#/services');
 
     const expectStopped = 'running=false kernels=[] pid=нет conflict=false';
-    const heroStatus = page.locator('.hero-status .status-badge').first();
+    const heroStatus = page.locator('.hero-status [data-status]').first();
     const stopBtn = page.locator('.hero-actions .btn-danger-soft');
     const restartBtn = page.locator('.hero-actions > button.btn-secondary').first();
     const startBtn = page.getByTestId('hero-start');
 
     /** Интерфейс и API говорят одно и то же о состоянии службы. */
     async function expectState(running: boolean, what: string): Promise<void> {
-      await expect(heroStatus, `${what}: значок статуса в интерфейсе`).toHaveClass(
-        running ? /\brunning\b/ : /\bstopped\b/,
+      await expect(heroStatus, `${what}: значок статуса в интерфейсе`).toHaveAttribute(
+        'data-status',
+        running ? 'running' : 'stopped',
         { timeout: ACTION }
       );
       await expect

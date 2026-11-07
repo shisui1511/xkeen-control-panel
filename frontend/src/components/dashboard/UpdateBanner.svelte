@@ -25,7 +25,7 @@
     <div class="update-banner-text">
       <strong>{$t('dash.update_banner_title', { version: latest })}</strong>
       {#if kind !== 'stable'}
-        <span class="badge badge-primary">{$t(`settings.update_kind_${kind}`)}</span>
+        <span class="badge badge--tag badge-info">{$t(`settings.update_kind_${kind}`)}</span>
       {/if}
       <span
         class="update-banner-desc"
@@ -51,10 +51,10 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px 16px;
+    gap: var(--spacing-3) var(--spacing-4);
     flex-wrap: wrap;
     margin-bottom: 18px;
-    padding: 12px 14px;
+    padding: var(--spacing-3) var(--spacing-3-5);
     border-radius: var(--radius-md);
     background: var(--accent-soft);
     border: 1px solid var(--accent-line);
@@ -64,7 +64,7 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 6px 10px;
+    gap: var(--spacing-1-5) var(--spacing-2-5);
     font-size: var(--font-size-sm);
     color: var(--fg-secondary);
     min-width: 0;
@@ -77,7 +77,7 @@
 
   .update-banner-actions {
     display: flex;
-    gap: 8px;
+    gap: var(--spacing-2);
     flex-shrink: 0;
   }
 </style>

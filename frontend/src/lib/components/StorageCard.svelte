@@ -74,13 +74,13 @@
   .storage-body {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .storage-head {
     display: flex;
     justify-content: space-between;
-    gap: 12px;
+    gap: var(--spacing-3);
     font-size: var(--font-size-base);
     font-weight: 500;
     color: var(--fg-primary);

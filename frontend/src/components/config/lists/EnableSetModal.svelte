@@ -156,7 +156,7 @@
   }
 </script>
 
-<Modal isOpen={open} {title} maxWidth="640px" dataTestid="geodata-add-modal" onclose={close}>
+<Modal {open} {title} maxWidth="640px" testid="geodata-add-modal" onclose={close}>
   <div class="es-body">
     {#if target}
       <p class="es-text" id="{uid}-body" data-testid="geodata-add-body">

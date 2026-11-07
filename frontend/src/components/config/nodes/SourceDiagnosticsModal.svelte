@@ -122,10 +122,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={$t('cfg.nodes.diag_title', { name })}
   maxWidth="760px"
-  dataTestid="nodes-diag-modal"
+  testid="nodes-diag-modal"
   {onclose}
 >
   <div class="dg-body">
@@ -140,7 +140,7 @@
           />
         </div>
       {:else if kernels.length === 1}
-        <span class="chip chip-default" data-testid="nodes-diag-kernel">{kernels[0].name}</span>
+        <span class="badge badge-neutral" data-testid="nodes-diag-kernel">{kernels[0].name}</span>
       {/if}
       <Tabs
         items={tabItems}

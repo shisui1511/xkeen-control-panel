@@ -112,7 +112,7 @@
         <label class="form-label" for="mihomo-dns-fakeip-range">Fake-IP Range</label>
         <input
           id="mihomo-dns-fakeip-range"
-          class="form-input"
+          class="input input-sm"
           bind:value={ctx.dns.fakeIPRange}
           oninput={() => ctx.markDirty()}
         />
@@ -138,7 +138,7 @@
         >
         <input
           id="mihomo-dns-proxy-server-ns"
-          class="form-input"
+          class="input input-sm"
           value={(ctx.dns.proxyServerNameservers?.length
             ? ctx.dns.proxyServerNameservers
             : DEFAULT_PROXY_SERVER_NAMESERVERS
@@ -180,17 +180,17 @@
 
 <style>
   .sec-body {
-    padding: 16px;
+    padding: var(--spacing-4);
   }
 
   .toggle-row {
-    margin-bottom: 12px;
+    margin-bottom: var(--spacing-3);
   }
 
   .toggle-label {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     font-size: var(--font-size-sm);
     cursor: pointer;
     user-select: none;
@@ -198,10 +198,10 @@
   }
 
   .form-row {
-    margin-bottom: 12px;
+    margin-bottom: var(--spacing-3);
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .form-label {
@@ -210,16 +210,15 @@
     color: var(--fg-secondary);
   }
 
-  .form-input,
   .form-textarea {
     width: 100%;
     box-sizing: border-box;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 8px;
+    padding: var(--spacing-2);
     color: var(--fg-primary);
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: var(--font-size-xs);
   }
 
@@ -228,7 +227,7 @@
   }
 
   .alert {
-    padding: 10px 12px;
+    padding: var(--spacing-2-5) var(--spacing-3);
     border-radius: var(--radius-sm);
   }
 
@@ -239,7 +238,7 @@
   }
 
   .form-hint {
-    margin: 4px 0 0;
+    margin: var(--spacing-1) 0 0;
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }

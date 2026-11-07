@@ -259,13 +259,7 @@
   const refLabel = (r: Pick<ListRef, 'file' | 'tag'>) => `${r.file} · ${r.tag}`;
 </script>
 
-<Modal
-  isOpen={open}
-  title={$t('cfg.list.title')}
-  maxWidth="720px"
-  dataTestid="list-picker"
-  {onclose}
->
+<Modal {open} title={$t('cfg.list.title')} maxWidth="720px" testid="list-picker" {onclose}>
   <div class="lp-body">
     <div class="lp-controls">
       {#if !single}
@@ -328,7 +322,7 @@
                   />
                   <span class="lp-main">
                     <span class="lp-mono">{refLabel(r)}</span>
-                    <span class="chip chip-danger lp-chip">{$t('cfg.list.missing')}</span>
+                    <span class="badge badge-danger lp-chip">{$t('cfg.list.missing')}</span>
                   </span>
                 </label>
               </li>
@@ -377,7 +371,7 @@
                       <span class="lp-mono">{refLabel(l)}</span>
                       <span class="lp-count">{$tp('cfg.list.entries', l.count)}</span>
                       {#if l.count > HEAVY}
-                        <span class="chip chip-warning lp-chip">{$t('cfg.list.heavy')}</span>
+                        <span class="badge badge-warning lp-chip">{$t('cfg.list.heavy')}</span>
                       {/if}
                     </span>
                     {#if (l.examples ?? []).length > 0}
@@ -418,16 +412,16 @@
                   <span class="lp-line">
                     <span class="lp-name">{set.name}</span>
                     {#if set.heavy}
-                      <span class="chip chip-warning lp-chip">{$t('cfg.list.heavy')}</span>
+                      <span class="badge badge-warning lp-chip">{$t('cfg.list.heavy')}</span>
                     {/if}
                     {#if set.installed}
-                      <span class="chip chip-default lp-chip">{$t('setup.installed')}</span>
+                      <span class="badge badge-neutral lp-chip">{$t('setup.installed')}</span>
                     {/if}
                   </span>
                   <span class="lp-mono lp-dim">{set.file} · {set.size_hint}</span>
                 </span>
                 {#if set.in_xkeen}
-                  <span class="chip chip-success lp-chip" data-testid="list-ext-in-{set.id}">
+                  <span class="badge badge-success lp-chip" data-testid="list-ext-in-{set.id}">
                     {$t('cfg.list.in_xkeen')}
                   </span>
                 {:else}
@@ -597,7 +591,7 @@
   .lp-main {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     min-width: 0;
   }
 
@@ -690,7 +684,7 @@
   .lp-ext-link {
     align-self: flex-start;
     font-size: var(--font-size-sm);
-    color: var(--accent-text, var(--accent));
+    color: var(--accent-text);
     text-decoration: underline;
   }
 

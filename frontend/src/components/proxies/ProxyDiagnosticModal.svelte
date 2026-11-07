@@ -24,7 +24,7 @@
     diagnosticLoading?: boolean;
     parseReportData?: ParseReport | null;
     rawResponseData?: RawResponse | null;
-    onClose: () => void;
+    onclose: () => void;
     onTabChange?: (tab: 'report' | 'headers' | 'raw') => void;
   }
 
@@ -34,7 +34,7 @@
     diagnosticLoading = false,
     parseReportData = null,
     rawResponseData = null,
-    onClose,
+    onclose: onClose,
     onTabChange = () => {}
   }: Props = $props();
 </script>
@@ -46,7 +46,7 @@
     {diagnosticLoading}
     {parseReportData}
     {rawResponseData}
-    {onClose}
+    onclose={onClose}
     {onTabChange}
   />
 {/if}

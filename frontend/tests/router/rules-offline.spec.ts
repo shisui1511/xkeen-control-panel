@@ -107,7 +107,7 @@ test('rules-offline: карточка провайдера', { tag: CORE_TAG }, 
     const first = cards.first();
     await expect(
       first
-        .locator('.provider-meta .meta-item, [data-testid^="provider-status-"], .badge-error')
+        .locator('.provider-meta .meta-item, [data-testid^="provider-status-"], .badge-danger')
         .first()
     ).toBeVisible();
     await expect(

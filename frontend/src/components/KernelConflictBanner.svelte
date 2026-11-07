@@ -57,17 +57,17 @@
 
 <style>
   .kernel-conflict {
-    margin: 12px 16px 0;
-    padding: 12px 16px;
+    margin: var(--spacing-3) var(--spacing-4) 0;
+    padding: var(--spacing-3) var(--spacing-4);
     justify-content: space-between;
     align-items: flex-start;
-    gap: 16px;
+    gap: var(--spacing-4);
   }
 
   .kernel-conflict__icon {
     display: inline-flex;
     flex: none;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .kernel-conflict__text {
@@ -75,7 +75,7 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .kernel-conflict__text strong {
@@ -98,7 +98,7 @@
     display: flex;
     flex: none;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: var(--spacing-2);
     align-items: center;
   }
 

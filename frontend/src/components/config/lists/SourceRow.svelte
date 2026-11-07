@@ -70,10 +70,10 @@
   }
 
   function resultChip(r: FileResultView): ResultChip {
-    if (r.status === 'updated') return { cls: 'chip-success', text: $t('cfg.geo.res_updated') };
-    if (r.status === 'unchanged') return { cls: 'chip-default', text: $t('cfg.geo.res_same') };
+    if (r.status === 'updated') return { cls: 'badge-success', text: $t('cfg.geo.res_updated') };
+    if (r.status === 'unchanged') return { cls: 'badge-neutral', text: $t('cfg.geo.res_same') };
     const code = r.reason !== undefined && r.reason !== '' ? r.reason : 'failed_new';
-    return { cls: 'chip-warning', text: $t('cfg.geo.res_kept', { reason: reasonText(code) }) };
+    return { cls: 'badge-warning', text: $t('cfg.geo.res_kept', { reason: reasonText(code) }) };
   }
 
   const result = $derived(source.result !== undefined ? resultChip(source.result) : null);
@@ -123,54 +123,54 @@
 
     <div class="sr-chips">
       {#if result !== null}
-        <span class="chip {result.cls}" data-testid="geo-source-status-{id}">{result.text}</span>
+        <span class="badge {result.cls}" data-testid="geo-source-status-{id}">{result.text}</span>
       {/if}
       {#if source.outside !== undefined && source.outside !== ''}
-        <span class="chip chip-default" data-testid="geo-source-outside-{id}">
+        <span class="badge badge-neutral" data-testid="geo-source-outside-{id}">
           {$t('cfg.geo.chip_outside', { date: routerDate(source.outside) })}
         </span>
       {/if}
       {#if source.pending}
-        <span class="chip chip-default" data-testid="geo-source-pending-{id}">
+        <span class="badge badge-neutral" data-testid="geo-source-pending-{id}">
           {$t('cfg.geo.chip_pending')}
         </span>
       {/if}
       {#if source.include_stuck}
-        <span class="chip chip-warning">{$t('cfg.geo.chip_include_partial')}</span>
+        <span class="badge badge-warning">{$t('cfg.geo.chip_include_partial')}</span>
       {/if}
       {#if source.dup}
-        <span class="chip chip-warning">{$t('cfg.geo.chip_dup')}</span>
+        <span class="badge badge-warning">{$t('cfg.geo.chip_dup')}</span>
       {:else if source.dup_url}
-        <span class="chip chip-warning">{$t('cfg.geo.chip_dup_url')}</span>
+        <span class="badge badge-warning">{$t('cfg.geo.chip_dup_url')}</span>
       {/if}
       {#if source.draft === 'delete'}
-        <span class="chip chip-default" data-testid="geo-source-draft-{id}">
+        <span class="badge badge-neutral" data-testid="geo-source-draft-{id}">
           {$t('cfg.geo.chip_draft_delete')}
         </span>
       {:else if source.draft === 'off'}
-        <span class="chip chip-default" data-testid="geo-source-draft-{id}">
+        <span class="badge badge-neutral" data-testid="geo-source-draft-{id}">
           {$t('cfg.geo.chip_draft_off')}
         </span>
       {/if}
       {#if incomplete}
-        <span class="chip chip-danger" data-testid="geo-source-incomplete-{id}">
+        <span class="badge badge-danger" data-testid="geo-source-incomplete-{id}">
           {$t('cfg.geo.chip_delete_incomplete', {
             reason: reasonText(source.delete_incomplete ?? '')
           })}
         </span>
       {/if}
       {#if noFileYet}
-        <span class="chip chip-warning" data-testid="geo-source-nofile-{id}">
+        <span class="badge badge-warning" data-testid="geo-source-nofile-{id}">
           {$t('cfg.geo.no_file')}
         </span>
       {/if}
       {#if source.invalid}
-        <span class="chip chip-warning">{$t('cfg.geo.chip_invalid')}</span>
+        <span class="badge badge-warning">{$t('cfg.geo.chip_invalid')}</span>
       {/if}
       {#if source.origin === 'panel'}
-        <span class="chip chip-default">{$t('cfg.geo.chip_panel')}</span>
+        <span class="badge badge-neutral">{$t('cfg.geo.chip_panel')}</span>
       {:else if source.origin === 'own'}
-        <span class="chip chip-default">{$t('cfg.geo.chip_own')}</span>
+        <span class="badge badge-neutral">{$t('cfg.geo.chip_own')}</span>
       {/if}
     </div>
 
@@ -299,7 +299,7 @@
 
   button.sr-name:hover,
   button.sr-name:focus-visible {
-    color: var(--accent-text, var(--accent));
+    color: var(--accent-text);
     text-decoration: underline;
   }
 
@@ -318,7 +318,7 @@
     display: none;
   }
 
-  .sr-chips :global(.chip) {
+  .sr-chips :global(.badge) {
     white-space: normal;
     overflow-wrap: anywhere;
     text-align: left;
@@ -356,7 +356,7 @@
   }
 
   .sr-actions :global(.sr-icon) {
-    min-width: var(--btn-h, 32px);
+    min-width: var(--btn-h);
     padding: 0;
     justify-content: center;
   }

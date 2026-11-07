@@ -567,8 +567,8 @@ for (const [name, src] of [
     `${name}: неопределённый токен (--bg-surface-hover / --color-primary)`,
   );
   expect(
-    !/class="[^"]*\bbadge\b/.test(src),
-    `${name}: пометки узлов — .chip, а не .badge`,
+    !/class="[^"]*\bbadge--tag\b/.test(src),
+    `${name}: пометки узлов — мягкий .badge, а не .badge--tag`,
   );
 }
 
@@ -581,8 +581,8 @@ expect(
 );
 expect(!/--danger/.test(row), "NodeRow.svelte: --danger в пометках узла");
 expect(
-  /chip chip-info/.test(row) && /chip chip-warning/.test(row),
-  "NodeRow.svelte: «только <ядро>» — chip-info, «не поддерживается» — chip-warning",
+  /badge badge-info/.test(row) && /badge badge-warning/.test(row),
+  "NodeRow.svelte: «только <ядро>» — badge-info, «не поддерживается» — badge-warning",
 );
 expect(
   !/\bcred|secret|password/i.test(row),

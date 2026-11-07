@@ -44,13 +44,13 @@
 
 <style>
   .scenario-bar {
-    margin-bottom: 12px;
+    margin-bottom: var(--spacing-3);
   }
 
   .scenario-chip-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     flex-wrap: wrap;
   }
 
@@ -61,10 +61,10 @@
   }
 
   .scenario-chip {
-    padding: 4px 10px;
+    padding: var(--spacing-1) var(--spacing-2-5);
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--radius-xl);
     color: var(--fg-primary);
     font-size: var(--font-size-xs);
     cursor: pointer;
@@ -90,14 +90,14 @@
 
   .preset-mod-badge {
     margin-left: 5px;
-    font-size: var(--font-size-xs, 0.6875rem);
+    font-size: var(--font-size-xs);
     color: var(--warning);
     opacity: 0.9;
     font-style: italic;
   }
 
   .scenario-description {
-    margin: 6px 0 0 0;
+    margin: var(--spacing-1-5) 0 0 0;
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
     line-height: 1.4;

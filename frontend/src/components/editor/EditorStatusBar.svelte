@@ -97,7 +97,7 @@
 
 <style>
   .editor-statusbar {
-    padding: 2px 10px;
+    padding: var(--spacing-0-5) var(--spacing-2-5);
     background: var(--surface-tint);
     border-top: 1px solid var(--border);
     display: flex;
@@ -111,14 +111,14 @@
     box-sizing: border-box;
     overflow: hidden;
     white-space: nowrap;
-    gap: 8px;
+    gap: var(--spacing-2);
     flex-wrap: nowrap;
   }
 
   .sb-left {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--spacing-2-5);
     flex-shrink: 0;
   }
 
@@ -126,15 +126,15 @@
     margin-left: auto;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     flex-shrink: 0;
   }
 
   .status-shortcut-tip kbd {
     background: var(--surface-tint);
     border: 1px solid var(--border);
-    border-radius: 3px;
-    padding: 1px 4px;
+    border-radius: var(--radius-xs);
+    padding: 1px var(--spacing-1);
     font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     color: var(--fg-secondary);
@@ -143,11 +143,11 @@
   .chip-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     font-size: var(--font-size-xs);
     font-weight: 600;
     font-family: var(--font-family-mono);
-    padding: 2px 7px;
+    padding: var(--spacing-0-5) 7px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
     background: var(--surface-tint);
@@ -181,8 +181,8 @@
   .ks-dot-spin {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    margin-right: 6px;
+    gap: var(--spacing-1);
+    margin-right: var(--spacing-1-5);
   }
   .ks-dot {
     width: 6px;
@@ -212,29 +212,29 @@
   .status-apply-indicator {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     font-size: var(--font-size-xs);
     color: var(--accent);
-    padding: 0 10px;
+    padding: 0 var(--spacing-2-5);
     border-left: 1px solid var(--border);
   }
 
   .backups-toggle-btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     background: var(--surface-tint);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--fg-secondary);
     font-size: var(--font-size-xs);
-    padding: 3px 8px;
+    padding: 3px var(--spacing-2);
     cursor: pointer;
     font-family: var(--font-family-mono);
     transition:
       color var(--transition-fast),
       background var(--transition-fast);
-    margin-left: 6px;
+    margin-left: var(--spacing-1-5);
   }
 
   .backups-toggle-btn:hover {
@@ -252,7 +252,7 @@
 
   @media (max-width: 768px) {
     .editor-statusbar {
-      padding: 2px 8px;
+      padding: var(--spacing-0-5) var(--spacing-2);
     }
 
     .status-shortcut-tip {
@@ -264,7 +264,7 @@
     }
 
     .chip-toggle {
-      padding: 3px 6px;
+      padding: 3px var(--spacing-1-5);
       min-width: 24px;
       min-height: 24px;
       display: inline-flex;
@@ -275,7 +275,7 @@
 
     .backups-toggle-btn {
       margin-left: 0;
-      padding: 2px 6px;
+      padding: var(--spacing-0-5) var(--spacing-1-5);
       min-width: 24px;
       min-height: 24px;
       box-sizing: border-box;
@@ -295,7 +295,7 @@
     }
 
     .sb-right {
-      gap: 20px;
+      gap: var(--spacing-5);
     }
 
     .backups-toggle-btn {

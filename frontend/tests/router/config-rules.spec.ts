@@ -139,7 +139,7 @@ test('rules: список — номера, чипы условий, цель и
   await expect(conds).toContainText(values[0]);
   await expect(conds).toContainText(values[2]);
   await expect(conds).not.toContainText(values[3]);
-  const more = conds.locator('.chip', { hasText: '+1' });
+  const more = conds.locator('.badge', { hasText: '+1' });
   await expect(more).toHaveCount(1);
   expect(await more.getAttribute('title')).toContain(values[3]);
   await expect(page.getByTestId(`rule-row-${a}`).locator('.rr-target-chip')).toHaveText('DIRECT');
@@ -147,8 +147,8 @@ test('rules: список — номера, чипы условий, цель и
   // два условия: между ними «И», цель REJECT — красный чип
   const rowB = page.getByTestId(`rule-row-${b}`);
   await expect(page.getByTestId(`rule-conds-${b}`).locator('.rr-and')).toHaveCount(1);
-  await expect(page.getByTestId(`rule-conds-${b}`).locator('.chip')).toHaveCount(2);
-  await expect(rowB.locator('.rr-target-chip')).toHaveClass(/chip-danger/);
+  await expect(page.getByTestId(`rule-conds-${b}`).locator('.badge')).toHaveCount(2);
+  await expect(rowB.locator('.rr-target-chip')).toHaveClass(/badge-danger/);
   await expect(rowB.locator('.rr-target-chip')).toHaveText('REJECT');
 
   await expect(page.getByTestId('rules-fallback')).toBeVisible();
@@ -404,7 +404,7 @@ test('rules: «Всё остальное» — смена цели через Se
   await resetDraft(page);
 });
 
-test('rules: перекрытие — chip-warning и «Поднять выше» меняет порядок', async ({ page }) => {
+test('rules: перекрытие — badge-warning и «Поднять выше» меняет порядок', async ({ page }) => {
   const guard = attachConsoleGuard(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await startPage(page);
@@ -421,7 +421,7 @@ test('rules: перекрытие — chip-warning и «Поднять выше�
   await openRules(page);
   const rowSecond = page.getByTestId(`rule-row-${second}`);
   await expect(rowSecond.locator('[data-chip="overlap"]')).toBeVisible({ timeout: T.action });
-  await expect(rowSecond.locator('[data-chip="overlap"]')).toHaveClass(/chip-warning/);
+  await expect(rowSecond.locator('[data-chip="overlap"]')).toHaveClass(/badge-warning/);
   await expect(page.getByTestId(`rule-raise-${second}`)).toBeVisible();
   // у верхнего правила перекрытия нет
   await expect(page.getByTestId(`rule-row-${first}`).locator('[data-chip="overlap"]')).toHaveCount(
@@ -749,7 +749,7 @@ for (const theme of ['dark', 'light'] as const) {
             const rb = row.getBoundingClientRect();
             if (row.scrollWidth - row.clientWidth > 0)
               out.push(`строка ${i + 1}: шире своей области`);
-            for (const el of row.querySelectorAll<HTMLElement>('.chip, .rr-actions, button')) {
+            for (const el of row.querySelectorAll<HTMLElement>('.badge, .rr-actions, button')) {
               const b = el.getBoundingClientRect();
               if (b.width > 0 && (b.right > rb.right + 1 || b.left < rb.left - 1))
                 out.push(`строка ${i + 1}: ${el.className.split(' ')[0] || el.tagName} вне строки`);

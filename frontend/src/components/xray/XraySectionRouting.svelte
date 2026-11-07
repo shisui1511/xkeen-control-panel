@@ -232,7 +232,7 @@
           >
           <input
             id="test-route-domain"
-            class="form-input"
+            class="input input-sm"
             data-testid="test-route-domain"
             bind:value={testRouteForm.domain}
             placeholder="example.com"
@@ -242,7 +242,7 @@
           <label class="form-label" for="test-route-ip">{$t('xray.test_route.target_ip')}</label>
           <input
             id="test-route-ip"
-            class="form-input"
+            class="input input-sm"
             data-testid="test-route-ip"
             bind:value={testRouteForm.ip}
             placeholder="1.2.3.4"
@@ -257,7 +257,7 @@
           <input
             id="test-route-port"
             type="number"
-            class="form-input"
+            class="input input-sm"
             data-testid="test-route-port"
             bind:value={testRouteForm.port}
             min="1"
@@ -288,7 +288,7 @@
         >
         <input
           id="test-route-inbound"
-          class="form-input"
+          class="input input-sm"
           data-testid="test-route-inbound"
           bind:value={testRouteForm.inboundTag}
           placeholder="proxy-in"
@@ -324,8 +324,9 @@
               <span class="form-label" style="margin: 0;"
                 >{$t('xray.test_route.result_outbound')}:</span
               >
-              <span class="badge badge-tag badge-proxy" data-testid="test-route-outbound-tag"
-                >{testRouteResult.outbound_tag}</span
+              <span
+                class="badge badge--tag badge-tag badge-proxy"
+                data-testid="test-route-outbound-tag">{testRouteResult.outbound_tag}</span
               >
             </div>
           {:else}
@@ -339,7 +340,9 @@
                 >{$t('xray.test_route.result_groups')}:</span
               >
               {#each testRouteResult.outbound_group_tags || testRouteResult.rule_groups as group, i (i)}
-                <span class="badge badge-tag" data-testid="test-route-rule-group">{group}</span>
+                <span class="badge badge--tag badge-tag" data-testid="test-route-rule-group"
+                  >{group}</span
+                >
               {/each}
             </div>
           {/if}
@@ -387,7 +390,7 @@
               <span class="toggle-dot"></span>
             </button>
             <span
-              class="badge badge-tag"
+              class="badge badge--tag badge-tag"
               class:badge-direct={rule.outboundTag === 'direct'}
               class:badge-block={rule.outboundTag === 'block'}
               class:badge-proxy={rule.outboundTag !== 'direct' && rule.outboundTag !== 'block'}
@@ -527,7 +530,7 @@
               <strong>{$t('xray.inbound_tags')}:</strong>
               <span class="rule-chips">
                 {#each rule.inboundTag as ib, i (i)}
-                  <span class="chip chip-ip">{ib}</span>
+                  <span class="badge badge-warning rule-cond">{ib}</span>
                 {/each}
               </span>
             </div>
@@ -538,7 +541,7 @@
               <strong>{$t('xray.domains')}:</strong>
               <span class="rule-chips">
                 {#each rule.domain as d, i (i)}
-                  <span class="chip chip-domain">{d}</span>
+                  <span class="badge badge-info rule-cond">{d}</span>
                 {/each}
               </span>
             </div>
@@ -549,7 +552,7 @@
               <strong>IP:</strong>
               <span class="rule-chips">
                 {#each rule.ip as ip, i (i)}
-                  <span class="chip chip-ip">{ip}</span>
+                  <span class="badge badge-warning rule-cond">{ip}</span>
                 {/each}
               </span>
             </div>
@@ -564,7 +567,7 @@
           {#if rule.network}
             <div class="rule-detail-item">
               <strong>{$t('xray.network')}:</strong>
-              <span class="badge">{rule.network}</span>
+              <span class="badge badge--tag">{rule.network}</span>
             </div>
           {/if}
 
@@ -573,7 +576,7 @@
               <strong>{$t('xray.rule_source')}:</strong>
               <span class="rule-chips">
                 {#each rule.source as src (src)}
-                  <span class="chip chip-ip">{src}</span>
+                  <span class="badge badge-warning rule-cond">{src}</span>
                 {/each}
               </span>
             </div>
@@ -588,7 +591,7 @@
           {#if rule.protocol && rule.protocol.length > 0}
             <div class="rule-detail-item">
               <strong>{$t('xray.rule_protocol')}:</strong>
-              {#each rule.protocol as p (p)}<span class="badge">{p}</span>{/each}
+              {#each rule.protocol as p (p)}<span class="badge badge--tag">{p}</span>{/each}
             </div>
           {/if}
 
@@ -626,7 +629,7 @@
   <XrayBalancersEditor bind:balancers bind:observatorySettings {outboundTags} {onchange} />
 
   <Modal
-    isOpen={showPresetModal}
+    open={showPresetModal}
     title={$t('xray.presets_title')}
     onclose={() => (showPresetModal = false)}
   >
@@ -662,7 +665,7 @@
   .sec-body {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   .section-title {
@@ -679,11 +682,11 @@
   .routing-rules-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .rule-card {
-    padding: 12px;
+    padding: var(--spacing-3);
     transition:
       transform var(--transition-fast),
       border-color var(--transition-fast),
@@ -708,14 +711,14 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 8px;
+    gap: var(--spacing-2);
+    margin-bottom: var(--spacing-2);
   }
 
   .rule-head-left {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .drag-handle {
@@ -735,7 +738,7 @@
     height: 16px;
     background: var(--bg-surface-active);
     border: 1px solid var(--border);
-    border-radius: 9999px;
+    border-radius: var(--radius-full);
     padding: 0;
     cursor: pointer;
     position: relative;
@@ -766,11 +769,11 @@
 
   .badge-tag {
     font-size: var(--font-size-xs);
-    padding: 2px 6px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
     border-radius: var(--radius-xs);
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     font-weight: 500;
   }
 
@@ -792,14 +795,14 @@
   .rule-actions {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .btn-rule-action {
     background: none;
     border: 1px solid var(--border);
     border-radius: var(--radius-xs);
-    padding: 4px 6px;
+    padding: var(--spacing-1) var(--spacing-1-5);
     color: var(--fg-secondary);
     cursor: pointer;
     display: inline-flex;
@@ -831,7 +834,7 @@
   .rule-details {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
@@ -839,37 +842,28 @@
   .rule-detail-item {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     flex-wrap: wrap;
   }
 
   .rule-chips {
     display: inline-flex;
-    gap: 4px;
+    gap: var(--spacing-1);
     flex-wrap: wrap;
   }
 
-  .chip {
-    padding: 1px 6px;
+  /* Условие правила: бейдж компактнее обычного, моноширинный */
+  .rule-cond {
+    padding: 1px var(--spacing-1-5);
     border-radius: var(--radius-xs);
     font-size: var(--font-size-2xs);
     font-family: var(--font-family-mono);
   }
 
-  .chip-domain {
-    background: var(--accent-soft);
-    color: var(--accent);
-  }
-
-  .chip-ip {
-    background: var(--warning-soft);
-    color: var(--warning);
-  }
-
   .form-row2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    gap: var(--spacing-3);
   }
 
   @media (max-width: 768px) {
@@ -881,13 +875,13 @@
   .form-col {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .form-row {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
     max-width: 480px;
   }
 
@@ -897,25 +891,11 @@
     color: var(--fg-secondary);
   }
 
-  .form-input {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 6px 10px;
-    font-size: var(--font-size-sm);
-    color: var(--fg-primary);
-  }
-
-  .form-input:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-
   :global(.form-select) {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
@@ -924,7 +904,7 @@
     background: var(--bg-card);
     border: 1px dashed var(--border);
     border-radius: var(--radius);
-    padding: 10px 16px;
+    padding: var(--spacing-2-5) var(--spacing-4);
     color: var(--fg-secondary);
     font-size: var(--font-size-sm);
     font-weight: 500;
@@ -945,9 +925,9 @@
   code {
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
-    color: var(--code-fg, var(--fg-primary));
-    background: var(--code-bg, var(--bg-surface-active));
-    padding: 2px 4px;
+    color: var(--code-fg);
+    background: var(--code-bg);
+    padding: var(--spacing-0-5) var(--spacing-1);
     border-radius: var(--radius-xs);
   }
 </style>

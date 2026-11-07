@@ -8,14 +8,14 @@
   import { t } from '../i18n';
 
   export interface ResponsiveSidebarProps {
-    show?: boolean;
+    open?: boolean;
     side?: 'left' | 'right';
     storageKey?: string;
     defaultWidth?: number;
     minWidth?: number;
     maxWidth?: number;
     overlay?: boolean;
-    onClose?: () => void;
+    onclose?: () => void;
     containerClass?: string;
     /** Заголовок шторки в режиме оверлея (рядом с кнопкой «Закрыть») */
     title?: string;
@@ -24,14 +24,14 @@
   }
 
   let {
-    show = $bindable(true),
+    open: show = $bindable(true),
     side = 'left',
     storageKey = 'editor_filetree_width',
     defaultWidth = 240,
     minWidth = 160,
     maxWidth = 450,
     overlay,
-    onClose,
+    onclose: onClose,
     containerClass = '',
     title,
     children,
@@ -402,8 +402,8 @@
   .responsive-sidebar-overlay-header {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 4px 4px 4px 12px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-1) var(--spacing-1) var(--spacing-1) var(--spacing-3);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
@@ -460,7 +460,7 @@
     -webkit-appearance: none;
     border: 0;
     padding: 0;
-    margin: 0 2px;
+    margin: 0 var(--spacing-0-5);
     background: transparent;
     box-sizing: border-box;
     width: 10px;

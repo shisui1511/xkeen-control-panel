@@ -114,7 +114,7 @@
   .kernels-skeleton {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .kernel-list {
@@ -128,8 +128,8 @@
     align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: 8px 12px;
-    padding: 14px var(--card-pad);
+    gap: var(--spacing-2) var(--spacing-3);
+    padding: var(--spacing-3-5) var(--card-pad);
     border-bottom: 1px solid var(--border);
     font-size: var(--font-size-sm);
     line-height: 1.5;
@@ -148,7 +148,7 @@
     display: inline-flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .kernel-note {

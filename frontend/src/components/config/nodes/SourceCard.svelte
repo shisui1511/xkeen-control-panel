@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from '../../Toggle.svelte';
   import { t, tp } from '../../../i18n';
   import { showConfirm, showToast } from '../../../stores';
   import { formatBytes } from '../../../lib/format';
@@ -289,29 +290,26 @@
       </button>
       <!-- Вид источника: у «Моих узлов» он совпадает с названием и не повторяется -->
       {#if kindLabel !== displayName}
-        <span class="chip chip-default">{kindLabel}</span>
+        <span class="badge badge-neutral">{kindLabel}</span>
       {/if}
       {#if off}
-        <span class="chip chip-default" data-testid="nodes-source-off-{source.id}">
+        <span class="badge badge-neutral" data-testid="nodes-source-off-{source.id}">
           {$t('cfg.nodes.disabled')}
         </span>
       {/if}
       {#if expired}
-        <span class="chip chip-danger" data-testid="nodes-source-expired-{source.id}">
+        <span class="badge badge-danger" data-testid="nodes-source-expired-{source.id}">
           {$t('cfg.nodes.expired')}
         </span>
       {/if}
-      <label class="toggle-switch sc-switch">
-        <input
-          type="checkbox"
-          checked={source.enabled}
-          disabled={toggling || $applyRunning}
-          aria-label={$t('cfg.nodes.source_enabled')}
-          data-testid="nodes-enabled-{source.id}"
-          onchange={toggleEnabled}
-        />
-        <span class="toggle-slider"></span>
-      </label>
+      <Toggle
+        class="sc-switch"
+        checked={source.enabled}
+        disabled={toggling || $applyRunning}
+        aria-label={$t('cfg.nodes.source_enabled')}
+        data-testid="nodes-enabled-{source.id}"
+        onchange={toggleEnabled}
+      />
     </div>
 
     <p class="sc-summary" data-testid="nodes-source-counts-{source.id}">{summary}</p>
@@ -577,7 +575,7 @@
     flex-direction: column;
     gap: var(--spacing-3);
     min-width: 0;
-    padding: 16px var(--card-pad);
+    padding: var(--spacing-4) var(--card-pad);
   }
 
   .sc-head {
@@ -620,7 +618,7 @@
     color: var(--fg-dim);
   }
 
-  .sc-switch {
+  :global(.sc-switch) {
     flex-shrink: 0;
     margin-left: auto;
   }
@@ -662,7 +660,7 @@
 
   .sc-bar {
     height: 6px;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     overflow: hidden;
@@ -670,7 +668,7 @@
 
   .sc-bar-fill {
     height: 100%;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
   }
 
   .level-normal {
@@ -690,7 +688,7 @@
     display: flex;
     gap: var(--spacing-2);
     min-width: 0;
-    padding: 12px var(--card-pad);
+    padding: var(--spacing-3) var(--card-pad);
     border-top: 1px solid var(--border);
     background: var(--surface-tint);
     color: var(--fg-secondary);
@@ -698,7 +696,7 @@
 
   .sc-announce :global(.sc-announce-icon) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .sc-announce-body {
@@ -813,11 +811,11 @@
   .sc-search {
     width: calc(100% - 2 * var(--card-pad));
     max-width: 360px;
-    margin: 12px var(--card-pad) 4px;
+    margin: var(--spacing-3) var(--card-pad) var(--spacing-1);
   }
 
   .sc-nodes :global(.node-row) {
-    padding: 10px var(--card-pad);
+    padding: var(--spacing-2-5) var(--card-pad);
   }
 
   .sc-nodes {
@@ -830,7 +828,7 @@
   .sc-empty,
   .sc-stubs {
     margin: 0;
-    padding: 12px var(--card-pad);
+    padding: var(--spacing-3) var(--card-pad);
     font-size: var(--font-size-base);
     color: var(--fg-dim);
     overflow-wrap: anywhere;
@@ -842,7 +840,7 @@
 
   .sc-more {
     display: flex;
-    padding: 4px var(--card-pad) 12px;
+    padding: var(--spacing-1) var(--card-pad) var(--spacing-3);
   }
 
   @media (pointer: coarse), (max-width: 768px) {

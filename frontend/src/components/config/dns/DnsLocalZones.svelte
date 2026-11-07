@@ -212,7 +212,7 @@
     <span class="form-label">{$t('cfg.dns.zones_builtin')}</span>
     <div class="dlz-builtin" data-testid="dns-zones-builtin">
       {#each builtinBadges as item (item.key)}
-        <span class={['badge dlz-badge', { 'dlz-mono': item.mono }]}>{item.text}</span>
+        <span class={['badge badge--tag dlz-badge', { 'dlz-mono': item.mono }]}>{item.text}</span>
       {/each}
     </div>
   </div>

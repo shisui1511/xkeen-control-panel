@@ -852,11 +852,11 @@
           content={yaml}
           language="yaml"
           storageKey="mihomo_builder_preview_width"
-          isOpen={ctx.showPreviewPane}
-          onClose={() => (ctx.showPreviewPane = false)}
+          open={ctx.showPreviewPane}
+          onclose={() => (ctx.showPreviewPane = false)}
           title="YAML {$t('mihomo.preview')}"
           fileName="config.yaml"
-          testId="mihomo-yaml-preview"
+          testid="mihomo-yaml-preview"
         >
           {#if validationError}
             <div
@@ -953,9 +953,9 @@
 
 <!-- Modal Confirm Apply -->
 <Modal
-  isOpen={showApplyConfirm}
+  open={showApplyConfirm}
   title={$t('editor.apply_confirm_title')}
-  dataTestid="apply-confirm-dialog"
+  testid="apply-confirm-dialog"
   onclose={() => (showApplyConfirm = false)}
 >
   <p>{willRestart ? $t('editor.apply_confirm_body') : $t('apply.confirm_body_no_restart')}</p>
@@ -991,21 +991,21 @@
   .container {
     max-width: var(--container-max-width, 1400px);
     margin: 0 auto;
-    padding: 16px;
+    padding: var(--spacing-4);
   }
 
   .constructor-header {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    margin-bottom: 20px;
-    gap: 16px;
+    margin-bottom: var(--spacing-5);
+    gap: var(--spacing-4);
   }
 
   .constructor-title {
     font-size: var(--font-size-xl);
     font-weight: 600;
-    margin: 0 0 4px 0;
+    margin: 0 0 var(--spacing-1) 0;
     color: var(--fg-primary);
   }
 
@@ -1017,7 +1017,7 @@
 
   .constructor-header-actions {
     display: flex;
-    gap: 8px;
+    gap: var(--spacing-2);
     align-items: center;
   }
 
@@ -1025,14 +1025,14 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 16px;
-    padding-bottom: 12px;
+    margin-bottom: var(--spacing-4);
+    padding-bottom: var(--spacing-3);
     border-bottom: 1px solid var(--border);
   }
 
   .safe-merge-card {
-    margin-bottom: 16px;
-    padding: 12px 16px;
+    margin-bottom: var(--spacing-4);
+    padding: var(--spacing-3) var(--spacing-4);
   }
 
   .safe-merge-head {
@@ -1044,7 +1044,7 @@
   .safe-merge-title-group {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
 
   .safe-merge-icon-wrap {
@@ -1067,16 +1067,16 @@
   .safe-merge-tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 10px;
-    padding-top: 8px;
+    gap: var(--spacing-1-5);
+    margin-top: var(--spacing-2-5);
+    padding-top: var(--spacing-2);
     border-top: 1px solid var(--border);
   }
 
   .directive-tag {
     background: var(--bg-card);
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
+    border-radius: var(--radius-sm);
     font-size: var(--font-size-xs);
   }
 
@@ -1086,7 +1086,7 @@
     color: var(--accent);
     font-size: var(--font-size-xs);
     cursor: pointer;
-    padding: 2px 4px;
+    padding: var(--spacing-0-5) var(--spacing-1);
   }
 
   .gen-layout {
@@ -1106,14 +1106,14 @@
   .gen-left {
     flex: 1;
     min-width: 320px;
-    padding-right: 12px;
+    padding-right: var(--spacing-3);
   }
 
   .rule-providers-row {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-bottom: 14px;
+    gap: var(--spacing-2);
+    margin-bottom: var(--spacing-3-5);
   }
 
   .rule-providers-row :global(.xcp-select) {
@@ -1126,12 +1126,12 @@
     /* Scroll inside instead of widening the page on phones. */
     max-width: 100%;
     min-width: 0;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     background: var(--surface-tint-faint);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 4px;
-    margin-bottom: 16px;
+    padding: var(--spacing-1);
+    margin-bottom: var(--spacing-4);
     overflow-x: auto;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
@@ -1149,7 +1149,7 @@
     color: var(--fg-secondary);
     font-size: var(--font-size-xs);
     font-weight: 500;
-    padding: 6px 10px;
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition:
@@ -1158,7 +1158,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
   }
 
   .sec-tab:hover {
@@ -1176,14 +1176,14 @@
     color: var(--bg-page);
     font-weight: 700;
     font-size: var(--font-size-xs);
-    padding: 1px 6px;
-    border-radius: 10px;
+    padding: 1px var(--spacing-1-5);
+    border-radius: var(--radius-lg);
   }
 
   .tab-status-badge {
     font-size: var(--font-size-xs);
     padding: 1px 5px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     font-weight: 600;
   }
 
@@ -1198,7 +1198,7 @@
   }
 
   .alert {
-    padding: 10px 12px;
+    padding: var(--spacing-2-5) var(--spacing-3);
     border-radius: var(--radius-sm);
   }
 
@@ -1210,7 +1210,7 @@
 
   .alert-dismissible {
     position: relative;
-    padding-right: 32px;
+    padding-right: var(--spacing-8);
   }
 
   .alert-close-btn {

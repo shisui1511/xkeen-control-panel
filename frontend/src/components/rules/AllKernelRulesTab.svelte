@@ -206,11 +206,13 @@
               <tr>
                 <td class="col-num mono">{String(i + 1).padStart(3, '0')}</td>
                 <td class="col-type">
-                  <span class="badge {getRuleBadgeClass(rule.type)}">{rule.type}</span>
+                  <span class="badge badge--tag {getRuleBadgeClass(rule.type)}">{rule.type}</span>
                 </td>
                 <td class="col-payload mono text-break">{rule.payload}</td>
                 <td class="col-target">
-                  <span class="badge {getTargetBadgeClass(rule.proxy)}">{rule.proxy}</span>
+                  <span class="badge badge--tag {getTargetBadgeClass(rule.proxy)}"
+                    >{rule.proxy}</span
+                  >
                 </td>
                 <td class="col-actions">
                   <button
@@ -243,11 +245,13 @@
                 <tr class="match-row">
                   <td class="col-num mono">—</td>
                   <td class="col-type">
-                    <span class="badge {getRuleBadgeClass(rule.type)}">{rule.type}</span>
+                    <span class="badge badge--tag {getRuleBadgeClass(rule.type)}">{rule.type}</span>
                   </td>
                   <td class="col-payload mono match-payload">{$t('rules.match_fallback')}</td>
                   <td class="col-target">
-                    <span class="badge {getTargetBadgeClass(rule.proxy)}">{rule.proxy}</span>
+                    <span class="badge badge--tag {getTargetBadgeClass(rule.proxy)}"
+                      >{rule.proxy}</span
+                    >
                   </td>
                   <td class="col-actions">
                     <button
@@ -283,22 +287,22 @@
   .kernel-rules-container {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: var(--spacing-3-5);
   }
 
   .toolbar-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 14px 16px;
+    padding: var(--spacing-3-5) var(--spacing-4);
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
 
   .toolbar-row {
     display: flex;
-    gap: 10px;
+    gap: var(--spacing-2-5);
     align-items: center;
     flex-wrap: wrap;
   }
@@ -313,7 +317,7 @@
 
   .search-input {
     width: 100%;
-    padding: 8px 28px 8px 12px;
+    padding: var(--spacing-2) 28px var(--spacing-2) var(--spacing-3);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -332,7 +336,7 @@
     cursor: pointer;
     font-size: var(--font-size-base);
     line-height: 1;
-    padding: 4px;
+    padding: var(--spacing-1);
     border-radius: var(--radius-sm);
     display: inline-flex;
     align-items: center;
@@ -363,12 +367,12 @@
   .stats-text {
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
   }
 
   .stats-total {
     color: var(--fg-dim);
-    margin-left: 4px;
+    margin-left: var(--spacing-1);
   }
 
   .loading-card {
@@ -377,7 +381,7 @@
     align-items: center;
     justify-content: center;
     padding: 48px;
-    gap: 12px;
+    gap: var(--spacing-3);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -390,7 +394,7 @@
     border: 2px solid var(--border);
     border-top-color: var(--accent);
     border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+    animation: spin var(--duration-spin) linear infinite;
   }
 
   .table-card {
@@ -412,7 +416,7 @@
   }
 
   th {
-    padding: 10px 14px;
+    padding: var(--spacing-2-5) var(--spacing-3-5);
     font-weight: 600;
     color: var(--fg-secondary);
     border-bottom: 1px solid var(--border);
@@ -423,8 +427,8 @@
   }
 
   td {
-    padding: 9px 14px;
-    border-bottom: 1px solid var(--border-light, var(--border));
+    padding: 9px var(--spacing-3-5);
+    border-bottom: 1px solid var(--border-light);
     color: var(--fg-primary);
     vertical-align: middle;
   }
@@ -464,7 +468,7 @@
   }
 
   .mono {
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
   }
 
   .text-break {
@@ -480,8 +484,8 @@
     display: inline-block;
     font-size: var(--font-size-xs);
     font-weight: 600;
-    padding: 2px 7px;
-    border-radius: 4px;
+    padding: var(--spacing-0-5) 7px;
+    border-radius: var(--radius-sm);
     letter-spacing: 0.02em;
     white-space: nowrap;
   }
@@ -541,7 +545,7 @@
     cursor: pointer;
     font-size: var(--font-size-lg);
     line-height: 1;
-    padding: 4px 8px;
+    padding: var(--spacing-1) var(--spacing-2);
     min-width: 32px;
     min-height: 32px;
     display: inline-flex;
@@ -566,11 +570,11 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     box-shadow: var(--shadow-md);
-    z-index: 100;
+    z-index: var(--z-dropdown);
     min-width: 160px;
     display: flex;
     flex-direction: column;
-    padding: 4px 0;
+    padding: var(--spacing-1) 0;
     animation: menuPop var(--duration-fast) var(--ease-out);
   }
 
@@ -584,7 +588,7 @@
     background: none;
     border: none;
     color: var(--fg-primary);
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
     text-align: left;
     font-size: var(--font-size-xs);
     cursor: pointer;
@@ -596,15 +600,9 @@
     background: var(--hover);
   }
 
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
   .filter-fields-row {
     display: flex;
-    gap: 10px;
+    gap: var(--spacing-2-5);
     flex: 1.5;
     min-width: 240px;
   }

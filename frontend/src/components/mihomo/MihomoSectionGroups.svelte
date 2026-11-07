@@ -1,6 +1,6 @@
 <script lang="ts">
   import Modal from '../Modal.svelte';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import GroupForm from './GroupForm.svelte';
   import Select from '../Select.svelte';
   import { t } from '../../i18n';
@@ -184,7 +184,7 @@
         {/if}
         <span class="item-meta">{g.proxies.length} {$t('mihomo.proxies_count')}</span>
         <button class="item-edit" onclick={() => editGroup(g)} title={$t('app.edit')}
-          ><Icon name="edit" /></button
+          ><Icon name="edit" size={13} /></button
         >
         <button class="item-del" onclick={() => ctx.removeGroup(g.id)} title={$t('app.delete')}
           ><Icon name="close" size={12} /></button
@@ -202,7 +202,7 @@
 
 <!-- Modal Group Form -->
 <Modal
-  isOpen={showGroupForm}
+  open={showGroupForm}
   title={editingGroupId
     ? $t('mihomo.edit_group_title', { name: ng.name || 'group' })
     : $t('mihomo.new_group_title')}
@@ -226,24 +226,24 @@
 
 <style>
   .sec-body {
-    padding: 16px;
+    padding: var(--spacing-4);
   }
 
   .zkeen-groups-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 12px;
-    margin-bottom: 16px;
+    gap: var(--spacing-3);
+    margin-bottom: var(--spacing-4);
   }
 
   .zkeen-group-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 12px;
+    padding: var(--spacing-3);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
     transition:
       border-color var(--transition-fast),
       opacity var(--transition-fast);
@@ -257,7 +257,7 @@
   .zkeen-group-header {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
 
   .zkeen-group-icon-wrap {
@@ -282,7 +282,7 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
   }
 
   .zkeen-group-name {
@@ -295,8 +295,8 @@
     background: color-mix(in srgb, var(--warning) 12%, transparent);
     color: var(--warning);
     font-size: var(--font-size-xs);
-    padding: 1px 4px;
-    border-radius: 4px;
+    padding: 1px var(--spacing-1);
+    border-radius: var(--radius-sm);
     width: fit-content;
   }
 
@@ -304,32 +304,32 @@
     background: color-mix(in srgb, var(--seq-6) 12%, transparent);
     color: var(--seq-6);
     font-size: var(--font-size-xs);
-    padding: 1px 4px;
-    border-radius: 4px;
+    padding: 1px var(--spacing-1);
+    border-radius: var(--radius-sm);
     width: fit-content;
   }
 
   .zkeen-group-body {
-    margin-top: 4px;
+    margin-top: var(--spacing-1);
     border-top: 1px solid var(--border-subtle);
-    padding-top: 8px;
+    padding-top: var(--spacing-2);
   }
 
   .item-row {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
+    gap: var(--spacing-2-5);
+    padding: var(--spacing-2) var(--spacing-3);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    margin-bottom: 6px;
+    margin-bottom: var(--spacing-1-5);
   }
 
   .item-badge {
     font-size: var(--font-size-xs);
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: var(--spacing-0-5) var(--spacing-1-5);
+    border-radius: var(--radius-sm);
     font-weight: 500;
     flex-shrink: 0;
   }
@@ -381,7 +381,7 @@
     color: var(--fg-faint);
     cursor: pointer;
     font-size: var(--font-size-xs);
-    padding: 2px 4px;
+    padding: var(--spacing-0-5) var(--spacing-1);
     border-radius: var(--radius-sm);
     transition: color var(--transition-fast);
     flex-shrink: 0;
@@ -400,7 +400,7 @@
 
   .add-btn {
     font-size: var(--font-size-xs);
-    padding: 6px 12px;
+    padding: var(--spacing-1-5) var(--spacing-3);
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition:

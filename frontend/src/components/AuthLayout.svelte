@@ -55,7 +55,7 @@
     align-items: center;
     justify-content: center;
     /* Поля по краям: на телефоне карточка не прилипает к краям экрана */
-    padding: 24px 16px;
+    padding: var(--spacing-6) var(--spacing-4);
     background: var(--bg-page);
   }
 
@@ -66,7 +66,7 @@
     background: linear-gradient(180deg, var(--surface-overlay-from), var(--surface-overlay-to));
     border: 1px solid rgba(var(--accent-rgb), 0.14);
     border-radius: var(--radius-lg);
-    padding: 38px 36px 32px;
+    padding: 38px 36px var(--spacing-8);
     box-shadow:
       0 48px 80px -32px rgba(0, 0, 0, 0.75),
       0 0 0 1px rgba(255, 255, 255, 0.025) inset,
@@ -75,7 +75,7 @@
 
   @media (max-width: 480px) {
     .login-card {
-      padding: 28px 20px 24px;
+      padding: 28px var(--spacing-5) var(--spacing-6);
     }
   }
 
@@ -91,7 +91,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 16px;
+    gap: var(--spacing-4);
     margin-bottom: 30px;
   }
 
@@ -117,7 +117,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   /* "XKeen" — mirrors sidebar .b1 */
@@ -149,7 +149,7 @@
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-family: var(--font-family-mono);
-    margin-top: 20px;
+    margin-top: var(--spacing-5);
     padding-top: 18px;
     border-top: 1px solid var(--border);
   }

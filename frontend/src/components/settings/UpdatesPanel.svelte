@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Toggle from '../Toggle.svelte';
   import { onMount, onDestroy } from 'svelte';
   import { t, tp, currentLang } from '../../i18n';
   import { apiFetch, apiFetchJSON } from '../../lib/api';
@@ -12,7 +13,7 @@
     type NoteKind,
     type ReleaseKind
   } from '../../lib/releaseNotes';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import SegmentedControl, { type SegmentItem } from '../SegmentedControl.svelte';
   import Modal from '../Modal.svelte';
   import Section from '../Section.svelte';
@@ -231,11 +232,7 @@
   );
 
   function kindBadge(kind: ReleaseKind): string {
-    return kind === 'stable'
-      ? 'badge-success'
-      : kind === 'beta'
-        ? 'badge-primary'
-        : 'badge-warning';
+    return kind === 'stable' ? 'badge-success' : kind === 'beta' ? 'badge-info' : 'badge-warning';
   }
 
   function formatDate(value: string | number | undefined): string {
@@ -470,8 +467,9 @@
           <span class="field-row-val version-val">
             <span class="mono">{version}</span>
             {#if version && version !== '...'}
-              <span class="badge {kindBadge(currentKind)}" data-testid="update-kind-current"
-                >{$t(`settings.update_kind_${currentKind}`)}</span
+              <span
+                class="badge badge--tag {kindBadge(currentKind)}"
+                data-testid="update-kind-current">{$t(`settings.update_kind_${currentKind}`)}</span
               >
             {/if}
           </span>
@@ -551,9 +549,11 @@
               <span class="available-title"
                 >{$t('settings.update_available_title', { version: info.latest_version })}</span
               >
-              <span class="badge {kindBadge(kind)}">{$t(`settings.update_kind_${kind}`)}</span>
+              <span class="badge badge--tag {kindBadge(kind)}"
+                >{$t(`settings.update_kind_${kind}`)}</span
+              >
               {#if availableUrgent}
-                <span class="badge badge-warning" data-testid="update-urgent-badge"
+                <span class="badge badge--tag badge-warning" data-testid="update-urgent-badge"
                   >{$t('settings.update_urgent_badge')}</span
                 >
               {/if}
@@ -608,32 +608,24 @@
               <span class="field-row-name">{$t('settings.update_auto_check')}</span>
               <div class="field-row-desc">{$t('settings.update_auto_check_desc')}</div>
             </div>
-            <label class="toggle-switch">
-              <input
-                type="checkbox"
-                aria-label={$t('settings.update_auto_check')}
-                checked={auto.auto_check}
-                disabled={savingAuto}
-                onchange={(e) => saveAuto({ auto_check: e.currentTarget.checked })}
-              />
-              <span class="toggle-slider"></span>
-            </label>
+            <Toggle
+              aria-label={$t('settings.update_auto_check')}
+              checked={auto.auto_check}
+              disabled={savingAuto}
+              onchange={(e) => saveAuto({ auto_check: e.currentTarget.checked })}
+            />
           </div>
           <div class="field-row">
             <div>
               <span class="field-row-name">{$t('settings.update_auto_install')}</span>
               <div class="field-row-desc">{$t('settings.update_auto_install_desc')}</div>
             </div>
-            <label class="toggle-switch">
-              <input
-                type="checkbox"
-                aria-label={$t('settings.update_auto_install')}
-                checked={auto.auto_install}
-                disabled={savingAuto}
-                onchange={(e) => saveAuto({ auto_install: e.currentTarget.checked })}
-              />
-              <span class="toggle-slider"></span>
-            </label>
+            <Toggle
+              aria-label={$t('settings.update_auto_install')}
+              checked={auto.auto_install}
+              disabled={savingAuto}
+              onchange={(e) => saveAuto({ auto_install: e.currentTarget.checked })}
+            />
           </div>
           {#if auto.auto_install}
             <div class="field-row">
@@ -837,7 +829,7 @@
 </div>
 
 <Modal
-  isOpen={showConfirmInstall}
+  open={showConfirmInstall}
   title={$t('settings.update_confirm_title')}
   onclose={() => (showConfirmInstall = false)}
 >
@@ -859,7 +851,7 @@
 
 <style>
   .mono {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: var(--font-size-xs);
   }
 
@@ -872,7 +864,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
+    gap: var(--spacing-4);
   }
 
   /* Сообщения и прогресс внутри карточки-списка — полосы на всю ширину
@@ -886,7 +878,7 @@
     border: 0;
     border-top: 1px solid var(--border);
     border-radius: 0;
-    padding: 14px var(--card-pad);
+    padding: var(--spacing-3-5) var(--card-pad);
   }
 
   .field-row-name {
@@ -904,13 +896,13 @@
   .field-row-desc {
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .version-val {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .checked-at {
@@ -919,8 +911,8 @@
   }
 
   .update-state {
-    margin-top: 14px;
-    padding: 10px 12px;
+    margin-top: var(--spacing-3-5);
+    padding: var(--spacing-2-5) var(--spacing-3);
     border-radius: var(--radius-md);
     font-size: var(--font-size-sm);
   }
@@ -946,29 +938,29 @@
   }
 
   .auto-status {
-    margin-top: 16px;
-    padding: 8px 16px;
+    margin-top: var(--spacing-4);
+    padding: var(--spacing-2) var(--spacing-4);
     font-size: var(--font-size-sm);
     line-height: 1.5;
     overflow-wrap: anywhere;
   }
 
   .update-available {
-    margin-top: 14px;
-    padding: 14px;
+    margin-top: var(--spacing-3-5);
+    padding: var(--spacing-3-5);
     border-radius: var(--radius-md);
     background: var(--accent-soft);
     border: 1px solid var(--accent-line);
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .available-head {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     flex-wrap: wrap;
   }
 
@@ -981,30 +973,30 @@
   .available-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 14px;
+    gap: var(--spacing-1) var(--spacing-3-5);
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
 
   .available-auto {
-    margin-top: 4px;
+    margin-top: var(--spacing-1);
     display: flex;
-    gap: 8px;
+    gap: var(--spacing-2);
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     overflow-wrap: anywhere;
   }
 
   .update-progress {
-    margin-top: 14px;
+    margin-top: var(--spacing-3-5);
   }
 
   .progress-head {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    gap: 12px;
-    margin-bottom: 6px;
+    gap: var(--spacing-3);
+    margin-bottom: var(--spacing-1-5);
   }
 
   .progress-stage {
@@ -1024,15 +1016,15 @@
   .progress-bar {
     height: 6px;
     background: var(--border);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     overflow: hidden;
-    margin-bottom: 6px;
+    margin-bottom: var(--spacing-1-5);
   }
 
   .progress-fill {
     height: 100%;
     background: var(--accent);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     transition: width var(--duration-slow) var(--ease-out);
   }
 
@@ -1075,9 +1067,9 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
-    padding: 18px 16px;
-    margin-top: 14px;
+    gap: var(--spacing-2-5);
+    padding: 18px var(--spacing-4);
+    margin-top: var(--spacing-3-5);
     background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
     border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
     border-radius: var(--radius-md);
@@ -1092,7 +1084,7 @@
   .reconnect-text {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
@@ -1139,7 +1131,7 @@
   }
 
   .digest-title {
-    margin: 0 0 12px;
+    margin: 0 0 var(--spacing-3);
     font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-secondary);
@@ -1151,7 +1143,7 @@
     list-style: none;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--spacing-2-5);
   }
 
   .highlight-list li {
@@ -1191,9 +1183,9 @@
   .group-head {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin: -6px -10px;
-    padding: 6px 10px;
+    gap: var(--spacing-2-5);
+    margin: calc(-1 * var(--spacing-1-5)) calc(-1 * var(--spacing-2-5));
+    padding: var(--spacing-1-5) var(--spacing-2-5);
     border-radius: var(--radius-md);
     cursor: pointer;
     list-style: none;
@@ -1246,12 +1238,12 @@
   }
 
   .change-list {
-    margin: 14px 0 0 3px;
+    margin: var(--spacing-3-5) 0 0 3px;
     padding: 0 0 0 17px;
     list-style: none;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
     border-left: 1px solid color-mix(in srgb, var(--kind) 35%, transparent);
   }
 
@@ -1259,7 +1251,7 @@
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: 16px;
+    gap: var(--spacing-4);
     max-width: 80ch;
     font-size: var(--font-size-sm);
     line-height: 1.5;
@@ -1286,7 +1278,7 @@
     color: var(--fg-dim);
     text-decoration: none;
     font-variant-numeric: tabular-nums;
-    padding: 0 2px;
+    padding: 0 var(--spacing-0-5);
     border-radius: var(--radius-xs);
   }
 
@@ -1300,8 +1292,8 @@
   }
 
   .digest-more {
-    margin: 12px 0 0 20px;
-    padding: 4px 0;
+    margin: var(--spacing-3) 0 0 var(--spacing-5);
+    padding: var(--spacing-1) 0;
     border: 0;
     background: none;
     font: inherit;
@@ -1322,13 +1314,13 @@
   }
 
   .group-more {
-    margin: 10px 0 0 20px;
+    margin: var(--spacing-2-5) 0 0 var(--spacing-5);
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
 
   .digest-footer {
-    padding: 14px var(--card-pad);
+    padding: var(--spacing-3-5) var(--card-pad);
   }
 
   .release-link {
@@ -1353,7 +1345,7 @@
 
   .auto-checked {
     display: block;
-    margin-top: 12px;
+    margin-top: var(--spacing-3);
   }
 
   .auto-error {
@@ -1371,8 +1363,8 @@
   .modal-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 12px;
-    margin-top: 16px;
+    gap: var(--spacing-3);
+    margin-top: var(--spacing-4);
   }
 
   @media (max-width: 480px) {

@@ -177,7 +177,7 @@
       case 'waiting':
         return 'badge-warning';
       case 'applying':
-        return 'badge-primary';
+        return 'badge-info';
       default:
         return '';
     }
@@ -532,11 +532,15 @@
     </div>
     {#if view && dnsState}
       <div class="dns-badges">
-        <span class="badge {stateClass}" data-testid="dns-state-badge" data-badge={badgeKey}>
+        <span
+          class="badge badge--tag {stateClass}"
+          data-testid="dns-state-badge"
+          data-badge={badgeKey}
+        >
           {$t(`cfg.dns.state.${badgeKey}`)}
         </span>
         {#if showKernelBadge}
-          <span class="badge badge-type" data-testid="dns-kernel-badge">
+          <span class="badge badge--tag badge-emphasis" data-testid="dns-kernel-badge">
             {dnsKernelTitle(view.kernel)}
           </span>
         {/if}
@@ -752,7 +756,7 @@
             <span>{$t('cfg.dns.params')}</span>
           </span>
           {#if view.params_changed}
-            <span class="badge badge-warning" data-testid="dns-params-changed">
+            <span class="badge badge--tag badge-warning" data-testid="dns-params-changed">
               {$t('cfg.dns.changed_badge')}
             </span>
           {/if}

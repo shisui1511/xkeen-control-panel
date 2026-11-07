@@ -2,6 +2,7 @@
   import { t } from '../../i18n';
   import Icon from '../../lib/components/Icon.svelte';
   import Button from '../Button.svelte';
+  import StatusBadge from '../StatusBadge.svelte';
   import Modal from '../Modal.svelte';
 
   let {
@@ -63,12 +64,12 @@
   const isError = $derived(status === 'error');
   const isLoading = $derived(status === 'loading');
 
-  const dotColorClass = $derived.by(() => {
-    if (isRunning) return 'dot-running';
-    if (isLoading) return 'dot-loading';
-    if (isNotInstalled) return 'dot-uninstalled';
-    if (isStopped || isError) return 'dot-stopped';
-    return 'dot-unknown';
+  const statusVariant = $derived.by(() => {
+    if (isRunning) return 'running' as const;
+    if (isLoading) return 'warning' as const;
+    if (isNotInstalled) return 'idle' as const;
+    if (isStopped || isError) return 'stopped' as const;
+    return 'idle' as const;
   });
 
   const statusText = $derived.by(() => {
@@ -152,14 +153,11 @@
   </div>
 
   <div class="svc-state">
-    <span class="status-pill status-pill-{dotColorClass}">
-      <span class="pill-dot" aria-hidden="true"></span>
-      {statusText}
-    </span>
+    <StatusBadge variant={statusVariant} label={statusText} pulse={isLoading} />
     {#if !formattedVersion && isInsecureLan && onMigrate}
       <button
         type="button"
-        class="badge badge-warning migrate-badge"
+        class="badge badge--tag badge-warning migrate-badge"
         onclick={onMigrate}
         title={$t('mihomo.migrate_banner_body')}
       >
@@ -243,7 +241,7 @@
   </div>
 </div>
 
-<Modal isOpen={sheetOpen} title={name} maxWidth="420px" onclose={() => (sheetOpen = false)}>
+<Modal open={sheetOpen} title={name} maxWidth="420px" onclose={() => (sheetOpen = false)}>
   <div class="svc-sheet">
     {#if onRestart}
       <button
@@ -298,14 +296,14 @@
     top: var(--spacing-3);
     bottom: var(--spacing-3);
     width: 3px;
-    border-radius: 0 3px 3px 0;
+    border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
     background: var(--accent);
   }
 
   .svc-ident {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     min-width: 0;
   }
 
@@ -373,70 +371,11 @@
     justify-self: end;
   }
 
-  .status-pill {
-    --tone: var(--fg-dim);
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 2px 9px 2px 8px;
-    border-radius: var(--radius-full);
-    background: color-mix(in srgb, var(--tone) 12%, transparent);
-    color: var(--tone);
-    font-size: var(--font-size-xs);
-    font-weight: 600;
-    line-height: 1.5;
-    white-space: nowrap;
-  }
-
-  .status-pill-dot-running {
-    --tone: var(--success);
-  }
-
-  .status-pill-dot-stopped {
-    --tone: var(--danger);
-  }
-
-  .status-pill-dot-loading {
-    --tone: var(--warning);
-  }
-
-  .status-pill-dot-uninstalled,
-  .status-pill-dot-unknown {
-    --tone: var(--fg-dim);
-    background: var(--surface-tint);
-  }
-
-  .pill-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: currentColor;
-    flex-shrink: 0;
-  }
-
-  .status-pill-dot-running .pill-dot {
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
-  }
-
-  .status-pill-dot-loading .pill-dot {
-    animation: pulse 1.5s infinite;
-  }
-
-  @keyframes pulse {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.4;
-    }
-  }
-
   .migrate-badge {
     cursor: pointer;
     border: none;
     font-size: var(--font-size-xs);
-    padding: 1px 6px;
+    padding: 1px var(--spacing-1-5);
     border-radius: var(--radius-sm);
   }
 
@@ -461,8 +400,8 @@
   .install-link {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
-    padding: 6px var(--spacing-2);
+    gap: var(--spacing-0-5);
+    padding: var(--spacing-1-5) var(--spacing-2);
     border-radius: var(--radius-md);
     color: var(--accent-text);
     font-size: var(--font-size-sm);
@@ -532,16 +471,16 @@
   .svc-sheet {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-2);
   }
 
   .sheet-action {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: var(--spacing-3-5);
     width: 100%;
     min-height: 56px;
-    padding: 10px 14px;
+    padding: var(--spacing-2-5) var(--spacing-3-5);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--bg-elevated);
@@ -563,7 +502,7 @@
   .sheet-text {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--spacing-0-5);
     min-width: 0;
   }
 
@@ -574,11 +513,5 @@
   .sheet-hint {
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .status-pill-dot-loading .pill-dot {
-      animation: none;
-    }
   }
 </style>

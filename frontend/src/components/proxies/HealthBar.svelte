@@ -167,8 +167,8 @@
   .health-bar {
     display: flex;
     width: calc(100% - 36px);
-    margin: 6px 18px 10px;
-    border-radius: var(--radius-sm, 4px);
+    margin: var(--spacing-1-5) 18px var(--spacing-2-5);
+    border-radius: var(--radius-sm);
     height: 4px;
     overflow: hidden;
     background: var(--bg-elevated);
@@ -185,7 +185,7 @@
     min-width: 64px;
     max-width: 64px;
     height: 6px;
-    margin: 0 4px;
+    margin: 0 var(--spacing-1);
     flex: 0 0 64px;
   }
 
@@ -223,25 +223,25 @@
 
   .health-tooltip {
     position: fixed;
-    z-index: 1100;
-    background: var(--bg-elevated, var(--bg-card));
+    z-index: var(--z-popover);
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg, 8px);
-    padding: 8px 10px;
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-2) var(--spacing-2-5);
     font-size: var(--font-size-xs);
     color: var(--fg-primary);
-    box-shadow: var(--shadow-md, 0 4px 6px -1px rgba(0, 0, 0, 0.3));
+    box-shadow: var(--shadow-md);
     pointer-events: none;
     white-space: nowrap;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .ht-row {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     line-height: 1.2;
   }
 

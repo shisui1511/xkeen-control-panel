@@ -245,10 +245,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   {title}
   maxWidth="640px"
-  dataTestid={then === undefined ? 'take-section-modal' : 'xlog-take-modal'}
+  testid={then === undefined ? 'take-section-modal' : 'xlog-take-modal'}
   onclose={close}
 >
   <div class="ts-body" data-mode={mode}>
@@ -488,7 +488,7 @@
 
   .ts-alert :global(.ts-alert-icon) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .ts-ack {

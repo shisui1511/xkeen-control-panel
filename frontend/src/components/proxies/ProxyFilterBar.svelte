@@ -112,12 +112,12 @@
   .proxy-filter-bar {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--spacing-2);
     flex-wrap: wrap;
   }
 
   .group-search {
-    padding: 6px 12px;
+    padding: var(--spacing-1-5) var(--spacing-3);
     border: 1px solid var(--border);
     background: var(--bg-input);
     color: var(--fg-primary);
@@ -138,7 +138,7 @@
     .group-search {
       width: 100%;
       font-size: var(--font-size-lg);
-      padding: 8px 12px;
+      padding: var(--spacing-2) var(--spacing-3);
     }
 
     .fb-label,

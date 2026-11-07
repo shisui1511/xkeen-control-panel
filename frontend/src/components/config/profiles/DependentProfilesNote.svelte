@@ -65,7 +65,7 @@
   .dep-note {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
+    gap: var(--spacing-2);
     margin-top: 0;
     line-height: 1.4;
     overflow-wrap: anywhere;
@@ -73,7 +73,7 @@
 
   .dep-note :global(svg) {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--spacing-0-5);
   }
 
   .dep-name {

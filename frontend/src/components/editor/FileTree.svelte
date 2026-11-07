@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from '../../i18n';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import { matchXKeenStoplist } from '../../lib/xkeenStoplist';
   import { configLayerEnabled } from '../../stores';
   import { filesByPath } from '../../lib/configLayer';
@@ -208,15 +208,15 @@
               {#if stopWord}
                 {@const markTitle = $t('stoplist.badge_title', { word: stopWord })}
                 <span class="stoplist-mark" title={markTitle} aria-label={markTitle}>
-                  <Icon name="alert-triangle" size={12} />
+                  <Icon name="warning" size={12} />
                 </span>
               {/if}
               {#if layerBadge(file.path) === 'managed'}
-                <span class="badge badge-info layer-badge" data-testid="layer-badge"
+                <span class="badge badge--tag badge-info layer-badge" data-testid="layer-badge"
                   >{$t('editor.managed_badge')}</span
                 >
               {:else if layerBadge(file.path) === 'manual'}
-                <span class="badge layer-badge" data-testid="layer-badge"
+                <span class="badge badge--tag layer-badge" data-testid="layer-badge"
                   >{$t('editor.manual_badge')}</span
                 >
               {/if}
@@ -269,11 +269,11 @@
                 >{#each breakableParts(file.name) as part, i (i)}{part}<wbr />{/each}</span
               >
               {#if layerBadge(file.path) === 'managed'}
-                <span class="badge badge-info layer-badge" data-testid="layer-badge"
+                <span class="badge badge--tag badge-info layer-badge" data-testid="layer-badge"
                   >{$t('editor.managed_badge')}</span
                 >
               {:else if layerBadge(file.path) === 'manual'}
-                <span class="badge layer-badge" data-testid="layer-badge"
+                <span class="badge badge--tag layer-badge" data-testid="layer-badge"
                   >{$t('editor.manual_badge')}</span
                 >
               {/if}
@@ -421,11 +421,11 @@
   }
 
   .file-tree-search-bar {
-    padding: 8px 10px;
+    padding: var(--spacing-2) var(--spacing-2-5);
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     background: var(--bg-group-head-from);
   }
 
@@ -436,7 +436,7 @@
 
   .file-search-input {
     width: 100%;
-    padding: 5px 24px 5px 8px;
+    padding: 5px var(--spacing-6) 5px var(--spacing-2);
     font-size: var(--font-size-xs);
     height: 28px;
     background: var(--bg-elevated);
@@ -466,7 +466,7 @@
     width: 28px;
     height: 28px;
     background: var(--accent);
-    color: var(--btn-primary-text, var(--bg-deep));
+    color: var(--btn-primary-text);
     border: none;
     border-radius: var(--radius-sm);
     cursor: pointer;
@@ -481,7 +481,7 @@
   .file-tree-body {
     flex: 1;
     overflow-y: auto;
-    padding: 6px 0;
+    padding: var(--spacing-1-5) 0;
   }
 
   .editor-files {
@@ -489,7 +489,7 @@
   }
 
   .editor-files-head {
-    padding: 8px 12px;
+    padding: var(--spacing-2) var(--spacing-3);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -511,7 +511,7 @@
   .group-ttl-wrap {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
   }
 
   .group-ttl {
@@ -527,7 +527,7 @@
   .group-path-wrap {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-1);
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
@@ -543,15 +543,15 @@
   .file-list {
     display: flex;
     flex-direction: column;
-    padding: 4px 6px;
-    gap: 2px;
+    padding: var(--spacing-1) var(--spacing-1-5);
+    gap: var(--spacing-0-5);
   }
 
   .file-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 5px 8px;
+    padding: 5px var(--spacing-2);
     border-radius: var(--radius-sm);
     border: none;
     background: transparent;
@@ -600,7 +600,7 @@
   .fr-left {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-1-5);
     min-width: 0;
     flex: 1;
   }
@@ -615,15 +615,15 @@
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-family: var(--font-family-mono);
-    margin-left: 6px;
+    margin-left: var(--spacing-1-5);
     flex-shrink: 0;
   }
 
   .fmt-badge {
     font-size: var(--font-size-xs);
     font-weight: 800;
-    padding: 1px 4px;
-    border-radius: 3px;
+    padding: 1px var(--spacing-1);
+    border-radius: var(--radius-xs);
     flex-shrink: 0;
     font-family: var(--font-family-mono);
   }
@@ -659,7 +659,7 @@
 
   .layer-badge {
     flex-shrink: 0;
-    padding: 0 4px;
+    padding: 0 var(--spacing-1);
     line-height: 1.4;
   }
 
@@ -677,7 +677,7 @@
   }
 
   .sb-empty {
-    padding: 6px 12px;
+    padding: var(--spacing-1-5) var(--spacing-3);
     font-size: var(--font-size-xs);
     color: var(--fg-faint);
   }
@@ -685,12 +685,12 @@
   /* Context Menu */
   .file-context-menu {
     position: fixed;
-    z-index: 1000;
+    z-index: var(--z-overlay);
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     box-shadow: var(--shadow-md);
-    padding: 4px;
+    padding: var(--spacing-1);
     min-width: 170px;
     display: flex;
     flex-direction: column;
@@ -701,7 +701,7 @@
   .ctx-header {
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
-    padding: 4px 8px;
+    padding: var(--spacing-1) var(--spacing-2);
     border-bottom: 1px solid var(--border);
     white-space: nowrap;
     overflow: hidden;
@@ -711,13 +711,13 @@
   .ctx-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
+    gap: var(--spacing-2);
+    padding: var(--spacing-1-5) var(--spacing-2);
     font-size: var(--font-size-xs);
     color: var(--fg-primary);
     background: transparent;
     border: none;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     cursor: pointer;
     text-align: left;
     transition: background var(--transition-fast);
@@ -744,8 +744,8 @@
   @media (max-width: 768px) {
     .file-row {
       min-height: 40px;
-      padding: 10px 12px;
-      gap: 8px;
+      padding: var(--spacing-2-5) var(--spacing-3);
+      gap: var(--spacing-2);
       font-size: var(--font-size-sm);
     }
 

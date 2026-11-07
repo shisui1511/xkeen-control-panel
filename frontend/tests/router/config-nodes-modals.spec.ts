@@ -522,7 +522,7 @@ test('modals: «Изменить» — узел только для Mihomo по�
   await row.locator('[data-testid^="nodes-edit-"]').click();
   const modal = page.getByTestId('nodes-edit-modal');
   await expect(modal.getByTestId('nodes-preview-nodes')).toBeVisible({ timeout: T.action });
-  await expect(modal.locator('.chip-info', { hasText: 'Mihomo' })).toBeVisible();
+  await expect(modal.locator('.badge-info', { hasText: 'Mihomo' })).toBeVisible();
   await expect(page.getByTestId('nodes-edit-save')).toBeEnabled();
 
   const req = page.waitForRequest(
