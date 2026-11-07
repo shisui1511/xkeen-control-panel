@@ -46,9 +46,18 @@ router-mips: update-version
 #   make router-test SUITE=smoke [ROUTERS=arm64] [RELEASE=vX.Y.Z]
 #   make router-test SUITE=smoke|full RELEASE=<тег>   (публикует статус stand/<arch>-<набор> на коммите тега)
 #   make router-test SUITE=session SPEC=<спека.json>
+#   make router-test SUITE=delta RELEASE=<тег|latest> [DRY_RUN=1]   (добор stand/<arch>-full от прошлого полного прогона вехи)
 # Наборы: (пусто) — полный (full — то же, что без SUITE), smoke — деплой и смоук, changed — затронутое diff'ом,
 # reboot — холодный старт каждой цели и проверка автозапуска, session — сессия на стенде
-# по спеке (формат — в scripts/router/session.mjs).
+# по спеке (формат — в scripts/router/session.mjs). Остальные наборы и их переменные:
+#   harness                                      — механика стенда: тесты блока harness на обоих ядрах и самопроверка сессии
+#   rerun FROM=<отчёт>                           — перепрогон упавших тестов отчёта (дописывается в него)
+#   bisect TEST=<go:Имя|pw:название> CORE=<ядро> FROM=<ссылка> [TO=<ссылка>] [MODE=regress|fix] [SPEC=<спек>]
+#                                                — поиск виновного коммита двоичным поиском по дереву коммитов
+#   delta RELEASE=<тег|latest> [DRY_RUN=1] [BASE_REPORT=<отчёт>]
+#                                                — добор stand/<arch>-full на новый тег без повторного полного прогона
+#                                                  (DRY_RUN=1 — статус не отправляется, решение в summary.md)
+# Отдельная цель router-test-unattended — полный прогон без присмотра (описана ниже).
 router-test:
 	sh scripts/router/run.sh $(SUITE)
 
