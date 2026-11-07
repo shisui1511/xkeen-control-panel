@@ -174,10 +174,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={$t('cfg.geo.insp_title', { file })}
   maxWidth="720px"
-  dataTestid="geo-inspector"
+  testid="geo-inspector"
   {onclose}
 >
   <div class="im-body">

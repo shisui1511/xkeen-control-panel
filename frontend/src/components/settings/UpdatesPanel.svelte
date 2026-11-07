@@ -13,7 +13,7 @@
     type NoteKind,
     type ReleaseKind
   } from '../../lib/releaseNotes';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import SegmentedControl, { type SegmentItem } from '../SegmentedControl.svelte';
   import Modal from '../Modal.svelte';
   import Section from '../Section.svelte';
@@ -829,7 +829,7 @@
 </div>
 
 <Modal
-  isOpen={showConfirmInstall}
+  open={showConfirmInstall}
   title={$t('settings.update_confirm_title')}
   onclose={() => (showConfirmInstall = false)}
 >
@@ -851,7 +851,7 @@
 
 <style>
   .mono {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: var(--font-size-xs);
   }
 

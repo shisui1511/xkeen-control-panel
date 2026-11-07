@@ -1373,7 +1373,7 @@
 
 <!-- Standalone Extended GeoScan Modal -->
 <GeoScanModal
-  isOpen={showGeoScanModal}
+  open={showGeoScanModal}
   availableFiles={files}
   onclose={() => (showGeoScanModal = false)}
 />
@@ -1443,7 +1443,7 @@
     display: inline-flex;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 6px);
+    border-radius: var(--radius-sm);
     padding: var(--spacing-0-5);
     gap: var(--spacing-0-5);
   }
@@ -1455,7 +1455,7 @@
     font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
     cursor: pointer;
     transition:
       color var(--transition-fast),
@@ -1565,7 +1565,7 @@
   }
 
   .qs-chip-file {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     color: var(--fg-secondary);
   }
 
@@ -1593,7 +1593,7 @@
   }
 
   .qs-chip-rule {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: var(--font-size-2xs);
     background: rgba(var(--accent-rgb), 0.08);
     border: 1px solid rgba(var(--accent-rgb), 0.25);
@@ -1692,7 +1692,7 @@
     display: flex;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 6px);
+    border-radius: var(--radius-sm);
     padding: var(--spacing-0-5);
     gap: var(--spacing-0-5);
     width: 100%;
@@ -1706,7 +1706,7 @@
     font-size: var(--font-size-2xs);
     font-weight: 500;
     color: var(--fg-secondary);
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
     cursor: pointer;
     text-align: center;
     transition:
@@ -1957,7 +1957,7 @@
   }
 
   .ih-path {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: var(--font-size-2xs);
     background: rgba(0, 0, 0, 0.2);
     border-radius: var(--radius-sm);
@@ -1998,7 +1998,7 @@
   }
 
   .banner-format {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: var(--font-size-2xs);
     background: rgba(var(--accent-rgb), 0.1);
     color: var(--accent);
@@ -2086,7 +2086,7 @@
   }
 
   .tag-card-row:hover {
-    border-color: var(--border-hover, var(--fg-dim));
+    border-color: var(--border-hover);
     background: var(--surface-tint-faint);
   }
 
@@ -2110,7 +2110,7 @@
   }
 
   .tag-name {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: var(--font-size-xs);
     font-weight: 500;
     overflow: hidden;
@@ -2204,7 +2204,7 @@
   }
 
   .dd-tag-name {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-weight: 600;
     font-size: var(--font-size-sm);
     color: var(--fg-primary);
@@ -2220,7 +2220,7 @@
   }
 
   .dd-rule-hint code {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: var(--font-size-2xs);
     background: rgba(var(--accent-rgb), 0.1);
     color: var(--accent);
@@ -2254,7 +2254,7 @@
   }
 
   .entry-text {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: var(--font-size-xs);
     color: var(--fg-primary);
     word-break: break-all;
@@ -2307,14 +2307,8 @@
     border: 2px solid var(--border-strong);
     border-top-color: var(--accent);
     border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+    animation: spin var(--duration-spin) linear infinite;
     display: inline-block;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 
   /* Responsive Behavior */

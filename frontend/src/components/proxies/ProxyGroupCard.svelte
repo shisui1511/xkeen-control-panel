@@ -1283,12 +1283,7 @@
     border: 2px solid currentColor;
     border-right-color: transparent;
     border-radius: 50%;
-    animation: spin 0.75s linear infinite;
-  }
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
+    animation: spin var(--duration-spin) linear infinite;
   }
   .proxy-grid-footer {
     display: flex;

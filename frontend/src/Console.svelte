@@ -316,7 +316,7 @@
   {/if}
 </div>
 
-<Modal isOpen={!!confirmPending} title={$t('console.confirm_title')} onclose={cancelConfirm}>
+<Modal open={!!confirmPending} title={$t('console.confirm_title')} onclose={cancelConfirm}>
   {#if confirmPending}
     <p style="margin: 0; line-height: 1.5; color: var(--fg-secondary);">
       {$t('console.confirm_desc', { name: formatCommandLine(confirmPending.command) })}
@@ -358,13 +358,13 @@
   .cmd-tile-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: var(--spacing-2, 8px);
+    gap: var(--spacing-2);
   }
 
   .cmd-tile {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-1, 4px);
+    gap: var(--spacing-1);
     padding: var(--spacing-2) var(--spacing-3);
     border-radius: var(--radius-md);
     background: var(--bg-card);
@@ -411,7 +411,7 @@
     color: var(--fg-primary);
     display: flex;
     align-items: center;
-    gap: var(--spacing-1, 4px);
+    gap: var(--spacing-1);
   }
 
   .cmd-tile .tile-name.dangerous-text {
@@ -419,7 +419,7 @@
   }
 
   .cmd-tile .tile-desc {
-    font-size: var(--font-size-xs, 11px);
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     line-height: 1.3;
   }

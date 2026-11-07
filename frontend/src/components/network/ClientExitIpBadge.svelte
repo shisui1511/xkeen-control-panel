@@ -338,7 +338,7 @@
     padding: 0 var(--spacing-1) 0 0;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
     font-size: var(--font-size-xs);
     color: var(--fg-primary);
     transition:
@@ -364,7 +364,7 @@
 
   .client-ip-pill:hover {
     border-color: var(--accent);
-    background: var(--bg-card-hover, var(--bg-hover));
+    background: var(--bg-card-hover);
   }
 
   .client-ip-pill.is-open {
@@ -378,7 +378,7 @@
   }
 
   .pill-ip {
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
     font-weight: 500;
     font-size: var(--font-size-xs);
     letter-spacing: -0.2px;
@@ -456,16 +456,7 @@
   }
 
   .spinning {
-    animation: spin 0.85s linear infinite;
-  }
-
-  @keyframes spin {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
+    animation: spin var(--duration-spin) linear infinite;
   }
 
   /* Popover */
@@ -476,7 +467,7 @@
     width: 290px;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg, 12px);
+    border-radius: var(--radius-lg);
     box-shadow:
       0 10px 25px -5px rgba(0, 0, 0, 0.25),
       0 8px 10px -6px rgba(0, 0, 0, 0.15);
@@ -584,7 +575,7 @@
   }
 
   .detail-value.mono {
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
   }
 
   .detail-value.text-muted {
@@ -618,7 +609,7 @@
     align-items: flex-start;
     gap: var(--spacing-2);
     padding: var(--spacing-2) var(--spacing-2-5);
-    border-radius: var(--radius-md, 8px);
+    border-radius: var(--radius-md);
     font-size: var(--font-size-2xs);
     line-height: 1.4;
     margin-top: var(--spacing-1);

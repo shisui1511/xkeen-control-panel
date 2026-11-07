@@ -1,6 +1,6 @@
 <script lang="ts">
   import Select from '../Select.svelte';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import { t } from '../../i18n';
   import { getMihomoContext } from './MihomoContext.svelte';
   import type { Listener } from '../../lib/mihomoYaml';
@@ -345,7 +345,7 @@
             title={$t('app.edit')}
             onclick={() => openListenerForm(l)}
           >
-            <Icon name="edit" />
+            <Icon name="edit" size={13} />
           </button>
           <button
             type="button"

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from '../../i18n';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import { matchXKeenStoplist } from '../../lib/xkeenStoplist';
   import { configLayerEnabled } from '../../stores';
   import { filesByPath } from '../../lib/configLayer';
@@ -208,7 +208,7 @@
               {#if stopWord}
                 {@const markTitle = $t('stoplist.badge_title', { word: stopWord })}
                 <span class="stoplist-mark" title={markTitle} aria-label={markTitle}>
-                  <Icon name="alert-triangle" size={12} />
+                  <Icon name="warning" size={12} />
                 </span>
               {/if}
               {#if layerBadge(file.path) === 'managed'}
@@ -466,7 +466,7 @@
     width: 28px;
     height: 28px;
     background: var(--accent);
-    color: var(--btn-primary-text, var(--bg-deep));
+    color: var(--btn-primary-text);
     border: none;
     border-radius: var(--radius-sm);
     cursor: pointer;

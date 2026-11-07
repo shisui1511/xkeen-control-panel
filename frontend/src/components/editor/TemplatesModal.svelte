@@ -13,19 +13,19 @@
   }
 
   interface Props {
-    isOpen: boolean;
+    open: boolean;
     selectedFile?: string;
     hasEditorView?: boolean;
     onApplyTemplate: (template: Template) => void | Promise<void>;
-    onClose: () => void;
+    onclose: () => void;
   }
 
   let {
-    isOpen,
+    open: isOpen,
     selectedFile = '',
     hasEditorView = false,
     onApplyTemplate,
-    onClose
+    onclose: onClose
   }: Props = $props();
 
   let templates = $state<Template[]>([]);
@@ -89,7 +89,7 @@
 </script>
 
 <Modal
-  {isOpen}
+  open={isOpen}
   title={$t('editor.templates')}
   maxWidth="900px"
   class="templates-wide-modal"

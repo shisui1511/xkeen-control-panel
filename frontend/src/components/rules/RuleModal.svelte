@@ -6,14 +6,14 @@
   import Button from '../Button.svelte';
 
   interface Props {
-    isOpen: boolean;
+    open: boolean;
     rule: UserRule | null;
     groups: string[];
     onSave: (r: UserRule) => void;
-    onClose: () => void;
+    onclose: () => void;
   }
 
-  let { isOpen, rule, groups, onSave, onClose }: Props = $props();
+  let { open: isOpen, rule, groups, onSave, onclose: onClose }: Props = $props();
 
   // Начальные значения формы пересчитываются при каждом открытии и при смене rule/groups.
   // Поля ниже — записываемые $derived: ввод пользователя переопределяет значение
@@ -87,7 +87,7 @@
 </script>
 
 <Modal
-  {isOpen}
+  open={isOpen}
   title={rule ? $t('rules.edit_rule') : $t('rules.add_rule')}
   onclose={onClose}
   maxWidth="500px"

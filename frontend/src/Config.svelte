@@ -114,7 +114,7 @@
   .config-stack {
     display: flex;
     flex-direction: column;
-    gap: var(--grid-gap, 16px);
+    gap: var(--grid-gap);
   }
 
   /* Полоса вкладок прокручивается по горизонтали внутри себя (скроллбар скрыт в Tabs):

@@ -433,12 +433,12 @@
 
   .trace-latency {
     font-size: var(--font-size-xs);
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
     color: var(--fg-secondary);
     background: var(--bg-elevated);
     padding: 3px var(--spacing-2);
     border-radius: var(--radius-sm);
-    border: 1px solid var(--border-light, var(--border));
+    border: 1px solid var(--border-light);
   }
 
   .flow-container {
@@ -582,7 +582,7 @@
   }
 
   .mono {
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
   }
 
   .text-truncate {

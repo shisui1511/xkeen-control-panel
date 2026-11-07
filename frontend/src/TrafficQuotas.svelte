@@ -733,7 +733,7 @@
 
 <!-- Modal Form -->
 <Modal
-  isOpen={showForm}
+  open={showForm}
   title={editingQuota ? $t('trafficquotas.edit_quota') : $t('trafficquotas.new_quota')}
   onclose={cancelEdit}
 >
@@ -914,13 +914,13 @@
   table {
     width: 100%;
     border-collapse: collapse;
-    font-size: var(--font-size-table, 0.8125rem);
+    font-size: var(--font-size-table);
     color: var(--fg-secondary);
   }
 
   th {
     text-align: left;
-    padding: calc((var(--table-row-h, 44px) - var(--spacing-5)) / 2) var(--spacing-5);
+    padding: calc((var(--table-row-h) - var(--spacing-5)) / 2) var(--spacing-5);
     font-weight: 600;
     color: var(--fg-secondary);
     border-bottom: 1px solid var(--border);
@@ -929,7 +929,7 @@
   }
 
   td {
-    padding: calc((var(--table-row-h, 44px) - var(--spacing-5)) / 2) var(--spacing-5);
+    padding: calc((var(--table-row-h) - var(--spacing-5)) / 2) var(--spacing-5);
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
   }
@@ -939,7 +939,7 @@
   }
 
   .mono {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
   }
 
   .num {

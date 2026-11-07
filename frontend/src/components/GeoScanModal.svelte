@@ -24,11 +24,11 @@
   }
 
   let {
-    isOpen = false,
+    open: isOpen = false,
     availableFiles = [],
     onclose = () => {}
   }: {
-    isOpen?: boolean;
+    open?: boolean;
     availableFiles?: DATFile[];
     onclose?: () => void;
   } = $props();
@@ -114,7 +114,7 @@
   }
 </script>
 
-<Modal {isOpen} title={$t('dat.geoscan_title')} maxWidth="680px" {onclose}>
+<Modal open={isOpen} title={$t('dat.geoscan_title')} maxWidth="680px" {onclose}>
   <div class="geoscan-modal">
     <p class="geoscan-desc">{$t('dat.geoscan_desc')}</p>
 
@@ -369,7 +369,7 @@
 
   .geoscan-desc {
     margin: 0;
-    font-size: var(--font-size-sm, 13px);
+    font-size: var(--font-size-sm);
     color: var(--fg-secondary);
     line-height: 1.4;
   }
@@ -397,7 +397,7 @@
   .geoscan-input {
     width: 100%;
     padding: 9px 36px 9px 36px;
-    font-size: var(--font-size-sm, 13px);
+    font-size: var(--font-size-sm);
     background: var(--bg-card);
     color: var(--fg-primary);
     border: 1px solid var(--border);
@@ -445,7 +445,7 @@
     display: inline-flex;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 6px);
+    border-radius: var(--radius-sm);
     padding: var(--spacing-0-5);
     gap: var(--spacing-0-5);
   }
@@ -454,10 +454,10 @@
     background: transparent;
     border: none;
     padding: 5px var(--spacing-3);
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
     cursor: pointer;
     transition:
       background var(--transition-fast),
@@ -479,9 +479,9 @@
     gap: var(--spacing-1-5);
     background: transparent;
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 6px);
+    border-radius: var(--radius-sm);
     padding: 5px var(--spacing-2-5);
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     cursor: pointer;
     transition:
@@ -490,7 +490,7 @@
   }
 
   .geoscan-file-filter-btn:hover {
-    border-color: var(--border-hover, var(--fg-dim));
+    border-color: var(--border-hover);
     color: var(--fg-primary);
   }
 
@@ -508,7 +508,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
   }
 
   .geoscan-files-title {
@@ -526,7 +526,7 @@
     background: none;
     border: none;
     color: var(--accent);
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
     cursor: pointer;
     padding: 0;
   }
@@ -553,7 +553,7 @@
     display: flex;
     align-items: center;
     gap: var(--spacing-1-5);
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
     color: var(--fg-primary);
     cursor: pointer;
     user-select: none;
@@ -594,7 +594,7 @@
     gap: var(--spacing-2-5);
     padding: var(--spacing-8) var(--spacing-4);
     color: var(--fg-dim);
-    font-size: var(--font-size-sm, 13px);
+    font-size: var(--font-size-sm);
   }
 
   .geoscan-state-box.geoscan-empty svg {
@@ -602,7 +602,7 @@
   }
 
   .geoscan-results-header {
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-secondary);
   }
@@ -625,7 +625,7 @@
   }
 
   .geoscan-result-card:hover {
-    border-color: var(--border-hover, var(--fg-dim));
+    border-color: var(--border-hover);
   }
 
   .geoscan-card-top {
@@ -640,13 +640,13 @@
     display: flex;
     align-items: center;
     gap: var(--spacing-1-5);
-    font-size: var(--font-size-sm, 13px);
+    font-size: var(--font-size-sm);
   }
 
   .geoscan-filename {
     color: var(--fg-secondary);
     font-family: var(--font-mono);
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
   }
 
   .geoscan-arrow {
@@ -676,9 +676,9 @@
   .geoscan-rule-code {
     background: rgba(0, 0, 0, 0.25);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
     padding: 3px var(--spacing-2);
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
     font-family: var(--font-mono);
     color: var(--accent);
   }
@@ -692,7 +692,7 @@
     display: flex;
     align-items: center;
     gap: var(--spacing-2);
-    font-size: var(--font-size-xs, 11px);
+    font-size: var(--font-size-xs);
     border-top: 1px solid var(--border-light);
     padding-top: var(--spacing-1-5);
   }

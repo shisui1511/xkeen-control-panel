@@ -168,7 +168,7 @@
     display: flex;
     width: calc(100% - 36px);
     margin: var(--spacing-1-5) 18px var(--spacing-2-5);
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
     height: 4px;
     overflow: hidden;
     background: var(--bg-elevated);
@@ -224,13 +224,13 @@
   .health-tooltip {
     position: fixed;
     z-index: var(--z-popover);
-    background: var(--bg-elevated, var(--bg-card));
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg, 8px);
+    border-radius: var(--radius-lg);
     padding: var(--spacing-2) var(--spacing-2-5);
     font-size: var(--font-size-xs);
     color: var(--fg-primary);
-    box-shadow: var(--shadow-md, 0 4px 6px -1px rgba(0, 0, 0, 0.3));
+    box-shadow: var(--shadow-md);
     pointer-events: none;
     white-space: nowrap;
     display: flex;

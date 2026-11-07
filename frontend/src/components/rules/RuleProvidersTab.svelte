@@ -494,7 +494,7 @@
     background: var(--bg-elevated);
     color: var(--fg-secondary);
     border: 1px solid var(--border);
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
   }
 
   .loading-state {
@@ -510,7 +510,7 @@
     border: 2px solid var(--border);
     border-top-color: var(--accent);
     border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+    animation: spin var(--duration-spin) linear infinite;
   }
 
   .providers-grid {
@@ -532,7 +532,7 @@
   }
 
   .provider-card:hover {
-    border-color: var(--border-hover, var(--border));
+    border-color: var(--border-hover);
   }
 
   .provider-body {
@@ -605,11 +605,11 @@
   }
 
   .mono {
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
   }
 
   .updated-time {
-    color: var(--fg-faint, var(--fg-dim));
+    color: var(--fg-faint);
   }
 
   .provider-actions {
@@ -619,7 +619,7 @@
     justify-content: flex-end;
     margin-top: var(--spacing-3);
     padding-top: var(--spacing-2-5);
-    border-top: 1px solid var(--border-light, var(--border));
+    border-top: 1px solid var(--border-light);
   }
 
   .provider-actions :global(.btn) {
@@ -632,13 +632,7 @@
   }
 
   .spinning {
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
+    animation: spin var(--duration-spin) linear infinite;
   }
 
   .provider-status :global(svg) {

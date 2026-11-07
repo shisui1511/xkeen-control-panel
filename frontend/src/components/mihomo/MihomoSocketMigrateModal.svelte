@@ -83,7 +83,7 @@
   }
 </script>
 
-<Modal isOpen={open} title={$t('mihomo.migrate_title')} maxWidth="560px" {onclose}>
+<Modal {open} title={$t('mihomo.migrate_title')} maxWidth="560px" {onclose}>
   <div class="migrate-modal-body" {@attach syncWithOpenState}>
     <div class="info-banner">
       <div class="info-icon">

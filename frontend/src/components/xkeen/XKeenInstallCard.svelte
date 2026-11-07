@@ -129,11 +129,11 @@
 </div>
 
 <Modal
-  {isOpen}
+  open={isOpen}
   title={$t('xkinst.modal_title')}
   maxWidth="960px"
   onclose={close}
-  dataTestid="xkeen-install-modal"
+  testid="xkeen-install-modal"
 >
   <div class="install-modal">
     {#if exitCode === null}

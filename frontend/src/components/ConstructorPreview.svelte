@@ -15,14 +15,14 @@
     content: string;
     language?: 'json' | 'yaml';
     storageKey: string;
-    isOpen?: boolean;
-    onClose?: () => void;
+    open?: boolean;
+    onclose?: () => void;
     title?: string;
     tabs?: PreviewTab[];
     activeTab?: string;
     onTabChange?: (tabId: string) => void;
     fileName?: string;
-    testId?: string;
+    testid?: string;
     children?: import('svelte').Snippet;
   }
 
@@ -30,14 +30,14 @@
     content,
     language = 'json',
     storageKey,
-    isOpen = true,
-    onClose,
+    open: isOpen = true,
+    onclose: onClose,
     title,
     tabs,
     activeTab,
     onTabChange,
     fileName,
-    testId,
+    testid: testId,
     children
   }: Props = $props();
 

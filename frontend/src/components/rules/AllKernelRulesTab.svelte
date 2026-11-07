@@ -367,7 +367,7 @@
   .stats-text {
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
   }
 
   .stats-total {
@@ -394,7 +394,7 @@
     border: 2px solid var(--border);
     border-top-color: var(--accent);
     border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+    animation: spin var(--duration-spin) linear infinite;
   }
 
   .table-card {
@@ -428,7 +428,7 @@
 
   td {
     padding: 9px var(--spacing-3-5);
-    border-bottom: 1px solid var(--border-light, var(--border));
+    border-bottom: 1px solid var(--border-light);
     color: var(--fg-primary);
     vertical-align: middle;
   }
@@ -468,7 +468,7 @@
   }
 
   .mono {
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
   }
 
   .text-break {
@@ -598,12 +598,6 @@
 
   .dropdown-menu button:hover {
     background: var(--hover);
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 
   .filter-fields-row {

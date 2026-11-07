@@ -483,10 +483,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={$t(rule === null ? 'cfg.rules.modal_new' : 'cfg.rules.modal_edit')}
   maxWidth="720px"
-  dataTestid="rule-modal"
+  testid="rule-modal"
   onclose={close}
 >
   <div class="re-body">
@@ -981,7 +981,7 @@
     background: none;
     color: inherit;
     cursor: pointer;
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
   }
 
   .re-list-remove:disabled {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import Modal from '../Modal.svelte';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import ProxyForm from './ProxyForm.svelte';
   import AwgDiffCard from '../awg/AwgDiffCard.svelte';
   import { t } from '../../i18n';
@@ -335,7 +335,7 @@
 
       <div class="item-actions">
         <button type="button" class="item-btn" onclick={() => editProxy(p)} title={$t('app.edit')}>
-          <Icon name="edit" />
+          <Icon name="edit" size={13} />
         </button>
         <button
           type="button"
@@ -343,7 +343,7 @@
           onclick={() => ctx.duplicateProxy(p.id)}
           title={$t('app.duplicate')}
         >
-          <Icon name="copy" />
+          <Icon name="copy" size={13} />
         </button>
         <button
           type="button"
@@ -351,7 +351,7 @@
           onclick={() => ctx.removeProxy(p.id)}
           title={$t('app.delete')}
         >
-          <Icon name="close" />
+          <Icon name="close" size={13} />
         </button>
       </div>
     </div>
@@ -385,7 +385,7 @@
           onclick={loadSubscriptions}
           title={$t('mihomo.refresh_provider')}
         >
-          <Icon name="refresh" />
+          <Icon name="refresh" size={13} />
         </button>
       </div>
     {/each}
@@ -394,7 +394,7 @@
 
 <!-- Modal Proxy Form -->
 <Modal
-  isOpen={showProxyForm}
+  open={showProxyForm}
   title={editingProxyId
     ? $t('mihomo.edit_proxy_title', { name: np.name || 'proxy' })
     : $t('mihomo.new_proxy_title')}
@@ -419,7 +419,7 @@
 </Modal>
 
 <!-- Modal Import Nodes -->
-<Modal isOpen={showImportModal} title={$t('subscr.import_modal_title')} onclose={closeImportModal}>
+<Modal open={showImportModal} title={$t('subscr.import_modal_title')} onclose={closeImportModal}>
   <div style="display: flex; flex-direction: column; gap: 16px;">
     {#if importErrorMsg}
       <div

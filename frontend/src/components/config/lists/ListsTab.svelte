@@ -319,14 +319,14 @@
   .lists-tab {
     display: flex;
     flex-direction: column;
-    gap: var(--grid-gap, 16px);
+    gap: var(--grid-gap);
     min-width: 0;
   }
 
   .lists-skeleton {
     display: flex;
     flex-direction: column;
-    gap: var(--grid-gap, 16px);
+    gap: var(--grid-gap);
   }
 
   .lists-alert {

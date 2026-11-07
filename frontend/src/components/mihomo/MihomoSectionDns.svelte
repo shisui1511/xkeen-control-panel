@@ -218,7 +218,7 @@
     border-radius: var(--radius-sm);
     padding: var(--spacing-2);
     color: var(--fg-primary);
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: var(--font-size-xs);
   }
 

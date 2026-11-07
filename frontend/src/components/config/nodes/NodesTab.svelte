@@ -94,14 +94,14 @@
   .nodes-tab {
     display: flex;
     flex-direction: column;
-    gap: var(--grid-gap, 16px);
+    gap: var(--grid-gap);
     min-width: 0;
   }
 
   .nodes-skeleton {
     display: flex;
     flex-direction: column;
-    gap: var(--grid-gap, 16px);
+    gap: var(--grid-gap);
   }
 
   .nodes-panel {
@@ -110,7 +110,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--spacing-2) var(--spacing-4);
-    min-height: var(--btn-h, 38px);
+    min-height: var(--btn-h);
   }
 
   .nodes-segment {
@@ -126,7 +126,7 @@
   .nodes-list {
     display: flex;
     flex-direction: column;
-    gap: var(--grid-gap, 16px);
+    gap: var(--grid-gap);
     min-width: 0;
   }
 

@@ -299,7 +299,7 @@
 
   button.sr-name:hover,
   button.sr-name:focus-visible {
-    color: var(--accent-text, var(--accent));
+    color: var(--accent-text);
     text-decoration: underline;
   }
 
@@ -356,7 +356,7 @@
   }
 
   .sr-actions :global(.sr-icon) {
-    min-width: var(--btn-h, 32px);
+    min-width: var(--btn-h);
     padding: 0;
     justify-content: center;
   }

@@ -629,7 +629,7 @@
   <XrayBalancersEditor bind:balancers bind:observatorySettings {outboundTags} {onchange} />
 
   <Modal
-    isOpen={showPresetModal}
+    open={showPresetModal}
     title={$t('xray.presets_title')}
     onclose={() => (showPresetModal = false)}
   >
@@ -925,8 +925,8 @@
   code {
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
-    color: var(--code-fg, var(--fg-primary));
-    background: var(--code-bg, var(--bg-surface-active));
+    color: var(--code-fg);
+    background: var(--code-bg);
     padding: var(--spacing-0-5) var(--spacing-1);
     border-radius: var(--radius-xs);
   }

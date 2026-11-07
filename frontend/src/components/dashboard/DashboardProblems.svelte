@@ -286,7 +286,7 @@
   .problems-list {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-3, 12px);
+    gap: var(--spacing-3);
   }
 
   .problem-item {
@@ -295,8 +295,8 @@
     align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: var(--spacing-3, 12px) var(--spacing-4, 16px);
-    padding: var(--spacing-4, 16px) var(--spacing-5, 20px);
+    gap: var(--spacing-3) var(--spacing-4);
+    padding: var(--spacing-4) var(--spacing-5);
     border: 1px solid color-mix(in srgb, var(--tone) 28%, var(--border));
     border-left: 3px solid var(--tone);
     border-radius: var(--radius-md);
@@ -316,7 +316,7 @@
   .problem-content {
     display: flex;
     align-items: flex-start;
-    gap: var(--spacing-3, 12px);
+    gap: var(--spacing-3);
     flex: 1 1 320px;
     min-width: 0;
   }
@@ -343,21 +343,21 @@
 
   .problem-step-label {
     display: block;
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
     font-weight: 600;
     line-height: 1.3;
     color: var(--tone);
   }
 
   .problem-title {
-    font-size: var(--font-size-lg, 16px);
+    font-size: var(--font-size-lg);
     font-weight: 600;
     line-height: 1.35;
     color: var(--fg-primary);
   }
 
   .problem-desc {
-    font-size: var(--font-size-base, 14px);
+    font-size: var(--font-size-base);
     line-height: 1.5;
     color: var(--fg-secondary);
   }
@@ -368,23 +368,23 @@
 
   .watchdog-stale-desc {
     display: inline-block;
-    margin-left: var(--spacing-1, 4px);
+    margin-left: var(--spacing-1);
     color: var(--fg-dim);
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
   }
 
   .watchdog-error-detail {
-    font-family: var(--font-family-mono, monospace);
-    font-size: var(--font-size-xs, 12px);
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
-    margin-top: var(--spacing-2, 8px);
+    margin-top: var(--spacing-2);
     word-break: break-word;
     white-space: pre-wrap;
   }
 
   @media (max-width: 768px) {
     .problem-item {
-      padding: var(--spacing-3, 12px) var(--spacing-4, 16px);
+      padding: var(--spacing-3) var(--spacing-4);
     }
 
     /* Телефон: замечание — компактная строка под «пультом», а не крупная
@@ -395,7 +395,7 @@
     }
 
     .problem-title {
-      font-size: var(--font-size-base, 14px);
+      font-size: var(--font-size-base);
     }
 
     .problem-desc {
@@ -408,7 +408,7 @@
     }
 
     .problems-list {
-      gap: var(--spacing-2, 8px);
+      gap: var(--spacing-2);
     }
 
     .problem-item.in-pulse {

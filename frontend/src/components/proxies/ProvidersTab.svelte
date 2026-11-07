@@ -102,7 +102,7 @@
 </div>
 
 <SubscriptionFormModal
-  isOpen={state.showAddModal}
+  open={state.showAddModal}
   editingSub={state.editingSub}
   bind:formName={state.formName}
   bind:formEnableXray={state.formEnableXray}
@@ -123,7 +123,7 @@
   bind:formSockoptFastOpen={state.formSockoptFastOpen}
   bind:formSockoptMptcp={state.formSockoptMptcp}
   availableMihomoGroups={state.availableMihomoGroups}
-  onClose={() => state.closeModal()}
+  onclose={() => state.closeModal()}
   onSave={() => state.saveSubscription()}
 />
 

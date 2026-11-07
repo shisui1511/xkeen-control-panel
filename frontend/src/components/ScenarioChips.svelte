@@ -90,7 +90,7 @@
 
   .preset-mod-badge {
     margin-left: 5px;
-    font-size: var(--font-size-xs, 0.6875rem);
+    font-size: var(--font-size-xs);
     color: var(--warning);
     opacity: 0.9;
     font-style: italic;

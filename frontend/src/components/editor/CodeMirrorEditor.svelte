@@ -607,7 +607,7 @@
     font-size: var(--font-size-2xs);
     font-weight: 600;
     padding: 1px 7px;
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
     background: color-mix(in srgb, var(--accent) 15%, transparent);
     color: var(--accent);
     border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
@@ -616,7 +616,7 @@
     font-size: var(--font-size-2xs);
     font-weight: 600;
     padding: 1px var(--spacing-1-5);
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
     background: color-mix(in srgb, var(--danger) 15%, transparent);
     color: var(--danger);
     border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
@@ -627,7 +627,7 @@
     gap: var(--spacing-1);
     font-size: var(--font-size-2xs);
     padding: 1px 7px;
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
     background: var(--bg-surface-elevated);
     border: 1px solid var(--border);
     color: var(--fg-secondary);
@@ -692,7 +692,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     transition:
       border-color var(--transition-fast),
@@ -725,7 +725,7 @@
     border-left: 3px solid var(--warning);
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
     line-height: 1.5;
   }
   :global(.cm-schema-tooltip-description blockquote p) {
@@ -808,7 +808,7 @@
     align-items: center;
     gap: var(--spacing-3);
     flex-wrap: wrap;
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
     flex-shrink: 0;
   }
   :global(.cm-schema-constraint) {

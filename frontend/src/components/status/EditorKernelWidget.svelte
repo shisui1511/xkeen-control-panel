@@ -81,7 +81,7 @@
     align-items: center;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 6px);
+    border-radius: var(--radius-sm);
     height: 28px;
     padding: 0 var(--spacing-1) 0 var(--spacing-2);
     gap: var(--spacing-1-5);
@@ -173,6 +173,6 @@
   }
 
   .spinning {
-    animation: spin 1s linear infinite;
+    animation: spin var(--duration-spin) linear infinite;
   }
 </style>

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '../../i18n';
   import Select from '../Select.svelte';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import type { XrayInbound } from './XrayContext.svelte';
 
   let {
@@ -64,7 +64,7 @@
           <Icon name="close" size={12} />
         </button>
       </div>
-      <div class="form-row2" style="margin-top:var(--spacing-2, 8px)">
+      <div class="form-row2" style="margin-top:var(--spacing-2)">
         <div class="form-col">
           <label class="form-label" for="xray-inbound-port-{inbound.tag}"
             >{$t('xray.inbound_port')}</label

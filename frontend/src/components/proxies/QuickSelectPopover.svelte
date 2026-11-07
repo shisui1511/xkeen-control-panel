@@ -21,7 +21,7 @@
     currentNode: string;
     anchorEl: HTMLElement | null;
     onSelect: (nodeName: string) => void;
-    onClose: () => void;
+    onclose: () => void;
     /** Проверка задержки всех узлов группы (кнопка в шапке листа на телефоне). */
     onTestAll?: () => void;
     testing?: boolean;
@@ -34,7 +34,7 @@
     currentNode,
     anchorEl,
     onSelect,
-    onClose,
+    onclose: onClose,
     onTestAll,
     testing = false
   }: Props = $props();
@@ -385,10 +385,10 @@
     z-index: var(--z-popover);
     width: 280px;
     max-height: 320px;
-    background: var(--bg-elevated, var(--bg-card));
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg, 8px);
-    box-shadow: var(--shadow-md, 0 4px 6px -1px rgba(0, 0, 0, 0.3));
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -403,7 +403,7 @@
     top: auto !important;
     width: 100% !important;
     max-height: 72dvh !important;
-    border-radius: var(--radius-lg, 10px) var(--radius-lg, 10px) 0 0 !important;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0 !important;
     border-left: 0;
     border-right: 0;
     border-bottom: 0;
@@ -485,7 +485,7 @@
     width: 36px;
     height: 4px;
     border-radius: 2px;
-    background: var(--border-strong, var(--border));
+    background: var(--border-strong);
   }
 
   .qs-header {
@@ -498,9 +498,9 @@
     width: 100%;
     padding: var(--spacing-1-5) var(--spacing-2-5);
     font-size: var(--font-size-sm);
-    border-radius: var(--radius-md, 6px);
+    border-radius: var(--radius-md);
     border: 1px solid var(--border);
-    background: var(--bg-input, rgba(0, 0, 0, 0.2));
+    background: var(--bg-input);
     color: var(--fg-primary);
     box-sizing: border-box;
   }

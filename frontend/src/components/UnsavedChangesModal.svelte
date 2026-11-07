@@ -4,14 +4,14 @@
   import { t } from '../i18n';
 
   let {
-    isOpen = false,
+    open: isOpen = false,
     dirtySources = [],
     isSaving = false,
     onSaveAndLeave,
     onLeaveWithoutSaving,
     onStay
   }: {
-    isOpen: boolean;
+    open: boolean;
     dirtySources?: string[];
     isSaving?: boolean;
     onSaveAndLeave: () => void;
@@ -21,11 +21,11 @@
 </script>
 
 <Modal
-  {isOpen}
+  open={isOpen}
   title={$t('nav.unsaved_title')}
   maxWidth="500px"
   onclose={onStay}
-  dataTestid="unsaved-changes-modal"
+  testid="unsaved-changes-modal"
 >
   <div class="unsaved-modal-body">
     <div class="warning-section">

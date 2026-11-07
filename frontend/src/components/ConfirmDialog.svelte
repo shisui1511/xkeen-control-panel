@@ -19,7 +19,7 @@
   }
 </script>
 
-<Modal isOpen={$confirmStore !== null} title={$confirmStore?.title || ''} onclose={cancel}>
+<Modal open={$confirmStore !== null} title={$confirmStore?.title || ''} onclose={cancel}>
   {#if $confirmStore}
     {@const variant = $confirmStore.variant || 'danger'}
     <div class="confirm-body">

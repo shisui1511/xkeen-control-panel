@@ -3,7 +3,7 @@
   import { capabilities, activeKernelState } from '../../stores';
   import { isMihomoAwg31Supported } from '../../lib/awgFields';
   import Select from '../Select.svelte';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import {
     AWG_PRESETS,
     getAwgPreset,
@@ -780,7 +780,7 @@
           <button
             class="btn-gen"
             onclick={() => (np.uuid = crypto.randomUUID())}
-            title={$t('app.generate')}><Icon name="refresh" /></button
+            title={$t('app.generate')}><Icon name="refresh" size={13} /></button
           >
         </div>
       </div>
@@ -872,7 +872,7 @@
             placeholder="uuid"
           />
           <button class="btn-gen" onclick={() => (np.uuid = crypto.randomUUID())} title="Generate"
-            ><Icon name="refresh" /></button
+            ><Icon name="refresh" size={13} /></button
           >
         </div>
       </div>
@@ -921,7 +921,7 @@
             placeholder="uuid"
           />
           <button class="btn-gen" onclick={() => (np.uuid = crypto.randomUUID())} title="Generate"
-            ><Icon name="refresh" /></button
+            ><Icon name="refresh" size={13} /></button
           >
         </div>
       </div>

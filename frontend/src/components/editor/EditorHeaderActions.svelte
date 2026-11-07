@@ -303,7 +303,7 @@
   .btn-accent {
     background: linear-gradient(180deg, var(--accent), var(--accent-2));
     border: 1px solid var(--accent);
-    color: var(--btn-primary-text, var(--bg-deep));
+    color: var(--btn-primary-text);
     font-weight: 600;
   }
   .btn-accent:hover:not(:disabled) {

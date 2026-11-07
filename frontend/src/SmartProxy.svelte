@@ -713,7 +713,7 @@
 
 <!-- Add/Edit Modal (3-Step Wizard) -->
 <Modal
-  isOpen={showForm}
+  open={showForm}
   title={editingProfile ? $t('smartproxy.edit_profile') : $t('smartproxy.new_profile')}
   onclose={cancelEdit}
   maxWidth="680px"

@@ -212,10 +212,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={$t('cfg.prof.modal_title')}
   maxWidth="640px"
-  dataTestid="new-profile-modal"
+  testid="new-profile-modal"
   onclose={close}
 >
   <div class="np-body">

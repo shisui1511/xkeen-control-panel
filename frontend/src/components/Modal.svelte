@@ -5,23 +5,23 @@
   import { swipeToDismiss } from '../lib/gestures';
 
   let {
-    isOpen = false,
+    open: isOpen = false,
     title = '',
     maxWidth = '520px',
     class: className = '',
     ariaLabel = '',
-    dataTestid = '',
+    testid: dataTestid = '',
     onclose,
     children
   }: {
-    isOpen: boolean;
+    open: boolean;
     title: string;
     maxWidth?: string;
     class?: string;
     /** Overrides the accessible name when the visible `.modal-header` (and its `<h2>`) is hidden by a caller's stylesheet. */
     ariaLabel?: string;
     /** Optional `data-testid` on the container, for callers whose E2E specs target a specific dialog instance. */
-    dataTestid?: string;
+    testid?: string;
     onclose: () => void;
     children?: Snippet;
   } = $props();
@@ -300,7 +300,7 @@
       width: 36px;
       height: 4px;
       border-radius: 2px;
-      background: var(--border-strong, var(--border));
+      background: var(--border-strong);
       transform: translateX(-50%);
     }
     .modal-close-btn {

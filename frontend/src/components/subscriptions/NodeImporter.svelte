@@ -25,7 +25,7 @@
     diagnosticLoading = false,
     parseReportData = null,
     rawResponseData = null,
-    onClose,
+    onclose: onClose,
     onTabChange
   }: {
     diagnosticSub: Subscription | null;
@@ -33,7 +33,7 @@
     diagnosticLoading: boolean;
     parseReportData: ParseReport | null;
     rawResponseData: RawResponse | null;
-    onClose: () => void;
+    onclose: () => void;
     onTabChange: (tab: 'report' | 'headers' | 'raw') => void;
   } = $props();
 
@@ -49,7 +49,7 @@
 </script>
 
 <Modal
-  isOpen={!!diagnosticSub}
+  open={!!diagnosticSub}
   title={diagnosticSub ? $t('subscr.diag_title').replace('{name}', diagnosticSub.name) : ''}
   onclose={onClose}
   class="node-importer-wide"

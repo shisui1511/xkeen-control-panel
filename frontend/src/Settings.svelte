@@ -2181,12 +2181,12 @@
   }
 
   .field-row-val.mono {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: var(--font-size-xs);
   }
 
   .mono {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: var(--font-size-xs);
   }
 
@@ -2197,7 +2197,7 @@
     border-radius: var(--radius-md);
     background: var(--bg-card);
     color: var(--fg-primary);
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     display: inline-flex;
     align-items: center;
   }

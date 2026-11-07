@@ -1508,7 +1508,7 @@
     border: none;
     cursor: pointer;
     padding: var(--spacing-1) var(--spacing-2);
-    border-radius: var(--radius-sm, 6px);
+    border-radius: var(--radius-sm);
     transition:
       opacity var(--transition-normal),
       background var(--transition-normal);
@@ -1542,7 +1542,7 @@
     display: inline-flex;
     background: var(--bg-card-hover);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 8px);
+    border-radius: var(--radius-md);
     padding: var(--spacing-0-5);
     gap: var(--spacing-0-5);
   }
@@ -1604,7 +1604,7 @@
     pointer-events: none;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 8px);
+    border-radius: var(--radius-md);
     padding: var(--spacing-2) var(--spacing-3);
     box-shadow: var(--shadow-md);
     z-index: 10;

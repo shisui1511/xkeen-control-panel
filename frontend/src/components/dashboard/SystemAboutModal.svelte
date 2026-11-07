@@ -7,13 +7,13 @@
   import type { SystemStats } from './SystemResourcesWidget.svelte';
 
   let {
-    isOpen = false,
-    onClose,
+    open: isOpen = false,
+    onclose: onClose,
     systemStats,
     panelVersion
   }: {
-    isOpen: boolean;
-    onClose: () => void;
+    open: boolean;
+    onclose: () => void;
     systemStats: SystemStats | null;
     panelVersion: string;
   } = $props();
@@ -22,17 +22,17 @@
 </script>
 
 <Modal
-  {isOpen}
+  open={isOpen}
   title={$t('dash.system_about_title')}
   maxWidth="640px"
   onclose={onClose}
-  dataTestid="system-about-modal"
+  testid="system-about-modal"
 >
   <div class="about-modal-body">
     <!-- Section 1: Go Runtime Telemetry -->
     <section class="diag-section">
       <div class="section-head">
-        <Icon name="console" size={16} color="var(--accent, #29c2f0)" />
+        <Icon name="console" size={16} color="var(--accent)" />
         <h3 class="section-title">{$t('dash.go_runtime_title')}</h3>
       </div>
       <p class="section-desc">{$t('dash.go_runtime_desc')}</p>
@@ -76,7 +76,7 @@
     <!-- Section 2: Entware & System Environment -->
     <section class="diag-section">
       <div class="section-head">
-        <Icon name="network" size={16} color="var(--success, #46d18a)" />
+        <Icon name="network" size={16} color="var(--success)" />
         <h3 class="section-title">{$t('dash.entware_diag_title')}</h3>
       </div>
       <p class="section-desc">{$t('dash.entware_diag_desc')}</p>
@@ -157,7 +157,7 @@
   .diag-section {
     background: var(--surface-tint-faint);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 10px);
+    border-radius: var(--radius-md);
     padding: var(--spacing-4);
     display: flex;
     flex-direction: column;
@@ -199,7 +199,7 @@
   .diag-item {
     background: rgba(0, 0, 0, 0.2);
     border: 1px solid var(--border-light);
-    border-radius: var(--radius-sm, 6px);
+    border-radius: var(--radius-sm);
     padding: var(--spacing-2) var(--spacing-3);
     display: flex;
     flex-direction: column;
@@ -224,7 +224,7 @@
   }
 
   .mono {
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
   }
 
   .text-success {

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { HTMLButtonAttributes } from 'svelte/elements';
+  import Spinner from './Spinner.svelte';
 
   // Кнопка панели. Своих стилей нет: вид задаёт .btn в global.css, поэтому <Button> и
   // <button class="btn …"> выглядят одинаково. Новый код пишет <Button> (scripts/check-controls.cjs).
@@ -66,7 +67,7 @@
   data-testid={testid ?? dataTestid}
 >
   {#if loading}
-    <span class="spinner" aria-hidden="true"></span>
+    <Spinner size={13} tone="current" />
   {/if}
   {@render children?.()}
 </button>

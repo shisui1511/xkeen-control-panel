@@ -1,6 +1,6 @@
 <script lang="ts">
   import Modal from '../Modal.svelte';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import RuleForm from './RuleForm.svelte';
   import { t } from '../../i18n';
   import { getMihomoContext } from './MihomoContext.svelte';
@@ -92,7 +92,7 @@
       <span class="item-name rule-value">{r.value}</span>
       <span class="item-meta">→ {r.outbound}</span>
       <button type="button" class="item-btn" onclick={() => editRule(r)} title={$t('app.edit')}>
-        <Icon name="edit" />
+        <Icon name="edit" size={13} />
       </button>
       <button
         type="button"
@@ -116,7 +116,7 @@
         onclick={() => editRule(matchRule)}
         title={$t('app.edit')}
       >
-        <Icon name="edit" />
+        <Icon name="edit" size={13} />
       </button>
       <button
         type="button"
@@ -130,7 +130,7 @@
 
 <!-- Modal Rule Form -->
 <Modal
-  isOpen={showRuleForm}
+  open={showRuleForm}
   title={editingRuleId ? $t('mihomo.edit_rule_title') : $t('mihomo.add_rule_title')}
   onclose={() => {
     showRuleForm = false;
@@ -203,7 +203,7 @@
   }
 
   .rule-value {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: var(--font-size-xs);
   }
 

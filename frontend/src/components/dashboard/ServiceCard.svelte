@@ -241,7 +241,7 @@
   </div>
 </div>
 
-<Modal isOpen={sheetOpen} title={name} maxWidth="420px" onclose={() => (sheetOpen = false)}>
+<Modal open={sheetOpen} title={name} maxWidth="420px" onclose={() => (sheetOpen = false)}>
   <div class="svc-sheet">
     {#if onRestart}
       <button

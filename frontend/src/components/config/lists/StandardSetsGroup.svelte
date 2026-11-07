@@ -145,7 +145,7 @@
   }
 
   .sg-toggle {
-    min-height: var(--btn-h, 32px);
+    min-height: var(--btn-h);
     font-size: var(--font-size-xs);
     font-weight: 600;
   }

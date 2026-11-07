@@ -414,10 +414,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={group ? $t('cfg.groups.modal_edit') : $t('cfg.groups.modal_new')}
   maxWidth={mode === 'manual' ? '720px' : '640px'}
-  dataTestid="group-modal"
+  testid="group-modal"
   onclose={close}
 >
   <div class="gm-body">

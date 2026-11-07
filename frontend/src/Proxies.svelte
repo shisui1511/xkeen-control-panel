@@ -1188,7 +1188,7 @@
   {diagnosticLoading}
   {parseReportData}
   {rawResponseData}
-  onClose={closeDiagnosticModal}
+  onclose={closeDiagnosticModal}
   onTabChange={(tab) => (diagnosticTab = tab)}
 />
 
@@ -1201,7 +1201,7 @@
     proxyName={activePopover.name}
     history={activePopover.history}
     anchorEl={activePopover.el}
-    onClose={() => (activePopover = null)}
+    onclose={() => (activePopover = null)}
   />
 {/if}
 
@@ -1215,7 +1215,7 @@
       currentNode={selectedGrp.now}
       anchorEl={quickSelect.anchor}
       onSelect={handleQuickSelect}
-      onClose={() => (quickSelect = null)}
+      onclose={() => (quickSelect = null)}
       onTestAll={() => testGroupLatency(selectedGrp)}
       testing={testingGroupNames.has(selectedGrp.name)}
     />

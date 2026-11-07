@@ -1,6 +1,6 @@
 <script lang="ts">
   import Modal from '../Modal.svelte';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import GroupForm from './GroupForm.svelte';
   import Select from '../Select.svelte';
   import { t } from '../../i18n';
@@ -184,7 +184,7 @@
         {/if}
         <span class="item-meta">{g.proxies.length} {$t('mihomo.proxies_count')}</span>
         <button class="item-edit" onclick={() => editGroup(g)} title={$t('app.edit')}
-          ><Icon name="edit" /></button
+          ><Icon name="edit" size={13} /></button
         >
         <button class="item-del" onclick={() => ctx.removeGroup(g.id)} title={$t('app.delete')}
           ><Icon name="close" size={12} /></button
@@ -202,7 +202,7 @@
 
 <!-- Modal Group Form -->
 <Modal
-  isOpen={showGroupForm}
+  open={showGroupForm}
   title={editingGroupId
     ? $t('mihomo.edit_group_title', { name: ng.name || 'group' })
     : $t('mihomo.new_group_title')}

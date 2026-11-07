@@ -852,11 +852,11 @@
           content={yaml}
           language="yaml"
           storageKey="mihomo_builder_preview_width"
-          isOpen={ctx.showPreviewPane}
-          onClose={() => (ctx.showPreviewPane = false)}
+          open={ctx.showPreviewPane}
+          onclose={() => (ctx.showPreviewPane = false)}
           title="YAML {$t('mihomo.preview')}"
           fileName="config.yaml"
-          testId="mihomo-yaml-preview"
+          testid="mihomo-yaml-preview"
         >
           {#if validationError}
             <div
@@ -953,9 +953,9 @@
 
 <!-- Modal Confirm Apply -->
 <Modal
-  isOpen={showApplyConfirm}
+  open={showApplyConfirm}
   title={$t('editor.apply_confirm_title')}
-  dataTestid="apply-confirm-dialog"
+  testid="apply-confirm-dialog"
   onclose={() => (showApplyConfirm = false)}
 >
   <p>{willRestart ? $t('editor.apply_confirm_body') : $t('apply.confirm_body_no_restart')}</p>

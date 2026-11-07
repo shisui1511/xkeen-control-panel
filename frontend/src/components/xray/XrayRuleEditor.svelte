@@ -105,10 +105,10 @@
 </script>
 
 <Modal
-  isOpen={true}
+  open={true}
   title={initial ? $t('xray.rule_edit_title') : $t('xray.rule_add_title')}
   maxWidth="640px"
-  dataTestid="xray-rule-editor"
+  testid="xray-rule-editor"
   {onclose}
 >
   <form

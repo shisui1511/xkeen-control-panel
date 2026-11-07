@@ -90,13 +90,13 @@
 
 <style>
   .preflight-warnings {
-    margin-bottom: var(--spacing-sm, 8px);
+    margin-bottom: var(--spacing-2);
   }
 
   .preflight-warnings-content {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-xs, 4px);
+    gap: var(--spacing-1);
     width: 100%;
   }
 
@@ -105,7 +105,7 @@
     padding-left: var(--spacing-5);
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-xs, 4px);
+    gap: var(--spacing-1);
   }
 
   .preflight-warnings-list li {
@@ -113,10 +113,10 @@
   }
 
   .warning-code-token {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: 0.85em;
     padding: 1px var(--spacing-1);
-    border-radius: var(--radius-xs, 3px);
+    border-radius: var(--radius-xs);
     background: color-mix(in srgb, var(--warning) 18%, transparent);
     color: var(--warning);
   }

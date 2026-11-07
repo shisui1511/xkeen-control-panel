@@ -97,7 +97,7 @@
   .obs-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg, 10px);
+    border-radius: var(--radius-lg);
     margin-bottom: var(--spacing-4);
     overflow: hidden;
     box-shadow: var(--shadow-sm);
@@ -109,7 +109,7 @@
     align-items: center;
     padding: var(--spacing-1-5) var(--spacing-3-5);
     background: linear-gradient(135deg, var(--bg-group-head-from), var(--bg-group-head-to));
-    border-bottom: 1px solid var(--border-strong, var(--border));
+    border-bottom: 1px solid var(--border-strong);
   }
 
   .obs-head .card-title.obs-title {
@@ -205,7 +205,7 @@
   }
 
   .obs-stat-btn[aria-pressed='true'] {
-    background: var(--accent-soft, var(--hover));
+    background: var(--accent-soft);
     box-shadow: inset 0 0 0 1px var(--accent);
   }
 

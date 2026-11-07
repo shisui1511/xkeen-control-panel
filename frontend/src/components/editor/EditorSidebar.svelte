@@ -10,7 +10,7 @@
   }
 
   interface Props {
-    show: boolean;
+    open: boolean;
     xrayFiles: ConfigFileInfo[];
     mihomoFiles: ConfigFileInfo[];
     selectedFile: string;
@@ -19,7 +19,7 @@
     activeKernel?: string;
     /** Узкий экран: панель выезжает листом поверх редактора, а не занимает колонку */
     overlay?: boolean;
-    onClose?: () => void;
+    onclose?: () => void;
     onLoadFile: (path: string, isPreviewClick: boolean) => void;
     onCreateFile: () => void;
     onRenameFile: (file: ConfigFileInfo) => void;
@@ -30,14 +30,14 @@
   }
 
   let {
-    show = $bindable(true),
+    open: show = $bindable(true),
     xrayFiles,
     mihomoFiles,
     selectedFile,
     loadingPath = null,
     activeKernel = '',
     overlay = false,
-    onClose,
+    onclose: onClose,
     onLoadFile,
     onCreateFile,
     onRenameFile,
@@ -49,9 +49,9 @@
 </script>
 
 <ResponsiveSidebarPanel
-  bind:show
+  bind:open={show}
   {overlay}
-  {onClose}
+  onclose={onClose}
   title={$t('editor.tab_files')}
   storageKey="editor_filetree_width"
   defaultWidth={240}

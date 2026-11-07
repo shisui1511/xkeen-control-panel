@@ -172,10 +172,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={$t('cfg.nodes.edit_title')}
   maxWidth="640px"
-  dataTestid="nodes-edit-modal"
+  testid="nodes-edit-modal"
   onclose={close}
 >
   {#if phase === 'loading' || phase === 'idle'}

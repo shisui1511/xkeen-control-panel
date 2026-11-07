@@ -15,18 +15,18 @@
   import Icon from '../../lib/components/Icon.svelte';
 
   let {
-    isOpen = false,
+    open: isOpen = false,
     activeKernel = '',
     isXkeenRunning = true,
     anchorEl = null,
-    onClose,
+    onclose: onClose,
     onSwitchTab
   }: {
-    isOpen: boolean;
+    open: boolean;
     activeKernel?: string;
     isXkeenRunning?: boolean;
     anchorEl?: HTMLElement | null;
-    onClose: () => void;
+    onclose: () => void;
     onSwitchTab: (tab: string) => void;
   } = $props();
 
@@ -322,7 +322,7 @@
     width: 250px;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 10px);
+    border-radius: var(--radius-md);
     box-shadow: var(--shadow-lg);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
@@ -393,7 +393,7 @@
     padding: 7px var(--spacing-2-5);
     background: transparent;
     border: none;
-    border-radius: var(--radius-sm, 6px);
+    border-radius: var(--radius-sm);
     color: var(--fg-primary);
     font-size: var(--font-size-sm);
     font-weight: 500;
@@ -441,7 +441,7 @@
   }
 
   .spinning {
-    animation: spin 1s linear infinite;
+    animation: spin var(--duration-spin) linear infinite;
   }
 
   .item-label {

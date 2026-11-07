@@ -192,7 +192,7 @@
   }
 
   .mono {
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
   }
 
   .text-muted {
@@ -216,8 +216,8 @@
     font-size: var(--font-size-xs);
     font-weight: 600;
     padding: var(--spacing-0-5) 7px;
-    border-radius: var(--radius-sm, 6px);
-    font-family: var(--font-family-mono, monospace);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-family-mono);
     letter-spacing: 0.02em;
     white-space: nowrap;
   }

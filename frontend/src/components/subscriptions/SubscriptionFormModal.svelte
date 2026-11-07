@@ -12,7 +12,7 @@
   }
 
   let {
-    isOpen = false,
+    open: isOpen = false,
     editingSub = null,
     formName = $bindable(''),
     formEnableXray = $bindable(false),
@@ -33,10 +33,10 @@
     formSockoptFastOpen = $bindable(false),
     formSockoptMptcp = $bindable(false),
     availableMihomoGroups = [],
-    onClose,
+    onclose: onClose,
     onSave
   }: {
-    isOpen?: boolean;
+    open?: boolean;
     editingSub: Subscription | null;
     formName: string;
     formEnableXray: boolean;
@@ -57,7 +57,7 @@
     formSockoptFastOpen?: boolean;
     formSockoptMptcp?: boolean;
     availableMihomoGroups?: string[];
-    onClose: () => void;
+    onclose: () => void;
     onSave: () => void;
   } = $props();
 
@@ -68,7 +68,7 @@
 </script>
 
 <Modal
-  {isOpen}
+  open={isOpen}
   title={editingSub ? $t('subscr.edit_title') : $t('subscr.add_title')}
   onclose={onClose}
 >

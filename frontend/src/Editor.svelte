@@ -1464,14 +1464,14 @@
     <!-- Workspace with Resizable Splitter (EDIT-02) -->
     <div class="editor-workspace">
       <EditorSidebar
-        show={showSidebar}
+        open={showSidebar}
         {xrayFiles}
         {mihomoFiles}
         {selectedFile}
         activeKernel={$activeKernelName}
         overlay={isNarrow}
         loadingPath={treeBusyPath}
-        onClose={() => (showSidebar = false)}
+        onclose={() => (showSidebar = false)}
         onLoadFile={async (path, isPreviewClick) => {
           const opened = await loadFile(path, isPreviewClick);
           // D-16: шторка закрывается только после того, как файл показан во вкладке; при отмене
@@ -1684,7 +1684,7 @@
               {backupLoading}
               onSelectBackup={selectBackup}
               onRestoreBackup={restoreBackup}
-              onClose={() => (drawerOpen = false)}
+              onclose={() => (drawerOpen = false)}
             />
           {/if}
         </div>
@@ -1737,33 +1737,33 @@
 
 <!-- Templates Modal -->
 <TemplatesModal
-  isOpen={showTemplatesModal}
+  open={showTemplatesModal}
   {selectedFile}
   hasEditorView={!!editorView}
   onApplyTemplate={applyTemplate}
-  onClose={() => (showTemplatesModal = false)}
+  onclose={() => (showTemplatesModal = false)}
 />
 
 <OutboundGeneratorModal
-  isOpen={showGeneratorModal}
+  open={showGeneratorModal}
   onGenerate={handleGeneratedOutbound}
-  onClose={() => (showGeneratorModal = false)}
+  onclose={() => (showGeneratorModal = false)}
 />
 
 <SaveConfirmModal
-  isOpen={showSaveConfirmModal}
+  open={showSaveConfirmModal}
   {originalContent}
   currentContent={editorView ? editorView.state.doc.toString() : ''}
   {saving}
   onConfirm={confirmSave}
-  onClose={() => (showSaveConfirmModal = false)}
+  onclose={() => (showSaveConfirmModal = false)}
 />
 
 <DeleteFileModal
-  isOpen={showDeleteConfirmModal}
+  open={showDeleteConfirmModal}
   filePath={actionTarget}
   onConfirm={confirmDeleteFile}
-  onClose={() => {
+  onclose={() => {
     showDeleteConfirmModal = false;
     menuTarget = '';
   }}
@@ -1889,7 +1889,7 @@
   .editor-empty-shortcuts kbd {
     background: var(--surface-tint);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
     padding: var(--spacing-0-5) var(--spacing-1-5);
     font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);

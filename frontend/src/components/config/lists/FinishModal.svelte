@@ -152,7 +152,7 @@
   }
 </script>
 
-<Modal isOpen={open} {title} maxWidth="640px" dataTestid="geo-finish-modal" onclose={close}>
+<Modal {open} {title} maxWidth="640px" testid="geo-finish-modal" onclose={close}>
   <div class="gf-body">
     {#if body !== ''}
       <p class="gf-text" id="{uid}-body">{body}</p>

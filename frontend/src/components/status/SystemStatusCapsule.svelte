@@ -146,11 +146,11 @@
     </button>
 
     <SystemQuickMenu
-      isOpen={isMenuOpen}
+      open={isMenuOpen}
       anchorEl={triggerEl}
       {activeKernel}
       {isXkeenRunning}
-      onClose={closeMenu}
+      onclose={closeMenu}
       {onSwitchTab}
     />
   </div>
@@ -173,11 +173,11 @@
     </button>
 
     <SystemQuickMenu
-      isOpen={isMenuOpen}
+      open={isMenuOpen}
       anchorEl={triggerEl}
       {activeKernel}
       {isXkeenRunning}
-      onClose={closeMenu}
+      onclose={closeMenu}
       {onSwitchTab}
     />
   </div>
@@ -251,11 +251,11 @@
     {/if}
 
     <SystemQuickMenu
-      isOpen={isMenuOpen}
+      open={isMenuOpen}
       anchorEl={triggerEl}
       {activeKernel}
       {isXkeenRunning}
-      onClose={closeMenu}
+      onclose={closeMenu}
       {onSwitchTab}
     />
   </div>
@@ -323,11 +323,11 @@
     </div>
 
     <SystemQuickMenu
-      isOpen={isMenuOpen}
+      open={isMenuOpen}
       anchorEl={triggerEl}
       {activeKernel}
       {isXkeenRunning}
-      onClose={closeMenu}
+      onclose={closeMenu}
       {onSwitchTab}
     />
   </div>
@@ -338,7 +338,7 @@
   .sidebar-status-card {
     background: var(--bg-elevated);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 8px);
+    border-radius: var(--radius-md);
     margin: var(--spacing-1-5) var(--spacing-3) var(--spacing-2);
     padding: var(--spacing-1);
     display: flex;
@@ -356,7 +356,7 @@
     cursor: pointer;
     color: var(--fg-primary);
     text-align: left;
-    border-radius: var(--radius-sm, 6px);
+    border-radius: var(--radius-sm);
     transition: background var(--transition-fast);
   }
 
@@ -416,7 +416,7 @@
     width: 100%;
     background: transparent;
     border: 1px solid transparent;
-    border-radius: var(--radius-sm, 6px);
+    border-radius: var(--radius-sm);
     padding: var(--spacing-1) var(--spacing-2);
     color: var(--fg-secondary);
     font-size: var(--font-size-xs);
@@ -488,7 +488,7 @@
     gap: 3px;
     background: var(--bg-elevated);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 6px);
+    border-radius: var(--radius-md);
     cursor: pointer;
     padding: 0;
     color: var(--fg-primary);
@@ -506,7 +506,7 @@
     font-size: var(--font-size-xs);
     font-weight: 700;
     letter-spacing: 0.05em;
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
     color: var(--fg-secondary);
   }
 
@@ -680,7 +680,7 @@
   .traffic-segment {
     border-left: 1px solid var(--border-light);
     gap: var(--spacing-2);
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
   }
 

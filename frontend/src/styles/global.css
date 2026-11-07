@@ -13,8 +13,6 @@
   --bg: #0c2237;
   --bg-page: #0c2237;
   --bg-card: #102a44;
-  --bg-surface: var(--bg-card);
-  --card-bg: #102a44;
   --bg-elevated: #14334f;
   --bg-deep: #07182a;
   /* sidebar / topbar */
@@ -22,7 +20,6 @@
   /* Ink */
   --fg-primary: #d9e7f4;
   --fg-secondary: #8aa0b7;
-  --text: #d9e7f4;
   --text-secondary: #8aa0b7;
   --fg-dim: #869cb3;
   --fg-faint: #3e5774;
@@ -35,7 +32,6 @@
 
   /* Accent — cyan-teal */
   --accent: #29c2f0;
-  --primary: #29c2f0;
   --accent-hover: #45cef5;
   --accent-2: #1aa6d4;
   --accent-soft: rgba(var(--accent-rgb), 0.14);
@@ -76,12 +72,9 @@
   --swatch-graphite: #33393f;
 
   /* Phantom-token aliases */
-  --fg-muted: var(--fg-dim);
-  --text-muted: var(--fg-dim);
   --error: var(--danger);
   --bg-hover: var(--hover);
   --bg-secondary: var(--bg-elevated);
-  --bg-tertiary: var(--bg-deep);
   --bg-input: var(--bg-elevated);
   /* terminal / code-output surface — theme-invariant pair, both halves fixed
      on purpose. The background stays dark in both themes (like the CodeMirror
@@ -95,23 +88,16 @@
   --bg-card-hover: var(--bg-elevated);
   --bg-card-subtle: var(--surface-tint);
   --bg-surface-elevated: var(--bg-elevated);
-  --bg-surface-raised: var(--bg-elevated);
   --bg-surface-active: var(--accent-soft);
   --border-subtle: var(--border);
-  --border-color: var(--border);
   --border-hover: var(--border-strong);
   --border-focus: var(--accent);
-  --primary-hover: var(--accent-hover);
   --accent-border: var(--accent-line);
   --accent-dim: var(--accent-2);
-  --accent-subtle: var(--accent-soft);
   --accent-rgb: 41, 194, 240;
   --font-mono: var(--font-family-mono);
   --radius-full: 9999px;
   --radius-xs: 3px;
-  --space-lg: var(--spacing-6);
-  --spacing-sm: var(--spacing-2);
-  --spacing-xs: var(--spacing-1);
 
   /* Type */
   --font-family-sans:
@@ -200,7 +186,6 @@
   /* Layout */
   --sidebar-w: 252px;
   --rail-w: 64px;
-  --topbar-h: 64px;
   /* Высота панели без системной полосы жестов; --dock-space — сколько места
      она реально занимает снизу (0 там, где панели нет) */
   --dock-h: 58px;
@@ -220,7 +205,6 @@
   --btn-h: 38px;
   --table-row-h: 44px;
   --grid-gap: 16px;
-  --row-gap: 12px;
   --font-size-table: 0.8125rem;
 
   /* CodeMirror tokens */
@@ -248,11 +232,9 @@
   --code-key: var(--cm-keyword);
   --code-string: var(--cm-string);
   --code-number: var(--cm-number);
-  --code-boolean: var(--cm-boolean);
   --code-null: var(--cm-null);
   --code-comment: var(--cm-comment);
   --code-punctuation: var(--cm-bracket);
-  --code-border: var(--cm-border);
 
   /* --seq-1..8 — named decorative multi-hue sequence (DS2-02). Applied by
      index: element N in a list gets step ((N - 1) % 8) + 1, so order stays
@@ -281,15 +263,12 @@
   --bg: #e2e7ec;
   --bg-page: #e2e7ec;
   --bg-card: #eef1f4;
-  --bg-surface: var(--bg-card);
-  --card-bg: #eef1f4;
   --bg-elevated: #f5f7f9;
   /* mobile header and terminal stay dark */
   --bg-deep: #22303d;
 
   --fg-primary: #1c2834;
   --fg-secondary: #44525f;
-  --text: #1c2834;
   --text-secondary: #44525f;
   /* 4.5:1 on the page background: 12px labels and hints use this token. */
   --fg-dim: #4f5e6c;
@@ -301,7 +280,6 @@
   --border-control: #75838f;
 
   --accent: #1b6a8e;
-  --primary: #1b6a8e;
   --accent-hover: #155a79;
   --accent-rgb: 27, 106, 142;
 
@@ -365,13 +343,11 @@
   --bg: #121416;
   --bg-page: #121416;
   --bg-card: #181b1e;
-  --card-bg: #181b1e;
   --bg-elevated: #1f2226;
   --bg-deep: #000000;
 
   --fg-primary: #e3e6e9;
   --fg-secondary: #9ba2aa;
-  --text: #e3e6e9;
   --text-secondary: #9ba2aa;
   --fg-dim: #949ba3;
   --fg-faint: #3d4248;
@@ -404,13 +380,11 @@
   --bg: #1f242c;
   --bg-page: #1f242c;
   --bg-card: #272d36;
-  --card-bg: #272d36;
   --bg-elevated: #2e3540;
   --bg-deep: #171b21;
 
   --fg-primary: #c6d0dc;
   --fg-secondary: #9ca7b5;
-  --text: #c6d0dc;
   --text-secondary: #9ca7b5;
   --fg-dim: #9aa5b3;
   --fg-faint: #4a5361;
@@ -420,7 +394,6 @@
   --border-control: #6a7584;
 
   --accent: #6db3d6;
-  --primary: #6db3d6;
   --accent-hover: #86c2e0;
   --accent-2: #4f9bc2;
   --accent-rgb: 109, 179, 214;
@@ -467,13 +440,11 @@
   --bg: #110d07;
   --bg-page: #110d07;
   --bg-card: #18120a;
-  --card-bg: #18120a;
   --bg-elevated: #20180d;
   --bg-deep: #0a0704;
 
   --fg-primary: #f1c47e;
   --fg-secondary: #c49a5c;
-  --text: #f1c47e;
   --text-secondary: #c49a5c;
   --fg-dim: #b88f55;
   --fg-faint: #4d3a18;
@@ -484,7 +455,6 @@
   --border-control: #8a6a3a;
 
   --accent: #ffbe55;
-  --primary: #ffbe55;
   --accent-hover: #ffcb73;
   --accent-2: #e6a43c;
   --accent-rgb: 255, 190, 85;
@@ -542,7 +512,6 @@
   --btn-h: 32px;
   --table-row-h: 32px;
   --grid-gap: 10px;
-  --row-gap: 8px;
   --font-size-table: 0.78125rem;
 }
 
@@ -552,7 +521,6 @@
   --btn-h: 38px;
   --table-row-h: 44px;
   --grid-gap: 16px;
-  --row-gap: 12px;
   --font-size-table: 0.8125rem;
 }
 
@@ -563,14 +531,12 @@
 
 [data-accent='indigo']:not([data-scheme='light']) {
   --accent: #818cf8;
-  --primary: #818cf8;
   --accent-hover: #a5b4fc;
   --accent-rgb: 129, 140, 248;
 }
 
 [data-scheme='light'][data-accent='indigo'] {
   --accent: #4f46e5;
-  --primary: #4f46e5;
   --accent-hover: #4338ca;
   --accent-rgb: 79, 70, 229;
 }
@@ -581,14 +547,12 @@
 
 [data-accent='steel']:not([data-scheme='light']) {
   --accent: #7d95ad;
-  --primary: #7d95ad;
   --accent-hover: #93a8bd;
   --accent-rgb: 125, 149, 173;
 }
 
 [data-scheme='light'][data-accent='steel'] {
   --accent: #46647c;
-  --primary: #46647c;
   --accent-hover: #3a5468;
   --accent-rgb: 70, 100, 124;
 }
@@ -599,14 +563,12 @@
 
 [data-accent='graphite']:not([data-scheme='light']) {
   --accent: #aab4bf;
-  --primary: #aab4bf;
   --accent-hover: #c0c8d1;
   --accent-rgb: 170, 180, 191;
 }
 
 [data-scheme='light'][data-accent='graphite'] {
   --accent: #33393f;
-  --primary: #33393f;
   --accent-hover: #262b30;
   --accent-rgb: 51, 57, 63;
 }
@@ -1000,8 +962,6 @@ h2.card-title {
 /* Спиннер загрузки внутри кнопки — цвета текста кнопки */
 .btn > .spinner {
   --spinner-size: 13px;
-  --spinner-track: currentColor;
-  --spinner-color: transparent;
 }
 
 /* Шеврон раскрытия: один значок поворачивается, а не подменяется — видно, что открылось.
@@ -1022,6 +982,13 @@ h2.card-title {
   }
 }
 
+/* Спиннер цвета окружающего текста: в кнопке, бейдже, строке статуса */
+.spinner-current,
+.btn > .spinner {
+  --spinner-track: color-mix(in srgb, currentColor 30%, transparent);
+  --spinner-color: currentColor;
+}
+
 .spinner {
   display: inline-block;
   vertical-align: middle;
@@ -1031,7 +998,7 @@ h2.card-title {
   border: var(--spinner-w, 2px) solid var(--spinner-track, var(--border));
   border-top-color: var(--spinner-color, var(--accent));
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  animation: spin var(--duration-spin) linear infinite;
 }
 
 /* ------------ Input ------------- */
@@ -2038,7 +2005,7 @@ body.drawer-locked {
 
 .page-header-actions {
   display: flex;
-  gap: var(--spacing-2, 8px);
+  gap: var(--spacing-2);
   flex-wrap: wrap;
   align-items: center;
 }
@@ -2152,12 +2119,12 @@ select.input:focus {
 table.data-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: var(--font-size-table, 13px);
+  font-size: var(--font-size-table);
 }
 
 .table-container thead th,
 table.data-table thead th {
-  background: var(--surface-tint, rgba(0, 0, 0, 0.05));
+  background: var(--surface-tint);
   text-align: left;
   padding: 11px var(--spacing-3-5);
   font-size: var(--font-size-xs);
@@ -3197,7 +3164,7 @@ pre.code-output {
   border-radius: 0 !important;
   border: none !important;
   margin: 0 !important;
-  background: var(--cm-bg, #050d16) !important;
+  background: var(--cm-bg) !important;
 }
 
 .editor-cm-toolbar {
@@ -3214,7 +3181,7 @@ pre.code-output {
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   padding: var(--spacing-1);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
 }
 
@@ -3468,7 +3435,7 @@ pre.code-output {
   border: 2px solid rgba(41, 194, 240, 0.25);
   border-top-color: var(--accent);
   border-radius: 50%;
-  animation: spin 0.6s linear infinite;
+  animation: spin var(--duration-spin) linear infinite;
   vertical-align: middle;
 }
 
@@ -3843,13 +3810,7 @@ pre.code-output {
 }
 
 .ptr-indicator.is-spinning svg {
-  animation: ptr-spin 0.8s linear infinite;
-}
-
-@keyframes ptr-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  animation: spin var(--duration-spin) linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

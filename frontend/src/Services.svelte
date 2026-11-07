@@ -2087,7 +2087,7 @@
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    border: 2px solid var(--border-hover, var(--fg-dim));
+    border: 2px solid var(--border-hover);
     position: relative;
     transition: border-color var(--transition-fast);
   }
@@ -2405,26 +2405,26 @@
   }
 
   .watchdog-stale-text {
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
 
   .watchdog-skeleton {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-2, 8px);
-    padding: var(--spacing-2, 8px) 0;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2) 0;
   }
 
   .watchdog-content {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-2, 8px);
-    padding: var(--spacing-2, 8px) 0;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2) 0;
   }
 
   .watchdog-row {
-    font-size: var(--font-size-sm, 13px);
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
 
@@ -2434,8 +2434,8 @@
   }
 
   .watchdog-error-row {
-    font-family: var(--font-family-mono, monospace);
-    font-size: var(--font-size-xs, 12px);
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
     color: var(--danger);
     word-break: break-word;
     white-space: pre-wrap;
@@ -2444,7 +2444,7 @@
   .watchdog-footer {
     display: flex;
     justify-content: flex-start;
-    margin-top: var(--spacing-3, 12px);
+    margin-top: var(--spacing-3);
   }
 
   @media (max-width: 1024px) {

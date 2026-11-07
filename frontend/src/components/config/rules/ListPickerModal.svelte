@@ -259,13 +259,7 @@
   const refLabel = (r: Pick<ListRef, 'file' | 'tag'>) => `${r.file} · ${r.tag}`;
 </script>
 
-<Modal
-  isOpen={open}
-  title={$t('cfg.list.title')}
-  maxWidth="720px"
-  dataTestid="list-picker"
-  {onclose}
->
+<Modal {open} title={$t('cfg.list.title')} maxWidth="720px" testid="list-picker" {onclose}>
   <div class="lp-body">
     <div class="lp-controls">
       {#if !single}
@@ -690,7 +684,7 @@
   .lp-ext-link {
     align-self: flex-start;
     font-size: var(--font-size-sm);
-    color: var(--accent-text, var(--accent));
+    color: var(--accent-text);
     text-decoration: underline;
   }
 

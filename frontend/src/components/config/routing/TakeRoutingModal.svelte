@@ -143,10 +143,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={$t('cfg.routing.take_title')}
   maxWidth="640px"
-  dataTestid="take-routing-modal"
+  testid="take-routing-modal"
   onclose={close}
 >
   <div class="tr-body" data-mode={mode} data-scope={takeScope}>

@@ -158,7 +158,7 @@
   }
 
   .sg-toggle {
-    min-height: var(--btn-h, 32px);
+    min-height: var(--btn-h);
   }
 
   @media (pointer: coarse), (max-width: 768px) {

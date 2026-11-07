@@ -650,7 +650,7 @@
     padding: 0 var(--spacing-8) 0 var(--spacing-8);
     background: rgba(0, 0, 0, 0.2);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 6px);
+    border-radius: var(--radius-md);
     color: var(--fg-primary);
     font-size: var(--font-size-sm);
     font-family: inherit;
@@ -713,7 +713,7 @@
     align-items: center;
     gap: 5px;
     padding: 3px var(--spacing-2-5);
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
     font-size: var(--font-size-xs);
     font-weight: 500;
     background: var(--surface-tint);
@@ -748,7 +748,7 @@
     text-align: center;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 6px);
+    border-radius: var(--radius-md);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -772,7 +772,7 @@
     display: flex;
     flex-direction: column;
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 6px);
+    border-radius: var(--radius-md);
     overflow: hidden;
     background: var(--bg-card);
   }
@@ -964,7 +964,7 @@
     border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
     color: var(--warning);
     padding: var(--spacing-0-5) var(--spacing-1-5);
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
     font-size: var(--font-size-xs);
     font-weight: 700;
     letter-spacing: 0;
@@ -1113,7 +1113,7 @@
   .sub-node-na-badge {
     font-size: var(--font-size-xs);
     padding: var(--spacing-0-5) var(--spacing-1-5);
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
     background: var(--bg-card-subtle);
     color: var(--fg-dim);
     border: 1px solid var(--border-subtle);

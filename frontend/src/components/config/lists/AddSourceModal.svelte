@@ -197,10 +197,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={$t('cfg.geo.add_title')}
   maxWidth="720px"
-  dataTestid="geo-add-modal"
+  testid="geo-add-modal"
   onclose={close}
 >
   <div class="am-body">

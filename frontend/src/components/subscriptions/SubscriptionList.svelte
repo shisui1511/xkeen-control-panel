@@ -556,7 +556,7 @@
 
       {#if sub.last_error}
         {@const nodeCount = sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0}
-        {@const errorColor = nodeCount > 0 ? 'var(--warning, #f0b450)' : 'var(--danger)'}
+        {@const errorColor = nodeCount > 0 ? 'var(--warning)' : 'var(--danger)'}
         <div
           class="sub-error-details"
           style="font-size: var(--font-size-sm); color: {errorColor}; margin: -4px 0 8px 34px; line-height: 1.4; font-family: var(--font-family-sans); word-break: break-word;"
@@ -913,7 +913,7 @@
 
   /* D-10: подпись бренда провайдера — вторичный текст, имя из формы важнее */
   .sub-profile-title {
-    font-size: var(--font-size-xs, 12px);
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     white-space: nowrap;
     overflow: hidden;
@@ -926,12 +926,12 @@
     margin: 0 0 var(--spacing-2) 34px;
     padding: var(--spacing-2-5) var(--spacing-3);
     border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
-    border-radius: var(--radius-md, 6px);
+    border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--danger) 8%, transparent);
     display: flex;
     flex-direction: column;
     gap: var(--spacing-1);
-    font-size: var(--font-size-sm, 13px);
+    font-size: var(--font-size-sm);
     line-height: 1.4;
     word-break: break-word;
   }
@@ -1217,7 +1217,7 @@
     gap: var(--spacing-2);
     background: color-mix(in srgb, var(--danger) 5%, transparent);
     border: 1px solid color-mix(in srgb, var(--danger) 15%, transparent);
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
     padding: var(--spacing-2) var(--spacing-3);
     margin-bottom: var(--spacing-3);
     text-align: left;

@@ -9,14 +9,17 @@
 //   - button    — <button class="btn …"> в разметке вместо <Button>;
 //   - input     — текстовый <input> (text, number, search, url, email, password, tel) вместо <Input>;
 //   - checkbox  — <input type="checkbox"> вместо <Checkbox> или <Toggle>;
-//   - override  — селектор в <style> компонента, который перекрашивает системные .btn* / .input.
+//   - override  — селектор в <style> компонента, который перекрашивает системные .btn* / .input;
+//   - svg       — статичный встроенный <svg> (без {выражений}) вместо <Icon name=…>
+//                 из lib/components/Icon.svelte. Графики и индикаторы с данными не считаются.
 //  После чистки: node scripts/check-controls.cjs --update (снижает базу).
 const fs = require('fs');
 const path = require('path');
 
 const SRC = path.join(__dirname, '../src');
 const BASELINE = path.join(__dirname, 'controls-baseline.json');
-const KINDS = ['button', 'input', 'checkbox', 'override'];
+const KINDS = ['button', 'input', 'checkbox', 'override', 'svg'];
+const SVG_OWN = /^(lib\/components\/icons\/|components\/BrandMark\.svelte$)/;
 const OWN = new Set([
   'components/Button.svelte',
   'components/Input.svelte',
@@ -100,6 +103,12 @@ for (const file of walk(SRC)) {
     } else if (TEXT_TYPES.has(type) && !/\stype=\{/.test(attrs)) add('input', rel, line);
   }
 
+  if (!SVG_OWN.test(rel)) {
+    for (const m of markup.matchAll(/<svg\b[\s\S]*?<\/svg>/g)) {
+      if (!m[0].includes('{')) add('svg', rel, lineOf(markup, m.index));
+    }
+  }
+
   // Перекраска системных классов в стиле компонента
   const style = text.replace(/<style[^>]*>([\s\S]*?)<\/style>|[\s\S]/g, (m, body) =>
     body !== undefined
@@ -135,7 +144,8 @@ const HINT = {
   button: '<Button>',
   input: '<Input>',
   checkbox: '<Checkbox> или <Toggle>',
-  override: 'вариант или размер Button/Input вместо перекраски .btn/.input'
+  override: 'вариант или размер Button/Input вместо перекраски .btn/.input',
+  svg: '<Icon name=…> (новая иконка — файл в lib/components/icons)'
 };
 let stale = 0;
 for (const k of KINDS) {

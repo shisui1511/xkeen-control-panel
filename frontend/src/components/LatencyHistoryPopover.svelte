@@ -12,10 +12,10 @@
     proxyName: string;
     history: HistoryItem[];
     anchorEl: HTMLElement | null;
-    onClose: () => void;
+    onclose: () => void;
   }
 
-  let { proxyName, history = [], anchorEl, onClose }: Props = $props();
+  let { proxyName, history = [], anchorEl, onclose: onClose }: Props = $props();
 
   let top = $state(0);
   let left = $state(0);

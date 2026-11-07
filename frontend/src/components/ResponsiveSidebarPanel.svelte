@@ -8,14 +8,14 @@
   import { t } from '../i18n';
 
   export interface ResponsiveSidebarProps {
-    show?: boolean;
+    open?: boolean;
     side?: 'left' | 'right';
     storageKey?: string;
     defaultWidth?: number;
     minWidth?: number;
     maxWidth?: number;
     overlay?: boolean;
-    onClose?: () => void;
+    onclose?: () => void;
     containerClass?: string;
     /** Заголовок шторки в режиме оверлея (рядом с кнопкой «Закрыть») */
     title?: string;
@@ -24,14 +24,14 @@
   }
 
   let {
-    show = $bindable(true),
+    open: show = $bindable(true),
     side = 'left',
     storageKey = 'editor_filetree_width',
     defaultWidth = 240,
     minWidth = 160,
     maxWidth = 450,
     overlay,
-    onClose,
+    onclose: onClose,
     containerClass = '',
     title,
     children,

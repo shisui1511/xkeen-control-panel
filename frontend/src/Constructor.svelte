@@ -143,7 +143,7 @@
   .constructor-wrapper {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-4, 16px);
+    gap: var(--spacing-4);
   }
 
   .constructor-kernel-toggle {
@@ -159,7 +159,7 @@
     border: none;
     border-bottom: 2px solid transparent;
     color: var(--fg-secondary);
-    font-size: var(--font-size-sm, 0.8125rem);
+    font-size: var(--font-size-sm);
     font-family: inherit;
     cursor: pointer;
     transition:
@@ -180,6 +180,6 @@
   }
 
   .constructor-body {
-    padding-top: var(--spacing-2, 8px);
+    padding-top: var(--spacing-2);
   }
 </style>

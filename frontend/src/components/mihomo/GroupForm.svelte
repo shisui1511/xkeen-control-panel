@@ -2,7 +2,7 @@
   import { t } from '../../i18n';
   import { slugifyProviderName } from '../../lib/mihomoYaml';
   import Select from '../Select.svelte';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
 
   let {
     ng = $bindable(),

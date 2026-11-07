@@ -1510,7 +1510,7 @@
   onsuccess={handleRefresh}
 />
 <UnsavedChangesModal
-  isOpen={showUnsavedModal}
+  open={showUnsavedModal}
   dirtySources={dirtySourceNames}
   isSaving={isSavingAndNavigating}
   onSaveAndLeave={handleSaveAndLeave}
@@ -1518,8 +1518,8 @@
   onStay={handleStay}
 />
 <SystemAboutModal
-  isOpen={showAboutModal}
-  onClose={() => (showAboutModal = false)}
+  open={showAboutModal}
+  onclose={() => (showAboutModal = false)}
   {systemStats}
   {panelVersion}
 />

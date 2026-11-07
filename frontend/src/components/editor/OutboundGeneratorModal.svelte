@@ -5,12 +5,12 @@
   import { t } from '../../i18n';
 
   interface Props {
-    isOpen: boolean;
+    open: boolean;
     onGenerate: (content: string) => void;
-    onClose: () => void;
+    onclose: () => void;
   }
 
-  let { isOpen, onGenerate, onClose }: Props = $props();
+  let { open: isOpen, onGenerate, onclose: onClose }: Props = $props();
 
   let genProtocol = $state('vless');
   let genAddress = $state('');
@@ -74,7 +74,7 @@
   }
 </script>
 
-<Modal {isOpen} title={$t('editor.generator')} onclose={onClose}>
+<Modal open={isOpen} title={$t('editor.generator')} onclose={onClose}>
   <div class="form-group" style="margin-bottom: 12px;">
     <label
       for="gen-protocol"

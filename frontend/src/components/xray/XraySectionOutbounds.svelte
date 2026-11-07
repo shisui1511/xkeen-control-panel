@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '../../i18n';
   import Modal from '../Modal.svelte';
-  import Icon from '../Icon.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
   import XrayOutboundForm from './XrayOutboundForm.svelte';
   import type { OutboundDetail } from './XrayContext.svelte';
   import { apiFetchJSON } from '../../lib/api';
@@ -264,7 +264,7 @@
             onclick={() => openEditOutbound(idx)}
             title={$t('app.edit')}
           >
-            <Icon name="edit" />
+            <Icon name="edit" size={13} />
           </button>
           <button
             type="button"
@@ -314,7 +314,7 @@
 
   <!-- Outbound Modal using XrayOutboundForm -->
   <Modal
-    isOpen={showOutboundForm}
+    open={showOutboundForm}
     title={editingOutboundIndex !== null
       ? $t('xray.edit_outbound_title', { tag: currentEditingOutbound.tag || 'outbound' })
       : $t('xray.add_outbound_title')}
@@ -331,11 +331,7 @@
   </Modal>
 
   <!-- Node Import Modal -->
-  <Modal
-    isOpen={showImportModal}
-    title={$t('subscr.import_modal_title')}
-    onclose={closeImportModal}
-  >
+  <Modal open={showImportModal} title={$t('subscr.import_modal_title')} onclose={closeImportModal}>
     <div style="display: flex; flex-direction: column; gap: 16px;">
       {#if importErrorMsg}
         <div

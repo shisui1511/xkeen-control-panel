@@ -104,10 +104,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={$t('cfg.prof.fill_title')}
   maxWidth="560px"
-  dataTestid="fill-sections-modal"
+  testid="fill-sections-modal"
   onclose={close}
 >
   <div class="fs-body">

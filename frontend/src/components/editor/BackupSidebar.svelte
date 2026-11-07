@@ -14,7 +14,7 @@
     backupLoading = false,
     onSelectBackup,
     onRestoreBackup,
-    onClose
+    onclose: onClose
   }: {
     backups: string[];
     selectedBackup: string;
@@ -22,7 +22,7 @@
     backupLoading: boolean;
     onSelectBackup: (backup: string) => void;
     onRestoreBackup: (backup: string) => void;
-    onClose?: () => void;
+    onclose?: () => void;
   } = $props();
 
   // Мобильный лист — два экрана: список копий → сравнение на весь лист

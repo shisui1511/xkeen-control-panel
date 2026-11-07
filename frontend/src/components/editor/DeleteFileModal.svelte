@@ -3,18 +3,18 @@
   import { t } from '../../i18n';
 
   interface Props {
-    isOpen: boolean;
+    open: boolean;
     filePath: string;
     onConfirm: () => void;
-    onClose: () => void;
+    onclose: () => void;
   }
 
-  let { isOpen, filePath, onConfirm, onClose }: Props = $props();
+  let { open: isOpen, filePath, onConfirm, onclose: onClose }: Props = $props();
 
   let fileName = $derived(filePath ? filePath.split('/').pop() || '' : '');
 </script>
 
-<Modal {isOpen} title={`${$t('editor.delete_file')}: ${fileName}`} onclose={onClose}>
+<Modal open={isOpen} title={`${$t('editor.delete_file')}: ${fileName}`} onclose={onClose}>
   <p style="margin: 0;">
     {$t('editor.delete_confirm_body', { file: fileName })}
   </p>

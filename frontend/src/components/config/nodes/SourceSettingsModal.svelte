@@ -179,10 +179,10 @@
 </script>
 
 <Modal
-  isOpen={open}
+  {open}
   title={$t('cfg.nodes.settings_title')}
   maxWidth="560px"
-  dataTestid="nodes-settings-modal"
+  testid="nodes-settings-modal"
   onclose={close}
 >
   <div class="ss-body">
