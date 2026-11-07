@@ -44,6 +44,15 @@
 //   node scripts/router/history.mjs durations [--suite s] [--days N] [--core c]
 //                                                     TSV check, core, median, runs по убыванию
 //                                                     медианы секунд
+//   node scripts/router/history.mjs failfreq [--days N]
+//                                                     TSV check, fails, runs по убыванию fails
+//                                                     (падение — FAIL, XPASS, QFAIL; прогон —
+//                                                     любой статус, кроме SKIP)
+//   node scripts/router/history.mjs last-full [--green]
+//                                                     TSV report, sha, release последнего полного
+//                                                     прогона (--green — без FAIL и XPASS);
+//                                                     нет — код 1
+//   node scripts/router/history.mjs trend <отчёт>     строки тренда для summary.md (D-16)
 // Неизвестная команда или аргумент — код 2.
 //
 // Экспорты ESM:
@@ -55,6 +64,15 @@
 //   median(numbers)                      медиана
 //   durations(rows, { suite, days, core }?)
 //                                        Map `<check>\t<core>` → { median, runs }
+//   failFreq(rows, { days }?)            Map check → { fails, runs } — порядок гейта (RTR-03),
+//                                        отбор для bisect (D-22), нестабильность (D-19)
+//   lastFull(rows, { green, before }?)   { report, sha, release, finished } последнего полного
+//                                        прогона (suite=full, не этап сессии) строго раньше
+//                                        before (ISO) или null
+//   trendLines(rows, reportName)         строки Markdown: «- Тренд: тестов N (было M, +K), время
+//                                        тестов X мин (было Y, +Z)» и «- Новые тесты: …» (до 5
+//                                        самых долгих проверок, которых не было в прошлом полном
+//                                        прогоне); тесты — верхние go: и pw: с ядром
 //
 // Только встроенные модули Node.
 
@@ -460,12 +478,122 @@ export function durations(rows, opts = {}) {
   return out;
 }
 
+// падение — FAIL, XPASS и QFAIL; прогон — любой статус, кроме SKIP
+const FAIL_STATUSES = new Set(['FAIL', 'XPASS', 'QFAIL']);
+
+export function failFreq(rows, opts = {}) {
+  const { days } = opts;
+  const out = new Map();
+  for (const r of rows) {
+    if (r.status === 'SKIP') continue;
+    if (!inWindow(r, days)) continue;
+    const v = out.get(r.check) || { fails: 0, runs: 0 };
+    v.runs += 1;
+    if (FAIL_STATUSES.has(r.status)) v.fails += 1;
+    out.set(r.check, v);
+  }
+  return out;
+}
+
+// отчёты истории: Map имя → { report, sha, release, suite, finished, rows }
+function byReport(rows) {
+  const out = new Map();
+  for (const r of rows) {
+    let v = out.get(r.report);
+    if (!v) {
+      v = {
+        report: r.report,
+        sha: r.sha,
+        release: r.release,
+        suite: r.suite,
+        finished: r.finished_utc,
+        rows: []
+      };
+      out.set(r.report, v);
+    }
+    if (r.finished_utc > v.finished) v.finished = r.finished_utc;
+    v.rows.push(r);
+  }
+  return out;
+}
+
+// последний полный прогон (suite=full, не этап сессии) по finished_utc; before — строго раньше
+// (ISO); green — без строк FAIL и XPASS
+export function lastFull(rows, opts = {}) {
+  const { green, before } = opts;
+  let best = null;
+  for (const v of byReport(rows).values()) {
+    if (v.suite !== 'full' || v.report.includes('/')) continue;
+    if (before && !(v.finished < before)) continue;
+    if (green && v.rows.some((r) => r.status === 'FAIL' || r.status === 'XPASS')) continue;
+    if (!best || v.finished > best.finished || (v.finished === best.finished && v.report > best.report))
+      best = v;
+  }
+  return best
+    ? { report: best.report, sha: best.sha, release: best.release, finished: best.finished }
+    : null;
+}
+
+// тесты отчёта: верхние go: (без подтестов) и pw:; Map check → секунды по всем ядрам
+function testsOf(reportRows) {
+  const keys = new Set();
+  const secs = new Map();
+  let timed = false;
+  for (const r of reportRows) {
+    const top = (r.check.startsWith('go:') && !r.check.includes('/')) || r.check.startsWith('pw:');
+    if (!top || r.core === '-') continue;
+    keys.add(`${r.check}\t${r.core}`);
+    if (!secs.has(r.check)) secs.set(r.check, null);
+    if (r.seconds !== null) {
+      secs.set(r.check, (secs.get(r.check) || 0) + r.seconds);
+      timed = true;
+    }
+  }
+  let total = 0;
+  for (const s of secs.values()) total += s || 0;
+  // без секунд (в старом отчёте нет go-*.jsonl и report*.json) время неизвестно
+  return { count: keys.size, secs, total: timed ? total : null };
+}
+
+function signed(n, digits = 0) {
+  const v = digits ? Number(n.toFixed(digits)) : Math.round(n);
+  const s = digits ? v.toFixed(digits) : String(v);
+  return v >= 0 ? `+${s}` : s;
+}
+
+// строки Markdown тренда отчёта против прошлого полного прогона (D-16)
+export function trendLines(rows, reportName) {
+  const reports = byReport(rows);
+  const cur = reports.get(reportName);
+  if (!cur) return [`- Тренд: отчёта ${reportName} в истории нет`];
+  const prevRef = lastFull(rows, { before: cur.finished });
+  if (!prevRef) return ['- Тренд: прошлого полного прогона в истории нет'];
+  const prev = reports.get(prevRef.report);
+  const a = testsOf(cur.rows);
+  const b = testsOf(prev.rows);
+  const mins = (t) => (t === null ? 'н/д' : `${(t / 60).toFixed(1)} мин`);
+  const delta = a.total !== null && b.total !== null ? `, ${signed((a.total - b.total) / 60, 1)}` : '';
+  const lines = [
+    `- Тренд: тестов ${a.count} (было ${b.count}, ${signed(a.count - b.count)}), ` +
+      `время тестов ${mins(a.total)} (было ${mins(b.total)}${delta}); ` +
+      `прошлый полный — ${prevRef.report}`
+  ];
+  const fresh = [...a.secs]
+    .filter(([check]) => !b.secs.has(check))
+    .sort((x, y) => (y[1] ?? -1) - (x[1] ?? -1))
+    .slice(0, 5)
+    .map(([check, s]) => (s === null ? check : `${check} (${Math.round(s)} с)`));
+  lines.push(`- Новые тесты: ${fresh.length > 0 ? fresh.join(', ') : 'нет'}`);
+  return lines;
+}
+
 // --- CLI ---------------------------------------------------------------------------------
 
 function usage(msg) {
   if (msg) console.error(`history: ${msg}`);
   console.error(
-    'usage: history.mjs append <отчёт> | backfill | durations [--suite s] [--days N] [--core c]'
+    'usage: history.mjs append <отчёт> | backfill | durations [--suite s] [--days N] [--core c]' +
+      ' | failfreq [--days N] | last-full [--green] | trend <отчёт>'
   );
   process.exit(2);
 }
@@ -513,6 +641,30 @@ function main(argv) {
       const d = [...durations(readHistory(), opts)].sort((a, b) => b[1].median - a[1].median);
       const out = d.map(([key, v]) => `${key}\t${fmtSeconds(v.median)}\t${v.runs}`);
       if (out.length > 0) process.stdout.write(out.join('\n') + '\n');
+      return;
+    }
+    case 'failfreq': {
+      const opts = parseOpts(args, ['days']);
+      const f = [...failFreq(readHistory(), opts)].sort(
+        (a, b) => b[1].fails - a[1].fails || b[1].runs - a[1].runs || (a[0] < b[0] ? -1 : 1)
+      );
+      const out = f.map(([check, v]) => `${check}\t${v.fails}\t${v.runs}`);
+      if (out.length > 0) process.stdout.write(out.join('\n') + '\n');
+      return;
+    }
+    case 'last-full': {
+      const opts = parseOpts(args, [], ['green']);
+      const r = lastFull(readHistory(), opts);
+      if (!r) {
+        console.error('history: полного прогона в истории нет');
+        process.exit(1);
+      }
+      console.log([r.report, r.sha, r.release].join('\t'));
+      return;
+    }
+    case 'trend': {
+      if (args.length !== 1) usage('trend: нужно имя отчёта');
+      console.log(trendLines(readHistory(), args[0]).join('\n'));
       return;
     }
     default:
