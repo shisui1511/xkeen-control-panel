@@ -6,7 +6,8 @@
 # выводе теста (internal/routertest). Родитель, упавший из-за подтеста, отдельной строкой
 # не выводится: падение несёт подтест.
 #
-# Карантин (routertest.Quarantine): тест с маркером «QUARANTINE slug=» и все его подтесты
+# Карантин (routertest.Quarantine): тест с маркером «QUARANTINE slug=» в начале строки t.Logf
+# («<файл>.go:<строка>: QUARANTINE slug=<slug>») и все его подтесты
 # дают QPASS при прохождении и QFAIL при падении (вместо PASS и FAIL); деталь называет
 # slug. QFAIL на итог не влияет: go-suite.sh считает в BAD только FAIL и XPASS, а строка
 # «пакет завершился ошибкой» не выводится, если ошибку пакета объясняют падения в карантине.
@@ -50,7 +51,13 @@ function field(re, skip, tail,    r) {
   if (action == "output") {
     if (match(text, /KNOWN-FAILURE slug=[a-z0-9-]+/)) kn[test] = substr(text, RSTART + 19, RLENGTH - 19)
     if (match(text, /XPASS slug=[a-z0-9-]+/)) xp[test] = substr(text, RSTART + 11, RLENGTH - 11)
-    if (match(text, /QUARANTINE slug=[a-z0-9][a-z0-9-]*/)) qr[test] = substr(text, RSTART + 16, RLENGTH - 16)
+    # маркер карантина — только строка t.Logf самого routertest.Quarantine («<файл>.go:<строка>:
+    # QUARANTINE slug=…» в начале вывода), а не такая подстрока где-то в логе теста
+    if (match(text, /^ *[A-Za-z0-9_.-]+\.go:[0-9]+: QUARANTINE slug=[a-z0-9][a-z0-9-]*/)) {
+      qt = substr(text, RSTART, RLENGTH)
+      sub(/^.*QUARANTINE slug=/, "", qt)
+      qr[test] = qt
+    }
     if (text !~ /^(=== |--- |PASS|FAIL|ok)/ && length(out[test]) < 400) out[test] = out[test] text
   }
 }

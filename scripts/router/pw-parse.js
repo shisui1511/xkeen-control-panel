@@ -12,6 +12,8 @@
 //     повод снимать метку;
 //   - тест с аннотацией quarantine (карантин, D-17; без test.fail): expected -> QPASS, иначе
 //     (unexpected, flaky, тайм-аут) -> QFAIL; деталь — «карантин: <slug>» и текст падения.
+//     Описание аннотации — slug вида [a-z0-9][a-z0-9-]*; иначе карантин не признаётся и
+//     падение остаётся FAIL с деталью «карантин без slug».
 //     QPASS и QFAIL на итог не влияют: pw-suite.sh считает в итог только FAIL и XPASS;
 //   - остальные: expected -> PASS, unexpected/flaky -> FAIL, skipped -> SKIP (деталь — описание
 //     аннотации 'skip', то есть причина test.skip(условие, причина); без неё — «пропущен»).
@@ -63,12 +65,18 @@ function knownSlug(test) {
   return null;
 }
 
+// slug карантина: null — аннотации нет, "" — аннотация без допустимого slug (карантин не
+// признаётся: check-known.sh не видит такого вызова, todo и срока у него нет)
 function quarantineSlug(test) {
   const lists = [test.annotations || []];
   for (const r of test.results || []) lists.push(r.annotations || []);
   for (const list of lists) {
     for (const a of list) {
-      if (a && a.type === "quarantine") return a.description || "quarantine";
+      if (a && a.type === "quarantine")
+        return typeof a.description === "string" &&
+          /^[a-z0-9][a-z0-9-]*$/.test(a.description)
+          ? a.description
+          : "";
     }
   }
   return null;
@@ -121,6 +129,13 @@ function visit(suite, titles) {
           "XPASS",
           name,
           `${slug}: тест прошёл, метка известного падения больше не нужна`,
+        );
+      } else if (qslug === "" && st !== "expected") {
+        // аннотация quarantine без slug: падение не глушится
+        out(
+          "FAIL",
+          name,
+          `карантин без slug: ${errorText(test) || last?.status || st}`,
         );
       } else if (qslug) {
         // карантин (D-17): исход виден, на итог не влияет

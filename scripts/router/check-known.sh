@@ -19,6 +19,7 @@
 #                                                 routertest.Quarantine(t, "<slug>") — карантин (D-17)
 #   frontend/tests/router/**/*.ts                 knownFailure('<селектор>', '<slug>')
 #                                                 quarantine('<slug>') — карантин (D-17)
+# Вызов карантина с нелитеральным slug (константа, шаблон) — нарушение: его todo не проверить.
 # Вызовы могут быть перенесены на другую строку (prettier, gofmt), поэтому файл перед
 # поиском склеивается в одну строку; строки-комментарии в поиске не участвуют.
 #
@@ -108,7 +109,8 @@ fi
 BAD=0
 SEEN=$(mktemp)
 CALLS=$(mktemp)
-trap 'rm -f "$SEEN" "$CALLS"' EXIT
+NONLIT=$(mktemp)
+trap 'rm -f "$SEEN" "$CALLS" "$NONLIT"' EXIT
 
 # frontmatter <файл> — строки между первой парой «---» (пусто, если файл начинается не с «---»)
 frontmatter() {
@@ -216,6 +218,18 @@ scan_calls() {
     } | while IFS= read -r _slug; do
       printf '%s\t%s\n' "${_file#"$ROOT"/}" "$_slug"
     done
+    # вызов карантина с нелитеральным slug (константа, шаблон, переменная): его slug здесь не
+    # виден, а карантин глушил бы падение без todo и срока (D-18). Вызовов больше, чем литеральных, —
+    # нарушение. Определение function quarantine( в lib/known.ts вызовом не считается.
+    _q_all=$(printf '%s\n' "$_flat" | sed -E 's/function[[:space:]]+quarantine\(//g' |
+      grep -oE 'routertest\.Quarantine\(|[^A-Za-z0-9_$.]quarantine\(' | wc -l)
+    _q_lit=$({
+      printf '%s\n' "$_flat" |
+        grep -oE "routertest\.Quarantine\([[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*,[[:space:]]*\"[a-z0-9][a-z0-9-]*\""
+      printf '%s\n' "$_flat" |
+        grep -oE "[^A-Za-z0-9_\$.]quarantine\([[:space:]]*[\"'][a-z0-9][a-z0-9-]*[\"']"
+    } | wc -l)
+    [ "$_q_all" -le "$_q_lit" ] || printf '%s\n' "${_file#"$ROOT"/}" >>"$NONLIT"
   done
 }
 
@@ -223,6 +237,11 @@ scan_calls() {
   scan_calls "$ROOT/internal" '*_test.go'
   scan_calls "$ROOT/frontend/tests/router" '*.ts'
 } >>"$CALLS"
+
+while IFS= read -r _nl; do
+  echo "check-known: карантин с нелитеральным slug ($_nl): slug — строковый литерал, иначе todo и срок не проверяются" >&2
+  BAD=1
+done <"$NONLIT"
 
 # --set-until: проставить срок todo, на которые ссылаются метки
 if [ "$MODE" = set ]; then
