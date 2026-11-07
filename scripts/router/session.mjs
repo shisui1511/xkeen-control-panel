@@ -14,6 +14,10 @@
 //   {
 //     "target": "arm64",                    id цели из локального конфига
 //     "cores": ["xray", "mihomo"],          ядра проходов (по умолчанию оба)
+//     "keep_going": false,                  необязательно (true/false, по умолчанию false):
+//                                           true — все проходы до конца (полный список
+//                                           падений), false — остановка на первом
+//                                           несовпадении (см. ниже)
 //     "passes": [
 //       {
 //         "name": "before-fix",             [a-z0-9-]
@@ -51,9 +55,27 @@
 //     "expect": {
 //       "exit": 0,                          код выхода run.sh, по умолчанию 0
 //       "summary": ["- Окно смоука: 30 с"], подстроки summary.md вложенного отчёта
-//       "same_failures_as": "full-1"        множество строк FAIL, KNOWN и XPASS (статус, ядро,
-//     }                                     проверка) совпадает с более ранним проходом-прогоном
+//       "same_failures_as": "full-1",       множество строк FAIL, KNOWN и XPASS (статус, ядро,
+//                                           проверка) совпадает с более ранним проходом-прогоном
+//       "max_minutes": 30                   у любого прохода-прогона, целое 1…600: вердикт
+//     }                                     «время прохода: N мин из max_minutes» по замеру
+//   }                                       вложенного прогона
+// Вложенная сессия — проход-прогон набора session (проверка самой сессии: ожидаемая остановка,
+// предел времени):
+//   {
+//     "name": "nested",
+//     "suite": "session",
+//     "spec": "build/spec-check/inner.json", обязателен: путь от корня рабочей копии без «..»,
+//                                           файл есть и не совпадает с внешней спекой; цель
+//                                           та же; своих проходов session у вложенной спеки
+//                                           нет (глубина 1)
+//     "expect": { "exit": 1, "max_minutes": 30, "summary": ["Остановлено на первом несовпадении"] }
 //   }
+// Вложенный `sh run.sh session` идёт с SPEC=<spec>, под блокировкой сессии, отчёт — как у
+// прогонов наборов; exit и summary сверяются по её коду и summary.md. files, release,
+// interrupt и same_failures_as у session не допускаются. Стенд после неё — по её session.json
+// (сборка HEAD, её исходное ядро); прерывание внешней сессии уходит только run.sh вложенной,
+// он передаёт сигнал её session.mjs один раз — она возвращает стенд сама.
 // Смоук установленного релиза — проход-прогон набора smoke с полем release:
 //   {
 //     "name": "release-smoke",
@@ -89,14 +111,37 @@
 // вернулся — сессия останавливается. Снимок, оставшийся к концу сессии, возвращает cleanup.
 // С go, specs, grep и product проход-прогон не сочетается. Вложенный `sh run.sh [changed]`
 // идёт под блокировкой сессии (RT_LOCK_HELD=1) без RT_HOLD_MINUTES, RT_CORES, RT_BASE и
-// SPEC, сам ставит сборку HEAD, снимает снимок и восстанавливает стенд. Его отчёт — в
+// SPEC (SPEC — только у session), сам ставит сборку HEAD, снимает снимок и восстанавливает стенд. Его отчёт — в
 // build/router/<каталог сессии>-<NN>-<проход> (RT_REPORT_DIR; ссылка last остаётся на
 // сессии). В summary.md сессии — раздел «Прогоны наборов»: проход, набор, код, итог,
 // оболочка, путь отчёта; те же данные — в session.json (suites).
 //
-// Статус ожидания — PASS, FAIL, KNOWN, XPASS или SKIP; несколько — через «|» (PASS|KNOWN).
-// detail — подстрока детали в results.tsv. Без default тест вне tests справочный, но FAIL
-// и XPASS у него — расхождение: неожиданное падение не теряется.
+// Статус ожидания — PASS, FAIL, KNOWN, XPASS, SKIP, QPASS или QFAIL; несколько — через «|»
+// (PASS|KNOWN). detail — подстрока детали в results.tsv. Без default тест вне tests справочный,
+// но FAIL и XPASS у него — расхождение: неожиданное падение не теряется.
+// Карантин (D-17): QPASS и QFAIL — исход теста с меткой карантина. Тест в карантине вне tests
+// (под default или справочный) несовпадением не считается и сессию не останавливает: строка
+// вердикта «карантин» со статусом. Тест из tests сверяется строго по указанным статусам —
+// QFAIL можно ждать явно ("QPASS|QFAIL" — любой исход карантина).
+//
+// Остановка на первом несовпадении (по умолчанию; "keep_going": true её выключает): красная
+// сессия не дожидается конца, когда итог уже ясен. Первое несовпадение с ожиданиями:
+//   - Go-этап — по мере вывода: сессия раз в секунду дочитывает файлы go-*.raw этапа в
+//     <этап>/<цель>/<ядро>/ (вывод -test.v=test2json, пока бинарник работает на цели) и готовые
+//     go-*.parsed пакетов; строка `--- FAIL: <тест>`, чей статус (XPASS при маркере
+//     `XPASS slug=`, QFAIL при маркере `QUARANTINE slug=` у теста или предка, иначе FAIL)
+//     ожидание теста не допускает, останавливает этап: TERM группе процессов этапа (как при
+//     прерывании), ожидание выхода и опустения группы, затем добивание тестовых бинарников на
+//     цели. Родитель, упавший из-за подтеста, отдельно не сверяется (как в go-parse.awk);
+//     деталь (detail) по ходу вывода не сверяется — её сверяет разбор после этапа;
+//   - Playwright, деплой со смоуком и прогоны наборов — после этапа (сверка results.tsv);
+//     несовпадение в Go-части прохода со спеками не пускает этап Playwright.
+// Остановленный проход сверяется по уже записанным результатам: тест, на котором остановились, —
+// несовпадение, невыполненные тесты не сверяются. Следующие ядра и проходы не запускаются,
+// стенд возвращается как при любом исходе (сборка HEAD, исходное ядро). В summary.md — раздел
+// «## Остановлено на первом несовпадении»: проход, ядро, тест, ожидаемый и полученный статус и
+// «Не выполнено:» (ядра прохода и проходы); код выхода 1. Несовпадение в последнем этапе
+// остановкой не считается: невыполненного нет.
 //
 // Порядок: проходы по очереди; внутри прохода ядра змейкой, первым — активное. На N проходов
 // приходится не больше N переключений, и ещё одно в конце, если стенд не на исходном ядре.
@@ -123,21 +168,29 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
   appendFileSync,
+  closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
+  realpathSync,
   rmSync,
   writeFileSync
 } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
 
 const SCRIPT = fileURLToPath(import.meta.url);
 const SCRIPT_DIR = path.dirname(SCRIPT);
 const CORES = ['xray', 'mihomo'];
-const STATUSES = ['PASS', 'FAIL', 'KNOWN', 'XPASS', 'SKIP'];
+const STATUSES = ['PASS', 'FAIL', 'KNOWN', 'XPASS', 'SKIP', 'QPASS', 'QFAIL'];
+// Статусы теста в карантине (метка quarantine, D-17): на итог не влияют, если их не ждут явно.
+const QUARANTINE = new Set(['QPASS', 'QFAIL']);
 const SAFE_PATH = /^[A-Za-z0-9_.][A-Za-z0-9_./-]*$/;
 const SAFE_NAME = /^[a-z0-9][a-z0-9-]*$/;
 const SAFE_REF = /^[A-Za-z0-9_.][A-Za-z0-9_./~^-]*$/;
@@ -148,8 +201,11 @@ const SNAP_BASE = '/opt/tmp/xcp-rt-snap/baseline';
 // Служебные строки этапов: всегда расхождение, если их FAIL не ожидался явно.
 const SERVICE = new Set(['pw:run', 'pw:setup']);
 
+// Префикс ошибок разбора вложенной спеки (проход-прогон session).
+let dieCtx = '';
+
 function die(msg, code = 2) {
-  process.stderr.write(`session: ${msg}\n`);
+  process.stderr.write(`session: ${dieCtx}${msg}\n`);
   process.exit(code);
 }
 
@@ -188,6 +244,24 @@ function parseStatus(s, where) {
   return parts;
 }
 
+// Статусы, которые ожидание прохода допускает для теста: явное ожидание из tests (строго, в том
+// числе QPASS и QFAIL), иначе default; без них тест справочный — допустимо всё, кроме FAIL и
+// XPASS. Тест в карантине (QPASS, QFAIL) вне tests — не несовпадение ни под default, ни справочно.
+function expectedOf(expect, name) {
+  const want = expect.tests.get(name);
+  if (want) return want.status;
+  if (SERVICE.has(name)) return ['PASS'];
+  if (expect.def) return expect.def;
+  return ['справочно'];
+}
+
+function allowedStatus(expect, name, status) {
+  if (QUARANTINE.has(status) && !expect.tests.has(name) && !SERVICE.has(name)) return true;
+  const want = expectedOf(expect, name);
+  if (want[0] === 'справочно') return status !== 'FAIL' && status !== 'XPASS';
+  return want.includes(status);
+}
+
 // Поле interrupt прохода-прогона: прерывание вложенного run.sh посреди этапа go.
 function loadInterrupt(i, where) {
   if (!i || typeof i !== 'object' || Array.isArray(i)) die(`${where}.interrupt: объект`);
@@ -212,18 +286,42 @@ function loadInterrupt(i, where) {
 // Название прохода-прогона для плана и журнала: «smoke (релиз <тег>)», «changed по файлам …».
 function suiteTitle(p, release) {
   if (p.suite === 'smoke') return `smoke (релиз ${release})`;
+  if (p.suite === 'session') return `session по ${p.nested.path}`;
   return `${p.suite}${p.files.length ? ` по файлам ${p.files.join(' ')}` : ''}`;
 }
 
-// Проход-прогон набора: разбор и проверка полей. earlier — имена прогонов набора выше по спеке.
-function loadSuitePass(p, where, earlier) {
-  if (p.suite !== 'full' && p.suite !== 'changed' && p.suite !== 'smoke') {
-    die(`${where}.suite: full, changed или smoke`);
+// Проход-прогон набора: разбор и проверка полей. earlier — имена прогонов набора выше по спеке,
+// ctx — { root, specFile, nested } внешней спеки (nested: спека сама вложенная).
+function loadSuitePass(p, where, earlier, ctx) {
+  if (!['full', 'changed', 'smoke', 'session'].includes(p.suite)) {
+    die(`${where}.suite: full, changed, smoke или session`);
   }
   if (p.go || p.specs !== undefined || p.grep !== undefined || p.product) {
     die(`${where}: проход-прогон не сочетается с go/specs/product`);
   }
   if (p.version !== undefined) die(`${where}.version: только у прохода go/specs`);
+  let nested = null;
+  if (p.suite === 'session') {
+    if (ctx.nested) die(`${where}: вложенная сессия не может содержать сессию`);
+    if (p.interrupt !== undefined) die(`${where}.interrupt: у session не поддерживается`);
+    if (typeof p.spec !== 'string' || !SAFE_PATH.test(p.spec) || p.spec.includes('..')) {
+      die(`${where}.spec: путь спеки от корня рабочей копии без «..»`);
+    }
+    const file = path.join(ctx.root, p.spec);
+    if (!existsSync(file)) die(`${where}.spec: нет файла ${p.spec}`);
+    if (realpathSync(file) === realpathSync(ctx.specFile)) {
+      die(`${where}.spec: вложенная спека совпадает с внешней`);
+    }
+    dieCtx = `${where}.spec ${p.spec}: `;
+    const inner = loadSpec(file, ctx.root, true);
+    dieCtx = '';
+    nested = { path: p.spec, passes: inner.passes.length, target: inner.target };
+    if (inner.target !== ctx.target) {
+      die(`${where}.spec: цель вложенной спеки ${inner.target}, у внешней ${ctx.target}`);
+    }
+  } else if (p.spec !== undefined) {
+    die(`${where}.spec: только у session`);
+  }
   let release = null;
   if (p.suite === 'smoke') {
     if (typeof p.release !== 'string' || (p.release !== 'latest' && !RELEASE_TAG.test(p.release))) {
@@ -247,12 +345,23 @@ function loadSuitePass(p, where, earlier) {
   }
   const e = p.expect ?? {};
   for (const k of Object.keys(e)) {
-    if (!['exit', 'summary', 'same_failures_as'].includes(k)) {
-      die(`${where}.expect.${k}: у прохода-прогона только exit, summary, same_failures_as`);
+    if (!['exit', 'summary', 'same_failures_as', 'max_minutes'].includes(k)) {
+      die(
+        `${where}.expect.${k}: у прохода-прогона только exit, summary, same_failures_as, max_minutes`
+      );
     }
   }
   if (e.exit !== undefined && (!Number.isInteger(e.exit) || e.exit < 0)) {
     die(`${where}.expect.exit: целое от 0`);
+  }
+  if (
+    e.max_minutes !== undefined &&
+    (!Number.isInteger(e.max_minutes) || e.max_minutes < 1 || e.max_minutes > 600)
+  ) {
+    die(`${where}.expect.max_minutes: целое от 1 до 600`);
+  }
+  if (p.suite === 'session' && e.same_failures_as !== undefined) {
+    die(`${where}.expect.same_failures_as: у session не поддерживается`);
   }
   const summary = e.summary ?? [];
   if (!Array.isArray(summary) || summary.some((x) => typeof x !== 'string' || !x)) {
@@ -270,17 +379,19 @@ function loadSuitePass(p, where, earlier) {
     suite: p.suite,
     release,
     files,
+    nested,
     interrupt: p.interrupt === undefined ? null : loadInterrupt(p.interrupt, where),
     version: null,
     product: null,
     go: null,
     specs: [],
     grep: '',
-    expect: { exit: e.exit ?? 0, summary, same }
+    expect: { exit: e.exit ?? 0, summary, same, maxMinutes: e.max_minutes ?? null }
   };
 }
 
-function loadSpec(file, root) {
+// nested — спека прохода-прогона session (глубина вложения 1: своих session у неё нет).
+function loadSpec(file, root, nested = false) {
   let spec;
   try {
     spec = JSON.parse(readFileSync(file, 'utf8'));
@@ -295,6 +406,8 @@ function loadSpec(file, root) {
     die(`cores: непустой список из ${CORES.join(', ')}`);
   }
   if (new Set(cores).size !== cores.length) die('cores: ядро указано дважды');
+  const keepGoing = spec.keep_going ?? false;
+  if (typeof keepGoing !== 'boolean') die('keep_going: true или false');
   if (!Array.isArray(spec.passes) || !spec.passes.length) die('passes: непустой список');
   const names = new Set();
   const suites = [];
@@ -307,8 +420,14 @@ function loadSpec(file, root) {
       die(`${where}.interrupt: только у прохода-прогона`);
     }
     if (p.suite !== undefined) {
-      const sp = loadSuitePass(p, where, suites);
-      suites.push(sp.name);
+      const sp = loadSuitePass(p, where, suites, {
+        root,
+        specFile: file,
+        nested,
+        target: spec.target
+      });
+      // same_failures_as сравнивает строки results.tsv прогонов наборов; у вложенной сессии их нет
+      if (sp.suite !== 'session') suites.push(sp.name);
       return sp;
     }
     let version = null;
@@ -390,7 +509,7 @@ function loadSpec(file, root) {
     }
     return { name: p.name, version, product, go, specs, grep, expect };
   });
-  return { target: spec.target, cores, passes };
+  return { target: spec.target, cores, keepGoing, passes };
 }
 
 // Ядра прохода змейкой: сначала активное, затем остальные в порядке спеки.
@@ -436,7 +555,10 @@ function productKey(p) {
 function dryRun(spec, specFile) {
   const c0 = spec.cores[0];
   const lines = [
-    `Сессия по ${specFile}: цель ${spec.target}, ядра ${spec.cores.join(', ')} (исходное считается ${c0})`
+    `Сессия по ${specFile}: цель ${spec.target}, ядра ${spec.cores.join(', ')} (исходное считается ${c0})`,
+    spec.keepGoing
+      ? 'keep_going: все проходы до конца, полный список падений'
+      : 'остановка на первом несовпадении (keep_going: false): Go — по ходу вывода, остальное — после этапа'
   ];
   let n = 0;
   const step = (s) => lines.push(`${++n}. ${s}`);
@@ -448,10 +570,22 @@ function dryRun(spec, specFile) {
       const irq = p.interrupt
         ? `; прерывание SIG${p.interrupt.signal} через ${p.interrupt.after} с после старта go, выход до ${p.interrupt.deadline} с`
         : '';
-      step(
-        `прогон набора ${suiteTitle(p, p.release)}: вложенный run.sh, отчёт build/router/<сессия>-NN-${p.name}${irq}`
-      );
-      // смоук релиза оставляет на стенде сборку релиза, а не HEAD
+      if (p.suite === 'session') {
+        step(
+          `вложенная сессия по ${p.nested.path}, проходов: ${p.nested.passes}; отчёт build/router/<сессия>-NN-${p.name}`
+        );
+      } else {
+        step(
+          `прогон набора ${suiteTitle(p, p.release)}: вложенный run.sh, отчёт build/router/<сессия>-NN-${p.name}${irq}`
+        );
+      }
+      if (p.expect.maxMinutes !== null) {
+        lines.push(
+          `   max_minutes: прогон прохода ${p.name} — не дольше ${p.expect.maxMinutes} мин`
+        );
+      }
+      // смоук релиза оставляет на стенде сборку релиза, а не HEAD; вложенная сессия
+      // возвращает стенд сама (сборка HEAD и её исходное ядро)
       deployed = p.suite === 'smoke' ? null : 'HEAD';
       continue;
     }
@@ -512,6 +646,10 @@ class Session {
     this.cleaning = false;
     this.network = false;
     this.broken = false;
+    // остановка на первом несовпадении: { pass, core, test, expected, actual, how, live, todo }
+    this.stopped = null;
+    // вердикты с этим индексом и дальше ещё не проверены на остановку (checkStop)
+    this.checked = 0;
   }
 
   say(msg) {
@@ -535,7 +673,8 @@ class Session {
 
   // Запуск этапа: вывод — в консоль и session.log. Код выхода (сигнал — 128+n).
   // opts.detached — отдельная группа процессов; opts.onSpawn(child) вызывается сразу после
-  // spawn и может вернуть функцию, которая будет вызвана при закрытии процесса.
+  // spawn и может вернуть функцию, которая будет вызвана при закрытии процесса; opts.drainIf()
+  // — true, если после выхода лидера нужно дождаться опустения группы.
   run(cmd, args, env = {}, opts = {}) {
     if (this.aborted && !this.cleaning) return Promise.resolve(130);
     const base = { ...process.env };
@@ -567,6 +706,7 @@ class Session {
         detached: opts.detached !== false
       });
       this.child = child;
+      this.childLeaderOnly = opts.leaderOnly === true;
       const onClose = opts.onSpawn ? opts.onSpawn(child) : null;
       const out = (d) => {
         process.stdout.write(d);
@@ -582,7 +722,8 @@ class Session {
         // пережить лидера: возврат стенда не стартует, пока группа не опустеет, иначе он шёл бы
         // одновременно с ними
         const pid = child.pid;
-        const interrupted = this.aborted || rc >= 128;
+        // opts.drainIf — этап остановлен сессией (первое несовпадение): ждать группу и при коде < 128
+        const interrupted = this.aborted || rc >= 128 || (opts.drainIf ? opts.drainIf() : false);
         if (opts.drain !== false && interrupted && Number.isInteger(pid) && pid > 1) {
           this.drainGroup(pid).then(() => resolve(rc));
         } else {
@@ -598,7 +739,9 @@ class Session {
     const c = this.child;
     if (!c) return;
     const pid = c.pid;
-    if (Number.isInteger(pid) && pid > 1) {
+    // вложенная сессия: сигнал только run.sh — он передаёт его session.mjs один раз; сигнал всей
+    // группе дошёл бы до session.mjs дважды, а второй сигнал — выход без возврата стенда
+    if (!this.childLeaderOnly && Number.isInteger(pid) && pid > 1) {
       try {
         process.kill(-pid, sig);
         return;
@@ -834,9 +977,28 @@ class Session {
     if (p.go) {
       const env = { RT_REPORT: dir, RT_GO_PKGS: p.go.pkgs };
       if (p.go.run) env.RT_GO_RUN = p.go.run;
-      const g = await this.run('sh', [path.join(SCRIPT_DIR, 'go-suite.sh'), this.t, core], env);
+      const watch = this.spec.keepGoing ? {} : this.goWatch(p, core, dir);
+      const g = await this.run(
+        'sh',
+        [path.join(SCRIPT_DIR, 'go-suite.sh'), this.t, core],
+        env,
+        watch
+      );
       this.record({ kind: 'go', pass: p.name, core, dir, rc: g, version: p.resolved ?? null });
-      if (g === 3) return 3;
+      if (g === 3 && !this.stopped?.live) return 3;
+      if (!this.stopped && p.specs.length && !this.spec.keepGoing && !this.aborted) {
+        // несовпадение в Go-части, которое видно только после этапа (например, PASS вместо
+        // ожидаемого FAIL), не пускает этап Playwright
+        const m = this.firstMismatch(p, dir);
+        if (m) this.setStopped({ pass: p.name, core, ...m, how: 'после этапа go', live: false });
+      }
+      if (this.stopped) {
+        // этап остановлен посреди пакета: тестовый бинарник на цели мог пережить обрыв ssh
+        if (this.stopped.live) this.killRemoteTests();
+        if (p.specs.length) this.stopped.todo.push(`проход ${p.name} на ${core}: этап Playwright`);
+        this.judge(p, core, dir);
+        return 0;
+      }
       if (p.specs.length) {
         // после разрушающих Go-тестов спеки начинают с рабочего стенда (как в run.sh)
         const s = spawnSync(
@@ -870,6 +1032,243 @@ class Session {
     }
     this.judge(p, core, dir);
     return 0;
+  }
+
+  // --- остановка на первом несовпадении ---
+
+  setStopped(s) {
+    this.stopped = { todo: [], ...s };
+    this.say(
+      `остановка на первом несовпадении (${s.how}): проход ${s.pass}, ядро ${s.core}: ${s.test} — ожидалось ${s.expected.join('|')}, получено ${s.actual}`
+    );
+  }
+
+  // Первое несовпадение среди вердиктов, добавленных после прошлой проверки (сверка после
+  // этапа). Возвращает true, если сессия остановлена.
+  checkStop() {
+    if (this.stopped) return true;
+    const fresh = this.verdicts.slice(this.checked);
+    this.checked = this.verdicts.length;
+    if (this.spec.keepGoing || this.aborted) return false;
+    const v = fresh.find((x) => !x.ok);
+    if (!v) return false;
+    this.setStopped({
+      pass: v.pass,
+      core: v.core,
+      test: v.test,
+      expected: v.expected,
+      actual: v.actual,
+      how: 'после этапа',
+      live: false
+    });
+    return true;
+  }
+
+  // Первая строка results.tsv этапа, которую ожидание прохода не допускает.
+  firstMismatch(p, dir) {
+    const file = path.join(dir, this.t, 'results.tsv');
+    if (!existsSync(file)) return null;
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      if (!line) continue;
+      const [status, , check = ''] = line.split('\t');
+      if (/^(pw|go):/.test(check)) {
+        if (!allowedStatus(p.expect, check, status)) {
+          return { test: check, expected: expectedOf(p.expect, check), actual: status };
+        }
+      } else if (status === 'FAIL' || status === 'XPASS') {
+        return { test: check, expected: ['PASS'], actual: status };
+      }
+    }
+    return null;
+  }
+
+  // Сторож Go-этапа: раз в секунду дочитывает go-*.raw в <этап>/<цель>/<ядро>/ (и на уровень
+  // ниже) с запомненной позиции и разбирает маркеры теста; готовые go-*.parsed (их .raw уже
+  // удалён) сверяет целиком. Несовпадение — this.stopped и TERM группе этапа; если бинарник
+  // в этот момент не работает (между пакетами), сигнал уходит, как только появится следующий
+  // .raw. Возвращает opts для run.
+  goWatch(p, core, dir) {
+    const art = path.join(dir, this.t, core);
+    const raws = new Map();
+    const parsedDone = new Set();
+    let found = false;
+    let sent = false;
+    let child = null;
+    const MARKS = [
+      ['xpass', /XPASS slug=[a-z0-9-]+/],
+      ['quarantine', /QUARANTINE slug=[a-z0-9-]+/]
+    ];
+    const signal = () => {
+      if (sent || !child) return;
+      sent = true;
+      this.stopped.live = true;
+      this.say('этап go останавливается: TERM группе этапа');
+      this.signalChild('SIGTERM');
+    };
+    const check = (name, status, hasRaw) => {
+      if (found || this.aborted) return;
+      const test = `go:${name}`;
+      if (allowedStatus(p.expect, test, status)) return;
+      found = true;
+      this.setStopped({
+        pass: p.name,
+        core,
+        test,
+        expected: expectedOf(p.expect, test),
+        actual: status,
+        how: 'по ходу этапа go',
+        live: false
+      });
+      if (hasRaw) signal();
+    };
+    const list = () => {
+      const out = [];
+      const walk = (d, depth) => {
+        let ents;
+        try {
+          ents = readdirSync(d, { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const e of ents) {
+          const f = path.join(d, e.name);
+          if (e.isDirectory()) {
+            if (depth === 0) walk(f, 1);
+          } else if (/^go-.+\.(raw|parsed)$/.test(e.name)) {
+            out.push(f);
+          }
+        }
+      };
+      walk(art, 0);
+      return out;
+    };
+    const onFail = (st, name) => {
+      // родитель, упавший из-за подтеста, отдельно не сверяется (badchild в go-parse.awk)
+      const byChild = [...st.failed].some((f) => f.startsWith(`${name}/`));
+      st.failed.add(name);
+      if (byChild) return;
+      const has = (t, k) => st.marks.get(t)?.has(k) ?? false;
+      const parts = name.split('/');
+      const ancestors = parts.map((_, i) => parts.slice(0, i + 1).join('/'));
+      let status = 'FAIL';
+      if (has(name, 'xpass')) status = 'XPASS';
+      else if (ancestors.some((a) => has(a, 'quarantine'))) status = 'QFAIL';
+      check(name, status, true);
+    };
+    const rawLine = (st, line) => {
+      // вывод -test.v=test2json: служебные строки начинаются с \x16, у подтестов — с отступом
+      const l = line.replace(/^[\s\x16]+/, '');
+      let m = l.match(/^=== (RUN|CONT|NAME)\s+(\S+)/);
+      if (m) {
+        st.cur = m[2];
+        return;
+      }
+      m = l.match(/^--- (FAIL|PASS|SKIP): (\S+)/);
+      if (m) {
+        if (m[1] === 'FAIL') onFail(st, m[2]);
+        return;
+      }
+      if (!st.cur) return;
+      for (const [kind, re] of MARKS) {
+        if (!re.test(l)) continue;
+        if (!st.marks.has(st.cur)) st.marks.set(st.cur, new Set());
+        st.marks.get(st.cur).add(kind);
+      }
+    };
+    const readRaw = (f) => {
+      let st = raws.get(f);
+      if (!st) {
+        st = {
+          pos: 0,
+          dec: new StringDecoder('utf8'),
+          rest: '',
+          cur: '',
+          marks: new Map(),
+          failed: new Set()
+        };
+        raws.set(f, st);
+      }
+      let fd;
+      try {
+        fd = openSync(f, 'r');
+      } catch {
+        return;
+      }
+      try {
+        const size = fstatSync(fd).size;
+        while (st.pos < size) {
+          const buf = Buffer.alloc(Math.min(size - st.pos, 1 << 20));
+          const n = readSync(fd, buf, 0, buf.length, st.pos);
+          if (n <= 0) break;
+          st.pos += n;
+          st.rest += st.dec.write(buf.subarray(0, n));
+        }
+      } finally {
+        closeSync(fd);
+      }
+      const lines = st.rest.split('\n');
+      st.rest = lines.pop();
+      for (const line of lines) rawLine(st, line);
+    };
+    const readParsed = (f) => {
+      parsedDone.add(f);
+      let text = '';
+      try {
+        text = readFileSync(f, 'utf8');
+      } catch {
+        return;
+      }
+      for (const line of text.split('\n')) {
+        const [status, name = ''] = line.split('\t');
+        if (name.startsWith('go:')) check(name.slice(3), status, false);
+      }
+    };
+    const poll = () => {
+      if (sent || this.aborted) return;
+      const files = list();
+      const live = files.filter((f) => f.endsWith('.raw'));
+      if (found) {
+        // несовпадение найдено между пакетами: остановить, как только пойдёт следующий бинарник
+        if (live.length) signal();
+        return;
+      }
+      for (const f of live) readRaw(f);
+      for (const f of files) {
+        if (found) break;
+        if (!f.endsWith('.parsed') || parsedDone.has(f)) continue;
+        if (existsSync(f.replace(/\.parsed$/, '.raw'))) continue;
+        readParsed(f);
+      }
+      if (found && !sent && live.some((f) => existsSync(f))) signal();
+    };
+    return {
+      drainIf: () => sent,
+      onSpawn: (c) => {
+        child = c;
+        const timer = setInterval(poll, 1000);
+        return () => {
+          clearInterval(timer);
+          child = null;
+        };
+      }
+    };
+  }
+
+  // Тестовые бинарники на цели после остановки Go-этапа: ssh этапа оборван, бинарник мог
+  // остаться работать — добить, чтобы возврат стенда не шёл одновременно с тестом.
+  killRemoteTests() {
+    const r = this.remote(
+      'n=0; for f in /proc/[0-9]*/cmdline; do p=${f#/proc/}; p=${p%/cmdline}; tr "\\000" " " <"$f" 2>/dev/null | grep -q "[.]test -test[.]" && kill "$p" 2>/dev/null && n=$((n+1)); done; echo "n=$n"'
+    );
+    const m = r.out.match(/^n=(\d+)$/m);
+    if (r.rc === 3) this.network = true;
+    if (!m) {
+      this.notes.push(
+        `после остановки этапа go тестовые процессы на цели не проверены (код ${r.rc})`
+      );
+    } else if (Number(m[1]) > 0) {
+      this.say(`после остановки этапа go добито тестовых процессов на цели: ${m[1]}`);
+    }
   }
 
   // Прерывание вложенного run.sh по спеке (interrupt). Вложенный прогон идёт отдельной группой
@@ -1003,15 +1402,23 @@ class Session {
       RT_KERNEL_TOUCHED: undefined,
       RT_SELECT_ALL: undefined,
       RT_FILES: p.files.length ? p.files.join(',') : undefined,
-      SPEC: undefined,
+      // вложенная сессия: её спека; у остальных наборов SPEC не наследуется
+      SPEC: p.suite === 'session' ? p.nested.path : undefined,
       SUITE: undefined,
       // установка артефакта релиза и публикация статуса — только у smoke с release
       RELEASE: tag ?? undefined
     };
     const args = [path.join(SCRIPT_DIR, 'run.sh')];
-    if (p.suite === 'changed' || p.suite === 'smoke') args.push(p.suite);
+    if (p.suite !== 'full') args.push(p.suite);
     const irq = p.interrupt ? this.interruptWatch(p.interrupt, dir) : null;
-    const rc = await this.run('sh', args, env, irq ? irq.opts : {});
+    const t0 = Date.now();
+    const rc = await this.run(
+      'sh',
+      args,
+      env,
+      irq ? irq.opts : { leaderOnly: p.suite === 'session' }
+    );
+    const took = Math.round((Date.now() - t0) / 1000);
     if (irq) irq.state.closedAt = Date.now();
     this.record({
       kind: 'suite',
@@ -1041,6 +1448,7 @@ class Session {
       p.suite !== 'smoke' && existsSync(deployRc) && readFileSync(deployRc, 'utf8').trim() === '0'
         ? 'HEAD'
         : null;
+    if (p.suite === 'session') this.nestedEnd(p, dir, rc);
     // сбой связи — только проверка reachable и потеря связи при восстановлении; по подстроке
     // «нет связи» в любой строке нельзя: так пишет и смоук, когда не отвечает сама панель
     if (
@@ -1089,7 +1497,8 @@ class Session {
       suite: tag ? `smoke ${tag}` : p.suite,
       files: p.files,
       exit: rc,
-      total: num(/^- Итого: (\d+) с/m),
+      // у вложенной сессии строки «Итого» нет — время по замеру прохода
+      total: num(/^- Итого: (\d+) с/m) ?? (p.suite === 'session' ? took : null),
       shell: num(/^- Оболочка: (\d+) с/m),
       report: rel
     });
@@ -1107,6 +1516,16 @@ class Session {
         report: rel
       });
     push('exit', [String(p.expect.exit)], String(rc), '', rc === p.expect.exit);
+    if (p.expect.maxMinutes !== null) {
+      const min = Math.round(took / 6) / 10;
+      push(
+        `время прохода: ${min} мин из ${p.expect.maxMinutes}`,
+        [`до ${p.expect.maxMinutes} мин`],
+        `${min} мин`,
+        `${took} с`,
+        took <= p.expect.maxMinutes * 60
+      );
+    }
     if (irq) {
       const st = irq.state;
       const sent = st.sentAt > 0;
@@ -1183,6 +1602,26 @@ class Session {
       }
     }
     return 0;
+  }
+
+  // Стенд после вложенной сессии — по её session.json: она сама возвращает сборку HEAD и своё
+  // исходное ядро (оно же активное ядро внешней сессии на момент прохода). Код 3 — сбой связи.
+  nestedEnd(p, dir, rc) {
+    if (rc === 3) this.network = true;
+    let j = null;
+    try {
+      j = JSON.parse(readFileSync(path.join(dir, 'session.json'), 'utf8'));
+    } catch {
+      this.notes.push(`вложенная сессия ${p.name} не оставила session.json: стенд вернёт cleanup`);
+      return;
+    }
+    const end = j.stand_end ?? {};
+    this.deployed = end.product_head === true ? 'HEAD' : null;
+    if (CORES.includes(j.core_initial) && !this.c0) {
+      this.c0 = j.core_initial;
+      this.say(`исходное ядро стенда: ${this.c0}`);
+    }
+    this.cur = CORES.includes(end.core) ? end.core : null;
   }
 
   // Вердикты после прерванного вложенного прогона: этап погас, блокировка свободна, стенд
@@ -1303,9 +1742,24 @@ class Session {
         report: rel
       });
     const { expect } = p;
+    // этап остановлен на первом несовпадении посреди вывода: тест остановки — несовпадение,
+    // тесты, до которых этап не дошёл, не сверяются
+    const st = this.stopped;
+    const stop = st && st.live && st.pass === p.name && st.core === core ? st : null;
+    if (stop) {
+      push(
+        stop.test,
+        stop.expected,
+        stop.actual,
+        `${stop.how}: этап остановлен, следующие тесты не выполнялись`,
+        false
+      );
+    }
     for (const [name, want] of expect.tests) {
+      if (stop && name === stop.test) continue;
       const r = got.get(name);
       if (!r) {
+        if (stop) continue;
         push(name, want.status, 'нет', 'тест не запускался: имя или --grep', false);
         continue;
       }
@@ -1315,9 +1769,12 @@ class Session {
       push(name, want.status, r.status, why, okStatus && okDetail);
     }
     for (const [name, r] of got) {
-      if (expect.tests.has(name)) continue;
+      if (expect.tests.has(name) || (stop && name === stop.test)) continue;
       if (SERVICE.has(name)) {
         push(name, ['PASS'], r.status, r.detail, r.status === 'PASS');
+      } else if (QUARANTINE.has(r.status)) {
+        // карантин (D-17): исход виден, на итог не влияет
+        push(name, ['карантин'], r.status, r.detail, true);
       } else if (expect.def) {
         push(name, expect.def, r.status, r.detail, expect.def.includes(r.status));
       } else if (r.status === 'FAIL' || r.status === 'XPASS') {
@@ -1327,7 +1784,7 @@ class Session {
       }
     }
     for (const e of extra) push(e.check, ['PASS'], e.status, e.detail, false);
-    if (expect.count !== null) {
+    if (expect.count !== null && !stop) {
       const n = [...got.keys()].filter((k) => !SERVICE.has(k)).length;
       push(`число тестов`, [String(expect.count)], String(n), '', n === expect.count);
     }
@@ -1390,6 +1847,16 @@ class Session {
       `- Цель: ${this.t}; исходное ядро: ${this.c0 ?? '-'}; ядра проходов: ${this.spec.cores.join(', ')}`
     );
     L.push(`- Отчёт: ${path.relative(this.root, this.dir)}`, '');
+    const st = this.stopped;
+    if (st) {
+      L.push('## Остановлено на первом несовпадении', '');
+      L.push(
+        `- проход ${st.pass}, ядро ${st.core}: ${esc(st.test)} — ожидалось ${st.expected.join('|')}, получено ${st.actual} (${st.how})`
+      );
+      L.push(`- Не выполнено:${st.todo.length ? '' : ' —'}`);
+      for (const t of st.todo) L.push(`  - ${t}`);
+      L.push('');
+    }
     L.push('## Ожидания', '');
     L.push('| Проход | Ядро | Тест | Ожидалось | Получено | Совпало | Деталь | Отчёт |');
     L.push('|---|---|---|---|---|---|---|---|');
@@ -1449,6 +1916,7 @@ class Session {
             dir: path.relative(this.root, s.dir)
           })),
           stand_end: end,
+          stopped: this.stopped,
           notes: this.notes
         },
         null,
@@ -1495,13 +1963,27 @@ async function main() {
   };
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, onSignal);
 
+  // Невыполненное при остановке: оставшиеся ядра текущего прохода и следующие проходы.
+  const passTitle = (q) =>
+    q.suite
+      ? `проход ${q.name} (прогон набора ${q.suite})`
+      : `проход ${q.name}: ядра ${spec.cores.join(', ')}`;
+  const stopAt = (i, cores = []) => {
+    if (cores.length) {
+      s.stopped.todo.push(`проход ${spec.passes[i].name}: ядра ${cores.join(', ')}`);
+    }
+    for (const q of spec.passes.slice(i + 1)) s.stopped.todo.push(passTitle(q));
+  };
+
   try {
-    for (const p of spec.passes) {
-      if (s.aborted || s.network || s.broken) break;
+    for (let i = 0; i < spec.passes.length; i++) {
+      const p = spec.passes[i];
+      if (s.aborted || s.network || s.broken || s.stopped) break;
       if (p.suite) {
         // вложенный прогон деплоит рабочее дерево: файлы продукта прежнего прохода — к HEAD
         s.restoreProduct();
         await s.runSuite(p);
+        if (s.checkStop()) stopAt(i);
         continue;
       }
       if (p.version && !s.resolveVersion(p)) break;
@@ -1524,17 +2006,30 @@ async function main() {
           s.c0 = s.cur;
           s.say(`исходное ядро стенда: ${s.c0}`);
         }
+        // красный смоук — несовпадение: проход не начинается
+        if (s.checkStop()) {
+          stopAt(i, coreOrder(spec.cores, s.cur));
+          break;
+        }
       }
-      for (const core of coreOrder(spec.cores, s.cur)) {
+      const order = coreOrder(spec.cores, s.cur);
+      for (let j = 0; j < order.length; j++) {
+        const core = order[j];
         if (s.aborted || s.network || s.broken) break;
         if (s.cur !== core) {
           const rc = await s.switchTo(core);
           if (rc !== 0) break;
         }
         const rc = await s.runPass(p, core);
+        if (s.checkStop()) {
+          stopAt(i, order.slice(j + 1));
+          break;
+        }
         if (rc === 3) break;
       }
     }
+    // несовпадение в последнем этапе без остановки посреди вывода — не остановка: невыполненного нет
+    if (s.stopped && !s.stopped.live && !s.stopped.todo.length) s.stopped = null;
   } catch (e) {
     s.notes.push(`сессия упала: ${e.message}`);
     s.broken = true;
@@ -1555,9 +2050,14 @@ async function main() {
   } else if (s.network) {
     code = 3;
     result = 'сбой связи ПК↔стенд — не красный прогон, нужен todo с разбором (AGENTS.md)';
-  } else if (s.broken || mismatches || !end?.ok) {
+  } else if (s.broken || s.stopped || mismatches || !end?.ok) {
     code = 1;
     const why = [];
+    if (s.stopped) {
+      why.push(
+        `остановлено на первом несовпадении: проход ${s.stopped.pass}, ядро ${s.stopped.core}, ${s.stopped.test}`
+      );
+    }
     if (s.broken) why.push('этап сломался');
     if (mismatches) why.push(`расхождений с ожиданиями: ${mismatches}`);
     if (!end?.ok) why.push('стенд не вернулся в исходное состояние');
