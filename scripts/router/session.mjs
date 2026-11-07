@@ -1826,6 +1826,10 @@ class Session {
     const art = path.join(dir, this.t, core);
     const raws = new Map();
     const parsedDone = new Set();
+    // статусы тестов, увиденные в go-*.raw: при остановке этапа go-suite.sh гибнет по TERM до
+    // разбора, results.tsv этапа не появляется — сессия дописывает их сама (перепрогон rerun
+    // и отчёт берут упавшие оттуда)
+    const seen = new Map();
     let found = false;
     let sent = false;
     let child = null;
@@ -1888,6 +1892,7 @@ class Session {
       let status = 'FAIL';
       if (has(name, 'xpass')) status = 'XPASS';
       else if (ancestors.some((a) => has(a, 'quarantine'))) status = 'QFAIL';
+      seen.set(name, status);
       check(name, status, true);
     };
     const rawLine = (st, line) => {
@@ -1901,6 +1906,7 @@ class Session {
       m = l.match(/^--- (FAIL|PASS|SKIP): (\S+)/);
       if (m) {
         if (m[1] === 'FAIL') onFail(st, m[2]);
+        else seen.set(m[2], m[1]);
         return;
       }
       if (!st.cur) return;
@@ -1984,9 +1990,33 @@ class Session {
         return () => {
           clearInterval(timer);
           child = null;
+          if (sent) this.writeSeen(dir, core, seen);
         };
       }
     };
+  }
+
+  // Строки results.tsv этапа по статусам, увиденным сторожем Go до остановки: пишутся, только
+  // если go-suite.sh не оставил ни одной строки go: этого ядра (его разбор не успел пройти).
+  writeSeen(dir, core, seen) {
+    if (seen.size === 0) return;
+    const file = path.join(dir, this.t, 'results.tsv');
+    let text = '';
+    try {
+      text = readFileSync(file, 'utf8');
+    } catch {
+      // файла нет — пишется заново
+    }
+    const has = text.split('\n').some((l) => {
+      const c = l.split('\t');
+      return c[1] === core && (c[2] ?? '').startsWith('go:');
+    });
+    if (has) return;
+    const why = 'этап остановлен сессией на первом несовпадении';
+    const rows = [...seen].map(([name, status]) => `${status}\t${core}\tgo:${name}\t${why}`);
+    mkdirSync(path.dirname(file), { recursive: true });
+    appendFileSync(file, rows.join('\n') + '\n');
+    this.say(`результаты остановленного этапа go: строк ${rows.length} в ${path.relative(this.root, file)}`);
   }
 
   // Тестовые бинарники на цели после остановки Go-этапа: ssh этапа оборван, бинарник мог
