@@ -444,7 +444,7 @@
       <p class="gm-hint" data-testid="group-mode-desc">{$t(`cfg.groups.mode_${mode}_desc`)}</p>
       {#each versionWarnings as text (text)}
         <p class="gm-warn" data-testid="group-version-warning">
-          <span class="chip chip-warning">{text}</span>
+          <span class="badge badge-warning">{text}</span>
         </p>
       {/each}
     </div>
@@ -710,7 +710,7 @@
       {/if}
       {#each emptyOne as r (r.id)}
         <p class="gm-warn" data-testid="group-empty-{r.id}">
-          <span class="chip chip-warning">
+          <span class="badge badge-warning">
             {$t('cfg.groups.empty_one_kernel', { kernel: r.name })}
           </span>
         </p>
@@ -799,7 +799,7 @@
     overflow-wrap: anywhere;
   }
 
-  .gm-warn .chip {
+  .gm-warn .badge {
     white-space: normal;
     max-width: 100%;
     overflow-wrap: anywhere;

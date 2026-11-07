@@ -231,11 +231,7 @@
   );
 
   function kindBadge(kind: ReleaseKind): string {
-    return kind === 'stable'
-      ? 'badge-success'
-      : kind === 'beta'
-        ? 'badge-primary'
-        : 'badge-warning';
+    return kind === 'stable' ? 'badge-success' : kind === 'beta' ? 'badge-info' : 'badge-warning';
   }
 
   function formatDate(value: string | number | undefined): string {
@@ -470,8 +466,9 @@
           <span class="field-row-val version-val">
             <span class="mono">{version}</span>
             {#if version && version !== '...'}
-              <span class="badge {kindBadge(currentKind)}" data-testid="update-kind-current"
-                >{$t(`settings.update_kind_${currentKind}`)}</span
+              <span
+                class="badge badge--tag {kindBadge(currentKind)}"
+                data-testid="update-kind-current">{$t(`settings.update_kind_${currentKind}`)}</span
               >
             {/if}
           </span>
@@ -551,9 +548,11 @@
               <span class="available-title"
                 >{$t('settings.update_available_title', { version: info.latest_version })}</span
               >
-              <span class="badge {kindBadge(kind)}">{$t(`settings.update_kind_${kind}`)}</span>
+              <span class="badge badge--tag {kindBadge(kind)}"
+                >{$t(`settings.update_kind_${kind}`)}</span
+              >
               {#if availableUrgent}
-                <span class="badge badge-warning" data-testid="update-urgent-badge"
+                <span class="badge badge--tag badge-warning" data-testid="update-urgent-badge"
                   >{$t('settings.update_urgent_badge')}</span
                 >
               {/if}

@@ -37,7 +37,7 @@
     "components/config/rules/PresetModal.svelte": 2,
     "components/config/rules/RuleEditModal.svelte": 1,
     "components/dashboard/QuickstartCard.svelte": 1,
-    "components/dashboard/ServiceCard.svelte": 2,
+    "components/dashboard/ServiceCard.svelte": 1,
     "components/dashboard/ServiceStatusGroup.svelte": 1,
     "components/dashboard/SystemAboutModal.svelte": 1,
     "components/dashboard/SystemInfoWidget.svelte": 1,

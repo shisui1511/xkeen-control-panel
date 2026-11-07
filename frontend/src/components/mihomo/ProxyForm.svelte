@@ -668,8 +668,8 @@
           <span class="chain-title">{$t('proxies.dialer_chain')}:</span>
           {#each dialerChain.chain as node, idx (idx)}
             <span
-              class="badge"
-              class:badge-primary={idx === 0}
+              class="badge badge--tag"
+              class:badge-info={idx === 0}
               class:badge-tag={node === 'DIRECT'}
               class:badge-secondary={idx > 0 && node !== 'DIRECT'}
             >
@@ -680,7 +680,7 @@
             {/if}
           {/each}
           {#if dialerChain.hasCycle}
-            <span class="badge badge-danger">
+            <span class="badge badge--tag badge-danger">
               {$t('proxies.dialer_cycle_detected')}
             </span>
           {/if}
@@ -1156,8 +1156,8 @@
           <span style="color: var(--fg-secondary);">{$t('proxies.dialer_chain')}:</span>
           {#each dialerChain.chain as node, idx (idx)}
             <span
-              class="badge"
-              class:badge-primary={idx === 0}
+              class="badge badge--tag"
+              class:badge-info={idx === 0}
               class:badge-tag={node === 'DIRECT'}
               class:badge-secondary={idx > 0 && node !== 'DIRECT'}
             >
@@ -1168,7 +1168,7 @@
             {/if}
           {/each}
           {#if dialerChain.hasCycle}
-            <span class="badge badge-danger" style="color: var(--danger);">
+            <span class="badge badge--tag badge-danger" style="color: var(--danger);">
               {$t('proxies.dialer_cycle_detected')}
             </span>
           {/if}

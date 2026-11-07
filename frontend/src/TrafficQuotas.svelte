@@ -10,6 +10,8 @@
   import Icon from './lib/components/Icon.svelte';
   import Select from './components/Select.svelte';
   import Button from './components/Button.svelte';
+  import Badge from './components/Badge.svelte';
+  import StatusBadge from './components/StatusBadge.svelte';
   import { apiFetch, apiFetchJSON } from './lib/api';
 
   interface Props {
@@ -348,15 +350,15 @@
   function getActionBadgeClass(action?: string): string {
     switch (action) {
       case 'throttle':
-        return 'badge tq-action-throttle';
+        return 'badge badge--tag tq-action-throttle';
       case 'log_only':
-        return 'badge tq-action-log';
+        return 'badge badge--tag tq-action-log';
       case 'block':
-        return 'badge tq-action-block';
+        return 'badge badge--tag tq-action-block';
       case 'redirect_direct':
-        return 'badge tq-action-redirect';
+        return 'badge badge--tag tq-action-redirect';
       default:
-        return 'badge tq-action-notify';
+        return 'badge badge--tag tq-action-notify';
     }
   }
 
@@ -567,14 +569,11 @@
                   <tr>
                     <td><b>{q.name}</b></td>
                     <td>
-                      <span
-                        class="status-badge"
-                        style="background: var(--surface-tint); color: var(--fg-secondary);"
-                      >
+                      <Badge>
                         {q.target_type === 'global'
                           ? $t('trafficquotas.target_global')
                           : q.target_id}
-                      </span>
+                      </Badge>
                     </td>
                     <td>
                       {q.period === 'daily'
@@ -611,38 +610,34 @@
                       </span>
                     </td>
                     <td>
-                      {#if q.enabled}
-                        <span class="status-badge active">
-                          <span class="status-dot success" style="margin: 0 4px 0 0;"></span>
-                          {$t('trafficquotas.status_active')}
-                        </span>
-                      {:else}
-                        <span class="status-badge stopped">
-                          <span class="status-dot error" style="margin: 0 4px 0 0;"></span>
-                          {$t('trafficquotas.status_disabled')}
-                        </span>
-                      {/if}
+                      <StatusBadge
+                        variant={q.enabled ? 'running' : 'stopped'}
+                        label={q.enabled
+                          ? $t('trafficquotas.status_active')
+                          : $t('trafficquotas.status_disabled')}
+                      />
                     </td>
                     <td>
                       {#if percent(q) >= 100}
                         {#if q.action === 'block'}
-                          <span class="badge badge-error"
+                          <span class="badge badge--tag badge-danger"
                             >{$t('trafficquotas.badge_status_blocked')}</span
                           >
                         {:else if q.action === 'redirect_direct'}
-                          <span class="badge badge-redirected"
+                          <span class="badge badge--tag badge-redirected"
                             >{$t('trafficquotas.badge_status_redirected')}</span
                           >
                         {:else}
-                          <span class="badge badge-error"
+                          <span class="badge badge--tag badge-danger"
                             >{$t('trafficquotas.status_exceeded')}</span
                           >
                         {/if}
                       {:else if percent(q) >= q.alert_threshold}
-                        <span class="badge badge-warning">{$t('trafficquotas.status_warning')}</span
+                        <span class="badge badge--tag badge-warning"
+                          >{$t('trafficquotas.status_warning')}</span
                         >
                       {:else}
-                        <span class="badge badge-success">OK</span>
+                        <span class="badge badge--tag badge-success">OK</span>
                       {/if}
                     </td>
                     <td>

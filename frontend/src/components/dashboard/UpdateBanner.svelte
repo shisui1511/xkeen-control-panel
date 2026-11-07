@@ -25,7 +25,7 @@
     <div class="update-banner-text">
       <strong>{$t('dash.update_banner_title', { version: latest })}</strong>
       {#if kind !== 'stable'}
-        <span class="badge badge-primary">{$t(`settings.update_kind_${kind}`)}</span>
+        <span class="badge badge--tag badge-info">{$t(`settings.update_kind_${kind}`)}</span>
       {/if}
       <span
         class="update-banner-desc"

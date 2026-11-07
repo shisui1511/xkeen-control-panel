@@ -229,7 +229,7 @@
                 <span class="pc-name font-mono">{p.name}</span>
               {/if}
               {#if p.active}
-                <span class="badge pc-badge">{$t('profiles.active')}</span>
+                <span class="badge badge--tag pc-badge">{$t('profiles.active')}</span>
               {/if}
               <span class="pc-meta">{formatDate(p.mtime)} · {(p.size / 1024).toFixed(1)} KB</span>
             </div>

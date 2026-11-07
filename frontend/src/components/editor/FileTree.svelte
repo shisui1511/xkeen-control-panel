@@ -212,11 +212,11 @@
                 </span>
               {/if}
               {#if layerBadge(file.path) === 'managed'}
-                <span class="badge badge-info layer-badge" data-testid="layer-badge"
+                <span class="badge badge--tag badge-info layer-badge" data-testid="layer-badge"
                   >{$t('editor.managed_badge')}</span
                 >
               {:else if layerBadge(file.path) === 'manual'}
-                <span class="badge layer-badge" data-testid="layer-badge"
+                <span class="badge badge--tag layer-badge" data-testid="layer-badge"
                   >{$t('editor.manual_badge')}</span
                 >
               {/if}
@@ -269,11 +269,11 @@
                 >{#each breakableParts(file.name) as part, i (i)}{part}<wbr />{/each}</span
               >
               {#if layerBadge(file.path) === 'managed'}
-                <span class="badge badge-info layer-badge" data-testid="layer-badge"
+                <span class="badge badge--tag badge-info layer-badge" data-testid="layer-badge"
                   >{$t('editor.managed_badge')}</span
                 >
               {:else if layerBadge(file.path) === 'manual'}
-                <span class="badge layer-badge" data-testid="layer-badge"
+                <span class="badge badge--tag layer-badge" data-testid="layer-badge"
                   >{$t('editor.manual_badge')}</span
                 >
               {/if}

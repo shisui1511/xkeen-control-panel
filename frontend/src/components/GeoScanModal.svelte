@@ -286,7 +286,10 @@
             <div class="geoscan-result-card">
               <div class="geoscan-card-top">
                 <div class="geoscan-card-meta">
-                  <span class="badge badge-type" class:badge-geoip={res.type === 'geoip'}>
+                  <span
+                    class="badge badge--tag badge-emphasis"
+                    class:badge-geoip={res.type === 'geoip'}
+                  >
                     {res.type.toUpperCase()}
                   </span>
                   <span class="geoscan-filename">{res.file}</span>

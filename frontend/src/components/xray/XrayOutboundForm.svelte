@@ -342,11 +342,11 @@
           <div class="tls-ping-head">
             <span class="tls-ping-title">{$t('xray.tls_ping.title')}</span>
             {#if tlsPingResult.ok}
-              <span class="badge badge-tag badge-direct">
+              <span class="badge badge--tag badge-tag badge-direct">
                 OK ({tlsPingResult.handshake_ms}ms)
               </span>
             {:else}
-              <span class="badge badge-tag badge-block">FAIL</span>
+              <span class="badge badge--tag badge-tag badge-block">FAIL</span>
             {/if}
           </div>
 
@@ -382,7 +382,7 @@
                 <span class="text-muted">{$t('xray.tls_ping.days_left')}:</span>
                 {#if tlsPingResult.days_until_expiry !== undefined}
                   <span
-                    class="badge badge-tag"
+                    class="badge badge--tag badge-tag"
                     class:badge-block={tlsPingResult.days_until_expiry < 14}
                     class:badge-direct={tlsPingResult.days_until_expiry >= 14}
                     data-testid="tls-ping-days"
@@ -787,8 +787,8 @@
         <span class="text-muted">{$t('xray.dialer_chain')}:</span>
         {#each dialerChainPreview.chain as node, idx (idx)}
           <span
-            class="badge"
-            class:badge-primary={idx === 0}
+            class="badge badge--tag"
+            class:badge-info={idx === 0}
             class:badge-secondary={idx > 0 && node !== 'DIRECT'}
             class:badge-tag={node === 'DIRECT'}
           >
@@ -799,7 +799,7 @@
           {/if}
         {/each}
         {#if dialerChainPreview.hasCycle}
-          <span class="badge badge-danger">
+          <span class="badge badge--tag badge-danger">
             {$t('xray.dialer_cycle_detected')}
           </span>
         {/if}

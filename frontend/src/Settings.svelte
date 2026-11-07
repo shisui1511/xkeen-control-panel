@@ -1765,7 +1765,8 @@
                     <div class="session-name-row">
                       <span class="field-row-name session-name-text">{sessionDeviceLabel(s)}</span>
                       {#if s.current}
-                        <span class="badge badge-info">{$t('settings.sessions_current_badge')}</span
+                        <span class="badge badge--tag badge-info"
+                          >{$t('settings.sessions_current_badge')}</span
                         >
                       {/if}
                     </div>

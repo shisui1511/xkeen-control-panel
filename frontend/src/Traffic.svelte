@@ -1249,7 +1249,7 @@
                       <tr data-testid="xray-stats-row">
                         <td>
                           <span
-                            class="badge badge-tag"
+                            class="badge badge--tag badge-tag"
                             class:badge-proxy={activeXrayTab === 'outbounds'}
                             class:badge-direct={activeXrayTab === 'inbounds'}
                             class:badge-secondary={activeXrayTab === 'users'}

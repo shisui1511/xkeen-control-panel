@@ -109,7 +109,7 @@
       {#if hasDraft}
         <div class="editor-draft-bar" style="display: inline-flex; align-items: center; gap: 4px;">
           <span
-            class="badge badge-warning"
+            class="badge badge--tag badge-warning"
             style="font-size: var(--font-size-xs); padding: 2px 6px;"
           >
             {$t('editor.has_draft')}

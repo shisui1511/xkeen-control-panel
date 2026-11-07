@@ -37,7 +37,7 @@
         <span class="pv-key">{item.key}</span>
         <span class="pv-arrow" aria-hidden="true">→</span>
         <span class="pv-value">{show(item.value)}</span>
-        <span class="badge pv-badge">{$t('cfg.sec.pinned')}</span>
+        <span class="badge badge--tag pv-badge">{$t('cfg.sec.pinned')}</span>
       </li>
     {/each}
   </ul>

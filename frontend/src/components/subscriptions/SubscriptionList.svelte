@@ -314,7 +314,7 @@
 </script>
 
 <div class="stats-chips-row mb-3">
-  <span class="chip chip-default">
+  <span class="badge badge-neutral">
     {pluralize(
       stats.total,
       $t('subscr.total_one', { count: String(stats.total) }),
@@ -322,12 +322,12 @@
       $t('subscr.total_many', { count: String(stats.total) })
     )}
   </span>
-  <span class="chip chip-default">
+  <span class="badge badge-neutral">
     <b>{stats.nodes}</b>
     {$t('subscr.nodes_total_label')}
   </span>
   {#if stats.next !== '—'}
-    <span class="chip chip-default chip--icon" data-testid="subs-next-update">
+    <span class="badge badge-neutral badge--icon" data-testid="subs-next-update">
       <svg
         width="12"
         height="12"
@@ -399,7 +399,7 @@
           {/if}
           {#if sub.last_error && (sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0) > 0}
             <span
-              class="badge badge-warning"
+              class="badge badge--tag badge-warning"
               style="margin-left: 8px;"
               title={$t('subscr.cached_fallback_tooltip')
                 .replace('{date}', formatDate(sub.last_update))
@@ -408,7 +408,7 @@
               {$t('subscr.cached_fallback')}
             </span>
           {:else if isFormatError(sub.last_error)}
-            <span class="badge badge-error" style="margin-left: 8px;">
+            <span class="badge badge--tag badge-danger" style="margin-left: 8px;">
               {$t('subscr.format_error')}
             </span>
           {/if}
@@ -618,7 +618,7 @@
           {#if sub.enabled && sub.enable_xray && sub.next_update}
             <span class="meta-divider">|</span>
             <span
-              class="chip chip-default chip--icon"
+              class="badge badge-neutral badge--icon"
               data-testid="sub-next-update-chip"
               title={subRefreshTooltip(sub)}
             >
@@ -627,7 +627,7 @@
             </span>
           {:else if sub.enabled && !sub.enable_xray && sub.enable_mihomo}
             <span class="meta-divider">|</span>
-            <span class="chip chip-default chip--icon" data-testid="sub-mihomo-refresh-chip">
+            <span class="badge badge-neutral badge--icon" data-testid="sub-mihomo-refresh-chip">
               {$t('subscr.updated_by_mihomo', {
                 hours: String(sub.refresh_interval_hours ?? sub.interval)
               })}

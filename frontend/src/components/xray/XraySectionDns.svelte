@@ -197,10 +197,10 @@
               {srv.address}:{srv.port || 53}
             </div>
             <div style="font-size: var(--font-size-xs); color: var(--fg-secondary);">
-              {$t('xray.tag')}: <span class="badge">{srv.tag}</span>
+              {$t('xray.tag')}: <span class="badge badge--tag">{srv.tag}</span>
               | {$t('xray.domains')}: {srv.domains?.join(', ') || $t('app.none')}
               {#if srv.skipFallback}
-                | <span class="badge">{$t('xray.skip_fallback')}</span>
+                | <span class="badge badge--tag">{$t('xray.skip_fallback')}</span>
               {/if}
             </div>
           </div>

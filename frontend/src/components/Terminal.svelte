@@ -6,6 +6,7 @@
   import { t } from '../i18n';
   import { showToast } from '../stores';
   import Icon from '../lib/components/Icon.svelte';
+  import StatusBadge from './StatusBadge.svelte';
 
   interface Props {
     /** shell — интерактивная оболочка; xkeen-install — официальный установщик XKeen */
@@ -343,21 +344,22 @@
         {/if}
       </div>
 
-      <div class="status-pill {status}">
-        <span class="dot"></span>
-        <span class="status-name">
-          {#if status === 'connected'}
-            {$t('console.status_connected')}
-          {:else if status === 'connecting'}
-            {$t('console.status_connecting')}
-          {:else}
-            {$t('console.status_disconnected')}
-          {/if}
-        </span>
-      </div>
+      <StatusBadge
+        variant={status === 'connected'
+          ? 'running'
+          : status === 'connecting'
+            ? 'warning'
+            : 'stopped'}
+        pulse={status === 'connecting'}
+        label={status === 'connected'
+          ? $t('console.status_connected')
+          : status === 'connecting'
+            ? $t('console.status_connecting')
+            : $t('console.status_disconnected')}
+      />
 
       {#if sessionLimitHit}
-        <span class="badge badge-danger">
+        <span class="badge badge--tag badge-danger">
           {$t('console.terminal_session_limit')}
         </span>
       {/if}
@@ -561,68 +563,6 @@
     background: var(--accent-soft);
     border: 1px solid var(--accent-line);
     border-radius: var(--radius-sm);
-  }
-
-  .status-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--spacing-1-5);
-    padding: var(--spacing-0-5) var(--spacing-2);
-    border-radius: var(--radius-xl);
-    font-size: var(--font-size-xs);
-    font-weight: 500;
-  }
-
-  .status-pill .dot {
-    width: 6px;
-    height: 6px;
-    min-width: 6px;
-    min-height: 6px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .status-pill.connected {
-    background: color-mix(in srgb, var(--success) 12%, transparent);
-    color: var(--success);
-    border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
-  }
-
-  .status-pill.connected .dot {
-    background: var(--success);
-    box-shadow: 0 0 6px color-mix(in srgb, var(--success) 70%, transparent);
-  }
-
-  .status-pill.connecting {
-    background: color-mix(in srgb, var(--warning) 12%, transparent);
-    color: var(--warning);
-    border: 1px solid color-mix(in srgb, var(--warning) 25%, transparent);
-  }
-
-  .status-pill.connecting .dot {
-    background: var(--warning);
-    box-shadow: 0 0 6px color-mix(in srgb, var(--warning) 70%, transparent);
-    animation: blink 1.2s infinite;
-  }
-
-  .status-pill.disconnected {
-    background: color-mix(in srgb, var(--danger) 12%, transparent);
-    color: var(--danger);
-    border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
-  }
-
-  .status-pill.disconnected .dot {
-    background: var(--danger);
-  }
-
-  @keyframes blink {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.3;
-    }
   }
 
   .header-right {

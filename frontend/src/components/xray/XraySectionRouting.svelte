@@ -324,8 +324,9 @@
               <span class="form-label" style="margin: 0;"
                 >{$t('xray.test_route.result_outbound')}:</span
               >
-              <span class="badge badge-tag badge-proxy" data-testid="test-route-outbound-tag"
-                >{testRouteResult.outbound_tag}</span
+              <span
+                class="badge badge--tag badge-tag badge-proxy"
+                data-testid="test-route-outbound-tag">{testRouteResult.outbound_tag}</span
               >
             </div>
           {:else}
@@ -339,7 +340,9 @@
                 >{$t('xray.test_route.result_groups')}:</span
               >
               {#each testRouteResult.outbound_group_tags || testRouteResult.rule_groups as group, i (i)}
-                <span class="badge badge-tag" data-testid="test-route-rule-group">{group}</span>
+                <span class="badge badge--tag badge-tag" data-testid="test-route-rule-group"
+                  >{group}</span
+                >
               {/each}
             </div>
           {/if}
@@ -387,7 +390,7 @@
               <span class="toggle-dot"></span>
             </button>
             <span
-              class="badge badge-tag"
+              class="badge badge--tag badge-tag"
               class:badge-direct={rule.outboundTag === 'direct'}
               class:badge-block={rule.outboundTag === 'block'}
               class:badge-proxy={rule.outboundTag !== 'direct' && rule.outboundTag !== 'block'}
@@ -527,7 +530,7 @@
               <strong>{$t('xray.inbound_tags')}:</strong>
               <span class="rule-chips">
                 {#each rule.inboundTag as ib, i (i)}
-                  <span class="chip chip-ip">{ib}</span>
+                  <span class="badge badge-warning rule-cond">{ib}</span>
                 {/each}
               </span>
             </div>
@@ -538,7 +541,7 @@
               <strong>{$t('xray.domains')}:</strong>
               <span class="rule-chips">
                 {#each rule.domain as d, i (i)}
-                  <span class="chip chip-domain">{d}</span>
+                  <span class="badge badge-info rule-cond">{d}</span>
                 {/each}
               </span>
             </div>
@@ -549,7 +552,7 @@
               <strong>IP:</strong>
               <span class="rule-chips">
                 {#each rule.ip as ip, i (i)}
-                  <span class="chip chip-ip">{ip}</span>
+                  <span class="badge badge-warning rule-cond">{ip}</span>
                 {/each}
               </span>
             </div>
@@ -564,7 +567,7 @@
           {#if rule.network}
             <div class="rule-detail-item">
               <strong>{$t('xray.network')}:</strong>
-              <span class="badge">{rule.network}</span>
+              <span class="badge badge--tag">{rule.network}</span>
             </div>
           {/if}
 
@@ -573,7 +576,7 @@
               <strong>{$t('xray.rule_source')}:</strong>
               <span class="rule-chips">
                 {#each rule.source as src (src)}
-                  <span class="chip chip-ip">{src}</span>
+                  <span class="badge badge-warning rule-cond">{src}</span>
                 {/each}
               </span>
             </div>
@@ -588,7 +591,7 @@
           {#if rule.protocol && rule.protocol.length > 0}
             <div class="rule-detail-item">
               <strong>{$t('xray.rule_protocol')}:</strong>
-              {#each rule.protocol as p (p)}<span class="badge">{p}</span>{/each}
+              {#each rule.protocol as p (p)}<span class="badge badge--tag">{p}</span>{/each}
             </div>
           {/if}
 
@@ -849,21 +852,12 @@
     flex-wrap: wrap;
   }
 
-  .chip {
+  /* Условие правила: бейдж компактнее обычного, моноширинный */
+  .rule-cond {
     padding: 1px var(--spacing-1-5);
     border-radius: var(--radius-xs);
     font-size: var(--font-size-2xs);
     font-family: var(--font-family-mono);
-  }
-
-  .chip-domain {
-    background: var(--accent-soft);
-    color: var(--accent);
-  }
-
-  .chip-ip {
-    background: var(--warning-soft);
-    color: var(--warning);
   }
 
   .form-row2 {

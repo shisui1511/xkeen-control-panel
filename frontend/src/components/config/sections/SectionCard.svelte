@@ -114,13 +114,13 @@
   });
   const ownerClass = $derived(
     ownerKind === 'panel'
-      ? 'badge-primary'
+      ? 'badge-info'
       : ownerKind === 'pending' || ownerKind === 'releasing'
         ? 'badge-warning'
         : ownerKind === 'user'
-          ? 'badge-type'
+          ? 'badge-emphasis'
           : ownerKind === 'drift'
-            ? 'badge-error'
+            ? 'badge-danger'
             : ''
   );
 
@@ -161,11 +161,17 @@
         <span class="sc-line">
           <span class="sc-title" id={titleId}>{title}</span>
           <span class="sc-badges">
-            <span class="badge {ownerClass}" data-testid="section-badge-{kernel}-{section.id}">
+            <span
+              class="badge badge--tag {ownerClass}"
+              data-testid="section-badge-{kernel}-{section.id}"
+            >
               {ownerLabel}
             </span>
             {#if section.dirty}
-              <span class="badge badge-warning" data-testid="section-dirty-{kernel}-{section.id}">
+              <span
+                class="badge badge--tag badge-warning"
+                data-testid="section-dirty-{kernel}-{section.id}"
+              >
                 {$t('cfg.sec.dirty')}
               </span>
             {/if}

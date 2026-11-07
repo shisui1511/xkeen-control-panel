@@ -316,7 +316,7 @@
   {#if files.length > 0}
     <ul class="add-files" data-testid="nodes-add-files">
       {#each files as f, i (i)}
-        <li class="chip chip-default add-file">
+        <li class="badge badge-neutral add-file">
           <span class="add-file-name">{f.name}</span>
           <button
             type="button"

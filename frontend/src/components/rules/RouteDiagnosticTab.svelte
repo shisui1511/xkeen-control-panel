@@ -174,11 +174,11 @@
               <span class="step-label">{$t('rules.diagnostic_step_rule')}</span>
               {#if result.source}
                 {@const sBadge = getSourceBadge(result.source)}
-                <span class="badge {sBadge.className}">{sBadge.label}</span>
+                <span class="badge badge--tag {sBadge.className}">{sBadge.label}</span>
               {/if}
             </div>
             <div class="rule-details">
-              <span class="badge rule-type-badge">{result.rule_type}</span>
+              <span class="badge badge--tag rule-type-badge">{result.rule_type}</span>
               <span class="step-value mono text-truncate" title={result.rule_payload}>
                 {result.rule_payload || '—'}
               </span>
@@ -205,7 +205,7 @@
           <div class="step-card">
             <span class="step-label">{$t('rules.diagnostic_step_group')}</span>
             <div class="group-details">
-              <span class="badge {getActionBadgeClass(result.target_action)}">
+              <span class="badge badge--tag {getActionBadgeClass(result.target_action)}">
                 {result.target_action}
               </span>
               {#if result.target_group && result.target_group !== result.target_action}
@@ -243,7 +243,7 @@
                 {result.selected_proxy || result.target_action}
               </span>
               {#if result.proxy_type}
-                <span class="badge proxy-type-badge">{result.proxy_type}</span>
+                <span class="badge badge--tag proxy-type-badge">{result.proxy_type}</span>
               {/if}
             </div>
           </div>

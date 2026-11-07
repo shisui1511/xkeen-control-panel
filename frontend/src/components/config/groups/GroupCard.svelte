@@ -280,11 +280,14 @@
         <Icon name="chevron-right" size={16} class="chevron-turn" />
         <span class="gc-name" id="{uid}-title">{group.name}</span>
       </button>
-      <span class="chip chip-default" data-testid="group-mode-{group.id}">
+      <span class="badge badge-neutral" data-testid="group-mode-{group.id}">
         {$t(`cfg.groups.mode_${group.mode}`)}
       </span>
       {#each chips as chip (chip.code + chip.text)}
-        <span class="chip chip-{chip.kind} gc-chip" data-testid="group-chip-{group.id}-{chip.code}">
+        <span
+          class="badge badge-{chip.kind} gc-chip"
+          data-testid="group-chip-{group.id}-{chip.code}"
+        >
           {chip.text}
         </span>
       {/each}

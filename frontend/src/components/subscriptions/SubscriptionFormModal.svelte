@@ -335,7 +335,7 @@
                   }}
                 />
                 <span>{missingGroup}</span>
-                <span class="badge missing-group-badge">
+                <span class="badge badge--tag missing-group-badge">
                   ({$t('subscr.modal.group_missing_in_config')})
                 </span>
               </label>

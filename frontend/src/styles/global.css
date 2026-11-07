@@ -2102,111 +2102,191 @@ td.mono,
   font-size: var(--font-size-xs);
 }
 
-/* ----- Badges / pills ----- */
+/* ----- Badge: одна система бейджей (компонент Badge.svelte) -----
+   Тон задаёт одна переменная --badge-color, форма — модификатор:
+     .badge                 soft — метка, фильтр, счётчик (по умолчанию);
+     .badge.badge--tag      tag — тип или версия: моноширинный, прописными;
+     .badge.badge--status   status — состояние сервиса или процесса, с точкой .badge-dot.
+   Тоны: .badge-neutral (по умолчанию), -emphasis, -info, -success, -warning, -danger.
+   Доля подложки и рамки (--badge-bg-mix / --badge-line-mix) своя у каждой формы.
+   Свои классы *-badge / *-chip / *-pill в компонентах не заводим (scripts/check-badges.cjs). */
 .badge {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-1);
-  padding: var(--spacing-0-5) var(--spacing-2);
-  border-radius: var(--radius-xs);
-  font-size: var(--font-size-xs);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  border: 1px solid var(--border);
-  background: var(--surface-tint);
-  color: var(--fg-secondary);
-  font-family: var(--font-family-mono);
-}
-
-.badge-success {
-  color: var(--success);
-  border-color: color-mix(in srgb, var(--success) 40%, transparent);
-  background: color-mix(in srgb, var(--success) 8%, transparent);
-}
-
-.badge-warning {
-  color: var(--warning);
-  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
-  background: color-mix(in srgb, var(--warning) 8%, transparent);
-}
-
-.badge-error,
-.badge-danger {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
-  background: color-mix(in srgb, var(--danger) 8%, transparent);
-}
-
-.badge-info,
-.badge-primary {
-  color: var(--accent-text, var(--accent));
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-}
-
-.badge-type {
-  color: var(--fg-primary);
-  background: var(--bg-elevated);
-}
-
-/* status-badge (Services / SmartProxy) */
-.status-badge {
+  --badge-color: var(--fg-secondary);
+  --badge-bg-mix: 8%;
+  --badge-line-mix: 20%;
+  --badge-surface: var(--surface-tint);
+  --badge-padding: 3px var(--spacing-2);
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-1-5);
-  padding: var(--spacing-1) var(--spacing-2-5);
-  border-radius: var(--radius-sm);
+  padding: var(--badge-padding);
+  border-radius: var(--radius-md);
   font-size: var(--font-size-xs);
   font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  vertical-align: middle;
   border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  color: var(--fg-secondary);
+  background: var(--badge-surface);
+  color: var(--badge-color);
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
 }
 
-.status-badge-dot {
-  width: 7px;
-  height: 7px;
+.badge-neutral {
+  --badge-color: var(--fg-secondary);
+}
+
+.badge-success {
+  --badge-color: var(--success);
+}
+
+.badge-warning {
+  --badge-color: var(--warning);
+}
+
+.badge-danger {
+  --badge-color: var(--danger);
+}
+
+.badge-info {
+  --badge-color: var(--accent-text);
+}
+
+.badge-success,
+.badge-warning,
+.badge-danger,
+.badge-info {
+  background: color-mix(in srgb, var(--badge-color) var(--badge-bg-mix), transparent);
+  border-color: color-mix(in srgb, var(--badge-color) var(--badge-line-mix), transparent);
+}
+
+.badge-emphasis {
+  --badge-color: var(--fg-primary);
+  --badge-surface: var(--bg-elevated);
+}
+
+/* Кликабельный бейдж */
+a.badge {
+  text-decoration: none;
+  cursor: pointer;
+}
+
+a.badge:hover {
+  background: var(--surface-tint-strong);
+  color: var(--fg-primary);
+  border-color: var(--accent);
+}
+
+/* С точкой (LED) */
+.badge--dot::before,
+.badge-dot {
+  content: '';
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: currentColor;
-  flex: 0 0 auto;
 }
 
-.status-badge.running,
-.status-badge.active {
-  color: var(--success);
-  border-color: color-mix(in srgb, var(--success) 45%, transparent);
-  background: color-mix(in srgb, var(--success) 6%, transparent);
+.badge--dot::before {
+  box-shadow: 0 0 6px currentColor;
+}
+
+.badge-dot--pulse {
+  animation: badge-pulse 1.2s infinite;
+}
+
+@keyframes badge-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge-dot--pulse {
+    animation: none;
+  }
+}
+
+/* С иконкой */
+.badge--icon svg {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  color: currentColor;
+}
+
+/* tag — тип, версия, канал: моноширинный, прописными. Высота строки и перенос — как у
+   окружающего текста (бейдж стоит в строке таблицы или заголовка). */
+.badge--tag {
+  --badge-line-mix: 40%;
+  gap: var(--spacing-1);
+  padding: var(--spacing-0-5) var(--spacing-2);
+  border-radius: var(--radius-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-family: var(--font-family-mono);
+  line-height: inherit;
+  white-space: inherit;
+  vertical-align: baseline;
+}
+
+.badge--tag.badge-info {
+  --badge-bg-mix: 14%;
+  --badge-line-mix: 42%;
+}
+
+/* status — состояние сервиса, ядра, файла (StatusBadge.svelte) */
+.badge--status {
+  --badge-bg-mix: 10%;
+  --badge-line-mix: 45%;
+  --badge-surface: var(--bg-elevated);
+  padding: var(--spacing-1) var(--spacing-2-5);
+  border-radius: var(--radius-sm);
+  line-height: inherit;
+  white-space: inherit;
+  vertical-align: baseline;
+}
+
+.badge--status .badge-dot {
+  width: 7px;
+  height: 7px;
+}
+
+.badge--status.badge-success {
+  --badge-bg-mix: 6%;
 }
 
 /* Подложка 10% красного поднимает фон, и чистый --danger в тёмной теме проседает до 4.1:1 */
-.status-badge.stopped {
+.badge--status.badge-danger {
   color: color-mix(in srgb, var(--danger) 80%, var(--fg-primary));
-  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
-.status-badge.warning {
-  color: var(--warning);
-  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
-  background: color-mix(in srgb, var(--warning) 10%, transparent);
-}
-
-.status-badge.idle {
-  color: var(--fg-primary);
-  border-color: color-mix(in srgb, var(--fg-secondary) 45%, transparent);
-  background: color-mix(in srgb, var(--fg-secondary) 10%, transparent);
-}
-
-.status-badge.info {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+.badge--status.badge-info {
+  --badge-color: var(--accent);
 }
 
 /* Светлая тема: при 10% подложки контраст акцентного текста 4.4:1 — ниже порога AA */
-[data-scheme='light'] .status-badge.info {
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
+[data-scheme='light'] .badge--status.badge-info {
+  --badge-bg-mix: 5%;
+}
+
+/* emphasis в статусе — «нет данных / не запущено»: яркий текст на нейтральной подложке */
+.badge--status.badge-emphasis {
+  --badge-surface: color-mix(in srgb, var(--fg-secondary) 10%, transparent);
+  border-color: color-mix(in srgb, var(--fg-secondary) 45%, transparent);
 }
 
 /* version chip */
@@ -2719,97 +2799,6 @@ pre.code-output {
     margin-left: 0;
     padding-left: 26px;
   }
-}
-
-/* ============================================================
-   Chips system (Phase 5.5)
-   ============================================================ */
-:root {
-  --chip-padding: 3px 8px;
-  --chip-radius: 6px;
-  --chip-font: var(--font-size-xs);
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-1-5);
-  padding: var(--chip-padding);
-  border-radius: var(--chip-radius);
-  font-size: var(--chip-font);
-  font-weight: 600;
-  line-height: 1.2;
-  white-space: nowrap;
-  vertical-align: middle;
-  border: 1px solid transparent;
-  transition:
-    color var(--transition-fast),
-    background-color var(--transition-fast),
-    border-color var(--transition-fast),
-    box-shadow var(--transition-fast),
-    opacity var(--transition-fast),
-    transform var(--transition-fast);
-}
-
-.chip-success {
-  background: color-mix(in srgb, var(--success) 8%, transparent);
-  color: var(--success);
-  border-color: color-mix(in srgb, var(--success) 20%, transparent);
-}
-
-.chip-warning {
-  background: color-mix(in srgb, var(--warning) 8%, transparent);
-  color: var(--warning);
-  border-color: color-mix(in srgb, var(--warning) 20%, transparent);
-}
-
-.chip-danger {
-  background: color-mix(in srgb, var(--danger) 8%, transparent);
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 20%, transparent);
-}
-
-.chip-info {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  color: var(--accent-text, var(--accent));
-  border-color: color-mix(in srgb, var(--accent) 20%, transparent);
-}
-
-.chip-default {
-  background: var(--surface-tint);
-  color: var(--fg-secondary);
-  border-color: var(--border);
-}
-
-/* Кликабельный чип */
-a.chip {
-  text-decoration: none;
-  cursor: pointer;
-}
-
-a.chip:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--fg-primary);
-  border-color: var(--accent);
-}
-
-/* С точкой (LED) */
-.chip--dot::before {
-  content: '';
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 6px currentColor;
-}
-
-/* С иконкой */
-.chip--icon svg {
-  flex-shrink: 0;
-  width: 12px;
-  height: 12px;
-  color: currentColor;
 }
 
 /* Accessibility screen-reader only utility */

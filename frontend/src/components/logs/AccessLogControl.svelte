@@ -85,7 +85,7 @@
             : ''
   );
   const ownerClass = $derived(
-    owner === 'panel' ? 'badge-primary' : owner === 'user' ? 'badge-type' : ''
+    owner === 'panel' ? 'badge-info' : owner === 'user' ? 'badge-emphasis' : ''
   );
   const foreignNote = $derived(
     owner === 'xkeen' || owner === 'user'
@@ -208,7 +208,7 @@
         {willParts[0]}<span class="alc-path font-mono">{willWrite}</span>{willParts[1]}
       </p>
       {#if owner !== ''}
-        <span class="badge {ownerClass}" data-testid="xlog-owner">{ownerLabel}</span>
+        <span class="badge badge--tag {ownerClass}" data-testid="xlog-owner">{ownerLabel}</span>
       {/if}
       {#if foreignNote !== ''}
         <p class="alc-caption" data-testid="xlog-foreign-note">{foreignNote}</p>
@@ -234,7 +234,7 @@
             · {(status.file_size / 1024).toFixed(0)} KB</span
           >{/if}
         {#if owner !== ''}
-          <span class="badge {ownerClass}" data-testid="xlog-owner">{ownerLabel}</span>
+          <span class="badge badge--tag {ownerClass}" data-testid="xlog-owner">{ownerLabel}</span>
         {/if}
       </span>
       <Button

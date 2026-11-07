@@ -52,7 +52,7 @@
   {#each inbounds as inbound (inbound.tag)}
     <div class="card inbound-card">
       <div class="inbound-title">
-        <span class="badge type-{inbound.protocol}">{inbound.protocol}</span>
+        <span class="badge badge--tag type-{inbound.protocol}">{inbound.protocol}</span>
         <strong>{inbound.tag}</strong>
         <button
           type="button"

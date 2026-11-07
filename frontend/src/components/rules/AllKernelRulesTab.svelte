@@ -206,11 +206,13 @@
               <tr>
                 <td class="col-num mono">{String(i + 1).padStart(3, '0')}</td>
                 <td class="col-type">
-                  <span class="badge {getRuleBadgeClass(rule.type)}">{rule.type}</span>
+                  <span class="badge badge--tag {getRuleBadgeClass(rule.type)}">{rule.type}</span>
                 </td>
                 <td class="col-payload mono text-break">{rule.payload}</td>
                 <td class="col-target">
-                  <span class="badge {getTargetBadgeClass(rule.proxy)}">{rule.proxy}</span>
+                  <span class="badge badge--tag {getTargetBadgeClass(rule.proxy)}"
+                    >{rule.proxy}</span
+                  >
                 </td>
                 <td class="col-actions">
                   <button
@@ -243,11 +245,13 @@
                 <tr class="match-row">
                   <td class="col-num mono">—</td>
                   <td class="col-type">
-                    <span class="badge {getRuleBadgeClass(rule.type)}">{rule.type}</span>
+                    <span class="badge badge--tag {getRuleBadgeClass(rule.type)}">{rule.type}</span>
                   </td>
                   <td class="col-payload mono match-payload">{$t('rules.match_fallback')}</td>
                   <td class="col-target">
-                    <span class="badge {getTargetBadgeClass(rule.proxy)}">{rule.proxy}</span>
+                    <span class="badge badge--tag {getTargetBadgeClass(rule.proxy)}"
+                      >{rule.proxy}</span
+                    >
                   </td>
                   <td class="col-actions">
                     <button

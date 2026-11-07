@@ -3,6 +3,7 @@
   import Icon from '../../lib/components/Icon.svelte';
   import Modal from '../Modal.svelte';
   import Button from '../Button.svelte';
+  import Badge from '../Badge.svelte';
   import type { SystemStats } from './SystemResourcesWidget.svelte';
 
   let {
@@ -100,9 +101,9 @@
         <div class="diag-item">
           <span class="diag-label">{$t('dash.wan_status')}</span>
           <span class="diag-val">
-            <span class="status-pill" class:status-pill-ok={systemStats?.wan_status === 'online'}>
+            <Badge tone={systemStats?.wan_status === 'online' ? 'success' : 'neutral'}>
               {systemStats?.wan_status || '—'}
-            </span>
+            </Badge>
           </span>
         </div>
         <div class="diag-item">
@@ -224,21 +225,6 @@
 
   .mono {
     font-family: var(--font-family-mono, monospace);
-  }
-
-  .status-pill {
-    display: inline-block;
-    padding: 1px var(--spacing-1-5);
-    border-radius: var(--radius-sm);
-    font-size: var(--font-size-xs);
-    font-weight: 600;
-    background: var(--surface-tint-strong);
-    color: var(--fg-secondary);
-  }
-
-  .status-pill-ok {
-    background: color-mix(in srgb, var(--success) 15%, transparent);
-    color: var(--success);
   }
 
   .text-success {

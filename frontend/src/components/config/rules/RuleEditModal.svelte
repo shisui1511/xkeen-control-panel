@@ -674,7 +674,7 @@
             {:else}
               <div class="re-lists" data-testid="rule-cond-lists-{i}">
                 {#each c.lists as list, li (`${list.file}:${list.tag}`)}
-                  <span class="chip chip-default re-list-chip">
+                  <span class="badge badge-neutral re-list-chip">
                     <span class="re-mono">{list.file} · {list.tag}</span>
                     <button
                       type="button"

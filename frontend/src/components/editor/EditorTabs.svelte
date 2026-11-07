@@ -82,11 +82,11 @@
         >
           <span class="tab-name" title={tab.name}>{tab.name}</span>
           {#if layerBadge(tab.path) === 'managed'}
-            <span class="badge badge-info layer-badge" data-testid="layer-badge"
+            <span class="badge badge--tag badge-info layer-badge" data-testid="layer-badge"
               >{$t('editor.managed_badge')}</span
             >
           {:else if layerBadge(tab.path) === 'manual'}
-            <span class="badge layer-badge" data-testid="layer-badge"
+            <span class="badge badge--tag layer-badge" data-testid="layer-badge"
               >{$t('editor.manual_badge')}</span
             >
           {/if}

@@ -250,7 +250,7 @@
         style="margin-bottom: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between;"
       >
         <div>
-          <span class="badge badge-tag">{item.tag}</span>
+          <span class="badge badge--tag badge-tag">{item.tag}</span>
           <span
             style="font-size: var(--font-size-xs); color: var(--fg-secondary); margin-left: 8px;"
           >
@@ -285,7 +285,9 @@
         style="margin-bottom: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between; opacity: 0.75; background: var(--bg-surface-active);"
       >
         <div>
-          <span class="badge badge-tag" style="background: var(--bg-card);">{item.tag}</span>
+          <span class="badge badge--tag badge-tag" style="background: var(--bg-card);"
+            >{item.tag}</span
+          >
           {#if item.server}
             <span
               style="font-size: var(--font-size-xs); color: var(--fg-secondary); margin-left: 8px;"

@@ -31,7 +31,7 @@
           <span class="diff-cat-label text-success">{$t('proxies.diff_kept')}:</span>
           <div class="diff-badges">
             {#each diff.kept as item, i (i)}
-              <span class="badge badge-success">{item.key}</span>
+              <span class="badge badge--tag badge-success">{item.key}</span>
             {/each}
           </div>
         </div>
@@ -43,7 +43,7 @@
           <div class="diff-badges">
             {#each diff.warnings as warn, i (i)}
               {@const warnReason = $t(warn.messageKey)}
-              <span class="badge badge-warning" title={warnReason}>
+              <span class="badge badge--tag badge-warning" title={warnReason}>
                 {warn.key}: {warnReason}
               </span>
             {/each}
@@ -57,7 +57,7 @@
           <div class="diff-badges">
             {#each diff.dropped as drop, i (i)}
               {@const dropReason = $t(drop.reasonKey)}
-              <span class="badge badge-danger" title={dropReason}>
+              <span class="badge badge--tag badge-danger" title={dropReason}>
                 {drop.key}: {dropReason}
               </span>
             {/each}

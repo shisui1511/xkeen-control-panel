@@ -824,7 +824,7 @@
                 </div>
               </div>
               <div class="grp-metrics">
-                <span class="badge badge-neutral">
+                <span class="badge badge--tag badge-neutral">
                   {pluralize(
                     grp.activeCount,
                     $t('conn.sessions_count_one', { count: String(grp.activeCount) }),
@@ -1114,7 +1114,7 @@
 
     <!-- Rule Column -->
     <td class="col-rule">
-      <span class="badge badge-rule">{conn.rule || 'Match'}</span>
+      <span class="badge badge--tag badge-rule">{conn.rule || 'Match'}</span>
       {#if conn.rulePayload}
         <div class="rule-payload monospace">{conn.rulePayload}</div>
       {/if}
@@ -1123,7 +1123,7 @@
     <!-- Chain / Route Column (CONN-03) -->
     <td class="col-chain">
       {#if isDirect(conn)}
-        <span class="badge badge-direct">DIRECT</span>
+        <span class="badge badge--tag badge-direct">DIRECT</span>
       {:else}
         <div class="chain-flow">
           {#each nodes as node, idx (idx)}
@@ -1139,7 +1139,7 @@
     <!-- Network Column -->
     <td class="col-network">
       <span
-        class="badge net-badge"
+        class="badge badge--tag net-badge"
         class:net-tcp={conn.metadata.network?.toUpperCase() === 'TCP'}
         class:net-udp={conn.metadata.network?.toUpperCase() === 'UDP'}
       >
@@ -1265,7 +1265,7 @@
         <div class="meta-grid">
           <div class="m-row">
             <span class="m-key">{$t('conn.rule')}:</span>
-            <span class="m-val badge badge-rule">{conn.rule || 'Match'}</span>
+            <span class="m-val badge badge--tag badge-rule">{conn.rule || 'Match'}</span>
           </div>
           {#if conn.rulePayload}
             <div class="m-row">

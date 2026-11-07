@@ -188,7 +188,7 @@
               {/if}
             </div>
             <div class="file-meta">
-              <span class="badge">{f.kernel}</span>
+              <span class="badge badge--tag">{f.kernel}</span>
               <span class="file-owner">{$t(`cfg.owner.${f.owner}`)}</span>
               <StatusBadge variant={BADGE[f.state]} label={$t(`cfg.state.${f.state}`)} />
             </div>

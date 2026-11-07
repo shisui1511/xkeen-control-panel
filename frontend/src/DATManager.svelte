@@ -765,7 +765,10 @@
               {@const isCopied = quickCopiedRule === res.rule}
               <div class="qs-result-chip">
                 <div class="qs-chip-left">
-                  <span class="badge badge-type" class:badge-geoip={res.type === 'geoip'}>
+                  <span
+                    class="badge badge--tag badge-emphasis"
+                    class:badge-geoip={res.type === 'geoip'}
+                  >
                     {res.type.toUpperCase()}
                   </span>
                   <span class="qs-chip-file">{res.file}</span>
@@ -927,7 +930,7 @@
                   <div class="db-info">
                     <div class="db-title-row">
                       <span class="db-name">{file.name}</span>
-                      <span class="badge badge-type">{getTypeBadge(file)}</span>
+                      <span class="badge badge--tag badge-emphasis">{getTypeBadge(file)}</span>
                     </div>
 
                     <div class="db-sub-row">
@@ -1028,7 +1031,8 @@
                 <div class="ih-title-group">
                   <div class="ih-title-row">
                     <span class="ih-title">{selectedFile.name}</span>
-                    <span class="badge badge-type">{getTypeBadge(selectedFile)}</span>
+                    <span class="badge badge--tag badge-emphasis">{getTypeBadge(selectedFile)}</span
+                    >
                     <StatusBadge
                       variant={getStatusBadge(selectedFile).variant}
                       label={getStatusBadge(selectedFile).label}
@@ -1124,7 +1128,7 @@
                     <span class="dd-nav-sep">/</span>
                     <span class="dd-tag-name">{activeTag}</span>
                     {#if !entriesLoading && entriesTotal > 0}
-                      <span class="badge badge-count">
+                      <span class="badge badge--tag badge-count">
                         {$t('dat.entries_count', { count: entriesTotal.toLocaleString(numLocale) })}
                       </span>
                     {/if}
@@ -1828,7 +1832,7 @@
     white-space: nowrap;
   }
 
-  .badge-type {
+  .badge-emphasis {
     font-size: var(--font-size-2xs);
     font-weight: 600;
     padding: 1px 5px;

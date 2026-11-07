@@ -355,7 +355,7 @@
                 </span>
                 {#if showSelectionBadge && isDefault}
                   <span
-                    class="badge badge-success sub-node-selection-badge"
+                    class="badge badge--tag badge-success sub-node-selection-badge"
                     data-testid="node-default-badge"
                     title={stableTag ? $t('subscr.node.stable_tag_hint', { tag: stableTag }) : ''}
                   >
@@ -363,7 +363,7 @@
                   </span>
                 {:else if showSelectionBadge && stableTag}
                   <span
-                    class="badge badge-info sub-node-selection-badge"
+                    class="badge badge--tag badge-info sub-node-selection-badge"
                     data-testid="node-by-tag-badge"
                     title={$t('subscr.node.stable_tag_hint', { tag: stableTag })}
                   >
@@ -467,7 +467,7 @@
                   {/each}
                 </Select>
               {:else if node.dialer_proxy}
-                <span class="badge badge-tag" data-testid="dialer-proxy-active-tag">
+                <span class="badge badge--tag badge-tag" data-testid="dialer-proxy-active-tag">
                   {node.dialer_proxy}
                 </span>
               {:else}

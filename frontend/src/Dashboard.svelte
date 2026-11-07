@@ -200,25 +200,25 @@
     switch (watchdogStatus.state) {
       case 'armed':
         return {
-          cssClass: 'badge badge-success',
+          cssClass: 'badge badge--tag badge-success',
           labelKey: 'watchdog.state_armed',
           hintKey: 'watchdog.state_armed_hint'
         };
       case 'idle':
         return {
-          cssClass: 'badge',
+          cssClass: 'badge badge--tag',
           labelKey: 'watchdog.state_idle',
           hintKey: 'watchdog.state_idle_hint'
         };
       case 'degraded':
         return {
-          cssClass: 'badge badge-danger',
+          cssClass: 'badge badge--tag badge-danger',
           labelKey: 'watchdog.state_degraded',
           hintKey: 'watchdog.state_degraded_hint'
         };
       case 'disarmed':
         return {
-          cssClass: 'badge badge-warning',
+          cssClass: 'badge badge--tag badge-warning',
           labelKey: 'watchdog.state_disarmed',
           hintKey: 'watchdog.state_disarmed_hint'
         };

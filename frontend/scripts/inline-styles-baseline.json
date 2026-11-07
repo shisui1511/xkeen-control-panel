@@ -8,7 +8,7 @@
   "Proxies.svelte": 1,
   "SmartProxy.svelte": 16,
   "Traffic.svelte": 2,
-  "TrafficQuotas.svelte": 11,
+  "TrafficQuotas.svelte": 8,
   "XrayRoutingConstructor.svelte": 8,
   "components/NodeRowSkeleton.svelte": 4,
   "components/editor/BackupSidebar.svelte": 2,

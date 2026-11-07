@@ -468,8 +468,8 @@ test('nodes-list: подписка — замаскированный адрес
       const st = found[0].kernels?.[k];
       expect(st, `сервер отдал состояние ядра ${k}`).toBeTruthy();
       const want = variantOf(st!.status.code, st!.pending, st!.stopped);
-      const got = await row.locator('.status-badge').getAttribute('class');
-      expect(got?.split(/\s+/), `вариант статуса ${k} при коде ${st!.status.code}`).toContain(want);
+      const got = await row.locator('[data-status]').getAttribute('data-status');
+      expect(got, `вариант статуса ${k} при коде ${st!.status.code}`).toBe(want);
     }
 
     // «Обновить» доходит до сервера, после ответа кнопка снова доступна, итог — уведомление
@@ -491,7 +491,7 @@ test('nodes-list: подписка — замаскированный адрес
     for (const k of ['xray', 'mihomo'] as const) {
       if (inst[k]) {
         await expect(
-          page.getByTestId(`nodes-status-${id}-${k}`).locator('.status-badge.idle')
+          page.getByTestId(`nodes-status-${id}-${k}`).locator('[data-status="idle"]')
         ).toHaveCount(1);
       }
     }

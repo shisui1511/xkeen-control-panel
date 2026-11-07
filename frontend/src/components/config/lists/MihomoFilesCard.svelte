@@ -53,7 +53,7 @@
             <li class="mc-row" data-testid="geo-mihomo-file">
               <span class="mc-name">{f.name}</span>
               <span class="mc-meta">{formatBytes(f.size)} · {routerDate(f.mtime)}</span>
-              <span class="chip chip-default">{$t('cfg.geo.mihomo_chip')}</span>
+              <span class="badge badge-neutral">{$t('cfg.geo.mihomo_chip')}</span>
             </li>
           {/each}
         </ul>

@@ -152,9 +152,9 @@
 
   function getTargetBadgeClass(target: string): string {
     const upper = target.toUpperCase();
-    if (upper === 'DIRECT') return 'badge badge-success';
-    if (upper === 'REJECT') return 'badge badge-danger';
-    return 'badge badge-primary';
+    if (upper === 'DIRECT') return 'badge badge--tag badge-success';
+    if (upper === 'REJECT') return 'badge badge--tag badge-danger';
+    return 'badge badge--tag badge-info';
   }
 
   function getTypeName(type: string): string {
@@ -349,7 +349,7 @@
                       {rule.target.toUpperCase()}
                     </span>
                     {#if rule.target === 'proxy' && rule.group}
-                      <span class="badge badge-group" title={rule.group}>
+                      <span class="badge badge--tag badge-group" title={rule.group}>
                         {rule.group}
                       </span>
                     {/if}

@@ -225,24 +225,32 @@
             <div class="provider-top">
               <span class="provider-name" title={provider.name}>{provider.name}</span>
               <div class="badges">
-                <span class="badge badge-type"
+                <span class="badge badge--tag badge-emphasis"
                   >{provider.vehicleType || provider.type || 'HTTP'}</span
                 >
                 {#if provider.behavior}
-                  <span class="badge badge-behavior">{provider.behavior}</span>
+                  <span class="badge badge--tag badge-behavior">{provider.behavior}</span>
                 {/if}
                 {#if offline}
                   {#if fs === 'none_file'}
-                    <span class="badge badge-error">{$t('rules.provider_badge_nofile')}</span>
+                    <span class="badge badge--tag badge-danger"
+                      >{$t('rules.provider_badge_nofile')}</span
+                    >
                   {:else if fs === 'empty'}
-                    <span class="badge badge-error">{$t('rules.provider_badge_empty_file')}</span>
+                    <span class="badge badge--tag badge-danger"
+                      >{$t('rules.provider_badge_empty_file')}</span
+                    >
                   {/if}
                 {:else}
                   {#if isEmpty(provider)}
-                    <span class="badge badge-empty">{$t('rules.provider_status_empty')}</span>
+                    <span class="badge badge--tag badge-empty"
+                      >{$t('rules.provider_status_empty')}</span
+                    >
                   {/if}
                   {#if d && !d.file_exists}
-                    <span class="badge badge-empty">{$t('rules.provider_status_no_file')}</span>
+                    <span class="badge badge--tag badge-empty"
+                      >{$t('rules.provider_status_no_file')}</span
+                    >
                   {/if}
                 {/if}
               </div>
@@ -563,7 +571,7 @@
     letter-spacing: 0;
   }
 
-  .badge-type {
+  .badge-emphasis {
     background: color-mix(in srgb, var(--accent) 12%, transparent);
     color: var(--accent);
     border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);

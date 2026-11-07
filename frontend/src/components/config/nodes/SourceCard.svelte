@@ -289,15 +289,15 @@
       </button>
       <!-- Вид источника: у «Моих узлов» он совпадает с названием и не повторяется -->
       {#if kindLabel !== displayName}
-        <span class="chip chip-default">{kindLabel}</span>
+        <span class="badge badge-neutral">{kindLabel}</span>
       {/if}
       {#if off}
-        <span class="chip chip-default" data-testid="nodes-source-off-{source.id}">
+        <span class="badge badge-neutral" data-testid="nodes-source-off-{source.id}">
           {$t('cfg.nodes.disabled')}
         </span>
       {/if}
       {#if expired}
-        <span class="chip chip-danger" data-testid="nodes-source-expired-{source.id}">
+        <span class="badge badge-danger" data-testid="nodes-source-expired-{source.id}">
           {$t('cfg.nodes.expired')}
         </span>
       {/if}

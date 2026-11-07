@@ -620,11 +620,11 @@
             <span class="profile-card-name">{p.name}</span>
 
             {#if !p.enabled}
-              <span class="badge sp-mode-badge sp-mode-disabled">
+              <span class="badge badge--tag sp-mode-badge sp-mode-disabled">
                 {$t('smartproxy.disabled')}
               </span>
             {:else}
-              <span class="badge sp-mode-badge sp-mode-scheduled">
+              <span class="badge badge--tag sp-mode-badge sp-mode-scheduled">
                 {$t('smartproxy.mode_time')}
               </span>
             {/if}
