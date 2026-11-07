@@ -109,7 +109,6 @@ const SPEC_DIR = 'frontend/tests/router';
 // Только безопасные имена путей: значения уходят в eval и в командную строку.
 const SAFE_PATH = /^[A-Za-z0-9_.][A-Za-z0-9_./-]*$/;
 const SAFE_ROUTE = /^[a-z][a-z0-9_-]*$/;
-const TEST_NAME = /^TestRouter[A-Za-z0-9_]+$/;
 const SEQ_ENTRY = /^[A-Za-z0-9_./-]+:TestRouter[A-Za-z0-9_]+$/;
 
 // Правка самого выбора: единственная причина полного выбора (RTR-02).

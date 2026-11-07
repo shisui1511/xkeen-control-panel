@@ -168,6 +168,9 @@ const MUTATIONS = [
   [/XCP_WANT_CORE/, 'XCP_WANT_CORE']
 ];
 
+// Экранирование для RegExp: и обратный слэш, и спецсимволы.
+const reEscape = (x) => x.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+
 const HTTP_MUTATING = /^(?:post|put|delete|patch)$/i;
 const IDENT = '[A-Za-z_$][\\w$]*';
 // Цепочка «a.b?.c» без вложенных неоднозначных квантификаторов: сегменты разделены точкой.
@@ -211,14 +214,14 @@ function requestIssues(code) {
     }
   }
   for (const a of aliases) {
-    const name = a.replace(/\$/g, '\\$');
+    const name = reEscape(a);
     const call = new RegExp(`(?:^|[^\\w$])${name}\\s*(?:\\?\\.|\\.)\\s*(post|put|delete|patch)\\s*\\(`, 'i');
     const bracket = new RegExp(`(?:^|[^\\w$])${name}\\s*(?:\\?\\.)?\\s*\\[\\s*(['"\`])(post|put|delete|patch)\\1\\s*\\]`, 'i');
     const m = call.exec(code) || bracket.exec(code);
     if (m) issues.push(`спек вида read содержит изменяющий вызов: ${a === 'request' ? '' : `псевдоним ${a} контекста запросов, `}метод ${m[m.length - 1]}`);
   }
   for (const f of fns) {
-    if (new RegExp(`(?:^|[^\\w$.])${f.replace(/\$/g, '\\$')}\\s*\\(`).test(masked)) {
+    if (new RegExp(`(?:^|[^\\w$.])${reEscape(f)}\\s*\\(`).test(masked)) {
       issues.push(`спек вида read содержит изменяющий вызов: ${f}(…) — метод контекста запросов`);
     }
   }
@@ -384,7 +387,7 @@ function importIssues(code) {
   // api из nodes-api: только вызовы без метода или с литералом 'GET'.
   const masked = maskStrings(body);
   for (const local of apiLocals) {
-    const re = new RegExp(`(^|[^\\w$.])${local.replace(/\$/g, '\\$')}(?![\\w$])`, 'g');
+    const re = new RegExp(`(^|[^\\w$.])${reEscape(local)}(?![\\w$])`, 'g');
     for (const m of masked.matchAll(re)) {
       const at = m.index + m[1].length + local.length;
       const rest = body.slice(at);

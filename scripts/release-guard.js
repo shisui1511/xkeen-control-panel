@@ -1007,8 +1007,13 @@ function takeUnread() {
   }
   let text = '';
   try {
-    const st = fs.lstatSync(file);
-    if (st.isFile() && st.size <= 4 * UNREAD_MAX) text = fs.readFileSync(file, 'utf8');
+    const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    try {
+      const st = fs.fstatSync(fd);
+      if (st.isFile() && st.size <= 4 * UNREAD_MAX) text = fs.readFileSync(fd, 'utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
   } catch {
     return '';
   }

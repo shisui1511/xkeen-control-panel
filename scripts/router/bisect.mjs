@@ -433,11 +433,11 @@ function stageEnv(extra = {}) {
 }
 
 // Запуск этапа без оболочки (execFile-семантика): вывод — в консоль и журнал, stdout возвращается.
-function run(cmd, args, extra = {}) {
+function run(args, extra = {}) {
   if (aborted && !cleaning) return Promise.resolve({ rc: 130, out: '' });
-  appendFileSync(LOG, `\n$ ${[cmd, ...args].join(' ')}\n`);
+  appendFileSync(LOG, `\n$ ${['sh', ...args].join(' ')}\n`);
   return new Promise((resolve) => {
-    const c = spawn(cmd, args, {
+    const c = spawn('sh', args, {
       cwd: ROOT,
       env: stageEnv(extra),
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -549,7 +549,7 @@ async function probe(sha, searchStep) {
   }
   args.push('--out', dir);
   say(`шаг ${n}${searchStep ? '' : ' (конец)'}: ${short(sha)} ${subjectOf(sha, 60)}`);
-  const { rc, out } = await run('sh', args);
+  const { rc, out } = await run(args);
   if (aborted) return null;
   if (rc === 3) {
     netLoss = true;
@@ -667,9 +667,7 @@ async function search() {
 // 3 — нет связи). Строки preflight и snapshot — в <RESTORE_DIR>/<цель>/results.tsv.
 async function snapStand() {
   mkdirSync(path.join(RESTORE_DIR, TARGET), { recursive: true });
-  const s = await run(
-    'sh',
-    ['-c', '. "$1/lib.sh"; rt_load_targets >/dev/null || exit 2; rt_snapshot "$2"', 'sh', SCRIPT_DIR, TARGET],
+  const s = await run(['-c', '. "$1/lib.sh"; rt_load_targets >/dev/null || exit 2; rt_snapshot "$2"', 'sh', SCRIPT_DIR, TARGET],
     { RT_REPORT: RESTORE_DIR }
   );
   return s.rc;
@@ -696,12 +694,12 @@ async function restoreStand(restoreCore, snapped) {
   let ok = true;
   const notes = [];
   let verify = '';
-  await run('sh', [path.join(SCRIPT_DIR, 'tree-step.sh'), 'cleanup']);
+  await run([path.join(SCRIPT_DIR, 'tree-step.sh'), 'cleanup']);
   mkdirSync(path.join(RESTORE_DIR, TARGET), { recursive: true });
   const dargs = [path.join(SCRIPT_DIR, 'deploy.sh')];
   if (opt['restore-release']) dargs.push('--release', opt['restore-release']);
   dargs.push('--target', TARGET);
-  const d = await run('sh', dargs, { RT_REPORT: RESTORE_DIR });
+  const d = await run(dargs, { RT_REPORT: RESTORE_DIR });
   const rcFile = path.join(RESTORE_DIR, TARGET, 'deploy.rc');
   const drc = existsSync(rcFile) ? readFileSync(rcFile, 'utf8').trim() : '-';
   if (d.rc !== 0 || drc !== '0') {
@@ -711,7 +709,7 @@ async function restoreStand(restoreCore, snapped) {
   if (restoreCore) {
     const now = remote(CORE_CMD);
     if (now.rc === 0 && now.out !== restoreCore) {
-      const s = await run('sh', [path.join(SCRIPT_DIR, 'pw-suite.sh'), TARGET, restoreCore, '--switch', restoreCore], {
+      const s = await run([path.join(SCRIPT_DIR, 'pw-suite.sh'), TARGET, restoreCore, '--switch', restoreCore], {
         RT_REPORT: RESTORE_DIR,
         RT_RESULTS_NAME: 'switch.tsv',
         RT_ART_SUB: 'restore-switch'
@@ -732,9 +730,7 @@ async function restoreStand(restoreCore, snapped) {
   }
   if (snapped) {
     // файлы данных, версии, ядро и xcp — по снимку, со сверкой (как в конце полного прогона)
-    const r = await run(
-      'sh',
-      ['-c', '. "$1/lib.sh"; rt_load_targets >/dev/null || exit 2; rt_restore "$2"', 'sh', SCRIPT_DIR, TARGET],
+    const r = await run(['-c', '. "$1/lib.sh"; rt_load_targets >/dev/null || exit 2; rt_restore "$2"', 'sh', SCRIPT_DIR, TARGET],
       { RT_REPORT: RESTORE_DIR }
     );
     const row = restoreRow('restore-verify');
