@@ -2,6 +2,7 @@
   import { t } from '../../../i18n';
   import Button from '../../Button.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
+  import ImmediateMark from '../ImmediateMark.svelte';
   import { applyRunning, draftChanges, layerSnapshot } from '../../../lib/configLayer';
   import type { ProfileView } from '../../../lib/configCores';
   import TakeRoutingModal from '../routing/TakeRoutingModal.svelte';
@@ -14,7 +15,9 @@
   // панели — строка с «Отпустить Mihomo» (подтверждение, применение сразу, итог тостом). Взятие
   // ждёт «Применить» — бейдж без действий; файла профиля нет — пояснение и то же взятие.
   // Открытый черновик блокирует отпускание и возврат постоянной строкой (D-08): оба идут
-  // применением. stopped — Mihomo остановлен: в подтверждение добавляется абзац об этом.
+  // применением. Отпускание и возврат переключают профиль сразу, мимо черновика (переход
+  // профиля, D-14) — у их кнопок ImmediateMark; первое взятие через диалог пишет в черновик и
+  // пометки не несёт. stopped — Mihomo остановлен: в подтверждение добавляется абзац об этом.
   let { profile, stopped = false }: { profile: ProfileView; stopped?: boolean } = $props();
 
   const uid = $props.id();
@@ -80,6 +83,9 @@
           {foreignParts[0]}<span class="mpn-name">{name}</span>{foreignParts[1]}
         </span>
         <div class="mpn-actions">
+          {#if returnMode}
+            <ImmediateMark />
+          {/if}
           <Button
             variant="primary"
             disabled={takeBlocked}
@@ -98,6 +104,7 @@
     <div class="mpn-row">
       <span class="mpn-ok"><Icon name="check" size={16} /></span>
       <span class="mpn-row-text">{$t('cfg.sec.profile_panel')}</span>
+      <ImmediateMark />
       <Button
         variant="secondary"
         class="mpn-btn"
@@ -136,6 +143,9 @@
   {:else}
     <div class="mpn-row">
       <span class="mpn-row-text">{$t('cfg.sec.no_file_note')}</span>
+      {#if returnMode}
+        <ImmediateMark />
+      {/if}
       <Button
         variant="primary"
         class="mpn-btn"

@@ -22,7 +22,8 @@
     TakeScope
   } from '../../../lib/configRouting';
   import { condLabelKey } from '../../../lib/routingView';
-  import { applyFromUi, reasonOf, routingBusy, takeIntoDraft } from '../routing/routingOwner';
+  import { openApplyPreview } from '../../../lib/configPreview';
+  import { reasonOf, routingBusy, takeIntoDraft } from '../routing/routingOwner';
 
   // Диалог пресета (D-24…D-31): карточки пресетов, страна, сервисы для «Выборочно», галочки
   // и план «Будет создано» либо «Уйдёт / Придёт» до записи. Создание — одна правка черновика
@@ -342,8 +343,12 @@
       (!needsCountry || country !== '')
   );
 
-  async function afterDraft() {
-    if (mode === 'intercept') await applyFromUi();
+  /**
+   * После записи в черновик и закрытия диалога: в режиме intercept открывается окно изменений
+   * (D-08), применяет только «Применить изменения» в нём. Конфликт ядер окно не открывает.
+   */
+  function afterDraft() {
+    if (mode === 'intercept') openApplyPreview();
   }
 
   async function create() {
@@ -355,8 +360,8 @@
       if (selectedId === 'empty' && view === null) {
         // Список пресетов не прочитан: «пустой» — это просто взятие в черновике
         const ok = await takeIntoDraft(scope);
-        if (ok) await afterDraft();
         onclose();
+        if (ok) afterDraft();
         return;
       }
       await applyPreset(choiceOf(), takeMode, scope);
@@ -375,9 +380,9 @@
       return;
     }
     if (takeMode) routingBusy.set(false);
-    await afterDraft();
     busy = false;
     onclose();
+    afterDraft();
   }
 
   /** Закрытие без выбора: при взятии маршрутизация остаётся взятой в черновике (D-04). */
@@ -388,13 +393,14 @@
       return;
     }
     busy = true;
+    let ok = false;
     try {
-      const ok = await takeIntoDraft(scope);
-      if (ok) await afterDraft();
+      ok = await takeIntoDraft(scope);
     } finally {
       busy = false;
     }
     onclose();
+    if (ok) afterDraft();
   }
 </script>
 
