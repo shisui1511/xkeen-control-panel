@@ -977,6 +977,11 @@
   .dns-block-text {
     min-width: 0;
     overflow-wrap: anywhere;
+    line-height: 1.5;
+  }
+
+  .dns-block-text .dns-link {
+    line-height: inherit;
   }
 
   .dns-stale {
@@ -1210,6 +1215,12 @@
   @media (max-width: 480px) {
     .dns-actions :global(.btn) {
       flex: 1 1 100%;
+    }
+
+    .dns-block-text .dns-link {
+      display: block;
+      margin: var(--spacing-1) 0 0 0;
+      line-height: inherit;
     }
   }
 </style>
