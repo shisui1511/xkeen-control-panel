@@ -1,9 +1,25 @@
 import { apiFetch } from '../../lib/api';
+import type { FileState } from '../../lib/configLayer';
+
+/** Владелец файла во вкладке «Файлы» (D-05): отпущенный файл панели — пользователь. */
+export type FileOwner = 'panel' | 'xkeen' | 'user';
+
+/** Исход загрузки списка «Файлов»: скелетон, группы или ошибка с «Повторить». */
+export type FileListStatus = 'loading' | 'ready' | 'error';
 
 export interface ConfigFileInfo {
   name: string;
   path: string;
   size: number;
+  // Поля ответа при scope=files (сервер, план 149-07); владелец — при включённом слое
+  owner?: FileOwner;
+  take_kernel?: 'xray' | 'mihomo';
+  take_sections?: string[];
+  stoplist_word?: string;
+  restricted?: boolean;
+  // Поля клиента: файла манифеста нет на диске (пропал или ещё не записан) и его состояние
+  missing?: boolean;
+  state?: FileState;
 }
 
 /** Ошибка файловой операции: статус ответа и машинный код сервера (если есть). */
@@ -100,6 +116,18 @@ export async function renameConfigFile(
 export async function listConfigFiles(dir: string): Promise<ConfigFileInfo[]> {
   const res = await apiFetch(`/api/config/list?dir=${encodeURIComponent(dir)}`);
   if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Список каталога для вкладки «Файлы» (D-04): сервер отдаёт только три каталога и владельца
+ * файлов. Ответ не 2xx — ошибка со статусом, а не пустой список: «файлов нет» и «список не
+ * получен» различаются.
+ */
+export async function listConfigFilesScoped(dir: string): Promise<ConfigFileInfo[]> {
+  const res = await apiFetch(`/api/config/list?dir=${encodeURIComponent(dir)}&scope=files`);
+  if (!res.ok) throw await readConfigOpError(res);
   const data = await res.json();
   return Array.isArray(data) ? data : [];
 }

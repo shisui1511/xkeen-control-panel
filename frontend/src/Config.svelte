@@ -7,14 +7,12 @@
   import DraftBar from './components/config/DraftBar.svelte';
   import ConfigNotices from './components/config/ConfigNotices.svelte';
   import ApplyProgress from './components/config/ApplyProgress.svelte';
-  import DevDiagnostics from './components/config/DevDiagnostics.svelte';
-  import ManagedFiles from './components/config/ManagedFiles.svelte';
-  import KernelVersions from './components/config/KernelVersions.svelte';
   import NodesTab from './components/config/nodes/NodesTab.svelte';
   import GroupsTab from './components/config/groups/GroupsTab.svelte';
   import RulesTab from './components/config/rules/RulesTab.svelte';
   import ListsTab from './components/config/lists/ListsTab.svelte';
   import SectionsTab from './components/config/sections/SectionsTab.svelte';
+  import FilesTab from './components/config/files/FilesTab.svelte';
   import RoutingOwnerNotice from './components/config/routing/RoutingOwnerNotice.svelte';
   import { watchOwnerToasts } from './components/config/routing/routingOwner';
   import { layerStatus, refetchLayerState } from './lib/configLayer';
@@ -32,8 +30,14 @@
   // черновик и полоса DraftBar при смене вкладки не пересоздаются
   let subTab = $state<ConfigSubTab>(configSubTab(window.location.hash));
 
+  // «Файлы» — встроенный Редактор: после первого открытия вкладка остаётся смонтированной
+  // и только скрывается, поэтому открытые файлы и несохранённые правки переживают переход
+  // между вкладками раздела (T-149-22)
+  let filesVisited = $state(configSubTab(window.location.hash) === 'files');
+
   function syncSubTab() {
     subTab = configSubTab(window.location.hash);
+    if (subTab === 'files') filesVisited = true;
   }
 
   // Подпись вкладки ядер (D-15): установлено одно ядро — только его имя (имена ядер не
@@ -60,7 +64,9 @@
   onMount(() => watchOwnerToasts());
 
   function selectTab(value: string) {
-    window.location.hash = configSubTabHash(asConfigSubTab(value));
+    const next = asConfigSubTab(value);
+    if (next === 'files') filesVisited = true;
+    window.location.hash = configSubTabHash(next);
   }
 </script>
 
@@ -69,9 +75,11 @@
 <!--
   Каркас раздела «Конфигурация» (D-02, D-15): уведомления (config-notices), DraftBar
   (config-draftbar) и ход применения (config-progress) общие и стоят над вкладками;
-  вкладки «Узлы» (nodes-tab), «Группы» (groups-tab), «Правила» (rules-tab), «Списки» (lists-tab, менеджер geodata XKeen), «Ядра» (cores-tab, секции Xray и Mihomo) и «Файлы панели» — нынешний стек: расхождения
-  (config-drift) и файлы (config-files) внутри ManagedFiles, ядра (config-kernels),
-  диагностика (config-diag). Фазы 146–148 добавляют вкладки в тот же Tabs.
+  вкладки «Узлы» (nodes-tab), «Группы» (groups-tab), «Правила» (rules-tab), «Списки»
+  (lists-tab, менеджер geodata XKeen), «Xray │ Mihomo» (cores-tab: секции ядер и версии
+  ядер config-kernels) и «Файлы» (files-tab: встроенный Редактор, D-01). «Файлы» после
+  первого открытия остаётся смонтированной и скрывается. Диагностика слоя (config-diag) —
+  в «Настройки → для разработчиков».
 -->
 <div class="container config-page" data-testid="config-page">
   <PageHeader title={$t('cfg.title')} subtitle={$t('cfg.subtitle')} />
@@ -111,12 +119,10 @@
       <ListsTab />
     {:else if subTab === 'cores'}
       <SectionsTab />
-    {:else if subTab === 'files'}
-      <div class="page-sections config-files-tab">
-        <ManagedFiles />
-        <KernelVersions />
-        <DevDiagnostics />
-      </div>
+    {/if}
+
+    {#if filesVisited}
+      <FilesTab active={subTab === 'files' && $layerStatus !== 'error'} />
     {/if}
   </div>
 </div>
