@@ -12,7 +12,7 @@
     ownerState,
     routingBusy,
     confirmRelease,
-    releaseAndApply,
+    releaseAndPreview,
     guarded
   } from './routingOwner';
 
@@ -66,7 +66,8 @@
   async function run(name: 'mihomo' | 'xray' | 'release') {
     action = name;
     try {
-      if (name === 'release') await releaseAndApply();
+      // «Отпустить» пишет возврат в черновик и открывает окно изменений (D-08)
+      if (name === 'release') await releaseAndPreview();
       else await guarded(() => reclaimRouting(name));
     } finally {
       action = '';

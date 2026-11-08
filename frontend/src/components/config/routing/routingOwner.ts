@@ -5,12 +5,8 @@
 import { derived, get, writable, type Readable } from 'svelte/store';
 import { t } from '../../../i18n';
 import { showConfirm, showToast } from '../../../stores';
-import {
-  applyNow,
-  handleLayerError,
-  layerSnapshot,
-  refetchLayerState
-} from '../../../lib/configLayer';
+import { layerSnapshot, refetchLayerState } from '../../../lib/configLayer';
+import { openApplyPreview } from '../../../lib/configPreview';
 import {
   releaseRouting,
   routingErrorText,
@@ -102,8 +98,13 @@ export async function takeIntoDraft(scope: TakeScope = 'all'): Promise<boolean> 
   }
 }
 
-/** Записывает желание «вернуть XKeen» и сразу применяет: возврат файлов не ждёт (D-01). */
-export async function releaseAndApply(): Promise<void> {
+/**
+ * Записывает желание «вернуть XKeen» в черновик и открывает окно изменений (D-08, D-09):
+ * в окне видна строка владения и все прочие неприменённые правки, которые применятся вместе
+ * с ней. Файлы меняет только «Применить изменения» в окне. При конфликте ядер окно не
+ * открывается — причину показывает openApplyPreview() (D-18), желание остаётся в черновике.
+ */
+export async function releaseAndPreview(): Promise<void> {
   routingBusy.set(true);
   try {
     await releaseRouting();
@@ -113,16 +114,12 @@ export async function releaseAndApply(): Promise<void> {
   } finally {
     routingBusy.set(false);
   }
-  try {
-    await applyNow();
-  } catch (err) {
-    handleLayerError(err);
-  }
+  openApplyPreview();
 }
 
 /**
- * «Отпустить маршрутизацию»: подтверждение с последствиями, затем возврат и применение.
- * Пока Mihomo на своём профиле, тело говорит, что профиль не изменится (D-07).
+ * «Отпустить маршрутизацию»: подтверждение с последствиями, затем возврат в черновике и
+ * окно изменений. Пока Mihomo на своём профиле, тело говорит, что профиль не изменится (D-07).
  */
 export async function confirmRelease(): Promise<void> {
   const tr = get(t);
@@ -133,7 +130,7 @@ export async function confirmRelease(): Promise<void> {
     message: tr(own ? 'cfg.routing.release_body_own_profile' : 'cfg.routing.release_body'),
     confirmLabel: tr('cfg.routing.release_confirm')
   });
-  if (ok) await releaseAndApply();
+  if (ok) await releaseAndPreview();
 }
 
 // --- Действия только с Mihomo (плашка профиля, D-06, D-07, D-09) ---
@@ -273,15 +270,6 @@ export async function guarded(action: () => Promise<void>): Promise<void> {
 function paramsOf(err: unknown): Record<string, string> | undefined {
   const p = (err as { params?: unknown } | null)?.params;
   return p && typeof p === 'object' ? (p as Record<string, string>) : undefined;
-}
-
-/** Запускает «Применить» из диалога или плашки; отказ — обычный разбор ошибок слоя. */
-export async function applyFromUi(): Promise<void> {
-  try {
-    await applyNow();
-  } catch (err) {
-    handleLayerError(err);
-  }
 }
 
 // --- Тосты по итогу применения ---
