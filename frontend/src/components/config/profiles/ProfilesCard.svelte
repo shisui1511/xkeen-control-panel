@@ -15,6 +15,7 @@
     renameProfile,
     type ProfilesState
   } from '../../../lib/configProfiles';
+  import { editorHash } from '../../../lib/editorRoute';
   import TakeRoutingModal from '../routing/TakeRoutingModal.svelte';
   import { activateOwnProfile, confirmMihomoReturn, routingBusy } from '../routing/routingOwner';
   import ImmediateMark from '../ImmediateMark.svelte';
@@ -205,7 +206,7 @@
 
   function edit(path: string): void {
     editorOpenRequest.set(`${MIHOMO_DIR}/${path}`);
-    window.location.hash = '#/editor';
+    window.location.hash = editorHash();
   }
 
   /** Переименование: пусто — готово, иначе текст ошибки под полем (D-12, D-24). */

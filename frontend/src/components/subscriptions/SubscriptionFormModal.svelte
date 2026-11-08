@@ -4,6 +4,7 @@
   import SegmentedControl from '../SegmentedControl.svelte';
   import { t, currentLang } from '../../i18n';
   import { isXray } from '../../stores';
+  import { editorHash } from '../../lib/editorRoute';
 
   interface Subscription {
     id: string;
@@ -284,11 +285,11 @@
               </a>
               {$t('app.or')}
               <a
-                href="#/editor"
+                href={editorHash()}
                 onclick={(e) => {
                   e.preventDefault();
                   onClose();
-                  window.location.hash = '#/editor';
+                  window.location.hash = editorHash();
                 }}
                 style="text-decoration: underline; color: var(--accent);"
               >
