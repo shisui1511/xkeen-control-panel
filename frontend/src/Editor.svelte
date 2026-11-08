@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy, tick, untrack } from 'svelte';
+  import { onMount, onDestroy, tick, untrack, type Snippet } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import { fade, slide, DURATION } from './lib/motion.svelte';
   import { MediaQuery, SvelteSet } from 'svelte/reactivity';
@@ -85,7 +85,9 @@
   let {
     onSwitchTab = () => {},
     embedded = false,
-    active = true
+    active = true,
+    onactivefile,
+    aboveCode
   }: {
     onSwitchTab?: (tab: string) => void;
     /**
@@ -98,6 +100,10 @@
      * поэтому горячие клавиши, шторка и запрос открытия файла действуют только при показе
      */
     active?: boolean;
+    /** Смена активной вкладки/файла во вкладке «Файлы» */
+    onactivefile?: (path: string | null, file?: ConfigFileInfo) => void;
+    /** Сниппет над редактором кода для активного файла (баннеры дрейфа, владельца) */
+    aboveCode?: Snippet<[string, (ConfigFileInfo | undefined)?]>;
   } = $props();
 
   let ru = $derived($currentLang === 'ru');
@@ -119,7 +125,10 @@
   const managedFile = $derived($configLayerEnabled ? $filesByPath.get(selectedFile) : undefined);
   // pending — файла ещё нет в манифесте: сервер его не защищает, а «Отпустить» ответил бы 404
   const isManagedReadOnly = $derived(
-    managedFile !== undefined && managedFile.state !== 'released' && managedFile.state !== 'pending'
+    managedFile !== undefined &&
+      (!managedFile.owner || managedFile.owner === 'panel') &&
+      managedFile.state !== 'released' &&
+      managedFile.state !== 'pending'
   );
   let loading = $state(false);
   let loadingPath = $state<string | null>(null);
@@ -238,7 +247,25 @@
   const selectedMissing = $derived(
     embedded && selectedFile !== '' && missingPaths.has(selectedFile)
   );
-  const isReadOnly = $derived(isManagedReadOnly || selectedMissing);
+
+  const allFiles = $derived([...xrayList, ...mihomoList, ...xkeenFiles]);
+  const activeFileInfo = $derived(allFiles.find((f) => f.path === (activeTabPath || selectedFile)));
+
+  // Вкладка «Файлы» (D-07): файл с дрейфом только для чтения до принятия решения
+  const isDrift = $derived(
+    embedded &&
+      selectedFile !== '' &&
+      ($filesByPath.get(selectedFile)?.state?.startsWith('drift_') ?? false)
+  );
+  const isReadOnly = $derived(isManagedReadOnly || selectedMissing || isDrift);
+
+  $effect(() => {
+    const cur = activeTabPath || selectedFile || null;
+    const info = cur ? activeFileInfo : undefined;
+    untrack(() => {
+      onactivefile?.(cur, info);
+    });
+  });
   // До 768 px панель файлов — выезжающий лист поверх редактора, а не колонка рядом
   const NARROW_QUERY = '(max-width: 768px)';
   const narrowQuery = new MediaQuery(NARROW_QUERY);
@@ -1859,8 +1886,12 @@
             }}
           />
 
-          {#if managedFile && isManagedReadOnly}
+          {#if managedFile && isManagedReadOnly && !managedFile.state?.startsWith('drift_')}
             <ManagedFileBanner file={managedFile} />
+          {/if}
+
+          {#if aboveCode && (activeTabPath || selectedFile)}
+            {@render aboveCode(activeTabPath || selectedFile, activeFileInfo)}
           {/if}
 
           <!-- CodeMirror editor component -->
