@@ -18,6 +18,7 @@
     type LastRunView
   } from '../../../lib/configGeodata';
   import OutputLog from './OutputLog.svelte';
+  import ImmediateMark from '../ImmediateMark.svelte';
 
   // Карточка «Обновление баз»: запуск xkeen -ug по кнопке, статус, итог последнего запуска и
   // живой вывод. Итог по файлам здесь не дублируется: он живёт в строках источников.
@@ -208,6 +209,7 @@
       </Button>
     {/snippet}
 
+    <ImmediateMark />
     <div class="card card-rows geo-card">
       {#if ugRunning || removeRunning || run?.waiting_apply || view.schedule.retry_at}
         <div class="card-block geo-status" role="status" data-testid="geo-run-status">
