@@ -247,6 +247,17 @@ var credentialKeys = map[string]bool{
 	"shortid": true, "key": true,
 }
 
+// credentialKeyNorm приводит имя ключа к виду credentialKeys: нижний регистр, без
+// «-» и «_» (preSharedKey = pre-shared-key = presharedkey).
+var credentialKeyNorm = strings.NewReplacer("-", "", "_", "")
+
+// IsCredentialKey — значение ключа name структурной записи (Xray-JSON, Clash,
+// sing-box) — учётные данные. Имя сравнивается без учёта регистра, «-» и «_».
+// Тот же набор маскирует диагностика узлов и предпросмотр «Применить».
+func IsCredentialKey(name string) bool {
+	return credentialKeys[strings.ToLower(credentialKeyNorm.Replace(name))]
+}
+
 // credentialValues собирает значения учётных данных из сырой записи, включая
 // вложенные карты и списки (vnext, users, peers). Записи, которая не стала узлом,
 // эти значения нужны только для маскирования в диагностике.
@@ -260,8 +271,7 @@ func credentialValues(v any) []string {
 		switch x := v.(type) {
 		case map[string]any:
 			for k, val := range x {
-				name := strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(k))
-				if s, ok := val.(string); ok && credentialKeys[name] && s != "" {
+				if s, ok := val.(string); ok && IsCredentialKey(k) && s != "" {
 					out = append(out, s)
 					continue
 				}

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
@@ -99,7 +100,10 @@ func (l *Layer) PreviewApply() (ApplyPreview, error) {
 	}
 	// Тот же счёт, что у draft_changes: чистый черновик строк не даёт.
 	if draftDirty(st) {
-		out.Changes = append(out.Changes, l.store.changeRows(st)...)
+		for _, row := range l.store.changeRows(st) {
+			row.Label = maskLabel(row.Label)
+			out.Changes = append(out.Changes, row)
+		}
 	}
 	out.Count = len(out.Changes)
 
@@ -260,7 +264,8 @@ func (l *Layer) previewMoved(ops *RoutingOps) []PreviewMoved {
 
 // previewFileOf — сторона «было» с диска (не больше diffSideLimit+1 байт) и
 // «станет» для одного файла плана. Второй результат ложь — файл не меняется
-// (содержимое совпадает или удалять нечего).
+// (содержимое совпадает или удалять нечего). Обе стороны проходят maskPair до
+// счёта строк и усечения: сырые значения секретов в ответ не попадают (D-11).
 func previewFileOf(key, abs string, action PlanAction, after []byte) (PreviewFile, bool, error) {
 	pf := PreviewFile{Key: key, Path: abs, Action: string(action)}
 	before, err := readCapped(abs, diffSideLimit)
@@ -277,12 +282,29 @@ func previewFileOf(key, abs string, action PlanAction, after []byte) (PreviewFil
 	if action == ActionWrite && !pf.Missing && bytes.Equal(before, after) {
 		return pf, false, nil
 	}
+	// Прочитанный сверх предела хвост «было» обрывается на границе строки: обрывок
+	// строки с секретом не должен попасть мимо маскирования.
+	beforeText, cut := cutLines(string(before), diffSideLimit)
+	maskedBefore, maskedAfter, changed := maskPair(beforeText, string(after))
+	pf.SecretsChanged = changed
+	pf.Added, pf.Removed = lineDelta(maskedBefore, maskedAfter)
 	var bt, at bool
-	pf.Before, bt = truncateUTF8(before, diffSideLimit)
-	pf.After, at = truncateUTF8(after, diffSideLimit)
-	pf.Truncated = bt || at
-	pf.Added, pf.Removed = lineDelta(string(before), string(after))
+	pf.Before, bt = cutLines(maskedBefore, diffSideLimit)
+	pf.After, at = cutLines(maskedAfter, diffSideLimit)
+	pf.Truncated = cut || bt || at
 	return pf, true, nil
+}
+
+// cutLines обрезает s до max байт по последней целой строке (без строки длиннее
+// предела — по границе символа UTF-8); второй результат — была ли обрезка.
+func cutLines(s string, max int) (string, bool) {
+	if len(s) <= max {
+		return s, false
+	}
+	if i := strings.LastIndexByte(s[:max], '\n'); i >= 0 {
+		return s[:i+1], true
+	}
+	return truncateUTF8([]byte(s), max)
 }
 
 // lineDelta — число строк after, которых нет в before, и строк before, которых нет
