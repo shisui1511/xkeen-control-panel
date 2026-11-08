@@ -239,3 +239,39 @@ test('config-files sheet vp:390', async ({ page }) => {
 
   await guard.assertClean();
 });
+
+test('config-files owner-banners vp:1280', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  const tab = await openFilesTab(page, VP_DESKTOP);
+  await expect(tab.locator('.skeleton')).toHaveCount(0, { timeout: T.page });
+
+  // 1. Открыть файл панели (data-owner="panel")
+  const panelRow = tab.locator('.file-row:has([data-owner="panel"])').first();
+  if ((await panelRow.count()) > 0) {
+    await panelRow.click({ timeout: T.action });
+    await expect(tab.getByTestId('managed-file-banner')).toBeVisible({ timeout: T.page });
+
+    // Кнопка «Сохранить» неактивна
+    const saveBtn = tab.locator('button:has-text("Сохранить")').first();
+    if ((await saveBtn.count()) > 0) {
+      await expect(saveBtn).toBeDisabled();
+    }
+
+    // В листе копий кнопка «Восстановить» неактивна (регрессия editor-restore-ignores-managed-readonly)
+    const restoreBtn = tab.locator('.restore-inline-btn, .diff-restore-btn').first();
+    if ((await restoreBtn.count()) > 0) {
+      await expect(restoreBtn).toBeDisabled();
+    }
+  }
+
+  // 2. Открыть файл пользователя или XKeen (наш fixtureName — user)
+  const userRow = fileRow(tab, fixtureName);
+  await expect(userRow).toBeVisible({ timeout: T.page });
+  await userRow.click({ timeout: T.action });
+  await expect(tab.getByTestId('files-immediate-note')).toBeVisible({ timeout: T.page });
+  await expect(tab.getByTestId('files-immediate-note').getByTestId('immediate-mark')).toBeVisible({
+    timeout: T.page
+  });
+
+  await guard.assertClean();
+});

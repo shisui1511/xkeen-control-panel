@@ -5,6 +5,7 @@
     visibleNotices,
     dismissNotice,
     handleLayerError,
+    driftCount,
     type LayerNotice
   } from '../../lib/configLayer';
   // Часы с шагом в минуту: текст «повтор через N мин» не застывает на момент сборки
@@ -315,6 +316,15 @@
      других вкладках (D-08). Системные уведомления слоя закрываются навсегда, а
      build_failed и source_* — до перезапуска панели или пока не исчезнет их условие -->
 <section class="config-notices" data-testid="config-notices">
+  {#if $driftCount > 0}
+    <div class="alert alert-warning" role="alert" data-testid="config-drift-notice">
+      <Icon name="warning" size={16} />
+      <span class="notice-text"
+        >{$t('cfg.files.drift_notice', { k: $driftCount })}
+        <a class="notice-link" href="#/config/files">{$t('cfg.files.drift_notice_link')}</a></span
+      >
+    </div>
+  {/if}
   {#each shown as { notice, tone, text, cabinet, ids } (notice.id)}
     <div class="alert alert-{tone} alert-dismissible" role="alert" data-notice={notice.id}>
       <Icon name={tone === 'info' ? 'info' : 'warning'} size={16} />
