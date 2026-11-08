@@ -32,6 +32,9 @@ func (a *API) UserRulesSave(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
+	if a.legacyBlocked(w, r) {
+		return
+	}
 
 	var req struct {
 		Rules []services.UserRule `json:"rules"`

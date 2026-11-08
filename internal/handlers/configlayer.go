@@ -27,6 +27,20 @@ func (a *API) requireLayer(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// legacyBlocked закрывает старые входы настройки, которые пишут конфиг ядра мимо
+// слоя «Конфигурация» (D-17): при включённом флаге отвечает 409 legacy_blocked с
+// переведённым текстом до разбора тела и любой записи. Флаг читается на каждый
+// запрос: маршруты регистрируются безусловно, флаг меняется на ходу. Авторизация и
+// CSRF проверяются обёрткой HandleProtected раньше обработчика. Возвращает true,
+// если ответ уже записан.
+func (a *API) legacyBlocked(w http.ResponseWriter, r *http.Request) bool {
+	if a.configLayer == nil || !a.configLayer.Enabled() {
+		return false
+	}
+	JSONErrorCode(w, http.StatusConflict, "legacy_blocked", a.t(r, "configlayer.legacy_blocked"))
+	return true
+}
+
 // writeLayerError переводит ошибку слоя в HTTP-ответ по таблице из контракта API.
 // Сообщения — переведённые строки по коду ошибки. Для неклассифицированной ошибки
 // (500) текст самой ошибки без ANSI-последовательностей уходит в поле detail, как
