@@ -16,6 +16,7 @@
   import { parseValidationError } from './lib/errorParser';
   import Icon from './lib/components/Icon.svelte';
   import EmptyState from './components/EmptyState.svelte';
+  import Button from './components/Button.svelte';
   import EditorIcon from './lib/components/icons/Editor.svelte';
   import Skeleton from './components/Skeleton.svelte';
   import { EditorState } from '@codemirror/state';
@@ -79,7 +80,23 @@
     currentContent: string;
   }
 
-  let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
+  let {
+    onSwitchTab = () => {},
+    embedded = false,
+    active = true
+  }: {
+    onSwitchTab?: (tab: string) => void;
+    /**
+     * Вкладка «Файлы» раздела «Конфигурация» (D-01): без заголовка страницы, без режима
+     * «Конструктор» и полноэкранной обёртки; разметка списка и редактора та же
+     */
+    embedded?: boolean;
+    /**
+     * Встроенный Редактор показан: вкладка раздела остаётся смонтированной и скрывается,
+     * поэтому горячие клавиши, шторка и запрос открытия файла действуют только при показе
+     */
+    active?: boolean;
+  } = $props();
 
   let ru = $derived($currentLang === 'ru');
 
@@ -422,6 +439,8 @@
   }
 
   function handleGlobalKeydown(e: KeyboardEvent) {
+    // Скрытая вкладка «Файлы» не перехватывает клавиши других вкладок раздела
+    if (!active) return;
     if (e.ctrlKey && e.key === 'Tab') {
       e.preventDefault();
       if (tabs.length <= 1) return;
@@ -1448,17 +1467,31 @@
     showToast('info', $t('draft.discarded_toast'));
   }
 
+  /** Открывает файл, который попросила другая страница, и сбрасывает запрос. */
+  function consumeOpenRequest(requested: string) {
+    editorOpenRequest.set(null);
+    if (requested.startsWith(mihomoDir + '/')) currentDir = mihomoDir;
+    void loadFile(requested, false);
+  }
+
+  // Встроенный Редактор живёт, пока открыт раздел: запрос открытия файла приходит и после
+  // монтирования. Он берётся, только когда вкладка показана, — иначе запрос, после которого
+  // страница уходит в Редактор, перехватила бы скрытая вкладка.
+  $effect(() => {
+    if (!embedded || !active) return;
+    const requested = $editorOpenRequest;
+    if (!requested) return;
+    untrack(() => consumeOpenRequest(requested));
+  });
+
   onMount(() => {
     loadFiles();
-    checkHashTab();
-
-    const requested = $editorOpenRequest;
-    if (requested) {
-      editorOpenRequest.set(null);
-      if (requested.startsWith(mihomoDir + '/')) currentDir = mihomoDir;
-      loadFile(requested, false);
+    if (!embedded) {
+      checkHashTab();
+      const requested = $editorOpenRequest;
+      if (requested) consumeOpenRequest(requested);
+      window.addEventListener('hashchange', checkHashTab);
     }
-    window.addEventListener('hashchange', checkHashTab);
 
     const draft = getDraft('editor');
     if (draft) {
@@ -1513,31 +1546,68 @@
 
 <svelte:window onkeydown={handleGlobalKeydown} />
 
-<div class="editor-page-container" class:constructor-mode={activeTab === 'constructor'}>
-  <!-- Level 1 Header (EDIT-01) -->
-  <PageHeader title={$t('editor.h1')} subtitle={$t('editor.h1_sub')}>
-    <Tabs
-      items={editorModeTabItems}
-      value={activeTab}
-      onchange={(val) => setTab(val as 'files' | 'constructor')}
-      ariaLabel={$t('editor.h1')}
-      variant="pill"
-    />
+{#snippet headerActions()}
+  <EditorHeaderActions
+    {saveStatusState}
+    {selectedFile}
+    {loading}
+    {saving}
+    {applyLoading}
+    onReloadFile={() => loadFile(selectedFile)}
+    onSaveFile={checkBeforeSave}
+    onSaveAndApply={handleSaveAndApply}
+    managedReadOnly={isManagedReadOnly}
+  />
+{/snippet}
 
-    {#if activeTab === 'files'}
-      <EditorHeaderActions
-        {saveStatusState}
-        {selectedFile}
-        {loading}
-        {saving}
-        {applyLoading}
-        onReloadFile={() => loadFile(selectedFile)}
-        onSaveFile={checkBeforeSave}
-        onSaveAndApply={handleSaveAndApply}
-        managedReadOnly={isManagedReadOnly}
+<div
+  class={embedded ? 'editor-embedded' : 'editor-page-container'}
+  class:constructor-mode={!embedded && activeTab === 'constructor'}
+>
+  {#if embedded}
+    <!-- Шапка встроенного Редактора: на ≤768 px «Файлы» открывает лист списка слева (EDT-02) -->
+    <div class="editor-embedded-head">
+      {#if isNarrow}
+        <Button
+          variant="secondary"
+          size="sm"
+          class="files-sheet-toggle"
+          aria-expanded={showSidebar}
+          onclick={() => (showSidebar = !showSidebar)}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            aria-hidden="true"
+            ><path
+              d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+            /></svg
+          >
+          {$t('editor.tab_files')}
+        </Button>
+      {/if}
+      {@render headerActions()}
+    </div>
+  {:else}
+    <!-- Level 1 Header (EDIT-01) -->
+    <PageHeader title={$t('editor.h1')} subtitle={$t('editor.h1_sub')}>
+      <Tabs
+        items={editorModeTabItems}
+        value={activeTab}
+        onchange={(val) => setTab(val as 'files' | 'constructor')}
+        ariaLabel={$t('editor.h1')}
+        variant="pill"
       />
-    {/if}
-  </PageHeader>
+
+      {#if activeTab === 'files'}
+        {@render headerActions()}
+      {/if}
+    </PageHeader>
+  {/if}
 
   {#if detectedDraft}
     <DraftRestoreBanner
@@ -1551,7 +1621,7 @@
     <!-- Workspace with Resizable Splitter (EDIT-02) -->
     <div class="editor-workspace">
       <EditorSidebar
-        open={showSidebar}
+        open={showSidebar && active}
         {xrayFiles}
         {mihomoFiles}
         {selectedFile}
@@ -1878,6 +1948,40 @@
     padding-bottom: 60px;
   }
 
+  /* Встроенный Редактор (вкладка «Файлы»): страница прокручивается обычным образом,
+     список и код прокручиваются внутри области заданной высоты */
+  .editor-embedded {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3);
+    min-width: 0;
+  }
+
+  .editor-embedded-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--spacing-2);
+    min-width: 0;
+  }
+
+  .editor-embedded-head > :global(:last-child) {
+    margin-left: auto;
+  }
+
+  .editor-embedded .editor-workspace {
+    flex: none;
+    height: clamp(520px, calc(100dvh - 280px), 900px);
+  }
+
+  .editor-embedded-head :global(.files-sheet-toggle) {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    min-height: 44px;
+  }
+
   :global(.page-header-actions .tabs) {
     margin-bottom: 0;
     border-bottom: none;
@@ -2000,6 +2104,11 @@
   @media (max-width: 768px) {
     .editor-page-container {
       height: calc(100dvh - 76px);
+    }
+
+    .editor-embedded .editor-workspace {
+      height: max(420px, 70dvh);
+      min-height: max(420px, 70dvh);
     }
 
     .editor-empty-card {
