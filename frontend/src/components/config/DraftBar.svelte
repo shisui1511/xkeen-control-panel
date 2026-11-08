@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
   import { get } from 'svelte/store';
   import { t, tp } from '../../i18n';
-  import { showConfirm, configLayerEnabled, runningKernels } from '../../stores';
+  import { showConfirm } from '../../stores';
   import Button from '../Button.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import {
@@ -19,8 +18,7 @@
     handleLayerError
   } from '../../lib/configLayer';
   import { routingView, loadRouting } from '../../lib/configRouting';
-  import { geodataView, geodataStatus, loadGeodata } from '../../lib/configGeodata';
-  import { dropSetName } from './lists/setName';
+  import { geodataView, loadGeodata } from '../../lib/configGeodata';
   import TakeRoutingModal from './routing/TakeRoutingModal.svelte';
   import { ownerState, routingBusy } from './routing/routingOwner';
   import ApplyPreviewModal from './ApplyPreviewModal.svelte';
@@ -69,46 +67,6 @@
           : undefined
   );
 
-  // Объявления перезапуска (D-16): снимок слоя перечисляет, какие правки черновика потребуют
-  // xkeen -restart или полного перезапуска Mihomo. Остановленное ядро перезапуска не ждёт:
-  // правки вступят в силу при запуске
-  const restartNotes = $derived.by(() => {
-    if (!ready || !dirty) return [];
-    const running: string[] = $runningKernels;
-    return ($layerSnapshot?.cores.restart ?? []).map((n) => ({
-      kernel: n.kernel,
-      reason: n.reason,
-      text: !running.includes(n.kernel)
-        ? $t('cfg.sec.kernel_stopped')
-        : n.reason === 'port'
-          ? $t('cfg.sec.restart_xkeen')
-          : n.reason === 'profile'
-            ? $t('cfg.sec.restart_profile')
-            : $t('cfg.sec.restart_tun')
-    }));
-  });
-
-  // Пометки менеджера geodata в черновике (D-27): строка видна на любой вкладке раздела.
-  // Название набора берётся из снимка менеджера так же, как в его группе
-  const geoRows = $derived.by(() => {
-    const view = $geodataView;
-    if (view === null) return [];
-    return view.draft.map((d) => {
-      const src = view.sources.find((x) => x.file === d.file);
-      return d.mode === 'off'
-        ? $t('cfg.geo.draft_row_off', { name: src !== undefined ? dropSetName(src) : d.file })
-        : $t('cfg.geo.draft_row_delete', { file: d.file });
-    });
-  });
-
-  // Страница открыта не на «Списках», а в черновике могут быть пометки: снимок менеджера
-  // читается один раз. Ошибка загрузки строку не показывает и полосу не ломает
-  $effect(() => {
-    if ($configLayerEnabled && dirty && $geodataView === null && $geodataStatus === 'idle') {
-      untrack(() => void loadGeodata());
-    }
-  });
-
   // «Применить» при группах или правилах в черновике, пока маршрутизацией управляет XKeen:
   // сначала диалог взятия с тремя исходами (D-01)
   let interceptOpen = $state(false);
@@ -142,7 +100,7 @@
     resetting = true;
     try {
       await resetDraft();
-      // Пометки менеджера тоже сброшены: строка перечитывается, не дожидаясь события
+      // Пометки менеджера тоже сброшены: «Списки» перечитываются, не дожидаясь события
       if (get(geodataView) !== null) void loadGeodata();
     } catch (err) {
       handleLayerError(err);
@@ -179,27 +137,9 @@
         <span class="status-icon status-icon-accent"><Icon name="edit" size={14} /></span>
         {$t('cfg.draft_dirty', { n: $draftChanges })}
       </span>
-      {#if geoRows.length > 0}
-        <span class="status-sub status-geo" data-testid="config-draft-geodata">
-          {geoRows.join(' · ')}
-        </span>
-      {/if}
       {#if blockedByDrift}
         <span class="status-sub">{$t('cfg.draft_blocked', { k: $driftCount })}</span>
       {/if}
-      {#each restartNotes as note (note.kernel + ':' + note.reason)}
-        <div
-          class="alert alert-warning restart-note"
-          role="status"
-          aria-live="polite"
-          data-testid="draft-restart-note"
-          data-reason={note.reason}
-          data-kernel={note.kernel}
-        >
-          <span class="icon-first-line"><Icon name="info" size={14} /></span>
-          <span class="restart-note-text">{note.text}</span>
-        </div>
-      {/each}
       {#if checkCount > 0}
         <span
           class="status-sub"
@@ -320,22 +260,6 @@
     color: var(--warning);
     font-size: var(--font-size-sm);
     overflow-wrap: anywhere;
-  }
-
-  .restart-note {
-    margin-bottom: 0;
-    padding: var(--spacing-2) var(--spacing-3);
-    font-size: var(--font-size-sm);
-    min-width: 0;
-  }
-
-  .restart-note-text {
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-
-  .status-geo {
-    color: var(--fg-secondary);
   }
 
   .status-holder {
