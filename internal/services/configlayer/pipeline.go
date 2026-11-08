@@ -864,7 +864,7 @@ func driftKeysExceptMissing(roots Roots, manifest map[string]ManifestEntry) []st
 // переписывается. Хук и применённое состояние идут одной записью.
 func (p *Pipeline) syncApplied(snap State, src Sections, req ApplyRequest, used Input) error {
 	syncDraft := req.Source == SourceDraft && len(req.Only) == 0 &&
-		draftChanges(State{Draft: src, Applied: snap.Applied}) != 0
+		draftDirty(State{Draft: src, Applied: snap.Applied})
 	hook := p.liveCommitter()
 	overlay := req.overlayActive()
 	restore := req.restoreActive()

@@ -202,6 +202,13 @@ func New(opts Options) (*Layer, error) {
 	// Файл состояния читается лениво, при первом обращении включённого слоя:
 	// выключенный слой ничего не читает и не пишет (FND-01).
 	store := NewStore(opts.DataDir, broker)
+	// Описатели секций, формат которых знает сам слой (секции ядер, владение
+	// маршрутизацией, перехват DNS, диагностика); остальные — через Register.
+	for _, d := range builtinDescribers() {
+		if err := store.addDescriber(d); err != nil {
+			return nil, err
+		}
+	}
 	// Генератор диагностики зарегистрирован всегда, но вне dev_mode файлов не
 	// выдаёт (D-19): переключение dev_mode не требует перезапуска.
 	registry := NewRegistry()
@@ -524,7 +531,7 @@ func (l *Layer) Snapshot() SnapshotView {
 		Enabled:       enabled,
 		DevMode:       l.devMode(),
 		DraftRevision: st.DraftRevision,
-		DraftChanges:  draftChanges(st),
+		DraftChanges:  l.store.changeCount(st),
 		Files:         []FileView{},
 		Kernels:       []KernelVersionView{},
 		Features:      map[Feature]Availability{},
@@ -1193,6 +1200,10 @@ type Hooks struct {
 	// держит замок применения; паника хука применение не валит.
 	BeforeApply     func(st StateView)
 	OnDriftResolved func()
+	// Describer — описатель строк изменений секций сервиса (D-12): из его строк
+	// считаются draft_changes и окно изменений перед применением. Чистая функция
+	// над секциями: вызывается под замком хранилища, без ввода-вывода и замков.
+	Describer Describer
 }
 
 // Register подключает сервис целиком или не подключает вовсе: все условия
@@ -1219,11 +1230,19 @@ func (l *Layer) Register(h Hooks) error {
 	if h.Checker != nil && l.registry.HasChecker(h.Checker.ID()) {
 		return fmt.Errorf("configlayer: проверка %q уже зарегистрирована", h.Checker.ID())
 	}
+	if h.Describer != nil && l.store.hasDescriber(h.Describer.ID()) {
+		return fmt.Errorf("configlayer: описатель %q уже зарегистрирован", h.Describer.ID())
+	}
 	for _, g := range h.Generators {
 		l.registry.Register(g)
 	}
 	if h.Checker != nil {
 		l.registry.RegisterChecker(h.Checker)
+	}
+	if h.Describer != nil {
+		if err := l.store.addDescriber(h.Describer); err != nil {
+			return err
+		}
 	}
 	if h.LiveCommitter != nil {
 		l.pipeline.addCommitLive(h.LiveCommitter)
@@ -1341,7 +1360,7 @@ func (l *Layer) ApplyEdit(ctx context.Context, edit func(st StateView) (map[stri
 	}
 	defer release()
 	st := l.store.Snapshot()
-	if draftChanges(st) != 0 {
+	if draftDirty(st) {
 		return ApplyView{}, ErrDraftOpen
 	}
 	sections, err := edit(StateView{DraftRevision: st.DraftRevision, Draft: st.Draft.Clone(), Applied: st.Applied.Clone(), Live: st.Live.Clone()})
@@ -1504,7 +1523,7 @@ func (l *Layer) updateAutoTakenNotices(auto string, now RoutingState) {
 // сверка.
 func (l *Layer) afterRun() {
 	st := l.store.Snapshot()
-	l.broker.Publish(Event{Type: EventDraft, Data: draftEventOf(st)})
+	l.broker.Publish(Event{Type: EventDraft, Data: l.store.draftEventOf(st)})
 	l.broker.Publish(Event{Type: EventNotices, Data: NoticesEvent{Notices: l.noticeViews(st)}})
 	l.checkNow(true)
 }
