@@ -87,7 +87,9 @@
         {$t('app.back')}
       </button>
     {/if}
-    <span class="drawer-title">{$t('editor.backups')}</span>
+    <span class="drawer-title"
+      >{panelApplies ? $t('cfg.files.applies_title') : $t('editor.backups')}</span
+    >
     <button type="button" class="drawer-close-btn" onclick={() => onClose?.()}>
       {$t('app.close')}
     </button>
