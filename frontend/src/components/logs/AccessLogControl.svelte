@@ -33,6 +33,8 @@
   import Button from '../Button.svelte';
   import EmptyState from '../EmptyState.svelte';
   import TakeSectionModal from '../config/sections/TakeSectionModal.svelte';
+  // Включение и выключение меняют конфиг Xray и перезапускают ядро сразу, мимо черновика (D-14)
+  import ImmediateMark from '../config/ImmediateMark.svelte';
 
   // Блок управления access-логом Xray на «Логах» (PART-01, D-13…D-17, D-25, D-26). Кнопки, а не
   // переключатель: действие требует подтверждения и перезапуска. Слой выключен — прежний путь
@@ -213,6 +215,7 @@
       {#if foreignNote !== ''}
         <p class="alc-caption" data-testid="xlog-foreign-note">{foreignNote}</p>
       {/if}
+      <ImmediateMark />
       <Button
         variant="primary"
         loading={busy}
@@ -237,17 +240,20 @@
           <span class="badge badge--tag {ownerClass}" data-testid="xlog-owner">{ownerLabel}</span>
         {/if}
       </span>
-      <Button
-        variant="secondary"
-        class="btn-sm"
-        loading={busy}
-        disabled={blocked}
-        title={hint || undefined}
-        data-testid="xlog-disable"
-        onclick={() => act(false)}
-      >
-        {$t('xlog.disable')}
-      </Button>
+      <span class="alc-act">
+        <ImmediateMark />
+        <Button
+          variant="secondary"
+          class="btn-sm"
+          loading={busy}
+          disabled={blocked}
+          title={hint || undefined}
+          data-testid="xlog-disable"
+          onclick={() => act(false)}
+        >
+          {$t('xlog.disable')}
+        </Button>
+      </span>
     </div>
     {#if foreignNote !== ''}
       <p class="alc-caption" data-testid="xlog-foreign-note">{foreignNote}</p>
@@ -298,6 +304,14 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--spacing-2);
+  }
+
+  .alc-act {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--spacing-2);
+    min-width: 0;
   }
 
   .alc-meta {

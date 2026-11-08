@@ -3,6 +3,7 @@
   import { showConfirm } from '../../../stores';
   import Button from '../../Button.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
+  import ImmediateMark from '../ImmediateMark.svelte';
   import {
     applyRunning,
     handleLayerError,
@@ -22,9 +23,11 @@
   } from './coresOwner';
 
   // Строка владельца секции (D-01…D-05, D-15, D-25): кто ведёт секцию и какие действия
-  // доступны. Решения принимает сервер — строка отражает вид секции и снимок слоя. Все
-  // действия идут в черновик, файлы меняются при «Применить». У секций Mihomo кнопок нет:
-  // секция берётся и отпускается вместе с профилем (D-03).
+  // доступны. Решения принимает сервер — строка отражает вид секции и снимок слоя. Взятие,
+  // отпускание и пресет идут в черновик, файлы меняются при «Применить»; решения дрейфа
+  // («Вернуть файл панели», «Пересобрать», «Принять правку») пишут сразу и несут пометку
+  // ImmediateMark (D-14). У секций Mihomo кнопок нет: секция берётся и отпускается вместе с
+  // профилем (D-03).
   let {
     kernel,
     section,
@@ -121,6 +124,8 @@
     </div>
     {#if isXray}
       <div class="so-actions">
+        <!-- «Вернуть файл панели» пишет файл сразу, мимо черновика (D-14) -->
+        <ImmediateMark />
         <Button
           variant="primary"
           disabled={blocked}
@@ -151,6 +156,8 @@
     </div>
     {#if isXray && panelFile}
       <div class="so-actions">
+        <!-- «Пересобрать» и «Принять правку» меняют файл и манифест сразу, мимо черновика -->
+        <ImmediateMark />
         <Button
           variant="primary"
           disabled={blocked}
@@ -324,6 +331,7 @@
   .so-actions {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: var(--spacing-2);
   }
 
