@@ -24,6 +24,7 @@
   import { notifyApplyOutcome, type ApplyResult } from './lib/serviceApply';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import { capsuleConfigStore, updateCapsuleConfig } from './lib/capsuleSettings';
+  import DevDiagnostics from './components/config/DevDiagnostics.svelte';
   import PingTargetSettingsCard from './components/PingTargetSettingsCard.svelte';
   import PageHeader from './PageHeader.svelte';
   import UpdatesPanel from './components/settings/UpdatesPanel.svelte';
@@ -1247,6 +1248,11 @@
           </div>
         </div>
       </Section>
+
+      <!-- Диагностика слоя (D-07): карточка сама скрыта без режима разработчика -->
+      {#if $configLayerEnabled}
+        <DevDiagnostics />
+      {/if}
 
       <PingTargetSettingsCard />
     {/if}

@@ -21,6 +21,7 @@
   import TakeSectionModal from './TakeSectionModal.svelte';
   import { coresBusy } from './coresOwner';
   import DnsTakeoverCard from '../dns/DnsTakeoverCard.svelte';
+  import KernelVersions from '../KernelVersions.svelte';
   import { startDns, stopDns } from '../../../lib/configDns';
 
   // Вкладка «Xray │ Mihomo»: переключатель ядра, строка состояния, загрузка, пустое
@@ -273,6 +274,9 @@
       {/if}
     </div>
   {/each}
+
+  <!-- Версии ядер и XKeen (D-07): переехали с прежней вкладки «Файлы панели» -->
+  <KernelVersions />
 </div>
 
 <TakeSectionModal
