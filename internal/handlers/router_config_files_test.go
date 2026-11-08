@@ -6,15 +6,21 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"testing"
 )
 
 // Файловый API вкладки «Файлы» на настоящей панели устройства (CFG-03): объём
-// списка по scope=files (D-04), владелец у каждого файла (D-05). Вердикт — коды и
-// тела ответов панели. Ядро не читается и не переключается; флаг слоя
+// списка по scope=files (D-04), владелец у каждого файла (D-05), файлы с именем не
+// латиницей в корне каталога Xray (видны, читаются, удаляются и переименовываются,
+// но не сохраняются). Вердикт — коды и тела ответов панели и файлы на диске
+// устройства. Ядро не читается и не переключается; файлы с такими именами XKeen
+// может отказаться загружать, поэтому тест удаляет их до конца; флаг слоя
 // возвращается прежним, черновик сбрасывается.
 
 const rtFilesXrayDir = "/opt/etc/xray/configs"
@@ -131,5 +137,123 @@ func TestRouterConfigFilesScope(t *testing.T) {
 	}
 	if panelSeen == 0 {
 		t.Logf("в каталоге Xray нет файлов манифеста: проверка владельца panel пропущена")
+	}
+
+	rtFilesNonLatin(t, e)
+}
+
+// rtFilesNonLatin — узкий путь для имён не латиницей в корне каталога Xray.
+func rtFilesNonLatin(t *testing.T, e *rtSrc) {
+	t.Helper()
+	const (
+		name    = "rt-файл (проверка).json"
+		other   = "rt-удаление.json"
+		renamed = "rt-files-renamed.json"
+		content = `{}`
+	)
+	abs := filepath.Join(rtFilesXrayDir, name)
+	otherAbs := filepath.Join(rtFilesXrayDir, other)
+	renamedAbs := filepath.Join(rtFilesXrayDir, renamed)
+	for _, p := range []string{abs, otherAbs, renamedAbs} {
+		if _, err := os.Lstat(p); err == nil {
+			t.Fatalf("файл %s уже есть на устройстве: тест его не трогает", filepath.Base(p))
+		}
+	}
+	t.Cleanup(func() {
+		for _, p := range []string{abs, otherAbs, renamedAbs} {
+			if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("уборка %s: %v", filepath.Base(p), err)
+			}
+		}
+	})
+	for _, p := range []string{abs, otherAbs} {
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatalf("запись %s: %v", filepath.Base(p), err)
+		}
+	}
+
+	st, items := e.rtFilesList(rtFilesXrayDir, true)
+	if st != http.StatusOK {
+		t.Fatalf("список %s со scope=files: статус %d", rtFilesXrayDir, st)
+	}
+	found := map[string]rtFileItem{}
+	for _, it := range items {
+		found[it.Name] = it
+	}
+	for _, n := range []string{name, other} {
+		it, ok := found[n]
+		switch {
+		case !ok:
+			t.Errorf("файл с именем не латиницей %q не виден в списке scope=files", n)
+		case !it.Restricted:
+			t.Errorf("файл %q: restricted=false, ожидался true", n)
+		case it.Owner != "user":
+			t.Errorf("файл %q: owner %q, ожидался user", n, it.Owner)
+		}
+	}
+	// Скобки в имени — слово стоп-списка XKeen «()».
+	if it := found[name]; it.StoplistWord != "()" {
+		t.Errorf("файл %q: stoplist_word %q, ожидалось «()»", name, it.StoplistWord)
+	}
+	// Без scope список прежний: такие файлы не показываются.
+	if _, plain := e.rtFilesList(rtFilesXrayDir, false); plain != nil {
+		for _, it := range plain {
+			if it.Name == name || it.Name == other {
+				t.Errorf("список без scope показал файл с именем не латиницей %q", it.Name)
+			}
+		}
+	}
+
+	pathQ := func(p string) string { return url.Values{"path": {p}}.Encode() }
+	if r := e.call(http.MethodGet, "/api/config/read?"+pathQ(abs), nil); r.Status != http.StatusOK || string(r.Raw) != content {
+		t.Errorf("чтение %q: статус %d, содержимое %q; ожидалось 200 и %q", name, r.Status, r.Raw, content)
+	}
+	// Сохранение и создание по имени не латиницей не расширены.
+	if r := e.call(http.MethodPost, "/api/config/save?"+pathQ(abs), map[string]bool{"rt": true}); r.Status != http.StatusForbidden {
+		t.Errorf("сохранение %q: статус %d, ожидался 403", name, r.Status)
+	}
+	created := filepath.Join(rtFilesXrayDir, "rt-создание.json")
+	t.Cleanup(func() { _ = os.Remove(created) })
+	if r := e.call(http.MethodPost, "/api/config/create?"+pathQ(created), nil); r.Status != http.StatusForbidden {
+		t.Errorf("создание файла с именем не латиницей: статус %d, ожидался 403", r.Status)
+	}
+	// Обход узкой проверки: «..», подкаталог, обратная косая черта и NUL.
+	for _, bad := range []string{
+		rtFilesXrayDir + "/../файл.json",
+		rtFilesXrayDir + "/подкаталог/файл.json",
+		rtFilesXrayDir + "/a\\файл.json",
+		rtFilesXrayDir + "/файл\x00.json",
+		"/opt/etc/xcp/файл.json",
+	} {
+		if r := e.call(http.MethodGet, "/api/config/read?"+pathQ(bad), nil); r.Status != http.StatusForbidden {
+			t.Errorf("чтение недопустимого пути %q: статус %d, ожидался 403", bad, r.Status)
+		}
+		if r := e.call(http.MethodPost, "/api/config/delete?"+pathQ(bad), nil); r.Status != http.StatusForbidden {
+			t.Errorf("удаление недопустимого пути %q: статус %d, ожидался 403", bad, r.Status)
+		}
+	}
+
+	// Переименование в латинское имя — путь исправления.
+	q := url.Values{"old": {abs}, "new": {renamedAbs}}.Encode()
+	if r := e.call(http.MethodPost, "/api/config/rename?"+q, nil); r.Status != http.StatusOK {
+		t.Errorf("переименование %q в %q: статус %d %s", name, renamed, r.Status, r.Error)
+	} else {
+		if _, err := os.Stat(renamedAbs); err != nil {
+			t.Errorf("после переименования нет %s: %v", renamed, err)
+		}
+		if _, err := os.Lstat(abs); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("после переименования прежнее имя %q осталось на диске", name)
+		}
+	}
+	// Новое имя не латиницей не принимается.
+	q = url.Values{"old": {otherAbs}, "new": {filepath.Join(rtFilesXrayDir, "rt-новое.json")}}.Encode()
+	if r := e.call(http.MethodPost, "/api/config/rename?"+q, nil); r.Status != http.StatusForbidden {
+		t.Errorf("переименование в имя не латиницей: статус %d, ожидался 403", r.Status)
+	}
+	// Удаление файла с именем не латиницей.
+	if r := e.call(http.MethodPost, "/api/config/delete?"+pathQ(otherAbs), nil); r.Status != http.StatusOK {
+		t.Errorf("удаление %q: статус %d %s", other, r.Status, r.Error)
+	} else if _, err := os.Lstat(otherAbs); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("после удаления файл %q остался на диске", other)
 	}
 }
