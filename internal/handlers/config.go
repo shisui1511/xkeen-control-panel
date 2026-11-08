@@ -28,6 +28,41 @@ type ConfigFileInfo struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 	Size int64  `json:"size"`
+	// Поля ниже заполняются только при scope=files и включённом слое (D-03, D-05).
+	// Owner — panel, xkeen или user.
+	Owner string `json:"owner,omitempty"`
+	// TakeKernel и TakeSections — ядро и секции, которые панель может взять из файла.
+	TakeKernel   string   `json:"take_kernel,omitempty"`
+	TakeSections []string `json:"take_sections,omitempty"`
+	// StoplistWord — слово стоп-списка XKeen, с которым совпало имя файла.
+	StoplistWord string `json:"stoplist_word,omitempty"`
+}
+
+// filesScope — значение параметра scope запроса списка для вкладки «Файлы».
+const filesScope = "files"
+
+// filesScopeRoots — каталоги, которые видит вкладка «Файлы» (D-04): данные
+// панели, логи и бинарники в неё не попадают. Корни AllowedRoots остальных
+// вызывающих не меняются.
+var filesScopeRoots = []string{"/opt/etc/xray", "/opt/etc/mihomo", "/opt/etc/xkeen"}
+
+// inFilesScope сообщает, что каталог dir (уже прошедший PathValidator) — один из
+// корней вкладки «Файлы» или лежит под ним. Корень сравнивается в исходном и в
+// развёрнутом по симлинкам виде: PathValidator возвращает развёрнутый путь.
+func inFilesScope(dir string) bool {
+	dir = filepath.Clean(dir)
+	for _, root := range filesScopeRoots {
+		bases := []string{filepath.Clean(root)}
+		if resolved, err := filepath.EvalSymlinks(root); err == nil {
+			bases = append(bases, filepath.Clean(resolved))
+		}
+		for _, base := range bases {
+			if dir == base || strings.HasPrefix(dir, base+string(filepath.Separator)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
@@ -39,9 +74,16 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 	if dir == "" {
 		dir = a.cfg.XRayConfigDir
 	}
+	scoped := r.URL.Query().Get("scope") == filesScope
 
 	cleanDir, err := a.pathVal.Validate(dir)
 	if err != nil {
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+	// Вкладка «Файлы» видит только три каталога (D-04): данные панели, логи и
+	// бинарники сервер не отдаёт ей и по прямому запросу.
+	if scoped && !inFilesScope(cleanDir) {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
 	}
@@ -50,6 +92,25 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Владелец файлов — только для вкладки «Файлы» при включённом слое.
+	var owners *configlayer.FileOwnerIndex
+	if scoped && a.configLayer != nil && a.configLayer.Enabled() {
+		owners = a.configLayer.FileOwnerIndex()
+	}
+	describe := func(info *ConfigFileInfo) {
+		if !scoped {
+			return
+		}
+		if word, ok := utils.XKeenStoplistMatch(info.Name); ok {
+			info.StoplistWord = word
+		}
+		if owners == nil {
+			return
+		}
+		o := owners.FileOwner(info.Path)
+		info.Owner, info.TakeKernel, info.TakeSections = o.Owner, o.TakeKernel, o.TakeSections
 	}
 
 	res := make([]ConfigFileInfo, 0, len(files))
@@ -86,11 +147,13 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 		// Use original glob path (f) for Name/Path so symlinks are shown by their
 		// link name (e.g. config.yaml), not the resolved target (e.g. profiles/default.yaml).
 		// cleanF is used only for the security check and os.Stat above.
-		res = append(res, ConfigFileInfo{
+		item := ConfigFileInfo{
 			Name: filepath.Base(f),
 			Path: f,
 			Size: size,
-		})
+		}
+		describe(&item)
+		res = append(res, item)
 	}
 
 	a.jsonResponse(w, res)
