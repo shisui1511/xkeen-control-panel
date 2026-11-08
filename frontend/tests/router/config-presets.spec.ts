@@ -57,6 +57,14 @@ async function siteLists(page: Page): Promise<CatalogList[]> {
   return all.filter((l) => l.kind === 'site');
 }
 
+/** Ожидает окно изменений и подтверждает применение (D-08). */
+async function confirmApply(page: Page): Promise<void> {
+  const modal = page.getByTestId('apply-preview-modal');
+  await expect(modal).toBeVisible({ timeout: T.action });
+  await modal.getByTestId('apply-preview-confirm').click();
+  await expect(modal).toHaveCount(0, { timeout: T.save * 2 });
+}
+
 test('presets: выбор списка', async ({ page }) => {
   const guard = attachConsoleGuard(page);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -494,7 +502,8 @@ test(
       expect(drafted.rules.every((r) => r.origin === 'preset')).toBe(true);
       expect((await ownerSnap(page)).taken, 'до «Применить» файлы не тронуты').toBe(false);
 
-      await page.getByTestId('config-apply').click();
+      // В режиме перехвата окно изменений открывается сразу после выбора пресета (план 149-16)
+      await confirmApply(page);
       await expect(notice).toHaveAttribute('data-owner', 'panel', { timeout: T.save * 3 });
       expect((await ownerSnap(page)).taken).toBe(true);
 

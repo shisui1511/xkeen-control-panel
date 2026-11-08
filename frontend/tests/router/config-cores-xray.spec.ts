@@ -517,11 +517,15 @@ test('cores: Xray входящие — закреплённые строки и 
     await port.fill(newPort);
     await port.blur();
     await expect(note).toBeVisible({ timeout: T.action });
-    // объявление в полосе черновика ждём всегда, в том числе когда «Входящие» берутся в этом же
-    // черновике: взятие сравнивается с действующим значением configs/ (G-147-3, D-16)
+    // объявление перезапуска перенесено в окно изменений (план 149-08, D-09)
+    await page.getByTestId('config-apply').click();
+    const modal = page.getByTestId('apply-preview-modal');
+    await expect(modal).toBeVisible({ timeout: T.action });
     await expect(
-      page.locator('[data-testid="draft-restart-note"][data-kernel="xray"][data-reason="port"]')
+      modal.locator('[data-testid="draft-restart-note"][data-kernel="xray"][data-reason="port"]')
     ).toBeVisible({ timeout: T.action });
+    await page.getByTestId('apply-preview-cancel').click();
+    await expect(modal).toHaveCount(0);
 
     // вернули записанное значение: объявление под полем исчезло
     await port.fill(oldPort);

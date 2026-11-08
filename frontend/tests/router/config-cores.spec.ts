@@ -44,6 +44,14 @@ async function tabReady(page: Page, testId: string): Promise<void> {
   await expect(tab.locator('.skeleton')).toHaveCount(0, { timeout: T.page });
 }
 
+/** Ожидает окно изменений и подтверждает применение (D-08). */
+async function confirmApply(page: Page): Promise<void> {
+  const modal = page.getByTestId('apply-preview-modal');
+  await expect(modal).toBeVisible({ timeout: T.action });
+  await modal.getByTestId('apply-preview-confirm').click();
+  await expect(modal).toHaveCount(0, { timeout: T.save * 2 });
+}
+
 type Kernel = 'xray' | 'mihomo';
 const KERNELS: readonly Kernel[] = ['xray', 'mihomo'];
 
@@ -69,7 +77,7 @@ test('cores: вкладка и переключатель ядра', async ({ pa
   await expect(page.getByTestId('config-tab-cores')).toHaveAttribute('aria-selected', 'true');
   await tabReady(page, 'cores-tab');
 
-  // вкладка стоит между «Списками» и «Файлами панели»
+  // вкладка стоит между «Списками» и «Файлами»
   const order = await page
     .locator('[data-testid="config-tabs"] [role="tab"]')
     .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')));
@@ -397,6 +405,7 @@ test(
 
       // «Применить»: секция у панели
       await page.getByTestId('config-apply').click();
+      await confirmApply(page);
       await expect(owner).toHaveAttribute('data-owner', 'panel', { timeout: T.save * 3 });
       expect((await layerProbe(page)).dnsTaken).toBe(true);
 
@@ -422,6 +431,7 @@ test(
       await expect(owner).toHaveAttribute('data-owner', 'releasing', { timeout: T.action });
       await expect(page.getByTestId('config-apply')).toBeEnabled({ timeout: T.action });
       await page.getByTestId('config-apply').click();
+      await confirmApply(page);
       await expect(owner).toHaveAttribute('data-owner', /^(xkeen|user)$/, { timeout: T.save * 3 });
       expect((await layerProbe(page)).dnsTaken).toBe(false);
       expect(await readConfig(page, DNS_FILE), 'исходный файл вернулся побайтно').toBe(DNS_CONTENT);

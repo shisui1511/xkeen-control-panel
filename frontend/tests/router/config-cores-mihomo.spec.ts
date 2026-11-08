@@ -349,9 +349,14 @@ test('cores: Mihomo — listener force-proxy переживает правку �
     await expect(page.getByTestId('section-restart-note-mihomo-inbounds')).toBeVisible({
       timeout: T.action
     });
+    await page.getByTestId('config-apply').click();
+    const modal = page.getByTestId('apply-preview-modal');
+    await expect(modal).toBeVisible({ timeout: T.action });
     await expect(
-      page.locator('[data-testid="draft-restart-note"][data-kernel="mihomo"]')
+      modal.locator('[data-testid="draft-restart-note"][data-kernel="mihomo"]')
     ).toHaveAttribute('data-reason', 'tun', { timeout: T.action });
+    await page.getByTestId('apply-preview-cancel').click();
+    await expect(modal).toHaveCount(0);
 
     await guard.assertClean();
   } finally {
