@@ -39,6 +39,7 @@
     type NodeItem
   } from '../../../lib/nodesView';
   import DependentProfilesNote from '../profiles/DependentProfilesNote.svelte';
+  import ImmediateMark from '../ImmediateMark.svelte';
   import NodeRow from './NodeRow.svelte';
   import NodeEditModal from './NodeEditModal.svelte';
   import SourceSettingsModal from './SourceSettingsModal.svelte';
@@ -509,6 +510,7 @@
   {#if !isMy}
     <div class="card-footer sc-actions">
       {#if source.enabled}
+        <ImmediateMark />
         <Button
           variant="secondary"
           class="btn-sm"

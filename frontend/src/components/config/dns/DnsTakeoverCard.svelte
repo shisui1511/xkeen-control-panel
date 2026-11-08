@@ -88,6 +88,7 @@
   import DnsLocalZones from './DnsLocalZones.svelte';
   import DnsOutcomeNote from './DnsOutcomeNote.svelte';
   import DnsLegacyNote from './DnsLegacyNote.svelte';
+  import ImmediateMark from '../ImmediateMark.svelte';
   import {
     dnsTakeover,
     dnsLoadError,
@@ -527,7 +528,10 @@
 <section class="card dns-card" aria-labelledby={titleId} data-testid="dns-takeover-card">
   <div class="dns-head">
     <div class="dns-head-text">
-      <h3 class="dns-title" id={titleId}>{$t('cfg.dns.title')}</h3>
+      <div class="dns-title-row">
+        <h3 class="dns-title" id={titleId}>{$t('cfg.dns.title')}</h3>
+        <ImmediateMark />
+      </div>
       <p class="dns-caption">{$t('cfg.dns.subtitle')}</p>
     </div>
     {#if view && dnsState}
@@ -882,6 +886,14 @@
     flex-direction: column;
     gap: var(--spacing-1);
     flex: 1 1 240px;
+    min-width: 0;
+  }
+
+  .dns-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--spacing-2);
     min-width: 0;
   }
 
