@@ -21,7 +21,7 @@
  *   3. @full без аннотации tier-full и аннотация tier-full без @full — нарушение.
  *   4. Тест одновременно full и Slow — нарушение.
  *   5. Причина яруса full начинается с вида: «реальное время:», «внесение сбоя:»,
- *      «нагрузка на диск:» или «реальная загрузка:».
+ *      «нагрузка на диск:», «реальная загрузка:» или «визуальная матрица:» (решение владельца D-20 фазы 149).
  * Предупреждение (код не меняет): тест gate без Slow, чья медиана по build/router/history.tsv
  * основной копии за 60 дней больше бюджета (Go — 60 с, PW — 30 с) хотя бы на одном ядре, —
  * строка «бюджет gate превышен: <тест> <медиана> с». Истории нет (CI) — проверка пропускается.
@@ -48,7 +48,7 @@ const root = path.resolve(__dirname, '..');
 const HISTORY_DAYS = 60;
 const BUDGET_GO = 60;
 const BUDGET_PW = 30;
-const REASON_KIND = /^(?:реальное время|внесение сбоя|нагрузка на диск|реальная загрузка): \S/;
+const REASON_KIND = /^(?:реальное время|внесение сбоя|нагрузка на диск|реальная загрузка|визуальная матрица): \S/;
 
 const problems = [];
 const violations = [];
@@ -118,7 +118,12 @@ for (const [got, tier, tierReason, slowReason] of factSamples) {
     problems.push(`самопроверка фактов: получено ${JSON.stringify(got)}; ожидалось ${tier}/${tierReason}/${slowReason}`);
   }
 }
-if (!REASON_KIND.test('реальное время: ждёт cron') || REASON_KIND.test('долго') || REASON_KIND.test('реальное время:')) {
+if (
+  !REASON_KIND.test('реальное время: ждёт cron') ||
+  !REASON_KIND.test('визуальная матрица: ширины и темы') ||
+  REASON_KIND.test('долго') ||
+  REASON_KIND.test('реальное время:')
+) {
   problems.push('самопроверка вида причины: шаблон REASON_KIND сломан');
 }
 
@@ -148,7 +153,7 @@ for (const x of facts) {
     if (!x.tierReason) violations.push(`${x.file}: ${label(x)} — ярус full без причины`);
     else if (!REASON_KIND.test(x.tierReason)) {
       violations.push(
-        `${x.file}: ${label(x)} — причина яруса full «${x.tierReason}» не начинается с вида («реальное время:», «внесение сбоя:», «нагрузка на диск:», «реальная загрузка:»)`
+        `${x.file}: ${label(x)} — причина яруса full «${x.tierReason}» не начинается с вида («реальное время:», «внесение сбоя:», «нагрузка на диск:», «реальная загрузка:», «визуальная матрица:»)`
       );
     }
   }
