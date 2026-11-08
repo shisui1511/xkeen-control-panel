@@ -1,10 +1,10 @@
-// e2e-pages: services
+// e2e-pages: services config/nodes
 // router-area: kernel
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
 import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
-import { withPanel } from './lib/nodes-api';
+import { api, layerFlag, withPanel } from './lib/nodes-api';
 
 // Управление службой ядра через интерфейс настоящей панели (RT-05, D-04): остановка, запуск и
 // перезапуск кнопками страницы «Службы». После каждого действия статус в интерфейсе (значок
@@ -175,7 +175,7 @@ test(
         'остановка, запуск и перезапуск ядра через интерфейс с проверкой состояния после каждого действия'
     }
   },
-  async ({ page }) => {
+  async ({ page, browser }) => {
     const core = RT.core;
     test.skip(core !== 'xray' && core !== 'mihomo', 'активное ядро стенда не определено');
     test.setTimeout(6 * ACTION);
@@ -217,6 +217,39 @@ test(
     await expectState(false, 'после остановки');
     await expect(startBtn).toBeVisible({ timeout: T.action });
     await expect(stopBtn).toHaveCount(0);
+
+    // --- раздел «Конфигурация» при остановленном ядре (CFG-01) ------------------------
+    // Слой включается на время шага и возвращается прежним: раздел открыт, все шесть вкладок
+    // видны, плашки «Mihomo API оффлайн» и заглушки конфликта ядер нет.
+    const layer = layerFlag();
+    await layer.enable(browser);
+    try {
+      await expect
+        .poll(
+          async () => {
+            const st = await api(page, 'GET', '/api/configlayer/state');
+            if (st.status !== 200) return `http ${st.status}`;
+            const apply = (st.data?.apply ?? {}) as { running?: boolean };
+            return apply.running === true ? 'применение идёт' : 'готово';
+          },
+          { message: 'применение слоя не завершилось', timeout: T.page, intervals: [1000, 2000] }
+        )
+        .toBe('готово');
+      await page.goto('/#/config/nodes');
+      for (const tab of ['nodes', 'groups', 'rules', 'lists', 'cores', 'files']) {
+        await expect(
+          page.getByTestId(`config-tab-${tab}`),
+          `ядро остановлено: вкладка ${tab} раздела`
+        ).toBeVisible({ timeout: T.page });
+      }
+      await expect(page.getByTestId('config-draftbar')).toBeVisible();
+      await expect(page.locator('.api-offline')).toHaveCount(0);
+      await expect(page.getByTestId('kernel-conflict-gate')).toHaveCount(0);
+    } finally {
+      await layer.restore(browser);
+    }
+    await page.goto('/#/services');
+    await expect(startBtn).toBeVisible({ timeout: T.page });
 
     // --- запуск ----------------------------------------------------------------------
     await expect(startBtn).toBeEnabled({ timeout: ACTION });
