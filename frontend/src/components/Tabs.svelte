@@ -19,7 +19,7 @@
 </script>
 
 <script lang="ts">
-  import { slidingIndicator } from '../lib/motion.svelte';
+  import { motion, slidingIndicator } from '../lib/motion.svelte';
 
   interface Props {
     items: TabItem[];
@@ -39,11 +39,34 @@
     if (!active || node.scrollWidth <= node.clientWidth) return;
     const left = active.offsetLeft - node.offsetLeft;
     const right = left + active.offsetWidth;
+    const behavior = motion.reduced ? 'auto' : 'smooth';
     if (left < node.scrollLeft + 24) {
-      node.scrollTo({ left: Math.max(0, left - 24), behavior: 'smooth' });
+      node.scrollTo({ left: Math.max(0, left - 24), behavior });
     } else if (right > node.scrollLeft + node.clientWidth - 24) {
-      node.scrollTo({ left: right - node.clientWidth + 24, behavior: 'smooth' });
+      node.scrollTo({ left: right - node.clientWidth + 24, behavior });
     }
+  }
+
+  // Признак продолжения полосы: data-more-start / data-more-end стоят, пока за левым или
+  // правым краем есть вкладки (допуск 1 px); маска края читает их в стилях. Расчёт в
+  // скрипте, а не по шкале прокрутки CSS, поэтому работает во всех браузерах. Пересчёт — по прокрутке и по
+  // смене размеров полосы и вкладок (подписи меняются вместе с items).
+  function edgeFade(node: HTMLElement) {
+    void items;
+    const update = () => {
+      const max = node.scrollWidth - node.clientWidth;
+      node.toggleAttribute('data-more-start', max > 1 && node.scrollLeft > 1);
+      node.toggleAttribute('data-more-end', max > 1 && node.scrollLeft < max - 1);
+    };
+    const resize = new ResizeObserver(update);
+    resize.observe(node);
+    for (const tab of node.querySelectorAll('.tab-btn')) resize.observe(tab);
+    node.addEventListener('scroll', update, { passive: true });
+    update();
+    return () => {
+      resize.disconnect();
+      node.removeEventListener('scroll', update);
+    };
   }
 
   function handleClick(item: TabItem) {
@@ -58,10 +81,12 @@
   <div
     class="tabs"
     class:tabs-pill={variant === 'pill'}
+    class:tabs-line={variant !== 'pill'}
     role="tablist"
     aria-label={ariaLabel}
     {@attach slidingIndicator('.tab-btn.active')}
     {@attach revealActive}
+    {@attach edgeFade}
   >
     {#each items as item (item.value)}
       <button
@@ -99,35 +124,23 @@
   }
 
   /* Края прокручиваемой полосы растворяются, пока за ними есть вкладки: видно, что
-     полоса листается. Без прокрутки шкала неактивна и маски нет. */
-  @supports (animation-timeline: scroll()) {
-    .tabs:not(.tabs-pill) {
-      mask-image: linear-gradient(
-        to right,
-        transparent 0,
-        black var(--tabs-fade-l),
-        black calc(100% - var(--tabs-fade-r)),
-        transparent 100%
-      );
-      animation: tabs-edge-fade linear both;
-      animation-timeline: scroll(self inline);
-    }
+     полоса листается. Атрибуты выставляет edgeFade; без прокрутки маски нет. */
+  .tabs-line:global([data-more-start]) {
+    mask-image: linear-gradient(to right, transparent 0, black var(--spacing-6));
   }
 
-  @keyframes tabs-edge-fade {
-    0% {
-      --tabs-fade-l: 0px;
-      --tabs-fade-r: 32px;
-    }
-    8%,
-    92% {
-      --tabs-fade-l: 32px;
-      --tabs-fade-r: 32px;
-    }
-    100% {
-      --tabs-fade-l: 32px;
-      --tabs-fade-r: 0px;
-    }
+  .tabs-line:global([data-more-end]) {
+    mask-image: linear-gradient(to right, black calc(100% - var(--spacing-6)), transparent 100%);
+  }
+
+  .tabs-line:global([data-more-start][data-more-end]) {
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      black var(--spacing-6),
+      black calc(100% - var(--spacing-6)),
+      transparent 100%
+    );
   }
 
   .tabs-pill {
@@ -148,7 +161,7 @@
     border: 0;
     padding: 11px var(--spacing-4);
     font-family: inherit;
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-secondary);
     cursor: pointer;
@@ -159,6 +172,13 @@
       color var(--transition-fast),
       border-color var(--transition-fast),
       background var(--transition-fast);
+  }
+
+  /* Касание на телефоне и планшете: цель не меньше 44 px */
+  @media (max-width: 768px) and (pointer: coarse) {
+    .tabs-line .tab-btn {
+      min-height: 44px;
+    }
   }
 
   .tab-btn:hover:not(:disabled) {

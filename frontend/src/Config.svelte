@@ -18,6 +18,7 @@
   import RoutingOwnerNotice from './components/config/routing/RoutingOwnerNotice.svelte';
   import { watchOwnerToasts } from './components/config/routing/routingOwner';
   import { layerStatus, refetchLayerState } from './lib/configLayer';
+  import { capabilities } from './stores';
   import {
     asConfigSubTab,
     configSubTab,
@@ -35,12 +36,22 @@
     subTab = configSubTab(window.location.hash);
   }
 
+  // Подпись вкладки ядер (D-15): установлено одно ядро — только его имя (имена ядер не
+  // переводятся); оба, ни одного или capabilities ещё не пришли — «Xray │ Mihomo»
+  const coresLabel = $derived.by(() => {
+    const xray = $capabilities?.kernels?.xray?.installed === true;
+    const mihomo = $capabilities?.kernels?.mihomo?.installed === true;
+    if (xray && !mihomo) return 'Xray';
+    if (mihomo && !xray) return 'Mihomo';
+    return $t('cfg.tab.cores');
+  });
+
   const tabItems = $derived([
     { value: 'nodes', label: $t('cfg.tab.nodes'), testId: 'config-tab-nodes' },
     { value: 'groups', label: $t('cfg.tab.groups'), testId: 'config-tab-groups' },
     { value: 'rules', label: $t('cfg.tab.rules'), testId: 'config-tab-rules' },
     { value: 'lists', label: $t('cfg.tab.lists'), testId: 'config-tab-lists' },
-    { value: 'cores', label: $t('cfg.tab.cores'), testId: 'config-tab-cores' },
+    { value: 'cores', label: coresLabel, testId: 'config-tab-cores' },
     { value: 'files', label: $t('cfg.tab.files'), testId: 'config-tab-files' }
   ]);
 
