@@ -96,11 +96,11 @@ test('routing: вкладки открываются кликом и по мар
 
   await page.getByTestId('config-tab-files').click();
   await expect(page).toHaveURL(/#\/config\/files$/);
-  await expect(page.getByTestId('config-files')).toBeVisible({ timeout: T.action });
+  await expect(page.getByTestId('files-tab')).toBeVisible({ timeout: T.action });
   await expect(page.getByTestId('rules-tab')).toHaveCount(0);
   expect(await kept()).toBe(true);
 
-  // порядок вкладок: Узлы, Группы, Правила, Списки, Xray │ Mihomo, Файлы панели
+  // порядок вкладок: Узлы, Группы, Правила, Списки, Xray │ Mihomo, Файлы
   const order = await page
     .locator('[data-testid="config-tabs"] [role="tab"]')
     .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')));
@@ -426,6 +426,10 @@ test(
       expect((await ownerSnap(page)).taken, 'до «Применить» файлы не тронуты').toBe(false);
 
       await page.getByTestId('config-apply').click();
+      const applyModal = page.getByTestId('apply-preview-modal');
+      await expect(applyModal).toBeVisible({ timeout: T.action });
+      await applyModal.getByTestId('apply-preview-confirm').click();
+      await expect(applyModal).toHaveCount(0, { timeout: T.save * 2 });
       await expect(notice).toHaveAttribute('data-owner', 'panel', { timeout: T.save * 3 });
       await expect(
         page
@@ -434,11 +438,15 @@ test(
       ).toBeVisible({ timeout: T.action });
       expect((await ownerSnap(page)).taken).toBe(true);
 
-      // «Отпустить»: подтверждение, возврат и применение без ожидания
+      // «Отпустить»: подтверждение, затем окно изменений и применение
       await page.getByTestId('routing-release').click();
       const confirm = page.getByRole('dialog');
       await expect(confirm).toBeVisible({ timeout: T.action });
       await confirm.getByRole('button', { name: /^(Отпустить|Release)$/ }).click();
+      const releaseModal = page.getByTestId('apply-preview-modal');
+      await expect(releaseModal).toBeVisible({ timeout: T.action });
+      await releaseModal.getByTestId('apply-preview-confirm').click();
+      await expect(releaseModal).toHaveCount(0, { timeout: T.save * 2 });
       await expect(notice).toHaveAttribute('data-owner', 'xkeen', { timeout: T.save * 3 });
       await expect(
         page
@@ -592,18 +600,23 @@ test(
       await expect(modal.getByTestId('take-routing-nodes-only')).toBeVisible();
       await expect(modal.getByTestId('take-routing-cancel')).toBeVisible();
 
-      // «Отмена»: ничего не записано и не применено
+      // «Отмена»: ничего не записано и не применено, окно изменений не открылось
       await modal.getByTestId('take-routing-cancel').click();
       await expect(modal).toHaveCount(0, { timeout: T.action });
+      await expect(page.getByTestId('apply-preview-modal')).toHaveCount(0);
       const afterCancel = await ownerSnap(page);
       expect(afterCancel.desired, 'отмена не пишет желание «взять»').toBe(false);
       expect(afterCancel.changes, 'отмена не применяет черновик').toBeGreaterThan(0);
 
-      // «Применить только узлы»: применение без взятия, плашка XKeen прежняя
+      // «Применить только узлы»: применение без взятия через окно изменений, плашка XKeen прежняя
       await apply.click();
       await expect(modal).toBeVisible({ timeout: T.action });
       await modal.getByTestId('take-routing-nodes-only').click();
       await expect(modal).toHaveCount(0, { timeout: T.action });
+      const nodesModal = page.getByTestId('apply-preview-modal');
+      await expect(nodesModal).toBeVisible({ timeout: T.action });
+      await nodesModal.getByTestId('apply-preview-confirm').click();
+      await expect(nodesModal).toHaveCount(0, { timeout: T.save * 2 });
       await expect
         .poll(
           async () => {
@@ -732,7 +745,7 @@ test(
       await expect(notices.locator('[data-notice^="routing_list_missing:"]')).toHaveCount(0);
 
       // стенд: Mihomo не ниже 1.19.27, Xray не ниже 1.8.10 — пояснений о порогах нет
-      await openConfig(page, '#/config/files');
+      await openConfig(page, '#/config/cores');
       await expect(page.getByTestId('config-kernels')).toBeVisible({ timeout: T.action });
       await expect(page.getByTestId('config-kernels').locator('li').first()).toBeVisible();
       await expect(page.locator('[data-testid^="config-kernel-note-"]')).toHaveCount(0);
