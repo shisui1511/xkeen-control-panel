@@ -2833,54 +2833,12 @@ pre.code-output {
 .api-offline-desc {
   font-size: var(--font-size-sm);
   color: var(--fg-secondary);
-}
-
-.api-endpoint {
-  font-family: var(--font-family-mono);
-  font-size: var(--font-size-xs);
-  color: var(--fg-primary);
-  background: rgba(239, 91, 107, 0.1);
-  border: 1px solid rgba(239, 91, 107, 0.3);
-  padding: 1px var(--spacing-1-5);
-  border-radius: var(--radius-xs);
-  margin-right: var(--spacing-1);
-}
-
-.api-offline-meta {
-  display: flex;
-  gap: var(--spacing-2);
-  margin-left: auto;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.api-offline-tag {
-  font-family: var(--font-family-mono);
-  font-size: var(--font-size-xs);
-  letter-spacing: 0.04em;
-  color: var(--fg-dim);
-  padding: 3px var(--spacing-2);
-  border-radius: var(--radius-xs);
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border);
-}
-
-.api-offline-tag b {
-  color: var(--fg-secondary);
-  font-weight: 600;
-  margin-left: var(--spacing-1);
-}
-
-.api-offline-tag.retry {
-  color: var(--warning);
-  border-color: rgba(240, 180, 80, 0.4);
-  background: rgba(240, 180, 80, 0.08);
+  overflow-wrap: anywhere;
 }
 
 .api-offline-action {
   flex-shrink: 0;
-  padding: 7px var(--spacing-3);
-  font-size: var(--font-size-xs);
+  margin-left: auto;
 }
 
 @media (max-width: 1024px) {
@@ -2896,12 +2854,6 @@ pre.code-output {
 
   .api-offline-body {
     flex: 1 1 0;
-  }
-
-  .api-offline-meta {
-    flex-basis: 100%;
-    margin-left: 0;
-    padding-left: 26px;
   }
 }
 
@@ -3600,16 +3552,15 @@ pre.code-output {
   }
 }
 
-/* Плашка «API недоступен» на телефоне: одна компактная строка — индикатор,
-   заголовок с коротким пояснением и кнопка справа; обратный отсчёт повтора
-   скрыт (повтор всё равно идёт сам) */
+/* Плашка «API недоступен» на телефоне: индикатор и причина в одной строке, причина
+   переносится целиком; действие — под текстом, цель касания не меньше 44 px */
 @media (max-width: 768px) {
   .api-offline {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
-    gap: var(--spacing-1) var(--spacing-3);
-    padding: var(--spacing-2-5) var(--spacing-2-5) var(--spacing-2-5) var(--spacing-3-5);
+    gap: var(--spacing-2) var(--spacing-3);
+    padding: var(--spacing-3);
   }
 
   .api-offline .api-offline-led {
@@ -3624,42 +3575,12 @@ pre.code-output {
     min-width: 0;
   }
 
-  .api-offline .api-offline-desc {
-    font-size: var(--font-size-xs);
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    overflow: hidden;
-  }
-
-  .api-offline .api-offline-meta {
-    display: none;
-  }
-
   .api-offline .api-offline-action {
-    grid-column: 3;
-    grid-row: 1;
-    min-height: 36px;
-  }
-}
-
-@media (max-width: 480px) {
-  /* Узкий телефон: кнопка повтора — значок 40×40, подпись остаётся для диктора */
-  .api-offline .api-offline-action {
-    min-width: 40px;
-    min-height: 40px;
-    padding: 0;
-    justify-content: center;
-  }
-
-  .api-offline-action-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: start;
+    margin-left: 0;
+    min-height: 44px;
   }
 }
 

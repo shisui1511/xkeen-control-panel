@@ -1,5 +1,5 @@
 // e2e-kind: read
-// e2e-pages: rules
+// e2e-pages: rules proxies config/nodes
 // router-area: routing
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
@@ -224,3 +224,64 @@ test(
     await guard.assertClean();
   }
 );
+
+/** Флаг слоя «Конфигурация» на устройстве (чтение): без него маршрута #/config нет. */
+async function configLayerOn(page: Page): Promise<boolean> {
+  const res = await page.request.get('/api/settings');
+  if (!res.ok()) return false;
+  const body = (await res.json()) as { data?: { config_layer?: boolean } };
+  return body.data?.config_layer === true;
+}
+
+/** Mihomo установлен на устройстве (чтение /api/capabilities). */
+async function mihomoInstalled(page: Page): Promise<boolean> {
+  const res = await page.request.get('/api/capabilities');
+  if (!res.ok()) return false;
+  const body = (await res.json()) as {
+    data?: { kernels?: { mihomo?: { installed?: boolean } } };
+    kernels?: { mihomo?: { installed?: boolean } };
+  };
+  return (body.data ?? body).kernels?.mihomo?.installed !== false;
+}
+
+const CONFIG_TABS = ['nodes', 'groups', 'rules', 'lists', 'cores', 'files'];
+
+// CFG-01: плашка «Mihomo API оффлайн» пишет причину по состоянию ядер и не предлагает запуск
+// второго ядра; раздел «Конфигурация» открыт при любом ядре и плашкой не закрывается.
+test(`proxies offline reason core:${RT.core}`, { tag: CORE_TAG }, async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/#/proxies', { timeout: T.page, waitUntil: 'domcontentloaded' });
+  await expect(page.locator('.main-content .page-header h1').first()).toBeVisible({
+    timeout: T.page
+  });
+
+  if (RT.core === 'xray') {
+    test.skip(!(await mihomoInstalled(page)), 'Mihomo не установлен: плашки нет по замыслу');
+    const banner = page.locator('.api-offline');
+    await expect(banner).toHaveAttribute('data-reason', 'xray', { timeout: T.page });
+    await expect(banner.getByTestId('api-offline-services')).toHaveAttribute('href', '#/services');
+    await expect(page.getByTestId('api-offline-start')).toHaveCount(0);
+    await expect(page.getByTestId('api-offline-restart')).toHaveCount(0);
+  } else {
+    // Mihomo активен: API отвечает, плашки нет (ждём ответа capabilities)
+    await page.waitForLoadState('networkidle', { timeout: T.network }).catch(() => {});
+    await expect(page.locator('.api-offline')).toHaveCount(0, { timeout: T.page });
+  }
+
+  if (!(await configLayerOn(page))) {
+    test.info().annotations.push({
+      type: 'skip-part',
+      description: 'флаг config_layer выключен на стенде: раздел #/config не проверен'
+    });
+  } else {
+    await page.goto('/#/config/nodes', { timeout: T.page, waitUntil: 'domcontentloaded' });
+    for (const tab of CONFIG_TABS) {
+      await expect(page.getByTestId(`config-tab-${tab}`)).toBeVisible({ timeout: T.page });
+    }
+    await expect(page.locator('.api-offline')).toHaveCount(0);
+    await expect(page.getByTestId('kernel-conflict-gate')).toHaveCount(0);
+  }
+
+  await guard.assertClean();
+});

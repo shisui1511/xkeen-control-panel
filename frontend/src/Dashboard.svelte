@@ -19,6 +19,7 @@
     isConflict,
     isMihomo,
     activeKernelName,
+    runningKernels,
     fetchSettingsFlags,
     configLayerEnabled,
     configLayerFlagKnown,
@@ -28,7 +29,7 @@
   import { usePoller } from './lib/poller';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { isServiceRestarting } from './lib/serviceGrace';
-  import { serviceAction } from './lib/serviceControl';
+  import { serviceAction, switchKernel, notifySwitchOutcome } from './lib/serviceControl';
   import { panelNewVersion, rememberPanelVersion } from './lib/panelHealth';
   import Sidebar from './components/Sidebar.svelte';
   import BottomDock from './components/BottomDock.svelte';
@@ -118,6 +119,13 @@
   // В конфликте ядер (оба процесса запущены) вкладки ядер и режим конструктора закрыты
   // заглушкой под баннером; обычный редактор — правка файлов, данные — не гейтится.
   const conflictGatedTabs = [...mihomoDependentTabs, 'dat'];
+  // Причина плашки «Mihomo API оффлайн» по состоянию ядер (todo mihomo-offline-banner-reason):
+  // при активном Xray страница просто показывает данные другого ядра — запуск Mihomo
+  // не предлагается (он столкнул бы два ядра, FND-05)
+  const apiOfflineReason = $derived(
+    $activeKernelName === 'xray' ? 'xray' : ($mihomoOfflineReason ?? 'api_down')
+  );
+  const apiOfflineCanStart = $derived($runningKernels.length === 0);
   const conflictGateActive = $derived(
     $conflictVisible &&
       (conflictGatedTabs.includes(currentTab) || (currentTab === 'editor' && isConstructorMode))
@@ -873,6 +881,28 @@
     }
   }
 
+  async function startMihomoFromBanner() {
+    try {
+      const res = await switchKernel('mihomo');
+      if (res.outcome !== 'switched') notifySwitchOutcome(res);
+      await fetchCapabilities();
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e?.message || $t('app.error'));
+    }
+  }
+
+  async function restartMihomoFromBanner() {
+    try {
+      await serviceAction('restart');
+      showToast('success', $t('app.restart') + ' Mihomo...');
+      await fetchCapabilities();
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e?.message || $t('app.error'));
+    }
+  }
+
   function statusColor(status: string): string {
     if (status === 'running') return 'success';
     if (status === 'stopped' || status === 'not_installed') return 'error';
@@ -1054,9 +1084,10 @@
         <!-- «Правила» работают без API Mihomo: вместо баннера — пометка на самой странице (D-19) -->
         <div class="shell-banner-slot">
           <ApiOffline
-            endpoint={$capabilities?.mihomo?.discovered_secret ? 'Mihomo API' : '127.0.0.1:9090'}
-            lastSeenSeconds={0}
-            onRetry={fetchCapabilities}
+            reason={apiOfflineReason}
+            canStart={apiOfflineCanStart}
+            onStart={startMihomoFromBanner}
+            onRestart={restartMihomoFromBanner}
           />
         </div>
       {/if}

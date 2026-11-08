@@ -1,39 +1,48 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
   import { t } from '../i18n';
+  import Button from './Button.svelte';
 
-  // Props — pass the endpoint URL and time since last successful response
+  // Плашка «Mihomo API оффлайн»: причина по состоянию ядер, без адреса контроллера и без
+  // таймера повтора (опрос capabilities и так идёт сам). Действие зависит от причины:
+  //   xray        — работает Xray: ссылка на «Службы», запуск Mihomo не предлагается;
+  //   not_running — Mihomo остановлен: «Запустить Mihomo», только если не запущено другое ядро;
+  //   api_down    — процесс есть, API молчит: «Перезапустить Mihomo».
+  type Reason = 'xray' | 'not_running' | 'api_down';
+
   let {
-    endpoint = '127.0.0.1:9090',
-    lastSeenSeconds = 0,
-    onRetry = () => {}
+    reason,
+    canStart = false,
+    onStart,
+    onRestart
   }: {
-    endpoint?: string;
-    lastSeenSeconds?: number;
-    onRetry?: () => void;
+    reason: Reason;
+    canStart: boolean;
+    onStart?: () => void | Promise<void>;
+    onRestart?: () => void | Promise<void>;
   } = $props();
 
-  // Format last-seen into a human-readable string
-  function formatLastSeen(secs: number): string {
-    if (secs < 60) return `${secs} ${$t('apioffline.sec_ago')}`;
-    if (secs < 3600) return `${Math.floor(secs / 60)} ${$t('apioffline.min_ago')}`;
-    return `${Math.floor(secs / 3600)} ${$t('apioffline.hour_ago')}`;
-  }
+  let busy = $state(false);
 
-  // Retry countdown: 8 seconds from mount, then a single onRetry()
-  let countdown = $state(8);
-  const timer = setInterval(() => {
-    countdown--;
-    if (countdown <= 0) {
-      clearInterval(timer);
-      onRetry();
+  const text = $derived(
+    reason === 'xray'
+      ? $t('apioffline.reason_xray')
+      : reason === 'not_running'
+        ? $t('apioffline.reason_not_running')
+        : $t('apioffline.reason_api_down')
+  );
+
+  async function run(action: (() => void | Promise<void>) | undefined) {
+    if (!action || busy) return;
+    busy = true;
+    try {
+      await action();
+    } finally {
+      busy = false;
     }
-  }, 1000);
-
-  onDestroy(() => clearInterval(timer));
+  }
 </script>
 
-<div class="api-offline" role="status" aria-live="polite">
+<div class="api-offline" role="status" aria-live="polite" data-reason={reason}>
   <span class="api-offline-led" aria-hidden="true"></span>
 
   <div class="api-offline-body">
@@ -57,42 +66,40 @@
       </svg>
       {$t('apioffline.title')}
     </div>
-    <div class="api-offline-desc">
-      <span class="api-endpoint">{endpoint}</span>
-      {$t('apioffline.desc')}
-    </div>
+    <div class="api-offline-desc">{text}</div>
   </div>
 
-  <div class="api-offline-meta">
-    {#if lastSeenSeconds > 0}
-      <span class="api-offline-tag">
-        {$t('apioffline.last_seen')} <b>{formatLastSeen(lastSeenSeconds)}</b>
-      </span>
-    {/if}
-    <span class="api-offline-tag retry">
-      {$t('apioffline.retry_countdown', { countdown: String(countdown) })}
-    </span>
-  </div>
-
-  <button
-    class="btn btn-secondary api-offline-action"
-    onclick={onRetry}
-    title={$t('apioffline.retry_title')}
-  >
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2.2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
+  {#if reason === 'xray'}
+    <a
+      class="btn btn-secondary api-offline-action"
+      href="#/services"
+      data-testid="api-offline-services"
     >
-      <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
-      <path d="M21 3v5h-5" />
-    </svg>
-    <span class="api-offline-action-label">{$t('apioffline.retry')}</span>
-  </button>
+      {$t('apioffline.services_link')}
+    </a>
+  {:else if reason === 'not_running'}
+    {#if canStart && onStart}
+      <Button
+        variant="primary"
+        class="api-offline-action"
+        data-testid="api-offline-start"
+        loading={busy}
+        disabled={busy}
+        onclick={() => run(onStart)}
+      >
+        {$t('apioffline.start_mihomo')}
+      </Button>
+    {/if}
+  {:else if onRestart}
+    <Button
+      variant="secondary"
+      class="api-offline-action"
+      data-testid="api-offline-restart"
+      loading={busy}
+      disabled={busy}
+      onclick={() => run(onRestart)}
+    >
+      {$t('apioffline.restart_mihomo')}
+    </Button>
+  {/if}
 </div>
