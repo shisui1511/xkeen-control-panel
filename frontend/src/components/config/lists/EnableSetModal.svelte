@@ -21,6 +21,7 @@
   import Button from '../../Button.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
   import DiffView from '../DiffView.svelte';
+  import ImmediateMark from '../ImmediateMark.svelte';
   import {
     previewOp,
     writeOp,
@@ -158,6 +159,7 @@
 
 <Modal {open} {title} maxWidth="640px" testid="geodata-add-modal" onclose={close}>
   <div class="es-body">
+    <ImmediateMark />
     {#if target}
       <p class="es-text" id="{uid}-body" data-testid="geodata-add-body">
         {bodyParts[0]}<span class="es-mono">{target.file}</span>{bodyParts[1]}

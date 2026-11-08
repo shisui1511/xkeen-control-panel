@@ -8,6 +8,7 @@
   import Input from '../../Input.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
   import DiffView from '../DiffView.svelte';
+  import ImmediateMark from '../ImmediateMark.svelte';
   import ProbeResults from './ProbeResults.svelte';
   import {
     geodataView,
@@ -204,6 +205,7 @@
   onclose={close}
 >
   <div class="am-body">
+    <ImmediateMark />
     <div class="am-field" data-testid="geo-add-file">
       <Input
         id="{uid}-file"
