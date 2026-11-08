@@ -204,6 +204,7 @@
   "configlayer.dns.kernel_conflict": "Запущены оба ядра. Остановите одно из них и повторите.",
   "configlayer.dns.kernel_stopped": "Запустите ядро. Включение перехвата его не запускает.",
   "configlayer.dns.legacy_blocked": "Перенаправление DNS ведёт слой «Конфигурация»: старый переключатель недоступен.",
+  "configlayer.legacy_blocked": "Эта настройка перенесена в раздел «Конфигурация»: меняйте её там.",
   "configlayer.dns.legacy_off_failed": "Не удалось выключить старое перенаправление.",
   "configlayer.dns.name_invalid": "Имя для проверки — доменное имя, например example.com.",
   "configlayer.dns.no_window": "Окна подтверждения нет: перехват уже подтверждён или откачен.",
