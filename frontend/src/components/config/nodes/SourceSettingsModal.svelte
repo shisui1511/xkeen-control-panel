@@ -255,6 +255,8 @@
         id="{uid}-interval"
         bind:value={interval}
         {options}
+        class="ss-interval-select"
+        title={options.find((o) => o.value === interval)?.label ?? ''}
         data-testid="nodes-settings-interval"
       />
     </div>
@@ -336,6 +338,12 @@
     flex-direction: column;
     gap: var(--spacing-2);
     min-width: 0;
+  }
+
+  :global(.ss-interval-select) {
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
   }
 
   .ss-hint {
