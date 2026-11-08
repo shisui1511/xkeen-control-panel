@@ -934,6 +934,35 @@
     }
   });
 
+  // Флаг включён — старые входы в настройку перенаправляются в единый раздел «Конфигурация» (D-01, D-16)
+  $effect(() => {
+    if (!$configLayerFlagKnown || !$configLayerEnabled) return;
+    if (isConstructorMode) {
+      window.location.replace('#/config/cores');
+      return;
+    }
+    if (currentTab === 'editor') {
+      window.location.replace('#/config/files');
+      return;
+    }
+    if (currentTab === 'proxies') {
+      const q = currentHash.split('?')[1] || '';
+      const params = new URLSearchParams(q);
+      if (params.get('tab') === 'providers') {
+        window.location.replace('#/config/nodes');
+        return;
+      }
+    }
+    if (currentTab === 'rules') {
+      const q = currentHash.split('?')[1] || '';
+      const params = new URLSearchParams(q);
+      if (params.get('tab') === 'exceptions') {
+        window.location.replace('#/config/rules');
+        return;
+      }
+    }
+  });
+
   onMount(() => {
     fetchVersion();
     void fetchSettingsFlags();
@@ -1270,7 +1299,7 @@
             </div>
           </div>
         </div>
-      {:else if currentTab === 'editor'}
+      {:else if currentTab === 'editor' && !($configLayerFlagKnown && $configLayerEnabled)}
         {#await import('./Editor.svelte')}
           <Skeleton type="card" height="100%" />
         {:then { default: Editor }}
