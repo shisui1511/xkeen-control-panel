@@ -728,8 +728,13 @@ async function startRun(path: string, body: unknown): Promise<void> {
   }
 }
 
-export function applyNow(): Promise<void> {
-  return startRun('/api/configlayer/apply', {});
+/**
+ * Запуск «Применить». revision — ревизия черновика, которую показало окно изменений:
+ * если черновик с тех пор изменился, сервер отвечает 409 draft_conflict. Без ревизии
+ * сверки нет (прежние вызовы).
+ */
+export function applyNow(revision?: number): Promise<void> {
+  return startRun('/api/configlayer/apply', revision !== undefined ? { revision } : {});
 }
 
 export function rebuildFiles(keys: string[] | 'all'): Promise<void> {
