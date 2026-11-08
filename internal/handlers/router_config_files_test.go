@@ -21,7 +21,8 @@ import (
 // но не сохраняются). Вердикт — коды и тела ответов панели и файлы на диске
 // устройства. Ядро не читается и не переключается; файлы с такими именами XKeen
 // может отказаться загружать, поэтому тест удаляет их до конца; флаг слоя
-// возвращается прежним, черновик сбрасывается.
+// возвращается прежним, черновик сбрасывается. Список последних применений файла
+// панели (D-06) только читается: наборы копий тест не создаёт.
 
 const rtFilesXrayDir = "/opt/etc/xray/configs"
 
@@ -140,6 +141,92 @@ func TestRouterConfigFilesScope(t *testing.T) {
 	}
 
 	rtFilesNonLatin(t, e)
+	rtFilesApplies(t, e)
+}
+
+// rtFilesApplies — последние применения файла панели (D-06): только ключ
+// манифеста и идентификатор набора копий, не путь.
+func rtFilesApplies(t *testing.T, e *rtSrc) {
+	t.Helper()
+	const base = "/api/configlayer/files/applies?"
+	// Файл pending ещё не записан и в манифест не входит.
+	var files []rtLayerFile
+	for _, f := range e.rtLayerFiles() {
+		if f.State != "pending" {
+			files = append(files, f)
+		}
+	}
+	for _, f := range files {
+		r := e.call(http.MethodGet, base+url.Values{"key": {f.Key}}.Encode(), nil)
+		if r.Status != http.StatusOK {
+			t.Errorf("применения %s: статус %d %s, ожидался 200", f.Key, r.Status, r.Code)
+			continue
+		}
+		var view struct {
+			Key     string `json:"key"`
+			Path    string `json:"path"`
+			Applies []struct {
+				ID     string `json:"id"`
+				Reason string `json:"reason"`
+				Size   int64  `json:"size"`
+			} `json:"applies"`
+		}
+		if err := json.Unmarshal(r.Data, &view); err != nil {
+			t.Fatalf("применения %s: %v", f.Key, err)
+		}
+		// У отпущенного файла снимок пути не несёт.
+		if view.Key != f.Key || (f.Path != "" && view.Path != f.Path) {
+			t.Errorf("применения %s: key %q, path %q; ожидались ключ и путь из снимка", f.Key, view.Key, view.Path)
+		}
+		if len(view.Applies) > 5 {
+			t.Errorf("применения %s: %d записей, ожидалось не больше 5", f.Key, len(view.Applies))
+		}
+		if len(view.Applies) == 0 {
+			continue
+		}
+		first := view.Applies[0]
+		q := url.Values{"key": {f.Key}, "id": {first.ID}}.Encode()
+		c := e.call(http.MethodGet, base+q, nil)
+		if c.Status != http.StatusOK {
+			t.Errorf("версия до применения %s %s: статус %d %s", f.Key, first.ID, c.Status, c.Code)
+			continue
+		}
+		var content struct {
+			ID        string `json:"id"`
+			Content   string `json:"content"`
+			Truncated bool   `json:"truncated"`
+		}
+		if err := json.Unmarshal(c.Data, &content); err != nil {
+			t.Fatalf("версия до применения %s: %v", f.Key, err)
+		}
+		if content.ID != first.ID || (!content.Truncated && int64(len(content.Content)) != first.Size) {
+			t.Errorf("версия до применения %s %s: id %q, длина %d при размере %d", f.Key, first.ID, content.ID, len(content.Content), first.Size)
+		}
+	}
+	if len(files) == 0 {
+		t.Logf("манифест пуст: список применений существующего ключа не проверен")
+	}
+
+	if r := e.call(http.MethodGet, base+url.Values{"key": {"xray:rt-absent.json"}}.Encode(), nil); r.Status != http.StatusNotFound {
+		t.Errorf("применения ключа вне манифеста: статус %d, ожидался 404", r.Status)
+	}
+	// Путь вместо ключа не принимается.
+	if r := e.call(http.MethodGet, base+url.Values{"key": {rtFilesXrayDir + "/01_log.json"}}.Encode(), nil); r.Status != http.StatusNotFound {
+		t.Errorf("применения по пути вместо ключа: статус %d, ожидался 404", r.Status)
+	}
+	if len(files) == 0 {
+		return
+	}
+	key := files[0].Key
+	for _, bad := range []string{"../apply-1", "apply-1/../../state", "apply-1/x", "apply-x", "state"} {
+		q := url.Values{"key": {key}, "id": {bad}}.Encode()
+		if r := e.call(http.MethodGet, base+q, nil); r.Status != http.StatusBadRequest {
+			t.Errorf("версия до применения с id %q: статус %d, ожидался 400", bad, r.Status)
+		}
+	}
+	if r := e.call(http.MethodGet, base+url.Values{"key": {key}, "id": {"apply-1"}}.Encode(), nil); r.Status != http.StatusNotFound {
+		t.Errorf("версия до несуществующего применения: статус %d, ожидался 404", r.Status)
+	}
 }
 
 // rtFilesNonLatin — узкий путь для имён не латиницей в корне каталога Xray.

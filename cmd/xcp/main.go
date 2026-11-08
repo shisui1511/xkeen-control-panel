@@ -958,6 +958,7 @@ func main() {
 	srv.HandleProtected("/api/configlayer/files/rebuild", api.ConfigLayerFilesRebuild)
 	srv.HandleProtected("/api/configlayer/files/release", api.ConfigLayerFilesRelease)
 	srv.HandleProtected("/api/configlayer/files/diff", api.ConfigLayerFilesDiff)
+	srv.HandleProtected("/api/configlayer/files/applies", api.ConfigLayerFilesApplies)
 	srv.HandleProtected("/api/configlayer/notices/dismiss", api.ConfigLayerNoticesDismiss)
 	srv.HandleProtected("/api/configlayer/diag", api.ConfigLayerDiag)
 	srv.HandleProtected("/api/configlayer/sources", api.ConfigSources)
