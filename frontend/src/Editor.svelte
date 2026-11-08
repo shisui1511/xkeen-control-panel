@@ -942,6 +942,12 @@
   }
 
   async function restoreBackup(backupPath: string) {
+    // Файл панели только для чтения (D-03): readOnly CodeMirror не останавливает
+    // программный dispatch, поэтому отказ здесь, как в handleInsertIntoEditor.
+    if (isManagedReadOnly) {
+      showToast('warning', $t('editor.managed_readonly_hint'));
+      return;
+    }
     // «Восстановить» подставляет копию только в файл, для которого её нажали.
     // Пока открыто подтверждение или читается копия, на ПК можно открыть другой
     // файл из колонки (лист копий при этом жив). Без сверки после каждого
@@ -975,6 +981,11 @@
       const content = await fetchBackupContent(backupPath);
       if (!stillValid()) {
         abortStale();
+        return;
+      }
+      // Файл мог перейти под управление панели, пока шло подтверждение и чтение копии
+      if (isManagedReadOnly) {
+        showToast('warning', $t('editor.managed_readonly_hint'));
         return;
       }
 
@@ -1682,6 +1693,7 @@
               {selectedBackup}
               {diffGroups}
               {backupLoading}
+              restoreDisabled={isManagedReadOnly}
               onSelectBackup={selectBackup}
               onRestoreBackup={restoreBackup}
               onclose={() => (drawerOpen = false)}

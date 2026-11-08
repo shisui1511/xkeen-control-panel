@@ -12,6 +12,7 @@
     selectedBackup = '',
     diffGroups = [],
     backupLoading = false,
+    restoreDisabled = false,
     onSelectBackup,
     onRestoreBackup,
     onclose: onClose
@@ -20,6 +21,8 @@
     selectedBackup: string;
     diffGroups: DiffGroup[];
     backupLoading: boolean;
+    /** Файл панели (только чтение, D-03): копию в него подставить нельзя, просмотр и сравнение остаются */
+    restoreDisabled?: boolean;
     onSelectBackup: (backup: string) => void;
     onRestoreBackup: (backup: string) => void;
     onclose?: () => void;
@@ -27,6 +30,11 @@
 
   // Мобильный лист — два экрана: список копий → сравнение на весь лист
   let mobileScreen = $state<'list' | 'diff'>('list');
+
+  function restore(backup: string) {
+    if (restoreDisabled) return;
+    onRestoreBackup(backup);
+  }
 
   function formatBackupDate(backup: string): string {
     const parts = backup.split('.backup-');
@@ -90,7 +98,9 @@
           <button
             type="button"
             class="btn btn-sm btn-secondary restore-inline-btn"
-            onclick={() => onRestoreBackup(backup)}
+            disabled={restoreDisabled}
+            title={restoreDisabled ? $t('editor.restore_managed_title') : undefined}
+            onclick={() => restore(backup)}
           >
             {$t('settings.restore')}
           </button>
@@ -109,7 +119,9 @@
             <button
               type="button"
               class="btn btn-primary btn-sm diff-restore-btn"
-              onclick={() => onRestoreBackup(selectedBackup)}
+              disabled={restoreDisabled}
+              title={restoreDisabled ? $t('editor.restore_managed_title') : undefined}
+              onclick={() => restore(selectedBackup)}
             >
               {$t('settings.restore')}
             </button>
