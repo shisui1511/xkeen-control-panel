@@ -493,6 +493,10 @@ func (a *API) ConfigCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if a.rejectManagedPath(w, r, cleanPath) {
+		return
+	}
+
 	if _, statErr := os.Stat(cleanPath); os.IsNotExist(statErr) {
 		if word, blocked := a.xkeenStoplistBlock(r, cleanPath); blocked {
 			a.stoplistConflict(w, r, cleanPath, word)
