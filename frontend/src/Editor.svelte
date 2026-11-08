@@ -118,6 +118,24 @@
   // Копии показываются только для файла в редакторе: до ответа фонового запроса
   // список пуст, копии прежнего файла не видны (WR-01)
   const visibleBackups = $derived(backupsPath === selectedFile ? backups : []);
+  // Исход последнего запроса списка копий: «копий нет» (ready с пустым списком) и «список
+  // не получен» (error) различаются (todo editor-backups-list-error-states). Состояние
+  // помечено путём файла, как и сам список: для другого файла оно не действует.
+  type BackupsStatus = 'idle' | 'loading' | 'ready' | 'error';
+  let backupsStatus = $state<BackupsStatus>('idle');
+  let backupsStatusPath = $state('');
+  const visibleBackupsStatus = $derived<BackupsStatus>(
+    backupsStatusPath === selectedFile ? backupsStatus : 'idle'
+  );
+  // Строка состояния: счётчик — при полученном списке (в том числе пока идёт фоновое
+  // обновление уже загруженного), ошибка — вместо счётчика
+  const statusBarBackups = $derived<BackupsStatus>(
+    visibleBackupsStatus === 'error'
+      ? 'error'
+      : visibleBackups.length > 0
+        ? 'ready'
+        : visibleBackupsStatus
+  );
   let tabs = $state<EditorTab[]>([]);
   let activeTabPath = $state('');
   let breadcrumbs = $state<PathSegment[]>([]);
@@ -127,6 +145,12 @@
 
   // Drawer states
   let drawerOpen = $state(false);
+  // Файл, для которого лист открыли явно: только для него лист показывает загрузку, ошибку
+  // и пустой список. При смене файла открытый лист виден, пока у нового файла есть копии.
+  let drawerPath = $state('');
+  const drawerVisible = $derived(
+    drawerOpen && (visibleBackups.length > 0 || (drawerPath !== '' && drawerPath === selectedFile))
+  );
   // Смена файла в редакторе сбрасывает выбор копии и сравнение в том же обновлении:
   // сравнение с копией другого файла недействительно (WR-01). Присваивания в
   // selectBackup и restoreBackup перезаписывают значение до следующей смены файла.
@@ -382,6 +406,8 @@
     selectedFile = '';
     backups = [];
     backupsPath = '';
+    backupsStatus = 'idle';
+    backupsStatusPath = '';
     originalContent = '';
     isDirty = false;
     loadFiles();
@@ -706,6 +732,10 @@
     | { kind: 'error'; message: string };
 
   async function loadBackups(path: string): Promise<BackupsLoadResult> {
+    if (path === selectedFile) {
+      backupsStatus = 'loading';
+      backupsStatusPath = path;
+    }
     try {
       const list = await fetchBackupsList(path);
       // Список копий грузится в фоне: ответ для уже не выбранного файла
@@ -714,14 +744,26 @@
       if (path !== selectedFile) return { kind: 'stale' };
       backups = list;
       backupsPath = path;
+      backupsStatus = 'ready';
+      backupsStatusPath = path;
       return { kind: 'ok' };
     } catch (e: any) {
       if (e?.status === 401) return { kind: 'unauthorized' };
       // «Копий нет» и «список не получен» различаются (WR-03). Поздний сбой
       // фонового запроса не обнуляет уже показанный список и не закрывает
-      // открытый лист (IN-02 ревью).
+      // открытый лист (IN-02 ревью): меняется только состояние.
+      if (path === selectedFile) {
+        backupsStatus = 'error';
+        backupsStatusPath = path;
+      }
       return { kind: 'error', message: e?.message || String(e) };
     }
+  }
+
+  /** «Повторить» в листе копий: заново запрашивает список для файла в редакторе. */
+  async function retryBackups() {
+    if (!selectedFile) return;
+    await loadBackups(selectedFile);
   }
 
   async function selectBackup(backupPath: string) {
@@ -942,6 +984,12 @@
   }
 
   async function restoreBackup(backupPath: string) {
+    // Файл панели только для чтения (D-03): readOnly CodeMirror не останавливает
+    // программный dispatch, поэтому отказ здесь, как в handleInsertIntoEditor.
+    if (isManagedReadOnly) {
+      showToast('warning', $t('editor.managed_readonly_hint'));
+      return;
+    }
     // «Восстановить» подставляет копию только в файл, для которого её нажали.
     // Пока открыто подтверждение или читается копия, на ПК можно открыть другой
     // файл из колонки (лист копий при этом жив). Без сверки после каждого
@@ -975,6 +1023,11 @@
       const content = await fetchBackupContent(backupPath);
       if (!stillValid()) {
         abortStale();
+        return;
+      }
+      // Файл мог перейти под управление панели, пока шло подтверждение и чтение копии
+      if (isManagedReadOnly) {
+        showToast('warning', $t('editor.managed_readonly_hint'));
         return;
       }
 
@@ -1129,8 +1182,56 @@
       showRenameModal = false;
       renameTarget = '';
       menuTarget = '';
+      // Вкладка старого пути переезжает на новый путь вместе с правками, признаком «изменено»,
+      // местом в списке и черновиком: иначе её «Сохранить» создало бы старый файл заново
+      // (todo editor-rename-keeps-old-tab, T-149-12)
+      const oldTab = tabs.find((tab) => tab.path === oldPath);
+      const movedActive = oldTab !== undefined && activeTabPath === oldPath;
+      if (oldTab) {
+        if (movedActive && editorView) {
+          // Вкладка ключуется путём: редактор пересоздаётся, позиция берётся из вкладки
+          oldTab.scrollState = {
+            top: editorView.scrollDOM.scrollTop,
+            left: editorView.scrollDOM.scrollLeft
+          };
+          oldTab.cursorPos = editorView.state.selection.main.head;
+          oldTab.currentContent = editorView.state.doc.toString();
+          oldTab.isDirty = oldTab.currentContent !== oldTab.originalContent;
+        }
+        // Вкладка с новым путём могла остаться от удалённого файла: два ключа пути недопустимы
+        const staleIndex = tabs.findIndex((tab) => tab.path === newPath);
+        if (staleIndex !== -1) tabs.splice(staleIndex, 1);
+        oldTab.path = newPath;
+        oldTab.name = newPath.split('/').pop() || target;
+        const draft = localStorage.getItem(`editor.draft.${oldPath}`);
+        if (draft !== null) localStorage.setItem(`editor.draft.${newPath}`, draft);
+        localStorage.removeItem(`editor.draft.${oldPath}`);
+        if (movedActive) {
+          activeTabPath = newPath;
+          selectedFile = newPath;
+        }
+        if (drawerPath === oldPath) drawerPath = newPath;
+        tabs = [...tabs];
+      }
       await loadFiles();
-      await loadFile(newPath);
+      if (movedActive && oldTab) {
+        // Вкладка уже показана на новом пути: файл не перечитывается, копии — нового пути
+        await tick();
+        if (editorView) {
+          if (oldTab.cursorPos !== undefined) {
+            editorView.dispatch({
+              selection: { anchor: oldTab.cursorPos, head: oldTab.cursorPos }
+            });
+          }
+          if (oldTab.scrollState) {
+            editorView.scrollDOM.scrollTop = oldTab.scrollState.top;
+            editorView.scrollDOM.scrollLeft = oldTab.scrollState.left;
+          }
+        }
+        void loadBackups(newPath);
+      } else {
+        await loadFile(newPath);
+      }
     } catch (e: any) {
       if (e?.status === 401) return;
       showToast('error', $t('editor.rename_error') + ': ' + (e as any)?.message);
@@ -1178,32 +1279,18 @@
 
   /**
    * Открывает файл и лист его копий. true — файл показан во вкладке (шторку можно закрыть),
-   * false — файл не открыт. Лист копий всегда относится к файлу в редакторе (CR-01, WR-03):
-   * по файлу без копий лист не открывается, показывается уведомление, а флаг листа
-   * не остаётся включённым и не накрывает следующий открытый файл. «Нет сохранённых бэкапов» —
-   * только при успешном пустом списке; если список не получен, показывается уведомление
-   * об ошибке и лист не открывается (WR-03). Возврат true по-прежнему значит «файл показан»
-   * (D-16, шторку можно закрыть).
+   * false — файл не открыт. Лист относится к файлу в редакторе (CR-01, WR-03) и показывает
+   * исход запроса сам: загрузку, список, «Копий пока нет» при успешном пустом списке или
+   * ошибку с «Повторить», если список не получен. Ошибка не закрывает лист (IN-02 ревью).
+   * Возврат true по-прежнему значит «файл показан» (D-16, шторку можно закрыть).
    */
   async function openBackupsForFile(file: ConfigFileInfo): Promise<boolean> {
     if (!(await loadFile(file.path))) return false;
     // loadFile открыл запомненный выбор другого файла («последний выбор побеждает»)
     if (selectedFile !== file.path) return true;
-    const res = await loadBackups(file.path);
-    if (selectedFile !== file.path || res.kind === 'stale' || res.kind === 'unauthorized') {
-      return true;
-    }
-    if (res.kind === 'error') {
-      drawerOpen = false;
-      showToast('error', $t('editor.backups_load_error') + ': ' + res.message);
-      return true;
-    }
-    if (visibleBackups.length === 0) {
-      drawerOpen = false;
-      showToast('info', $t('editor.no_backups'));
-      return true;
-    }
+    drawerPath = file.path;
     drawerOpen = true;
+    await loadBackups(file.path);
     return true;
   }
 
@@ -1669,19 +1756,26 @@
             {applyLoading}
             {backgroundStatusText}
             backupCount={visibleBackups.length}
-            {drawerOpen}
+            backupsStatus={statusBarBackups}
+            drawerOpen={drawerVisible}
             onToggleSchema={toggleSchema}
             onToggleExpertMode={toggleExpertMode}
-            onToggleDrawer={() => (drawerOpen = !drawerOpen)}
+            onToggleDrawer={() => {
+              drawerPath = selectedFile;
+              drawerOpen = !drawerVisible;
+            }}
           />
 
           <!-- Bottom Drawer -->
-          {#if drawerOpen && visibleBackups.length > 0}
+          {#if drawerVisible}
             <BackupSidebar
               backups={visibleBackups}
+              status={visibleBackupsStatus}
+              onRetry={retryBackups}
               {selectedBackup}
               {diffGroups}
               {backupLoading}
+              restoreDisabled={isManagedReadOnly}
               onSelectBackup={selectBackup}
               onRestoreBackup={restoreBackup}
               onclose={() => (drawerOpen = false)}

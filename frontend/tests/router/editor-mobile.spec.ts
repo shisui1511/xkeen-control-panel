@@ -1831,7 +1831,10 @@ test('editor-mobile menu-save-target vp:390', { tag: CORE_TAG }, async ({ page, 
       page.locator(`.editor-tab.active .tab-name[title="${f.name}"]`),
       'CR-01: «История резервных копий» не открыла файл из меню — «Сохранить» нацелено не на открытую вкладку'
     ).toHaveCount(1, { timeout: T.page });
-    await expect(page.locator('.editor-bottom-drawer')).toHaveCount(0);
+    // у F копий нет: лист открыт с «Копий пока нет» и закрывается перед переходом во вкладку A
+    await expect(page.getByTestId('backups-empty')).toBeVisible({ timeout: T.page });
+    await page.locator('.drawer-close-btn').click();
+    await expect(page.locator('.editor-bottom-drawer')).toHaveCount(0, { timeout: T.action });
     await tabA.click({ timeout: T.action });
     await expect(page.locator(`.editor-tab.active .tab-name[title="${a.name}"]`)).toHaveCount(1, {
       timeout: T.page
@@ -1893,25 +1896,29 @@ test('editor-mobile menu-backups vp:390', { tag: CORE_TAG }, async ({ page }) =>
   await page.locator('.drawer-close-btn').click();
   await expect(drawer).toHaveCount(0, { timeout: T.action });
 
-  // файл без копий: файл открыт, листа нет, есть уведомление
+  // файл без копий: файл открыт, лист показывает «Копий пока нет», а не ошибку
   await openSheetFromToolbar(page);
   const menu2 = await openFileMenu(page, altFx().name);
   await menu2.locator('.ctx-item').nth(CTX_BACKUPS).click();
   await expect(activeTab(altFx().name)).toHaveCount(1, { timeout: T.page });
   await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  await expect(drawer, 'лист копий не открылся для файла без копий').toBeVisible({
+    timeout: T.page
+  });
   await expect(
-    page
-      .locator('.toast--info', {
-        hasText: /Резервных копий этого файла пока нет|No backups of this file yet/
-      })
-      .first(),
-    'WR-03: нет уведомления «Резервных копий этого файла пока нет» при успешном пустом списке'
-  ).toBeVisible({ timeout: T.action });
+    page.getByTestId('backups-empty'),
+    'нет «Копий пока нет» при успешном пустом списке'
+  ).toContainText(/Копий пока нет|No backups yet/, { timeout: T.action });
+  await expect(
+    page.getByTestId('backups-error'),
+    'при успешном пустом списке лист показывает ошибку загрузки'
+  ).toHaveCount(0);
   await expect(
     page.locator('.toast--error'),
     'WR-03: при успешном пустом списке показано уведомление об ошибке'
   ).toHaveCount(0);
-  await expect(drawer).toHaveCount(0);
+  await page.locator('.drawer-close-btn').click();
+  await expect(drawer).toHaveCount(0, { timeout: T.action });
 
   // флаг листа не остался включённым: следующий файл открывается без листа
   await openSheetFromToolbar(page);
@@ -2041,5 +2048,99 @@ test('editor-mobile backups-collapsed vp:390', { tag: CORE_TAG }, async ({ page,
         await deleteFileWithBackups(pg, left.path);
       });
     }
+  }
+});
+
+test('editor-mobile rename-moves-tab vp:1280', { tag: CORE_TAG }, async ({ page, browser }) => {
+  test.setTimeout(90_000 * RT.slow);
+  const dir = fixtureDir()!.dir;
+  const created: string[] = [];
+  try {
+    // временный файл создаётся до перехода, чтобы его строка попала в колонку при загрузке
+    const x = await withPanel(browser, async (pg) => {
+      const file = await createScratchFile(pg, []);
+      created.push(file.path);
+      return { ...file, text: await readOnDisk(pg, file.path) };
+    });
+    const ext = fixtureDir()!.ext;
+    let newName = x.name;
+    while (newName === x.name || newName === fx().name || newName === altFx().name) {
+      newName = `${FIXTURE_PREFIX}${randomInt(100000, 1000000)}${ext}`;
+    }
+    const newPath = `${dir}/${newName}`;
+    created.push(newPath);
+
+    const guard = attachConsoleGuard(page);
+    await gotoEditor(page, VP_DESKTOP);
+    const column = page.locator('.file-tree-pane');
+    const row = column.locator(`button.file-row:has(.fr-name[title="${x.name}"])`).first();
+    await row.click({ timeout: T.page });
+    const oldTab = page.locator('.editor-tab', {
+      has: page.locator(`.tab-name[title="${x.name}"]`)
+    });
+    await expect(oldTab).toHaveCount(1, { timeout: T.page });
+    await expect(page.locator('.cm-content').first()).toBeVisible({ timeout: T.page });
+
+    // несохранённая правка: пробел в конце документа, ядро принимает такую запись
+    await page.locator('.cm-content').first().click({ timeout: T.action });
+    await page.keyboard.press('Control+End');
+    await page.keyboard.insertText(' ');
+    await expect(oldTab.locator('.tab-dirty-dot')).toBeVisible({ timeout: T.action });
+
+    // «Переименовать» из меню файла в колонке
+    await row.click({ button: 'right', timeout: T.action });
+    const menu = page.locator('.file-context-menu');
+    await expect(menu).toBeVisible({ timeout: T.action });
+    await expect(menu.locator('.ctx-header')).toContainText(x.name);
+    await menu.locator('.ctx-item').nth(CTX_RENAME).click();
+    const input = page.locator('#rename-target');
+    await expect(input).toHaveValue(x.name, { timeout: T.action });
+    await input.fill(newName);
+    await page.locator('.modal-backdrop .confirm-modal-actions .btn-primary').click();
+    await expect(page.locator('.modal-backdrop')).toHaveCount(0, { timeout: T.action });
+
+    const newTab = page.locator('.editor-tab', {
+      has: page.locator(`.tab-name[title="${newName}"]`)
+    });
+    await expect(newTab, 'после «Переименовать» нет вкладки с новым именем').toHaveCount(1, {
+      timeout: T.page
+    });
+    await expect(
+      page.locator(`.editor-tab .tab-name[title="${x.name}"]`),
+      'после «Переименовать» осталась вкладка старого пути'
+    ).toHaveCount(0);
+    await expect(page.locator(`.editor-tab.active .tab-name[title="${newName}"]`)).toHaveCount(1);
+    await expect(
+      newTab.locator('.tab-dirty-dot'),
+      'несохранённая правка потерялась при переименовании'
+    ).toBeVisible();
+    const drafts = await page.evaluate(
+      ({ oldKey, newKey }) => ({
+        old: localStorage.getItem(oldKey),
+        moved: localStorage.getItem(newKey)
+      }),
+      { oldKey: `editor.draft.${x.path}`, newKey: `editor.draft.${newPath}` }
+    );
+    expect(drafts.old, 'черновик старого пути остался в localStorage').toBeNull();
+    expect(drafts.moved, 'черновик не перенесён на новый путь').toBe(x.text + ' ');
+    expect(
+      await listNames(page, dir),
+      'старый файл есть на диске после переименования'
+    ).not.toContain(x.name);
+
+    // «Сохранить» пишет новый путь и не создаёт старый файл заново
+    await saveActiveFile(page);
+    expect(await readOnDisk(page, newPath), 'правка не записана в файл с новым именем').toBe(
+      x.text + ' '
+    );
+    const names = await listNames(page, dir);
+    expect(names, '«Сохранить» создало старый файл заново').not.toContain(x.name);
+    expect(names).toContain(newName);
+
+    await guard.assertClean();
+  } finally {
+    await withPanel(browser, async (pg) => {
+      for (const path of created) await deleteFileWithBackups(pg, path);
+    });
   }
 });

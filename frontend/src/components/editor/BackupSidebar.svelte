@@ -1,6 +1,9 @@
 <script lang="ts">
   import { slide, DURATION } from '../../lib/motion.svelte';
   import { t } from '../../i18n';
+  import Button from '../Button.svelte';
+  import EmptyState from '../EmptyState.svelte';
+  import Skeleton from '../Skeleton.svelte';
 
   interface DiffGroup {
     type: 'added' | 'removed' | 'collapsed' | 'unchanged';
@@ -9,17 +12,25 @@
 
   let {
     backups = [],
+    status = 'ready',
+    onRetry,
     selectedBackup = '',
     diffGroups = [],
     backupLoading = false,
+    restoreDisabled = false,
     onSelectBackup,
     onRestoreBackup,
     onclose: onClose
   }: {
     backups: string[];
+    /** Исход запроса списка: ошибка и «копий нет» — разные состояния листа */
+    status?: 'idle' | 'loading' | 'ready' | 'error';
+    onRetry?: () => void;
     selectedBackup: string;
     diffGroups: DiffGroup[];
     backupLoading: boolean;
+    /** Файл панели (только чтение, D-03): копию в него подставить нельзя, просмотр и сравнение остаются */
+    restoreDisabled?: boolean;
     onSelectBackup: (backup: string) => void;
     onRestoreBackup: (backup: string) => void;
     onclose?: () => void;
@@ -27,6 +38,11 @@
 
   // Мобильный лист — два экрана: список копий → сравнение на весь лист
   let mobileScreen = $state<'list' | 'diff'>('list');
+
+  function restore(backup: string) {
+    if (restoreDisabled) return;
+    onRestoreBackup(backup);
+  }
 
   function formatBackupDate(backup: string): string {
     const parts = backup.split('.backup-');
@@ -75,6 +91,25 @@
   <div class="drawer-layout" class:show-diff={mobileScreen === 'diff'}>
     <!-- Список бэкапов слева -->
     <div class="drawer-sidebar">
+      {#if status === 'error'}
+        <!-- Сбой фонового обновления не стирает уже полученный список: он остаётся под ошибкой -->
+        <div class="alert alert-error backups-alert" role="alert" data-testid="backups-error">
+          <span>{$t('editor.backups_error')}</span>
+          <Button variant="secondary" size="sm" testid="backups-retry" onclick={() => onRetry?.()}>
+            {$t('editor.backups_retry')}
+          </Button>
+        </div>
+      {:else if backups.length === 0 && status === 'ready'}
+        <div class="backups-empty" data-testid="backups-empty">
+          <EmptyState title={$t('editor.backups_empty')} description="" plain={true} />
+        </div>
+      {:else if backups.length === 0}
+        <div class="backups-loading" data-testid="backups-loading" aria-busy="true">
+          {#each [0, 1, 2] as row (row)}
+            <Skeleton type="text-line" />
+          {/each}
+        </div>
+      {/if}
       {#each backups as backup (backup)}
         <div class="backup-item" class:active={selectedBackup === backup}>
           <button
@@ -90,7 +125,9 @@
           <button
             type="button"
             class="btn btn-sm btn-secondary restore-inline-btn"
-            onclick={() => onRestoreBackup(backup)}
+            disabled={restoreDisabled}
+            title={restoreDisabled ? $t('editor.restore_managed_title') : undefined}
+            onclick={() => restore(backup)}
           >
             {$t('settings.restore')}
           </button>
@@ -109,7 +146,9 @@
             <button
               type="button"
               class="btn btn-primary btn-sm diff-restore-btn"
-              onclick={() => onRestoreBackup(selectedBackup)}
+              disabled={restoreDisabled}
+              title={restoreDisabled ? $t('editor.restore_managed_title') : undefined}
+              onclick={() => restore(selectedBackup)}
             >
               {$t('settings.restore')}
             </button>
@@ -144,7 +183,7 @@
             {/if}
           </div>
         </div>
-      {:else}
+      {:else if backups.length > 0}
         <div class="drawer-empty-state">{$t('editor.select_backup_hint')}</div>
       {/if}
     </div>
@@ -190,6 +229,20 @@
   .drawer-sidebar::-webkit-scrollbar-thumb {
     background: var(--border);
     border-radius: var(--radius-sm);
+  }
+
+  .backups-alert {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--spacing-2);
+    margin: 0;
+    padding: var(--spacing-2) var(--spacing-2-5);
+    font-size: var(--font-size-xs);
+  }
+
+  .backups-loading {
+    padding: var(--spacing-1);
   }
 
   .backup-item {
@@ -415,6 +468,10 @@
     .backup-select-btn {
       min-height: 44px;
       font-size: var(--font-size-base);
+    }
+
+    .backups-alert {
+      font-size: var(--font-size-sm);
     }
 
     .drawer-main {
