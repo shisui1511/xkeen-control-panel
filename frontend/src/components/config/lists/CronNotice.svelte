@@ -4,6 +4,7 @@
   import { showToast } from '../../../stores';
   import Button from '../../Button.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
+  import ImmediateMark from '../ImmediateMark.svelte';
   import {
     geodataView,
     cronAction,
@@ -91,6 +92,9 @@
           <p class="geo-cron-text">
             {parts[0]}<span class="geo-cron-mono">{cron.schedule ?? ''}</span>{parts[1]}
           </p>
+        {/if}
+        {#if kind !== 'nonstandard'}
+          <ImmediateMark />
         {/if}
         {#if kind === 'resume'}
           <div class="geo-cron-actions">

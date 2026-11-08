@@ -10,6 +10,7 @@
   import { geodataView, installJQ, geodataErrorText } from '../../../lib/configGeodata';
   import FinishModal, { type FinishMode } from './FinishModal.svelte';
   import OutputLog from './OutputLog.svelte';
+  import ImmediateMark from '../ImmediateMark.svelte';
 
   // Блок «Загрузка»: адрес прокси для GitHub (gh_proxy) и готовность окружения XKeen — jq и
   // geofile_update. Пока ни одна кнопка не нажата, панель ничего не меняет (D-10); запись в
@@ -109,7 +110,8 @@
             <Icon name="warning" size={16} class="icon-first-line geo-dl-alert-icon" />
             <div class="geo-dl-alert-body">
               <p class="geo-dl-alert-text">{$t('cfg.geo.nojq')}</p>
-              <div>
+              <div class="geo-dl-jq-actions">
+                <ImmediateMark />
                 <Button
                   variant="primary"
                   loading={jqBusy}
@@ -273,6 +275,14 @@
   .geo-dl-alert-body {
     display: flex;
     flex-direction: column;
+    gap: var(--spacing-2);
+    min-width: 0;
+  }
+
+  .geo-dl-jq-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     gap: var(--spacing-2);
     min-width: 0;
   }
