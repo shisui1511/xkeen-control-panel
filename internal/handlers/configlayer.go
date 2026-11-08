@@ -248,6 +248,23 @@ func (a *API) ConfigLayerApply(w http.ResponseWriter, r *http.Request) {
 	JSONSuccess(w, map[string]bool{"started": true})
 }
 
+// ConfigLayerApplyPreview — GET /api/configlayer/apply/preview: что запишет
+// «Применить» по текущему черновику — строки изменений, объявления перезапуска и
+// файлы ядер «было → станет» (D-09). Блокировки приходят полем blocked при 200.
+// Ответ несёт содержимое файлов ядер, поэтому не кэшируется.
+func (a *API) ConfigLayerApplyPreview(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireLayer(w, r) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	view, err := a.configLayer.PreviewApply()
+	if err != nil {
+		a.writeLayerError(w, r, err)
+		return
+	}
+	JSONSuccess(w, view)
+}
+
 // ConfigLayerFilesRebuild — POST /api/configlayer/files/rebuild {keys} или {all}.
 // Файлы адресуются только ключами манифеста.
 func (a *API) ConfigLayerFilesRebuild(w http.ResponseWriter, r *http.Request) {
