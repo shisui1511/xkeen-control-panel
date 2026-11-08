@@ -28,6 +28,44 @@ type ConfigFileInfo struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 	Size int64  `json:"size"`
+	// Поля ниже заполняются только при scope=files и включённом слое (D-03, D-05).
+	// Owner — panel, xkeen или user.
+	Owner string `json:"owner,omitempty"`
+	// TakeKernel и TakeSections — ядро и секции, которые панель может взять из файла.
+	TakeKernel   string   `json:"take_kernel,omitempty"`
+	TakeSections []string `json:"take_sections,omitempty"`
+	// StoplistWord — слово стоп-списка XKeen, с которым совпало имя файла.
+	StoplistWord string `json:"stoplist_word,omitempty"`
+	// Restricted — имя не латиницей в корне каталога Xray: файл можно прочитать,
+	// удалить и переименовать, но не сохранить.
+	Restricted bool `json:"restricted,omitempty"`
+}
+
+// filesScope — значение параметра scope запроса списка для вкладки «Файлы».
+const filesScope = "files"
+
+// filesScopeRoots — каталоги, которые видит вкладка «Файлы» (D-04): данные
+// панели, логи и бинарники в неё не попадают. Корни AllowedRoots остальных
+// вызывающих не меняются.
+var filesScopeRoots = []string{"/opt/etc/xray", "/opt/etc/mihomo", "/opt/etc/xkeen"}
+
+// inFilesScope сообщает, что каталог dir (уже прошедший PathValidator) — один из
+// корней вкладки «Файлы» или лежит под ним. Корень сравнивается в исходном и в
+// развёрнутом по симлинкам виде: PathValidator возвращает развёрнутый путь.
+func inFilesScope(dir string) bool {
+	dir = filepath.Clean(dir)
+	for _, root := range filesScopeRoots {
+		bases := []string{filepath.Clean(root)}
+		if resolved, err := filepath.EvalSymlinks(root); err == nil {
+			bases = append(bases, filepath.Clean(resolved))
+		}
+		for _, base := range bases {
+			if dir == base || strings.HasPrefix(dir, base+string(filepath.Separator)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
@@ -39,9 +77,16 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 	if dir == "" {
 		dir = a.cfg.XRayConfigDir
 	}
+	scoped := r.URL.Query().Get("scope") == filesScope
 
 	cleanDir, err := a.pathVal.Validate(dir)
 	if err != nil {
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+	// Вкладка «Файлы» видит только три каталога (D-04): данные панели, логи и
+	// бинарники сервер не отдаёт ей и по прямому запросу.
+	if scoped && !inFilesScope(cleanDir) {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
 	}
@@ -52,10 +97,53 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Владелец файлов — только для вкладки «Файлы» при включённом слое.
+	var owners *configlayer.FileOwnerIndex
+	if scoped && a.configLayer != nil && a.configLayer.Enabled() {
+		owners = a.configLayer.FileOwnerIndex()
+	}
+	describe := func(info *ConfigFileInfo) {
+		if !scoped {
+			return
+		}
+		if word, ok := utils.XKeenStoplistMatch(info.Name); ok {
+			info.StoplistWord = word
+		}
+		if owners == nil {
+			return
+		}
+		o := owners.FileOwner(info.Path)
+		info.Owner, info.TakeKernel, info.TakeSections = o.Owner, o.TakeKernel, o.TakeSections
+	}
+
 	res := make([]ConfigFileInfo, 0, len(files))
+	// Файлы с именем не латиницей в корне каталога Xray (XKeen их может не
+	// загрузить) видны только вкладке «Файлы» и только через узкую проверку имени.
+	xrayRoot := scoped && (cleanDir == a.xrayRootDir() || cleanDir == filepath.Clean(a.cfg.XRayConfigDir))
+	restricted := func(f string) {
+		if !xrayRoot || filepath.Dir(f) != cleanDir {
+			return
+		}
+		safe, err := a.xrayNames.ValidateRootName(filepath.Base(f))
+		if err != nil {
+			return
+		}
+		// codeql[go/path-injection] - safe validated via RootNameValidator.ValidateRootName:
+		// a single name without separators, "..", NUL or backslash, in the fixed Xray root.
+		info, statErr := os.Stat(safe)
+		var size int64
+		if statErr == nil {
+			size = info.Size()
+		}
+		item := ConfigFileInfo{Name: filepath.Base(f), Path: f, Size: size, Restricted: true}
+		describe(&item)
+		res = append(res, item)
+	}
+
 	for _, f := range files {
 		cleanF, err := a.pathVal.Validate(f)
 		if err != nil {
+			restricted(f)
 			continue
 		}
 		// Explicit inline validation for CodeQL path sanitization
@@ -75,6 +163,7 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if !configPathRegex.MatchString(cleanF) {
+			restricted(f)
 			continue
 		}
 		// codeql[go/path-injection] - cleanF validated via PathValidator.Validate + strings.HasPrefix check above.
@@ -86,11 +175,13 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 		// Use original glob path (f) for Name/Path so symlinks are shown by their
 		// link name (e.g. config.yaml), not the resolved target (e.g. profiles/default.yaml).
 		// cleanF is used only for the security check and os.Stat above.
-		res = append(res, ConfigFileInfo{
+		item := ConfigFileInfo{
 			Name: filepath.Base(f),
 			Path: f,
 			Size: size,
-		})
+		}
+		describe(&item)
+		res = append(res, item)
 	}
 
 	a.jsonResponse(w, res)
@@ -103,13 +194,24 @@ func (a *API) ConfigRead(w http.ResponseWriter, r *http.Request) {
 	}
 	path := r.URL.Query().Get("path")
 
+	read := a.configSvc.Read
 	cleanPath, err := a.pathVal.Validate(path)
 	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusForbidden)
-		return
+		// Имя не латиницей в корне каталога Xray — только через узкую проверку имени.
+		name, ok := a.xrayRootName(path)
+		if !ok {
+			a.errorResponse(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		safe, nameErr := a.xrayNames.ValidateRootName(name)
+		if nameErr != nil {
+			a.errorResponse(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		cleanPath, read = safe, a.configSvc.ReadValidated
 	}
 
-	data, err := a.configSvc.Read(cleanPath)
+	data, err := read(cleanPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			a.errorResponse(w, a.t(r, "config.file_not_found"), http.StatusNotFound)
@@ -341,6 +443,21 @@ func (a *API) xrayRootDir() string {
 	return dir
 }
 
+// xrayRootName возвращает имя файла, если path указывает прямо в корень каталога
+// Xray (в исходном или развёрнутом виде) и не содержит «..», NUL и обратной косой
+// черты. Само имя дальше проверяет только RootNameValidator.ValidateRootName.
+func (a *API) xrayRootName(path string) (string, bool) {
+	if path == "" || strings.Contains(path, "..") || strings.ContainsAny(path, "\\\x00") {
+		return "", false
+	}
+	dir, name := filepath.Split(path)
+	dir = filepath.Clean(dir)
+	if name == "" || (dir != filepath.Clean(a.cfg.XRayConfigDir) && dir != a.xrayRootDir()) {
+		return "", false
+	}
+	return name, true
+}
+
 // xkeenStoplistBlock сообщает, что запись файла cleanPath отменит запуск Xray в
 // XKeen: файл лежит в корне каталога Xray (XKeen смотрит только его, без
 // подкаталогов), его имя входит в стоп-список, а клиент не подтвердил риск
@@ -402,17 +519,28 @@ func (a *API) ConfigDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	path := r.URL.Query().Get("path")
+	remove := a.configSvc.Delete
 	cleanPath, err := a.pathVal.Validate(path)
 	if err != nil {
-		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
-		return
+		// Имя не латиницей в корне каталога Xray — только через узкую проверку имени.
+		name, ok := a.xrayRootName(path)
+		if !ok {
+			a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+			return
+		}
+		safe, nameErr := a.xrayNames.ValidateRootName(name)
+		if nameErr != nil {
+			a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+			return
+		}
+		cleanPath, remove = safe, a.configSvc.DeleteValidated
 	}
 
 	if a.rejectManagedPath(w, r, cleanPath) {
 		return
 	}
 
-	if err := a.configSvc.Delete(cleanPath); err != nil {
+	if err := remove(cleanPath); err != nil {
 		if os.IsNotExist(err) {
 			a.errorResponse(w, a.t(r, "config.file_not_found"), http.StatusNotFound)
 			return
@@ -433,10 +561,22 @@ func (a *API) ConfigRename(w http.ResponseWriter, r *http.Request) {
 	oldPath := r.URL.Query().Get("old")
 	newPath := r.URL.Query().Get("new")
 
+	rename := a.configSvc.Rename
 	cleanOldPath, err := a.pathVal.Validate(oldPath)
 	if err != nil {
-		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
-		return
+		// Старое имя не латиницей в корне каталога Xray — через узкую проверку имени:
+		// переименование в допустимое имя — путь исправления. Новое имя — только Validate.
+		name, ok := a.xrayRootName(oldPath)
+		if !ok {
+			a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+			return
+		}
+		safe, nameErr := a.xrayNames.ValidateRootName(name)
+		if nameErr != nil {
+			a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+			return
+		}
+		cleanOldPath, rename = safe, a.configSvc.RenameValidatedFrom
 	}
 
 	cleanNewPath, err := a.pathVal.Validate(newPath)
@@ -457,7 +597,7 @@ func (a *API) ConfigRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.configSvc.Rename(cleanOldPath, cleanNewPath); err != nil {
+	if err := rename(cleanOldPath, cleanNewPath); err != nil {
 		if os.IsNotExist(err) {
 			a.errorResponse(w, a.t(r, "config.file_not_found"), http.StatusNotFound)
 			return

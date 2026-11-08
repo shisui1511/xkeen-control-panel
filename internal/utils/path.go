@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // LogRoot is the only directory the panel reads core logs from.
@@ -68,6 +69,67 @@ func (v *PathValidator) Validate(path string) (string, error) {
 		}
 	}
 	return "", errors.New("path traversal detected or path not allowed")
+}
+
+// RootNameValidator — узкая проверка одного имени файла в корне, закреплённом при
+// создании (каталог конфигураций Xray). Нужна для файлов, имя которых не проходит
+// латинскую регулярку Validate (кириллица, пробел, скобки): их видно, можно
+// прочитать, удалить и переименовать в допустимое имя. Validate при этом не
+// ослабляется, а вызывающий передаёт только имя и не может подставить другой
+// каталог.
+type RootNameValidator struct {
+	root string
+	base *PathValidator
+}
+
+// NewRootNameValidator создаёт проверку имён для корня root; сам корень обязан
+// проходить base.Validate.
+func NewRootNameValidator(root string, base *PathValidator) *RootNameValidator {
+	return &RootNameValidator{root: root, base: base}
+}
+
+// rootNameRE — допустимые символы имени: буквы и цифры Unicode, пробел, точка,
+// подчёркивание, дефис и круглые скобки.
+var rootNameRE = regexp.MustCompile(`^[\p{L}\p{N} ._()\-]+$`)
+
+// ValidateRootName проверяет одно имя файла в закреплённом корне и возвращает
+// путь к нему. Имя — без разделителей, «..», NUL и обратной косой черты; корень
+// проходит Validate; итоговый путь после разворачивания симлинков обязан лежать
+// прямо в корне (родитель равен корню).
+func (v *RootNameValidator) ValidateRootName(name string) (string, error) {
+	errName := errors.New("file name not allowed")
+	if v == nil || v.base == nil || name == "" || name == "." || filepath.Base(name) != name {
+		return "", errName
+	}
+	if strings.Contains(name, "..") || strings.ContainsAny(name, "/\\\x00") {
+		return "", errName
+	}
+	if !utf8.ValidString(name) || !rootNameRE.MatchString(name) {
+		return "", errName
+	}
+	cleanRoot, err := v.base.Validate(v.root)
+	if err != nil {
+		return "", errName
+	}
+	joined := filepath.Join(cleanRoot, name)
+	if filepath.Dir(joined) != cleanRoot {
+		return "", errName
+	}
+	// codeql[go/path-injection] - name is a single path element (no separators, "..",
+	// NUL or backslash, Unicode letters/digits only) joined to the fixed root that passed
+	// PathValidator.Validate; the parent is re-checked against the root below.
+	resolved, err := filepath.EvalSymlinks(joined)
+	switch {
+	case err == nil:
+	case os.IsNotExist(err):
+		resolved = joined
+	default:
+		return "", errName
+	}
+	if filepath.Dir(resolved) != cleanRoot {
+		return "", errName
+	}
+	return resolved, nil
 }
 
 // ValidateUnder is Validate plus a check that the resolved path is root itself

@@ -54,7 +54,8 @@ func (a *API) writeLayerError(w http.ResponseWriter, r *http.Request, err error)
 		JSONErrorCode(w, http.StatusNotFound, "config_layer_disabled", a.t(r, "configlayer.disabled"))
 	case errors.Is(err, configlayer.ErrDraftConflict):
 		JSONErrorCode(w, http.StatusConflict, "draft_conflict", a.t(r, "configlayer.draft_conflict"))
-	case errors.Is(err, configlayer.ErrInvalidSection), errors.Is(err, configlayer.ErrUnknownDiagAction):
+	case errors.Is(err, configlayer.ErrInvalidSection), errors.Is(err, configlayer.ErrUnknownDiagAction),
+		errors.Is(err, configlayer.ErrInvalidApplyID):
 		JSONErrorCode(w, http.StatusBadRequest, "invalid_request", a.t(r, "configlayer.invalid_request"))
 	case errors.Is(err, configlayer.ErrGeodataBusy):
 		// Замок применения держит менеджер geodata: свой код и текст, раньше apply_busy.
@@ -320,6 +321,35 @@ func (a *API) ConfigLayerFilesDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view, err := a.configLayer.Diff(r.URL.Query().Get("key"))
+	if err != nil {
+		a.writeLayerError(w, r, err)
+		return
+	}
+	JSONSuccess(w, view)
+}
+
+// ConfigLayerFilesApplies — GET /api/configlayer/files/applies?key=[&id=]: без id —
+// до 5 последних применений, в наборах копий которых есть прежняя версия файла;
+// с id — содержимое версии до этого применения (D-06). Принимаются только ключ
+// манифеста и идентификатор набора, не путь (T-144-33). Ответ несёт содержимое
+// файлов ядра, поэтому не кэшируется.
+func (a *API) ConfigLayerFilesApplies(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireLayer(w, r) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	q := r.URL.Query()
+	key := q.Get("key")
+	if id := q.Get("id"); id != "" {
+		view, err := a.configLayer.FileApplyContent(key, id)
+		if err != nil {
+			a.writeLayerError(w, r, err)
+			return
+		}
+		JSONSuccess(w, view)
+		return
+	}
+	view, err := a.configLayer.FileApplies(key)
 	if err != nil {
 		a.writeLayerError(w, r, err)
 		return

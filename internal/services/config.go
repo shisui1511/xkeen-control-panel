@@ -205,6 +205,81 @@ func (s *ConfigService) Delete(path string) error {
 	return os.Remove(safePath)
 }
 
+// withinRoots — абсолютный путь path без «..» и NUL лежит внутри одного из
+// разрешённых корней (в исходном или развёрнутом по симлинкам виде). Только для
+// путей, уже проверенных utils.RootNameValidator.ValidateRootName: латинская
+// регулярка resolvePath для них не повторяется.
+func (s *ConfigService) withinRoots(path string) (string, error) {
+	if s.validator == nil {
+		return "", errors.New("path validator not configured")
+	}
+	if path == "" || !filepath.IsAbs(path) || strings.Contains(path, "..") || strings.ContainsRune(path, 0) {
+		return "", errors.New("path traversal detected")
+	}
+	clean := filepath.Clean(path)
+	for _, root := range s.validator.AllowedRoots {
+		bases := []string{filepath.Clean(root)}
+		if resolved, err := filepath.EvalSymlinks(root); err == nil {
+			bases = append(bases, filepath.Clean(resolved))
+		}
+		for _, base := range bases {
+			if strings.HasPrefix(clean, base+string(filepath.Separator)) {
+				return clean, nil
+			}
+		}
+	}
+	return "", errors.New("path not within allowed configuration roots")
+}
+
+// ReadValidated читает файл по пути, уже проверенному ValidateRootName.
+func (s *ConfigService) ReadValidated(path string) ([]byte, error) {
+	safePath, err := s.withinRoots(path)
+	if err != nil {
+		return nil, err
+	}
+	// codeql[go/path-injection] - safePath passed RootNameValidator.ValidateRootName
+	// (single name in the fixed Xray root) and the allowed-roots prefix check above.
+	return os.ReadFile(safePath)
+}
+
+// DeleteValidated удаляет файл по пути, уже проверенному ValidateRootName.
+func (s *ConfigService) DeleteValidated(path string) error {
+	safePath, err := s.withinRoots(path)
+	if err != nil {
+		return err
+	}
+	// codeql[go/path-injection] - safePath passed RootNameValidator.ValidateRootName
+	// (single name in the fixed Xray root) and the allowed-roots prefix check above.
+	if _, err := os.Lstat(safePath); err != nil {
+		return err
+	}
+	// codeql[go/path-injection] - same validated safePath as above.
+	return os.Remove(safePath)
+}
+
+// RenameValidatedFrom переименовывает файл oldAbs (уже проверен ValidateRootName)
+// в newPath; новое имя проходит обычную проверку resolvePath.
+func (s *ConfigService) RenameValidatedFrom(oldAbs, newPath string) error {
+	safeOld, err := s.withinRoots(oldAbs)
+	if err != nil {
+		return err
+	}
+	safeNew, err := s.resolvePath(newPath)
+	if err != nil {
+		return err
+	}
+	// codeql[go/path-injection] - safeOld passed RootNameValidator.ValidateRootName
+	// (single name in the fixed Xray root) and the allowed-roots prefix check above.
+	if _, err := os.Lstat(safeOld); err != nil {
+		return err
+	}
+	if s.Exists(safeNew) {
+		return os.ErrExist
+	}
+	// codeql[go/path-injection] - safeOld validated above, safeNew via resolvePath.
+	return os.Rename(safeOld, safeNew)
+}
+
 func (s *ConfigService) Rename(oldPath, newPath string) error {
 	safeOld, err := s.resolvePath(oldPath)
 	if err != nil {

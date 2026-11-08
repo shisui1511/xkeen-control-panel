@@ -60,6 +60,7 @@ type API struct {
 	clientResolver        *services.ClientResolver
 	assetsSvc             *assets.AssetsService
 	pathVal               *utils.PathValidator
+	xrayNames             *utils.RootNameValidator // имена не латиницей в корне каталога Xray
 	delayGuard            *DelayGuard
 	configValCache        bool
 	configValCacheTime    time.Time
@@ -106,6 +107,7 @@ type API struct {
 
 func NewAPI(cfg *config.Config, srv *server.Server) *API {
 	assetsSvc := assets.NewService(cfg.DataDir)
+	pathVal := utils.NewPathValidator(cfg.AllowedRoots)
 	return &API{
 		cfg:            cfg,
 		srv:            srv,
@@ -114,7 +116,8 @@ func NewAPI(cfg *config.Config, srv *server.Server) *API {
 		configSvc:      services.NewConfigService(cfg.XRayConfigDir, cfg.AllowedRoots),
 		clientResolver: services.NewClientResolver(),
 		assetsSvc:      assetsSvc,
-		pathVal:        utils.NewPathValidator(cfg.AllowedRoots),
+		pathVal:        pathVal,
+		xrayNames:      utils.NewRootNameValidator(cfg.XRayConfigDir, pathVal),
 		delayGuard:     NewDelayGuard(32, 15*time.Second),
 	}
 }
