@@ -25,6 +25,7 @@ GEMINI.md
 .planning
 .claude
 .gemini
+.codex
 graphify-out
 # Node.js files (frontend build)
 node_modules
