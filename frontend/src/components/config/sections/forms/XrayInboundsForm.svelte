@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick, untrack } from 'svelte';
+  import { tick } from 'svelte';
   import { t } from '../../../../i18n';
   import { loadRouting, routingView } from '../../../../lib/configRouting';
   import {
@@ -50,9 +50,14 @@
   type Obj = Record<string, unknown>;
 
   interface Row {
-    key: number;
-    /** Строка формы из вида секции; null — добавленная в этой сессии. */
+    /** Ключ #each: «s<номер>» у строки вида, localId у добавленной в этой сессии. */
+    key: string;
+    /** Номер строки в виде секции: по нему ключ «#<номер>» остатка входящего без тега. */
+    index: number;
+    /** Строка формы из вида секции; null — добавленная, ещё не ушедшая в черновик. */
     orig: Obj | null;
+    /** Локальный ключ добавленной строки; у строки вида его нет. */
+    localId?: string;
     tag: string;
     protocol: string;
     listen: string;
@@ -63,14 +68,14 @@
     return value === undefined || value === null ? '' : String(value);
   }
 
-  // Ключ строки — её номер в виде секции: после перечитывания поля остаются на месте и не
-  // теряют фокус; у добавленной строки ключ следующий за наибольшим
+  // Ключ строки вида — её номер: после перечитывания поля остаются на месте и не теряют фокус
   function rowsOf(form: unknown): Row[] {
     if (!Array.isArray(form)) return [];
-    return form.map((raw, key) => {
+    return form.map((raw, index) => {
       const o = (raw !== null && typeof raw === 'object' ? raw : {}) as Obj;
       return {
-        key,
+        key: `s${index}`,
+        index,
         orig: o,
         tag: str(o.tag),
         protocol: str(o.protocol),
@@ -80,8 +85,29 @@
     });
   }
 
-  // Строки выводятся из вида секции; ввод их переопределяет, новый вид сбрасывает
-  let rows = $derived(rowsOf(section.form));
+  // Строки вида выводятся из вида секции; ввод их переопределяет, новый вид обновляет. Добавленные
+  // строки, которые ещё не ушли в черновик (нет порта, ошибка проверки), живут отдельно в
+  // localRows: событие черновика от другой правки перечитывает вид, но их не трогает.
+  let serverRows = $derived(rowsOf(section.form));
+  let localRows = $state.raw<Row[]>([]);
+  // Тег строки, ушедшей из localRows в черновик → её localId: строка вида с этим тегом остаётся
+  // тем же элементом списка, поле в фокусе не пересоздаётся при приходе нового вида
+  let adoptedKeys = $state.raw<Map<string, string>>(new Map());
+  // Номер для localId: crypto.randomUUID нет вне защищённого контекста (панель по http)
+  let localSeq = 0;
+
+  const rows = $derived.by<Row[]>(() => {
+    const used = new Set<string>();
+    const server = serverRows.map((r) => {
+      const id = r.orig !== null ? adoptedKeys.get(str(r.orig.tag).trim()) : undefined;
+      if (id === undefined || used.has(id)) return r;
+      used.add(id);
+      return { ...r, key: id };
+    });
+    // Чужая секция (readonly) показывает только действующие значения
+    return readonly ? server : [...server, ...localRows];
+  });
+
   let advanced = $derived(section.advanced);
   let issues = $state<KeyIssue[]>([]);
 
@@ -100,14 +126,13 @@
 
   // Порты секции до правок: с ними сравнивается порт закреплённой строки. Пока в секции нет
   // несохранённых правок, база обновляется; с правками остаётся записанное значение.
-  let baseline = $state.raw<Record<string, string> | null>(null);
-  $effect(() => {
+  // Прежняя база держится в обычной переменной: это кэш вычисления, а не состояние формы.
+  let lastBaseline: Record<string, string> | null = null;
+  const baseline = $derived.by<Record<string, string>>(() => {
     const ports: Record<string, string> = {};
     for (const r of rowsOf(section.form)) ports[r.tag] = r.port;
-    const dirty = section.dirty;
-    untrack(() => {
-      if (baseline === null || !dirty) baseline = ports;
-    });
+    if (lastBaseline === null || !section.dirty) lastBaseline = ports;
+    return lastBaseline;
   });
 
   interface RowError {
@@ -165,7 +190,7 @@
       const tag = str(row.orig.tag);
       raw = section.pinned.find((p) => p.key === `${tag}.settings.network`)?.value;
       if (raw === undefined) {
-        const entry = advancedObj[tag !== '' ? tag : `#${row.key}`];
+        const entry = advancedObj[tag !== '' ? tag : `#${row.index}`];
         const settings =
           entry !== null && typeof entry === 'object' ? (entry as Obj).settings : null;
         if (settings !== null && typeof settings === 'object') raw = (settings as Obj).network;
@@ -192,7 +217,7 @@
 
   // Порт закреплённой строки изменён: способ применения станет другим (D-16)
   function portChanged(row: Row): boolean {
-    if (baseline === null || row.orig === null) return false;
+    if (row.orig === null) return false;
     const was = baseline[str(row.orig.tag)];
     return was !== undefined && was !== row.port.trim();
   }
@@ -225,7 +250,7 @@
     const rest = obj as Obj;
     const keyOf = (r: Row): string => {
       const tag = str(r.orig?.tag);
-      return tag !== '' ? tag : `#${r.key}`;
+      return tag !== '' ? tag : `#${r.index}`;
     };
     // Ключи строк вида секции до правок: все снимаются, уцелевшие возвращаются под новым ключом
     const taken = new Map<string, unknown>();
@@ -260,6 +285,9 @@
     const valid = errors.map((e) => e.tag === '' && e.port === '');
     const out: Obj[] = [];
     const outIndex: (number | null)[] = [];
+    // Добавленные строки, ушедшие в этой записи, и принятые строки, сменившие тег
+    const sent: { localId: string; item: Obj }[] = [];
+    const renamed: { from: string; to: string; id: string }[] = [];
     rows.forEach((r, i) => {
       if (!valid[i]) {
         if (r.orig !== null) {
@@ -277,12 +305,64 @@
       item.port = r.orig !== null && port === str(r.orig.port) ? r.orig.port : Number(port);
       outIndex.push(out.length);
       out.push(item);
+      if (r.orig === null && r.localId !== undefined) sent.push({ localId: r.localId, item });
+      else if (r.orig !== null && r.key !== `s${r.index}`) {
+        renamed.push({ from: str(r.orig.tag).trim(), to: str(item.tag), id: r.key });
+      }
     });
-    issues = await commitSection(kernel, ID, out, advancedFor(valid, outIndex));
+    const result = await commitSection(kernel, ID, out, advancedFor(valid, outIndex));
+    issues = result;
+    if (result.length === 0) adopt(sent, renamed);
   }
 
-  function patch(key: number, change: Partial<Row>): void {
-    rows = rows.map((r) => (r.key === key ? { ...r, ...change } : r));
+  /**
+   * Запись принята: ушедшие добавленные строки переходят из localRows к строкам вида (до
+   * прихода нового вида — с записанным значением как исходным), их localId остаётся ключом
+   * строки вида с тем же тегом. Значения, введённые за время записи, сохраняются. Строку,
+   * удалённую за время записи, не возвращает; строку, которую уже принёс новый вид, не дублирует.
+   */
+  function adopt(
+    sent: { localId: string; item: Obj }[],
+    renamed: { from: string; to: string; id: string }[]
+  ): void {
+    if (sent.length === 0 && renamed.length === 0) return;
+    const keys = new Map(adoptedKeys);
+    for (const { from, to, id } of renamed) {
+      if (keys.get(from) === id) keys.delete(from);
+      keys.set(to, id);
+    }
+    const appended: Row[] = [];
+    const moved = new Set<string>();
+    for (const { localId, item } of sent) {
+      const cur = localRows.find((r) => r.localId === localId);
+      if (cur === undefined) continue;
+      const tag = str(item.tag);
+      keys.set(tag, localId);
+      moved.add(localId);
+      if (serverRows.some((r) => r.orig !== null && str(r.orig.tag).trim() === tag)) continue;
+      const index = serverRows.length + appended.length;
+      appended.push({
+        key: `s${index}`,
+        index,
+        orig: item,
+        tag: cur.tag,
+        protocol: cur.protocol,
+        listen: cur.listen,
+        port: cur.port
+      });
+    }
+    adoptedKeys = keys;
+    if (appended.length > 0) serverRows = [...serverRows, ...appended];
+    if (moved.size > 0) localRows = localRows.filter((r) => !moved.has(r.localId ?? ''));
+  }
+
+  /** Ввод в поле: строка вида правится в serverRows, добавленная — в localRows по localId. */
+  function patch(row: Row, change: Partial<Row>): void {
+    if (row.orig === null) {
+      localRows = localRows.map((r) => (r.localId === row.localId ? { ...r, ...change } : r));
+    } else {
+      serverRows = serverRows.map((r) => (r.index === row.index ? { ...r, ...change } : r));
+    }
   }
 
   /** Поле строки изменено: строка с ошибкой в черновик не уходит. */
@@ -293,14 +373,30 @@
   }
 
   async function addRow(): Promise<void> {
-    const key = rows.reduce((max, r) => Math.max(max, r.key), -1) + 1;
-    rows = [...rows, { key, orig: null, tag: '', protocol: 'socks', listen: '', port: '' }];
+    const localId = `l${++localSeq}`;
+    localRows = [
+      ...localRows,
+      {
+        key: localId,
+        index: -1,
+        localId,
+        orig: null,
+        tag: '',
+        protocol: 'socks',
+        listen: '',
+        port: ''
+      }
+    ];
     await tick();
-    document.getElementById(`${uid}-tag-${key}`)?.focus();
+    document.getElementById(`${uid}-tag-${localId}`)?.focus();
   }
 
-  function removeRow(key: number): void {
-    rows = rows.filter((r) => r.key !== key);
+  function removeRow(row: Row): void {
+    if (row.orig === null) {
+      localRows = localRows.filter((r) => r.localId !== row.localId);
+    } else {
+      serverRows = serverRows.filter((r) => r.index !== row.index);
+    }
     void commit();
   }
 
@@ -373,7 +469,7 @@
                 aria-describedby={err.tag !== '' ? `${uid}-tag-${row.key}-err` : undefined}
                 data-testid="{fieldTestId(kernel, ID, 'tag')}-{i}"
                 value={row.tag}
-                oninput={(e) => patch(row.key, { tag: e.currentTarget.value })}
+                oninput={(e) => patch(row, { tag: e.currentTarget.value })}
                 onchange={() => onField(i)}
               />
               {#if readonly && fixed}
@@ -397,7 +493,7 @@
                 value={row.protocol}
                 data-testid="{fieldTestId(kernel, ID, 'protocol')}-{i}"
                 onchange={(e) => {
-                  patch(row.key, { protocol: e.currentTarget.value });
+                  patch(row, { protocol: e.currentTarget.value });
                   void onField(i);
                 }}
               >
@@ -444,7 +540,7 @@
                 aria-readonly={readonly ? 'true' : undefined}
                 data-testid="{fieldTestId(kernel, ID, 'listen')}-{i}"
                 value={row.listen}
-                oninput={(e) => patch(row.key, { listen: e.currentTarget.value })}
+                oninput={(e) => patch(row, { listen: e.currentTarget.value })}
                 onchange={() => onField(i)}
               />
             {/if}
@@ -469,7 +565,7 @@
                   : undefined}
               data-testid="{fieldTestId(kernel, ID, 'port')}-{i}"
               value={row.port}
-              oninput={(e) => patch(row.key, { port: e.currentTarget.value })}
+              oninput={(e) => patch(row, { port: e.currentTarget.value })}
               onchange={() => onField(i)}
             />
             {#if err.port !== ''}
@@ -492,7 +588,7 @@
               class="btn btn-secondary btn-sm xi-remove"
               aria-label="{$t('cfg.sec.f.remove_inbound')} {row.tag || i + 1}"
               data-testid="{fieldTestId(kernel, ID, 'remove')}-{i}"
-              onclick={() => removeRow(row.key)}
+              onclick={() => removeRow(row)}
             >
               {$t('cfg.sec.f.remove_inbound')}
             </button>

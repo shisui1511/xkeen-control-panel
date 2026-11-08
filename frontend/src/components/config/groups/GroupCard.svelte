@@ -5,6 +5,7 @@
   import Button from '../../Button.svelte';
   import Select from '../../Select.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
+  import ImmediateMark from '../ImmediateMark.svelte';
   import { slide, easeOut, DURATION } from '../../../lib/motion.svelte';
   import { applyRunning, handleLayerError } from '../../../lib/configLayer';
   import { configSubTabHash } from '../../../lib/configSubTab';
@@ -306,7 +307,11 @@
 
     {#if manual}
       <div class="gc-current">
-        <label class="gc-current-label" for="{uid}-current">{$t('cfg.groups.current')}</label>
+        <div class="gc-current-head">
+          <label class="gc-current-label" for="{uid}-current">{$t('cfg.groups.current')}</label>
+          <!-- Выбор применяется сразу: Mihomo через Clash API, Xray перезапуском (D-14) -->
+          <ImmediateMark />
+        </div>
         <div class="gc-current-row">
           <Select
             id="{uid}-current"
@@ -527,6 +532,14 @@
     display: flex;
     flex-direction: column;
     gap: var(--spacing-1);
+    min-width: 0;
+  }
+
+  .gc-current-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--spacing-1) var(--spacing-2);
     min-width: 0;
   }
 
