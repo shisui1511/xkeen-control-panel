@@ -8,7 +8,7 @@ import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
 
 // Каркас раздела «Конфигурация» на настоящей панели (фаза 145, план 12): вкладки «Узлы»
-// и «Файлы панели» с маршрутами #/config/nodes и #/config/files, общая полоса черновика,
+// и «Файлы» с маршрутами #/config/nodes и #/config/files, общая полоса черновика,
 // бейдж меню, полоса вкладок на 390 px. Ответы сети не подменяются: черновик создаёт
 // настоящий маршрут добавления узла (данные — ссылка из internal/nodes/testdata/links).
 // Флаг слоя включается на время прогона и возвращается прежним; черновик сбрасывается.
@@ -157,30 +157,30 @@ test('config-tabs: #/config открывает Узлы, вкладки пере
   } else {
     await expect(emptyState).toHaveCount(0);
   }
-  await expect(page.getByTestId('config-files')).toHaveCount(0);
+  await expect(page.getByTestId('files-tab')).toHaveCount(0);
 
   await page.getByTestId('config-tab-files').click();
   await expect(page).toHaveURL(/#\/config\/files$/);
-  await expect(page.getByTestId('config-files')).toBeVisible({ timeout: T.action });
+  await expect(page.getByTestId('files-tab')).toBeVisible({ timeout: T.action });
   await expect(page.getByTestId('config-tab-files')).toHaveAttribute('aria-selected', 'true');
   await expect(nodesTab).toHaveCount(0);
 
   await page.getByTestId('config-tab-nodes').click();
   await expect(page).toHaveURL(/#\/config\/nodes$/);
   await expect(page.getByTestId('nodes-tab')).toBeVisible({ timeout: T.action });
-  await expect(page.getByTestId('config-files')).toHaveCount(0);
+  await expect(page.getByTestId('files-tab')).toHaveCount(0);
 
   await guard.assertClean();
 });
 
-test('config-tabs: #/config/files напрямую открывает Файлы панели', async ({ page }) => {
+test('config-tabs: #/config/files напрямую открывает Файлы', async ({ page }) => {
   const guard = attachConsoleGuard(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await openConfig(page, '#/config/files');
   await page.reload({ timeout: T.page, waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('config-page')).toBeVisible({ timeout: T.page });
   await expect(page.getByTestId('config-tab-files')).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByTestId('config-files')).toBeVisible({ timeout: T.page });
+  await expect(page.getByTestId('files-tab')).toBeVisible({ timeout: T.page });
   await expect(page.getByTestId('nodes-tab')).toHaveCount(0);
   await guard.assertClean();
 });
@@ -203,7 +203,7 @@ test('config-tabs: полоса черновика общая, смена вкл
   });
 
   await page.getByTestId('config-tab-files').click();
-  await expect(page.getByTestId('config-files')).toBeVisible({ timeout: T.action });
+  await expect(page.getByTestId('files-tab')).toBeVisible({ timeout: T.action });
   await expect(bar).toBeVisible();
   expect(await bar.evaluate((el) => (el as HTMLElement & { __kept?: boolean }).__kept)).toBe(true);
 
@@ -220,6 +220,33 @@ test('config-tabs: полоса черновика общая, смена вкл
   await expect(badge).toBeVisible({ timeout: T.action });
   const expected = changes + notices;
   await expect(badge).toHaveText(expected > 99 ? '99+' : String(expected));
+
+  // Окно изменений: сводка apply-preview-count равна draft_changes и числу строк apply-preview-list
+  await page.getByTestId('config-apply').click();
+  const modal = page.getByTestId('apply-preview-modal');
+  await expect(modal).toBeVisible({ timeout: T.action });
+  const previewCountText = (await page.getByTestId('apply-preview-count').textContent()) ?? '';
+  const previewCount = Number(previewCountText.trim());
+  const rowsCount = await page.locator('[data-testid="apply-preview-list"] li').count();
+  expect(previewCount, 'сводка в окне равна draft_changes').toBe(changes);
+  expect(rowsCount, 'число строк в окне равно draft_changes').toBe(changes);
+
+  // «Закрыть без применения» не меняет черновик
+  await page.getByTestId('apply-preview-cancel').click();
+  await expect(modal).toHaveCount(0);
+  const stateAfterCancel = await api(page, 'GET', '/api/configlayer/state');
+  expect(
+    Number(stateAfterCancel.data?.draft_changes ?? 0),
+    'после отмены draft_changes прежний'
+  ).toBe(changes);
+
+  // «Сбросить» отменяет весь черновик
+  await resetDraft(page);
+  const stateAfterReset = await api(page, 'GET', '/api/configlayer/state');
+  expect(
+    Number(stateAfterReset.data?.draft_changes ?? 0),
+    'после сброса draft_changes равен 0'
+  ).toBe(0);
 
   await guard.assertClean();
 });
@@ -296,7 +323,7 @@ test('config-add: вставка ссылки → предпросмотр → �
   await expect(page.getByTestId('nodes-preview')).toHaveCount(0);
   await expect(page.getByTestId('nodes-add-announce')).toContainText(/\S/);
   const after = Number((await api(page, 'GET', '/api/configlayer/state')).data?.draft_changes ?? 0);
-  expect(after, 'узел попал в черновик').toBeGreaterThan(before);
+  expect(after, 'узел попал в черновик').toBe(before + 1);
 
   await guard.assertClean();
 });
