@@ -1140,8 +1140,55 @@
       showRenameModal = false;
       renameTarget = '';
       menuTarget = '';
+      // Вкладка старого пути переезжает на новый путь вместе с правками, признаком «изменено»,
+      // местом в списке и черновиком: иначе её «Сохранить» создало бы старый файл заново
+      // (todo editor-rename-keeps-old-tab, T-149-12)
+      const oldTab = tabs.find((tab) => tab.path === oldPath);
+      const movedActive = oldTab !== undefined && activeTabPath === oldPath;
+      if (oldTab) {
+        if (movedActive && editorView) {
+          // Вкладка ключуется путём: редактор пересоздаётся, позиция берётся из вкладки
+          oldTab.scrollState = {
+            top: editorView.scrollDOM.scrollTop,
+            left: editorView.scrollDOM.scrollLeft
+          };
+          oldTab.cursorPos = editorView.state.selection.main.head;
+          oldTab.currentContent = editorView.state.doc.toString();
+          oldTab.isDirty = oldTab.currentContent !== oldTab.originalContent;
+        }
+        // Вкладка с новым путём могла остаться от удалённого файла: два ключа пути недопустимы
+        const staleIndex = tabs.findIndex((tab) => tab.path === newPath);
+        if (staleIndex !== -1) tabs.splice(staleIndex, 1);
+        oldTab.path = newPath;
+        oldTab.name = newPath.split('/').pop() || target;
+        const draft = localStorage.getItem(`editor.draft.${oldPath}`);
+        if (draft !== null) localStorage.setItem(`editor.draft.${newPath}`, draft);
+        localStorage.removeItem(`editor.draft.${oldPath}`);
+        if (movedActive) {
+          activeTabPath = newPath;
+          selectedFile = newPath;
+        }
+        tabs = [...tabs];
+      }
       await loadFiles();
-      await loadFile(newPath);
+      if (movedActive && oldTab) {
+        // Вкладка уже показана на новом пути: файл не перечитывается, копии — нового пути
+        await tick();
+        if (editorView) {
+          if (oldTab.cursorPos !== undefined) {
+            editorView.dispatch({
+              selection: { anchor: oldTab.cursorPos, head: oldTab.cursorPos }
+            });
+          }
+          if (oldTab.scrollState) {
+            editorView.scrollDOM.scrollTop = oldTab.scrollState.top;
+            editorView.scrollDOM.scrollLeft = oldTab.scrollState.left;
+          }
+        }
+        void loadBackups(newPath);
+      } else {
+        await loadFile(newPath);
+      }
     } catch (e: any) {
       if (e?.status === 401) return;
       showToast('error', $t('editor.rename_error') + ': ' + (e as any)?.message);
