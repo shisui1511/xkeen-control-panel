@@ -3,6 +3,7 @@
   import Card from '../Card.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import { mihomoApiAvailable, mihomoApiState, mihomoOfflineReason } from '../../stores';
+  import { constructorHash } from '../../lib/editorRoute';
 
   // Чек-лист первого запуска Mihomo: ядро выбрано → подписка → конфиг применён → ядро
   // запущено. Шаги — настоящая последовательность, поэтому список упорядоченный. Когда
@@ -44,7 +45,7 @@
         $mihomoApiState === 'down' && $mihomoOfflineReason
           ? $t(`dash.mihomo_offline_${$mihomoOfflineReason}`)
           : undefined,
-      cta: { label: $t('dash.quickstart.step3_cta'), href: '#/constructor' }
+      cta: { label: $t('dash.quickstart.step3_cta'), href: constructorHash() }
     },
     {
       key: 'running',
