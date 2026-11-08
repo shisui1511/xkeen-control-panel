@@ -87,7 +87,8 @@
     embedded = false,
     active = true,
     onactivefile,
-    aboveCode
+    aboveCode,
+    appliesFor
   }: {
     onSwitchTab?: (tab: string) => void;
     /**
@@ -104,6 +105,8 @@
     onactivefile?: (path: string | null, file?: ConfigFileInfo) => void;
     /** Сниппет над редактором кода для активного файла (баннеры дрейфа, владельца) */
     aboveCode?: Snippet<[string, (ConfigFileInfo | undefined)?]>;
+    /** Сниппет «Последних применений» для файла панели (D-06) */
+    appliesFor?: Snippet<[string, string?]>;
   } = $props();
 
   let ru = $derived($currentLang === 'ru');
@@ -177,7 +180,10 @@
   // и пустой список. При смене файла открытый лист виден, пока у нового файла есть копии.
   let drawerPath = $state('');
   const drawerVisible = $derived(
-    drawerOpen && (visibleBackups.length > 0 || (drawerPath !== '' && drawerPath === selectedFile))
+    drawerOpen &&
+      (visibleBackups.length > 0 ||
+        (drawerPath !== '' && drawerPath === selectedFile) ||
+        (embedded && managedFile?.owner === 'panel'))
   );
   // Смена файла в редакторе сбрасывает выбор копии и сравнение в том же обновлении:
   // сравнение с копией другого файла недействительно (WR-01). Присваивания в
@@ -1963,6 +1969,14 @@
 
           <!-- Bottom Drawer -->
           {#if drawerVisible}
+            {#snippet panelAppliesSnippet()}
+              {#if appliesFor && selectedFile}
+                {@render appliesFor(
+                  selectedFile,
+                  editorView ? editorView.state.doc.toString() : ''
+                )}
+              {/if}
+            {/snippet}
             <BackupSidebar
               backups={visibleBackups}
               status={visibleBackupsStatus}
@@ -1971,6 +1985,9 @@
               {diffGroups}
               {backupLoading}
               restoreDisabled={isReadOnly}
+              panelApplies={embedded && managedFile?.owner === 'panel' && appliesFor
+                ? panelAppliesSnippet
+                : undefined}
               onSelectBackup={selectBackup}
               onRestoreBackup={restoreBackup}
               onclose={() => (drawerOpen = false)}

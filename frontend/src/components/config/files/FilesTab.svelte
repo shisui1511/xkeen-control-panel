@@ -5,6 +5,7 @@
   import Button from '../../Button.svelte';
   import Editor from '../../../Editor.svelte';
   import DiffView from '../DiffView.svelte';
+  import AppliesList from './AppliesList.svelte';
   import ImmediateMark from '../ImmediateMark.svelte';
   import TakeSectionModal from '../sections/TakeSectionModal.svelte';
   import type { CoreKernel } from '../../../lib/configCores';
@@ -221,6 +222,12 @@
             {/if}
           </div>
         {/if}
+      {/if}
+    {/snippet}
+    {#snippet appliesFor(path, current)}
+      {@const layerFile = path ? $filesByPath.get(path) : undefined}
+      {#if layerFile}
+        <AppliesList file={layerFile} {current} />
       {/if}
     {/snippet}
   </Editor>
