@@ -1,8 +1,10 @@
 <script lang="ts">
   import { get } from 'svelte/store';
   import { t, tp } from '../../i18n';
-  import { showConfirm } from '../../stores';
+  import { showConfirm, conflictVisible } from '../../stores';
   import Button from '../Button.svelte';
+  import Skeleton from '../Skeleton.svelte';
+  import Spinner from '../Spinner.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import {
     draftChanges,
@@ -27,6 +29,12 @@
   let resetting = $state(false);
 
   const ready = $derived($layerStatus === 'ready');
+  const hasSnapshot = $derived($layerSnapshot !== null);
+  // Первая загрузка: снимка ещё нет — скелетон строки статуса с резервом высоты. Обновление
+  // поверх снимка: счётчик и кнопки из снимка, рядом спиннер, полоса не пустеет
+  const firstLoad = $derived(!hasSnapshot && $layerStatus !== 'error');
+  const refreshing = $derived(hasSnapshot && $layerStatus === 'loading');
+  const shown = $derived(ready || refreshing);
   const dirty = $derived($draftChanges > 0);
   const hasDrift = $derived($driftCount > 0);
   const lost = $derived($layerConnection === 'lost');
@@ -51,20 +59,30 @@
   const busy = $derived(applyingHere || applyingOther || resetting || $routingBusy);
   // Пустой черновик: две неактивные кнопки ничего не предлагают, а на телефоне занимают
   // две строки по 44 px. Кнопки появляются вместе с первой правкой или идущим применением
-  const showActions = $derived(dirty || busy);
+  const showActions = $derived(!firstLoad && (dirty || busy));
   const blockedByDrift = $derived(dirty && hasDrift);
+  // Конфликт ядер (D-18): правки в черновик принимаются, а «Применить» неактивна, окно
+  // изменений не открывается
+  const blockedByConflict = $derived(dirty && $conflictVisible);
   // Проблемы проверки черновика (пустая группа, нет списка, цикл): «Применить» отказывает,
   // пока их не исправят (GRP-05, SRC-07)
   const checkCount = $derived($layerSnapshot?.checks.length ?? 0);
   const blockedByChecks = $derived(dirty && checkCount > 0);
+  const conflictText = $derived($t('cfg.apply_blocked_conflict'));
+  const driftText = $derived($t('cfg.apply_blocked_drift', { k: $driftCount }));
   const applyHint = $derived(
-    holderHint !== ''
-      ? holderHint
-      : blockedByChecks
-        ? $t('cfg.routing.apply_blocked_hint')
-        : blockedByDrift
-          ? $t('cfg.apply_blocked_hint')
-          : undefined
+    blockedByConflict
+      ? conflictText
+      : holderHint !== ''
+        ? holderHint
+        : blockedByChecks
+          ? $t('cfg.routing.apply_blocked_hint')
+          : blockedByDrift
+            ? driftText
+            : $t('cfg.apply_aria')
+  );
+  const showReasons = $derived(
+    shown && dirty && (blockedByConflict || blockedByDrift || checkCount > 0 || holderHint !== '')
   );
 
   // «Применить» при группах или правилах в черновике, пока маршрутизацией управляет XKeen:
@@ -81,6 +99,7 @@
   // «Применить» открывает окно изменений, а не конвейер (D-08): конвейер запускает только
   // «Применить изменения» в окне, с ревизией черновика, которую окно показало
   async function onApply() {
+    if (blockedByConflict) return;
     if (await shouldIntercept()) {
       interceptOpen = true;
       return;
@@ -110,82 +129,105 @@
   }
 </script>
 
-<section
-  class="draft-bar card"
-  class:draft-bar-idle={!showActions}
-  data-testid="config-draftbar"
-  aria-label={$t('cfg.draftbar_label')}
->
-  <div class="draft-bar-status" aria-live="polite">
-    {#if lost}
-      <span class="status-line status-muted">
-        <span class="spinner" aria-hidden="true"></span>
-        {$t('cfg.sse_lost')}
-      </span>
-    {:else if applyingHere}
-      <span class="status-line">
-        <span class="spinner" aria-hidden="true"></span>
-        {$t('cfg.applying')}
-      </span>
-    {:else if applyingOther}
-      <span class="status-line">
-        <span class="status-icon status-icon-info"><Icon name="info" size={14} /></span>
-        {$t('cfg.applying_other_tab')}
-      </span>
-    {:else if ready && dirty}
-      <span class="status-line">
-        <span class="status-icon status-icon-accent"><Icon name="edit" size={14} /></span>
-        {$t('cfg.draft_dirty', { n: $draftChanges })}
-      </span>
-      {#if blockedByDrift}
-        <span class="status-sub">{$t('cfg.draft_blocked', { k: $driftCount })}</span>
-      {/if}
-      {#if checkCount > 0}
-        <span
-          class="status-sub"
-          title={$t('cfg.routing.apply_blocked_hint')}
-          data-testid="config-apply-blocked"
-        >
-          {$tp('cfg.routing.apply_blocked', checkCount)}
+{#if hasSnapshot || $layerStatus !== 'error'}
+  <section
+    class="draft-bar card"
+    class:draft-bar-idle={!showActions}
+    data-testid="config-draftbar"
+    aria-label={$t('cfg.draftbar_label')}
+    aria-busy={firstLoad || refreshing}
+  >
+    <div class="draft-bar-status" aria-live="polite">
+      {#if firstLoad}
+        <span class="status-skeleton" data-testid="config-draftbar-loading">
+          <Skeleton type="text-line" width="160px" />
+        </span>
+      {:else if lost}
+        <span class="status-line status-muted">
+          <span class="spinner" aria-hidden="true"></span>
+          <span class="status-text">{$t('cfg.sse_lost')}</span>
+        </span>
+      {:else if applyingHere}
+        <span class="status-line">
+          <span class="spinner" aria-hidden="true"></span>
+          <span class="status-text">{$t('cfg.applying')}</span>
+        </span>
+      {:else if applyingOther}
+        <span class="status-line">
+          <span class="status-icon status-icon-info"><Icon name="info" size={14} /></span>
+          <span class="status-text">{$t('cfg.applying_other_tab')}</span>
+        </span>
+      {:else if shown && dirty}
+        <span class="status-line">
+          <span class="status-icon status-icon-accent"><Icon name="edit" size={14} /></span>
+          <span class="status-text label-long">{$t('cfg.draft_dirty', { n: $draftChanges })}</span>
+          <span class="status-text label-short"
+            >{$t('cfg.draft_dirty_short', { n: $draftChanges })}</span
+          >
+          {#if refreshing}<Spinner size={16} />{/if}
+        </span>
+      {:else if shown}
+        <span class="status-line">
+          <span class="status-icon status-icon-success"><Icon name="check" size={14} /></span>
+          <span class="status-text">{$t('cfg.draft_clean')}</span>
+          {#if refreshing}<Spinner size={16} />{/if}
         </span>
       {/if}
-    {:else if ready}
-      <span class="status-line">
-        <span class="status-icon status-icon-success"><Icon name="check" size={14} /></span>
-        {$t('cfg.draft_clean')}
-      </span>
-    {/if}
-    {#if holderHint !== ''}
-      <span class="status-sub status-holder" title={holderHint} data-testid="config-geo-busy">
-        {holderHint}
-      </span>
-    {/if}
-  </div>
-  {#if showActions}
-    <div class="draft-bar-actions">
-      <Button
-        variant="secondary"
-        class="draft-bar-btn"
-        disabled={!ready || !dirty || busy}
-        onclick={onReset}>{$t('cfg.reset')}</Button
-      >
-      <Button
-        variant="primary"
-        class="draft-bar-btn"
-        data-testid="config-apply"
-        disabled={!ready ||
-          !dirty ||
-          busy ||
-          holderHint !== '' ||
-          blockedByDrift ||
-          blockedByChecks}
-        loading={applyingHere}
-        title={applyHint}
-        onclick={onApply}>{$t('cfg.apply')}</Button
-      >
     </div>
-  {/if}
-</section>
+    {#if showActions}
+      <div class="draft-bar-actions">
+        <Button
+          variant="secondary"
+          class="draft-bar-btn"
+          ariaLabel={$t('cfg.reset_aria')}
+          title={$t('cfg.reset_aria')}
+          disabled={!ready || !dirty || busy}
+          onclick={onReset}>{$t('cfg.reset')}</Button
+        >
+        <Button
+          variant="primary"
+          class="draft-bar-btn"
+          data-testid="config-apply"
+          ariaLabel={$t('cfg.apply_aria')}
+          disabled={!ready ||
+            !dirty ||
+            busy ||
+            holderHint !== '' ||
+            blockedByDrift ||
+            blockedByChecks ||
+            blockedByConflict}
+          loading={applyingHere}
+          title={applyHint}
+          onclick={onApply}>{$t('cfg.apply')}</Button
+        >
+      </div>
+    {/if}
+    {#if showReasons || holderHint !== ''}
+      <div class="draft-bar-reasons">
+        {#if blockedByConflict}
+          <span class="status-sub" data-testid="config-apply-blocked-conflict">{conflictText}</span>
+        {/if}
+        {#if shown && dirty && blockedByDrift}
+          <span class="status-sub" data-testid="config-apply-blocked-drift">{driftText}</span>
+        {/if}
+        {#if shown && dirty && checkCount > 0}
+          <span
+            class="status-sub"
+            title={$t('cfg.routing.apply_blocked_hint')}
+            data-testid="config-apply-blocked"
+          >
+            {$tp('cfg.routing.apply_blocked', checkCount)}
+          </span>
+        {/if}
+        {#if holderHint !== ''}
+          <span class="status-sub status-holder" title={holderHint} data-testid="config-geo-busy">
+            {holderHint}
+          </span>
+        {/if}
+      </div>
+    {/if}
+  </section>
+{/if}
 
 <TakeRoutingModal open={interceptOpen} mode="intercept" onclose={() => (interceptOpen = false)} />
 
@@ -202,9 +244,12 @@
     top: calc(0px + var(--dns-banner-h, 0px));
     z-index: 5;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: var(--spacing-4);
+    column-gap: var(--spacing-4);
+    row-gap: var(--spacing-1);
+    min-height: 44px;
     padding: var(--spacing-3) var(--spacing-4);
     border: 1px solid var(--border);
     box-shadow: var(--shadow-sm);
@@ -214,24 +259,41 @@
 
   /* Пустой черновик — спокойная строка состояния без тени и лишней высоты */
   .draft-bar.draft-bar-idle {
-    padding-top: var(--spacing-2-5);
-    padding-bottom: var(--spacing-2-5);
+    padding-top: var(--spacing-2);
+    padding-bottom: var(--spacing-2);
     box-shadow: none;
     background: var(--surface-tint);
   }
 
   .draft-bar-status {
     display: flex;
-    flex-direction: column;
-    gap: var(--spacing-1);
+    align-items: center;
+    flex: 1;
     min-width: 0;
+  }
+
+  .status-skeleton {
+    display: flex;
+    align-items: center;
+    width: 160px;
+    max-width: 100%;
   }
 
   .status-line {
     display: inline-flex;
     align-items: center;
     gap: var(--spacing-2);
+    min-width: 0;
     color: var(--fg-primary);
+  }
+
+  .status-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .label-short {
+    display: none;
   }
 
   .status-muted {
@@ -256,9 +318,18 @@
     color: var(--fg-secondary);
   }
 
+  /* Причины блокировки — второй строкой под рядом статуса и кнопок */
+  .draft-bar-reasons {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1);
+    flex-basis: 100%;
+    min-width: 0;
+  }
+
   .status-sub {
     color: var(--warning);
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-base);
     overflow-wrap: anywhere;
   }
 
@@ -278,23 +349,26 @@
   }
 
   @media (max-width: 768px) {
+    /* Один ряд: статус слева, кнопки по содержимому справа; высота с правками ≤ 64 px */
     .draft-bar {
-      flex-wrap: wrap;
+      column-gap: var(--spacing-2);
+      padding: var(--spacing-2) var(--spacing-3);
       /* Липкая мобильная шапка (.mobile-header, 69 px + safe-area) иначе перекрыла бы полосу */
       top: calc(var(--mhdr-h) + env(safe-area-inset-top) + var(--dns-banner-h, 0px));
     }
 
-    .draft-bar-status {
-      flex: 1 1 100%;
-    }
-
-    .draft-bar-actions {
-      flex: 1 1 100%;
-    }
-
     .draft-bar-actions :global(.draft-bar-btn) {
-      flex: 1;
       min-height: 44px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .label-long {
+      display: none;
+    }
+
+    .label-short {
+      display: inline;
     }
   }
 </style>
