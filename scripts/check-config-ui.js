@@ -62,6 +62,15 @@
  *    cfg.dns.issue.<код> в ru и en, routingView.ts переводит проблемы в cfg.dns.issue.*; в
  *    components/config/dns/*.svelte нет {@html} и нестилизованного нативного выбора.
  *
+ * 12. Немедленные действия (план 149-15, D-14): константа IMMEDIATE_CALLS клиентских
+ *    функций немедленных действий; в components/config/**, ManagedFileBanner и
+ *    AccessLogControl каждый файл с вызовом содержит <ImmediateMark (или внесён в
+ *    IMMEDIATE_ALLOW с непустой причиной).
+ *
+ * 13. Применение только через окно (план 149-15, D-08): вызов applyNow( в
+ *    components/** допустим только в DraftBar.svelte; applyFromUi и releaseAndApply
+ *    нигде в frontend/src не встречаются.
+ *
  * Usage: node scripts/check-config-ui.js [--root <каталог>]
  */
 const fs = require("fs");
@@ -1702,6 +1711,101 @@ for (const lang of ["ru", "en"]) {
   expect(
     /from '\.\/dnsErrorCodes\.json'/.test(rv) && rv.includes("cfg.dns.issue."),
     `${SRC}/lib/routingView.ts: issueTextKey не переводит проблемы перехвата в cfg.dns.issue.<код>`,
+  );
+}
+
+// --- 12. Немедленные действия (план 149-15, D-14) ----------------------------
+
+const IMMEDIATE_CALLS = [
+  "refreshSource",
+  "enableDns",
+  "disableDns",
+  "rollbackDns",
+  "keepDns",
+  "runUpdate",
+  "installJQ",
+  "saveSchedule",
+  "cronAction",
+  "writeOp",
+  "createProfile",
+  "renameProfile",
+  "deleteProfile",
+  "activateProfile",
+  "selectMember",
+  "reclaimRouting",
+  "reclaimSection",
+  "setAccessLog",
+  "rebuildFiles",
+  "releaseFile",
+  "confirmMihomoRelease",
+  "confirmMihomoReturn",
+  "activateOwnProfile",
+  "mihomoOwnerAction",
+];
+
+const IMMEDIATE_ALLOW = {
+  // файл -> непустая причина исключения
+};
+
+for (const [f, reason] of Object.entries(IMMEDIATE_ALLOW)) {
+  expect(
+    typeof reason === "string" && reason.trim() !== "",
+    `IMMEDIATE_ALLOW[${f}]: причина исключения не должна быть пустой`,
+  );
+}
+
+function stripCommentsForCalls(text) {
+  return text
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+}
+
+const IMMEDIATE_FILES = [
+  ...walk(`${SRC}/components/config`, []).filter((f) => f.endsWith(".svelte")),
+  `${SRC}/components/editor/ManagedFileBanner.svelte`,
+  `${SRC}/components/logs/AccessLogControl.svelte`,
+];
+
+for (const rel of IMMEDIATE_FILES) {
+  const text = read(rel);
+  const clean = stripCommentsForCalls(text);
+  const matched = IMMEDIATE_CALLS.filter((call) =>
+    new RegExp(`\\b${call}\\s*\\(`).test(clean),
+  );
+  if (matched.length > 0) {
+    const allowed = IMMEDIATE_ALLOW[rel];
+    if (allowed) continue;
+    expect(
+      clean.includes("<ImmediateMark"),
+      `${rel}: содержит вызов немедленного действия (${matched.join(", ")}), но не содержит <ImmediateMark (D-14)`,
+    );
+  }
+}
+
+// --- 13. Применение только через окно (план 149-15, D-08) -------------------
+
+for (const file of walk(`${SRC}/components`, [])) {
+  const text = read(file);
+  const clean = stripCommentsForCalls(text);
+  if (/\bapplyNow\s*\(/.test(clean)) {
+    expect(
+      file === `${SRC}/components/config/DraftBar.svelte`,
+      `${file}: вызов applyNow( допустим только в components/config/DraftBar.svelte (D-08)`,
+    );
+  }
+}
+
+for (const file of walk(SRC, [])) {
+  const text = read(file);
+  const clean = stripCommentsForCalls(text);
+  expect(
+    !/\bapplyFromUi\b/.test(clean),
+    `${file}: устаревший идентификатор applyFromUi (удалён планом 149-16, D-08)`,
+  );
+  expect(
+    !/\breleaseAndApply\b/.test(clean),
+    `${file}: устаревший идентификатор releaseAndApply (удалён планом 149-16, D-08)`,
   );
 }
 
