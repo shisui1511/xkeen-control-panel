@@ -510,119 +510,17 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		return p.finish(ResultView{Code: ResultJournalRecoveryFailed, Message: err.Error()})
 	}
 	snap := p.d.Store.Snapshot()
-	src := snap.Draft
-	if req.Source == SourceApplied {
-		src = snap.Applied
-		switch {
-		case req.restoreActive():
-			// Откат к снимку: файлы собираются из прежнего Applied целиком, секции,
-			// которых в нём не было, во вход не попадают.
-			src = req.Restore.Applied.Clone()
-		case req.overlayActive():
-			src = liveWithOverlay(src, req.SectionsOverlay)
-		}
-	}
 	bins := p.binaries()
 	installed := InstalledKernels{Xray: bins.Xray != "", Mihomo: bins.Mihomo != ""}
 
 	p.setStep(StepBuild, StepRunning, "", "")
-	// Дрейф проверяется здесь, под замками применения, а не только в StartApply:
-	// фоновые запуски (установка ядра, включение слоя) идут мимо кнопки и иначе
-	// молча перезаписали бы ручную правку (D-11). «Пересобрать» дрейф разрешает сам.
-	manifest := manifestOfScope(snap.Manifest, installed, req.Kernel)
-	listenerOnly := false
-	if req.Trigger != TriggerRebuild {
-		drift := driftKeys
-		if req.Trigger == TriggerKernelInstalled {
-			// Переустановленное ядро с пропавшими файлами: перезаписывать нечего,
-			// ручной правки там нет, поэтому сборка их восстанавливает (D-18).
-			drift = driftKeysExceptMissing
-		}
-		blocked := len(drift(p.d.Roots, manifest)) > 0
-		// Дрейф маршрутизации (D-06, D-07) блокирует запуск, который держит
-		// маршрутизацию этого ядра; запуск, отпускающий ядро, — это и есть решение
-		// «Отпустить», дрейфом этого ядра он не блокируется (по ядрам, D-06 из 147.1).
-		if !blocked {
-			blocked = routingDriftBlocks(src, routingDrift(p.d.Roots, snap.Routing, installed, req.Kernel, p.d.ForeignOwned))
-		}
-		// Чужой файл с ключом взятой секции блокирует запуск, который эту секцию
-		// держит (managed); запуск с managed=false — «Отпустить» — не блокируется.
-		if !blocked {
-			blocked = sectionDriftBlocks(src, sectionsDrift(p.d.Roots, snap.Cores, installed, req.Kernel, p.d.ForeignOwned))
-		}
-		switch {
-		case blocked && req.ReleaseListener:
-			// Снятие слушателя :53 не ждёт, пока пользователь разрешит дрейф: план
-			// сужается до файлов, затронутых живыми данными перехвата.
-			listenerOnly = true
-		case blocked:
-			p.setStep(StepBuild, StepFailed, "", ErrDriftBlocked.Error())
-			return p.finish(ResultView{Code: ResultDriftBlocked, Message: ErrDriftBlocked.Error()})
-		}
-	}
-	used := Input{Sections: src, Live: req.runLive(snap.Live), Mode: req.Source, Routing: routingFacts(p.d.Roots, snap.Routing)}
-	files, err := p.d.Registry.Build(used, installed)
-	if err == nil {
-		files = filesOfScope(files, req.Kernel)
-		err = CheckGenerated(files, p.d.ForeignOwned)
-	}
-	if err == nil {
-		// Проверки до записи (пустая группа, висячая ссылка): при любом триггере,
-		// в том числе фоновом, иначе обновление источника обошло бы блокировку
-		// «Применить». Непустой итог — отказ сборки без записи на диск.
-		if issues := p.d.Registry.Check(used, installed); len(issues) > 0 {
-			err = &BuildError{Issues: issues}
-		}
-	}
-	var plan Plan
-	if err == nil {
-		only := make(map[string]bool, len(req.Only))
-		for _, k := range req.Only {
-			only[k] = true
-		}
-		skipPlan := false
-		if listenerOnly {
-			// Только файлы, затронутые живыми данными перехвата; их нет — писать нечего.
-			var keys []string
-			if keys, err = p.listenerFileKeys(used, snap, installed, req, files); err == nil {
-				for _, k := range keys {
-					only[k] = true
-				}
-				skipPlan = len(keys) == 0
-				req.Only = keys
-			}
-		}
-		if err == nil && !skipPlan {
-			// Записи манифеста неустановленного ядра не участвуют в плане: иначе при
-			// пустой генерации его файлы ушли бы в удаление. Они остаются нетронутыми.
-			plan, err = ComputePlan(p.d.Roots, files, manifest, only, p.d.ForeignOwned)
-			// Каталог неустановленного ядра (и ядра вне области запуска) так же не
-			// трогается: его сирот не убираем.
-			plan.Orphans = orphansOfScope(plan.Orphans, installed, req.Kernel)
-		}
-	}
-	if err == nil && !listenerOnly {
-		// Взятие и возврат маршрутизации — часть этого же плана: проверка ядрами
-		// идёт на итоговой раскладке, запись и откат общие.
-		plan.Routing, err = p.planRouting(src, snap.Routing, installed, req)
-	}
-	if err == nil && !listenerOnly {
-		// Секции Xray (взятие и возврат файлов, D-01) идут теми же операциями.
-		plan.Routing, err = p.planCores(src, snap.Cores, plan.Routing, installed, req)
-	}
-	if err == nil && req.Source == SourceDraft && len(req.Only) == 0 {
-		// Смена порта прозрачного входящего или tun — полный перезапуск вместо
-		// горячей перезагрузки Mihomo (D-16): правила XKeen пересобираются только им.
-		// Тот же расчёт, что и у объявления в снимке; на переходе владения
-		// сравнивается значение по ту сторону перехода (G-147-3).
-		base := restartBase(p.d.Roots, snap, src, installed, p.d.ForeignOwned)
-		plan.FullRestart = fullRestartOf(RestartReasons(snap.Applied, src, base))
-	}
-	if err == nil && req.ForceFullRestart {
-		if plan.FullRestart == nil {
-			plan.FullRestart = map[string]string{}
-		}
-		plan.FullRestart[KernelMihomo] = RestartReasonFirmwareDNS
+	// План собирает та же функция, что и предпросмотр «Применить» (D-09): показанное
+	// в окне изменений совпадает с тем, что запишется.
+	plan, used, err := p.buildPlan(snap, &req, installed)
+	src := used.Sections
+	if errors.Is(err, ErrDriftBlocked) {
+		p.setStep(StepBuild, StepFailed, "", ErrDriftBlocked.Error())
+		return p.finish(ResultView{Code: ResultDriftBlocked, Message: ErrDriftBlocked.Error()})
 	}
 	if err != nil {
 		p.setStep(StepBuild, StepFailed, "", err.Error())
@@ -711,6 +609,148 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	kept := p.d.Store.Snapshot()
 	_ = PruneBackups(p.d.DataDir, BackupRetention, append(kept.Routing.backupDirs(), kept.Cores.backupDirs()...)...)
 	return p.finish(ResultView{OK: true, Code: ResultApplied, Written: out.Written, OrphansRemoved: out.OrphansRemoved})
+}
+
+// driftBlockedError — сборка плана остановлена дрейфом: Is совпадает с
+// ErrDriftBlocked, count — число расхождений, по которым запуск заблокирован.
+type driftBlockedError struct {
+	count int
+}
+
+func (e *driftBlockedError) Error() string { return ErrDriftBlocked.Error() }
+
+// Is связывает driftBlockedError с сентинелом ErrDriftBlocked.
+func (e *driftBlockedError) Is(target error) bool { return target == ErrDriftBlocked }
+
+// runSections — секции, из которых собираются файлы запуска: черновик или
+// применённое состояние (с подменой секций или снимком отката).
+func runSections(snap State, req ApplyRequest) Sections {
+	if req.Source != SourceApplied {
+		return snap.Draft
+	}
+	switch {
+	case req.restoreActive():
+		// Откат к снимку: файлы собираются из прежнего Applied целиком, секции,
+		// которых в нём не было, во вход не попадают.
+		return req.Restore.Applied.Clone()
+	case req.overlayActive():
+		return liveWithOverlay(snap.Applied, req.SectionsOverlay)
+	}
+	return snap.Applied
+}
+
+// buildPlan собирает план запуска из снимка состояния: проверка дрейфа, сборка
+// реестром генераторов, проверки до записи, расчёт плана, операции взятия и возврата,
+// признак полного перезапуска. Диск не меняется и шаги не публикуются: этим путём
+// идут и Run, и предпросмотр «Применить» (Layer.PreviewApply), поэтому окно
+// изменений показывает ровно то, что запишется (D-09). Снятие слушателя при дрейфе
+// сужает req.Only до файлов перехвата. Возвращает план и вход генераторов
+// (used.Sections — секции запуска). Дрейф — *driftBlockedError (Is ErrDriftBlocked),
+// проблемы сборки и проверок — *BuildError.
+func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledKernels) (Plan, Input, error) {
+	src := runSections(snap, *req)
+	// Дрейф проверяется здесь, под замками применения, а не только в StartApply:
+	// фоновые запуски (установка ядра, включение слоя) идут мимо кнопки и иначе
+	// молча перезаписали бы ручную правку (D-11). «Пересобрать» дрейф разрешает сам.
+	manifest := manifestOfScope(snap.Manifest, installed, req.Kernel)
+	listenerOnly := false
+	if req.Trigger != TriggerRebuild {
+		drift := driftKeys
+		if req.Trigger == TriggerKernelInstalled {
+			// Переустановленное ядро с пропавшими файлами: перезаписывать нечего,
+			// ручной правки там нет, поэтому сборка их восстанавливает (D-18).
+			drift = driftKeysExceptMissing
+		}
+		blocked := len(drift(p.d.Roots, manifest))
+		// Дрейф маршрутизации (D-06, D-07) блокирует запуск, который держит
+		// маршрутизацию этого ядра; запуск, отпускающий ядро, — это и есть решение
+		// «Отпустить», дрейфом этого ядра он не блокируется (по ядрам, D-06 из 147.1).
+		if blocked == 0 {
+			if rd := routingDrift(p.d.Roots, snap.Routing, installed, req.Kernel, p.d.ForeignOwned); routingDriftBlocks(src, rd) {
+				blocked = len(rd)
+			}
+		}
+		// Чужой файл с ключом взятой секции блокирует запуск, который эту секцию
+		// держит (managed); запуск с managed=false — «Отпустить» — не блокируется.
+		if blocked == 0 {
+			if sd := sectionsDrift(p.d.Roots, snap.Cores, installed, req.Kernel, p.d.ForeignOwned); sectionDriftBlocks(src, sd) {
+				blocked = len(sd)
+			}
+		}
+		switch {
+		case blocked > 0 && req.ReleaseListener:
+			// Снятие слушателя :53 не ждёт, пока пользователь разрешит дрейф: план
+			// сужается до файлов, затронутых живыми данными перехвата.
+			listenerOnly = true
+		case blocked > 0:
+			return Plan{}, Input{Sections: src}, &driftBlockedError{count: blocked}
+		}
+	}
+	used := Input{Sections: src, Live: req.runLive(snap.Live), Mode: req.Source, Routing: routingFacts(p.d.Roots, snap.Routing)}
+	files, err := p.d.Registry.Build(used, installed)
+	if err == nil {
+		files = filesOfScope(files, req.Kernel)
+		err = CheckGenerated(files, p.d.ForeignOwned)
+	}
+	if err == nil {
+		// Проверки до записи (пустая группа, висячая ссылка): при любом триггере,
+		// в том числе фоновом, иначе обновление источника обошло бы блокировку
+		// «Применить». Непустой итог — отказ сборки без записи на диск.
+		if issues := p.d.Registry.Check(used, installed); len(issues) > 0 {
+			err = &BuildError{Issues: issues}
+		}
+	}
+	var plan Plan
+	if err == nil {
+		only := make(map[string]bool, len(req.Only))
+		for _, k := range req.Only {
+			only[k] = true
+		}
+		skipPlan := false
+		if listenerOnly {
+			// Только файлы, затронутые живыми данными перехвата; их нет — писать нечего.
+			var keys []string
+			if keys, err = p.listenerFileKeys(used, snap, installed, *req, files); err == nil {
+				for _, k := range keys {
+					only[k] = true
+				}
+				skipPlan = len(keys) == 0
+				req.Only = keys
+			}
+		}
+		if err == nil && !skipPlan {
+			// Записи манифеста неустановленного ядра не участвуют в плане: иначе при
+			// пустой генерации его файлы ушли бы в удаление. Они остаются нетронутыми.
+			plan, err = ComputePlan(p.d.Roots, files, manifest, only, p.d.ForeignOwned)
+			// Каталог неустановленного ядра (и ядра вне области запуска) так же не
+			// трогается: его сирот не убираем.
+			plan.Orphans = orphansOfScope(plan.Orphans, installed, req.Kernel)
+		}
+	}
+	if err == nil && !listenerOnly {
+		// Взятие и возврат маршрутизации — часть этого же плана: проверка ядрами
+		// идёт на итоговой раскладке, запись и откат общие.
+		plan.Routing, err = p.planRouting(src, snap.Routing, installed, *req)
+	}
+	if err == nil && !listenerOnly {
+		// Секции Xray (взятие и возврат файлов, D-01) идут теми же операциями.
+		plan.Routing, err = p.planCores(src, snap.Cores, plan.Routing, installed, *req)
+	}
+	if err == nil && req.Source == SourceDraft && len(req.Only) == 0 {
+		// Смена порта прозрачного входящего или tun — полный перезапуск вместо
+		// горячей перезагрузки Mihomo (D-16): правила XKeen пересобираются только им.
+		// Тот же расчёт, что и у объявления в снимке; на переходе владения
+		// сравнивается значение по ту сторону перехода (G-147-3).
+		base := restartBase(p.d.Roots, snap, src, installed, p.d.ForeignOwned)
+		plan.FullRestart = fullRestartOf(RestartReasons(snap.Applied, src, base))
+	}
+	if err == nil && req.ForceFullRestart {
+		if plan.FullRestart == nil {
+			plan.FullRestart = map[string]string{}
+		}
+		plan.FullRestart[KernelMihomo] = RestartReasonFirmwareDNS
+	}
+	return plan, used, err
 }
 
 // listenerFileKeys — ключи файлов, чьё содержимое в этом запуске меняют живые данные
