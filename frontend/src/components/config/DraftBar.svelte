@@ -23,6 +23,8 @@
   import { dropSetName } from './lists/setName';
   import TakeRoutingModal from './routing/TakeRoutingModal.svelte';
   import { ownerState, routingBusy } from './routing/routingOwner';
+  import ApplyPreviewModal from './ApplyPreviewModal.svelte';
+  import { applyPreviewOpen, openApplyPreview } from '../../lib/configPreview';
 
   let resetting = $state(false);
 
@@ -118,16 +120,14 @@
     return (view?.groups.length ?? 0) > 0 || (view?.rules.length ?? 0) > 0;
   }
 
+  // «Применить» открывает окно изменений, а не конвейер (D-08): конвейер запускает только
+  // «Применить изменения» в окне, с ревизией черновика, которую окно показало
   async function onApply() {
     if (await shouldIntercept()) {
       interceptOpen = true;
       return;
     }
-    try {
-      await applyNow();
-    } catch (err) {
-      handleLayerError(err);
-    }
+    openApplyPreview();
   }
 
   async function onReset() {
@@ -248,6 +248,12 @@
 </section>
 
 <TakeRoutingModal open={interceptOpen} mode="intercept" onclose={() => (interceptOpen = false)} />
+
+<ApplyPreviewModal
+  open={$applyPreviewOpen}
+  onclose={() => applyPreviewOpen.set(false)}
+  onconfirm={(rev) => applyNow(rev)}
+/>
 
 <style>
   .draft-bar {
