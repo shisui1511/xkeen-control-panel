@@ -313,7 +313,6 @@ func TestRouterSettleSection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadState: %v", err)
 	}
-	wantChanges := draftChanges(State{Draft: pre.Draft, Applied: pre.Applied}) - 1
 	if err := layer.SettleSection("geodata_settle", func(applied, draft json.RawMessage) (json.RawMessage, json.RawMessage, error) {
 		return draft, draft, nil
 	}); err != nil {
@@ -326,6 +325,9 @@ func TestRouterSettleSection(t *testing.T) {
 	if post.DraftRevision != pre.DraftRevision {
 		t.Errorf("изменение только Applied сдвинуло ревизию: %d -> %d", pre.DraftRevision, post.DraftRevision)
 	}
+	// Событие несёт число строк изменений черновика после правки — тем же счётом
+	// по сущностям, что у хранилища этого слоя.
+	wantChanges := layer.store.changeCount(State{Draft: post.Draft, Applied: post.Applied})
 	gotApplied := false
 	for deadline := time.Now().Add(5 * time.Second); !gotApplied && time.Now().Before(deadline); {
 		dev, ok := rtNextEvent(events, EventDraft, time.Until(deadline))

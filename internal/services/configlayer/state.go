@@ -396,24 +396,6 @@ func (s *Store) read(fn func(st State)) {
 	fn(s.st)
 }
 
-// draftChanges считает секции, чей черновик отличается от применённого
-// состояния: ключ есть только с одной стороны или значения не равны.
-func draftChanges(st State) int {
-	n := 0
-	for k, d := range st.Draft {
-		a, ok := st.Applied[k]
-		if !ok || !SectionEqual(d, a) {
-			n++
-		}
-	}
-	for k := range st.Applied {
-		if _, ok := st.Draft[k]; !ok {
-			n++
-		}
-	}
-	return n
-}
-
 // draftDirty сообщает, отличается ли черновик от применённого состояния: ключ
 // есть только с одной стороны или значения не равны. Для булевых проверок
 // «черновик открыт»; число изменений — changeCount.

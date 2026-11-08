@@ -1360,7 +1360,7 @@ func (l *Layer) ApplyEdit(ctx context.Context, edit func(st StateView) (map[stri
 	}
 	defer release()
 	st := l.store.Snapshot()
-	if draftChanges(st) != 0 {
+	if draftDirty(st) {
 		return ApplyView{}, ErrDraftOpen
 	}
 	sections, err := edit(StateView{DraftRevision: st.DraftRevision, Draft: st.Draft.Clone(), Applied: st.Applied.Clone(), Live: st.Live.Clone()})
