@@ -261,6 +261,7 @@
       },
       "tests": [
         "go:TestRouterAddRevisionConflict",
+        "go:TestRouterApplyPreview",
         "go:TestRouterApplyWithIncompatibleNodes",
         "go:TestRouterBlobsHoldReleaseRace",
         "go:TestRouterBlobsPutHeldIntegrity",

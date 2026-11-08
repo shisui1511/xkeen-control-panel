@@ -1293,6 +1293,14 @@ func (l *Layer) Diag(rev int64, action string) (DraftEvent, error) {
 // сразу после запуска: конвейер привязан к жизни слоя, а не к HTTP-запросу, и не
 // обрывается при закрытии вкладки.
 func (l *Layer) StartApply(user bool) error {
+	return l.StartApplyAt(user, 0)
+}
+
+// StartApplyAt — StartApply с ревизией черновика, которую видел клиент (окно
+// изменений перед применением, D-08): rev > 0 и не равна текущей ревизии под
+// замком применения — ErrDraftConflict, конвейер не запускается. rev == 0 —
+// ревизия не сверяется (прежние вызовы без тела).
+func (l *Layer) StartApplyAt(user bool, rev int64) error {
 	if !l.Enabled() {
 		return ErrDisabled
 	}
@@ -1304,6 +1312,12 @@ func (l *Layer) StartApply(user bool) error {
 	release, err := l.pipeline.TryBegin(l.ctx, user)
 	if err != nil {
 		return l.mapBusy(err)
+	}
+	// Черновик изменился после того, как клиент показал окно изменений: применять
+	// не то, что видел пользователь, нельзя.
+	if rev > 0 && rev != l.store.Snapshot().DraftRevision {
+		release()
+		return ErrDraftConflict
 	}
 	// Свежая сверка под замком применения: пока есть нерешённый дрейф, диск не
 	// трогается (D-11). «Пересобрать» по названным файлам этим не блокируется.

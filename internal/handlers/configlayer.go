@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -239,9 +240,17 @@ func (a *API) ConfigLayerApply(w http.ResponseWriter, r *http.Request) {
 	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) {
 		return
 	}
-	// Тело не используется, но размер ограничен как у остальных запросов.
+	// Необязательное тело {revision}: ревизия черновика, которую показало окно
+	// изменений. Пустое тело (прежние вызовы) — ревизия не сверяется.
+	var req struct {
+		Revision int64 `json:"revision"`
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxLayerBodyBytes)
-	if err := a.configLayer.StartApply(true); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		JSONErrorCode(w, http.StatusBadRequest, "invalid_request", a.t(r, "configlayer.invalid_request"))
+		return
+	}
+	if err := a.configLayer.StartApplyAt(true, req.Revision); err != nil {
 		a.writeLayerError(w, r, err)
 		return
 	}
