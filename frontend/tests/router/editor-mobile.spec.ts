@@ -1831,7 +1831,10 @@ test('editor-mobile menu-save-target vp:390', { tag: CORE_TAG }, async ({ page, 
       page.locator(`.editor-tab.active .tab-name[title="${f.name}"]`),
       'CR-01: «История резервных копий» не открыла файл из меню — «Сохранить» нацелено не на открытую вкладку'
     ).toHaveCount(1, { timeout: T.page });
-    await expect(page.locator('.editor-bottom-drawer')).toHaveCount(0);
+    // у F копий нет: лист открыт с «Копий пока нет» и закрывается перед переходом во вкладку A
+    await expect(page.getByTestId('backups-empty')).toBeVisible({ timeout: T.page });
+    await page.locator('.drawer-close-btn').click();
+    await expect(page.locator('.editor-bottom-drawer')).toHaveCount(0, { timeout: T.action });
     await tabA.click({ timeout: T.action });
     await expect(page.locator(`.editor-tab.active .tab-name[title="${a.name}"]`)).toHaveCount(1, {
       timeout: T.page
@@ -1893,25 +1896,29 @@ test('editor-mobile menu-backups vp:390', { tag: CORE_TAG }, async ({ page }) =>
   await page.locator('.drawer-close-btn').click();
   await expect(drawer).toHaveCount(0, { timeout: T.action });
 
-  // файл без копий: файл открыт, листа нет, есть уведомление
+  // файл без копий: файл открыт, лист показывает «Копий пока нет», а не ошибку
   await openSheetFromToolbar(page);
   const menu2 = await openFileMenu(page, altFx().name);
   await menu2.locator('.ctx-item').nth(CTX_BACKUPS).click();
   await expect(activeTab(altFx().name)).toHaveCount(1, { timeout: T.page });
   await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  await expect(drawer, 'лист копий не открылся для файла без копий').toBeVisible({
+    timeout: T.page
+  });
   await expect(
-    page
-      .locator('.toast--info', {
-        hasText: /Резервных копий этого файла пока нет|No backups of this file yet/
-      })
-      .first(),
-    'WR-03: нет уведомления «Резервных копий этого файла пока нет» при успешном пустом списке'
-  ).toBeVisible({ timeout: T.action });
+    page.getByTestId('backups-empty'),
+    'нет «Копий пока нет» при успешном пустом списке'
+  ).toContainText(/Копий пока нет|No backups yet/, { timeout: T.action });
+  await expect(
+    page.getByTestId('backups-error'),
+    'при успешном пустом списке лист показывает ошибку загрузки'
+  ).toHaveCount(0);
   await expect(
     page.locator('.toast--error'),
     'WR-03: при успешном пустом списке показано уведомление об ошибке'
   ).toHaveCount(0);
-  await expect(drawer).toHaveCount(0);
+  await page.locator('.drawer-close-btn').click();
+  await expect(drawer).toHaveCount(0, { timeout: T.action });
 
   // флаг листа не остался включённым: следующий файл открывается без листа
   await openSheetFromToolbar(page);
