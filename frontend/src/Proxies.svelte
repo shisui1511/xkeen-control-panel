@@ -15,7 +15,9 @@
     mihomoOfflineReason,
     activeKernelName,
     runningKernels,
-    isMihomo
+    isMihomo,
+    configLayerEnabled,
+    configLayerFlagKnown
   } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { switchKernel, notifySwitchOutcome } from './lib/serviceControl';
@@ -117,6 +119,8 @@
     icon?: string;
   }
 
+  const isLayerActive = $derived($configLayerFlagKnown && $configLayerEnabled);
+
   // Active tab state: 'groups' | 'providers'
   let activeTab = $state<'groups' | 'providers'>(
     typeof window !== 'undefined' &&
@@ -125,6 +129,12 @@
       ? 'providers'
       : 'groups'
   );
+
+  $effect(() => {
+    if (isLayerActive && activeTab === 'providers') {
+      activeTab = 'groups';
+    }
+  });
 
   // Groups and Proxies states
   let groups = $state<ProxyGroup[]>([]);
@@ -1011,13 +1021,15 @@
     {/if}
   </PageHeader>
 
-  <Tabs
-    bind:value={activeTab}
-    items={[
-      { value: 'groups', label: $t('proxies.tab_groups') },
-      { value: 'providers', label: $t('proxies.tab_providers') }
-    ]}
-  />
+  {#if !isLayerActive}
+    <Tabs
+      bind:value={activeTab}
+      items={[
+        { value: 'groups', label: $t('proxies.tab_groups') },
+        { value: 'providers', label: $t('proxies.tab_providers') }
+      ]}
+    />
+  {/if}
 
   {#if activeTab === 'groups'}
     {#if $capabilities?.kernels?.mihomo?.installed === false}

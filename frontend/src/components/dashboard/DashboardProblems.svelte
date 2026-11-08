@@ -6,6 +6,7 @@
   import { kernelLabel } from '../../lib/kernelState';
   import { formatBytes } from '../../lib/format';
   import type { NextStep } from '../../lib/nextStep';
+  import { constructorHash } from '../../lib/editorRoute';
 
   // Замечания дашборда: сторожевой таймер, сбой ядра, место на диске, сертификат, ошибка
   // конфигурации, API Mihomo и следующий шаг настройки. Каждое — строка с тоном, текстом и
@@ -59,7 +60,7 @@
   }: Props = $props();
 
   function openConstructor() {
-    window.location.hash = '#/constructor';
+    window.location.hash = constructorHash();
   }
 
   const mihomoApiDown = $derived(

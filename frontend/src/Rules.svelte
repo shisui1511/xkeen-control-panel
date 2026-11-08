@@ -7,7 +7,9 @@
     mihomoApiState,
     mihomoOfflineReason,
     activeKernelName,
-    isConflict
+    isConflict,
+    configLayerEnabled,
+    configLayerFlagKnown
   } from './stores';
   import {
     apiFetch,
@@ -38,6 +40,8 @@
 
   let { onSwitchTab = () => {} }: Props = $props();
 
+  const isLayerActive = $derived($configLayerFlagKnown && $configLayerEnabled);
+
   // Active tab state
   type TabKey = 'exceptions' | 'providers' | 'diagnostic' | 'all_rules';
 
@@ -50,6 +54,12 @@
   let activeTab = $state<TabKey>(hashWantsProviders() ? 'providers' : 'exceptions');
   // Вкладку выбрали руками или адресом: самовыбор «Провайдеров» по состоянию ядра её не меняет.
   let tabChosen = $state(hashWantsProviders());
+
+  $effect(() => {
+    if (isLayerActive && activeTab === 'exceptions') {
+      activeTab = 'providers';
+    }
+  });
 
   // Страница без API Mihomo (D-19): ядро остановлено, API не отвечает или работает Xray.
   // До первого ответа capabilities (unknown) причины нет — показывается скелетон.
@@ -106,7 +116,9 @@
 
   // Tab definitions
   let tabItems = $derived<TabItem[]>([
-    { value: 'exceptions', label: $t('rules.tab_exceptions'), testId: 'tab-exceptions' },
+    ...(isLayerActive
+      ? []
+      : [{ value: 'exceptions', label: $t('rules.tab_exceptions'), testId: 'tab-exceptions' }]),
     { value: 'providers', label: $t('rules.tab_providers'), testId: 'tab-providers' },
     {
       value: 'diagnostic',

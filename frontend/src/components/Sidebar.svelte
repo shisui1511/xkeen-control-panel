@@ -9,8 +9,10 @@
     isConflict,
     isMihomo,
     activeKernelName,
-    configLayerEnabled
+    configLayerEnabled,
+    configLayerFlagKnown
   } from '../stores';
+  import { editorHash } from '../lib/editorRoute';
   import { navBadgeCount, badgeTotal } from '../lib/configLayer';
   import { showMihomoNavFor } from '../lib/navCaps';
   import Skeleton from './Skeleton.svelte';
@@ -507,9 +509,11 @@
     </summary>
     <!-- Editor first: confirmed as the most-opened item in this group. -->
     <a
-      href="#/editor"
+      href={$configLayerFlagKnown && $configLayerEnabled ? '#/config/files' : editorHash()}
       class="nav-item"
-      aria-current={currentTab === 'editor' ? 'page' : undefined}
+      aria-current={!($configLayerFlagKnown && $configLayerEnabled) && currentTab === 'editor'
+        ? 'page'
+        : undefined}
       data-label={$t('nav.editor')}
       onclick={() => isSidebarOpen.set(false)}
       title={$isSidebarCollapsed ? undefined : $t('nav.editor')}
