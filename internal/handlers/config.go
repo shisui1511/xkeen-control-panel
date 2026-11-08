@@ -102,12 +102,17 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 	if scoped && a.configLayer != nil && a.configLayer.Enabled() {
 		owners = a.configLayer.FileOwnerIndex()
 	}
+	// Файлы с именем не латиницей в корне каталога Xray (XKeen их может не
+	// загрузить) видны только вкладке «Файлы» и только через узкую проверку имени.
+	xrayRoot := scoped && (cleanDir == a.xrayRootDir() || cleanDir == filepath.Clean(a.cfg.XRayConfigDir))
 	describe := func(info *ConfigFileInfo) {
 		if !scoped {
 			return
 		}
-		if word, ok := utils.XKeenStoplistMatch(info.Name); ok {
-			info.StoplistWord = word
+		if xrayRoot {
+			if word, ok := utils.XKeenStoplistMatch(info.Name); ok {
+				info.StoplistWord = word
+			}
 		}
 		if owners == nil {
 			return
@@ -117,9 +122,6 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res := make([]ConfigFileInfo, 0, len(files))
-	// Файлы с именем не латиницей в корне каталога Xray (XKeen их может не
-	// загрузить) видны только вкладке «Файлы» и только через узкую проверку имени.
-	xrayRoot := scoped && (cleanDir == a.xrayRootDir() || cleanDir == filepath.Clean(a.cfg.XRayConfigDir))
 	restricted := func(f string) {
 		if !xrayRoot || filepath.Dir(f) != cleanDir {
 			return
