@@ -755,6 +755,35 @@ export function fetchDiff(key: string): Promise<LayerDiff> {
   return apiFetchJSON<LayerDiff>(`/api/configlayer/files/diff?key=${encodeURIComponent(key)}`);
 }
 
+export interface ApplyCopy {
+  id: string;
+  at: string;
+  reason: string;
+  size: number;
+}
+
+export interface FileApplies {
+  key: string;
+  path: string;
+  applies: ApplyCopy[];
+}
+
+export interface ApplyContent {
+  id: string;
+  content: string;
+  truncated: boolean;
+}
+
+export function fetchApplies(key: string): Promise<FileApplies> {
+  return apiFetchJSON<FileApplies>(`/api/configlayer/files/applies?key=${encodeURIComponent(key)}`);
+}
+
+export function fetchApplyContent(key: string, id: string): Promise<ApplyContent> {
+  return apiFetchJSON<ApplyContent>(
+    `/api/configlayer/files/applies?key=${encodeURIComponent(key)}&id=${encodeURIComponent(id)}`
+  );
+}
+
 export async function dismissNotice(id: string): Promise<void> {
   const res = await post<{ notices?: LayerNotice[] }>('/api/configlayer/notices/dismiss', { id });
   layerSnapshot.update((s) => reduceLayerEvent(s, 'notices', { notices: res.notices ?? [] }));

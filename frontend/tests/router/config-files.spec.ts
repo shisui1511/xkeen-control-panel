@@ -275,3 +275,38 @@ test('config-files owner-banners vp:1280', async ({ page }) => {
 
   await guard.assertClean();
 });
+
+test('config-files applies vp:1280', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  const tab = await openFilesTab(page, VP_DESKTOP);
+  await expect(tab.locator('.skeleton')).toHaveCount(0, { timeout: T.page });
+
+  // 1. Открыть файл панели (data-owner="panel")
+  const panelRow = tab.locator('.file-row:has([data-owner="panel"])').first();
+  if ((await panelRow.count()) > 0) {
+    await panelRow.click({ timeout: T.action });
+    await expect(tab.getByTestId('managed-file-banner')).toBeVisible({ timeout: T.page });
+
+    // Открыть лист копий через кнопку в строке состояния
+    const backupsToggle = tab.locator('.backups-toggle-btn').first();
+    if ((await backupsToggle.count()) > 0) {
+      await backupsToggle.click({ timeout: T.action });
+      await expect(tab.getByTestId('files-applies-list')).toBeVisible({ timeout: T.action });
+      // Кнопки «Восстановить» в листе последних применений нет
+      await expect(
+        tab.getByTestId('files-applies-list').locator('.restore-inline-btn, .diff-restore-btn')
+      ).toHaveCount(0);
+    }
+  }
+
+  // 2. Открыть файл пользователя или XKeen (наш fixtureName — user)
+  const userRow = fileRow(tab, fixtureName);
+  await expect(userRow).toBeVisible({ timeout: T.page });
+  await userRow.click({ timeout: T.action });
+
+  // Рядом с кнопкой «Сохранить» видна пометка ImmediateMark
+  const saveSection = tab.locator('.eph-right');
+  await expect(saveSection.getByTestId('immediate-mark')).toBeVisible({ timeout: T.page });
+
+  await guard.assertClean();
+});
