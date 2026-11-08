@@ -134,7 +134,18 @@
     {#snippet aboveCode(path, info)}
       {@const fileInfo = info ?? activeFileInfo}
       {@const layerFile = path ? $filesByPath.get(path) : undefined}
-      {#if layerFile && layerFile.state?.startsWith('drift_')}
+      {#if fileInfo?.restricted}
+        <div
+          class="alert alert-warning files-stoplist-banner"
+          role="alert"
+          data-testid="files-stoplist-banner"
+        >
+          <Icon name="warning" size={16} />
+          <span class="stoplist-message">
+            {$t('cfg.files.stoplist_banner', { word: fileInfo.stoplist_word || 'non-latin' })}
+          </span>
+        </div>
+      {:else if layerFile && layerFile.state?.startsWith('drift_')}
         <div
           class="alert alert-warning files-drift-banner"
           role="alert"
@@ -247,6 +258,22 @@
 </section>
 
 <style>
+  .files-stoplist-banner {
+    margin: 0;
+    border-radius: 0;
+    border-width: 0 0 1px 0;
+    border-left-width: var(--spacing-1);
+    border-left-style: solid;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2) var(--spacing-3);
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+    min-width: 0;
+    flex-shrink: 0;
+  }
+
   .files-drift-banner {
     margin: 0;
     border-radius: 0;

@@ -263,7 +263,8 @@
       selectedFile !== '' &&
       ($filesByPath.get(selectedFile)?.state?.startsWith('drift_') ?? false)
   );
-  const isReadOnly = $derived(isManagedReadOnly || selectedMissing || isDrift);
+  const isRestricted = $derived(embedded && Boolean(activeFileInfo?.restricted));
+  const isReadOnly = $derived(isManagedReadOnly || selectedMissing || isDrift || isRestricted);
 
   $effect(() => {
     const cur = activeTabPath || selectedFile || null;
@@ -1681,6 +1682,11 @@
     onSaveFile={checkBeforeSave}
     onSaveAndApply={handleSaveAndApply}
     managedReadOnly={isReadOnly}
+    immediate={embedded &&
+      Boolean(
+        activeFileInfo && (activeFileInfo.owner === 'xkeen' || activeFileInfo.owner === 'user')
+      )}
+    saveDisabledReason={isRestricted ? $t('cfg.files.restricted_title') : undefined}
   />
 {/snippet}
 
@@ -1959,6 +1965,7 @@
             backupCount={visibleBackups.length}
             backupsStatus={statusBarBackups}
             drawerOpen={drawerVisible}
+            hasApplies={Boolean(embedded && managedFile?.owner === 'panel' && appliesFor)}
             onToggleSchema={toggleSchema}
             onToggleExpertMode={toggleExpertMode}
             onToggleDrawer={() => {

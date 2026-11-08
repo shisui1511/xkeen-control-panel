@@ -14,6 +14,7 @@
     /** Исход запроса списка копий: счётчик — только при ready, при error — «Копии: ошибка» */
     backupsStatus?: 'idle' | 'loading' | 'ready' | 'error';
     drawerOpen?: boolean;
+    hasApplies?: boolean;
     onToggleSchema: () => void;
     onToggleExpertMode: () => void;
     onToggleDrawer?: () => void;
@@ -30,6 +31,7 @@
     backupCount = 0,
     backupsStatus = 'ready',
     drawerOpen = false,
+    hasApplies = false,
     onToggleSchema,
     onToggleExpertMode,
     onToggleDrawer
@@ -90,7 +92,7 @@
         <Icon name="warning" size={12} />
         {$t('editor.backups_status_error')}
       </button>
-    {:else if backupsStatus === 'ready' && backupCount > 0}
+    {:else if hasApplies || (backupsStatus === 'ready' && backupCount > 0)}
       <button class="backups-toggle-btn tap-zone-44" onclick={() => onToggleDrawer?.()}>
         <svg
           width="10"
@@ -104,7 +106,7 @@
         >
           <polyline points="18 15 12 9 6 15"></polyline>
         </svg>
-        {$t('editor.backups')} ({backupCount})
+        {hasApplies ? $t('cfg.files.applies_title') : `${$t('editor.backups')} (${backupCount})`}
       </button>
     {/if}
   </div>
