@@ -159,6 +159,51 @@ test('config-files open vp:1280', async ({ page }) => {
   await guard.assertClean();
 });
 
+test('config-files owners vp:1280', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  const tab = await openFilesTab(page, VP_DESKTOP);
+  await expect(tab.locator('.skeleton')).toHaveCount(0, { timeout: T.page });
+  await expect(tab.locator('.ft-error')).toHaveCount(0);
+  await expect(fileRow(tab, fixtureName)).toBeVisible({ timeout: T.page });
+
+  // у каждой строки один бейдж владельца из трёх (D-05); временный файл — пользователя
+  const rows = tab.locator('.file-row');
+  const count = await rows.count();
+  expect(count, 'в списке нет строк').toBeGreaterThan(0);
+  const paths: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const row = rows.nth(i);
+    const path = (await row.getAttribute('data-path')) ?? '';
+    paths.push(path);
+    const badge = row.getByTestId('files-owner-badge');
+    await expect(badge, `строка ${path}: бейдж владельца`).toHaveCount(1);
+    expect(['panel', 'xkeen', 'user'], `строка ${path}: владелец`).toContain(
+      await badge.getAttribute('data-owner')
+    );
+  }
+  await expect(fileRow(tab, fixtureName).getByTestId('files-owner-badge')).toHaveAttribute(
+    'data-owner',
+    'user'
+  );
+
+  // только три каталога: данные панели, логи и бинарники не выводятся (D-04)
+  const roots = ['/opt/etc/xray/', '/opt/etc/mihomo/', '/opt/etc/xkeen/'];
+  for (const path of paths) {
+    expect(
+      roots.some((r) => path.startsWith(r)),
+      `путь вне трёх каталогов: ${path}`
+    ).toBe(true);
+    for (const banned of ['/opt/etc/xcp', '/opt/var/log', '/opt/sbin', '/opt/bin']) {
+      expect(path.startsWith(banned), `в списке путь ${banned}`).toBe(false);
+    }
+  }
+  // сервер тоже отказывает вкладке в каталоге данных панели
+  const denied = await api(page, 'GET', '/api/config/list?dir=%2Fopt%2Fetc%2Fxcp&scope=files');
+  expect(denied.status, 'scope=files для каталога панели').toBe(403);
+
+  await guard.assertClean();
+});
+
 test('config-files sheet vp:390', async ({ page }) => {
   const guard = attachConsoleGuard(page);
   const tab = await openFilesTab(page, VP_PHONE);

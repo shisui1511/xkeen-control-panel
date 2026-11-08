@@ -3,17 +3,19 @@
   import Icon from '../../lib/components/Icon.svelte';
   import { matchXKeenStoplist } from '../../lib/xkeenStoplist';
   import { configLayerEnabled } from '../../stores';
-  import { filesByPath } from '../../lib/configLayer';
-
-  interface ConfigFileInfo {
-    name: string;
-    path: string;
-    size: number;
-  }
+  import { filesByPath, type FileState } from '../../lib/configLayer';
+  import Badge, { type BadgeTone } from '../Badge.svelte';
+  import Button from '../Button.svelte';
+  import EmptyState from '../EmptyState.svelte';
+  import Skeleton from '../Skeleton.svelte';
+  import OwnerBadge from './OwnerBadge.svelte';
+  import type { ConfigFileInfo, FileListStatus, FileOwner } from './fileOps';
 
   let {
     xrayFiles = [],
     mihomoFiles = [],
+    xkeenFiles,
+    status = 'ready',
     selectedFile = '',
     loadingPath = null,
     activeKernel = '',
@@ -23,10 +25,18 @@
     onDuplicateFile,
     onDownloadFile,
     onDeleteFile,
-    onViewBackups
+    onViewBackups,
+    onRetry
   }: {
     xrayFiles: ConfigFileInfo[];
     mihomoFiles: ConfigFileInfo[];
+    /**
+     * Файлы каталога XKeen: задан только во вкладке «Файлы» раздела (D-04); без него
+     * список — прежние две группы Редактора
+     */
+    xkeenFiles?: ConfigFileInfo[];
+    /** Исход загрузки списка: скелетон, ошибка с «Повторить» или группы */
+    status?: FileListStatus;
     selectedFile: string;
     /** Путь файла, который сейчас открывается: его строка помечена aria-busy и подсвечена */
     loadingPath?: string | null;
@@ -38,29 +48,75 @@
     onDownloadFile: (file: ConfigFileInfo) => void;
     onDeleteFile: (file: ConfigFileInfo) => void;
     onViewBackups: (file: ConfigFileInfo) => void;
+    onRetry?: () => void;
   } = $props();
 
   let fileSearchQuery = $state('');
 
-  let filteredXrayFiles = $derived(
-    xrayFiles.filter((file) => file.name.toLowerCase().includes(fileSearchQuery.toLowerCase()))
+  const scoped = $derived(xkeenFiles !== undefined);
+  const query = $derived(fileSearchQuery.toLowerCase());
+  const matches = (file: ConfigFileInfo) => file.name.toLowerCase().includes(query);
+
+  let filteredXrayFiles = $derived(xrayFiles.filter(matches));
+  let filteredMihomoFiles = $derived(mihomoFiles.filter(matches));
+  let filteredXkeenFiles = $derived((xkeenFiles ?? []).filter(matches));
+
+  // Фильтр не нашёл ни одного файла: вместо пустых групп — одно пустое состояние
+  const nothingFound = $derived(
+    scoped &&
+      query !== '' &&
+      filteredXrayFiles.length + filteredMihomoFiles.length + filteredXkeenFiles.length === 0
   );
 
-  let filteredMihomoFiles = $derived(
-    mihomoFiles.filter((file) => file.name.toLowerCase().includes(fileSearchQuery.toLowerCase()))
-  );
-
-  // Слой «Конфигурация»: файл манифеста — «панель» (под управлением) или «ручной» (отпущен).
-  // Файлы вне манифеста и выключенный флаг — без бейджа, как до включения слоя.
-  function layerBadge(path: string): 'managed' | 'manual' | null {
+  // Владелец (D-05): поле ответа scope=files, без него — по манифесту слоя (файл манифеста —
+  // «Панель», отпущенный — «Пользователь»). Выключенный флаг — без бейджа, как до слоя.
+  function ownerOf(file: ConfigFileInfo): FileOwner | null {
     if (!$configLayerEnabled) return null;
-    const f = $filesByPath.get(path);
+    if (file.owner) return file.owner;
+    const f = $filesByPath.get(file.path);
     if (!f) return null;
-    return f.state === 'released' ? 'manual' : 'managed';
+    return f.state === 'released' ? 'user' : 'panel';
+  }
+
+  function stateOf(file: ConfigFileInfo): FileState | undefined {
+    if (!$configLayerEnabled) return undefined;
+    return file.state ?? $filesByPath.get(file.path)?.state;
+  }
+
+  const DRIFT_STATES: readonly FileState[] = [
+    'drift_modified',
+    'drift_renamed',
+    'drift_empty',
+    'drift_missing'
+  ];
+
+  /** Бейдж статуса файла (D-07): у совпадающего файла бейджа статуса нет */
+  function statusOf(
+    file: ConfigFileInfo
+  ): { state: FileState; tone: BadgeTone; label: string } | null {
+    const state = stateOf(file);
+    if (state === 'drift_missing') {
+      return { state, tone: 'warning', label: $t('cfg.files.badge_missing') };
+    }
+    if (state && DRIFT_STATES.includes(state)) {
+      return { state, tone: 'warning', label: $t('cfg.files.badge_drift') };
+    }
+    if (state === 'pending') {
+      return { state, tone: 'neutral', label: $t('cfg.files.badge_pending') };
+    }
+    return null;
+  }
+
+  function driftCount(list: ConfigFileInfo[]): number {
+    return list.filter((f) => {
+      const state = stateOf(f);
+      return state !== undefined && DRIFT_STATES.includes(state);
+    }).length;
   }
 
   const xrayDir = '/opt/etc/xray/configs';
   const mihomoDir = '/opt/etc/mihomo';
+  const xkeenDir = '/opt/etc/xkeen';
 
   /** Части имени для переноса строки после «.», «_», «-», «/» (разделитель остаётся в конце части) */
   function breakableParts(name: string): string[] {
@@ -164,129 +220,150 @@
     </button>
   </div>
 
-  <div class="file-tree-body">
-    <!-- Xray Section (EDIT-03) -->
-    <details
-      class="editor-files nav-group"
-      open={activeKernel === 'xray' || filteredXrayFiles.length > 0}
-    >
-      <summary class="editor-files-head">
-        <div class="group-ttl-wrap">
-          <span class="group-ttl">Xray</span>
-          <span class="group-count">({filteredXrayFiles.length})</span>
-        </div>
-        <span class="group-path-wrap">
-          <span class="group-path" title={xrayDir}
-            >{#each breakableParts(xrayDir) as part, i (i)}{part}<wbr />{/each}</span
-          >
-          <span class="nav-group-arrow">›</span>
-        </span>
-      </summary>
-      <div class="file-list">
-        {#each filteredXrayFiles as file (file.path)}
-          {@const fmt = getFormatBadge(file.name)}
-          {@const stopWord = matchXKeenStoplist(file.name)}
-          {@const activeConfig = isActiveRunningConfig(file)}
-          {@const busy = file.path === loadingPath}
-          <button
-            class="file-row"
-            class:active={loadingPath ? busy : file.path === selectedFile}
-            class:busy
-            aria-busy={busy ? 'true' : undefined}
-            onclick={() => onLoadFile(file.path, true)}
-            ondblclick={() => onLoadFile(file.path, false)}
-            oncontextmenu={(e) => handleContextMenu(e, file)}
-          >
-            <div class="fr-left">
-              <span class="fmt-badge {fmt.cls}">{fmt.label}</span>
-              {#if activeConfig}
-                <span class="active-dot" title={$t('editor.active_config')}></span>
-              {/if}
-              <span class="fr-name file-name" title={file.name}
-                >{#each breakableParts(file.name) as part, i (i)}{part}<wbr />{/each}</span
-              >
-              {#if stopWord}
-                {@const markTitle = $t('stoplist.badge_title', { word: stopWord })}
-                <span class="stoplist-mark" title={markTitle} aria-label={markTitle}>
-                  <Icon name="warning" size={12} />
-                </span>
-              {/if}
-              {#if layerBadge(file.path) === 'managed'}
-                <span class="badge badge--tag badge-info layer-badge" data-testid="layer-badge"
-                  >{$t('editor.managed_badge')}</span
-                >
-              {:else if layerBadge(file.path) === 'manual'}
-                <span class="badge badge--tag layer-badge" data-testid="layer-badge"
-                  >{$t('editor.manual_badge')}</span
-                >
-              {/if}
-            </div>
-            <span class="fr-meta">{formatBytes(file.size)}</span>
-          </button>
-        {:else}
-          <span class="sb-empty">—</span>
+  <div class="file-tree-body" class:scoped>
+    {#if status === 'loading'}
+      <div class="ft-skeleton" aria-busy="true">
+        {#each [0, 1, 2, 3, 4, 5] as i (i)}
+          <Skeleton height="28px" />
         {/each}
       </div>
-    </details>
-
-    <!-- Mihomo Section (EDIT-03) -->
-    <details
-      class="editor-files nav-group"
-      open={activeKernel === 'mihomo' || filteredMihomoFiles.length > 0}
-    >
-      <summary class="editor-files-head">
-        <div class="group-ttl-wrap">
-          <span class="group-ttl">Mihomo</span>
-          <span class="group-count">({filteredMihomoFiles.length})</span>
-        </div>
-        <span class="group-path-wrap">
-          <span class="group-path" title={mihomoDir}
-            >{#each breakableParts(mihomoDir) as part, i (i)}{part}<wbr />{/each}</span
-          >
-          <span class="nav-group-arrow">›</span>
-        </span>
-      </summary>
-      <div class="file-list">
-        {#each filteredMihomoFiles as file (file.path)}
-          {@const fmt = getFormatBadge(file.name)}
-          {@const activeConfig = isActiveRunningConfig(file)}
-          {@const busy = file.path === loadingPath}
-          <button
-            class="file-row"
-            class:active={loadingPath ? busy : file.path === selectedFile}
-            class:busy
-            aria-busy={busy ? 'true' : undefined}
-            onclick={() => onLoadFile(file.path, true)}
-            ondblclick={() => onLoadFile(file.path, false)}
-            oncontextmenu={(e) => handleContextMenu(e, file)}
-          >
-            <div class="fr-left">
-              <span class="fmt-badge {fmt.cls}">{fmt.label}</span>
-              {#if activeConfig}
-                <span class="active-dot" title={$t('editor.active_config')}></span>
-              {/if}
-              <span class="fr-name file-name" title={file.name}
-                >{#each breakableParts(file.name) as part, i (i)}{part}<wbr />{/each}</span
-              >
-              {#if layerBadge(file.path) === 'managed'}
-                <span class="badge badge--tag badge-info layer-badge" data-testid="layer-badge"
-                  >{$t('editor.managed_badge')}</span
-                >
-              {:else if layerBadge(file.path) === 'manual'}
-                <span class="badge badge--tag layer-badge" data-testid="layer-badge"
-                  >{$t('editor.manual_badge')}</span
-                >
-              {/if}
-            </div>
-            <span class="fr-meta">{formatBytes(file.size)}</span>
-          </button>
-        {:else}
-          <span class="sb-empty">—</span>
-        {/each}
+    {:else if status === 'error'}
+      <div class="alert alert-error ft-error" role="alert">
+        <span>{$t('cfg.files.list_error')}</span>
+        <Button variant="secondary" size="sm" onclick={() => onRetry?.()}
+          >{$t('cfg.files.retry')}</Button
+        >
       </div>
-    </details>
+    {:else if nothingFound}
+      <EmptyState
+        title={$t('cfg.files.empty_title')}
+        description={$t('cfg.files.empty_body')}
+        plain
+      />
+    {:else}
+      <!-- Xray Section (EDIT-03) -->
+      {@render group(
+        scoped ? $t('cfg.files.group_xray') : 'Xray',
+        xrayDir,
+        filteredXrayFiles,
+        activeKernel === 'xray' || filteredXrayFiles.length > 0,
+        true
+      )}
+      <!-- Mihomo Section (EDIT-03) -->
+      {@render group(
+        scoped ? $t('cfg.files.group_mihomo') : 'Mihomo',
+        mihomoDir,
+        filteredMihomoFiles,
+        activeKernel === 'mihomo' || filteredMihomoFiles.length > 0,
+        false
+      )}
+      <!-- XKeen Section: только во вкладке «Файлы» раздела (D-04) -->
+      {#if scoped}
+        {@render group(
+          $t('cfg.files.group_xkeen'),
+          xkeenDir,
+          filteredXkeenFiles,
+          filteredXkeenFiles.length > 0,
+          false
+        )}
+      {/if}
+    {/if}
   </div>
 </div>
+
+{#snippet group(
+  title: string,
+  dir: string,
+  list: ConfigFileInfo[],
+  open: boolean,
+  xrayRoot: boolean
+)}
+  {@const drift = driftCount(list)}
+  <details class="editor-files nav-group" {open}>
+    <summary class="editor-files-head">
+      <div class="group-ttl-wrap">
+        <span class="group-ttl">{title}</span>
+        <span class="group-count">({list.length})</span>
+        {#if drift > 0}
+          <Badge tone="warning">{$t('cfg.files.drift_count', { k: drift })}</Badge>
+        {/if}
+      </div>
+      <span class="group-path-wrap">
+        <span class="group-path" title={dir}
+          >{#each breakableParts(dir) as part, i (i)}{part}<wbr />{/each}</span
+        >
+        <span class="nav-group-arrow">›</span>
+      </span>
+    </summary>
+    <div class="file-list">
+      {#each list as file (file.path)}
+        {@render row(file, xrayRoot)}
+      {:else}
+        <span class="sb-empty">—</span>
+      {/each}
+    </div>
+  </details>
+{/snippet}
+
+{#snippet row(file: ConfigFileInfo, xrayRoot: boolean)}
+  {@const fmt = getFormatBadge(file.name)}
+  {@const stopWord = xrayRoot ? file.stoplist_word || matchXKeenStoplist(file.name) : null}
+  {@const activeConfig = isActiveRunningConfig(file)}
+  {@const busy = file.path === loadingPath}
+  {@const owner = ownerOf(file)}
+  {@const fileStatus = statusOf(file)}
+  <button
+    class="file-row"
+    class:active={loadingPath ? busy : file.path === selectedFile}
+    class:busy
+    aria-busy={busy ? 'true' : undefined}
+    data-path={file.path}
+    onclick={() => onLoadFile(file.path, true)}
+    ondblclick={() => onLoadFile(file.path, false)}
+    oncontextmenu={(e) => handleContextMenu(e, file)}
+  >
+    <span class="fr-main">
+      <span class="fr-left">
+        <span class="fmt-badge {fmt.cls}">{fmt.label}</span>
+        {#if activeConfig}
+          <span class="active-dot" title={$t('editor.active_config')}></span>
+        {/if}
+        <span class="fr-name file-name" title={file.name}
+          >{#each breakableParts(file.name) as part, i (i)}{part}<wbr />{/each}</span
+        >
+        {#if file.restricted}
+          {@const markTitle = $t('cfg.files.restricted_title')}
+          <span class="stoplist-mark" title={markTitle} aria-label={markTitle} role="img">
+            <Icon name="warning" size={12} />
+          </span>
+        {:else if stopWord}
+          {@const markTitle = $t('stoplist.badge_title', { word: stopWord })}
+          <span class="stoplist-mark" title={markTitle} aria-label={markTitle} role="img">
+            <Icon name="warning" size={12} />
+          </span>
+        {/if}
+      </span>
+      {#if !file.missing}
+        <span class="fr-meta">{formatBytes(file.size)}</span>
+      {/if}
+    </span>
+    {#if owner || fileStatus}
+      <span class="fr-labels">
+        {#if owner}
+          <OwnerBadge {owner} />
+        {/if}
+        {#if fileStatus}
+          <Badge
+            variant="status"
+            tone={fileStatus.tone}
+            testid="files-drift-badge"
+            data-state={fileStatus.state}>{fileStatus.label}</Badge
+          >
+        {/if}
+      </span>
+    {/if}
+  </button>
+{/snippet}
 
 <!-- Context Menu (EDIT-03). Обработчик вызывается до closeContextMenu(): после закрытия f обнуляется. -->
 {#if ctxMenu.visible && ctxMenu.file}
@@ -481,6 +558,7 @@
   .file-tree-body {
     flex: 1;
     overflow-y: auto;
+    scrollbar-width: thin;
     padding: var(--spacing-1-5) 0;
   }
 
@@ -549,8 +627,9 @@
 
   .file-row {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--spacing-1);
     padding: 5px var(--spacing-2);
     border-radius: var(--radius-sm);
     border: none;
@@ -595,6 +674,13 @@
     .file-row.busy {
       animation: none;
     }
+  }
+
+  .fr-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-width: 0;
   }
 
   .fr-left {
@@ -657,16 +743,46 @@
     flex-shrink: 0;
   }
 
-  .layer-badge {
-    flex-shrink: 0;
-    padding: 0 var(--spacing-1);
-    line-height: 1.4;
+  /* Второй ряд строки: владелец и статус файла; бейджи не сжимают имя */
+  .fr-labels {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--spacing-1);
+    min-width: 0;
+  }
+
+  .fr-labels :global(.badge) {
+    font-weight: 500;
   }
 
   /* Подложка бейджа поверх выбранной строки (--accent-soft) складывалась бы с собственной:
      контраст ниже 4.5:1. Плотная подложка карточки держит его в норме в обеих темах. */
-  .file-row.active .layer-badge {
+  .file-row.active .fr-labels :global(.badge) {
     background: var(--bg-card);
+  }
+
+  .ft-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1-5);
+    padding: var(--spacing-2) var(--spacing-2-5);
+  }
+
+  .ft-error {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--spacing-2);
+    margin: var(--spacing-2) var(--spacing-2-5);
+    overflow-wrap: anywhere;
+  }
+
+  /* Вкладка «Файлы»: длинное имя переносится по «.», «_», «-», «/», а не обрезается */
+  .file-tree-body.scoped .fr-name {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    min-width: 0;
   }
 
   .stoplist-mark {

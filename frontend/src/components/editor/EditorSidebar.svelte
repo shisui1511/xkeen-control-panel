@@ -2,17 +2,17 @@
   import ResponsiveSidebarPanel from '../ResponsiveSidebarPanel.svelte';
   import FileTree from './FileTree.svelte';
   import { t } from '../../i18n';
-
-  export interface ConfigFileInfo {
-    name: string;
-    path: string;
-    size: number;
-  }
+  import type { ConfigFileInfo, FileListStatus } from './fileOps';
 
   interface Props {
     open: boolean;
     xrayFiles: ConfigFileInfo[];
     mihomoFiles: ConfigFileInfo[];
+    /** Каталог XKeen: только во вкладке «Файлы» раздела (D-04) */
+    xkeenFiles?: ConfigFileInfo[];
+    /** Исход загрузки списка во вкладке «Файлы» */
+    filesStatus?: FileListStatus;
+    onRetryFiles?: () => void;
     selectedFile: string;
     /** Путь файла, который сейчас открывается: строка списка показывает занятость */
     loadingPath?: string | null;
@@ -33,6 +33,9 @@
     open: show = $bindable(true),
     xrayFiles,
     mihomoFiles,
+    xkeenFiles,
+    filesStatus = 'ready',
+    onRetryFiles,
     selectedFile,
     loadingPath = null,
     activeKernel = '',
@@ -61,6 +64,9 @@
   <FileTree
     {xrayFiles}
     {mihomoFiles}
+    {xkeenFiles}
+    status={filesStatus}
+    onRetry={onRetryFiles}
     {selectedFile}
     {loadingPath}
     {activeKernel}

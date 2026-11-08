@@ -11,7 +11,7 @@
     editorOpenRequest,
     configLayerEnabled
   } from './stores';
-  import { filesByPath, handleLayerError } from './lib/configLayer';
+  import { filesByPath, handleLayerError, layerSnapshot } from './lib/configLayer';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { parseValidationError } from './lib/errorParser';
   import Icon from './lib/components/Icon.svelte';
@@ -61,10 +61,12 @@
     deleteConfigFile,
     renameConfigFile,
     listConfigFiles,
+    listConfigFilesScoped,
     formatBytes,
     ConfigOpError,
     nextDuplicateName,
     type ConfigFileInfo,
+    type FileListStatus,
     type ConfigOpOptions
   } from './components/editor/fileOps';
   import { isXrayRootPath, matchXKeenStoplist } from './lib/xkeenStoplist';
@@ -190,6 +192,53 @@
   // Dual-panel sidebar file lists
   let xrayFiles = $state<ConfigFileInfo[]>([]);
   let mihomoFiles = $state<ConfigFileInfo[]>([]);
+  // Вкладка «Файлы» (D-04): третий каталог — XKeen; список берётся с scope=files
+  const xkeenDir = '/opt/etc/xkeen';
+  let xkeenFiles = $state<ConfigFileInfo[]>([]);
+  let filesStatus = $state<FileListStatus>('loading');
+
+  /**
+   * Список ядра вместе с файлами манифеста слоя, которых нет в ответе каталога (D-07): файл
+   * пропал с диска, ещё не записан или лежит в подкаталоге Mihomo (список каталога не
+   * рекурсивный). Такой файл стоит в группе своего ядра со своим состоянием.
+   */
+  function withManifest(
+    listed: ConfigFileInfo[],
+    kernel: 'xray' | 'mihomo',
+    dir: string
+  ): ConfigFileInfo[] {
+    if (!embedded || !$configLayerEnabled) return listed;
+    const known = new Set(listed.map((f) => f.path));
+    const extra: ConfigFileInfo[] = [];
+    for (const f of $layerSnapshot?.files ?? []) {
+      if (f.kernel !== kernel || !f.path.startsWith(dir + '/')) continue;
+      if (known.has(f.path) || (f.alias_paths ?? []).some((a) => known.has(a))) continue;
+      const rel = f.path.slice(dir.length + 1);
+      const inSubdir = rel.includes('/');
+      extra.push({
+        name: rel,
+        path: f.path,
+        size: 0,
+        owner: f.state === 'released' ? 'user' : 'panel',
+        state: f.state,
+        missing: !inSubdir || f.state === 'drift_missing' || f.state === 'pending'
+      });
+    }
+    if (extra.length === 0) return listed;
+    return [...listed, ...extra].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  }
+
+  const xrayList = $derived(withManifest(xrayFiles, 'xray', xrayDir));
+  const mihomoList = $derived(withManifest(mihomoFiles, 'mihomo', mihomoDir));
+  const missingPaths = $derived(
+    new Set([...xrayList, ...mihomoList].filter((f) => f.missing).map((f) => f.path))
+  );
+  // Файл манифеста, которого нет на диске (пропал или ещё не записан): вкладка «Файлы»
+  // показывает его пустой вкладкой только для чтения, диск не читается
+  const selectedMissing = $derived(
+    embedded && selectedFile !== '' && missingPaths.has(selectedFile)
+  );
+  const isReadOnly = $derived(isManagedReadOnly || selectedMissing);
   // До 768 px панель файлов — выезжающий лист поверх редактора, а не колонка рядом
   const NARROW_QUERY = '(max-width: 768px)';
   const narrowQuery = new MediaQuery(NARROW_QUERY);
@@ -335,7 +384,7 @@
   }
 
   async function handleInsertIntoEditor(yamlContent: string) {
-    if (isManagedReadOnly) {
+    if (isReadOnly) {
       showToast('warning', $t('editor.managed_readonly_hint'));
       return;
     }
@@ -407,8 +456,48 @@
     });
   }
 
+  /** Каталог для списка вкладки «Файлы»: отказ сервера из-за отсутствия каталога — пустая группа */
+  async function listScopedDir(dir: string): Promise<ConfigFileInfo[]> {
+    try {
+      return await listConfigFilesScoped(dir);
+    } catch (e) {
+      // Каталога нет (ядро не установлено): группа пуста, остальные показываются (partial)
+      if (e instanceof ConfigOpError && (e.status === 403 || e.status === 404)) return [];
+      throw e;
+    }
+  }
+
+  /**
+   * Список вкладки «Файлы» (D-04): три каталога. Первичная загрузка и «Повторить» показывают
+   * скелетон и, при сбое, ошибку вместо пустых групп; сбой обновления уже показанного списка
+   * не стирает его.
+   */
+  async function loadScopedFiles() {
+    const shown = filesStatus === 'ready';
+    if (!shown) filesStatus = 'loading';
+    try {
+      const [x, m, k] = await Promise.all([
+        listScopedDir(xrayDir),
+        listScopedDir(mihomoDir),
+        listScopedDir(xkeenDir)
+      ]);
+      xrayFiles = x;
+      mihomoFiles = m;
+      xkeenFiles = k;
+      filesStatus = 'ready';
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      if (shown) showToast('error', $t('editor.load_error'));
+      else filesStatus = 'error';
+    }
+  }
+
   async function loadFiles(dir?: string) {
     if (dir) currentDir = dir;
+    if (embedded) {
+      await loadScopedFiles();
+      return;
+    }
     try {
       xrayFiles = await listConfigFiles(xrayDir);
       mihomoFiles = await listConfigFiles(mihomoDir);
@@ -620,7 +709,7 @@
     }
 
     try {
-      const content = await readConfigFile(path);
+      const content = embedded && missingPaths.has(path) ? '' : await readConfigFile(path);
 
       // Пока читался этот файл, выбрали другой: ответ отбрасывается до любых изменений вкладок
       let next = takeQueuedPick();
@@ -813,7 +902,7 @@
   }
 
   async function checkBeforeSave() {
-    if (!selectedFile || !editorView || isManagedReadOnly) return;
+    if (!selectedFile || !editorView || isReadOnly) return;
     const content = editorView.state.doc.toString();
 
     diffChanges = getDiff(originalContent, content);
@@ -827,7 +916,7 @@
   }
 
   async function confirmSave() {
-    if (!selectedFile || !editorView || isManagedReadOnly) return;
+    if (!selectedFile || !editorView || isReadOnly) return;
 
     saving = true;
     saveError = false;
@@ -884,7 +973,7 @@
   }
 
   async function handleSaveAndApply() {
-    if (!selectedFile || !editorView || isManagedReadOnly) return;
+    if (!selectedFile || !editorView || isReadOnly) return;
     applyLoading = true;
     saveError = false;
     saveWarnings = [];
@@ -1005,7 +1094,7 @@
   async function restoreBackup(backupPath: string) {
     // Файл панели только для чтения (D-03): readOnly CodeMirror не останавливает
     // программный dispatch, поэтому отказ здесь, как в handleInsertIntoEditor.
-    if (isManagedReadOnly) {
+    if (isReadOnly) {
       showToast('warning', $t('editor.managed_readonly_hint'));
       return;
     }
@@ -1045,7 +1134,7 @@
         return;
       }
       // Файл мог перейти под управление панели, пока шло подтверждение и чтение копии
-      if (isManagedReadOnly) {
+      if (isReadOnly) {
         showToast('warning', $t('editor.managed_readonly_hint'));
         return;
       }
@@ -1259,7 +1348,9 @@
 
   async function duplicateFile(file: ConfigFileInfo) {
     const dir = file.path.substring(0, file.path.lastIndexOf('/'));
-    const siblings = (dir === mihomoDir ? mihomoFiles : xrayFiles).map((f) => f.name);
+    const siblings = (
+      dir === mihomoDir ? mihomoFiles : dir === xkeenDir ? xkeenFiles : xrayFiles
+    ).map((f) => f.name);
     const copyName = nextDuplicateName(file.name, siblings);
     const copyPath = `${dir}/${copyName}`;
     try {
@@ -1322,7 +1413,7 @@
   }
 
   function applyQuickFixes() {
-    if (!editorView || !selectedFile || isManagedReadOnly) return;
+    if (!editorView || !selectedFile || isReadOnly) return;
 
     try {
       const content = editorView.state.doc.toString();
@@ -1346,7 +1437,7 @@
   }
 
   async function applyTemplate(template: Template) {
-    if (!editorView || isManagedReadOnly) return;
+    if (!editorView || isReadOnly) return;
     if (isDirty && !(await confirmUnsaved())) return;
     if (
       !(await showConfirm({
@@ -1556,7 +1647,7 @@
     onReloadFile={() => loadFile(selectedFile)}
     onSaveFile={checkBeforeSave}
     onSaveAndApply={handleSaveAndApply}
-    managedReadOnly={isManagedReadOnly}
+    managedReadOnly={isReadOnly}
   />
 {/snippet}
 
@@ -1622,8 +1713,11 @@
     <div class="editor-workspace">
       <EditorSidebar
         open={showSidebar && active}
-        {xrayFiles}
-        {mihomoFiles}
+        xrayFiles={xrayList}
+        mihomoFiles={mihomoList}
+        xkeenFiles={embedded ? xkeenFiles : undefined}
+        filesStatus={embedded ? filesStatus : 'ready'}
+        onRetryFiles={() => void loadScopedFiles()}
         {selectedFile}
         activeKernel={$activeKernelName}
         overlay={isNarrow}
@@ -1753,7 +1847,7 @@
             onOpenGenerator={() => (showGeneratorModal = true)}
             onApplyQuickFixes={applyQuickFixes}
             onDeleteFile={deleteFile}
-            managedReadOnly={isManagedReadOnly}
+            managedReadOnly={isReadOnly}
           />
 
           <EditorBreadcrumbs {breadcrumbs} onJump={jumpToSegment} />
@@ -1785,7 +1879,7 @@
                   path={tab.path}
                   {expertMode}
                   {schemaEnabled}
-                  readOnly={isManagedReadOnly}
+                  readOnly={isReadOnly}
                   bind:view={editorView}
                   onContentChange={(newContent) => {
                     tab.currentContent = newContent;
@@ -1845,7 +1939,7 @@
               {selectedBackup}
               {diffGroups}
               {backupLoading}
-              restoreDisabled={isManagedReadOnly}
+              restoreDisabled={isReadOnly}
               onSelectBackup={selectBackup}
               onRestoreBackup={restoreBackup}
               onclose={() => (drawerOpen = false)}
