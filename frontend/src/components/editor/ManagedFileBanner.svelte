@@ -3,6 +3,7 @@
   import { showConfirm } from '../../stores';
   import Button from '../Button.svelte';
   import Icon from '../../lib/components/Icon.svelte';
+  import ImmediateMark from '../config/ImmediateMark.svelte';
   import { releaseFile, handleLayerError, type LayerFile } from '../../lib/configLayer';
 
   // Плашка над кодом файла панели (D-12). Закрыть её нельзя: она исчезает, когда файл
@@ -19,7 +20,7 @@
       title: $t('editor.managed_release_title'),
       objectName: file.path,
       message: $t('cfg.confirm.release_message'),
-      consequence: $t('cfg.confirm.release_consequence'),
+      consequence: $t('cfg.files.release_consequence'),
       confirmLabel: $t('editor.managed_release_ok')
     });
     if (!confirmed) return;
@@ -38,9 +39,18 @@
 <div class="alert alert-warning managed-banner" data-testid="managed-file-banner">
   <Icon name="info" size={16} />
   <p class="managed-text">{$t('editor.managed_strip')}</p>
-  <Button variant="secondary" class="btn-sm managed-release" loading={busy} onclick={onRelease}>
-    {$t('editor.managed_release')}
-  </Button>
+  <div class="managed-actions">
+    <Button
+      variant="secondary"
+      size="sm"
+      class="managed-release"
+      loading={busy}
+      onclick={onRelease}
+    >
+      {$t('editor.managed_release')}
+    </Button>
+    <ImmediateMark />
+  </div>
 </div>
 
 <style>
@@ -69,7 +79,15 @@
     overflow-wrap: anywhere;
   }
 
-  .managed-banner :global(.managed-release) {
+  .managed-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+
+  .managed-actions :global(.managed-release) {
     flex: none;
   }
 
@@ -83,8 +101,12 @@
       flex: 1 1 calc(100% - 32px);
     }
 
+    .managed-actions {
+      width: 100%;
+    }
+
     /* Текст, затем кнопка во всю ширину с зоной нажатия 44 px */
-    .managed-banner :global(.managed-release) {
+    .managed-actions :global(.managed-release) {
       flex: 1 1 100%;
       min-height: 44px;
     }

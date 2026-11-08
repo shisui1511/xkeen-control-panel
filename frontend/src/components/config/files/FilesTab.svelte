@@ -6,6 +6,8 @@
   import Editor from '../../../Editor.svelte';
   import DiffView from '../DiffView.svelte';
   import ImmediateMark from '../ImmediateMark.svelte';
+  import TakeSectionModal from '../sections/TakeSectionModal.svelte';
+  import type { CoreKernel } from '../../../lib/configCores';
   import type { ConfigFileInfo } from '../../editor/fileOps';
   import {
     filesByPath,
@@ -33,6 +35,37 @@
 
   const locked = $derived($applyRunning || acting);
   const diffId = (key: string) => `config-diff-${key.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+
+  // Модальное окно «Управлять в панели» (D-03)
+  let takeModalOpen = $state(false);
+  let takeKernel = $state<CoreKernel>('xray');
+  let takeMode = $state<'one' | 'all'>('one');
+  let takeSection = $state('');
+  let takeIds = $state<string[]>([]);
+
+  function openTake(info: ConfigFileInfo) {
+    if (!info.take_kernel || !info.take_sections || info.take_sections.length === 0) return;
+    takeKernel = info.take_kernel as CoreKernel;
+    if (info.take_sections.length === 1) {
+      takeMode = 'one';
+      takeSection = info.take_sections[0];
+      takeIds = info.take_sections;
+    } else {
+      takeMode = 'all';
+      takeSection = '';
+      takeIds = info.take_sections;
+    }
+    takeModalOpen = true;
+  }
+
+  function ownerOf(path: string, info?: ConfigFileInfo): 'panel' | 'xkeen' | 'user' | null {
+    if (info?.owner) return info.owner;
+    const lf = $filesByPath.get(path);
+    if (lf) return lf.state === 'released' ? 'user' : 'panel';
+    if (path.startsWith('/opt/etc/xkeen')) return 'xkeen';
+    if (path) return 'user';
+    return null;
+  }
 
   async function toggleDiff(key: string) {
     if (opened[key]) {
@@ -169,9 +202,41 @@
             </div>
           {/if}
         </div>
+      {:else}
+        {@const owner = ownerOf(path, fileInfo)}
+        {#if owner === 'xkeen' || owner === 'user'}
+          <div class="files-immediate-note" data-testid="files-immediate-note">
+            <span class="immediate-note-text">{$t('cfg.files.immediate_note')}</span>
+            <ImmediateMark />
+            {#if fileInfo?.take_kernel && (fileInfo.take_sections?.length ?? 0) > 0}
+              <Button
+                variant="secondary"
+                size="sm"
+                class="files-take-btn"
+                testid="files-take-btn"
+                onclick={() => openTake(fileInfo)}
+              >
+                {$t('cfg.files.take')}
+              </Button>
+            {/if}
+          </div>
+        {/if}
       {/if}
     {/snippet}
   </Editor>
+
+  {#if takeModalOpen}
+    <TakeSectionModal
+      bind:open={takeModalOpen}
+      kernel={takeKernel}
+      mode={takeMode}
+      section={takeSection}
+      ids={takeIds}
+      ontaken={() => {
+        // события слоя сами обновляют список и снимок
+      }}
+    />
+  {/if}
 </section>
 
 <style>
@@ -229,6 +294,31 @@
     color: var(--fg-dim);
   }
 
+  .files-immediate-note {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2) var(--spacing-3);
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    border-left: var(--spacing-1) solid var(--border-strong);
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+    flex-wrap: wrap;
+    min-width: 0;
+    flex-shrink: 0;
+  }
+
+  .immediate-note-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--fg-secondary);
+  }
+
+  .files-immediate-note :global(.files-take-btn) {
+    flex: none;
+  }
+
   @media (max-width: 768px) {
     .drift-header {
       align-items: flex-start;
@@ -240,6 +330,16 @@
     }
 
     .drift-actions :global(.drift-btn) {
+      width: 100%;
+      min-height: 44px;
+    }
+
+    .files-immediate-note {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .files-immediate-note :global(.files-take-btn) {
       width: 100%;
       min-height: 44px;
     }
