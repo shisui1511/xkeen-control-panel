@@ -16,6 +16,7 @@
     type ImpactView,
     type ListRef
   } from '../../../lib/configGeodata';
+  import { editorHash } from '../../../lib/editorRoute';
 
   // Диалог каскада при удалении или выключении источника со ссылками (D-18…D-21): списки
   // файла, на которые ссылаются правила, и что сделать с каждым — заменить другим списком,
@@ -313,7 +314,7 @@
             </span>
             <a
               class="dm-link"
-              href="#/editor"
+              href={editorHash()}
               data-testid="geo-delete-editor"
               onclick={() => {
                 if (editorTarget) editorOpenRequest.set(editorTarget);
