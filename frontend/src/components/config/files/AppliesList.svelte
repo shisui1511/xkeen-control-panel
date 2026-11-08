@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { t, currentLang } from '../../../i18n';
   import Button from '../../Button.svelte';
   import EmptyState from '../../EmptyState.svelte';
@@ -81,10 +80,6 @@
 
   $effect(() => {
     void file.key;
-    void load();
-  });
-
-  onMount(() => {
     void load();
   });
 </script>
