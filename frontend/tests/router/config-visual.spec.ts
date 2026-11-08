@@ -4,6 +4,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
+import { FULL_TAG, TIER_FULL_ANNOTATION } from './lib/known';
 
 // Визуальная проверка вкладок раздела «Конфигурация» (CFG-05, D-20).
 // Read-спек обходит шесть вкладок: узлы, группы, правила, списки, ядра, файлы.
@@ -138,4 +139,30 @@ for (const tab of TABS) {
     await checkTab(page, tab, 'light', 390);
     await checkTab(page, tab, 'dark', 1280);
   });
+}
+
+// ── Ярус full: полная матрица (390/768/1280 × две темы, кроме срезов gate, D-20) ──
+for (const tab of TABS) {
+  test(
+    `config-visual tab:${tab} matrix:full`,
+    {
+      tag: FULL_TAG,
+      annotation: {
+        type: TIER_FULL_ANNOTATION,
+        description: 'визуальная матрица: 390/768/1280 × две темы, кроме срезов gate (D-20)'
+      }
+    },
+    async ({ page }) => {
+      if (!(await layerOn(page))) {
+        test.skip(
+          true,
+          'флаг config_layer выключен на этом устройстве: панель не открывает #/config'
+        );
+      }
+      await checkTab(page, tab, 'dark', 390);
+      await checkTab(page, tab, 'light', 768);
+      await checkTab(page, tab, 'dark', 768);
+      await checkTab(page, tab, 'light', 1280);
+    }
+  );
 }
