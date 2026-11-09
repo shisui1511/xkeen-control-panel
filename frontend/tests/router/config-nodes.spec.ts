@@ -452,7 +452,8 @@ test(
     if (await nodesOnly.isVisible()) await nodesOnly.click();
     await expect(modal).toBeVisible({ timeout: T.action });
     const previewCountText = (await page.getByTestId('apply-preview-count').textContent()) ?? '';
-    const previewCount = Number(previewCountText.trim());
+    // текст сводки — «3 изменения»: число берём из первых цифр
+    const previewCount = Number(previewCountText.match(/\d+/)?.[0]);
     const rowsCount = await page.locator('[data-testid="apply-preview-list"] li').count();
     expect(previewCount, 'сводка в окне равна draft_changes').toBe(changes);
     expect(rowsCount, 'число строк в окне равно draft_changes').toBe(changes);
