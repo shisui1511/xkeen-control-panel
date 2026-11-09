@@ -71,6 +71,14 @@ type ApplyRequest struct {
 	// (D-08): сверяется с тем снимком, из которого строится план, и при расхождении
 	// запуск отменяется (ResultDraftConflict) до сборки. 0 — не сверять.
 	ExpectRevision int64
+	// draftSnapshot — подтверждённый снимок состояния запуска «Применить»
+	// (StartApplyAt): глубокая копия, которой владеет только этот запуск. Его
+	// черновик и ревизия — источник сверки ExpectRevision, сборки плана и фиксации
+	// Applied (D-08, D-09); правка черновика после подтверждения в запуск не
+	// попадает и остаётся в общем черновике. Манифест, маршрутизация, Applied и
+	// живые данные читаются заново под замком применения (после возврата журнала).
+	// nil — черновик берётся из текущего состояния.
+	draftSnapshot *State
 	// Kernel ограничивает запуск одним ядром (фоновая сборка после его установки):
 	// файлы, записи манифеста и сироты других ядер не участвуют в плане и не
 	// трогаются. Пусто — все установленные ядра.
@@ -517,9 +525,14 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		return p.finish(ResultView{Code: ResultJournalRecoveryFailed, Message: err.Error()})
 	}
 	snap := p.d.Store.Snapshot()
+	// Подтверждённый запуск собирает и фиксирует черновик своего снимка, а не
+	// свежее чтение: правка после подтверждения не применится незаметно (D-08,
+	// D-09) и останется в черновике (Applied получает только src, Draft не трогается).
+	if req.draftSnapshot != nil {
+		snap.Draft, snap.DraftRevision = req.draftSnapshot.Draft, req.draftSnapshot.DraftRevision
+	}
 	// Ревизия, которую показало окно изменений, сверяется с тем же снимком, из
-	// которого строится план: правка между проверкой в StartApplyAt и этим снимком
-	// не применится незаметно (D-08).
+	// которого строится план (D-08).
 	if req.ExpectRevision > 0 && snap.DraftRevision != req.ExpectRevision {
 		p.setStep(StepBuild, StepFailed, "", ErrDraftConflict.Error())
 		return p.finish(ResultView{Code: ResultDraftConflict, Message: ErrDraftConflict.Error()})

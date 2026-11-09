@@ -1094,14 +1094,20 @@ func (l *Layer) fireAfterApply(req ApplyRequest, view ApplyView) {
 // со своей копией состояния. Вызывается под замком применения до запуска
 // конвейера; паника хука журналируется, применение идёт дальше. Возвращает номер
 // запуска: он идёт в ApplyRequest.ApplySeq и в AfterApplyInfo, чтобы хук после
-// применения нашёл снимок именно своего запуска.
-func (l *Layer) fireBeforeApply() int64 {
+// применения нашёл снимок именно своего запуска. pinned — подтверждённый снимок
+// запуска (StartApplyAt): хуки видят его черновик и ревизию, то есть ровно то, что
+// применится, а не правку, сделанную после подтверждения. nil — черновик читается
+// заново (ApplyEdit).
+func (l *Layer) fireBeforeApply(pinned *State) int64 {
 	seq := l.applySeq.Add(1)
 	l.mu.Lock()
 	hooks := append([]func(StateView){}, l.beforeApply...)
 	l.mu.Unlock()
 	for _, fn := range hooks {
 		st := l.store.Snapshot()
+		if pinned != nil {
+			st.Draft, st.DraftRevision = pinned.Draft.Clone(), pinned.DraftRevision
+		}
 		view := StateView{ApplySeq: seq, DraftRevision: st.DraftRevision, Draft: st.Draft, Applied: st.Applied, Live: st.Live}
 		func() {
 			defer func() {
@@ -1297,15 +1303,20 @@ func (l *Layer) StartApply(user bool) error {
 }
 
 // StartApplyAt — StartApply с ревизией черновика, которую видел клиент (окно
-// изменений перед применением, D-08): rev > 0 и не равна текущей ревизии под
+// изменений перед применением, D-08): rev > 0 и не равна ревизии снимка под
 // замком применения — ErrDraftConflict, конвейер не запускается. rev == 0 —
-// ревизия не сверяется (прежние вызовы без тела).
+// ревизия не сверяется (прежние вызовы без тела). Под замком применения берётся
+// один глубокий снимок состояния: по нему сверяются ревизия, проверки до записи и
+// блокировка дрейфом, и только его черновик собирает и фиксирует в Applied
+// конвейер (D-09). Правка черновика после подтверждения остаётся в общем
+// черновике неприменённой (D-12, D-13).
 func (l *Layer) StartApplyAt(user bool, rev int64) error {
 	if !l.Enabled() {
 		return ErrDisabled
 	}
 	// Проверки до записи: пустая группа или висячая ссылка не дают начать
-	// применение (GRP-05, SRC-07). Фоновые запуски проверяет сам конвейер.
+	// применение (GRP-05, SRC-07). Это ранний отказ без замка; решающая проверка —
+	// по закреплённому снимку ниже. Фоновые запуски проверяет сам конвейер.
 	if issues := l.cachedChecks(l.store.Snapshot()); len(issues) > 0 {
 		return &ChecksError{Issues: issues}
 	}
@@ -1313,11 +1324,18 @@ func (l *Layer) StartApplyAt(user bool, rev int64) error {
 	if err != nil {
 		return l.mapBusy(err)
 	}
+	// Снимок запуска: владеет им только этот запуск, правки черновика после этой
+	// точки в него не попадают.
+	pinned := l.store.Snapshot()
 	// Черновик изменился после того, как клиент показал окно изменений: применять
 	// не то, что видел пользователь, нельзя.
-	if rev > 0 && rev != l.store.Snapshot().DraftRevision {
+	if rev > 0 && rev != pinned.DraftRevision {
 		release()
 		return ErrDraftConflict
+	}
+	if issues := l.cachedChecks(pinned); len(issues) > 0 {
+		release()
+		return &ChecksError{Issues: issues}
 	}
 	// Свежая сверка под замком применения: пока есть нерешённый дрейф, диск не
 	// трогается (D-11). «Пересобрать» по названным файлам этим не блокируется.
@@ -1327,17 +1345,17 @@ func (l *Layer) StartApplyAt(user bool, rev int64) error {
 	// Расхождение взятой секции блокирует применение, пока секция желаема (managed):
 	// «Отпустить» (managed=false) её не блокирует (FND-03, D-07 из 146). Расхождение
 	// маршрутизации блокирует только то ядро, которое панель держит (D-06 из 147.1).
-	draft := l.store.Snapshot().Draft
-	if fe.DriftCount-len(fe.Routing)-len(fe.Sections) > 0 || routingDriftBlocks(draft, fe.Routing) || sectionDriftBlocks(draft, fe.Sections) {
+	// Желаемое берётся из черновика того же снимка, который применится.
+	if fe.DriftCount-len(fe.Routing)-len(fe.Sections) > 0 || routingDriftBlocks(pinned.Draft, fe.Routing) || sectionDriftBlocks(pinned.Draft, fe.Sections) {
 		release()
 		return ErrDriftBlocked
 	}
 	// Хуки до применения — под замком применения, после проверки дрейфа и до
-	// запуска конвейера (окно «Применить», D-08 фазы 148).
-	seq := l.fireBeforeApply()
+	// запуска конвейера (окно «Применить», D-08 фазы 148); видят черновик снимка.
+	seq := l.fireBeforeApply(&pinned)
 	if !l.spawn(func() {
 		defer release()
-		req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft, ApplySeq: seq, ExpectRevision: rev}
+		req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft, ApplySeq: seq, ExpectRevision: rev, draftSnapshot: &pinned}
 		view := l.runPipeline(req)
 		release()
 		l.afterRun()
@@ -1386,7 +1404,7 @@ func (l *Layer) ApplyEdit(ctx context.Context, edit func(st StateView) (map[stri
 		return ApplyView{}, err
 	}
 	// Хуки до применения видят черновик с правкой, которая сейчас применится.
-	seq := l.fireBeforeApply()
+	seq := l.fireBeforeApply(nil)
 	req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft, ApplySeq: seq}
 	view := l.runPipeline(req)
 	if view.Result == nil || !view.Result.OK {

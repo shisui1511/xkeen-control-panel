@@ -258,36 +258,3 @@ func TestRouterCheckerBlocksApply(t *testing.T) {
 		t.Errorf("файл изменён фоновым запуском при отказе проверки: %v", err)
 	}
 }
-
-// Ревизия из окна изменений закреплена за снимком конвейера (D-08): правка
-// черновика, попавшая между проверкой ревизии в StartApplyAt и снимком
-// конвейера (хук BeforeApply работает как раз в этом окне), даёт draft_conflict,
-// файлы ядра не пишутся.
-func TestRouterApplyExpectRevisionPinned(t *testing.T) {
-	var layerRef *Layer
-	layer, file := rtNewCheckLayer(t, func(l *Layer) {
-		layerRef = l
-		hook := func(st StateView) {
-			if _, err := layerRef.EditDraft(st.DraftRevision, "check_late", json.RawMessage(`{"late":true}`)); err != nil {
-				t.Errorf("правка черновика внутри хука: %v", err)
-			}
-		}
-		if err := l.Register(Hooks{BeforeApply: hook}); err != nil {
-			t.Fatal(err)
-		}
-	})
-	ev, err := layer.EditDraft(0, "check_seen", json.RawMessage(`{"on":true}`))
-	if err != nil {
-		t.Fatalf("EditDraft: %v", err)
-	}
-	if err := layer.StartApplyAt(true, ev.DraftRevision); err != nil {
-		t.Fatalf("StartApplyAt: %v", err)
-	}
-	view := rtWaitUserApply(t, layer)
-	if view.Result == nil || view.Result.Code != ResultDraftConflict {
-		t.Fatalf("итог применения: %+v, ожидался %s", view.Result, ResultDraftConflict)
-	}
-	if _, err := os.Stat(file); !os.IsNotExist(err) {
-		t.Errorf("файл записан при конфликте ревизии: %v", err)
-	}
-}
