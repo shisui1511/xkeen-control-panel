@@ -119,7 +119,54 @@ export async function listSources(page: Page): Promise<SourceInfo[]> {
   return (view.data?.sources ?? []) as SourceInfo[];
 }
 
-/** Состояние флага слоя до прогона: включается на время сценариев и возвращается прежним. */
+/** Ждёт два последовательных снимка простоя, включая хвост фонового включения слоя. */
+export async function waitApplyIdle(page: Page, what: string): Promise<void> {
+  let streak = 0;
+  await expect
+    .poll(
+      async () => {
+        const res = await api(page, 'GET', '/api/configlayer/state');
+        const apply = (res.data?.apply ?? {}) as { running?: boolean; trigger?: string };
+        const holder = res.data?.busy_holder;
+        const idle =
+          (res.status === 200 && apply.running === false && !holder) ||
+          (res.status === 404 && res.data?.code === 'config_layer_disabled');
+        streak = idle ? streak + 1 : 0;
+        if (streak >= 2) return 'idle';
+        if (idle) return 'ожидание второго снимка простоя';
+        if (res.status === 200 && apply.running) return `применение идёт: ${apply.trigger ?? ''}`;
+        if (res.status === 200 && holder) return `замок держит ${holder}`;
+        return `GET /api/configlayer/state ${res.status}`;
+      },
+      { message: `простой конвейера: ${what}`, timeout: T.save * 2, intervals: [1000] }
+    )
+    .toBe('idle');
+}
+
+/** Переключает слой; повторяет только занятый запрос, который не меняет диск. */
+export async function switchLayer(page: Page, on: boolean): Promise<void> {
+  if (!on) await waitApplyIdle(page, 'перед выключением слоя');
+  const started = Date.now();
+  let res: ApiResult;
+  let code: string;
+  for (;;) {
+    res = await api(page, 'POST', '/api/settings/config-layer', { enabled: on });
+    code = String(res.data?.code ?? '');
+    if (
+      res.status !== 409 ||
+      !['apply_busy', 'kernel_op_in_progress', 'geodata_busy'].includes(code) ||
+      Date.now() - started >= T.save
+    )
+      break;
+    await page.waitForTimeout(2000);
+  }
+  expect(res.status, `флаг слоя → ${on ? 'вкл' : 'выкл'} (${code})`).toBe(200);
+  expect(res.data?.config_layer, 'флаг слоя в ответе').toBe(on);
+  if (on) await waitApplyIdle(page, 'сборка после включения слоя');
+}
+
+/** Состояние флага до прогона возвращается прежним. Включение ждёт фоновую сборку,
+ * выключение — простой конвейера (G149-06, WR-01). */
 export function layerFlag() {
   let wasOn = false;
   return {
@@ -129,18 +176,17 @@ export function layerFlag() {
         expect(settings.status, 'GET /api/settings').toBe(200);
         wasOn = settings.data?.config_layer === true;
         if (!wasOn) {
-          const res = await api(page, 'POST', '/api/settings/config-layer', { enabled: true });
-          expect(res.status, 'включение слоя').toBe(200);
+          await switchLayer(page, true);
         }
         await resetDraft(page);
       });
     },
     async restore(browser: Browser): Promise<void> {
       await withPanel(browser, async (page) => {
+        await waitApplyIdle(page, 'перед возвратом флага слоя');
         await resetDraft(page);
         if (!wasOn) {
-          const res = await api(page, 'POST', '/api/settings/config-layer', { enabled: false });
-          expect(res.status, 'возврат флага слоя').toBe(200);
+          await switchLayer(page, false);
         }
       });
     }
