@@ -3053,6 +3053,7 @@
   "cfg.preview.entity.section_owner_removed": "Section {name} ({kernel}) goes back to files",
   "cfg.preview.entity.routing_owner_added": "{kernel} routing comes under panel control",
   "cfg.preview.entity.routing_owner_removed": "{kernel} routing goes back to XKeen",
+  "cfg.preview.entity.routing_owner_profile": "{kernel} custom profile changes",
   "cfg.preview.entity.dns_takeover": "DNS takeover",
   "cfg.preview.entity.diag": "Diagnostics",
   "cfg.preview.entity.other": "Section {name}",

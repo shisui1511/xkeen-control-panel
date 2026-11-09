@@ -144,7 +144,10 @@ export function rowText(row: ChangeRow, tr: Translate): string {
     if (title !== titleKey) name = title;
   }
   let key: string;
-  if (row.entity === 'section_owner' || row.entity === 'routing_owner') {
+  if (row.entity === 'routing_owner' && row.kind === 'changed') {
+    // Mihomo отпущен, меняется только свой профиль: панель ничего не берёт и не возвращает
+    key = 'cfg.preview.entity.routing_owner_profile';
+  } else if (row.entity === 'section_owner' || row.entity === 'routing_owner') {
     key = `cfg.preview.entity.${row.entity}_${row.kind === 'removed' ? 'removed' : 'added'}`;
   } else if (KNOWN_ENTITIES.has(row.entity)) {
     key = `cfg.preview.entity.${row.entity}`;

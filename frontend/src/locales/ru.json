@@ -3053,6 +3053,7 @@
   "cfg.preview.entity.section_owner_removed": "Секция {name} ({kernel}) возвращается в файлы",
   "cfg.preview.entity.routing_owner_added": "Маршрутизация {kernel} переходит под управление панели",
   "cfg.preview.entity.routing_owner_removed": "Маршрутизация {kernel} возвращается XKeen",
+  "cfg.preview.entity.routing_owner_profile": "Свой профиль {kernel} меняется",
   "cfg.preview.entity.dns_takeover": "Перехват DNS",
   "cfg.preview.entity.diag": "Диагностика",
   "cfg.preview.entity.other": "Секция {name}",
