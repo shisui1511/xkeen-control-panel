@@ -1812,8 +1812,15 @@
               plain={true}
             />
             <div class="editor-empty-actions">
-              {#if !showSidebar}
-                <button class="btn btn-secondary" onclick={() => (showSidebar = true)}>
+              <!-- На ≤768 px кнопка остаётся под бэкдропом: overlayLock возвращает фокус
+                   после Escape, «Закрыть» и фона только на элемент в разметке (G149-07, WR-05).
+                   На ПК при видимой колонке кнопки нет. -->
+              {#if !showSidebar || isNarrow}
+                <button
+                  class="btn btn-secondary"
+                  aria-expanded={showSidebar}
+                  onclick={() => (showSidebar = true)}
+                >
                   <svg
                     width="14"
                     height="14"
