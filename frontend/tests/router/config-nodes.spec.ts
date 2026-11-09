@@ -445,6 +445,11 @@ test(
     // Окно изменений: сводка apply-preview-count равна draft_changes и числу строк apply-preview-list
     await page.getByTestId('config-apply').click();
     const modal = page.getByTestId('apply-preview-modal');
+    // Если маршрутизацию ещё не принимала панель, сначала открывается диалог «Взять маршрутизацию»:
+    // «Применить только узлы» ведёт в то же окно изменений без взятия
+    const nodesOnly = page.getByTestId('take-routing-nodes-only');
+    await expect(modal.or(nodesOnly)).toBeVisible({ timeout: T.action });
+    if (await nodesOnly.isVisible()) await nodesOnly.click();
     await expect(modal).toBeVisible({ timeout: T.action });
     const previewCountText = (await page.getByTestId('apply-preview-count').textContent()) ?? '';
     const previewCount = Number(previewCountText.trim());
