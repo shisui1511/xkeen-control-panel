@@ -186,9 +186,11 @@
     }
   });
 
+  // Ошибка обновления: прежний список мог устареть, подтверждать его нельзя (D-08)
   const canConfirm = $derived(
     preview !== null &&
       !loading &&
+      !failed &&
       !confirming &&
       rows.length > 0 &&
       blockedText === '' &&
