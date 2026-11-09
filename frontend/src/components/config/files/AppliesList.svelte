@@ -149,7 +149,7 @@
               {:else if contentError}
                 <div class="alert alert-error" role="alert">
                   <span>{contentError}</span>
-                  <Button variant="secondary" size="sm" onclick={() => toggleApply(item)}>
+                  <Button variant="secondary" size="sm" onclick={() => void loadContent(item)}>
                     {$t('app.retry')}
                   </Button>
                 </div>
