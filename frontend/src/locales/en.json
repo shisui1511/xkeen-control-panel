@@ -2719,6 +2719,7 @@
   "cfg.files.apply_diff_caption": "“−” is the version before the apply of {date}, “+” is the file now",
   "cfg.files.applies_error": "Could not load the list of applies.",
   "cfg.files.stoplist_banner": "The file name hits the XKeen stop list ({word}): XKeen will not load this file. You can view, rename and delete it.",
+  "cfg.files.restricted_banner": "The file name is not in Latin letters: XKeen may not load this file. You can view, rename and delete it.",
   "cfg.files.restricted_title": "Non-Latin name: view, rename and delete only",
   "cfg.files.release_consequence": "The file becomes a user file; the panel stops rebuilding it.",
   "cfg.files.delete_message": "Delete {filename}? The file is deleted immediately, bypassing the draft. This cannot be undone.",

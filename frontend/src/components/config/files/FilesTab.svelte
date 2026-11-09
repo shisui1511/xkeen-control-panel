@@ -134,7 +134,13 @@
     {#snippet aboveCode(path, info)}
       {@const fileInfo = info ?? activeFileInfo}
       {@const layerFile = path ? $filesByPath.get(path) : undefined}
-      {#if fileInfo?.restricted}
+      <!-- Слово стоп-списка — точная причина, имя не латиницей — отдельный случай (WR-05) -->
+      {@const stoplistText = fileInfo?.stoplist_word
+        ? $t('cfg.files.stoplist_banner', { word: fileInfo.stoplist_word })
+        : fileInfo?.restricted
+          ? $t('cfg.files.restricted_banner')
+          : ''}
+      {#if stoplistText}
         <div
           class="alert alert-warning files-stoplist-banner"
           role="alert"
@@ -142,7 +148,7 @@
         >
           <Icon name="warning" size={16} />
           <span class="stoplist-message">
-            {$t('cfg.files.stoplist_banner', { word: fileInfo.stoplist_word || 'non-latin' })}
+            {stoplistText}
           </span>
         </div>
       {:else if layerFile && layerFile.state?.startsWith('drift_')}
