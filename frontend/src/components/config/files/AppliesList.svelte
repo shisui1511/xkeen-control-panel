@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { t, currentLang } from '../../../i18n';
   import Button from '../../Button.svelte';
   import EmptyState from '../../EmptyState.svelte';
@@ -22,6 +23,8 @@
     current?: string;
   } = $props();
 
+  const MAX_ROWS = 5;
+
   let loading = $state(true);
   let error = $state('');
   let applies = $state<ApplyCopy[]>([]);
@@ -41,65 +44,117 @@
     }
   }
 
-  // Счётчики запросов: поздний ответ устаревшего запроса не должен подменять
-  // список или содержимое, показанные для текущего файла и выбранной строки.
+  // Идентичность запросов (G149-02): список принадлежит activeKey и поколению
+  // listSeq, содержимое — activeKey, selectedId и поколению contentSeq. Ответ,
+  // ветвь catch и finally публикуют результат только при совпадении всех трёх,
+  // поэтому поздний ответ прошлого файла или прошлой строки не меняет текущий
+  // выбор, ошибку и индикатор загрузки. Счётчики и ключ нереактивны.
+  let activeKey: string | null = null;
   let listSeq = 0;
   let contentSeq = 0;
 
-  async function load(): Promise<void> {
-    const mine = ++listSeq;
-    contentSeq++; // отменить идущий запрос содержимого
-    const key = file.key;
-    loading = true;
-    error = '';
+  function errorText(e: unknown): string {
+    const msg = e instanceof Error ? e.message : String(e);
+    return msg || $t('cfg.files.applies_error');
+  }
+
+  // Сбросить раскрытую строку и инвалидировать её незавершённое чтение.
+  function clearSelection(): void {
+    contentSeq++;
     selectedId = null;
     selectedContent = null;
+    selectedTruncated = false;
     contentLoading = false;
+    contentError = '';
+  }
+
+  // Новый файл не наследует ни список, ни раскрытую строку прошлого файла.
+  function openFile(key: string): void {
+    activeKey = key;
+    listSeq++;
+    clearSelection();
+    applies = [];
+    error = '';
+    loading = true;
+    void loadList(key);
+  }
+
+  // Чтение списка. Повтор для того же файла не стирает успешно загруженный
+  // список до нового успеха (UI-SPEC: сбой фонового чтения не закрывает список).
+  async function loadList(key: string): Promise<void> {
+    const mine = ++listSeq;
+    const owns = () => mine === listSeq && activeKey === key;
+    loading = true;
+    error = '';
     try {
       const res = await fetchApplies(key);
-      if (mine !== listSeq) return;
-      applies = res.applies ?? [];
+      if (!owns()) return;
+      const next = res.applies ?? [];
+      applies = next;
+      if (selectedId !== null && !next.slice(0, MAX_ROWS).some((a) => a.id === selectedId)) {
+        clearSelection();
+      }
     } catch (e) {
-      if (mine === listSeq) error = e instanceof Error ? e.message : String(e);
+      if (owns()) error = errorText(e);
     } finally {
-      if (mine === listSeq) loading = false;
+      if (owns()) loading = false;
     }
   }
 
+  function retryList(): void {
+    if (activeKey !== null) void loadList(activeKey);
+  }
+
+  // Чтение содержимого выбранной копии: key и id захватываются до await.
   async function loadContent(item: ApplyCopy): Promise<void> {
+    const key = activeKey;
+    const id = item.id;
+    if (key === null || selectedId !== id) return;
     const mine = ++contentSeq;
-    const key = file.key;
+    const owns = () => mine === contentSeq && activeKey === key && selectedId === id;
     selectedContent = null;
     selectedTruncated = false;
-    contentLoading = true;
     contentError = '';
+    contentLoading = true;
     try {
-      const res = await fetchApplyContent(key, item.id);
-      if (mine !== contentSeq || selectedId !== item.id) return;
+      const res = await fetchApplyContent(key, id);
+      if (!owns()) return;
       selectedContent = res.content;
       selectedTruncated = res.truncated;
     } catch (e) {
-      if (mine === contentSeq) contentError = e instanceof Error ? e.message : String(e);
+      if (owns()) contentError = errorText(e);
     } finally {
-      if (mine === contentSeq) contentLoading = false;
+      if (owns()) contentLoading = false;
     }
   }
 
+  // Выбор или сворачивание строки. Новый выбор сразу убирает прошлый diff.
   function toggleApply(item: ApplyCopy): void {
     if (selectedId === item.id) {
-      contentSeq++;
-      selectedId = null;
-      selectedContent = null;
-      contentLoading = false;
+      clearSelection();
       return;
     }
+    clearSelection();
     selectedId = item.id;
     void loadContent(item);
   }
 
+  // «Повторить» в раскрытой строке: новое чтение того же id, строка остаётся раскрытой.
+  function retrySelected(item: ApplyCopy): void {
+    if (activeKey === null || selectedId !== item.id) return;
+    void loadContent(item);
+  }
+
+  // Зависимость эффекта — только file.key; чтение состояния внутри загрузки
+  // не отслеживается. Cleanup (смена файла, уничтожение) инвалидирует оба поколения.
   $effect(() => {
-    void file.key;
-    void load();
+    const key = file.key;
+    untrack(() => openFile(key));
+    return () => {
+      activeKey = null;
+      listSeq++;
+      contentSeq++;
+    };
   });
 </script>
 
@@ -109,26 +164,30 @@
     <p class="applies-note">{$t('cfg.files.applies_note')}</p>
   </div>
 
-  {#if loading}
-    <div class="applies-loading" aria-busy="true">
-      <Skeleton type="text-line" width="70%" />
-      <Skeleton type="text-line" width="85%" />
-      <Skeleton type="text-line" width="60%" />
-    </div>
-  {:else if error}
+  {#if error}
     <div class="alert alert-error applies-alert" role="alert">
       <span>{$t('cfg.files.applies_error')}</span>
-      <Button variant="secondary" size="sm" onclick={() => void load()}>
+      <Button variant="secondary" size="sm" {loading} onclick={retryList}>
         {$t('app.retry')}
       </Button>
     </div>
-  {:else if applies.length === 0}
-    <div class="applies-empty">
-      <EmptyState title={$t('editor.backups_empty')} description="" plain={true} />
-    </div>
+  {/if}
+
+  {#if applies.length === 0}
+    {#if loading}
+      <div class="applies-loading" aria-busy="true">
+        <Skeleton type="text-line" width="70%" />
+        <Skeleton type="text-line" width="85%" />
+        <Skeleton type="text-line" width="60%" />
+      </div>
+    {:else if !error}
+      <div class="applies-empty">
+        <EmptyState title={$t('editor.backups_empty')} description="" plain={true} />
+      </div>
+    {/if}
   {:else}
     <div class="applies-items">
-      {#each applies.slice(0, 5) as item (item.id)}
+      {#each applies.slice(0, MAX_ROWS) as item (item.id)}
         <div class="apply-row" class:active={selectedId === item.id}>
           <button
             type="button"
@@ -149,7 +208,7 @@
               {:else if contentError}
                 <div class="alert alert-error" role="alert">
                   <span>{contentError}</span>
-                  <Button variant="secondary" size="sm" onclick={() => void loadContent(item)}>
+                  <Button variant="secondary" size="sm" onclick={() => retrySelected(item)}>
                     {$t('app.retry')}
                   </Button>
                 </div>
