@@ -2716,6 +2716,7 @@
   "cfg.files.applies_title": "Recent applies",
   "cfg.files.applies_note": "View and compare only. There is no rollback to an apply.",
   "cfg.files.apply_row": "Version before the apply of {date}",
+  "cfg.files.apply_diff_caption": "“−” is the version before the apply of {date}, “+” is the file now",
   "cfg.files.applies_error": "Could not load the list of applies.",
   "cfg.files.stoplist_banner": "The file name hits the XKeen stop list ({word}): XKeen will not load this file. You can view, rename and delete it.",
   "cfg.files.restricted_title": "Non-Latin name: view, rename and delete only",

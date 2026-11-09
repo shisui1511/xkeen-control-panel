@@ -158,6 +158,7 @@
                   expected={current}
                   actual={selectedContent}
                   truncated={selectedTruncated}
+                  caption={$t('cfg.files.apply_diff_caption', { date: formatDate(item.at) })}
                 />
               {/if}
             </div>
