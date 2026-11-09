@@ -1,11 +1,22 @@
 // e2e-pages: config config/nodes config/files
 // router-area: sources
+import { execFile } from 'node:child_process';
 import { randomInt } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { test, expect, type Browser, type Page } from '@playwright/test';
+import { promisify } from 'node:util';
+import {
+  test,
+  expect,
+  type Browser,
+  type ConsoleMessage,
+  type Page,
+  type Request,
+  type Response
+} from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
+import { FULL_TAG, TIER_FULL_ANNOTATION } from './lib/known';
 
 // Каркас раздела «Конфигурация» на настоящей панели (фаза 145, план 12): вкладки «Узлы»
 // и «Файлы» с маршрутами #/config/nodes и #/config/files, общая полоса черновика,
@@ -103,9 +114,208 @@ async function addDraftNode(page: Page): Promise<string> {
   return text;
 }
 
+// --- Сбой обновления окна изменений (G149-01, D-08) ---
+// Настоящий отказ чтения: самоссылка с именем файла панели в каталоге конфигураций Xray.
+// Сверка сирот берёт её без чтения, предпросмотр читает «было» и получает ELOOP, обработчик
+// отвечает HTTP 500 internal. Создаётся и удаляется только вычисленный тестом путь; применение,
+// перезапуск ядра и скан запуска ядра, пока самоссылка существует, тест не делает.
+
+const run = promisify(execFile);
+const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const XRAY_CONFIGS = '/opt/etc/xray/configs';
+const ORPHAN_NAME = /^xcp-e2e-preview-\d+\.json$/;
+const PREVIEW_PATH = '/api/configlayer/apply/preview';
+const APPLY_PATH = '/api/configlayer/apply';
+const RESOURCE_500 = /^Failed to load resource: the server responded with a status of 500\b/;
+const ELOOP_TEXT = /too many levels of symbolic links|ELOOP/i;
+
+/** Самоссылка, созданная этим спеком и ещё не удалённая: её убирает afterEach при прерывании. */
+let ownedOrphan: string | null = null;
+
+/**
+ * Команда на стенде arm64 через scripts/router/lib.sh из корня репозитория: алиас и доступы
+ * берутся только из локального файла целей. Возвращает код выхода команды; сбой подготовки
+ * (файл целей, связь) — ошибка. Вывод ssh (в нём может быть алиас) в отчёт не попадает,
+ * поэтому исходная ошибка процесса не прикладывается причиной.
+ */
+async function standSh(remote: string): Promise<number> {
+  const code = await run(
+    'sh',
+    [
+      '-c',
+      '. scripts/router/lib.sh || exit 90; rt_load_targets || exit 91; rt_ssh arm64 "$1"',
+      'sh',
+      remote
+    ],
+    { cwd: REPO_ROOT, env: { ...process.env, ROUTERS: 'arm64' }, timeout: 60_000 }
+  ).then(
+    () => 0 as unknown,
+    (err: unknown) => (err as { code?: unknown } | null)?.code
+  );
+  if (code === 3) throw new Error('стенд arm64: нет связи по ssh');
+  if (code === 90 || code === 91) throw new Error('стенд arm64: файл целей не прочитан');
+  if (typeof code !== 'number') {
+    throw new Error('стенд arm64: команда не выполнена (таймаут или запуск sh)');
+  }
+  return code;
+}
+
+function orphanPath(name: string): string {
+  if (!ORPHAN_NAME.test(name)) throw new Error('имя сироты вне шаблона теста');
+  return `${XRAY_CONFIGS}/${name}`;
+}
+
+/** Путь свободен (lstat: ни файла, ни ссылки), ключа xray:<имя> в манифесте нет. */
+async function expectOrphanFree(page: Page, name: string): Promise<void> {
+  const p = orphanPath(name);
+  const state = await api(page, 'GET', '/api/configlayer/state');
+  expect(state.status, 'GET /api/configlayer/state').toBe(200);
+  const files = Array.isArray(state.data?.files) ? (state.data.files as { key?: unknown }[]) : [];
+  expect(
+    files.some((f) => f?.key === `xray:${name}`),
+    'G149-01 подготовка: ключ сироты уже в манифесте'
+  ).toBe(false);
+  const code = await standSh(`test ! -e ${p} && test ! -L ${p} || exit 10`);
+  if (code !== 0) throw new Error(`G149-01 подготовка: путь сироты уже занят (код ${code})`);
+}
+
+/** Создаёт самоссылку name → name; существующий путь не заменяет. */
+async function createSelfLink(name: string): Promise<void> {
+  const p = orphanPath(name);
+  const code = await standSh(
+    `test -d ${XRAY_CONFIGS} || exit 11; test ! -e ${p} && test ! -L ${p} || exit 10; ` +
+      `ln -s ${name} ${p} || exit 12; test -L ${p} || exit 13`
+  );
+  // 10 и 11 — до создания: путь чужой или каталога нет, удалять нечего
+  if (code !== 10 && code !== 11) ownedOrphan = name;
+  if (code !== 0) throw new Error(`G149-01 подготовка: самоссылка не создана (код ${code})`);
+}
+
+/** Удаляет только ссылку по вычисленному пути и проверяет, что пути больше нет. */
+async function removeSelfLink(name: string): Promise<void> {
+  const p = orphanPath(name);
+  const code = await standSh(
+    `if test -L ${p}; then rm -f ${p}; fi; test ! -e ${p} && test ! -L ${p} || exit 10`
+  );
+  if (code !== 0) throw new Error(`G149-01 уборка: путь сироты остался (код ${code})`);
+  if (ownedOrphan === name) ownedOrphan = null;
+}
+
+function urlPath(url: string): string {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return url;
+  }
+}
+
+function isPreviewGet(req: Request): boolean {
+  return req.method() === 'GET' && urlPath(req.url()) === PREVIEW_PATH;
+}
+
+interface FaultWindow {
+  violations: string[];
+  /** Ответы HTTP 500 предпросмотра: тело сверяется после окна. */
+  failed: Response[];
+  /** location.url ресурсных строк console.error про 500. */
+  resourceLines: string[];
+  applyPosts: number;
+  detach(): void;
+}
+
+/**
+ * Строгий сборщик узкого окна сбоя. Допустимы только HTTP 500 GET предпросмотра и ресурсная
+ * строка console.error с адресом этого же запроса; любые другие 5xx, requestfailed, pageerror
+ * и console.error — нарушения. ERR_ABORTED запроса, на который ответ уже пришёл, отказом не
+ * считается, как и в attachConsoleGuard.
+ */
+function openFaultWindow(page: Page): FaultWindow {
+  const answered = new WeakSet<Request>();
+  const w: FaultWindow = {
+    violations: [],
+    failed: [],
+    resourceLines: [],
+    applyPosts: 0,
+    detach: () => {
+      page.off('console', onConsole);
+      page.off('pageerror', onPageError);
+      page.off('response', onResponse);
+      page.off('requestfailed', onRequestFailed);
+      page.off('request', onRequest);
+    }
+  };
+  const onConsole = (msg: ConsoleMessage) => {
+    if (msg.type() !== 'error') return;
+    if (RESOURCE_500.test(msg.text()) && urlPath(msg.location().url) === PREVIEW_PATH) {
+      w.resourceLines.push(msg.location().url);
+      return;
+    }
+    w.violations.push(`console.error: ${msg.text()}`);
+  };
+  const onPageError = (err: Error) => {
+    w.violations.push(`pageerror: ${err.message}`);
+  };
+  const onResponse = (res: Response) => {
+    answered.add(res.request());
+    if (res.status() < 500) return;
+    if (res.status() === 500 && isPreviewGet(res.request())) {
+      w.failed.push(res);
+      return;
+    }
+    w.violations.push(`HTTP ${res.status()} ${res.request().method()} ${urlPath(res.url())}`);
+  };
+  const onRequestFailed = (req: Request) => {
+    const why = req.failure()?.errorText ?? 'без причины';
+    if (why === 'net::ERR_ABORTED' && answered.has(req)) return;
+    w.violations.push(`requestfailed ${req.method()} ${urlPath(req.url())}: ${why}`);
+  };
+  const onRequest = (req: Request) => {
+    if (req.method() === 'POST' && urlPath(req.url()) === APPLY_PATH) w.applyPosts++;
+  };
+  page.on('console', onConsole);
+  page.on('pageerror', onPageError);
+  page.on('response', onResponse);
+  page.on('requestfailed', onRequestFailed);
+  page.on('request', onRequest);
+  return w;
+}
+
+/** Тело HTTP 500 предпросмотра — отказ чтения именно этой сироты. */
+function isOrphanEloop(body: unknown, name: string): boolean {
+  const b = body as { code?: unknown; detail?: unknown } | null;
+  return (
+    b?.code === 'internal' &&
+    typeof b.detail === 'string' &&
+    b.detail.includes(name) &&
+    ELOOP_TEXT.test(b.detail)
+  );
+}
+
+/** Нарушения окна сбоя после его закрытия: посторонние ошибки и непарные строки консоли. */
+async function faultProblems(w: FaultWindow, name: string): Promise<string[]> {
+  const out = [...w.violations];
+  for (const res of w.failed) {
+    const body = await res.json().catch(() => null);
+    if (!isOrphanEloop(body, name)) out.push('HTTP 500 предпросмотра не от ELOOP сироты теста');
+  }
+  const seen = w.failed.map((r) => r.url());
+  for (const url of w.resourceLines) {
+    const i = seen.indexOf(url);
+    if (i < 0) out.push(`строка консоли о 500 без наблюдённого ответа: ${urlPath(url)}`);
+    else seen.splice(i, 1);
+  }
+  if (w.applyPosts > 0) out.push(`POST ${APPLY_PATH} отправлен ${w.applyPosts} раз`);
+  return out;
+}
+
 let layerWasOn = false;
 
 test.describe.configure({ mode: 'serial' });
+
+test.afterEach(async () => {
+  // Прерванный тест: убрать только свою самоссылку по известному имени
+  if (ownedOrphan !== null) await removeSelfLink(ownedOrphan);
+});
 
 test.beforeAll(async ({ browser }) => {
   await withPanel(browser, async (page) => {
@@ -185,71 +395,165 @@ test('config-tabs: #/config/files напрямую открывает Файлы
   await guard.assertClean();
 });
 
-test('config-tabs: полоса черновика общая, смена вкладки её не пересоздаёт, бейдж меню считает', async ({
-  page
-}) => {
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/', { timeout: T.page, waitUntil: 'domcontentloaded' });
-  await page.locator('.main-content').first().waitFor({ state: 'visible', timeout: T.page });
-  await addDraftNode(page);
+test(
+  'config-tabs: полоса черновика общая, смена вкладки её не пересоздаёт, бейдж меню считает',
+  {
+    tag: FULL_TAG,
+    annotation: {
+      type: TIER_FULL_ANNOTATION,
+      description: 'внесение сбоя: ELOOP при чтении сироты preview'
+    }
+  },
+  async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/', { timeout: T.page, waitUntil: 'domcontentloaded' });
+    await page.locator('.main-content').first().waitFor({ state: 'visible', timeout: T.page });
+    await addDraftNode(page);
 
-  await openConfig(page, '#/config/nodes');
-  const bar = page.getByTestId('config-draftbar');
-  await expect(bar).toBeVisible({ timeout: T.action });
-  // метка на элементе полосы: если вкладки пересоздали бы её, метка пропала бы
-  await bar.evaluate((el) => {
-    (el as HTMLElement & { __kept?: boolean }).__kept = true;
-  });
+    await openConfig(page, '#/config/nodes');
+    const bar = page.getByTestId('config-draftbar');
+    await expect(bar).toBeVisible({ timeout: T.action });
+    // метка на элементе полосы: если вкладки пересоздали бы её, метка пропала бы
+    await bar.evaluate((el) => {
+      (el as HTMLElement & { __kept?: boolean }).__kept = true;
+    });
 
-  await page.getByTestId('config-tab-files').click();
-  await expect(page.getByTestId('files-tab')).toBeVisible({ timeout: T.action });
-  await expect(bar).toBeVisible();
-  expect(await bar.evaluate((el) => (el as HTMLElement & { __kept?: boolean }).__kept)).toBe(true);
+    await page.getByTestId('config-tab-files').click();
+    await expect(page.getByTestId('files-tab')).toBeVisible({ timeout: T.action });
+    await expect(bar).toBeVisible();
+    expect(await bar.evaluate((el) => (el as HTMLElement & { __kept?: boolean }).__kept)).toBe(
+      true
+    );
 
-  await page.getByTestId('config-tab-nodes').click();
-  await expect(page.getByTestId('nodes-tab')).toBeVisible({ timeout: T.action });
-  expect(await bar.evaluate((el) => (el as HTMLElement & { __kept?: boolean }).__kept)).toBe(true);
+    await page.getByTestId('config-tab-nodes').click();
+    await expect(page.getByTestId('nodes-tab')).toBeVisible({ timeout: T.action });
+    expect(await bar.evaluate((el) => (el as HTMLElement & { __kept?: boolean }).__kept)).toBe(
+      true
+    );
 
-  // бейдж меню = изменения черновика + видимые уведомления слоя
-  const state = await api(page, 'GET', '/api/configlayer/state');
-  const changes = Number(state.data?.draft_changes ?? 0);
-  expect(changes, 'в черновике есть изменение').toBeGreaterThan(0);
-  const notices = await page.locator('[data-testid="config-notices"] [data-notice]').count();
-  const badge = page.locator('.nav-badge-config');
-  await expect(badge).toBeVisible({ timeout: T.action });
-  const expected = changes + notices;
-  await expect(badge).toHaveText(expected > 99 ? '99+' : String(expected));
+    // бейдж меню = изменения черновика + видимые уведомления слоя
+    const state = await api(page, 'GET', '/api/configlayer/state');
+    const changes = Number(state.data?.draft_changes ?? 0);
+    expect(changes, 'в черновике есть изменение').toBeGreaterThan(0);
+    const notices = await page.locator('[data-testid="config-notices"] [data-notice]').count();
+    const badge = page.locator('.nav-badge-config');
+    await expect(badge).toBeVisible({ timeout: T.action });
+    const expected = changes + notices;
+    await expect(badge).toHaveText(expected > 99 ? '99+' : String(expected));
 
-  // Окно изменений: сводка apply-preview-count равна draft_changes и числу строк apply-preview-list
-  await page.getByTestId('config-apply').click();
-  const modal = page.getByTestId('apply-preview-modal');
-  await expect(modal).toBeVisible({ timeout: T.action });
-  const previewCountText = (await page.getByTestId('apply-preview-count').textContent()) ?? '';
-  const previewCount = Number(previewCountText.trim());
-  const rowsCount = await page.locator('[data-testid="apply-preview-list"] li').count();
-  expect(previewCount, 'сводка в окне равна draft_changes').toBe(changes);
-  expect(rowsCount, 'число строк в окне равно draft_changes').toBe(changes);
+    // Окно изменений: сводка apply-preview-count равна draft_changes и числу строк apply-preview-list
+    await page.getByTestId('config-apply').click();
+    const modal = page.getByTestId('apply-preview-modal');
+    await expect(modal).toBeVisible({ timeout: T.action });
+    const previewCountText = (await page.getByTestId('apply-preview-count').textContent()) ?? '';
+    const previewCount = Number(previewCountText.trim());
+    const rowsCount = await page.locator('[data-testid="apply-preview-list"] li').count();
+    expect(previewCount, 'сводка в окне равна draft_changes').toBe(changes);
+    expect(rowsCount, 'число строк в окне равно draft_changes').toBe(changes);
+    const confirmBtn = page.getByTestId('apply-preview-confirm');
+    await expect(confirmBtn, 'исходный предпросмотр разрешает подтверждение').toBeEnabled();
 
-  // «Закрыть без применения» не меняет черновик
-  await page.getByTestId('apply-preview-cancel').click();
-  await expect(modal).toHaveCount(0);
-  const stateAfterCancel = await api(page, 'GET', '/api/configlayer/state');
-  expect(
-    Number(stateAfterCancel.data?.draft_changes ?? 0),
-    'после отмены draft_changes прежний'
-  ).toBe(changes);
+    // Сбой обновления окна (G149-01, D-08): прежний успешный список остаётся на экране, но
+    // подтвердить его нельзя, пока повтор не прочитает предпросмотр заново. Чистый начальный
+    // участок проверен и отключён; на окно сбоя — свой строгий сборщик.
+    await guard.assertClean();
+    const orphan = `xcp-e2e-preview-${randomInt(100_000_000, 1_000_000_000)}.json`;
+    await expectOrphanFree(page, orphan);
+    const fault = openFaultWindow(page);
+    let primary: unknown;
+    let cleanupError: unknown;
+    try {
+      await createSelfLink(orphan);
+      // Вторая правка черновика настоящим API: событие draft перечитывает открытое окно
+      const failedPreview = page
+        .waitForResponse((r) => isPreviewGet(r.request()) && r.status() === 500, {
+          timeout: T.action
+        })
+        .catch(() => null);
+      await addDraftNode(page);
+      const res500 = await failedPreview;
+      if (res500 === null) {
+        throw new Error(
+          'G149-01 подготовка: окно не получило HTTP 500 предпросмотра — сбой не внесён'
+        );
+      }
+      expect(
+        isOrphanEloop(await res500.json().catch(() => null), orphan),
+        'G149-01 подготовка: HTTP 500 internal от ELOOP сироты теста'
+      ).toBe(true);
+      await expect(page.getByTestId('apply-preview-error')).toBeVisible({ timeout: T.action });
+      await expect(confirmBtn, 'G149-01 preview failure blocks confirmation').toBeDisabled();
+      expect(fault.applyPosts, 'G149-01: применение не отправлялось').toBe(0);
 
-  // «Сбросить» отменяет весь черновик
-  await resetDraft(page);
-  const stateAfterReset = await api(page, 'GET', '/api/configlayer/state');
-  expect(
-    Number(stateAfterReset.data?.draft_changes ?? 0),
-    'после сброса draft_changes равен 0'
-  ).toBe(0);
+      // Сирота убрана до штатного повтора: успешное чтение новой ревизии снимает блокировку
+      await removeSelfLink(orphan);
+      const rev = Number(
+        (await api(page, 'GET', '/api/configlayer/sources')).data?.draft_revision ?? 0
+      );
+      const okPreview = page
+        .waitForResponse((r) => isPreviewGet(r.request()) && r.status() === 200, {
+          timeout: T.action
+        })
+        .catch(() => null);
+      await page.getByTestId('apply-preview-retry').click();
+      const res200 = await okPreview;
+      if (res200 === null) throw new Error('G149-01: повтор не получил HTTP 200 предпросмотра');
+      const okBody = (await res200.json().catch(() => null)) as {
+        data?: { draft_revision?: unknown };
+      } | null;
+      expect(Number(okBody?.data?.draft_revision), 'повтор читает новую ревизию').toBe(rev);
+      await expect(page.getByTestId('apply-preview-error')).toHaveCount(0);
+      await expect(confirmBtn, 'G149-01: успешный повтор снимает блокировку').toBeEnabled();
+    } catch (err) {
+      primary = err;
+    } finally {
+      if (ownedOrphan !== null) {
+        try {
+          await removeSelfLink(ownedOrphan);
+        } catch (err) {
+          cleanupError = err;
+        }
+      }
+      fault.detach();
+    }
+    const problems = await faultProblems(fault, orphan);
+    if (primary !== undefined) {
+      if (problems.length > 0 && primary instanceof Error) {
+        primary.message += `\n\nнарушения окна сбоя:\n- ${problems.join('\n- ')}`;
+      }
+      throw primary;
+    }
+    if (cleanupError !== undefined) throw cleanupError;
+    expect(problems, 'G149-01: в окне сбоя нет посторонних ошибок').toEqual([]);
 
-  await guard.assertClean();
-});
+    // Остаток сценария — под новым сборщиком консоли
+    const rest = attachConsoleGuard(page);
+    const changesNow = Number(
+      (await api(page, 'GET', '/api/configlayer/state')).data?.draft_changes ?? 0
+    );
+    expect(changesNow, 'вторая правка в черновике').toBeGreaterThanOrEqual(changes);
+
+    // «Закрыть без применения» не меняет черновик
+    await page.getByTestId('apply-preview-cancel').click();
+    await expect(modal).toHaveCount(0);
+    const stateAfterCancel = await api(page, 'GET', '/api/configlayer/state');
+    expect(
+      Number(stateAfterCancel.data?.draft_changes ?? 0),
+      'после отмены draft_changes прежний'
+    ).toBe(changesNow);
+
+    // «Сбросить» отменяет весь черновик
+    await resetDraft(page);
+    const stateAfterReset = await api(page, 'GET', '/api/configlayer/state');
+    expect(
+      Number(stateAfterReset.data?.draft_changes ?? 0),
+      'после сброса draft_changes равен 0'
+    ).toBe(0);
+
+    await rest.assertClean();
+  }
+);
 
 test('config-tabs: на 390 px полоса вкладок прокручивается внутри себя', async ({ page }) => {
   const guard = attachConsoleGuard(page);
