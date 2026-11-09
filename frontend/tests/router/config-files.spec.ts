@@ -30,6 +30,7 @@ const VP_DESKTOP = { width: 1280, height: 800 };
 const VP_PHONE = { width: 390, height: 844 };
 const SHEET = '.file-tree-pane.overlay';
 const SHEET_TOGGLE = '.files-sheet-toggle';
+const SHOW_FILES = '.editor-empty-actions .btn-secondary';
 
 let fixtureName = '';
 
@@ -263,9 +264,7 @@ test('config-files sheet vp:390', async ({ page }) => {
   const toggle = tab.locator(SHEET_TOGGLE);
   await expect(toggle).toBeVisible({ timeout: T.page });
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await toggle.click({ timeout: T.action });
   const sheet = page.locator(SHEET);
-  await expect(sheet).toBeVisible({ timeout: T.action });
   const settled = async (): Promise<void> => {
     await expect
       .poll(
@@ -278,6 +277,29 @@ test('config-files sheet vp:390', async ({ page }) => {
       )
       .toBe(true);
   };
+  const focusInSheet = (): Promise<boolean> =>
+    sheet.evaluate((el) => el.contains(document.activeElement));
+  const showFiles = tab.locator(SHOW_FILES).first();
+  await expect(showFiles).toBeVisible({ timeout: T.page });
+  await showFiles.click();
+  await expect(sheet).toBeVisible({ timeout: T.action });
+  await settled();
+  await expect
+    .poll(focusInSheet, {
+      message: 'G149-04 initial focus из пустого состояния',
+      timeout: T.action
+    })
+    .toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(sheet).toHaveCount(0, { timeout: T.action });
+  await expect(
+    showFiles,
+    'WR-05: фокус после закрытия листа, открытого из пустого состояния'
+  ).toBeFocused();
+  await expect(showFiles).toHaveAttribute('aria-expanded', 'false');
+
+  await toggle.click({ timeout: T.action });
+  await expect(sheet).toBeVisible({ timeout: T.action });
   await settled();
   const box = await sheet.boundingBox();
   expect(box, 'лист: нет рамки').not.toBeNull();
@@ -287,8 +309,6 @@ test('config-files sheet vp:390', async ({ page }) => {
   );
 
   // G149-04: лист — модальный диалог. Обычный клик переносит фокус внутрь листа
-  const focusInSheet = (): Promise<boolean> =>
-    sheet.evaluate((el) => el.contains(document.activeElement));
   await expect
     .poll(focusInSheet, { message: 'G149-04 initial focus', timeout: T.action })
     .toBe(true);

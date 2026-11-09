@@ -478,6 +478,33 @@ test('editor-mobile sheet-close vp:390', { tag: CORE_TAG }, async ({ page }) => 
   test.setTimeout(90_000 * RT.slow);
   const guard = attachConsoleGuard(page);
   await gotoEditor(page, VP_PHONE);
+  const showFiles = page.locator(SHOW_FILES).first();
+  await openSheetFromEmpty(page);
+  await expectFocusInSheet(page, 'открытие из пустого состояния');
+  await page.keyboard.press('Escape');
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  await expect(
+    showFiles,
+    'WR-05: после Escape фокус не вернулся на «Показать файлы»'
+  ).toBeFocused();
+  await expect(showFiles).toHaveAttribute('aria-expanded', 'false');
+
+  await openSheetFromEmpty(page);
+  await page.locator(CLOSE_BTN).click();
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  await expect(
+    showFiles,
+    'WR-05: после «Закрыть» фокус не вернулся на «Показать файлы»'
+  ).toBeFocused();
+
+  await openSheetFromEmpty(page);
+  await page.mouse.click(VP_PHONE.width - 16, VP_PHONE.height / 2);
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  await expect(
+    showFiles,
+    'WR-05: после нажатия по фону фокус не вернулся на «Показать файлы»'
+  ).toBeFocused();
+
   await openFixtureFile(page);
 
   const toggle = page.locator(TOGGLE).first();
