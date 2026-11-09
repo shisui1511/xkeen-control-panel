@@ -45,6 +45,19 @@ async function mihomoApiUp(page: Page): Promise<boolean> {
   return Boolean((body.data ?? body).mihomo?.api_reachable);
 }
 
+/**
+ * Флаг слоя «Конфигурация» на устройстве (чтение с сессией панели). Неудачный ответ или
+ * конверт без булева config_layer — красный сценарий, а не «флаг выключен».
+ */
+async function configLayerFlag(page: Page): Promise<boolean> {
+  const res = await page.request.get('/api/settings');
+  expect(res.status(), 'GET /api/settings').toBe(200);
+  const body = (await res.json()) as { data?: { config_layer?: unknown } };
+  const flag = body.data?.config_layer;
+  expect(typeof flag, 'config_layer в конверте data ответа /api/settings').toBe('boolean');
+  return flag === true;
+}
+
 /** Критичные и серьёзные нарушения axe (WCAG 2.0/2.1 A и AA) в рабочей области страницы. */
 async function axeSevere(page: Page): Promise<string[]> {
   // переход между вкладками идёт с затуханием: axe не должен видеть полупрозрачный кадр
@@ -72,7 +85,15 @@ test('rules-offline: при Xray вкладка Провайдеры', { tag: CO
 
   await expect(page.getByTestId('tab-diagnostic')).toBeDisabled();
   await expect(page.getByTestId('tab-all_rules')).toBeDisabled();
-  await expect(page.getByTestId('tab-exceptions')).toBeEnabled();
+  // D-16: при включённом слое старой вкладки «Исключения» нет (её адрес ведёт в «Конфигурацию»),
+  // без слоя она на месте. Оба режима проходит config-entries legacy-redirects.
+  const exceptions = page.getByTestId('tab-exceptions');
+  if (await configLayerFlag(page)) {
+    await expect(exceptions).toHaveCount(0);
+  } else {
+    await expect(exceptions).toBeVisible();
+    await expect(exceptions).toBeEnabled();
+  }
   await expect(page.getByTestId('rules-tabs-note')).toBeVisible();
   await expect(page.getByTestId('rules-offline-badge')).toBeVisible();
   await expect(page.getByTestId('rules-offline-note')).toBeVisible();
@@ -225,14 +246,6 @@ test(
   }
 );
 
-/** Флаг слоя «Конфигурация» на устройстве (чтение): без него маршрута #/config нет. */
-async function configLayerOn(page: Page): Promise<boolean> {
-  const res = await page.request.get('/api/settings');
-  if (!res.ok()) return false;
-  const body = (await res.json()) as { data?: { config_layer?: boolean } };
-  return body.data?.config_layer === true;
-}
-
 /** Mihomo установлен на устройстве (чтение /api/capabilities). */
 async function mihomoInstalled(page: Page): Promise<boolean> {
   const res = await page.request.get('/api/capabilities');
@@ -269,7 +282,7 @@ test(`proxies offline reason core:${RT.core}`, { tag: CORE_TAG }, async ({ page 
     await expect(page.locator('.api-offline')).toHaveCount(0, { timeout: T.page });
   }
 
-  if (!(await configLayerOn(page))) {
+  if (!(await configLayerFlag(page))) {
     test.info().annotations.push({
       type: 'skip-part',
       description: 'флаг config_layer выключен на стенде: раздел #/config не проверен'
