@@ -328,6 +328,63 @@ async function waitSheetSettled(page: Page): Promise<void> {
     .toBe(true);
 }
 
+/**
+ * Обход фокуса внутри области по стандартным признакам HTML, без классов и атрибутов панели:
+ * видимые элементы с tabIndex ≥ 0, не disabled, не внутри inert или aria-hidden. `first`/`last`
+ * фокусируют край обхода и возвращают число элементов; `where` — где сейчас фокус.
+ */
+async function focusEdge(
+  scope: Locator,
+  action: 'first' | 'last' | 'where'
+): Promise<{ count: number; at: 'first' | 'last' | 'inside' | 'outside' }> {
+  return scope.evaluate((root, act) => {
+    const sel =
+      'a[href], button, input:not([type="hidden"]), select, textarea, summary, [contenteditable="true"], [tabindex]';
+    const list = Array.from(root.querySelectorAll<HTMLElement>(sel)).filter(
+      (el) =>
+        el.tabIndex >= 0 &&
+        !(el as HTMLButtonElement).disabled &&
+        !el.closest('[inert], [aria-hidden="true"]') &&
+        el.getClientRects().length > 0 &&
+        getComputedStyle(el).visibility !== 'hidden'
+    );
+    if (act === 'first') list[0]?.focus();
+    if (act === 'last') list[list.length - 1]?.focus();
+    const active = document.activeElement;
+    const at =
+      active === list[0]
+        ? 'first'
+        : active === list[list.length - 1]
+          ? 'last'
+          : active && root.contains(active)
+            ? 'inside'
+            : 'outside';
+    return { count: list.length, at };
+  }, action);
+}
+
+/** G149-04: фокус внутри открытой шторки. */
+async function expectFocusInSheet(page: Page, what: string): Promise<void> {
+  await expect
+    .poll(() => page.locator(SHEET).evaluate((el) => el.contains(document.activeElement)), {
+      message: `G149-04 initial focus: ${what}`,
+      timeout: T.action
+    })
+    .toBe(true);
+}
+
+/** G149-04: Tab с последнего элемента шторки ведёт на первый, Shift+Tab с первого — на последний. */
+async function expectSheetTabCycle(page: Page, what: string): Promise<void> {
+  const sheet = page.locator(SHEET);
+  const edges = await focusEdge(sheet, 'last');
+  expect(edges.count, `${what}: в шторке меньше двух доступных элементов`).toBeGreaterThan(1);
+  expect(edges.at, `${what}: последний элемент шторки не принял фокус`).toBe('last');
+  await page.keyboard.press('Tab');
+  expect((await focusEdge(sheet, 'where')).at, `G149-04 ${what}: Tab с последнего`).toBe('first');
+  await page.keyboard.press('Shift+Tab');
+  expect((await focusEdge(sheet, 'where')).at, `G149-04 ${what}: Shift+Tab с первого`).toBe('last');
+}
+
 /** Пустое состояние Редактора: кнопка «Показать файлы» открывает шторку. */
 async function openSheetFromEmpty(page: Page): Promise<void> {
   await page.locator(SHOW_FILES).first().click({ timeout: T.page });
@@ -434,6 +491,9 @@ test('editor-mobile sheet-close vp:390', { tag: CORE_TAG }, async ({ page }) => 
   expect(await bodyOverflow(page), 'шторка открыта, прокрутка body не заблокирована (D-14)').toBe(
     'hidden'
   );
+  // G149-04: открытие мышью переносит фокус в шторку, Tab обходит её по кругу
+  await expectFocusInSheet(page, 'открытие мышью');
+  await expectSheetTabCycle(page, 'открытие мышью');
   const mainOpen = await boxOf(page.locator(MAIN_CARD).first(), 'карточка кода при шторке');
   expect(
     Math.abs(mainOpen.width - mainBefore.width),
@@ -462,6 +522,7 @@ test('editor-mobile sheet-close vp:390', { tag: CORE_TAG }, async ({ page }) => 
   expect(await bodyOverflow(page), 'открытие по Enter: прокрутка body не заблокирована').toBe(
     'hidden'
   );
+  await expectFocusInSheet(page, 'открытие по Enter');
   await page.keyboard.press('Escape');
   await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
   await expect(toggle).toBeFocused();
@@ -472,6 +533,20 @@ test('editor-mobile sheet-close vp:390', { tag: CORE_TAG }, async ({ page }) => 
   await page.mouse.click(VP_PHONE.width - 16, VP_PHONE.height / 2);
   await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
   expect(await bodyOverflow(page), 'после нажатия по фону прокрутка body не восстановлена').toBe(
+    overflow0
+  );
+  // фон получает фокус при нажатии мышью, после закрытия фокус снова на кнопке шторки
+  await expect(toggle).toBeFocused();
+
+  // переход к 1280 при открытой шторке: шторка становится колонкой, фокус из ушедшей шторки
+  // возвращается на кнопку, прокрутка body восстановлена
+  await openSheetFromToolbar(page);
+  await expectFocusInSheet(page, 'перед переходом к 1280');
+  await page.setViewportSize(VP_DESKTOP);
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  await expect(page.locator('.file-tree-pane').first()).toBeVisible({ timeout: T.action });
+  await expect(toggle, 'G149-04: после выхода из оверлея фокус не вернулся').toBeFocused();
+  expect(await bodyOverflow(page), 'после перехода к 1280 прокрутка body не восстановлена').toBe(
     overflow0
   );
 
@@ -650,19 +725,45 @@ test('editor-mobile sheet-escape-modal vp:390', { tag: CORE_TAG }, async ({ page
   await openSheetFromToolbar(page);
 
   // модалка создания открывается поверх шторки; фокус уходит внутрь модалки
+  await expectFocusInSheet(page, 'шторка до модалки');
   await page.locator(SHEET).locator('.btn-new-file').first().click({ timeout: T.action });
-  await expect(page.locator('.modal-backdrop').first()).toBeVisible({ timeout: T.action });
+  const modal = page.locator('.modal-backdrop').first();
+  await expect(modal).toBeVisible({ timeout: T.action });
   await expect(page.locator('.modal-backdrop :focus')).toHaveCount(1, { timeout: T.action });
+
+  // G149-04: клавиатура принадлежит модалке поверх шторки — Tab и Shift+Tab по кругу всех её
+  // элементов не уводят фокус в шторку
+  const inModal = await focusEdge(modal, 'where');
+  expect(inModal.count, 'в модалке нет доступных элементов').toBeGreaterThan(0);
+  for (let i = 0; i <= inModal.count; i++) {
+    await page.keyboard.press('Tab');
+    expect(
+      (await focusEdge(modal, 'where')).at,
+      `G149-04: Tab ${i + 1} увёл фокус из модалки над шторкой`
+    ).not.toBe('outside');
+  }
+  for (let i = 0; i <= inModal.count; i++) {
+    await page.keyboard.press('Shift+Tab');
+    expect(
+      (await focusEdge(modal, 'where')).at,
+      `G149-04: Shift+Tab ${i + 1} увёл фокус из модалки над шторкой`
+    ).not.toBe('outside');
+  }
 
   // первый Escape закрывает только модалку; второй не нажимаем, пока она не ушла полностью
   await page.keyboard.press('Escape');
   await expect(page.locator('.modal-backdrop')).toHaveCount(0, { timeout: T.action });
   // шторка в документе и не inert: уходящая шторка (анимация 200 мс) не считается оставшейся
   await expectSheetStays(page, 'первый Escape');
+  // после закрытия модалки шторка снова держит фокус
+  await expectFocusInSheet(page, 'после закрытия модалки');
+  await expectSheetTabCycle(page, 'после закрытия модалки');
 
-  // второй Escape закрывает шторку
+  // второй Escape закрывает шторку, фокус возвращается на кнопку шторки
   await page.keyboard.press('Escape');
   await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  await expect(page.locator(TOGGLE).first()).toBeFocused();
+  await expect(page.locator(TOGGLE).first()).toHaveAttribute('aria-expanded', 'false');
 
   expect(await filesCount(), 'число файлов каталога изменилось').toBe(before);
   await guard.assertClean();
