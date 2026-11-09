@@ -878,6 +878,16 @@
       backupsStatus = 'loading';
       backupsStatusPath = path;
     }
+    // Файл с именем не латиницей сохранять нельзя, копий у него не бывает, а сервер
+    // список копий для такого имени отклоняет (403): запрос не делаем, список пуст.
+    if (allFiles.find((f) => f.path === path)?.restricted) {
+      if (path !== selectedFile) return { kind: 'stale' };
+      backups = [];
+      backupsPath = path;
+      backupsStatus = 'ready';
+      backupsStatusPath = path;
+      return { kind: 'ok' };
+    }
     try {
       const list = await fetchBackupsList(path);
       // Список копий грузится в фоне: ответ для уже не выбранного файла
