@@ -12,6 +12,12 @@ import { FULL_TAG, TIER_FULL_ANNOTATION } from './lib/known';
 // 1. Консоль и сеть: нет console.error, pageerror, ответов 5xx или оборванных запросов.
 // 2. Горизонтальная прокрутка страницы: document.scrollingElement.scrollWidth <= innerWidth.
 // 3. Отсутствие обрезанных подписей без многоточия у кнопок, вкладок, бейджей, заголовков.
+//    Подписью считается собственный видимый текст элемента: элемент отмечается, только если
+//    прямоугольник его текстового узла выходит за правый край клиентской области (G149-03).
+//    Сужение сознательное: нетекстовое переполнение внутри элемента эта проверка больше
+//    не ловит. Это сенсорная зона переключателя (global.css .toggle-switch::after, 44×44
+//    при ширине 34 px), иконки и абсолютно позиционированные декоративные слои. Содержимое,
+//    вылезающее за окно, по-прежнему ловит проверка горизонтальной прокрутки (пункт 2).
 // 4. На экранах <= 768 px полоса config-tabs не шире окна (горизонтальный скролл полосы).
 //
 // В сообщения провалов попадают только testId и классы элементов (CFG-05 privacy).
@@ -76,8 +82,25 @@ async function checkTab(
     problems.push(`прокрутка: scrollWidth ${wide.scroll} шире окна ${wide.inner}`);
   }
 
-  // 2. Обрезанные подписи без ellipsis
+  // 2. Обрезанные подписи без ellipsis. Подпись — текст элемента: переключатель без
+  // текста шире своей клиентской области только из-за сенсорной зоны
+  // global.css .toggle-switch::after и в провал не попадает (G149-03).
   const truncated = await page.evaluate(() => {
+    // Текстовый прямоугольник элемента выходит за правый край его клиентской области.
+    function textOverflows(el: HTMLElement): boolean {
+      const edge = el.getBoundingClientRect().left + el.clientLeft + el.clientWidth;
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.textContent || node.textContent.trim() === '') continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        for (const rect of Array.from(range.getClientRects())) {
+          if (rect.width > 0 && rect.right > edge + 1) return true;
+        }
+      }
+      return false;
+    }
+
     const selector =
       '.tab-btn, .btn, .badge, h1, h2, h3, label, .status-line, [data-testid$="-badge"]';
     const elements = Array.from(document.querySelectorAll(selector));
@@ -87,7 +110,7 @@ async function checkTab(
       if (el.offsetWidth === 0 || el.offsetHeight === 0) continue;
       if (el.scrollWidth > el.clientWidth + 1) {
         const style = window.getComputedStyle(el);
-        if (style.textOverflow !== 'ellipsis') {
+        if (style.textOverflow !== 'ellipsis' && textOverflows(el)) {
           const testId = el.getAttribute('data-testid') || '';
           const cls = el.className ? String(el.className).trim() : '';
           const tag = el.tagName.toLowerCase();
