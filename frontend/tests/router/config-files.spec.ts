@@ -890,7 +890,7 @@ test(
       await expectNothingSelected(tab, 'G149-02 file switch drops late A');
 
       // файл пользователя: рядом с «Сохранить» пометка ImmediateMark
-      await expect(tab.locator('.eph-right').getByTestId('immediate-mark')).toBeVisible({
+      await expect(tab.locator('.eph-right').getByTestId('immediate-mark').first()).toBeVisible({
         timeout: T.page
       });
 
