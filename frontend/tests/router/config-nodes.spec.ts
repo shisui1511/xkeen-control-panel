@@ -454,7 +454,7 @@ test(
     const previewCountText = (await page.getByTestId('apply-preview-count').textContent()) ?? '';
     // текст сводки — «3 изменения»: число берём из первых цифр
     const previewCount = Number(previewCountText.match(/\d+/)?.[0]);
-    const rowsCount = await page.locator('[data-testid="apply-preview-list"] li').count();
+    const rowsCount = await page.locator('[data-testid^="apply-preview-row-"]').count();
     expect(previewCount, 'сводка в окне равна draft_changes').toBe(changes);
     expect(rowsCount, 'число строк в окне равно draft_changes').toBe(changes);
     const confirmBtn = page.getByTestId('apply-preview-confirm');
