@@ -41,41 +41,60 @@
     }
   }
 
+  // Счётчики запросов: поздний ответ устаревшего запроса не должен подменять
+  // список или содержимое, показанные для текущего файла и выбранной строки.
+  let listSeq = 0;
+  let contentSeq = 0;
+
   async function load(): Promise<void> {
+    const mine = ++listSeq;
+    contentSeq++; // отменить идущий запрос содержимого
+    const key = file.key;
     loading = true;
     error = '';
     selectedId = null;
     selectedContent = null;
+    contentLoading = false;
     try {
-      const res = await fetchApplies(file.key);
+      const res = await fetchApplies(key);
+      if (mine !== listSeq) return;
       applies = res.applies ?? [];
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      if (mine === listSeq) error = e instanceof Error ? e.message : String(e);
     } finally {
-      loading = false;
+      if (mine === listSeq) loading = false;
     }
   }
 
-  async function toggleApply(item: ApplyCopy): Promise<void> {
-    if (selectedId === item.id) {
-      selectedId = null;
-      selectedContent = null;
-      return;
-    }
-    selectedId = item.id;
+  async function loadContent(item: ApplyCopy): Promise<void> {
+    const mine = ++contentSeq;
+    const key = file.key;
     selectedContent = null;
     selectedTruncated = false;
     contentLoading = true;
     contentError = '';
     try {
-      const res = await fetchApplyContent(file.key, item.id);
+      const res = await fetchApplyContent(key, item.id);
+      if (mine !== contentSeq || selectedId !== item.id) return;
       selectedContent = res.content;
       selectedTruncated = res.truncated;
     } catch (e) {
-      contentError = e instanceof Error ? e.message : String(e);
+      if (mine === contentSeq) contentError = e instanceof Error ? e.message : String(e);
     } finally {
-      contentLoading = false;
+      if (mine === contentSeq) contentLoading = false;
     }
+  }
+
+  function toggleApply(item: ApplyCopy): void {
+    if (selectedId === item.id) {
+      contentSeq++;
+      selectedId = null;
+      selectedContent = null;
+      contentLoading = false;
+      return;
+    }
+    selectedId = item.id;
+    void loadContent(item);
   }
 
   $effect(() => {
@@ -115,7 +134,7 @@
             type="button"
             class="apply-row-btn"
             aria-expanded={selectedId === item.id ? 'true' : 'false'}
-            onclick={() => void toggleApply(item)}
+            onclick={() => toggleApply(item)}
           >
             <span class="apply-row-title">
               {$t('cfg.files.apply_row', { date: formatDate(item.at) })}
@@ -130,7 +149,7 @@
               {:else if contentError}
                 <div class="alert alert-error" role="alert">
                   <span>{contentError}</span>
-                  <Button variant="secondary" size="sm" onclick={() => void toggleApply(item)}>
+                  <Button variant="secondary" size="sm" onclick={() => toggleApply(item)}>
                     {$t('app.retry')}
                   </Button>
                 </div>
