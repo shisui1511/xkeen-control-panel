@@ -143,6 +143,41 @@ function fileRow(scope: Locator, name: string): Locator {
   return scope.locator(`.file-row:has(.fr-name[title="${name}"])`).first();
 }
 
+/**
+ * Обход фокуса внутри области по стандартным признакам HTML, без классов и атрибутов панели:
+ * видимые элементы с tabIndex ≥ 0, не disabled, не внутри inert или aria-hidden. `first`/`last`
+ * фокусируют край обхода и возвращают число элементов; `where` — где сейчас фокус.
+ */
+async function focusEdge(
+  scope: Locator,
+  action: 'first' | 'last' | 'where'
+): Promise<{ count: number; at: 'first' | 'last' | 'inside' | 'outside' }> {
+  return scope.evaluate((root, act) => {
+    const sel =
+      'a[href], button, input:not([type="hidden"]), select, textarea, summary, [contenteditable="true"], [tabindex]';
+    const list = Array.from(root.querySelectorAll<HTMLElement>(sel)).filter(
+      (el) =>
+        el.tabIndex >= 0 &&
+        !(el as HTMLButtonElement).disabled &&
+        !el.closest('[inert], [aria-hidden="true"]') &&
+        el.getClientRects().length > 0 &&
+        getComputedStyle(el).visibility !== 'hidden'
+    );
+    if (act === 'first') list[0]?.focus();
+    if (act === 'last') list[list.length - 1]?.focus();
+    const active = document.activeElement;
+    const at =
+      active === list[0]
+        ? 'first'
+        : active === list[list.length - 1]
+          ? 'last'
+          : active && root.contains(active)
+            ? 'inside'
+            : 'outside';
+    return { count: list.length, at };
+  }, action);
+}
+
 /** Файл открыт во вкладке редактора с кодом. */
 async function expectFileOpened(page: Page, name: string): Promise<void> {
   await expect(page.locator('.editor-tab', { hasText: name }).first()).toBeVisible({
@@ -231,21 +266,69 @@ test('config-files sheet vp:390', async ({ page }) => {
   await toggle.click({ timeout: T.action });
   const sheet = page.locator(SHEET);
   await expect(sheet).toBeVisible({ timeout: T.action });
-  await expect
-    .poll(
-      () =>
-        sheet.evaluate(
-          (el) => el.getAnimations().length === 0 && Math.abs(el.getBoundingClientRect().left) <= 1
-        ),
-      { message: 'лист не встал на место', timeout: T.action }
-    )
-    .toBe(true);
+  const settled = async (): Promise<void> => {
+    await expect
+      .poll(
+        () =>
+          sheet.evaluate(
+            (el) =>
+              el.getAnimations().length === 0 && Math.abs(el.getBoundingClientRect().left) <= 1
+          ),
+        { message: 'лист не встал на место', timeout: T.action }
+      )
+      .toBe(true);
+  };
+  await settled();
   const box = await sheet.boundingBox();
   expect(box, 'лист: нет рамки').not.toBeNull();
   const limit = Math.min(0.85 * VP_PHONE.width, 320);
   expect(box!.width, `лист: ширина ${box!.width} при пределе ${limit}`).toBeLessThanOrEqual(
     limit + 1
   );
+
+  // G149-04: лист — модальный диалог. Обычный клик переносит фокус внутрь листа
+  const focusInSheet = (): Promise<boolean> =>
+    sheet.evaluate((el) => el.contains(document.activeElement));
+  await expect
+    .poll(focusInSheet, { message: 'G149-04 initial focus', timeout: T.action })
+    .toBe(true);
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+  // Tab с последнего элемента и Shift+Tab с первого не выводят фокус на страницу под листом
+  const edges = await focusEdge(sheet, 'last');
+  expect(edges.count, 'G149-04: в листе меньше двух доступных элементов').toBeGreaterThan(1);
+  expect(edges.at, 'G149-04: последний элемент листа не принял фокус').toBe('last');
+  await page.keyboard.press('Tab');
+  expect((await focusEdge(sheet, 'where')).at, 'G149-04: Tab с последнего элемента').toBe('first');
+  expect((await focusEdge(sheet, 'first')).at, 'G149-04: первый элемент листа').toBe('first');
+  await page.keyboard.press('Shift+Tab');
+  expect((await focusEdge(sheet, 'where')).at, 'G149-04: Shift+Tab с первого элемента').toBe(
+    'last'
+  );
+
+  // фон не удерживает фокус: фокус, поставленный на кнопку под листом, возвращается в лист
+  await toggle.evaluate((el) => (el as HTMLElement).focus());
+  await expect
+    .poll(focusInSheet, {
+      message: 'G149-04: фокус остался на кнопке под листом',
+      timeout: T.action
+    })
+    .toBe(true);
+
+  // Escape закрывает лист и возвращает фокус на кнопку «Файлы»
+  await page.keyboard.press('Escape');
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(toggle).toBeFocused();
+
+  // повторное открытие с клавиатуры: Enter по кнопке, фокус снова внутри листа
+  await page.keyboard.press('Enter');
+  await expect(sheet).toBeVisible({ timeout: T.action });
+  await settled();
+  await expect
+    .poll(focusInSheet, { message: 'G149-04 initial focus после Enter', timeout: T.action })
+    .toBe(true);
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
 
   // выбор файла закрывает лист и показывает файл во вкладке
   await fileRow(sheet, fixtureName).click({ timeout: T.action });
