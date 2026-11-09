@@ -3124,6 +3124,7 @@
   "cfg.result.build_failed": "The panel could not build the files.",
   "cfg.result.state_write_failed": "The panel could not save its state file. No files were written.",
   "cfg.result.drift_blocked": "Applying is blocked: some files differ from the panel. Resolve them in the files list.",
+  "cfg.result.draft_conflict": "The draft changed after the changes window was shown. Applying was cancelled and no files were touched — review the changes and try again.",
   "cfg.result.output_label": "Kernel message",
   "cfg.hint.xray_unknown_protocol": "Check the protocol name in the node: Xray does not recognize it.",
   "cfg.hint.xray_json_syntax": "Fix the JSON syntax: a comma or a bracket is missing.",

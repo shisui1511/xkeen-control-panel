@@ -67,6 +67,10 @@ type ApplyRequest struct {
 	// ApplySeq — номер запуска «Применить» из хуков BeforeApply (0 — хуки не
 	// вызывались); возвращается хукам AfterApply в AfterApplyInfo.
 	ApplySeq int64
+	// ExpectRevision — ревизия черновика, которую видел клиент в окне изменений
+	// (D-08): сверяется с тем снимком, из которого строится план, и при расхождении
+	// запуск отменяется (ResultDraftConflict) до сборки. 0 — не сверять.
+	ExpectRevision int64
 	// Kernel ограничивает запуск одним ядром (фоновая сборка после его установки):
 	// файлы, записи манифеста и сироты других ядер не участвуют в плане и не
 	// трогаются. Пусто — все установленные ядра.
@@ -272,6 +276,9 @@ const (
 	// файлы на диске не менялись, возвращать нечего.
 	ResultStateWriteFailed = "state_write_failed"
 	ResultDriftBlocked     = "drift_blocked"
+	// ResultDraftConflict — черновик изменился после того, как клиент показал окно
+	// изменений: применение отменено до сборки, файлы не тронуты.
+	ResultDraftConflict = "draft_conflict"
 	// ResultBeforeWriteFailed — хук ApplyRequest.BeforeWrite вернул ошибку после
 	// проверки ядрами: запуск отменён, файлы не тронуты.
 	ResultBeforeWriteFailed = "before_write_failed"
@@ -510,6 +517,13 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		return p.finish(ResultView{Code: ResultJournalRecoveryFailed, Message: err.Error()})
 	}
 	snap := p.d.Store.Snapshot()
+	// Ревизия, которую показало окно изменений, сверяется с тем же снимком, из
+	// которого строится план: правка между проверкой в StartApplyAt и этим снимком
+	// не применится незаметно (D-08).
+	if req.ExpectRevision > 0 && snap.DraftRevision != req.ExpectRevision {
+		p.setStep(StepBuild, StepFailed, "", ErrDraftConflict.Error())
+		return p.finish(ResultView{Code: ResultDraftConflict, Message: ErrDraftConflict.Error()})
+	}
 	bins := p.binaries()
 	installed := InstalledKernels{Xray: bins.Xray != "", Mihomo: bins.Mihomo != ""}
 

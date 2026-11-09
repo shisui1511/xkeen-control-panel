@@ -153,7 +153,8 @@
     'validation_not_run',
     'build_failed',
     'state_write_failed',
-    'drift_blocked'
+    'drift_blocked',
+    'draft_conflict'
   ];
   const filesUntouched = $derived(failure !== null && FILES_UNTOUCHED.includes(failure.code));
 
@@ -185,6 +186,8 @@
         return $t('cfg.result.interrupted');
       case 'drift_blocked':
         return $t('cfg.result.drift_blocked');
+      case 'draft_conflict':
+        return $t('cfg.result.draft_conflict');
       default:
         return rolledBack ? $t('cfg.result.rolled_back') : '';
     }

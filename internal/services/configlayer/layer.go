@@ -1337,7 +1337,7 @@ func (l *Layer) StartApplyAt(user bool, rev int64) error {
 	seq := l.fireBeforeApply()
 	if !l.spawn(func() {
 		defer release()
-		req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft, ApplySeq: seq}
+		req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft, ApplySeq: seq, ExpectRevision: rev}
 		view := l.runPipeline(req)
 		release()
 		l.afterRun()
