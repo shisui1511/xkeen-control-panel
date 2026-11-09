@@ -262,7 +262,12 @@ func (l *Layer) previewMoved(ops *RoutingOps) []PreviewMoved {
 	return out
 }
 
-// previewFileOf — сторона «было» с диска (не больше diffSideLimit+1 байт) и
+// diffCountLimit — предел чтения стороны «было» для сверки и счёта строк, когда
+// она длиннее diffSideLimit: показ усекается до diffSideLimit, а счётчики и
+// «не меняется» считаются по файлу целиком, если он не больше этого предела.
+const diffCountLimit = 4 * 1024 * 1024
+
+// previewFileOf — сторона «было» с диска (показ не больше diffSideLimit байт) и
 // «станет» для одного файла плана. Второй результат ложь — файл не меняется
 // (содержимое совпадает или удалять нечего). Обе стороны проходят maskPair до
 // счёта строк и усечения: сырые значения секретов в ответ не попадают (D-11).
@@ -279,19 +284,29 @@ func previewFileOf(key, abs string, action PlanAction, after []byte) (PreviewFil
 	if action == ActionDelete && pf.Missing {
 		return pf, false, nil
 	}
+	// Сторона «было» длиннее предела показа: для сверки с «станет» и счёта строк
+	// файл читается дальше (до diffCountLimit), иначе усечённая сторона всегда
+	// «отличается» и даёт заведомо неверные счётчики.
+	limit := diffSideLimit
+	longBefore := len(before) > diffSideLimit
+	if longBefore {
+		if full, ferr := readCapped(abs, diffCountLimit); ferr == nil {
+			before, limit = full, diffCountLimit
+		}
+	}
 	if action == ActionWrite && !pf.Missing && bytes.Equal(before, after) {
 		return pf, false, nil
 	}
-	// Прочитанный сверх предела хвост «было» обрывается на границе строки: обрывок
+	// Недочитанный до конца хвост «было» обрывается на границе строки: обрывок
 	// строки с секретом не должен попасть мимо маскирования.
-	beforeText, cut := cutLines(string(before), diffSideLimit)
+	beforeText, _ := cutLines(string(before), limit)
 	maskedBefore, maskedAfter, changed := maskPair(beforeText, string(after))
 	pf.SecretsChanged = changed
 	pf.Added, pf.Removed = lineDelta(maskedBefore, maskedAfter)
 	var bt, at bool
 	pf.Before, bt = cutLines(maskedBefore, diffSideLimit)
 	pf.After, at = cutLines(maskedAfter, diffSideLimit)
-	pf.Truncated = cut || bt || at
+	pf.Truncated = longBefore || bt || at
 	return pf, true, nil
 }
 
