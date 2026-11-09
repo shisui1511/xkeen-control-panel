@@ -56,11 +56,13 @@ type ScheduleView struct {
 
 // CronView — cron XKeen и его отношение к расписанию панели.
 type CronView struct {
-	Found     bool   `json:"found"`
-	Adoptable bool   `json:"adoptable"`
-	Two       bool   `json:"two"`
-	Kept      bool   `json:"kept"`
-	Schedule  string `json:"schedule,omitempty"`
+	Found     bool `json:"found"`
+	Adoptable bool `json:"adoptable"`
+	Two       bool `json:"two"`
+	Kept      bool `json:"kept"`
+	// Панель убрала строку cron XKeen при перенятии расписания (CronTaken): выключение флага слоя вернёт её.
+	Taken    bool   `json:"taken"`
+	Schedule string `json:"schedule,omitempty"`
 }
 
 // RunView — текущее задание менеджера.
@@ -234,7 +236,7 @@ func (s *Service) Snapshot() (View, error) {
 	if st.RetryAt.After(now) {
 		v.Schedule.RetryAt = rfc3339(st.RetryAt)
 	}
-	v.Cron = CronView{Two: st.CronTwo}
+	v.Cron = CronView{Two: st.CronTwo, Taken: st.CronTaken != nil}
 	if info, err := s.readCron(); err == nil && info.found {
 		v.Cron.Found = true
 		v.Cron.Adoptable = info.standard

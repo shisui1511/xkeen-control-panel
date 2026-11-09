@@ -67,6 +67,8 @@ export interface CronView {
   two: boolean;
   /** Владелец оставил cron XKeen («Не сейчас»). */
   kept: boolean;
+  /** Панель убрала строку cron XKeen при перенятии, выключение слоя вернёт её. */
+  taken: boolean;
   schedule?: string;
 }
 
