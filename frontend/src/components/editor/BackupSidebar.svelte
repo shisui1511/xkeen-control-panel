@@ -261,7 +261,7 @@
     align-items: flex-start;
     gap: var(--spacing-2);
     margin: 0;
-    padding: var(--spacing-2) var(--spacing-2-5);
+    padding: var(--spacing-2) var(--spacing-3);
     font-size: var(--font-size-xs);
   }
 
@@ -495,7 +495,7 @@
     }
 
     .backups-alert {
-      font-size: var(--font-size-sm);
+      font-size: var(--font-size-base);
     }
 
     .drawer-main {

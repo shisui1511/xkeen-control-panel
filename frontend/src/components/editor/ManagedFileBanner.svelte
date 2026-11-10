@@ -79,7 +79,7 @@
     margin: 0;
     flex: 1 1 auto;
     min-width: 0;
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-base);
     line-height: 1.5;
     overflow-wrap: anywhere;
   }

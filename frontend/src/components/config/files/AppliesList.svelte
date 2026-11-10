@@ -259,7 +259,7 @@
 
   .applies-title {
     margin: 0;
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
   }
@@ -273,7 +273,7 @@
   .applies-loading {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-1-5);
+    gap: var(--spacing-2);
     padding: var(--spacing-2) 0;
   }
 
@@ -292,7 +292,7 @@
   .applies-items {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-1-5);
+    gap: var(--spacing-2);
   }
 
   .apply-row {

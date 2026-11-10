@@ -752,10 +752,6 @@
     min-width: 0;
   }
 
-  .fr-labels :global(.badge) {
-    font-weight: 500;
-  }
-
   /* Подложка бейджа поверх выбранной строки (--accent-soft) складывалась бы с собственной:
      контраст ниже 4.5:1. Плотная подложка карточки держит его в норме в обеих темах. */
   .file-row.active .fr-labels :global(.badge) {
@@ -765,8 +761,8 @@
   .ft-skeleton {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-1-5);
-    padding: var(--spacing-2) var(--spacing-2-5);
+    gap: var(--spacing-2);
+    padding: var(--spacing-2) var(--spacing-3);
   }
 
   .ft-error {
@@ -774,7 +770,7 @@
     flex-direction: column;
     align-items: flex-start;
     gap: var(--spacing-2);
-    margin: var(--spacing-2) var(--spacing-2-5);
+    margin: var(--spacing-2) var(--spacing-3);
     overflow-wrap: anywhere;
   }
 

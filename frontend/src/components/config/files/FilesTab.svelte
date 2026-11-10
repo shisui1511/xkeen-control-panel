@@ -273,7 +273,7 @@
     align-items: center;
     gap: var(--spacing-2);
     padding: var(--spacing-2) var(--spacing-3);
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-base);
     line-height: 1.5;
     min-width: 0;
     flex-shrink: 0;
@@ -308,7 +308,7 @@
     margin: 0;
     flex: 1 1 auto;
     min-width: 0;
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-base);
     line-height: 1.5;
     overflow-wrap: anywhere;
   }
@@ -341,7 +341,7 @@
     background: var(--bg-card);
     border-bottom: 1px solid var(--border);
     border-left: var(--spacing-1) solid var(--border-strong);
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-base);
     line-height: 1.5;
     flex-wrap: wrap;
     min-width: 0;
