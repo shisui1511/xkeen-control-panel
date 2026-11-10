@@ -3222,7 +3222,7 @@
   "cfg.confirm.rebuild_all_consequence": "Previous versions will be kept in the backup. The running kernel will restart.",
   "cfg.confirm.rebuild_all_ok": "Rebuild all",
   "cfg.confirm.release_title": "Accept the edit?",
-  "cfg.confirm.release_message": "The file becomes manual: the panel will no longer overwrite or remove it.",
+  "cfg.confirm.release_message": "The file becomes a user file: the panel will no longer overwrite or remove it.",
   "cfg.confirm.release_consequence": "You can return it to panel management in the “Configuration” section.",
   "cfg.confirm.release_ok": "Accept",
   "cfg.tab.groups": "Groups",

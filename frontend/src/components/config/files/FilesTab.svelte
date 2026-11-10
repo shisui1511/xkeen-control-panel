@@ -113,7 +113,7 @@
       variant: 'warning',
       title: $t('cfg.confirm.release_title'),
       objectName: f.path,
-      message: $t('cfg.confirm.release_message'),
+      // Итог называет одна строка контракта: «Файл станет пользовательским…», без повтора
       consequence: $t('cfg.files.release_consequence'),
       confirmLabel: $t('cfg.confirm.release_ok')
     });
