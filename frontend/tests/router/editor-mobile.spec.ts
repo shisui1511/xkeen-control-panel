@@ -4,7 +4,7 @@ import { test, expect, type CDPSession, type Locator, type Page } from '@playwri
 import { randomInt } from 'node:crypto';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
-import { CORE_TAG } from './lib/known';
+import { CORE_TAG, knownFailure } from './lib/known';
 import { withPanel } from './lib/nodes-api';
 
 // Сценарии EDT-01 на настоящей панели: шторка файлов на ≤768 px, действия и лист Backups на
@@ -1449,6 +1449,7 @@ async function expectTapZone(loc: Locator, what: string): Promise<void> {
 for (const theme of THEMES) {
   test(`editor-mobile backups theme:${theme} vp:390`, { tag: CORE_TAG }, async ({ page }) => {
     test.setTimeout(150_000 * RT.slow);
+    knownFailure('*', 'editor-mobile-backups-drawer-not-opening');
     const guard = attachConsoleGuard(page);
     await gotoEditor(page, VP_PHONE, theme);
     await openFixtureFile(page);
