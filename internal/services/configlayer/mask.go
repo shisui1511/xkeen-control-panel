@@ -24,14 +24,20 @@ const (
 
 // maskExtraKeys — ключи сверх общего набора учётных данных узлов
 // (nodes.IsCredentialKey), которые есть в файлах ядер: приватный ключ WireGuard
-// Xray, публичный ключ и список short-id Reality, ключ защиты заголовка, seed mKCP.
-// Имена приведены к виду normMaskKey.
+// Xray, публичный ключ и список short-id Reality, ключ защиты заголовка, seed mKCP,
+// пароли входящих прокси Mihomo (authentication), параметр decryption VLESS Xray
+// (после префикса mlkem768x25519plus содержит приватный ключ) и ключи ML-DSA-65
+// Reality. Имена приведены к виду normMaskKey.
 var maskExtraKeys = map[string]bool{
 	"secretkey":           true,
 	"publickey":           true,
 	"shortids":            true,
 	"headerprotectionkey": true,
 	"seed":                true,
+	"authentication":      true,
+	"decryption":          true,
+	"mldsa65seed":         true,
+	"mldsa65verify":       true,
 }
 
 var maskKeyReplacer = strings.NewReplacer("-", "", "_", "")
@@ -44,6 +50,21 @@ func normMaskKey(name string) string {
 // isSecretKey — значение ключа name маскируется.
 func isSecretKey(name string) bool {
 	return nodes.IsCredentialKey(name) || maskExtraKeys[normMaskKey(name)]
+}
+
+// isURLKey — ключ хранит URL (url, subscription-url): сам адрес виден, а query-часть
+// с токеном заменяется маской (URL подписки — секрет).
+func isURLKey(nk string) bool {
+	return strings.HasSuffix(nk, "url")
+}
+
+// urlMask заменяет query-часть URL маской; адрес без «?» остаётся как есть.
+func (m *masker) urlMask(nk, v string) string {
+	i := strings.IndexByte(v, '?')
+	if i < 0 || i == len(v)-1 {
+		return v
+	}
+	return v[:i+1] + m.secret(nk, v[i+1:])
 }
 
 // maskPairRe находит ключ и разделитель пары: ключ в двойных или одинарных кавычках
@@ -157,7 +178,7 @@ func (m *masker) line(s string) string {
 		if strings.TrimSpace(body) == "" {
 			return s
 		}
-		if indent > m.blockIndent {
+		if indent > m.blockIndent || (indent == m.blockIndent && m.sameIndentValue(body)) {
 			return m.uuids(s[:indent] + m.blockLine(body))
 		}
 		m.blockKey = ""
@@ -174,6 +195,21 @@ func (m *masker) line(s string) string {
 		m.openKey = ""
 	}
 	return m.uuids(head + m.pairs(rest, indent, false))
+}
+
+// sameIndentValue — строка с тем же отступом, что у секретного ключа без значения,
+// продолжает его значение: элемент списка YAML без отступа («key:» и «- a» на одном
+// уровне) или значение JSON, перенесённое на следующую строку. Парный ключ, закрывающая
+// скобка и комментарий значением не считаются.
+func (m *masker) sameIndentValue(body string) bool {
+	if body == "-" || strings.HasPrefix(body, "- ") {
+		return true
+	}
+	switch body[0] {
+	case '}', ']', '#':
+		return false
+	}
+	return !maskYAMLPairRe.MatchString(body)
 }
 
 // uuids заменяет подстроки вида UUID маской (с признаком изменения).
@@ -277,6 +313,10 @@ func (m *masker) pairs(s string, indent int, force bool) string {
 					b.WriteByte(c)
 					b.WriteString(m.secret(nk, s[vs+1:end-1]))
 					b.WriteByte(c)
+				} else if isURLKey(nk) {
+					b.WriteByte(c)
+					b.WriteString(m.urlMask(nk, s[vs+1:end-1]))
+					b.WriteByte(c)
 				} else {
 					b.WriteString(s[vs:end])
 				}
@@ -303,6 +343,9 @@ func (m *masker) bare(b *strings.Builder, s string, vs, end int, key string, sec
 	}
 	if secret && val != "" {
 		b.WriteString(m.secret(key, val))
+		b.WriteString(raw[len(val):])
+	} else if val != "" && isURLKey(key) {
+		b.WriteString(m.urlMask(key, val))
 		b.WriteString(raw[len(val):])
 	} else {
 		b.WriteString(raw)
