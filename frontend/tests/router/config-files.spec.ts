@@ -412,9 +412,14 @@ test('config-files owner-banners vp:1280', async ({ page }) => {
   await expect(userRow).toBeVisible({ timeout: T.page });
   await userRow.click({ timeout: T.action });
   await expect(tab.getByTestId('files-immediate-note')).toBeVisible({ timeout: T.page });
-  await expect(tab.getByTestId('files-immediate-note').getByTestId('immediate-mark')).toBeVisible({
+  // пометка «мимо черновика» одна — у «Сохранить» (в шапке или строкой под ней на телефоне);
+  // строка files-immediate-note говорит то же текстом и бейдж не повторяет
+  await expect(tab.locator('[data-testid="immediate-mark"]:visible').first()).toBeVisible({
     timeout: T.page
   });
+  await expect(tab.getByTestId('files-immediate-note').getByTestId('immediate-mark')).toHaveCount(
+    0
+  );
 
   await guard.assertClean();
 });

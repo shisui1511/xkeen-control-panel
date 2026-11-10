@@ -223,8 +223,9 @@
         {@const owner = ownerOf(path, fileInfo)}
         {#if owner === 'xkeen' || owner === 'user'}
           <div class="files-immediate-note" data-testid="files-immediate-note">
+            <!-- Пометка ImmediateMark стоит у «Сохранить» в шапке: здесь только текст, без
+                 третьего повтора «мимо черновика» рядом -->
             <span class="immediate-note-text">{$t('cfg.files.immediate_note')}</span>
-            <ImmediateMark />
             {#if fileInfo?.take_kernel && (fileInfo.take_sections?.length ?? 0) > 0}
               <Button
                 variant="secondary"
