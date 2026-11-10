@@ -317,7 +317,8 @@
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    padding: var(--spacing-1-5) var(--spacing-2);
+    min-height: 40px;
+    padding: var(--spacing-2) var(--spacing-3);
     background: transparent;
     border: none;
     color: var(--fg-primary);
@@ -329,6 +330,18 @@
 
   .apply-row-btn:hover {
     background: var(--bg-hover);
+  }
+
+  /* Строка обрезает содержимое по скруглению (overflow: hidden), поэтому кольцо фокуса
+     рисуется внутри кнопки, а не снаружи, где его срезал бы край строки */
+  .apply-row .apply-row-btn:focus-visible {
+    outline-offset: -2px;
+  }
+
+  @media (max-width: 768px) {
+    .apply-row-btn {
+      min-height: 44px;
+    }
   }
 
   .apply-diff-container {
