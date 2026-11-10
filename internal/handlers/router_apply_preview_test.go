@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -264,6 +265,10 @@ func TestRouterApplyPreview(t *testing.T) {
 	// Исходные формы возвращаются до очистки помощников: она применяет черновик.
 	e.rtCoresLiveSave("xray", origRows, xadv)
 	e.rtCoresLiveSave("mihomo", origMform, madv)
+	back := rtCoresSection(e.rtCoresView("xray"), "inbounds")
+	backRows, _ := back["form"].([]any)
+	backAdv, _ := back["advanced"].(string)
+	t.Logf("DEBUG строк до %d, после %d, advanced до %d после %d, есть тег: %v", len(origRows), len(backRows), len(xadv), len(backAdv), strings.Contains(fmt.Sprint(backRows, backAdv), "xcp-rt-pv"))
 	// Без этой проверки тест прошёл бы и тогда, когда секции в предпросмотр не попали.
 	maskedKeys := map[string]bool{}
 	for _, k := range secView.Kernels {
