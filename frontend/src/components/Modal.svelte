@@ -116,12 +116,13 @@
 
   function getFocusableElements(dialog: HTMLElement): HTMLElement[] {
     const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-    // offsetParent is null for display:none (on the element or an ancestor) — callers
+    // getClientRects() пуст для display:none (на самом элементе или предке) — callers
     // like the dat-drawer variant hide Modal's own header (and its close button) via
     // CSS in favor of a custom in-content header. .focus() on such an element is a
     // silent no-op, so it must be excluded here rather than merely deprioritized.
+    // Проверка через offsetParent не годится: у position: fixed он null и у видимых.
     return Array.from(dialog.querySelectorAll<HTMLElement>(selectors)).filter(
-      (el) => el.tabIndex >= 0 && !el.matches(':disabled') && el.offsetParent !== null
+      (el) => el.tabIndex >= 0 && !el.matches(':disabled') && el.getClientRects().length > 0
     );
   }
 
@@ -140,7 +141,10 @@
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
       const active = document.activeElement;
-      if (active === dialog || active === (event.shiftKey ? first : last)) {
+      // Фокус вне списка обхода (контейнер, tabindex="-1", ставшая disabled кнопка) тоже
+      // замыкается по кругу: штатный Tab увёл бы его за диалог, на страницу под бэкдропом.
+      const outsideList = !focusables.includes(active as HTMLElement);
+      if (outsideList || active === (event.shiftKey ? first : last)) {
         event.preventDefault();
         (event.shiftKey ? last : first).focus();
       }
