@@ -12,7 +12,7 @@
     configLayerEnabled
   } from './stores';
   import { filesByPath, handleLayerError, layerSnapshot } from './lib/configLayer';
-  import { apiFetch, apiFetchJSON } from './lib/api';
+  import { apiFetch, apiFetchJSON, isLegacyBlocked } from './lib/api';
   import { parseValidationError } from './lib/errorParser';
   import Icon from './lib/components/Icon.svelte';
   import EmptyState from './components/EmptyState.svelte';
@@ -1525,6 +1525,11 @@
         }
       } catch (mergeErr: any) {
         if (mergeErr?.status === 401) return;
+        // Слой «Конфигурация» закрывает слияние шаблонов: показываем переведённый текст сервера
+        if (isLegacyBlocked(mergeErr)) {
+          showToast('warning', mergeErr.message);
+          return;
+        }
         console.error('Smart merge failed:', mergeErr);
         showToast('error', $t('editor.smart_merge_failed'));
         return;
