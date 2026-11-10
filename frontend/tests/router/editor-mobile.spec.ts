@@ -1915,7 +1915,7 @@ test('editor-mobile menu-save-target vp:390', { tag: CORE_TAG }, async ({ page, 
     const menu2 = await openFileMenu(page, f.name);
     await menu2.locator('.ctx-item.ctx-danger').click();
     await expect(page.locator('.modal-backdrop')).toContainText(f.name, { timeout: T.action });
-    await page.locator('.modal-backdrop .confirm-modal-actions .btn-secondary').click();
+    await page.locator('.modal-backdrop .confirm-actions .btn-secondary').click();
     await expect(page.locator('.modal-backdrop')).toHaveCount(0, { timeout: T.action });
     await page.locator(CLOSE_BTN).click();
     await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
@@ -1932,7 +1932,7 @@ test('editor-mobile menu-save-target vp:390', { tag: CORE_TAG }, async ({ page, 
     const menu3 = await openFileMenu(page, d.name);
     await menu3.locator('.ctx-item.ctx-danger').click();
     await expect(page.locator('.modal-backdrop')).toContainText(d.name, { timeout: T.action });
-    await page.locator('.modal-backdrop .confirm-modal-actions .btn-danger').click();
+    await page.locator('.modal-backdrop .confirm-actions .btn-danger').click();
     await expect(page.locator('.modal-backdrop')).toHaveCount(0, { timeout: T.action });
     await expect(
       page.locator(SHEET).locator(`button.file-row:has(.fr-name[title="${d.name}"])`)

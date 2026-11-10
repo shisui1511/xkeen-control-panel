@@ -33,7 +33,6 @@
   import TemplatesModal, { type Template } from './components/editor/TemplatesModal.svelte';
   import SaveConfirmModal from './components/editor/SaveConfirmModal.svelte';
   import OutboundGeneratorModal from './components/editor/OutboundGeneratorModal.svelte';
-  import DeleteFileModal from './components/editor/DeleteFileModal.svelte';
   import EditorToolbar from './components/editor/EditorToolbar.svelte';
   import EditorStatusBar from './components/editor/EditorStatusBar.svelte';
   import EditorBreadcrumbs from './components/editor/EditorBreadcrumbs.svelte';
@@ -1289,20 +1288,32 @@
     }
   }
 
-  let showDeleteConfirmModal = $state(false);
-
   function deleteFile() {
     if (!selectedFile) return;
     menuTarget = '';
-    showDeleteConfirmModal = true;
+    void confirmDeleteFile();
   }
 
+  /**
+   * Подтверждение удаления через общий ConfirmDialog (variant danger: 44 px кнопки на
+   * мобильных). В «Файлах» текст контракта говорит, что файл удаляется сразу, мимо черновика.
+   */
   async function confirmDeleteFile() {
     // цель берётся до любых await: файл меню либо файл редактора
     const fileToDelete = actionTarget;
     if (!fileToDelete) return;
+    const fileName = fileToDelete.split('/').pop() || fileToDelete;
+    const confirmed = await showConfirm({
+      variant: 'danger',
+      title: $t('editor.delete_file'),
+      message: embedded
+        ? $t('cfg.files.delete_message', { filename: fileName })
+        : $t('editor.delete_confirm_body', { file: fileName }),
+      confirmLabel: $t('editor.delete_file'),
+      cancelLabel: $t('app.cancel')
+    });
     menuTarget = '';
-    showDeleteConfirmModal = false;
+    if (!confirmed) return;
 
     try {
       await deleteConfigFile(fileToDelete);
@@ -1428,7 +1439,7 @@
 
   function deleteFileByInfo(file: ConfigFileInfo) {
     menuTarget = file.path;
-    showDeleteConfirmModal = true;
+    void confirmDeleteFile();
   }
 
   /**
@@ -2092,16 +2103,6 @@
   {saving}
   onConfirm={confirmSave}
   onclose={() => (showSaveConfirmModal = false)}
-/>
-
-<DeleteFileModal
-  open={showDeleteConfirmModal}
-  filePath={actionTarget}
-  onConfirm={confirmDeleteFile}
-  onclose={() => {
-    showDeleteConfirmModal = false;
-    menuTarget = '';
-  }}
 />
 
 <style>

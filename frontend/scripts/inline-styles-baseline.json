@@ -12,7 +12,6 @@
   "XrayRoutingConstructor.svelte": 8,
   "components/NodeRowSkeleton.svelte": 4,
   "components/editor/BackupSidebar.svelte": 2,
-  "components/editor/DeleteFileModal.svelte": 2,
   "components/editor/EditorToolbar.svelte": 2,
   "components/editor/FileActionModals.svelte": 2,
   "components/editor/OutboundGeneratorModal.svelte": 14,
