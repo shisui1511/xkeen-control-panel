@@ -33,6 +33,8 @@
   let selectedTruncated = $state(false);
   let contentLoading = $state(false);
   let contentError = $state('');
+  // Кнопки строк по id копии: на них возвращается фокус при «Повторить». Нереактивны.
+  const rowButtons: Record<string, HTMLButtonElement | null> = {};
 
   function formatDate(iso: string): string {
     try {
@@ -144,7 +146,7 @@
     if (activeKey === null || selectedId !== item.id) return;
     const retryButton = event.currentTarget;
     if (retryButton instanceof HTMLElement && retryButton === document.activeElement) {
-      retryButton.closest('.apply-row')?.querySelector<HTMLElement>('.apply-row-btn')?.focus();
+      rowButtons[item.id]?.focus();
     }
     void loadContent(item);
   }
@@ -200,6 +202,7 @@
           <button
             type="button"
             class="apply-row-btn"
+            bind:this={rowButtons[item.id]}
             aria-expanded={selectedId === item.id ? 'true' : 'false'}
             onclick={() => toggleApply(item)}
           >
@@ -210,8 +213,9 @@
           {#if selectedId === item.id}
             <div class="apply-diff-container">
               {#if contentLoading}
-                <div class="diff-loading">
+                <div class="diff-loading" role="status" aria-busy="true">
                   <span class="spinner" aria-hidden="true"></span>
+                  <span class="sr-only">{$t('app.loading')}</span>
                 </div>
               {:else if contentError}
                 <div class="alert alert-error" role="alert">
