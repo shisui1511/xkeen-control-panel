@@ -222,19 +222,10 @@ test(
     // Слой включается на время шага и возвращается прежним: раздел открыт, все шесть вкладок
     // видны, плашки «Mihomo API оффлайн» и заглушки конфликта ядер нет.
     const layer = layerFlag();
-    await layer.enable(browser);
     try {
-      await expect
-        .poll(
-          async () => {
-            const st = await api(page, 'GET', '/api/configlayer/state');
-            if (st.status !== 200) return `http ${st.status}`;
-            const apply = (st.data?.apply ?? {}) as { running?: boolean };
-            return apply.running === true ? 'применение идёт' : 'готово';
-          },
-          { message: 'применение слоя не завершилось', timeout: T.page, intervals: [1000, 2000] }
-        )
-        .toBe('готово');
+      // enable внутри try: сбой после переключения флага не оставляет слой включённым.
+      // Простой конвейера после включения ждёт сам enable.
+      await layer.enable(browser);
       await page.goto('/#/config/nodes');
       for (const tab of ['nodes', 'groups', 'rules', 'lists', 'cores', 'files']) {
         await expect(

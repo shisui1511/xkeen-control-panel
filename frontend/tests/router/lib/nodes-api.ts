@@ -168,7 +168,8 @@ export async function switchLayer(page: Page, on: boolean): Promise<void> {
 /** Состояние флага до прогона возвращается прежним. Включение ждёт фоновую сборку,
  * выключение — простой конвейера (G149-06, WR-01). */
 export function layerFlag() {
-  let wasOn = false;
+  // null — прежнее состояние флага ещё не прочитано: возвращать нечего.
+  let wasOn: boolean | null = null;
   return {
     async enable(browser: Browser): Promise<void> {
       await withPanel(browser, async (page) => {
@@ -182,6 +183,7 @@ export function layerFlag() {
       });
     },
     async restore(browser: Browser): Promise<void> {
+      if (wasOn === null) return;
       await withPanel(browser, async (page) => {
         await waitApplyIdle(page, 'перед возвратом флага слоя');
         await resetDraft(page);
