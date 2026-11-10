@@ -242,6 +242,8 @@ func TestRouterApplyPreview(t *testing.T) {
 	// берутся в черновик без «Применить»; возврат — в очистке помощников.
 	decSecret := "mlkem768x25519plus.native.0rtt." + rtPvRandHex(t, 24)
 	authSecret := "xcprt:" + rtPvRandHex(t, 16)
+	// Помощник Mihomo применяет черновик при подготовке: берётся первым.
+	rtCoresLiveMihomoTakeDraft(t, e, tg)
 	rtCoresLiveXrayTakeDraft(t, e)
 	xsec := rtCoresSection(e.rtCoresView("xray"), "inbounds")
 	origRows, _ := xsec["form"].([]any)
@@ -251,7 +253,6 @@ func TestRouterApplyPreview(t *testing.T) {
 		"settings": map[string]any{"decryption": decSecret, "clients": []any{}},
 	})
 	e.rtCoresLiveSave("xray", rows, xadv)
-	rtCoresLiveMihomoTakeDraft(t, e, tg)
 	msec := rtCoresSection(e.rtCoresView("mihomo"), "inbounds")
 	mform, _ := msec["form"].(map[string]any)
 	madv, _ := msec["advanced"].(string)
@@ -265,10 +266,6 @@ func TestRouterApplyPreview(t *testing.T) {
 	// Исходные формы возвращаются до очистки помощников: она применяет черновик.
 	e.rtCoresLiveSave("xray", origRows, xadv)
 	e.rtCoresLiveSave("mihomo", origMform, madv)
-	back := rtCoresSection(e.rtCoresView("xray"), "inbounds")
-	backRows, _ := back["form"].([]any)
-	backAdv, _ := back["advanced"].(string)
-	t.Logf("DEBUG строк до %d, после %d, advanced до %d после %d, есть тег: %v", len(origRows), len(backRows), len(xadv), len(backAdv), strings.Contains(fmt.Sprint(backRows, backAdv), "xcp-rt-pv"))
 	// Без этой проверки тест прошёл бы и тогда, когда секции в предпросмотр не попали.
 	maskedKeys := map[string]bool{}
 	for _, k := range secView.Kernels {
