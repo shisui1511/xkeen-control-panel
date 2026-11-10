@@ -1,6 +1,10 @@
 <script lang="ts">
   import { slide, DURATION } from '../../lib/motion.svelte';
+  import type { Snippet } from 'svelte';
   import { t } from '../../i18n';
+  import Button from '../Button.svelte';
+  import EmptyState from '../EmptyState.svelte';
+  import Skeleton from '../Skeleton.svelte';
 
   interface DiffGroup {
     type: 'added' | 'removed' | 'collapsed' | 'unchanged';
@@ -9,17 +13,28 @@
 
   let {
     backups = [],
+    status = 'ready',
+    onRetry,
     selectedBackup = '',
     diffGroups = [],
     backupLoading = false,
+    restoreDisabled = false,
+    panelApplies,
     onSelectBackup,
     onRestoreBackup,
     onclose: onClose
   }: {
     backups: string[];
+    /** Исход запроса списка: ошибка и «копий нет» — разные состояния листа */
+    status?: 'idle' | 'loading' | 'ready' | 'error';
+    onRetry?: () => void;
     selectedBackup: string;
     diffGroups: DiffGroup[];
     backupLoading: boolean;
+    /** Файл панели (только чтение, D-03): копию в него подставить нельзя, просмотр и сравнение остаются */
+    restoreDisabled?: boolean;
+    /** Список последних применений для файла панели (D-06) */
+    panelApplies?: Snippet;
     onSelectBackup: (backup: string) => void;
     onRestoreBackup: (backup: string) => void;
     onclose?: () => void;
@@ -27,6 +42,11 @@
 
   // Мобильный лист — два экрана: список копий → сравнение на весь лист
   let mobileScreen = $state<'list' | 'diff'>('list');
+
+  function restore(backup: string) {
+    if (restoreDisabled) return;
+    onRestoreBackup(backup);
+  }
 
   function formatBackupDate(backup: string): string {
     const parts = backup.split('.backup-');
@@ -67,88 +87,126 @@
         {$t('app.back')}
       </button>
     {/if}
-    <span class="drawer-title">{$t('editor.backups')}</span>
+    <span class="drawer-title"
+      >{panelApplies ? $t('cfg.files.applies_title') : $t('editor.backups')}</span
+    >
     <button type="button" class="drawer-close-btn" onclick={() => onClose?.()}>
       {$t('app.close')}
     </button>
   </div>
-  <div class="drawer-layout" class:show-diff={mobileScreen === 'diff'}>
-    <!-- Список бэкапов слева -->
-    <div class="drawer-sidebar">
-      {#each backups as backup (backup)}
-        <div class="backup-item" class:active={selectedBackup === backup}>
-          <button
-            type="button"
-            class="backup-select-btn"
-            onclick={() => {
-              onSelectBackup(backup);
-              mobileScreen = 'diff';
-            }}
-          >
-            <span class="backup-time">{formatBackupDate(backup)}</span>
-          </button>
-          <button
-            type="button"
-            class="btn btn-sm btn-secondary restore-inline-btn"
-            onclick={() => onRestoreBackup(backup)}
-          >
-            {$t('settings.restore')}
-          </button>
-        </div>
-      {/each}
+  {#if panelApplies}
+    <div class="drawer-applies">
+      {@render panelApplies()}
     </div>
-
-    <!-- Зона diff-viewer справа -->
-    <div class="drawer-main">
-      {#if selectedBackup}
-        <div class="diff-viewer-container">
-          <div class="diff-header">
-            <span
-              >{$t('editor.compare_with_backup', { date: formatBackupDate(selectedBackup) })}</span
+  {:else}
+    <div class="drawer-layout" class:show-diff={mobileScreen === 'diff'}>
+      <!-- Список бэкапов слева -->
+      <div class="drawer-sidebar">
+        {#if status === 'error'}
+          <!-- Сбой фонового обновления не стирает уже полученный список: он остаётся под ошибкой -->
+          <div class="alert alert-error backups-alert" role="alert" data-testid="backups-error">
+            <span>{$t('editor.backups_error')}</span>
+            <Button
+              variant="secondary"
+              size="sm"
+              testid="backups-retry"
+              onclick={() => onRetry?.()}
             >
+              {$t('editor.backups_retry')}
+            </Button>
+          </div>
+        {:else if backups.length === 0 && status === 'ready'}
+          <div class="backups-empty" data-testid="backups-empty">
+            <EmptyState title={$t('editor.backups_empty')} description="" plain={true} />
+          </div>
+        {:else if backups.length === 0}
+          <div class="backups-loading" data-testid="backups-loading" aria-busy="true">
+            {#each [0, 1, 2] as row (row)}
+              <Skeleton type="text-line" />
+            {/each}
+          </div>
+        {/if}
+        {#each backups as backup (backup)}
+          <div class="backup-item" class:active={selectedBackup === backup}>
             <button
               type="button"
-              class="btn btn-primary btn-sm diff-restore-btn"
-              onclick={() => onRestoreBackup(selectedBackup)}
+              class="backup-select-btn"
+              onclick={() => {
+                onSelectBackup(backup);
+                mobileScreen = 'diff';
+              }}
+            >
+              <span class="backup-time">{formatBackupDate(backup)}</span>
+            </button>
+            <button
+              type="button"
+              class="btn btn-sm btn-secondary restore-inline-btn"
+              disabled={restoreDisabled}
+              title={restoreDisabled ? $t('editor.restore_managed_title') : undefined}
+              onclick={() => restore(backup)}
             >
               {$t('settings.restore')}
             </button>
           </div>
-          <div class="diff-body">
-            {#if backupLoading}
-              <div style="display:grid;place-items:center;height:100px;">
-                <div class="spinner" style="--spinner-size: 24px;"></div>
-              </div>
-            {:else}
-              <div class="diff-lines">
-                {#each diffGroups as group, gi (gi)}
-                  {#if group.type === 'added'}
-                    {#each group.lines as line, li (li)}
-                      <div class="diff-line diff-line-added">+ {line}</div>
-                    {/each}
-                  {:else if group.type === 'removed'}
-                    {#each group.lines as line, li (li)}
-                      <div class="diff-line diff-line-removed">- {line}</div>
-                    {/each}
-                  {:else if group.type === 'collapsed'}
-                    <div class="diff-line diff-line-collapsed">
-                      <span class="diff-collapsed-label">{group.lines[0]}</span>
-                    </div>
-                  {:else}
-                    {#each group.lines as line, li (li)}
-                      <div class="diff-line diff-line-unchanged">{line}</div>
-                    {/each}
-                  {/if}
-                {/each}
-              </div>
-            {/if}
+        {/each}
+      </div>
+
+      <!-- Зона diff-viewer справа -->
+      <div class="drawer-main">
+        {#if selectedBackup}
+          <div class="diff-viewer-container">
+            <div class="diff-header">
+              <span
+                >{$t('editor.compare_with_backup', {
+                  date: formatBackupDate(selectedBackup)
+                })}</span
+              >
+              <button
+                type="button"
+                class="btn btn-primary btn-sm diff-restore-btn"
+                disabled={restoreDisabled}
+                title={restoreDisabled ? $t('editor.restore_managed_title') : undefined}
+                onclick={() => restore(selectedBackup)}
+              >
+                {$t('settings.restore')}
+              </button>
+            </div>
+            <div class="diff-body">
+              {#if backupLoading}
+                <div style="display:grid;place-items:center;height:100px;">
+                  <div class="spinner" style="--spinner-size: 24px;"></div>
+                </div>
+              {:else}
+                <div class="diff-lines">
+                  {#each diffGroups as group, gi (gi)}
+                    {#if group.type === 'added'}
+                      {#each group.lines as line, li (li)}
+                        <div class="diff-line diff-line-added">+ {line}</div>
+                      {/each}
+                    {:else if group.type === 'removed'}
+                      {#each group.lines as line, li (li)}
+                        <div class="diff-line diff-line-removed">- {line}</div>
+                      {/each}
+                    {:else if group.type === 'collapsed'}
+                      <div class="diff-line diff-line-collapsed">
+                        <span class="diff-collapsed-label">{group.lines[0]}</span>
+                      </div>
+                    {:else}
+                      {#each group.lines as line, li (li)}
+                        <div class="diff-line diff-line-unchanged">{line}</div>
+                      {/each}
+                    {/if}
+                  {/each}
+                </div>
+              {/if}
+            </div>
           </div>
-        </div>
-      {:else}
-        <div class="drawer-empty-state">{$t('editor.select_backup_hint')}</div>
-      {/if}
+        {:else if backups.length > 0}
+          <div class="drawer-empty-state">{$t('editor.select_backup_hint')}</div>
+        {/if}
+      </div>
     </div>
-  </div>
+  {/if}
 </div>
 
 <style>
@@ -162,6 +220,11 @@
   .drawer-layout {
     display: flex;
     height: 100%;
+  }
+
+  .drawer-applies {
+    height: 100%;
+    overflow-y: auto;
   }
 
   .drawer-topbar,
@@ -190,6 +253,20 @@
   .drawer-sidebar::-webkit-scrollbar-thumb {
     background: var(--border);
     border-radius: var(--radius-sm);
+  }
+
+  .backups-alert {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--spacing-2);
+    margin: 0;
+    padding: var(--spacing-2) var(--spacing-3);
+    font-size: var(--font-size-xs);
+  }
+
+  .backups-loading {
+    padding: var(--spacing-1);
   }
 
   .backup-item {
@@ -414,6 +491,10 @@
 
     .backup-select-btn {
       min-height: 44px;
+      font-size: var(--font-size-base);
+    }
+
+    .backups-alert {
       font-size: var(--font-size-base);
     }
 

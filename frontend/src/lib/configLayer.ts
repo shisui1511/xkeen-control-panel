@@ -728,8 +728,13 @@ async function startRun(path: string, body: unknown): Promise<void> {
   }
 }
 
-export function applyNow(): Promise<void> {
-  return startRun('/api/configlayer/apply', {});
+/**
+ * Запуск «Применить». revision — ревизия черновика, которую показало окно изменений:
+ * если черновик с тех пор изменился, сервер отвечает 409 draft_conflict. Без ревизии
+ * сверки нет (прежние вызовы).
+ */
+export function applyNow(revision?: number): Promise<void> {
+  return startRun('/api/configlayer/apply', revision !== undefined ? { revision } : {});
 }
 
 export function rebuildFiles(keys: string[] | 'all'): Promise<void> {
@@ -748,6 +753,35 @@ export async function releaseFile(key: string): Promise<void> {
 
 export function fetchDiff(key: string): Promise<LayerDiff> {
   return apiFetchJSON<LayerDiff>(`/api/configlayer/files/diff?key=${encodeURIComponent(key)}`);
+}
+
+export interface ApplyCopy {
+  id: string;
+  at: string;
+  reason: string;
+  size: number;
+}
+
+export interface FileApplies {
+  key: string;
+  path: string;
+  applies: ApplyCopy[];
+}
+
+export interface ApplyContent {
+  id: string;
+  content: string;
+  truncated: boolean;
+}
+
+export function fetchApplies(key: string): Promise<FileApplies> {
+  return apiFetchJSON<FileApplies>(`/api/configlayer/files/applies?key=${encodeURIComponent(key)}`);
+}
+
+export function fetchApplyContent(key: string, id: string): Promise<ApplyContent> {
+  return apiFetchJSON<ApplyContent>(
+    `/api/configlayer/files/applies?key=${encodeURIComponent(key)}&id=${encodeURIComponent(id)}`
+  );
 }
 
 export async function dismissNotice(id: string): Promise<void> {

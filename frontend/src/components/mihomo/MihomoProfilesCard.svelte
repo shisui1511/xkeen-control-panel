@@ -6,6 +6,7 @@
   import { activateRestartGrace } from '../../lib/serviceGrace';
   import { notifyApplyOutcome, type ApplyOutcome } from '../../lib/serviceApply';
   import { showConfirm, showToast, editorOpenRequest, isConflict } from '../../stores';
+  import { editorHash } from '../../lib/editorRoute';
   import Button from '../Button.svelte';
   import Skeleton from '../Skeleton.svelte';
 
@@ -179,6 +180,7 @@
 
   function edit(name: string) {
     editorOpenRequest.set(`${mihomoDir}/profiles/${name}.yaml`);
+    window.location.hash = editorHash();
     onSwitchTab('editor');
   }
 

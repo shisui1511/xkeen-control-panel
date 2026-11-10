@@ -75,6 +75,10 @@ type Store struct {
 	// неё файл снова записывался без fsync и нужен ещё один проход.
 	syncing    atomic.Bool
 	syncWanted atomic.Bool
+
+	// describers — описатели строк изменений черновика (D-12): из них
+	// считается число неприменённых изменений. Наполняется слоем до Start.
+	describers describeRegistry
 }
 
 // NewStore создаёт хранилище, не обращаясь к диску: файл состояния читается или
@@ -363,10 +367,11 @@ func (s *Store) DraftRevision() int64 {
 	return rev
 }
 
-// DraftChanges возвращает число неприменённых изменений черновика.
+// DraftChanges возвращает число неприменённых изменений черновика — строк
+// изменений по сущностям (D-12).
 func (s *Store) DraftChanges() int {
 	var n int
-	s.read(func(st State) { n = draftChanges(st) })
+	s.read(func(st State) { n = s.changeCount(st) })
 	return n
 }
 
@@ -391,26 +396,56 @@ func (s *Store) read(fn func(st State)) {
 	fn(s.st)
 }
 
-// draftChanges считает секции, чей черновик отличается от применённого
-// состояния: ключ есть только с одной стороны или значения не равны.
-func draftChanges(st State) int {
-	n := 0
+// draftDirty сообщает, отличается ли черновик от применённого состояния: ключ
+// есть только с одной стороны или значения не равны. Для булевых проверок
+// «черновик открыт»; число изменений — changeCount.
+func draftDirty(st State) bool {
 	for k, d := range st.Draft {
 		a, ok := st.Applied[k]
 		if !ok || !SectionEqual(d, a) {
-			n++
+			return true
 		}
 	}
 	for k := range st.Applied {
 		if _, ok := st.Draft[k]; !ok {
-			n++
+			return true
 		}
 	}
-	return n
+	return false
 }
 
-func draftEventOf(st State) DraftEvent {
-	return DraftEvent{DraftRevision: st.DraftRevision, DraftChanges: draftChanges(st)}
+// changeRows — строки изменений черновика st по описателям хранилища.
+// Описатели чистые и без замков слоя, поэтому вызов допустим под mu.
+func (s *Store) changeRows(st State) []ChangeRow {
+	return s.describers.rows(st)
+}
+
+// changeCount — число строк изменений черновика st (поле draft_changes):
+// больше нуля тогда и только тогда, когда черновик отличается от применённого.
+func (s *Store) changeCount(st State) int {
+	if !draftDirty(st) {
+		return 0
+	}
+	return len(s.changeRows(st))
+}
+
+// addDescriber подключает описатель строк изменений; занятый ID — ошибка.
+func (s *Store) addDescriber(d Describer) error {
+	if d == nil {
+		return errors.New("configlayer: описатель не задан")
+	}
+	if s.describers.has(d.ID()) {
+		return fmt.Errorf("configlayer: описатель %q уже зарегистрирован", d.ID())
+	}
+	s.describers.add(d)
+	return nil
+}
+
+// hasDescriber сообщает, занят ли идентификатор описателя.
+func (s *Store) hasDescriber(id string) bool { return s.describers.has(id) }
+
+func (s *Store) draftEventOf(st State) DraftEvent {
+	return DraftEvent{DraftRevision: st.DraftRevision, DraftChanges: s.changeCount(st)}
 }
 
 // EditDraft меняет секцию черновика, если baseRev совпадает с текущей
@@ -447,7 +482,7 @@ func (s *Store) EditDraft(baseRev int64, section string, value json.RawMessage) 
 
 	s.commitLocked(next)
 	s.scheduleFlushLocked()
-	ev := draftEventOf(next)
+	ev := s.draftEventOf(next)
 	s.mu.Unlock()
 
 	s.broker.Publish(Event{Type: EventDraft, Data: ev})
@@ -503,7 +538,7 @@ func (s *Store) EditDraftBatch(baseRev int64, sections map[string]json.RawMessag
 
 	s.commitLocked(next)
 	s.scheduleFlushLocked()
-	ev := draftEventOf(next)
+	ev := s.draftEventOf(next)
 	s.mu.Unlock()
 
 	s.broker.Publish(Event{Type: EventDraft, Data: ev})
@@ -550,7 +585,7 @@ func (s *Store) SettleSection(section string, fn func(applied, draft json.RawMes
 		return DraftEvent{}, false, err
 	}
 	if !appliedChanged && !draftChanged {
-		ev := draftEventOf(s.st)
+		ev := s.draftEventOf(s.st)
 		s.mu.Unlock()
 		return ev, false, nil
 	}
@@ -560,7 +595,7 @@ func (s *Store) SettleSection(section string, fn func(applied, draft json.RawMes
 
 	s.commitLocked(next)
 	s.scheduleFlushLocked()
-	ev := draftEventOf(next)
+	ev := s.draftEventOf(next)
 	s.mu.Unlock()
 
 	s.broker.Publish(Event{Type: EventDraft, Data: ev})
@@ -608,7 +643,7 @@ func (s *Store) ResetDraft(baseRev int64) (DraftEvent, error) {
 
 	s.commitLocked(next)
 	s.scheduleFlushLocked()
-	ev := draftEventOf(next)
+	ev := s.draftEventOf(next)
 	s.mu.Unlock()
 
 	s.broker.Publish(Event{Type: EventDraft, Data: ev})

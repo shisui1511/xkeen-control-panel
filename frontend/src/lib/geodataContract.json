@@ -1,6 +1,6 @@
 {
   "CronView": {
-    "required": ["found", "adoptable", "two", "kept"],
+    "required": ["found", "adoptable", "two", "kept", "taken"],
     "optional": ["schedule"],
     "children": {}
   },

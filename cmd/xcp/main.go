@@ -765,6 +765,7 @@ func main() {
 				Generators:      sourcesSvc.Generators(),
 				LiveCommitter:   sourcesSvc.CommitLive,
 				OnDriftResolved: sourcesSvc.OnDriftResolved,
+				Describer:       sourcesSvc.Describer(),
 			})
 			if srcErr != nil {
 				log.Printf("Сервис источников не подключён к слою, маршруты /api/configlayer/sources* отвечают 404: %v", srcErr)
@@ -809,6 +810,7 @@ func main() {
 					Checker:       routingSvc.Checker(),
 					LiveCommitter: routingSvc.CommitLive,
 					AfterApply:    routingSvc.AfterApply,
+					Describer:     routingSvc.Describer(),
 				})
 			}
 			if routeErr == nil {
@@ -952,9 +954,11 @@ func main() {
 	srv.HandleProtected("/api/configlayer/draft", api.ConfigLayerDraft)
 	srv.HandleProtected("/api/configlayer/draft/reset", api.ConfigLayerDraftReset)
 	srv.HandleProtected("/api/configlayer/apply", api.ConfigLayerApply)
+	srv.HandleProtected("/api/configlayer/apply/preview", api.ConfigLayerApplyPreview)
 	srv.HandleProtected("/api/configlayer/files/rebuild", api.ConfigLayerFilesRebuild)
 	srv.HandleProtected("/api/configlayer/files/release", api.ConfigLayerFilesRelease)
 	srv.HandleProtected("/api/configlayer/files/diff", api.ConfigLayerFilesDiff)
+	srv.HandleProtected("/api/configlayer/files/applies", api.ConfigLayerFilesApplies)
 	srv.HandleProtected("/api/configlayer/notices/dismiss", api.ConfigLayerNoticesDismiss)
 	srv.HandleProtected("/api/configlayer/diag", api.ConfigLayerDiag)
 	srv.HandleProtected("/api/configlayer/sources", api.ConfigSources)

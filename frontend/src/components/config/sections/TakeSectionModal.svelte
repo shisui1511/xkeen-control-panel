@@ -5,6 +5,7 @@
   import Button from '../../Button.svelte';
   import Skeleton from '../../Skeleton.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
+  import ImmediateMark from '../ImmediateMark.svelte';
   import {
     draftChanges,
     handleLayerError,
@@ -252,6 +253,11 @@
   onclose={close}
 >
   <div class="ts-body" data-mode={mode}>
+    {#if then !== undefined}
+      <!-- Режим then применяет access-лог сразу (POST /api/configlayer/cores/access-log:
+           xray -test, запись и перезапуск ядра), мимо черновика (D-14) -->
+      <ImmediateMark />
+    {/if}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
       class="ts-scroll"

@@ -5,8 +5,11 @@
     visibleNotices,
     dismissNotice,
     handleLayerError,
+    driftCount,
+    layerSnapshot,
     type LayerNotice
   } from '../../lib/configLayer';
+  import { editorOpenRequest } from '../../stores';
   // Часы с шагом в минуту: текст «повтор через N мин» не застывает на момент сборки
   import { minuteClock, formatDate } from '../../lib/nodesView';
 
@@ -302,6 +305,22 @@
     return out;
   });
 
+  // Первый файл с расхождением в порядке списка «Файлов»: Xray, затем Mihomo, внутри — по пути
+  const firstDriftPath = $derived.by(() => {
+    const drifted = ($layerSnapshot?.files ?? []).filter((f) => f.state.startsWith('drift_'));
+    drifted.sort(
+      (a, b) =>
+        Number(a.kernel !== 'xray') - Number(b.kernel !== 'xray') || a.path.localeCompare(b.path)
+    );
+    return drifted[0]?.path ?? null;
+  });
+
+  // Ссылка сводки ведёт в «Файлы» и выбирает первый файл с расхождением: встроенный
+  // Редактор забирает запрос, когда вкладка показана
+  function openFirstDrift() {
+    if (firstDriftPath !== null) editorOpenRequest.set(firstDriftPath);
+  }
+
   async function dismiss(ids: string[]) {
     try {
       for (const id of ids) await dismissNotice(id);
@@ -315,6 +334,20 @@
      других вкладках (D-08). Системные уведомления слоя закрываются навсегда, а
      build_failed и source_* — до перезапуска панели или пока не исчезнет их условие -->
 <section class="config-notices" data-testid="config-notices">
+  {#if $driftCount > 0}
+    <div class="alert alert-warning" role="alert" data-testid="config-drift-notice">
+      <Icon name="warning" size={16} />
+      <span class="notice-text"
+        >{$t('cfg.files.drift_notice', { k: $driftCount })}
+        <a
+          class="notice-link"
+          href="#/config/files"
+          data-testid="config-drift-notice-link"
+          onclick={openFirstDrift}>{$t('cfg.files.drift_notice_link')}</a
+        ></span
+      >
+    </div>
+  {/if}
   {#each shown as { notice, tone, text, cabinet, ids } (notice.id)}
     <div class="alert alert-{tone} alert-dismissible" role="alert" data-notice={notice.id}>
       <Icon name={tone === 'info' ? 'info' : 'warning'} size={16} />

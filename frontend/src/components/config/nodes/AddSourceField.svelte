@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, tick } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import { t, tp } from '../../../i18n';
   import Button from '../../Button.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
@@ -38,6 +38,13 @@
   let text = $state('');
   let files = $state<PreviewFile[]>([]);
   let dragging = $state(false);
+  let isTouch = $state(false);
+
+  onMount(() => {
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      isTouch = window.matchMedia('(pointer: coarse)').matches;
+    }
+  });
   let preview = $state<PreviewView | null>(null);
   let loading = $state(false);
   let error = $state<SourceErrorPayload | null>(null);
@@ -286,7 +293,7 @@
     spellcheck="false"
     autocomplete="off"
     autocapitalize="off"
-    placeholder={$t('cfg.nodes.add_placeholder')}
+    placeholder={$t(isTouch ? 'cfg.nodes.add_placeholder_touch' : 'cfg.nodes.add_placeholder')}
     value={text}
     {@attach registerInput}
     oninput={onInput}

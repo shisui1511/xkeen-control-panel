@@ -204,7 +204,7 @@ test('nodes-list: «Мои узлы» последней карточкой, с�
 
   // раскрытие не сбрасывается сменой вкладки
   await page.getByTestId('config-tab-files').click();
-  await expect(page.getByTestId('config-files')).toBeVisible({ timeout: T.action });
+  await expect(page.getByTestId('files-tab')).toBeVisible({ timeout: T.action });
   await page.getByTestId('config-tab-nodes').click();
   await expect(page.getByTestId('nodes-source-my').locator('.sc-expand')).toHaveAttribute(
     'aria-expanded',

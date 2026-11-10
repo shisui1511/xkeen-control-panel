@@ -4,6 +4,8 @@
   import { t } from '../../i18n';
   import { configLayerEnabled } from '../../stores';
   import { filesByPath } from '../../lib/configLayer';
+  import OwnerBadge from './OwnerBadge.svelte';
+  import type { FileOwner } from './fileOps';
 
   export interface EditorTab {
     path: string;
@@ -26,12 +28,12 @@
     onCloseTab: (path: string) => void;
   } = $props();
 
-  // Слой «Конфигурация»: «панель» для файла под управлением, «ручной» для отпущенного
-  function layerBadge(path: string): 'managed' | 'manual' | null {
+  // Слой «Конфигурация»: значок владельца файла («Панель», «Пользователь»)
+  function layerOwner(path: string): FileOwner | null {
     if (!$configLayerEnabled) return null;
     const f = $filesByPath.get(path);
     if (!f) return null;
-    return f.state === 'released' ? 'manual' : 'managed';
+    return f.state === 'released' ? 'user' : 'panel';
   }
 
   // Активная вкладка всегда видна в полосе целиком (без scrollIntoView: он двигает и страницу)
@@ -81,14 +83,8 @@
           ondblclick={() => onPinTab(tab.path)}
         >
           <span class="tab-name" title={tab.name}>{tab.name}</span>
-          {#if layerBadge(tab.path) === 'managed'}
-            <span class="badge badge--tag badge-info layer-badge" data-testid="layer-badge"
-              >{$t('editor.managed_badge')}</span
-            >
-          {:else if layerBadge(tab.path) === 'manual'}
-            <span class="badge badge--tag layer-badge" data-testid="layer-badge"
-              >{$t('editor.manual_badge')}</span
-            >
+          {#if layerOwner(tab.path)}
+            <OwnerBadge owner={layerOwner(tab.path)!} />
           {/if}
           {#if tab.isDirty}
             <span class="tab-dirty-dot">●</span>
@@ -173,14 +169,6 @@
 
   .tab-name {
     display: inline-block;
-  }
-
-  /* Имя усекается, бейдж не сжимается */
-  .layer-badge {
-    flex-shrink: 0;
-    padding: 0 var(--spacing-1);
-    line-height: 1.4;
-    font-weight: 600;
   }
 
   .editor-tab:hover {

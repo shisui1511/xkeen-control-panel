@@ -11,6 +11,7 @@
     activeKernelName,
     configLayerEnabled
   } from '../stores';
+  import { editorHref } from '../lib/editorRoute';
   import { navBadgeCount, badgeTotal } from '../lib/configLayer';
   import { showMihomoNavFor } from '../lib/navCaps';
   import Skeleton from './Skeleton.svelte';
@@ -507,9 +508,9 @@
     </summary>
     <!-- Editor first: confirmed as the most-opened item in this group. -->
     <a
-      href="#/editor"
+      href={$editorHref}
       class="nav-item"
-      aria-current={currentTab === 'editor' ? 'page' : undefined}
+      aria-current={$editorHref === '#/editor' && currentTab === 'editor' ? 'page' : undefined}
       data-label={$t('nav.editor')}
       onclick={() => isSidebarOpen.set(false)}
       title={$isSidebarCollapsed ? undefined : $t('nav.editor')}

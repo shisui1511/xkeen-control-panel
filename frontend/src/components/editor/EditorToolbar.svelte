@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fade, DURATION } from '../../lib/motion.svelte';
   import { t } from '../../i18n';
+  import { configLayerEnabled } from '../../stores';
   import Icon from '../../lib/components/Icon.svelte';
   import EditorTabs, { type EditorTab } from './EditorTabs.svelte';
   import EditorKernelWidget from '../status/EditorKernelWidget.svelte';
@@ -161,15 +162,18 @@
               <Icon name="edit" size={14} />
               {$t('app.rename')}
             </button>
-            <button
-              class="kebab-item"
-              onclick={() => onOpenTemplates?.()}
-              disabled={managedReadOnly}
-              title={readOnlyHint}
-            >
-              <Icon name="settings" size={14} />
-              {$t('editor.templates')}
-            </button>
+            <!-- Слой «Конфигурация» закрывает слияние шаблонов (сервер отвечает legacy_blocked) -->
+            {#if !$configLayerEnabled}
+              <button
+                class="kebab-item"
+                onclick={() => onOpenTemplates?.()}
+                disabled={managedReadOnly}
+                title={readOnlyHint}
+              >
+                <Icon name="settings" size={14} />
+                {$t('editor.templates')}
+              </button>
+            {/if}
             {#if fileType === 'JSON'}
               <button
                 class="kebab-item"

@@ -43,7 +43,6 @@
     "components/config/sections/forms/XrayInboundsForm.svelte": 2,
     "components/dashboard/UpdateBanner.svelte": 1,
     "components/editor/BackupSidebar.svelte": 2,
-    "components/editor/DeleteFileModal.svelte": 2,
     "components/editor/EditorHeaderActions.svelte": 4,
     "components/editor/EditorToolbar.svelte": 2,
     "components/editor/FileActionModals.svelte": 4,

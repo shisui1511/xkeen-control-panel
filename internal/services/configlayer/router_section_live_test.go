@@ -220,7 +220,7 @@ func TestRouterSectionLive(t *testing.T) {
 		if after.DraftRevision != before.DraftRevision+1 {
 			t.Errorf("ревизия %d -> %d, ожидался +1", before.DraftRevision, after.DraftRevision)
 		}
-		if n := draftChanges(after); n == 0 {
+		if !draftDirty(after) {
 			t.Error("чужие правки черновика пропали из числа изменений")
 		}
 	})

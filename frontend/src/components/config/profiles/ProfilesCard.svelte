@@ -15,8 +15,10 @@
     renameProfile,
     type ProfilesState
   } from '../../../lib/configProfiles';
+  import { editorHash } from '../../../lib/editorRoute';
   import TakeRoutingModal from '../routing/TakeRoutingModal.svelte';
   import { activateOwnProfile, confirmMihomoReturn, routingBusy } from '../routing/routingOwner';
+  import ImmediateMark from '../ImmediateMark.svelte';
   import FillSectionsModal from './FillSectionsModal.svelte';
   import NewProfileModal from './NewProfileModal.svelte';
   import ProfileRow from './ProfileRow.svelte';
@@ -204,7 +206,7 @@
 
   function edit(path: string): void {
     editorOpenRequest.set(`${MIHOMO_DIR}/${path}`);
-    window.location.hash = '#/editor';
+    window.location.hash = editorHash();
   }
 
   /** Переименование: пусто — готово, иначе текст ошибки под полем (D-12, D-24). */
@@ -252,7 +254,11 @@
 <section class="card pc" aria-labelledby={titleId} data-testid="profiles-card">
   <div class="pc-head">
     <div class="pc-titles">
-      <h3 class="pc-title" id={titleId}>{$t('cfg.prof.title')}</h3>
+      <div class="pc-title-row">
+        <h3 class="pc-title" id={titleId}>{$t('cfg.prof.title')}</h3>
+        <!-- Создание, переименование, удаление и активация профилей идут мимо черновика (D-14) -->
+        <ImmediateMark />
+      </div>
       <p class="pc-caption">{$t('cfg.prof.subtitle')}</p>
     </div>
     <Button
@@ -414,6 +420,14 @@
     flex-direction: column;
     gap: var(--spacing-1);
     flex: 1 1 16rem;
+    min-width: 0;
+  }
+
+  .pc-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--spacing-1) var(--spacing-2);
     min-width: 0;
   }
 

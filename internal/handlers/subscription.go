@@ -31,6 +31,9 @@ func (a *API) SubscriptionAdd(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
+	if a.legacyBlocked(w, r) {
+		return
+	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -75,6 +78,9 @@ func (a *API) SubscriptionAdd(w http.ResponseWriter, r *http.Request) {
 func (a *API) SubscriptionUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	if a.legacyBlocked(w, r) {
 		return
 	}
 
@@ -149,6 +155,9 @@ func (a *API) SubscriptionDelete(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
+	if a.legacyBlocked(w, r) {
+		return
+	}
 
 	id := r.URL.Query().Get("id")
 	if id == "" {
@@ -167,6 +176,9 @@ func (a *API) SubscriptionDelete(w http.ResponseWriter, r *http.Request) {
 func (a *API) SubscriptionRefresh(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	if a.legacyBlocked(w, r) {
 		return
 	}
 
@@ -204,6 +216,9 @@ func (a *API) SubscriptionRefresh(w http.ResponseWriter, r *http.Request) {
 func (a *API) SubscriptionRefreshAll(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	if a.legacyBlocked(w, r) {
 		return
 	}
 
@@ -352,6 +367,9 @@ func (a *API) SubscriptionSetActive(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
+	if a.legacyBlocked(w, r) {
+		return
+	}
 
 	id := r.URL.Query().Get("id")
 	if id == "" {
@@ -408,6 +426,9 @@ func (a *API) SubscriptionSetActive(w http.ResponseWriter, r *http.Request) {
 func (a *API) SubscriptionClearActive(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	if a.legacyBlocked(w, r) {
 		return
 	}
 
@@ -541,6 +562,9 @@ func (a *API) MihomoProviderRedirect(w http.ResponseWriter, r *http.Request) {
 func (a *API) SubscriptionSetNodeDialerProxy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	if a.legacyBlocked(w, r) {
 		return
 	}
 

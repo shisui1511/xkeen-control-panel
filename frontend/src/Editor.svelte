@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy, tick, untrack } from 'svelte';
+  import { onMount, onDestroy, tick, untrack, type Snippet } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import { fade, slide, DURATION } from './lib/motion.svelte';
   import { MediaQuery, SvelteSet } from 'svelte/reactivity';
@@ -11,11 +11,12 @@
     editorOpenRequest,
     configLayerEnabled
   } from './stores';
-  import { filesByPath, handleLayerError } from './lib/configLayer';
-  import { apiFetch, apiFetchJSON } from './lib/api';
+  import { filesByPath, handleLayerError, layerSnapshot } from './lib/configLayer';
+  import { apiFetch, apiFetchJSON, isLegacyBlocked } from './lib/api';
   import { parseValidationError } from './lib/errorParser';
   import Icon from './lib/components/Icon.svelte';
   import EmptyState from './components/EmptyState.svelte';
+  import Button from './components/Button.svelte';
   import EditorIcon from './lib/components/icons/Editor.svelte';
   import Skeleton from './components/Skeleton.svelte';
   import { EditorState } from '@codemirror/state';
@@ -32,7 +33,6 @@
   import TemplatesModal, { type Template } from './components/editor/TemplatesModal.svelte';
   import SaveConfirmModal from './components/editor/SaveConfirmModal.svelte';
   import OutboundGeneratorModal from './components/editor/OutboundGeneratorModal.svelte';
-  import DeleteFileModal from './components/editor/DeleteFileModal.svelte';
   import EditorToolbar from './components/editor/EditorToolbar.svelte';
   import EditorStatusBar from './components/editor/EditorStatusBar.svelte';
   import EditorBreadcrumbs from './components/editor/EditorBreadcrumbs.svelte';
@@ -60,10 +60,12 @@
     deleteConfigFile,
     renameConfigFile,
     listConfigFiles,
+    listConfigFilesScoped,
     formatBytes,
     ConfigOpError,
     nextDuplicateName,
     type ConfigFileInfo,
+    type FileListStatus,
     type ConfigOpOptions
   } from './components/editor/fileOps';
   import { isXrayRootPath, matchXKeenStoplist } from './lib/xkeenStoplist';
@@ -79,7 +81,32 @@
     currentContent: string;
   }
 
-  let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
+  let {
+    onSwitchTab = () => {},
+    embedded = false,
+    active = true,
+    onactivefile,
+    aboveCode,
+    appliesFor
+  }: {
+    onSwitchTab?: (tab: string) => void;
+    /**
+     * Вкладка «Файлы» раздела «Конфигурация» (D-01): без заголовка страницы, без режима
+     * «Конструктор» и полноэкранной обёртки; разметка списка и редактора та же
+     */
+    embedded?: boolean;
+    /**
+     * Встроенный Редактор показан: вкладка раздела остаётся смонтированной и скрывается,
+     * поэтому горячие клавиши, шторка и запрос открытия файла действуют только при показе
+     */
+    active?: boolean;
+    /** Смена активной вкладки/файла во вкладке «Файлы» */
+    onactivefile?: (path: string | null, file?: ConfigFileInfo) => void;
+    /** Сниппет над редактором кода для активного файла (баннеры дрейфа, владельца) */
+    aboveCode?: Snippet<[string, (ConfigFileInfo | undefined)?]>;
+    /** Сниппет «Последних применений» для файла панели (D-06) */
+    appliesFor?: Snippet<[string, string?]>;
+  } = $props();
 
   let ru = $derived($currentLang === 'ru');
 
@@ -100,7 +127,10 @@
   const managedFile = $derived($configLayerEnabled ? $filesByPath.get(selectedFile) : undefined);
   // pending — файла ещё нет в манифесте: сервер его не защищает, а «Отпустить» ответил бы 404
   const isManagedReadOnly = $derived(
-    managedFile !== undefined && managedFile.state !== 'released' && managedFile.state !== 'pending'
+    managedFile !== undefined &&
+      (!managedFile.owner || managedFile.owner === 'panel') &&
+      managedFile.state !== 'released' &&
+      managedFile.state !== 'pending'
   );
   let loading = $state(false);
   let loadingPath = $state<string | null>(null);
@@ -118,6 +148,24 @@
   // Копии показываются только для файла в редакторе: до ответа фонового запроса
   // список пуст, копии прежнего файла не видны (WR-01)
   const visibleBackups = $derived(backupsPath === selectedFile ? backups : []);
+  // Исход последнего запроса списка копий: «копий нет» (ready с пустым списком) и «список
+  // не получен» (error) различаются (todo editor-backups-list-error-states). Состояние
+  // помечено путём файла, как и сам список: для другого файла оно не действует.
+  type BackupsStatus = 'idle' | 'loading' | 'ready' | 'error';
+  let backupsStatus = $state<BackupsStatus>('idle');
+  let backupsStatusPath = $state('');
+  const visibleBackupsStatus = $derived<BackupsStatus>(
+    backupsStatusPath === selectedFile ? backupsStatus : 'idle'
+  );
+  // Строка состояния: счётчик — при полученном списке (в том числе пока идёт фоновое
+  // обновление уже загруженного), ошибка — вместо счётчика
+  const statusBarBackups = $derived<BackupsStatus>(
+    visibleBackupsStatus === 'error'
+      ? 'error'
+      : visibleBackups.length > 0
+        ? 'ready'
+        : visibleBackupsStatus
+  );
   let tabs = $state<EditorTab[]>([]);
   let activeTabPath = $state('');
   let breadcrumbs = $state<PathSegment[]>([]);
@@ -127,6 +175,15 @@
 
   // Drawer states
   let drawerOpen = $state(false);
+  // Файл, для которого лист открыли явно: только для него лист показывает загрузку, ошибку
+  // и пустой список. При смене файла открытый лист виден, пока у нового файла есть копии.
+  let drawerPath = $state('');
+  const drawerVisible = $derived(
+    drawerOpen &&
+      (visibleBackups.length > 0 ||
+        (drawerPath !== '' && drawerPath === selectedFile) ||
+        (embedded && managedFile?.owner === 'panel'))
+  );
   // Смена файла в редакторе сбрасывает выбор копии и сравнение в том же обновлении:
   // сравнение с копией другого файла недействительно (WR-01). Присваивания в
   // selectBackup и restoreBackup перезаписывают значение до следующей смены файла.
@@ -149,6 +206,72 @@
   // Dual-panel sidebar file lists
   let xrayFiles = $state<ConfigFileInfo[]>([]);
   let mihomoFiles = $state<ConfigFileInfo[]>([]);
+  // Вкладка «Файлы» (D-04): третий каталог — XKeen; список берётся с scope=files
+  const xkeenDir = '/opt/etc/xkeen';
+  let xkeenFiles = $state<ConfigFileInfo[]>([]);
+  let filesStatus = $state<FileListStatus>('loading');
+
+  /**
+   * Список ядра вместе с файлами манифеста слоя, которых нет в ответе каталога (D-07): файл
+   * пропал с диска, ещё не записан или лежит в подкаталоге Mihomo (список каталога не
+   * рекурсивный). Такой файл стоит в группе своего ядра со своим состоянием.
+   */
+  function withManifest(
+    listed: ConfigFileInfo[],
+    kernel: 'xray' | 'mihomo',
+    dir: string
+  ): ConfigFileInfo[] {
+    if (!embedded || !$configLayerEnabled) return listed;
+    const known = new Set(listed.map((f) => f.path));
+    const extra: ConfigFileInfo[] = [];
+    for (const f of $layerSnapshot?.files ?? []) {
+      if (f.kernel !== kernel || !f.path.startsWith(dir + '/')) continue;
+      if (known.has(f.path) || (f.alias_paths ?? []).some((a) => known.has(a))) continue;
+      const rel = f.path.slice(dir.length + 1);
+      const inSubdir = rel.includes('/');
+      extra.push({
+        name: rel,
+        path: f.path,
+        size: 0,
+        owner: f.state === 'released' ? 'user' : 'panel',
+        state: f.state,
+        missing: !inSubdir || f.state === 'drift_missing' || f.state === 'pending'
+      });
+    }
+    if (extra.length === 0) return listed;
+    return [...listed, ...extra].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  }
+
+  const xrayList = $derived(withManifest(xrayFiles, 'xray', xrayDir));
+  const mihomoList = $derived(withManifest(mihomoFiles, 'mihomo', mihomoDir));
+  const missingPaths = $derived(
+    new Set([...xrayList, ...mihomoList].filter((f) => f.missing).map((f) => f.path))
+  );
+  // Файл манифеста, которого нет на диске (пропал или ещё не записан): вкладка «Файлы»
+  // показывает его пустой вкладкой только для чтения, диск не читается
+  const selectedMissing = $derived(
+    embedded && selectedFile !== '' && missingPaths.has(selectedFile)
+  );
+
+  const allFiles = $derived([...xrayList, ...mihomoList, ...xkeenFiles]);
+  const activeFileInfo = $derived(allFiles.find((f) => f.path === (activeTabPath || selectedFile)));
+
+  // Вкладка «Файлы» (D-07): файл с дрейфом только для чтения до принятия решения
+  const isDrift = $derived(
+    embedded &&
+      selectedFile !== '' &&
+      ($filesByPath.get(selectedFile)?.state?.startsWith('drift_') ?? false)
+  );
+  const isRestricted = $derived(embedded && Boolean(activeFileInfo?.restricted));
+  const isReadOnly = $derived(isManagedReadOnly || selectedMissing || isDrift || isRestricted);
+
+  $effect(() => {
+    const cur = activeTabPath || selectedFile || null;
+    const info = cur ? activeFileInfo : undefined;
+    untrack(() => {
+      onactivefile?.(cur, info);
+    });
+  });
   // До 768 px панель файлов — выезжающий лист поверх редактора, а не колонка рядом
   const NARROW_QUERY = '(max-width: 768px)';
   const narrowQuery = new MediaQuery(NARROW_QUERY);
@@ -294,7 +417,7 @@
   }
 
   async function handleInsertIntoEditor(yamlContent: string) {
-    if (isManagedReadOnly) {
+    if (isReadOnly) {
       showToast('warning', $t('editor.managed_readonly_hint'));
       return;
     }
@@ -366,8 +489,48 @@
     });
   }
 
+  /** Каталог для списка вкладки «Файлы»: отказ сервера из-за отсутствия каталога — пустая группа */
+  async function listScopedDir(dir: string): Promise<ConfigFileInfo[]> {
+    try {
+      return await listConfigFilesScoped(dir);
+    } catch (e) {
+      // Каталога нет (ядро не установлено): группа пуста, остальные показываются (partial)
+      if (e instanceof ConfigOpError && (e.status === 403 || e.status === 404)) return [];
+      throw e;
+    }
+  }
+
+  /**
+   * Список вкладки «Файлы» (D-04): три каталога. Первичная загрузка и «Повторить» показывают
+   * скелетон и, при сбое, ошибку вместо пустых групп; сбой обновления уже показанного списка
+   * не стирает его.
+   */
+  async function loadScopedFiles() {
+    const shown = filesStatus === 'ready';
+    if (!shown) filesStatus = 'loading';
+    try {
+      const [x, m, k] = await Promise.all([
+        listScopedDir(xrayDir),
+        listScopedDir(mihomoDir),
+        listScopedDir(xkeenDir)
+      ]);
+      xrayFiles = x;
+      mihomoFiles = m;
+      xkeenFiles = k;
+      filesStatus = 'ready';
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      if (shown) showToast('error', $t('editor.load_error'));
+      else filesStatus = 'error';
+    }
+  }
+
   async function loadFiles(dir?: string) {
     if (dir) currentDir = dir;
+    if (embedded) {
+      await loadScopedFiles();
+      return;
+    }
     try {
       xrayFiles = await listConfigFiles(xrayDir);
       mihomoFiles = await listConfigFiles(mihomoDir);
@@ -382,6 +545,8 @@
     selectedFile = '';
     backups = [];
     backupsPath = '';
+    backupsStatus = 'idle';
+    backupsStatusPath = '';
     originalContent = '';
     isDirty = false;
     loadFiles();
@@ -396,6 +561,8 @@
   }
 
   function handleGlobalKeydown(e: KeyboardEvent) {
+    // Скрытая вкладка «Файлы» не перехватывает клавиши других вкладок раздела
+    if (!active) return;
     if (e.ctrlKey && e.key === 'Tab') {
       e.preventDefault();
       if (tabs.length <= 1) return;
@@ -575,7 +742,7 @@
     }
 
     try {
-      const content = await readConfigFile(path);
+      const content = embedded && missingPaths.has(path) ? '' : await readConfigFile(path);
 
       // Пока читался этот файл, выбрали другой: ответ отбрасывается до любых изменений вкладок
       let next = takeQueuedPick();
@@ -706,6 +873,20 @@
     | { kind: 'error'; message: string };
 
   async function loadBackups(path: string): Promise<BackupsLoadResult> {
+    if (path === selectedFile) {
+      backupsStatus = 'loading';
+      backupsStatusPath = path;
+    }
+    // Файл с именем не латиницей сохранять нельзя, копий у него не бывает, а сервер
+    // список копий для такого имени отклоняет (403): запрос не делаем, список пуст.
+    if (allFiles.find((f) => f.path === path)?.restricted) {
+      if (path !== selectedFile) return { kind: 'stale' };
+      backups = [];
+      backupsPath = path;
+      backupsStatus = 'ready';
+      backupsStatusPath = path;
+      return { kind: 'ok' };
+    }
     try {
       const list = await fetchBackupsList(path);
       // Список копий грузится в фоне: ответ для уже не выбранного файла
@@ -714,14 +895,26 @@
       if (path !== selectedFile) return { kind: 'stale' };
       backups = list;
       backupsPath = path;
+      backupsStatus = 'ready';
+      backupsStatusPath = path;
       return { kind: 'ok' };
     } catch (e: any) {
       if (e?.status === 401) return { kind: 'unauthorized' };
       // «Копий нет» и «список не получен» различаются (WR-03). Поздний сбой
       // фонового запроса не обнуляет уже показанный список и не закрывает
-      // открытый лист (IN-02 ревью).
+      // открытый лист (IN-02 ревью): меняется только состояние.
+      if (path === selectedFile) {
+        backupsStatus = 'error';
+        backupsStatusPath = path;
+      }
       return { kind: 'error', message: e?.message || String(e) };
     }
+  }
+
+  /** «Повторить» в листе копий: заново запрашивает список для файла в редакторе. */
+  async function retryBackups() {
+    if (!selectedFile) return;
+    await loadBackups(selectedFile);
   }
 
   async function selectBackup(backupPath: string) {
@@ -752,7 +945,7 @@
   }
 
   async function checkBeforeSave() {
-    if (!selectedFile || !editorView || isManagedReadOnly) return;
+    if (!selectedFile || !editorView || isReadOnly) return;
     const content = editorView.state.doc.toString();
 
     diffChanges = getDiff(originalContent, content);
@@ -766,7 +959,7 @@
   }
 
   async function confirmSave() {
-    if (!selectedFile || !editorView || isManagedReadOnly) return;
+    if (!selectedFile || !editorView || isReadOnly) return;
 
     saving = true;
     saveError = false;
@@ -823,7 +1016,7 @@
   }
 
   async function handleSaveAndApply() {
-    if (!selectedFile || !editorView || isManagedReadOnly) return;
+    if (!selectedFile || !editorView || isReadOnly) return;
     applyLoading = true;
     saveError = false;
     saveWarnings = [];
@@ -942,6 +1135,12 @@
   }
 
   async function restoreBackup(backupPath: string) {
+    // Файл панели только для чтения (D-03): readOnly CodeMirror не останавливает
+    // программный dispatch, поэтому отказ здесь, как в handleInsertIntoEditor.
+    if (isReadOnly) {
+      showToast('warning', $t('editor.managed_readonly_hint'));
+      return;
+    }
     // «Восстановить» подставляет копию только в файл, для которого её нажали.
     // Пока открыто подтверждение или читается копия, на ПК можно открыть другой
     // файл из колонки (лист копий при этом жив). Без сверки после каждого
@@ -975,6 +1174,11 @@
       const content = await fetchBackupContent(backupPath);
       if (!stillValid()) {
         abortStale();
+        return;
+      }
+      // Файл мог перейти под управление панели, пока шло подтверждение и чтение копии
+      if (isReadOnly) {
+        showToast('warning', $t('editor.managed_readonly_hint'));
         return;
       }
 
@@ -1084,20 +1288,32 @@
     }
   }
 
-  let showDeleteConfirmModal = $state(false);
-
   function deleteFile() {
     if (!selectedFile) return;
     menuTarget = '';
-    showDeleteConfirmModal = true;
+    void confirmDeleteFile();
   }
 
+  /**
+   * Подтверждение удаления через общий ConfirmDialog (variant danger: 44 px кнопки на
+   * мобильных). В «Файлах» текст контракта говорит, что файл удаляется сразу, мимо черновика.
+   */
   async function confirmDeleteFile() {
     // цель берётся до любых await: файл меню либо файл редактора
     const fileToDelete = actionTarget;
     if (!fileToDelete) return;
+    const fileName = fileToDelete.split('/').pop() || fileToDelete;
+    const confirmed = await showConfirm({
+      variant: 'danger',
+      title: $t('editor.delete_file'),
+      message: embedded
+        ? $t('cfg.files.delete_message', { filename: fileName })
+        : $t('editor.delete_confirm_body', { file: fileName }),
+      confirmLabel: $t('editor.delete_file'),
+      cancelLabel: $t('app.cancel')
+    });
     menuTarget = '';
-    showDeleteConfirmModal = false;
+    if (!confirmed) return;
 
     try {
       await deleteConfigFile(fileToDelete);
@@ -1129,8 +1345,56 @@
       showRenameModal = false;
       renameTarget = '';
       menuTarget = '';
+      // Вкладка старого пути переезжает на новый путь вместе с правками, признаком «изменено»,
+      // местом в списке и черновиком: иначе её «Сохранить» создало бы старый файл заново
+      // (todo editor-rename-keeps-old-tab, T-149-12)
+      const oldTab = tabs.find((tab) => tab.path === oldPath);
+      const movedActive = oldTab !== undefined && activeTabPath === oldPath;
+      if (oldTab) {
+        if (movedActive && editorView) {
+          // Вкладка ключуется путём: редактор пересоздаётся, позиция берётся из вкладки
+          oldTab.scrollState = {
+            top: editorView.scrollDOM.scrollTop,
+            left: editorView.scrollDOM.scrollLeft
+          };
+          oldTab.cursorPos = editorView.state.selection.main.head;
+          oldTab.currentContent = editorView.state.doc.toString();
+          oldTab.isDirty = oldTab.currentContent !== oldTab.originalContent;
+        }
+        // Вкладка с новым путём могла остаться от удалённого файла: два ключа пути недопустимы
+        const staleIndex = tabs.findIndex((tab) => tab.path === newPath);
+        if (staleIndex !== -1) tabs.splice(staleIndex, 1);
+        oldTab.path = newPath;
+        oldTab.name = newPath.split('/').pop() || target;
+        const draft = localStorage.getItem(`editor.draft.${oldPath}`);
+        if (draft !== null) localStorage.setItem(`editor.draft.${newPath}`, draft);
+        localStorage.removeItem(`editor.draft.${oldPath}`);
+        if (movedActive) {
+          activeTabPath = newPath;
+          selectedFile = newPath;
+        }
+        if (drawerPath === oldPath) drawerPath = newPath;
+        tabs = [...tabs];
+      }
       await loadFiles();
-      await loadFile(newPath);
+      if (movedActive && oldTab) {
+        // Вкладка уже показана на новом пути: файл не перечитывается, копии — нового пути
+        await tick();
+        if (editorView) {
+          if (oldTab.cursorPos !== undefined) {
+            editorView.dispatch({
+              selection: { anchor: oldTab.cursorPos, head: oldTab.cursorPos }
+            });
+          }
+          if (oldTab.scrollState) {
+            editorView.scrollDOM.scrollTop = oldTab.scrollState.top;
+            editorView.scrollDOM.scrollLeft = oldTab.scrollState.left;
+          }
+        }
+        void loadBackups(newPath);
+      } else {
+        await loadFile(newPath);
+      }
     } catch (e: any) {
       if (e?.status === 401) return;
       showToast('error', $t('editor.rename_error') + ': ' + (e as any)?.message);
@@ -1139,7 +1403,9 @@
 
   async function duplicateFile(file: ConfigFileInfo) {
     const dir = file.path.substring(0, file.path.lastIndexOf('/'));
-    const siblings = (dir === mihomoDir ? mihomoFiles : xrayFiles).map((f) => f.name);
+    const siblings = (
+      dir === mihomoDir ? mihomoFiles : dir === xkeenDir ? xkeenFiles : xrayFiles
+    ).map((f) => f.name);
     const copyName = nextDuplicateName(file.name, siblings);
     const copyPath = `${dir}/${copyName}`;
     try {
@@ -1173,37 +1439,23 @@
 
   function deleteFileByInfo(file: ConfigFileInfo) {
     menuTarget = file.path;
-    showDeleteConfirmModal = true;
+    void confirmDeleteFile();
   }
 
   /**
    * Открывает файл и лист его копий. true — файл показан во вкладке (шторку можно закрыть),
-   * false — файл не открыт. Лист копий всегда относится к файлу в редакторе (CR-01, WR-03):
-   * по файлу без копий лист не открывается, показывается уведомление, а флаг листа
-   * не остаётся включённым и не накрывает следующий открытый файл. «Нет сохранённых бэкапов» —
-   * только при успешном пустом списке; если список не получен, показывается уведомление
-   * об ошибке и лист не открывается (WR-03). Возврат true по-прежнему значит «файл показан»
-   * (D-16, шторку можно закрыть).
+   * false — файл не открыт. Лист относится к файлу в редакторе (CR-01, WR-03) и показывает
+   * исход запроса сам: загрузку, список, «Копий пока нет» при успешном пустом списке или
+   * ошибку с «Повторить», если список не получен. Ошибка не закрывает лист (IN-02 ревью).
+   * Возврат true по-прежнему значит «файл показан» (D-16, шторку можно закрыть).
    */
   async function openBackupsForFile(file: ConfigFileInfo): Promise<boolean> {
     if (!(await loadFile(file.path))) return false;
     // loadFile открыл запомненный выбор другого файла («последний выбор побеждает»)
     if (selectedFile !== file.path) return true;
-    const res = await loadBackups(file.path);
-    if (selectedFile !== file.path || res.kind === 'stale' || res.kind === 'unauthorized') {
-      return true;
-    }
-    if (res.kind === 'error') {
-      drawerOpen = false;
-      showToast('error', $t('editor.backups_load_error') + ': ' + res.message);
-      return true;
-    }
-    if (visibleBackups.length === 0) {
-      drawerOpen = false;
-      showToast('info', $t('editor.no_backups'));
-      return true;
-    }
+    drawerPath = file.path;
     drawerOpen = true;
+    await loadBackups(file.path);
     return true;
   }
 
@@ -1216,7 +1468,7 @@
   }
 
   function applyQuickFixes() {
-    if (!editorView || !selectedFile || isManagedReadOnly) return;
+    if (!editorView || !selectedFile || isReadOnly) return;
 
     try {
       const content = editorView.state.doc.toString();
@@ -1240,7 +1492,7 @@
   }
 
   async function applyTemplate(template: Template) {
-    if (!editorView || isManagedReadOnly) return;
+    if (!editorView || isReadOnly) return;
     if (isDirty && !(await confirmUnsaved())) return;
     if (
       !(await showConfirm({
@@ -1284,6 +1536,11 @@
         }
       } catch (mergeErr: any) {
         if (mergeErr?.status === 401) return;
+        // Слой «Конфигурация» закрывает слияние шаблонов: показываем переведённый текст сервера
+        if (isLegacyBlocked(mergeErr)) {
+          showToast('warning', mergeErr.message);
+          return;
+        }
         console.error('Smart merge failed:', mergeErr);
         showToast('error', $t('editor.smart_merge_failed'));
         return;
@@ -1361,17 +1618,31 @@
     showToast('info', $t('draft.discarded_toast'));
   }
 
+  /** Открывает файл, который попросила другая страница, и сбрасывает запрос. */
+  function consumeOpenRequest(requested: string) {
+    editorOpenRequest.set(null);
+    if (requested.startsWith(mihomoDir + '/')) currentDir = mihomoDir;
+    void loadFile(requested, false);
+  }
+
+  // Встроенный Редактор живёт, пока открыт раздел: запрос открытия файла приходит и после
+  // монтирования. Он берётся, только когда вкладка показана, — иначе запрос, после которого
+  // страница уходит в Редактор, перехватила бы скрытая вкладка.
+  $effect(() => {
+    if (!embedded || !active) return;
+    const requested = $editorOpenRequest;
+    if (!requested) return;
+    untrack(() => consumeOpenRequest(requested));
+  });
+
   onMount(() => {
     loadFiles();
-    checkHashTab();
-
-    const requested = $editorOpenRequest;
-    if (requested) {
-      editorOpenRequest.set(null);
-      if (requested.startsWith(mihomoDir + '/')) currentDir = mihomoDir;
-      loadFile(requested, false);
+    if (!embedded) {
+      checkHashTab();
+      const requested = $editorOpenRequest;
+      if (requested) consumeOpenRequest(requested);
+      window.addEventListener('hashchange', checkHashTab);
     }
-    window.addEventListener('hashchange', checkHashTab);
 
     const draft = getDraft('editor');
     if (draft) {
@@ -1426,31 +1697,63 @@
 
 <svelte:window onkeydown={handleGlobalKeydown} />
 
-<div class="editor-page-container" class:constructor-mode={activeTab === 'constructor'}>
-  <!-- Level 1 Header (EDIT-01) -->
-  <PageHeader title={$t('editor.h1')} subtitle={$t('editor.h1_sub')}>
-    <Tabs
-      items={editorModeTabItems}
-      value={activeTab}
-      onchange={(val) => setTab(val as 'files' | 'constructor')}
-      ariaLabel={$t('editor.h1')}
-      variant="pill"
-    />
+{#snippet headerActions()}
+  <EditorHeaderActions
+    {saveStatusState}
+    {selectedFile}
+    {loading}
+    {saving}
+    {applyLoading}
+    onReloadFile={() => loadFile(selectedFile)}
+    onSaveFile={checkBeforeSave}
+    onSaveAndApply={handleSaveAndApply}
+    managedReadOnly={isReadOnly}
+    immediate={embedded &&
+      Boolean(
+        activeFileInfo && (activeFileInfo.owner === 'xkeen' || activeFileInfo.owner === 'user')
+      )}
+    saveDisabledReason={isRestricted ? $t('cfg.files.restricted_title') : undefined}
+    {embedded}
+  />
+{/snippet}
 
-    {#if activeTab === 'files'}
-      <EditorHeaderActions
-        {saveStatusState}
-        {selectedFile}
-        {loading}
-        {saving}
-        {applyLoading}
-        onReloadFile={() => loadFile(selectedFile)}
-        onSaveFile={checkBeforeSave}
-        onSaveAndApply={handleSaveAndApply}
-        managedReadOnly={isManagedReadOnly}
+<div
+  class={embedded ? 'editor-embedded' : 'editor-page-container'}
+  class:constructor-mode={!embedded && activeTab === 'constructor'}
+>
+  {#if embedded}
+    <!-- Шапка встроенного Редактора: на ≤768 px «Файлы» открывает лист списка слева (EDT-02) -->
+    <div class="editor-embedded-head">
+      {#if isNarrow}
+        <Button
+          variant="secondary"
+          size="sm"
+          class="files-sheet-toggle"
+          aria-expanded={showSidebar}
+          onclick={() => (showSidebar = !showSidebar)}
+        >
+          <Icon name="folder" size={16} />
+          {$t('editor.tab_files')}
+        </Button>
+      {/if}
+      {@render headerActions()}
+    </div>
+  {:else}
+    <!-- Level 1 Header (EDIT-01) -->
+    <PageHeader title={$t('editor.h1')} subtitle={$t('editor.h1_sub')}>
+      <Tabs
+        items={editorModeTabItems}
+        value={activeTab}
+        onchange={(val) => setTab(val as 'files' | 'constructor')}
+        ariaLabel={$t('editor.h1')}
+        variant="pill"
       />
-    {/if}
-  </PageHeader>
+
+      {#if activeTab === 'files'}
+        {@render headerActions()}
+      {/if}
+    </PageHeader>
+  {/if}
 
   {#if detectedDraft}
     <DraftRestoreBanner
@@ -1464,9 +1767,12 @@
     <!-- Workspace with Resizable Splitter (EDIT-02) -->
     <div class="editor-workspace">
       <EditorSidebar
-        open={showSidebar}
-        {xrayFiles}
-        {mihomoFiles}
+        open={showSidebar && active}
+        xrayFiles={xrayList}
+        mihomoFiles={mihomoList}
+        xkeenFiles={embedded ? xkeenFiles : undefined}
+        filesStatus={embedded ? filesStatus : 'ready'}
+        onRetryFiles={() => void loadScopedFiles()}
         {selectedFile}
         activeKernel={$activeKernelName}
         overlay={isNarrow}
@@ -1512,19 +1818,16 @@
               plain={true}
             />
             <div class="editor-empty-actions">
-              {#if !showSidebar}
-                <button class="btn btn-secondary" onclick={() => (showSidebar = true)}>
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    ><path
-                      d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
-                    /></svg
-                  >
+              <!-- На ≤768 px кнопка остаётся под бэкдропом: overlayLock возвращает фокус
+                   после Escape, «Закрыть» и фона только на элемент в разметке (G149-07, WR-05).
+                   На ПК при видимой колонке кнопки нет. -->
+              {#if !showSidebar || isNarrow}
+                <button
+                  class="btn btn-secondary"
+                  aria-expanded={showSidebar}
+                  onclick={() => (showSidebar = true)}
+                >
+                  <Icon name="folder" size={16} />
                   {$t('editor.show_files')}
                 </button>
               {/if}
@@ -1535,17 +1838,7 @@
                   newFileName = '';
                 }}
               >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
+                <Icon name="add" size={16} />
                 {$t('editor.create_file')}
               </button>
             </div>
@@ -1596,7 +1889,7 @@
             onOpenGenerator={() => (showGeneratorModal = true)}
             onApplyQuickFixes={applyQuickFixes}
             onDeleteFile={deleteFile}
-            managedReadOnly={isManagedReadOnly}
+            managedReadOnly={isReadOnly}
           />
 
           <EditorBreadcrumbs {breadcrumbs} onJump={jumpToSegment} />
@@ -1608,8 +1901,12 @@
             }}
           />
 
-          {#if managedFile && isManagedReadOnly}
+          {#if managedFile && isManagedReadOnly && !managedFile.state?.startsWith('drift_')}
             <ManagedFileBanner file={managedFile} />
+          {/if}
+
+          {#if aboveCode && (activeTabPath || selectedFile)}
+            {@render aboveCode(activeTabPath || selectedFile, activeFileInfo)}
           {/if}
 
           <!-- CodeMirror editor component -->
@@ -1628,7 +1925,7 @@
                   path={tab.path}
                   {expertMode}
                   {schemaEnabled}
-                  readOnly={isManagedReadOnly}
+                  readOnly={isReadOnly}
                   bind:view={editorView}
                   onContentChange={(newContent) => {
                     tab.currentContent = newContent;
@@ -1669,19 +1966,38 @@
             {applyLoading}
             {backgroundStatusText}
             backupCount={visibleBackups.length}
-            {drawerOpen}
+            backupsStatus={statusBarBackups}
+            drawerOpen={drawerVisible}
+            hasApplies={Boolean(embedded && managedFile?.owner === 'panel' && appliesFor)}
             onToggleSchema={toggleSchema}
             onToggleExpertMode={toggleExpertMode}
-            onToggleDrawer={() => (drawerOpen = !drawerOpen)}
+            onToggleDrawer={() => {
+              drawerPath = selectedFile;
+              drawerOpen = !drawerVisible;
+            }}
           />
 
           <!-- Bottom Drawer -->
-          {#if drawerOpen && visibleBackups.length > 0}
+          {#if drawerVisible}
+            {#snippet panelAppliesSnippet()}
+              {#if appliesFor && selectedFile}
+                {@render appliesFor(
+                  selectedFile,
+                  editorView ? editorView.state.doc.toString() : ''
+                )}
+              {/if}
+            {/snippet}
             <BackupSidebar
               backups={visibleBackups}
+              status={visibleBackupsStatus}
+              onRetry={retryBackups}
               {selectedBackup}
               {diffGroups}
               {backupLoading}
+              restoreDisabled={isReadOnly}
+              panelApplies={embedded && managedFile?.owner === 'panel' && appliesFor
+                ? panelAppliesSnippet
+                : undefined}
               onSelectBackup={selectBackup}
               onRestoreBackup={restoreBackup}
               onclose={() => (drawerOpen = false)}
@@ -1759,16 +2075,6 @@
   onclose={() => (showSaveConfirmModal = false)}
 />
 
-<DeleteFileModal
-  open={showDeleteConfirmModal}
-  filePath={actionTarget}
-  onConfirm={confirmDeleteFile}
-  onclose={() => {
-    showDeleteConfirmModal = false;
-    menuTarget = '';
-  }}
-/>
-
 <style>
   .editor-page-container {
     display: flex;
@@ -1782,6 +2088,40 @@
     height: auto;
     min-height: 100%;
     padding-bottom: 60px;
+  }
+
+  /* Встроенный Редактор (вкладка «Файлы»): страница прокручивается обычным образом,
+     список и код прокручиваются внутри области заданной высоты */
+  .editor-embedded {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3);
+    min-width: 0;
+  }
+
+  .editor-embedded-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--spacing-2);
+    min-width: 0;
+  }
+
+  .editor-embedded-head > :global(:last-child) {
+    margin-left: auto;
+  }
+
+  .editor-embedded .editor-workspace {
+    flex: none;
+    height: clamp(520px, calc(100dvh - 280px), 900px);
+  }
+
+  .editor-embedded-head :global(.files-sheet-toggle) {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    min-height: 44px;
   }
 
   :global(.page-header-actions .tabs) {
@@ -1906,6 +2246,11 @@
   @media (max-width: 768px) {
     .editor-page-container {
       height: calc(100dvh - 76px);
+    }
+
+    .editor-embedded .editor-workspace {
+      height: max(420px, 70dvh);
+      min-height: max(420px, 70dvh);
     }
 
     .editor-empty-card {

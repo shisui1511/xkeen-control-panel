@@ -11,6 +11,8 @@
     class: className = '',
     ariaLabel = '',
     testid: dataTestid = '',
+    closeDisabled = false,
+    closeTitle = '',
     onclose,
     children
   }: {
@@ -22,11 +24,28 @@
     ariaLabel?: string;
     /** Optional `data-testid` on the container, for callers whose E2E specs target a specific dialog instance. */
     testid?: string;
+    /** Крестик неактивен (идёт операция, которую нельзя прервать); причина — в `closeTitle`. */
+    closeDisabled?: boolean;
+    /** Подсказка неактивного крестика: почему окно сейчас не закрывается. */
+    closeTitle?: string;
     onclose: () => void;
     children?: Snippet;
   } = $props();
 
-  const MODAL_SELECTOR = '[role="dialog"][aria-modal="true"]';
+  // Уникальный id заголовка на экземпляр: в стеке модалей (подтверждение поверх другой
+  // модали) общий id отдавал верхнему диалогу имя нижнего.
+  const titleId = $props.id();
+
+  const MODAL_SELECTOR = '.modal-backdrop > .modal-container[aria-modal="true"]';
+
+  function topVisibleModal(): HTMLElement | undefined {
+    return Array.from(document.querySelectorAll<HTMLElement>(MODAL_SELECTOR))
+      .reverse()
+      .find(
+        (dialog) =>
+          dialog.getClientRects().length > 0 && getComputedStyle(dialog).visibility === 'visible'
+      );
+  }
 
   // Телефон: лист тянут вниз за шапку (с ручкой), чтобы закрыть
   let containerEl: HTMLDivElement | null = $state(null);
@@ -71,15 +90,11 @@
   // перерисовке), и на вызвавшей кнопке (Tab пришёл раньше начального фокуса, который
   // ставится через setTimeout). Такой Tab не доходит до обработчика на самом диалоге и
   // увёл бы фокус на страницу под модалью. Пока диалог открыт и он верхний, Tab
-  // возвращает фокус на первый элемент диалога, Shift+Tab: на последний. Фокус внутри
-  // любого диалога aria-modal (свой или лежащего поверх подтверждения) не трогаем.
+  // возвращает фокус на первый элемент диалога, Shift+Tab ведёт на последний.
   const trapWindowTab: Attachment<HTMLDivElement> = (dialog) => {
     const onWindowKeydown = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab') return;
-      const active = document.activeElement;
-      if (active && active !== document.body && active.closest(MODAL_SELECTOR)) return;
-      const dialogs = document.querySelectorAll(MODAL_SELECTOR);
-      if (dialogs[dialogs.length - 1] !== dialog) return;
+      if (event.key !== 'Tab' || event.defaultPrevented) return;
+      if (dialog.contains(document.activeElement) || topVisibleModal() !== dialog) return;
       event.preventDefault();
       const focusables = getFocusableElements(dialog);
       if (focusables.length === 0) dialog.focus();
@@ -98,8 +113,7 @@
     const observer = new MutationObserver(() => {
       const active = document.activeElement;
       if (active && active !== document.body) return;
-      const dialogs = document.querySelectorAll(MODAL_SELECTOR);
-      if (dialogs[dialogs.length - 1] !== dialog) return;
+      if (topVisibleModal() !== dialog) return;
       dialog.focus();
     });
     observer.observe(dialog, { childList: true, subtree: true });
@@ -108,13 +122,14 @@
 
   function getFocusableElements(dialog: HTMLElement): HTMLElement[] {
     const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-    // offsetParent is null for display:none (on the element or an ancestor) — callers
+    // getClientRects() пуст для display:none (на самом элементе или предке) — callers
     // like the dat-drawer variant hide Modal's own header (and its close button) via
     // CSS in favor of a custom in-content header. .focus() on such an element is a
     // silent no-op, so it must be excluded here rather than merely deprioritized.
-    return Array.from(dialog.querySelectorAll(selectors)).filter(
-      (el) => (el as HTMLElement).offsetParent !== null
-    ) as HTMLElement[];
+    // Проверка через offsetParent не годится: у position: fixed он null и у видимых.
+    return Array.from(dialog.querySelectorAll<HTMLElement>(selectors)).filter(
+      (el) => el.tabIndex >= 0 && !el.matches(':disabled') && el.getClientRects().length > 0
+    );
   }
 
   function handleKeydown(event: KeyboardEvent) {
@@ -122,8 +137,9 @@
       onclose();
       return;
     }
-    if (event.key === 'Tab') {
-      const focusables = getFocusableElements(event.currentTarget as HTMLElement);
+    if (event.key === 'Tab' && !event.defaultPrevented) {
+      const dialog = event.currentTarget as HTMLElement;
+      const focusables = getFocusableElements(dialog);
       if (focusables.length === 0) {
         event.preventDefault();
         return;
@@ -131,16 +147,12 @@
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
       const active = document.activeElement;
-      if (event.shiftKey) {
-        if (active === first) {
-          last.focus();
-          event.preventDefault();
-        }
-      } else {
-        if (active === last) {
-          first.focus();
-          event.preventDefault();
-        }
+      // Фокус вне списка обхода (контейнер, tabindex="-1", ставшая disabled кнопка) тоже
+      // замыкается по кругу: штатный Tab увёл бы его за диалог, на страницу под бэкдропом.
+      const outsideList = !focusables.includes(active as HTMLElement);
+      if (outsideList || active === (event.shiftKey ? first : last)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
       }
     }
   }
@@ -154,7 +166,7 @@
       role="dialog"
       aria-modal="true"
       aria-label={ariaLabel || undefined}
-      aria-labelledby={ariaLabel ? undefined : 'modal-title'}
+      aria-labelledby={ariaLabel ? undefined : titleId}
       data-testid={dataTestid || undefined}
       {@attach manageFocus}
       {@attach trapWindowTab}
@@ -165,12 +177,13 @@
       tabindex="-1"
     >
       <header class="modal-header" {@attach sheetSwipe}>
-        <h2 id="modal-title" class="modal-title">{title}</h2>
+        <h2 id={titleId} class="modal-title">{title}</h2>
         <button
           class="modal-close-btn"
           onclick={onclose}
+          disabled={closeDisabled}
           aria-label={$t('app.close')}
-          title={$t('app.close')}
+          title={closeDisabled && closeTitle ? closeTitle : $t('app.close')}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -257,7 +270,11 @@
       background var(--transition-fast),
       color var(--transition-fast);
   }
-  .modal-close-btn:hover {
+  .modal-close-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+  .modal-close-btn:hover:not(:disabled) {
     background: var(--surface-tint);
     color: var(--fg-primary);
   }

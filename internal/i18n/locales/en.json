@@ -204,6 +204,7 @@
   "configlayer.dns.kernel_conflict": "Both cores are running. Stop one of them and try again.",
   "configlayer.dns.kernel_stopped": "Start the core. Enabling interception does not start it.",
   "configlayer.dns.legacy_blocked": "DNS redirection is managed by the “Configuration” layer: the old switch is unavailable.",
+  "configlayer.legacy_blocked": "This setting moved to the “Configuration” section: change it there.",
   "configlayer.dns.legacy_off_failed": "Could not turn off the old redirection.",
   "configlayer.dns.name_invalid": "The name to check is a domain name, for example example.com.",
   "configlayer.dns.no_window": "There is no confirmation window: interception has already been confirmed or rolled back.",

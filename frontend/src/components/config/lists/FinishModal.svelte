@@ -13,6 +13,7 @@
   import Button from '../../Button.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
   import DiffView from '../DiffView.svelte';
+  import ImmediateMark from '../ImmediateMark.svelte';
   import {
     previewOp,
     writeOp,
@@ -154,6 +155,7 @@
 
 <Modal {open} {title} maxWidth="640px" testid="geo-finish-modal" onclose={close}>
   <div class="gf-body">
+    <ImmediateMark />
     {#if body !== ''}
       <p class="gf-text" id="{uid}-body">{body}</p>
     {/if}

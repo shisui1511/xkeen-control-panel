@@ -7,6 +7,7 @@
   import Select from '../../Select.svelte';
   import SegmentedControl, { type SegmentItem } from '../../SegmentedControl.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
+  import ImmediateMark from '../ImmediateMark.svelte';
   import {
     PROFILE_TEMPLATES,
     createProfile,
@@ -219,6 +220,8 @@
   onclose={close}
 >
   <div class="np-body">
+    <!-- Профиль создаётся на диске сразу, мимо черновика (D-14) -->
+    <ImmediateMark />
     <div class="np-scroll" data-testid="new-profile-scroll">
       <div class="form-group np-field">
         <label class="form-label" for={nameId}>{$t('cfg.prof.name_label')}</label>

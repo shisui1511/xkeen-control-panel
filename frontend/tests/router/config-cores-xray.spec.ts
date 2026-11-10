@@ -517,11 +517,15 @@ test('cores: Xray входящие — закреплённые строки и 
     await port.fill(newPort);
     await port.blur();
     await expect(note).toBeVisible({ timeout: T.action });
-    // объявление в полосе черновика ждём всегда, в том числе когда «Входящие» берутся в этом же
-    // черновике: взятие сравнивается с действующим значением configs/ (G-147-3, D-16)
+    // объявление перезапуска перенесено в окно изменений (план 149-08, D-09)
+    await page.getByTestId('config-apply').click();
+    const modal = page.getByTestId('apply-preview-modal');
+    await expect(modal).toBeVisible({ timeout: T.action });
     await expect(
-      page.locator('[data-testid="draft-restart-note"][data-kernel="xray"][data-reason="port"]')
+      modal.locator('[data-testid="draft-restart-note"][data-kernel="xray"][data-reason="port"]')
     ).toBeVisible({ timeout: T.action });
+    await page.getByTestId('apply-preview-cancel').click();
+    await expect(modal).toHaveCount(0);
 
     // вернули записанное значение: объявление под полем исчезло
     await port.fill(oldPort);
@@ -695,22 +699,46 @@ test('cores: Xray входящие — группа force-proxy', async ({ page 
       // «вид → карточка → форма» проверялась всегда
       await takeViaDialog(page, 'inbounds');
       const rows = page.locator(INBOUND_ROWS);
-      // Вид секции после взятия приходит отдельным обновлением и сбрасывает строки формы,
-      // ещё не ушедшие в черновик: строку добавляем заново, пока она не удержится
-      await expect(async () => {
-        const count = await rows.count();
-        await page.getByTestId('section-field-xray-inbounds-add').click();
-        await expect(rows).toHaveCount(count + 1, { timeout: 3000 });
-        const tag = page.getByTestId(`section-field-xray-inbounds-tag-${count}`);
-        await tag.fill('force-proxy', { timeout: 3000 });
-        await tag.blur();
-        const listen = page.getByTestId(`section-field-xray-inbounds-listen-${count}`);
-        await listen.fill('127.0.0.1', { timeout: 3000 });
-        await listen.blur();
-        const port = page.getByTestId(`section-field-xray-inbounds-port-${count}`);
-        await port.fill(String(randomPort()), { timeout: 3000 });
-        await port.blur();
-      }).toPass({ timeout: T.action });
+      const count = await rows.count();
+      await page.getByTestId('section-field-xray-inbounds-add').click();
+      await expect(rows).toHaveCount(count + 1, { timeout: T.action });
+      const tag = page.getByTestId(`section-field-xray-inbounds-tag-${count}`);
+      await tag.fill('force-proxy');
+      await tag.blur();
+
+      // Регрессия: строка без порта в черновик не уходит. Событие черновика от другой правки
+      // (повторная запись секции тем же значением поднимает ревизию) перечитывает вид секции
+      // не раньше чем через 300 мс; незаполненная строка и набранный тег при этом остаются
+      const inb = await sectionOf(page, 'inbounds');
+      const probe = await layerProbe(page);
+      const reread = page
+        .waitForResponse(
+          (r) => r.url().includes('/api/configlayer/cores?kernel=xray') && r.status() === 200,
+          { timeout: T.action }
+        )
+        .catch(() => null);
+      const resave = await api(page, 'POST', '/api/configlayer/cores/save', {
+        revision: probe.revision,
+        kernel: 'xray',
+        section: 'inbounds',
+        form: inb?.form ?? [],
+        advanced: inb?.advanced ?? ''
+      });
+      expect(resave.status, 'повторная запись секции «Входящие»').toBe(200);
+      await expect
+        .poll(async () => (await layerProbe(page)).revision, { timeout: T.action })
+        .toBeGreaterThan(probe.revision);
+      await reread;
+      await page.waitForTimeout(500);
+      await expect(rows, 'добавленная строка пережила перечитывание вида').toHaveCount(count + 1);
+      await expect(tag).toHaveValue('force-proxy');
+      const listen = page.getByTestId(`section-field-xray-inbounds-listen-${count}`);
+      await listen.fill('127.0.0.1', { timeout: 3000 });
+      await listen.blur();
+      await expect(listen).toHaveValue('127.0.0.1');
+      const port = page.getByTestId(`section-field-xray-inbounds-port-${count}`);
+      await port.fill(String(randomPort()), { timeout: 3000 });
+      await port.blur();
       await expect
         .poll(async () => (await xrayView(page)).forceProxy?.tags ?? [], { timeout: T.action })
         .toContain('force-proxy');

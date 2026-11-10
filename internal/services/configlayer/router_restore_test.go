@@ -227,8 +227,14 @@ type rtHookEnv struct {
 	applies []StateView
 }
 
-func rtNewHookEnv(t *testing.T) *rtHookEnv {
+// rtNewHookEnv — слой с генераторами rtSecGen и rtHookGen и хуком BeforeApply,
+// который запоминает свой вход. before (не больше одного) регистрируется до Start
+// и вызывается тем же хуком после записи входа, синхронно под замком применения.
+func rtNewHookEnv(t *testing.T, before ...func(e *rtHookEnv, st StateView)) *rtHookEnv {
 	t.Helper()
+	if len(before) > 1 {
+		t.Fatal("rtNewHookEnv: допустим один колбэк BeforeApply")
+	}
 	if _, err := os.Stat(rtRefreshXrayBin); err != nil {
 		t.Skipf("Xray не установлен на устройстве: %v", err)
 	}
@@ -262,6 +268,9 @@ func rtNewHookEnv(t *testing.T) *rtHookEnv {
 			e.mu.Lock()
 			e.applies = append(e.applies, st)
 			e.mu.Unlock()
+			if len(before) == 1 {
+				before[0](e, st)
+			}
 		},
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
@@ -370,6 +379,241 @@ func TestRouterLayerSectionLiveHooks(t *testing.T) {
 		rtSecEqual(t, "BeforeApply Draft[rt_log]", got[0].Draft["rt_log"], `{"access":"none"}`)
 		if _, has := got[0].Applied["rt_log"]; has {
 			t.Errorf("BeforeApply получил Applied уже после применения: %s", got[0].Applied["rt_log"])
+		}
+	})
+}
+
+// rtSnapshotInjector — поздняя правка черновика внутри хука BeforeApply, то есть
+// между подтверждением ревизии в StartApplyAt и сборкой плана. Срабатывает один
+// раз после arm, итог правки запоминает.
+type rtSnapshotInjector struct {
+	mu       sync.Mutex
+	sections map[string]json.RawMessage
+	fired    int
+	err      error
+}
+
+func (in *rtSnapshotInjector) arm(sections map[string]json.RawMessage) {
+	in.mu.Lock()
+	in.sections = sections
+	in.mu.Unlock()
+}
+
+// hook — колбэк rtNewHookEnv: настоящий EditDraftBatch по ревизии, которую видит хук.
+func (in *rtSnapshotInjector) hook(e *rtHookEnv, st StateView) {
+	in.mu.Lock()
+	sections := in.sections
+	in.sections = nil
+	in.mu.Unlock()
+	if sections == nil {
+		return
+	}
+	_, err := e.layer.EditDraftBatch(st.DraftRevision, sections, nil)
+	in.mu.Lock()
+	in.fired++
+	in.err = err
+	in.mu.Unlock()
+}
+
+func (in *rtSnapshotInjector) result() (int, error) {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	return in.fired, in.err
+}
+
+// rtApplyAt — «Применить» с ревизией окна изменений; ждёт apply_done из подписки
+// (не прошлый итог конвейера).
+func rtApplyAt(t *testing.T, e *rtHookEnv, rev int64) ApplyView {
+	t.Helper()
+	events, cancel, err := e.layer.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	if err := e.layer.StartApplyAt(true, rev); err != nil {
+		t.Fatalf("G149-01 snapshot: StartApplyAt(%d): %v", rev, err)
+	}
+	return waitApplyDone(t, events)
+}
+
+func rtSnapEqual(t *testing.T, what string, got json.RawMessage, want string) {
+	t.Helper()
+	if !SectionEqual(got, json.RawMessage(want)) {
+		t.Errorf("G149-01 snapshot: %s = %s, ожидалось %s", what, got, want)
+	}
+}
+
+// rtSnapLog — ключи log файла генератора rtSecGen.
+func rtSnapLog(t *testing.T, path string) map[string]string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("G149-01 snapshot: файл генератора: %v", err)
+	}
+	var doc struct {
+		Log map[string]string `json:"log"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("G149-01 snapshot: файл генератора не JSON: %v", err)
+	}
+	return doc.Log
+}
+
+// rtSnapLate сверяет состояние после подтверждённого запуска с поздней правкой:
+// Applied — снимок подтверждения, Draft — поздняя правка, ревизия не меньше
+// ревизии правки, черновик открыт.
+func rtSnapLate(t *testing.T, e *rtHookEnv, rev int64, applied, draft, late string) State {
+	t.Helper()
+	st := e.state(t)
+	rtSnapEqual(t, "Applied[rt_log]", st.Applied["rt_log"], applied)
+	if v, has := st.Applied["rt_late"]; has {
+		t.Errorf("G149-01 snapshot: поздняя секция попала в Applied: %s", v)
+	}
+	rtSnapEqual(t, "Draft[rt_log]", st.Draft["rt_log"], draft)
+	rtSnapEqual(t, "Draft[rt_late]", st.Draft["rt_late"], late)
+	if st.DraftRevision < rev+1 {
+		t.Errorf("G149-01 snapshot: ревизия черновика %d, ожидалась не меньше %d", st.DraftRevision, rev+1)
+	}
+	if !draftDirty(st) {
+		t.Error("G149-01 snapshot: поздняя правка пропала из неприменённых изменений")
+	}
+	return st
+}
+
+// rtSnapClean — повторное «Применить» без инъекции применяет черновик целиком.
+func rtSnapClean(t *testing.T, e *rtHookEnv, rev int64, late string) {
+	t.Helper()
+	st := e.state(t)
+	if st.DraftRevision != rev {
+		t.Errorf("G149-01 snapshot: ревизия после чистого применения %d, ожидалась %d", st.DraftRevision, rev)
+	}
+	if draftDirty(st) {
+		t.Errorf("G149-01 snapshot: черновик не чист после применения поздней правки: Draft %v, Applied %v", rtSectionNames(st.Draft), rtSectionNames(st.Applied))
+	}
+	rtSnapEqual(t, "Applied[rt_late]", st.Applied["rt_late"], late)
+}
+
+// Подтверждение ревизии закрепляет снимок черновика (G149-01, D-08, D-09): правка,
+// внесённая настоящим EditDraftBatch между проверкой ревизии в StartApplyAt и
+// сборкой (хук BeforeApply работает как раз в этом окне), не применяется и остаётся
+// в черновике (D-12, D-13). Настоящий слой, хранилище и `xray run -test` роутера;
+// работающие ядра стенда не трогаются, ядро тест не читает и не переключает.
+func TestRouterApplyRevisionSnapshot(t *testing.T) {
+	const late = `{"late":1}`
+
+	t.Run("write", func(t *testing.T) {
+		inj := &rtSnapshotInjector{}
+		e := rtNewHookEnv(t, inj.hook)
+		const valA = `{"access":"none"}`
+		const valB = `{"access":"none","level":"debug"}`
+		e.edit(t, "rt_log", valA)
+		rev := e.state(t).DraftRevision
+		inj.arm(map[string]json.RawMessage{"rt_log": json.RawMessage(valB), "rt_late": json.RawMessage(late)})
+
+		view := rtApplyAt(t, e, rev)
+		if fired, err := inj.result(); fired != 1 || err != nil {
+			t.Fatalf("G149-01 snapshot: поздняя правка не внесена: срабатываний %d, ошибка %v", fired, err)
+		}
+		if view.Result == nil || view.Result.Code != ResultApplied {
+			t.Fatalf("G149-01 snapshot: итог подтверждённого запуска %+v, ожидался %s", view.Result, ResultApplied)
+		}
+		if lvl, has := rtSnapLog(t, e.file)["loglevel"]; has {
+			t.Errorf("G149-01 snapshot: поздняя правка level попала в файл: loglevel=%q", lvl)
+		}
+		e.mu.Lock()
+		seen := append([]StateView(nil), e.applies...)
+		e.mu.Unlock()
+		if len(seen) != 1 {
+			t.Fatalf("G149-01 snapshot: BeforeApply вызван %d раз, ожидался 1", len(seen))
+		}
+		rtSnapEqual(t, "BeforeApply Draft[rt_log]", seen[0].Draft["rt_log"], valA)
+		if seen[0].DraftRevision != rev {
+			t.Errorf("G149-01 snapshot: BeforeApply видел ревизию %d, ожидалась %d", seen[0].DraftRevision, rev)
+		}
+		st := rtSnapLate(t, e, rev, valA, valB, late)
+
+		// Поздняя правка применяется своим подтверждением, без повторной инъекции.
+		view = rtApplyAt(t, e, st.DraftRevision)
+		if view.Result == nil || view.Result.Code != ResultApplied {
+			t.Fatalf("G149-01 snapshot: итог применения поздней правки %+v", view.Result)
+		}
+		if lvl := rtSnapLog(t, e.file)["loglevel"]; lvl != "debug" {
+			t.Errorf("G149-01 snapshot: loglevel после применения поздней правки %q, ожидалось debug", lvl)
+		}
+		rtSnapClean(t, e, st.DraftRevision, late)
+		if fired, _ := inj.result(); fired != 1 {
+			t.Errorf("G149-01 snapshot: инъекция сработала %d раз, ожидался 1", fired)
+		}
+	})
+
+	t.Run("empty_plan", func(t *testing.T) {
+		inj := &rtSnapshotInjector{}
+		e := rtNewHookEnv(t, inj.hook)
+		e.edit(t, "rt_log", `{"access":"none"}`)
+		e.applyDraft(t)
+		fileBefore := hashOf(e.file)
+		if fileBefore == "" {
+			t.Fatal("G149-01 snapshot: исходное применение не записало файл")
+		}
+		// Панельное поле note в файл не попадает: план пуст, Applied фиксирует syncApplied.
+		const valA = `{"access":"none","note":"n1"}`
+		const valB = `{"access":"none","note":"n2"}`
+		e.edit(t, "rt_log", valA)
+		rev := e.state(t).DraftRevision
+		inj.arm(map[string]json.RawMessage{"rt_log": json.RawMessage(valB), "rt_late": json.RawMessage(late)})
+
+		view := rtApplyAt(t, e, rev)
+		if fired, err := inj.result(); fired != 1 || err != nil {
+			t.Fatalf("G149-01 snapshot: поздняя правка не внесена: срабатываний %d, ошибка %v", fired, err)
+		}
+		if view.Result == nil || !view.Result.OK || view.Result.Code != ResultNothingToApply {
+			t.Fatalf("G149-01 snapshot: итог подтверждённого запуска %+v, ожидался %s", view.Result, ResultNothingToApply)
+		}
+		if got := hashOf(e.file); got != fileBefore {
+			t.Errorf("G149-01 snapshot: файл изменён при пустом плане: %s -> %s", fileBefore, got)
+		}
+		st := rtSnapLate(t, e, rev, valA, valB, late)
+
+		view = rtApplyAt(t, e, st.DraftRevision)
+		if view.Result == nil || !view.Result.OK || view.Result.Code != ResultNothingToApply {
+			t.Fatalf("G149-01 snapshot: итог применения поздней правки %+v", view.Result)
+		}
+		if got := hashOf(e.file); got != fileBefore {
+			t.Errorf("G149-01 snapshot: файл изменён панельным полем: %s -> %s", fileBefore, got)
+		}
+		rtSnapEqual(t, "Applied[rt_log] после поздней правки", e.state(t).Applied["rt_log"], valB)
+		rtSnapClean(t, e, st.DraftRevision, late)
+	})
+
+	t.Run("stale_revision", func(t *testing.T) {
+		e := rtNewHookEnv(t)
+		e.edit(t, "rt_log", `{"access":"none"}`)
+		rev := e.state(t).DraftRevision
+		e.edit(t, "rt_log", `{"access":"none","level":"debug"}`)
+		before := e.state(t)
+
+		if err := e.layer.StartApplyAt(true, rev); !errors.Is(err, ErrDraftConflict) {
+			t.Fatalf("G149-01 snapshot: устаревшая ревизия %d: %v, ожидался ErrDraftConflict", rev, err)
+		}
+		if _, err := os.Stat(e.file); !os.IsNotExist(err) {
+			t.Errorf("G149-01 snapshot: файл записан при устаревшей ревизии: %v", err)
+		}
+		e.mu.Lock()
+		calls := len(e.applies)
+		e.mu.Unlock()
+		if calls != 0 {
+			t.Errorf("G149-01 snapshot: BeforeApply вызван %d раз при устаревшей ревизии", calls)
+		}
+		if cur := e.layer.pipeline.Current(); cur.Running || cur.Result != nil {
+			t.Errorf("G149-01 snapshot: конвейер запущен при устаревшей ревизии: %+v", cur)
+		}
+		after := e.state(t)
+		if after.DraftRevision != before.DraftRevision {
+			t.Errorf("G149-01 snapshot: ревизия %d -> %d", before.DraftRevision, after.DraftRevision)
+		}
+		rtSnapEqual(t, "Draft[rt_log]", after.Draft["rt_log"], `{"access":"none","level":"debug"}`)
+		if len(after.Applied) != 0 {
+			t.Errorf("G149-01 snapshot: Applied изменён при устаревшей ревизии: %v", rtSectionNames(after.Applied))
 		}
 	})
 }

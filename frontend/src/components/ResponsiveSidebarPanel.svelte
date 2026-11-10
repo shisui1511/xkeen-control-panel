@@ -225,9 +225,26 @@
     }
   }
 
+  // Панель шторки в разметке: от монтирования до конца анимации ухода. По ней возврат фокуса
+  // отличает фокус внутри уходящей шторки от фокуса, который пользователь уже перенёс в другое место.
+  // tabindex=-1 даёт панели принять фокус, когда в ней нет доступных элементов; колонке на ПК он
+  // не ставится, и щелчок по пустому месту колонки фокус не переносит.
+  let overlayPanelEl: HTMLElement | null = null;
+
+  const trackOverlayPanel: Attachment<HTMLElement> = (node) => {
+    overlayPanelEl = node;
+    node.tabIndex = -1;
+    return () => {
+      if (overlayPanelEl === node) overlayPanelEl = null;
+    };
+  };
+
   // Блокировка прокрутки body и возврат фокуса, пока шторка открыта как оверлей. Вложение на
   // document перезапускается при смене isOverlay и show: ветки открытия и закрытия те же,
   // что были в $effect, а выход из оверлея возвращает фокус сразу, не дожидаясь ухода шторки.
+  // Фокус возвращается, только если он потерян (body, убранный узел) или остался в оверлее
+  // (шторка или бэкдроп, который получает фокус при нажатии мышью), и только на элемент, который
+  // ещё в разметке: фокус в редакторе или другом месте не отнимается.
   const overlayLock: Attachment<Document> = () => {
     if (isOverlay && show) {
       lockBodyScroll();
@@ -236,13 +253,128 @@
       }
     } else {
       restoreBodyScroll();
-      if (previouslyFocusedElement && typeof previouslyFocusedElement.focus === 'function') {
-        previouslyFocusedElement.focus();
-        previouslyFocusedElement = null;
-      }
+      const target = previouslyFocusedElement;
+      previouslyFocusedElement = null;
+      const active = document.activeElement;
+      const focusLost = !active || active === document.body || !active.isConnected;
+      const overlayRoot = overlayPanelEl?.parentElement ?? overlayPanelEl;
+      const inSheet = active !== null && overlayRoot?.contains(active) === true;
+      if (target?.isConnected && (focusLost || inSheet)) target.focus();
     }
 
     return () => restoreBodyScroll();
+  };
+
+  const FOCUSABLE =
+    'a[href], button, input:not([type="hidden"]), select, textarea, summary, [contenteditable="true"], [tabindex]';
+
+  /** Видимые доступные элементы шторки в порядке разметки. */
+  function focusablesIn(root: HTMLElement): HTMLElement[] {
+    return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => {
+      if (el.tabIndex < 0) return false;
+      if ((el as HTMLButtonElement).disabled) return false;
+      if (el.closest('[inert], [aria-hidden="true"]')) return false;
+      if (el.getClientRects().length === 0) return false;
+      return getComputedStyle(el).visibility !== 'hidden';
+    });
+  }
+
+  /** Шторка — верхняя модальная поверхность: открыта, не уходит, поверх неё нет диалога. */
+  function isTopSheet(node: HTMLElement): boolean {
+    return (
+      isOverlay &&
+      show &&
+      node.isConnected &&
+      !node.inert &&
+      document.querySelector(MODAL_SURFACES) === null
+    );
+  }
+
+  /** Фокус на первый доступный элемент шторки, без них — на саму панель. */
+  function focusInto(node: HTMLElement): void {
+    const first = focusablesIn(node)[0] ?? node;
+    first.focus({ preventScroll: true });
+  }
+
+  // Удержание фокуса в открытой шторке (CFG-03, CFG-05): начальный фокус на первом видимом
+  // элементе, цикл Tab и Shift+Tab, возврат фокуса, ушедшего наружу. Вложение читает show и
+  // isOverlay: при повторном открытии во время ухода ветка возобновляется без нового монтирования,
+  // и вложение перезапускается по смене show. Слушатели проверяют состояние при каждом событии:
+  // уходящая шторка (inert), выход из оверлея и диалог поверх шторки клавиатуру не перехватывают;
+  // после закрытия диалога шторка снова держит фокус. Вложение и trackOverlayPanel ставятся
+  // только панели ветки оверлея (panel(true)), колонке на ПК — нет.
+  const overlayFocus: Attachment<HTMLElement> = (node) => {
+    if (!show || !isOverlay) return;
+
+    let frame = 0;
+    let tries = 0;
+    // Начальный фокус после текущего события: клик или Enter по кнопке-переключателю уже
+    // отработал, прежний фокус сохранён в overlayLock. Пока шторка возобновляется после
+    // прерванного ухода, она ещё inert: попытка повторяется в следующих кадрах.
+    const focusInitial = () => {
+      frame = 0;
+      if (!isTopSheet(node)) {
+        if (node.isConnected && node.inert && show && isOverlay && tries++ < 10) {
+          frame = requestAnimationFrame(focusInitial);
+        }
+        return;
+      }
+      if (!node.contains(document.activeElement)) focusInto(node);
+    };
+    const timerId = setTimeout(focusInitial, 0);
+
+    const onKeydown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || e.defaultPrevented || !isTopSheet(node)) return;
+      const active = document.activeElement;
+      const list = focusablesIn(node);
+      if (list.length === 0) {
+        e.preventDefault();
+        node.focus({ preventScroll: true });
+        return;
+      }
+      const first = list[0];
+      const last = list[list.length - 1];
+      let target: HTMLElement | null = null;
+      if (!active || !node.contains(active)) {
+        // фокус снаружи шторки (body, кнопка-переключатель): Tab ведёт к началу, Shift+Tab к концу
+        target = e.shiftKey ? last : first;
+      } else if (e.shiftKey ? active === first || active === node : active === last) {
+        target = e.shiftKey ? last : first;
+      } else if (!list.includes(active as HTMLElement)) {
+        // фокус на элементе вне обхода (tabindex=-1): соседний по разметке, по кругу
+        const following = list.filter(
+          (el) => (active.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+        );
+        const preceding = list.filter(
+          (el) => (active.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING) !== 0
+        );
+        target = e.shiftKey ? (preceding[preceding.length - 1] ?? last) : (following[0] ?? first);
+      }
+      if (target) {
+        e.preventDefault();
+        target.focus({ preventScroll: true });
+      }
+    };
+
+    const onFocusIn = (e: FocusEvent) => {
+      if (!isTopSheet(node)) return;
+      const target = e.target;
+      if (!(target instanceof Node)) return;
+      // бэкдроп и сама шторка — часть оверлея
+      if (node.contains(target) || node.parentElement?.contains(target)) return;
+      // фокус в другом диалоге (aria-modal) не отнимается
+      if (target instanceof Element && target.closest('[role="dialog"][aria-modal="true"]')) return;
+      focusInto(node);
+    };
+
+    window.addEventListener('keydown', onKeydown, true);
+    document.addEventListener('focusin', onFocusIn);
+    return () => {
+      clearTimeout(timerId);
+      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener('keydown', onKeydown, true);
+      document.removeEventListener('focusin', onFocusIn);
+    };
   };
 
   onDestroy(() => {
@@ -266,6 +398,8 @@
     role={isOverlay ? 'dialog' : undefined}
     aria-modal={isOverlay ? 'true' : undefined}
     aria-label={isOverlay ? (title ?? $t('editor.sidebar_panel')) : undefined}
+    {@attach animated ? trackOverlayPanel : null}
+    {@attach animated ? overlayFocus : null}
     ontouchstart={onTouchStart}
     ontouchmove={onTouchMove}
     ontouchend={onTouchEnd}

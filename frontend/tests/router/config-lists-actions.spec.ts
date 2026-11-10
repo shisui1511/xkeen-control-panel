@@ -1077,14 +1077,64 @@ test.describe('удаление источника', () => {
     const del = row.getByTestId(`geo-source-delete-${DEL_FILE}`);
     const restore = row.getByTestId(`geo-source-restore-${DEL_FILE}`);
     const chip = row.getByTestId(`geo-source-draft-${DEL_FILE}`);
-    const geoRow = page.getByTestId('config-draft-geodata');
     await expect(row).toBeVisible({ timeout: T.action });
     await expect(del).toHaveAttribute('aria-label', /.+/);
     await expect(restore).toHaveCount(0);
 
+    const dialog = page.getByRole('dialog');
+    const root = page.locator('html');
+    const themeBefore = await root.evaluate((el) => ({
+      theme: el.getAttribute('data-theme'),
+      scheme: el.getAttribute('data-scheme')
+    }));
+    const viewportBefore = page.viewportSize()!;
+    try {
+      await page.setViewportSize({ width: 390, height: 844 });
+      for (const theme of ['dusk', 'light']) {
+        await root.evaluate((el, theme) => {
+          el.setAttribute('data-theme', theme);
+          el.setAttribute('data-scheme', theme === 'light' ? 'light' : 'dark');
+        }, theme);
+        await del.click();
+        const actions = dialog.locator('.confirm-actions');
+        await expect(actions).toBeVisible({ timeout: T.action });
+        await expect(actions.getByRole('button')).toHaveCount(2);
+        await expect
+          .poll(
+            () =>
+              actions.evaluate((footer) => {
+                const bounds = footer.getBoundingClientRect();
+                return Array.from(footer.querySelectorAll('.btn'), (button) => {
+                  const { height, left, right, top, bottom } = button.getBoundingClientRect();
+                  return (
+                    height >= 44 &&
+                    left >= Math.max(0, bounds.left) &&
+                    right <= Math.min(window.innerWidth, bounds.right) &&
+                    top >= Math.max(0, bounds.top) &&
+                    bottom <= Math.min(window.innerHeight, bounds.bottom)
+                  );
+                });
+              }),
+            { message: `G149-08: кнопки в подвале, тема ${theme}`, timeout: T.action }
+          )
+          .toEqual([true, true]);
+        await page.keyboard.press('Escape');
+        await expect(dialog).toHaveCount(0, { timeout: T.action });
+        await expect(del).toBeFocused();
+        await expect(chip).toHaveCount(0);
+      }
+    } finally {
+      await root.evaluate((el, { theme, scheme }) => {
+        if (theme === null) el.removeAttribute('data-theme');
+        else el.setAttribute('data-theme', theme);
+        if (scheme === null) el.removeAttribute('data-scheme');
+        else el.setAttribute('data-scheme', scheme);
+      }, themeBefore);
+      await page.setViewportSize(viewportBefore);
+    }
+
     // ссылок нет: подтверждение, а не диалог каскада; отмена ничего не помечает
     await del.click();
-    const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: T.action });
     await expect(page.getByTestId('geo-delete-modal')).toHaveCount(0);
     await expect(dialog).toContainText(/Ссылок на файл нет|Nothing references the file/);
@@ -1103,7 +1153,16 @@ test.describe('удаление источника', () => {
     await expect(row.getByTestId(`geo-source-edit-${DEL_FILE}`)).toHaveCount(0);
     await expect(del).toHaveCount(0);
     await expect(restore).toBeVisible();
-    await expect(geoRow).toContainText(DEL_FILE, { timeout: T.action });
+    await page.getByTestId('config-apply').click();
+    const preview = page.getByTestId('apply-preview-modal');
+    await expect(preview).toBeVisible({ timeout: T.action });
+    const listsGroup = preview.getByTestId('apply-preview-group-lists');
+    await expect(listsGroup).toBeVisible({ timeout: T.action });
+    await expect(
+      listsGroup.locator('[data-testid^="apply-preview-row-"]').filter({ hasText: DEL_FILE })
+    ).toBeVisible({ timeout: T.action });
+    await page.getByTestId('apply-preview-cancel').click();
+    await expect(preview).toHaveCount(0);
     const marked = await snapshot(page);
     expect(marked.draft?.some((d) => d.file === DEL_FILE && d.mode === 'delete')).toBe(true);
     // запись и файл на месте: удаление ждёт «Применить»
@@ -1112,7 +1171,7 @@ test.describe('удаление источника', () => {
     // «Вернуть источник» снимает только пометку
     await restore.click();
     await expect(chip).toHaveCount(0, { timeout: T.action });
-    await expect(geoRow).toHaveCount(0, { timeout: T.action });
+    expect((await snapshot(page)).draft ?? []).toHaveLength(0);
     await expect(del).toBeVisible();
 
     // снова пометить и сбросить черновик из полосы
@@ -1125,7 +1184,6 @@ test.describe('удаление источника', () => {
     await dialog.locator('.confirm-actions button').last().click();
     await expect(dialog).toHaveCount(0, { timeout: T.action });
     await expect(chip).toHaveCount(0, { timeout: T.action });
-    await expect(geoRow).toHaveCount(0, { timeout: T.action });
     expect((await snapshot(page)).draft ?? []).toHaveLength(0);
 
     await guard.assertClean();
@@ -1222,9 +1280,16 @@ test.describe('удаление источника', () => {
     await expect(row.getByTestId(`geo-source-draft-${src.id}`)).toBeVisible({
       timeout: T.action
     });
-    await expect(page.getByTestId('config-draft-geodata')).toContainText(src.file, {
-      timeout: T.action
-    });
+    await page.getByTestId('config-apply').click();
+    const preview = page.getByTestId('apply-preview-modal');
+    await expect(preview).toBeVisible({ timeout: T.action });
+    const listsGroup = preview.getByTestId('apply-preview-group-lists');
+    await expect(listsGroup).toBeVisible({ timeout: T.action });
+    await expect(
+      listsGroup.locator('[data-testid^="apply-preview-row-"]').filter({ hasText: src.file })
+    ).toBeVisible({ timeout: T.action });
+    await page.getByTestId('apply-preview-cancel').click();
+    await expect(preview).toHaveCount(0);
     const marked = await api(page, 'GET', '/api/configlayer/routing');
     const ruleIds = ((marked.data?.rules ?? []) as { id: string }[]).map((r) => r.id);
     expect(ruleIds, 'правило без условий убрано каскадом').not.toContain(ruleId);
@@ -1238,7 +1303,6 @@ test.describe('удаление источника', () => {
     await expect(row.getByTestId(`geo-source-draft-${src.id}`)).toHaveCount(0, {
       timeout: T.action
     });
-    await expect(page.getByTestId('config-draft-geodata')).toHaveCount(0);
     expect((await snapshot(page)).draft ?? []).toHaveLength(0);
 
     await guard.assertClean();

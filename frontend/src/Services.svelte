@@ -50,6 +50,7 @@
     type KernelName
   } from './lib/serviceControl';
   import { kernelLabel } from './lib/kernelState';
+  import { editorHash, editorHref } from './lib/editorRoute';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import XKeenSettingsCard from './components/xkeen/XKeenSettingsCard.svelte';
   import XKeenInstallCard from './components/xkeen/XKeenInstallCard.svelte';
@@ -438,7 +439,7 @@
                 $t('svc.preflight_fix')
               );
               if (!proceed) {
-                window.location.hash = '/editor';
+                window.location.hash = editorHash();
                 actionLoading[key] = false;
                 return;
               }
@@ -1100,7 +1101,7 @@
                 {/if}
                 {#if ($capabilities?.mihomo?.process_running || mihomo?.process_status === 'running') && $capabilities?.mihomo?.reachable && !$capabilities?.mihomo?.api_reachable}
                   <a
-                    href="#/editor"
+                    href={$editorHref}
                     class="badge badge--tag badge-warning mihomo-api-badge-link"
                     title={$t('svc.mihomo_api_unavailable_title')}
                     onclick={(e) => e.stopPropagation()}

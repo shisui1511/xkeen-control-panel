@@ -3,6 +3,7 @@
   import { t } from '../../../i18n';
   import Button from '../../Button.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
+  import ImmediateMark from '../ImmediateMark.svelte';
   import { applyRunning } from '../../../lib/configLayer';
   import { configSubTabHash } from '../../../lib/configSubTab';
   import { fetchTakeover, reclaimRouting } from '../../../lib/configRouting';
@@ -11,7 +12,7 @@
     ownerState,
     routingBusy,
     confirmRelease,
-    releaseAndApply,
+    releaseAndPreview,
     guarded
   } from './routingOwner';
 
@@ -65,7 +66,8 @@
   async function run(name: 'mihomo' | 'xray' | 'release') {
     action = name;
     try {
-      if (name === 'release') await releaseAndApply();
+      // «Отпустить» пишет возврат в черновик и открывает окно изменений (D-08)
+      if (name === 'release') await releaseAndPreview();
       else await guarded(() => reclaimRouting(name));
     } finally {
       action = '';
@@ -84,6 +86,8 @@
     <div class="ro-body">
       <span class="ro-text">{$t('cfg.routing.drift_profile')}</span>
       <div class="ro-actions">
+        <!-- «Вернуть профиль панели» пишет файлы сразу, мимо черновика (D-14) -->
+        <ImmediateMark />
         <Button
           variant="primary"
           disabled={blocked}
@@ -112,6 +116,8 @@
     <div class="ro-body">
       <span class="ro-text">{$t('cfg.routing.drift_foreign', { file: xrayDrift.join(', ') })}</span>
       <div class="ro-actions">
+        <!-- «Вернуть файл панели» пишет файл сразу, мимо черновика (D-14) -->
+        <ImmediateMark />
         <Button
           variant="primary"
           disabled={blocked}
@@ -238,6 +244,7 @@
   .ro-actions {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: var(--spacing-2);
   }
 

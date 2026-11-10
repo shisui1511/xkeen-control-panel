@@ -8,6 +8,7 @@
   import Input from '../../Input.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
   import DiffView from '../DiffView.svelte';
+  import ImmediateMark from '../ImmediateMark.svelte';
   import ProbeResults from './ProbeResults.svelte';
   import {
     geodataView,
@@ -206,6 +207,7 @@
   onclose={close}
 >
   <div class="eu-body">
+    <ImmediateMark />
     <div class="eu-field eu-mono" data-testid="geo-url-file">
       <Input id="{uid}-file" label={$t('cfg.geo.add_file')} value={file} disabled />
       <p class="eu-hint">{$t('cfg.geo.url_name_fixed')}</p>

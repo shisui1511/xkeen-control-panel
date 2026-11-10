@@ -42,6 +42,7 @@
   import ChevronUp from './icons/ChevronUp.svelte';
   import Grip from './icons/Grip.svelte';
   import ArrowRight from './icons/ArrowRight.svelte';
+  import Folder from './icons/Folder.svelte';
 
   let {
     name,
@@ -140,4 +141,6 @@
   <Grip {size} {color} class={className} />
 {:else if name === 'arrow-right'}
   <ArrowRight {size} {color} class={className} />
+{:else if name === 'folder'}
+  <Folder {size} {color} class={className} />
 {/if}

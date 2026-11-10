@@ -7,7 +7,8 @@
     expected,
     actual,
     missing = false,
-    truncated = false
+    truncated = false,
+    caption: captionOverride
   }: {
     id?: string;
     /** Что запишет панель (добавленные строки «+»). */
@@ -17,6 +18,8 @@
     /** Файла на диске нет: все строки ожидаемого содержимого — добавленные. */
     missing?: boolean;
     truncated?: boolean;
+    /** Своя подпись сравнения, если «−» и «+» значат не «на диске» и «запишет панель». */
+    caption?: string;
   } = $props();
 
   // Строки выводятся текстовыми узлами Svelte: содержимое файла не исполняется (T-144-46)
@@ -26,7 +29,9 @@
     return lines;
   });
   const groups = $derived(missing ? [] : getDiffGroups(actual, expected));
-  const caption = $derived(missing ? $t('cfg.diff.missing') : $t('cfg.diff.caption'));
+  const caption = $derived(
+    captionOverride ?? (missing ? $t('cfg.diff.missing') : $t('cfg.diff.caption'))
+  );
 </script>
 
 <div class="diff-view" {id} data-testid="config-diff">

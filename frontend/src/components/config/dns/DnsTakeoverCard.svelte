@@ -88,6 +88,7 @@
   import DnsLocalZones from './DnsLocalZones.svelte';
   import DnsOutcomeNote from './DnsOutcomeNote.svelte';
   import DnsLegacyNote from './DnsLegacyNote.svelte';
+  import ImmediateMark from '../ImmediateMark.svelte';
   import {
     dnsTakeover,
     dnsLoadError,
@@ -527,7 +528,10 @@
 <section class="card dns-card" aria-labelledby={titleId} data-testid="dns-takeover-card">
   <div class="dns-head">
     <div class="dns-head-text">
-      <h3 class="dns-title" id={titleId}>{$t('cfg.dns.title')}</h3>
+      <div class="dns-title-row">
+        <h3 class="dns-title" id={titleId}>{$t('cfg.dns.title')}</h3>
+        <ImmediateMark />
+      </div>
       <p class="dns-caption">{$t('cfg.dns.subtitle')}</p>
     </div>
     {#if view && dnsState}
@@ -885,6 +889,14 @@
     min-width: 0;
   }
 
+  .dns-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--spacing-2);
+    min-width: 0;
+  }
+
   .dns-title {
     margin: 0;
     font-size: var(--font-size-lg);
@@ -965,6 +977,11 @@
   .dns-block-text {
     min-width: 0;
     overflow-wrap: anywhere;
+    line-height: 1.5;
+  }
+
+  .dns-block-text .dns-link {
+    line-height: inherit;
   }
 
   .dns-stale {
@@ -1198,6 +1215,12 @@
   @media (max-width: 480px) {
     .dns-actions :global(.btn) {
       flex: 1 1 100%;
+    }
+
+    .dns-block-text .dns-link {
+      display: block;
+      margin: var(--spacing-1) 0 0 0;
+      line-height: inherit;
     }
   }
 </style>

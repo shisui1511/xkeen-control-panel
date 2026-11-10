@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -27,6 +28,20 @@ func (a *API) requireLayer(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// legacyBlocked закрывает старые входы настройки, которые пишут конфиг ядра мимо
+// слоя «Конфигурация» (D-17): при включённом флаге отвечает 409 legacy_blocked с
+// переведённым текстом до разбора тела и любой записи. Флаг читается на каждый
+// запрос: маршруты регистрируются безусловно, флаг меняется на ходу. Авторизация и
+// CSRF проверяются обёрткой HandleProtected раньше обработчика. Возвращает true,
+// если ответ уже записан.
+func (a *API) legacyBlocked(w http.ResponseWriter, r *http.Request) bool {
+	if a.configLayer == nil || !a.configLayer.Enabled() {
+		return false
+	}
+	JSONErrorCode(w, http.StatusConflict, "legacy_blocked", a.t(r, "configlayer.legacy_blocked"))
+	return true
+}
+
 // writeLayerError переводит ошибку слоя в HTTP-ответ по таблице из контракта API.
 // Сообщения — переведённые строки по коду ошибки. Для неклассифицированной ошибки
 // (500) текст самой ошибки без ANSI-последовательностей уходит в поле detail, как
@@ -39,7 +54,8 @@ func (a *API) writeLayerError(w http.ResponseWriter, r *http.Request, err error)
 		JSONErrorCode(w, http.StatusNotFound, "config_layer_disabled", a.t(r, "configlayer.disabled"))
 	case errors.Is(err, configlayer.ErrDraftConflict):
 		JSONErrorCode(w, http.StatusConflict, "draft_conflict", a.t(r, "configlayer.draft_conflict"))
-	case errors.Is(err, configlayer.ErrInvalidSection), errors.Is(err, configlayer.ErrUnknownDiagAction):
+	case errors.Is(err, configlayer.ErrInvalidSection), errors.Is(err, configlayer.ErrUnknownDiagAction),
+		errors.Is(err, configlayer.ErrInvalidApplyID):
 		JSONErrorCode(w, http.StatusBadRequest, "invalid_request", a.t(r, "configlayer.invalid_request"))
 	case errors.Is(err, configlayer.ErrGeodataBusy):
 		// Замок применения держит менеджер geodata: свой код и текст, раньше apply_busy.
@@ -225,13 +241,38 @@ func (a *API) ConfigLayerApply(w http.ResponseWriter, r *http.Request) {
 	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) {
 		return
 	}
-	// Тело не используется, но размер ограничен как у остальных запросов.
+	// Необязательное тело {revision}: ревизия черновика, которую показало окно
+	// изменений. Пустое тело (прежние вызовы) — ревизия не сверяется.
+	var req struct {
+		Revision int64 `json:"revision"`
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxLayerBodyBytes)
-	if err := a.configLayer.StartApply(true); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		JSONErrorCode(w, http.StatusBadRequest, "invalid_request", a.t(r, "configlayer.invalid_request"))
+		return
+	}
+	if err := a.configLayer.StartApplyAt(true, req.Revision); err != nil {
 		a.writeLayerError(w, r, err)
 		return
 	}
 	JSONSuccess(w, map[string]bool{"started": true})
+}
+
+// ConfigLayerApplyPreview — GET /api/configlayer/apply/preview: что запишет
+// «Применить» по текущему черновику — строки изменений, объявления перезапуска и
+// файлы ядер «было → станет» (D-09). Блокировки приходят полем blocked при 200.
+// Ответ несёт содержимое файлов ядер, поэтому не кэшируется.
+func (a *API) ConfigLayerApplyPreview(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireLayer(w, r) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	view, err := a.configLayer.PreviewApply()
+	if err != nil {
+		a.writeLayerError(w, r, err)
+		return
+	}
+	JSONSuccess(w, view)
 }
 
 // ConfigLayerFilesRebuild — POST /api/configlayer/files/rebuild {keys} или {all}.
@@ -280,6 +321,35 @@ func (a *API) ConfigLayerFilesDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view, err := a.configLayer.Diff(r.URL.Query().Get("key"))
+	if err != nil {
+		a.writeLayerError(w, r, err)
+		return
+	}
+	JSONSuccess(w, view)
+}
+
+// ConfigLayerFilesApplies — GET /api/configlayer/files/applies?key=[&id=]: без id —
+// до 5 последних применений, в наборах копий которых есть прежняя версия файла;
+// с id — содержимое версии до этого применения (D-06). Принимаются только ключ
+// манифеста и идентификатор набора, не путь (T-144-33). Ответ несёт содержимое
+// файлов ядра, поэтому не кэшируется.
+func (a *API) ConfigLayerFilesApplies(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireLayer(w, r) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	q := r.URL.Query()
+	key := q.Get("key")
+	if id := q.Get("id"); id != "" {
+		view, err := a.configLayer.FileApplyContent(key, id)
+		if err != nil {
+			a.writeLayerError(w, r, err)
+			return
+		}
+		JSONSuccess(w, view)
+		return
+	}
+	view, err := a.configLayer.FileApplies(key)
 	if err != nil {
 		a.writeLayerError(w, r, err)
 		return

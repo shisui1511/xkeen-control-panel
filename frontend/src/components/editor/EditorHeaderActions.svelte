@@ -4,6 +4,7 @@
   import { isConflict } from '../../stores';
   import StatusBadge from '../StatusBadge.svelte';
   import LiveIndicator from '../LiveIndicator.svelte';
+  import ImmediateMark from '../config/ImmediateMark.svelte';
 
   type SaveBadgeVariant = 'running' | 'warning' | 'stopped';
 
@@ -22,6 +23,13 @@
     onSaveAndApply: () => void;
     /** Файл панели под управлением слоя: сохранение недоступно (D-12) */
     managedReadOnly?: boolean;
+    /** Прямая запись на диск сразу, мимо черновика слоя (D-02, D-14) */
+    immediate?: boolean;
+    /** Причина, по которой запись отключена (например, стоп-список) */
+    saveDisabledReason?: string;
+    /** Встроенный Редактор раздела «Конфигурация»: акцент там только у «Применить» полосы
+        черновика (UI-SPEC), поэтому «Сохранить и применить» — вторичная кнопка */
+    embedded?: boolean;
   }
 
   let {
@@ -33,7 +41,10 @@
     onReloadFile,
     onSaveFile,
     onSaveAndApply,
-    managedReadOnly = false
+    managedReadOnly = false,
+    immediate = false,
+    saveDisabledReason = '',
+    embedded = false
   }: Props = $props();
 
   let showOverflowMenu = $state(false);
@@ -43,9 +54,12 @@
     $isConflict ? $t('kernel.conflict_blocked') : $t('editor.save_and_apply')
   );
 
-  const saveTitle = $derived(managedReadOnly ? $t('editor.managed_readonly_hint') : $t('app.save'));
-  const saveAndApplyTitle = $derived(
-    managedReadOnly ? $t('editor.managed_readonly_hint') : saveAndApplyLabel
+  const isSaveDisabled = $derived(managedReadOnly || Boolean(saveDisabledReason));
+  const effectiveSaveTitle = $derived(
+    saveDisabledReason || (managedReadOnly ? $t('editor.managed_readonly_hint') : $t('app.save'))
+  );
+  const effectiveSaveAndApplyTitle = $derived(
+    saveDisabledReason || (managedReadOnly ? $t('editor.managed_readonly_hint') : saveAndApplyLabel)
   );
 
   function toggleOverflowMenu(e: MouseEvent) {
@@ -98,8 +112,8 @@
     <button
       class="btn btn-secondary btn-compact btn-desktop-only"
       onclick={onSaveFile}
-      disabled={saving || applyLoading || managedReadOnly}
-      title={saveTitle}
+      disabled={saving || applyLoading || isSaveDisabled}
+      title={effectiveSaveTitle}
     >
       <svg
         width="13"
@@ -114,6 +128,11 @@
       >
       {saving ? $t('app.loading') : $t('app.save')}
     </button>
+    {#if immediate}
+      <span class="immediate-wrap btn-desktop-only">
+        <ImmediateMark />
+      </span>
+    {/if}
 
     <div class="overflow-wrap">
       <button
@@ -151,8 +170,8 @@
               showOverflowMenu = false;
               onSaveFile();
             }}
-            disabled={saving || applyLoading || managedReadOnly}
-            title={managedReadOnly ? $t('editor.managed_readonly_hint') : undefined}
+            disabled={saving || applyLoading || isSaveDisabled}
+            title={effectiveSaveTitle}
           >
             <svg
               width="14"
@@ -196,10 +215,10 @@
     </div>
 
     <button
-      class="btn btn-accent btn-compact"
+      class={['btn btn-compact btn-save-apply', embedded ? 'btn-secondary' : 'btn-accent']}
       onclick={onSaveAndApply}
-      disabled={saving || applyLoading || $isConflict || managedReadOnly}
-      title={saveAndApplyTitle}
+      disabled={saving || applyLoading || $isConflict || isSaveDisabled}
+      title={effectiveSaveAndApplyTitle}
       aria-label={saveAndApplyLabel}
     >
       {#if applyLoading}
@@ -223,6 +242,11 @@
         {$t('editor.save_and_apply')}
       {/if}
     </button>
+  {/if}
+  {#if immediate && selectedFile}
+    <div class="immediate-mobile-bar">
+      <ImmediateMark />
+    </div>
   {/if}
 </div>
 
@@ -346,12 +370,29 @@
     }
   }
 
+  .immediate-wrap {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .immediate-mobile-bar {
+    display: none;
+    width: 100%;
+    padding: var(--spacing-0-5) 0;
+  }
+
   @media (max-width: 768px) {
     .btn-desktop-only {
       display: none !important;
     }
     .btn-overflow-trigger {
       display: inline-flex !important;
+    }
+    .immediate-wrap {
+      display: none !important;
+    }
+    .immediate-mobile-bar {
+      display: flex !important;
     }
   }
 </style>

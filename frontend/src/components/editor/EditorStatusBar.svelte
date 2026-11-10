@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from '../../i18n';
+  import Icon from '../../lib/components/Icon.svelte';
 
   interface Props {
     cursorLine: number;
@@ -10,7 +11,10 @@
     applyLoading?: boolean;
     backgroundStatusText?: string;
     backupCount?: number;
+    /** Исход запроса списка копий: счётчик — только при ready, при error — «Копии: ошибка» */
+    backupsStatus?: 'idle' | 'loading' | 'ready' | 'error';
     drawerOpen?: boolean;
+    hasApplies?: boolean;
     onToggleSchema: () => void;
     onToggleExpertMode: () => void;
     onToggleDrawer?: () => void;
@@ -25,7 +29,9 @@
     applyLoading = false,
     backgroundStatusText = '',
     backupCount = 0,
+    backupsStatus = 'ready',
     drawerOpen = false,
+    hasApplies = false,
     onToggleSchema,
     onToggleExpertMode,
     onToggleDrawer
@@ -75,7 +81,18 @@
       </div>
     {/if}
 
-    {#if backupCount > 0}
+    {#if backupsStatus === 'error'}
+      <button
+        type="button"
+        class="backups-toggle-btn backups-toggle-error tap-zone-44"
+        data-testid="backups-status-error"
+        aria-expanded={drawerOpen}
+        onclick={() => onToggleDrawer?.()}
+      >
+        <Icon name="warning" size={12} />
+        {$t('editor.backups_status_error')}
+      </button>
+    {:else if hasApplies || (backupsStatus === 'ready' && backupCount > 0)}
       <button class="backups-toggle-btn tap-zone-44" onclick={() => onToggleDrawer?.()}>
         <svg
           width="10"
@@ -89,7 +106,7 @@
         >
           <polyline points="18 15 12 9 6 15"></polyline>
         </svg>
-        {$t('editor.backups')} ({backupCount})
+        {hasApplies ? $t('cfg.files.applies_title') : `${$t('editor.backups')} (${backupCount})`}
       </button>
     {/if}
   </div>
@@ -235,6 +252,10 @@
       color var(--transition-fast),
       background var(--transition-fast);
     margin-left: var(--spacing-1-5);
+  }
+
+  .backups-toggle-error {
+    color: var(--warning);
   }
 
   .backups-toggle-btn:hover {
