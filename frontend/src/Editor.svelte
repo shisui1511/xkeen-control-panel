@@ -1713,6 +1713,7 @@
         activeFileInfo && (activeFileInfo.owner === 'xkeen' || activeFileInfo.owner === 'user')
       )}
     saveDisabledReason={isRestricted ? $t('cfg.files.restricted_title') : undefined}
+    {embedded}
   />
 {/snippet}
 

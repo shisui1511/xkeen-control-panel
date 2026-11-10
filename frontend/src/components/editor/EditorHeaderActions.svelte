@@ -27,6 +27,9 @@
     immediate?: boolean;
     /** Причина, по которой запись отключена (например, стоп-список) */
     saveDisabledReason?: string;
+    /** Встроенный Редактор раздела «Конфигурация»: акцент там только у «Применить» полосы
+        черновика (UI-SPEC), поэтому «Сохранить и применить» — вторичная кнопка */
+    embedded?: boolean;
   }
 
   let {
@@ -40,7 +43,8 @@
     onSaveAndApply,
     managedReadOnly = false,
     immediate = false,
-    saveDisabledReason = ''
+    saveDisabledReason = '',
+    embedded = false
   }: Props = $props();
 
   let showOverflowMenu = $state(false);
@@ -211,7 +215,7 @@
     </div>
 
     <button
-      class="btn btn-accent btn-compact"
+      class={['btn btn-compact btn-save-apply', embedded ? 'btn-secondary' : 'btn-accent']}
       onclick={onSaveAndApply}
       disabled={saving || applyLoading || $isConflict || isSaveDisabled}
       title={effectiveSaveAndApplyTitle}

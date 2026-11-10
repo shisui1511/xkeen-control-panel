@@ -1345,7 +1345,7 @@ for (const theme of THEMES) {
     await expectNoHorizontalScroll(page, 'файл открыт');
 
     // шапка (D-20): «Сохранить и применить» и «Ещё» видны, кнопки для ПК скрыты
-    const apply = page.locator('.eph-right .btn-accent').first();
+    const apply = page.locator('.eph-right .btn-save-apply').first();
     await expect(apply).toBeVisible({ timeout: T.page });
     await expectInside(page, apply, '«Сохранить и применить»');
     const more = page.locator('.btn-overflow-trigger').first();
