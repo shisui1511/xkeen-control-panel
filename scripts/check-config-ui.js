@@ -1758,7 +1758,9 @@ function stripCommentsForCalls(text) {
   return text
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/.*$/gm, "");
+    // «//» начинает комментарий только в начале строки или после пробела: адрес
+    // «https://…» в той же строке не должен прятать вызов, стоящий после него.
+    .replace(/(^|\s)\/\/.*$/gm, "$1");
 }
 
 const IMMEDIATE_FILES = [
@@ -1785,7 +1787,10 @@ for (const rel of IMMEDIATE_FILES) {
 
 // --- 13. Применение только через окно (план 149-15, D-08) -------------------
 
-for (const file of walk(`${SRC}/components`, [])) {
+// Обход всего SRC (страницы src/*.svelte и src/lib/ тоже): определение applyNow живёт
+// в lib/configLayer.ts, остальным файлам вызывать его нельзя.
+for (const file of walk(SRC, [])) {
+  if (file === `${SRC}/lib/configLayer.ts`) continue;
   const text = read(file);
   const clean = stripCommentsForCalls(text);
   if (/\bapplyNow\s*\(/.test(clean)) {
