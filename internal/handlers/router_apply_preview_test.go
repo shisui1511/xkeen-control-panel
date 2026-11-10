@@ -249,9 +249,20 @@ func TestRouterApplyPreview(t *testing.T) {
 	xadv, _ := xsec["advanced"].(string)
 	rows := append(append([]any{}, origRows...), map[string]any{
 		"tag": "xcp-rt-pv", "listen": "127.0.0.1", "port": float64(61290), "protocol": "vless",
-		"settings": map[string]any{"decryption": decSecret, "clients": []any{}},
 	})
-	e.rtCoresLiveSave("xray", rows, xadv)
+	// settings входящего Xray лежат в «Дополнительно» под ключом тега.
+	rest := map[string]any{}
+	if strings.TrimSpace(xadv) != "" {
+		if err := json.Unmarshal([]byte(xadv), &rest); err != nil {
+			t.Fatalf("«Дополнительно» входящих Xray не JSON-объект: %v", err)
+		}
+	}
+	rest["xcp-rt-pv"] = map[string]any{"settings": map[string]any{"decryption": decSecret, "clients": []any{}}}
+	restJSON, err := json.Marshal(rest)
+	if err != nil {
+		t.Fatalf("«Дополнительно» входящих Xray: %v", err)
+	}
+	e.rtCoresLiveSave("xray", rows, string(restJSON))
 	msec := rtCoresSection(e.rtCoresView("mihomo"), "inbounds")
 	mform, _ := msec["form"].(map[string]any)
 	madv, _ := msec["advanced"].(string)
