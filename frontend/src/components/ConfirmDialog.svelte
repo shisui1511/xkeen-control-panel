@@ -33,9 +33,10 @@
 
       {#if $confirmStore.consequence}
         <div
-          class="confirm-consequence"
-          class:danger={variant === 'danger'}
-          class:warning={variant === 'warning'}
+          class={[
+            'confirm-consequence',
+            { danger: variant === 'danger', warning: variant === 'warning' }
+          ]}
         >
           <svg
             width="14"
@@ -133,5 +134,12 @@
     display: flex;
     gap: var(--spacing-3);
     justify-content: flex-end;
+  }
+
+  @media (pointer: coarse), (max-width: 768px) {
+    .confirm-actions {
+      --btn-h: 44px;
+      flex-wrap: wrap;
+    }
   }
 </style>
