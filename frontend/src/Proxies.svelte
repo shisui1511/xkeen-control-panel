@@ -12,13 +12,11 @@
     showConfirm,
     mihomoApiReady,
     mihomoApiState,
-    mihomoOfflineReason,
-    activeKernelName,
-    runningKernels,
     isMihomo,
     configLayerEnabled,
     configLayerFlagKnown
   } from './stores';
+  import { canLaunchMihomo, mihomoOfflineDesc } from './lib/mihomoOffline';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { switchKernel, notifySwitchOutcome } from './lib/serviceControl';
   import { parseValidationError } from './lib/errorParser';
@@ -83,17 +81,6 @@
   }
 
   let { onSwitchTab = () => {} }: Props = $props();
-
-  // Запуск Mihomo со страницы — только когда не работает ни одно ядро: при активном Xray
-  // (или любом другом запущенном процессе ядра) запуск столкнул бы два ядра (FND-05)
-  const canLaunchMihomo = $derived($activeKernelName !== 'xray' && $runningKernels.length === 0);
-  const mihomoOfflineDesc = $derived(
-    $activeKernelName === 'xray'
-      ? $t('apioffline.reason_xray')
-      : $mihomoOfflineReason === 'api_down'
-        ? $t('apioffline.reason_api_down')
-        : $t('ds.empty.mihomo_offline_desc')
-  );
 
   const mihomoOffline = $derived($capabilities !== null && !$capabilities.mihomo.reachable);
 
@@ -1040,12 +1027,12 @@
         ctaText={$t('ds.empty.mihomo_missing_cta')}
         oncta={() => onSwitchTab('services')}
       />
-    {:else if $capabilities !== null && !$capabilities.mihomo.reachable && !canLaunchMihomo}
+    {:else if $capabilities !== null && !$capabilities.mihomo.reachable && !$canLaunchMihomo}
       <!-- Работает другое ядро или API запущенного Mihomo молчит: запуск не предлагается,
            действие — переход на «Службы» -->
       <EmptyState
         title={$t('ds.empty.mihomo_offline_title')}
-        description={mihomoOfflineDesc}
+        description={$mihomoOfflineDesc}
         icon={WarningIcon}
         ctaText={$t('apioffline.services_link')}
         oncta={() => onSwitchTab('services')}
