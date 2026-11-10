@@ -70,16 +70,20 @@
   const blockedByChecks = $derived(dirty && checkCount > 0);
   const conflictText = $derived($t('cfg.apply_blocked_conflict'));
   const driftText = $derived($t('cfg.apply_blocked_drift', { k: $driftCount }));
+  // Связь со слоем потеряна: состояние черновика на сервере неизвестно, поэтому обе кнопки
+  // неактивны, а «Применить» в title называет ту же причину, что и строка статуса
   const applyHint = $derived(
-    blockedByConflict
-      ? conflictText
-      : holderHint !== ''
-        ? holderHint
-        : blockedByChecks
-          ? $t('cfg.routing.apply_blocked_hint')
-          : blockedByDrift
-            ? driftText
-            : $t('cfg.apply_aria')
+    lost
+      ? $t('cfg.sse_lost')
+      : blockedByConflict
+        ? conflictText
+        : holderHint !== ''
+          ? holderHint
+          : blockedByChecks
+            ? $t('cfg.routing.apply_blocked_hint')
+            : blockedByDrift
+              ? driftText
+              : $t('cfg.apply_aria')
   );
   const showReasons = $derived(
     shown && dirty && (blockedByConflict || blockedByDrift || checkCount > 0 || holderHint !== '')
@@ -180,8 +184,8 @@
           variant="secondary"
           class="draft-bar-btn"
           ariaLabel={$t('cfg.reset_aria')}
-          title={$t('cfg.reset_aria')}
-          disabled={!ready || !dirty || busy}
+          title={lost ? $t('cfg.sse_lost') : $t('cfg.reset_aria')}
+          disabled={!ready || !dirty || busy || lost}
           onclick={onReset}>{$t('cfg.reset')}</Button
         >
         <Button
@@ -192,6 +196,7 @@
           disabled={!ready ||
             !dirty ||
             busy ||
+            lost ||
             holderHint !== '' ||
             blockedByDrift ||
             blockedByChecks ||
