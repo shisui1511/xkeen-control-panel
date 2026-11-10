@@ -26,6 +26,10 @@
     children?: Snippet;
   } = $props();
 
+  // Уникальный id заголовка на экземпляр: в стеке модалей (подтверждение поверх другой
+  // модали) общий id отдавал верхнему диалогу имя нижнего.
+  const titleId = $props.id();
+
   const MODAL_SELECTOR = '.modal-backdrop > .modal-container[aria-modal="true"]';
 
   function topVisibleModal(): HTMLElement | undefined {
@@ -152,7 +156,7 @@
       role="dialog"
       aria-modal="true"
       aria-label={ariaLabel || undefined}
-      aria-labelledby={ariaLabel ? undefined : 'modal-title'}
+      aria-labelledby={ariaLabel ? undefined : titleId}
       data-testid={dataTestid || undefined}
       {@attach manageFocus}
       {@attach trapWindowTab}
@@ -163,7 +167,7 @@
       tabindex="-1"
     >
       <header class="modal-header" {@attach sheetSwipe}>
-        <h2 id="modal-title" class="modal-title">{title}</h2>
+        <h2 id={titleId} class="modal-title">{title}</h2>
         <button
           class="modal-close-btn"
           onclick={onclose}
