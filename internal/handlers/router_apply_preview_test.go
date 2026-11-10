@@ -244,8 +244,24 @@ func TestRouterApplyPreview(t *testing.T) {
 	e.rtPvDraftInbounds(configlayer.SectionXrayInbounds, `[{"tag":"xcp-rt-pv","listen":"127.0.0.1","port":61290,`+
 		`"protocol":"vless","settings":{"decryption":"`+decSecret+`","clients":[]}}]`)
 	e.rtPvDraftInbounds(configlayer.SectionMihomoInbounds, `{"authentication":["`+authSecret+`"]}`)
-	_, rawSec, _ := e.rtPvFetch()
+	secView, rawSec, _ := e.rtPvFetch()
 	rtNoSecrets(t, "предпросмотр: секреты секций «Входящие»", rawSec, decSecret, authSecret)
+	// Без этой проверки тест прошёл бы и тогда, когда секции в предпросмотр не попали.
+	maskedKeys := map[string]bool{}
+	for _, k := range secView.Kernels {
+		for _, f := range k.Files {
+			for _, key := range []string{"decryption", "authentication"} {
+				if strings.Contains(f.After, key) && strings.Contains(f.After, configlayer.SecretMask) {
+					maskedKeys[key] = true
+				}
+			}
+		}
+	}
+	for _, key := range []string{"decryption", "authentication"} {
+		if !maskedKeys[key] {
+			t.Errorf("в предпросмотре нет файла с ключом %s и маской значения", key)
+		}
+	}
 	// (6) Черновик сбрасывает очистка enableLayer.
 }
 
