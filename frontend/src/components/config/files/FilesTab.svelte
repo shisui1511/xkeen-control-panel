@@ -206,7 +206,6 @@
               {#if diffs[layerFile.key]?.diff}
                 {@const d = diffs[layerFile.key].diff!}
                 <DiffView
-                  id={diffId(layerFile.key)}
                   expected={d.expected}
                   actual={d.actual}
                   missing={d.missing}
