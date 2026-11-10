@@ -146,9 +146,3 @@ func (idx *FileOwnerIndex) FileOwner(path string) FileOwnerInfo {
 	}
 	return info
 }
-
-// FileOwner — владелец одного файла (FileOwnerIndex на один путь). Для списка
-// файлов строить индекс один раз через FileOwnerIndex.
-func (l *Layer) FileOwner(path string) FileOwnerInfo {
-	return l.FileOwnerIndex().FileOwner(path)
-}
