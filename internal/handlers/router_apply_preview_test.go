@@ -243,9 +243,9 @@ func TestRouterApplyPreview(t *testing.T) {
 	authSecret := "xcprt:" + rtPvRandHex(t, 16)
 	rtCoresLiveXrayTakeDraft(t, e)
 	xsec := rtCoresSection(e.rtCoresView("xray"), "inbounds")
-	rows, _ := xsec["form"].([]any)
+	origRows, _ := xsec["form"].([]any)
 	xadv, _ := xsec["advanced"].(string)
-	rows = append(rows, map[string]any{
+	rows := append(append([]any{}, origRows...), map[string]any{
 		"tag": "xcp-rt-pv", "listen": "127.0.0.1", "port": float64(61290), "protocol": "vless",
 		"settings": map[string]any{"decryption": decSecret, "clients": []any{}},
 	})
@@ -254,9 +254,16 @@ func TestRouterApplyPreview(t *testing.T) {
 	msec := rtCoresSection(e.rtCoresView("mihomo"), "inbounds")
 	mform, _ := msec["form"].(map[string]any)
 	madv, _ := msec["advanced"].(string)
+	origMform := map[string]any{}
+	for k, v := range mform {
+		origMform[k] = v
+	}
 	e.rtCoresLiveSave("mihomo", mform, madv+"\nauthentication:\n  - \""+authSecret+"\"\n")
 	secView, rawSec, _ := e.rtPvFetch()
 	rtNoSecrets(t, "предпросмотр: секреты секций «Входящие»", rawSec, decSecret, authSecret)
+	// Исходные формы возвращаются до очистки помощников: она применяет черновик.
+	e.rtCoresLiveSave("xray", origRows, xadv)
+	e.rtCoresLiveSave("mihomo", origMform, madv)
 	// Без этой проверки тест прошёл бы и тогда, когда секции в предпросмотр не попали.
 	maskedKeys := map[string]bool{}
 	for _, k := range secView.Kernels {
