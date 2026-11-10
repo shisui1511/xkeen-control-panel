@@ -237,13 +237,24 @@ func TestRouterApplyPreview(t *testing.T) {
 	}
 
 	// (5) Секреты секций «Входящие»: decryption VLESS Xray и authentication
-	// Mihomo в «станет»-стороне заменены маской и в ответ не попадают.
-	e.rtRstIdle()
+	// Mihomo в «станет»-стороне заменены маской и в ответ не попадают. Секции
+	// берутся в черновик без «Применить»; возврат — в очистке помощников.
 	decSecret := "mlkem768x25519plus.native.0rtt." + rtPvRandHex(t, 24)
 	authSecret := "xcprt:" + rtPvRandHex(t, 16)
-	e.rtPvDraftInbounds(configlayer.SectionXrayInbounds, `[{"tag":"xcp-rt-pv","listen":"127.0.0.1","port":61290,`+
-		`"protocol":"vless","settings":{"decryption":"`+decSecret+`","clients":[]}}]`)
-	e.rtPvDraftInbounds(configlayer.SectionMihomoInbounds, `{"authentication":["`+authSecret+`"]}`)
+	rtCoresLiveXrayTakeDraft(t, e)
+	xsec := rtCoresSection(e.rtCoresView("xray"), "inbounds")
+	rows, _ := xsec["form"].([]any)
+	xadv, _ := xsec["advanced"].(string)
+	rows = append(rows, map[string]any{
+		"tag": "xcp-rt-pv", "listen": "127.0.0.1", "port": float64(61290), "protocol": "vless",
+		"settings": map[string]any{"decryption": decSecret, "clients": []any{}},
+	})
+	e.rtCoresLiveSave("xray", rows, xadv)
+	rtCoresLiveMihomoTakeDraft(t, e, tg)
+	msec := rtCoresSection(e.rtCoresView("mihomo"), "inbounds")
+	mform, _ := msec["form"].(map[string]any)
+	madv, _ := msec["advanced"].(string)
+	e.rtCoresLiveSave("mihomo", mform, madv+"\nauthentication:\n  - \""+authSecret+"\"\n")
 	secView, rawSec, _ := e.rtPvFetch()
 	rtNoSecrets(t, "предпросмотр: секреты секций «Входящие»", rawSec, decSecret, authSecret)
 	// Без этой проверки тест прошёл бы и тогда, когда секции в предпросмотр не попали.
@@ -273,18 +284,4 @@ func rtPvRandHex(t *testing.T, n int) string {
 		t.Fatalf("случайные байты: %v", err)
 	}
 	return hex.EncodeToString(b)
-}
-
-// rtPvDraftInbounds правит секцию входящих ядра в черновике как управляемую
-// панелью: значение value — массив (Xray) или объект (Mihomo).
-func (e *rtSrc) rtPvDraftInbounds(section, value string) {
-	e.t.Helper()
-	raw, err := configlayer.EncodeCoreSection(configlayer.CoreSection{Managed: true, Value: json.RawMessage(value)})
-	if err != nil {
-		e.t.Fatalf("секция %s: кодирование: %v", section, err)
-	}
-	r := e.call(http.MethodPost, "/api/configlayer/draft", map[string]any{"revision": e.revision(), "section": section, "value": json.RawMessage(raw)})
-	if r.Status != http.StatusOK {
-		e.t.Fatalf("секция %s: правка черновика: %d %s", section, r.Status, r.Code)
-	}
 }
