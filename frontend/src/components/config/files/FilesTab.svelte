@@ -212,8 +212,9 @@
                   truncated={d.truncated}
                 />
               {:else}
-                <div class="diff-loading">
+                <div class="diff-loading" role="status" aria-busy="true">
                   <span class="spinner" aria-hidden="true"></span>
+                  <span class="sr-only">{$t('app.loading')}</span>
                 </div>
               {/if}
             </div>
