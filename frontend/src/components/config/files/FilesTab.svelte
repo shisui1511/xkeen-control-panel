@@ -174,7 +174,7 @@
                   aria-controls={diffId(layerFile.key)}
                   onclick={() => void toggleDiff(layerFile.key)}
                 >
-                  <Icon name={opened[layerFile.key] ? 'eye-off' : 'eye'} size={13} />
+                  <Icon name={opened[layerFile.key] ? 'eye-off' : 'eye'} size={12} />
                   {opened[layerFile.key] ? $t('cfg.action.hide_diff') : $t('cfg.files.show_diff')}
                 </Button>
               {/if}
