@@ -71,9 +71,14 @@ func describeGroups(appliedRaw, draftRaw json.RawMessage) []configlayer.ChangeRo
 			ID: g.ID, Label: g.Name, Section: GroupsSection,
 		})
 	}
+	// Повторяющийся id в черновике или применённом не даёт повторных строк.
+	seen := make(map[string]bool, len(d.Items))
 	for _, g := range d.Items {
+		if seen[g.ID] {
+			continue
+		}
+		seen[g.ID] = true
 		old, ok := was[g.ID]
-		delete(was, g.ID)
 		switch {
 		case !ok:
 			row(configlayer.ChangeAdded, g)
@@ -82,7 +87,8 @@ func describeGroups(appliedRaw, draftRaw json.RawMessage) []configlayer.ChangeRo
 		}
 	}
 	for _, g := range a.Items {
-		if _, ok := was[g.ID]; ok {
+		if !seen[g.ID] {
+			seen[g.ID] = true
 			row(configlayer.ChangeRemoved, g)
 		}
 	}
@@ -108,9 +114,14 @@ func describeRules(applied, draft configlayer.Sections) []configlayer.ChangeRow 
 			ID: r.ID, Label: ruleSummary(r), Section: RulesSection,
 		})
 	}
+	// Повторяющийся id в черновике или применённом не даёт повторных строк.
+	seen := make(map[string]bool, len(d.Items))
 	for _, r := range d.Items {
+		if seen[r.ID] {
+			continue
+		}
+		seen[r.ID] = true
 		old, ok := was[r.ID]
-		delete(was, r.ID)
 		switch {
 		case !ok:
 			row(configlayer.ChangeAdded, r)
@@ -119,7 +130,8 @@ func describeRules(applied, draft configlayer.Sections) []configlayer.ChangeRow 
 		}
 	}
 	for _, r := range a.Items {
-		if _, ok := was[r.ID]; ok {
+		if !seen[r.ID] {
+			seen[r.ID] = true
 			row(configlayer.ChangeRemoved, r)
 		}
 	}
