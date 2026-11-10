@@ -1755,8 +1755,14 @@ for (const [f, reason] of Object.entries(IMMEDIATE_ALLOW)) {
 }
 
 function stripCommentsForCalls(text) {
-  return text
-    .replace(/<!--[\s\S]*?-->/g, "")
+  // Повторяем, пока замена что-то убирает: вложенный «<!-- <!-- -->» после
+  // одного прохода оставил бы незакрытый «<!--».
+  let html = text;
+  for (let prev = null; prev !== html; ) {
+    prev = html;
+    html = html.replace(/<!--[\s\S]*?-->/g, "");
+  }
+  return html
     .replace(/\/\*[\s\S]*?\*\//g, "")
     // «//» начинает комментарий только в начале строки или после пробела: адрес
     // «https://…» в той же строке не должен прятать вызов, стоящий после него.
