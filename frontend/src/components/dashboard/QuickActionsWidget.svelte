@@ -40,11 +40,9 @@
     isRefreshingSubs = true;
     showToast('info', $t('dash.qa_refresh_subs_title') + '...');
     try {
-      const res = await apiFetch('/api/subscriptions/refresh-all', { method: 'POST' });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt);
-      }
+      // apiFetchJSON разбирает конверт ошибки, в том числе legacy_blocked при включённом слое:
+      // в тост попадает переведённый текст сервера, а не сырой JSON ответа.
+      await apiFetchJSON('/api/subscriptions/refresh-all', { method: 'POST' });
       showToast('success', $t('dash.qa_refresh_subs_success'));
     } catch (e: any) {
       if (e?.status === 401) return;
