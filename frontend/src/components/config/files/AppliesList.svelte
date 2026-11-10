@@ -140,8 +140,12 @@
   }
 
   // «Повторить» в раскрытой строке: новое чтение того же id, строка остаётся раскрытой.
-  function retrySelected(item: ApplyCopy): void {
+  function retrySelected(item: ApplyCopy, event: MouseEvent): void {
     if (activeKey === null || selectedId !== item.id) return;
+    const retryButton = event.currentTarget;
+    if (retryButton instanceof HTMLElement && retryButton === document.activeElement) {
+      retryButton.closest('.apply-row')?.querySelector<HTMLElement>('.apply-row-btn')?.focus();
+    }
     void loadContent(item);
   }
 
@@ -192,7 +196,7 @@
   {:else}
     <div class="applies-items">
       {#each applies.slice(0, MAX_ROWS) as item (item.id)}
-        <div class="apply-row" class:active={selectedId === item.id}>
+        <div class={['apply-row', { active: selectedId === item.id }]}>
           <button
             type="button"
             class="apply-row-btn"
@@ -212,7 +216,11 @@
               {:else if contentError}
                 <div class="alert alert-error" role="alert">
                   <span>{contentError}</span>
-                  <Button variant="secondary" size="sm" onclick={() => retrySelected(item)}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onclick={(event) => retrySelected(item, event)}
+                  >
                     {$t('app.retry')}
                   </Button>
                 </div>

@@ -956,30 +956,43 @@ test(
       await answered(reqA2, 200, 'позднее содержимое A');
       await expectNothingSelected(list, 'G149-02 collapse drops late A');
 
-      // 3. Настоящий 404 копии B и «Повторить» в раскрытой строке B
-      await hideCopy(idB, key);
-      const reqB3 = await select(rowB, idB);
-      await answered(reqB3, 404, 'копии B нет на диске');
-      await expect(rowB.locator('.apply-row-btn')).toHaveAttribute('aria-expanded', 'true');
+      // 3. Настоящий 404 и клавиатурный повтор чтения той же копии.
+      const rowButton = rowB.locator('.apply-row-btn');
       const retry = rowB.getByRole('alert').getByRole('button', { name: RETRY_NAME });
-      await expect(retry).toHaveCount(1, { timeout: T.action });
-      await releaseCopy(idB, key);
-      const again = page
-        .waitForRequest((r) => isContentReq(r, key, idB), { timeout: T.action })
-        .catch(() => null);
-      await retry.click({ timeout: T.action });
-      const reqB4 = await again;
-      if (reqB4 === null) {
-        throw new Error(
-          'G149-02 retry keeps selection and fetches: нового запроса содержимого B нет'
-        );
+      const waitForB = () =>
+        page.waitForRequest((r) => isContentReq(r, key, idB), { timeout: T.action });
+      for (const activation of ['Enter', 'Space']) {
+        const message = `G149-09: ${activation}`;
+        await hideCopy(idB, key);
+        await list
+          .locator('.apply-row-btn')
+          .nth(iB + 1)
+          .focus();
+        await page.keyboard.press('Shift+Tab');
+        await expect(rowButton, message).toBeFocused();
+        const [missing] = await Promise.all([waitForB(), page.keyboard.press(activation)]);
+        await answered(missing, 404, `${message}: копии B нет на диске`);
+        await expect(rowButton).toHaveAttribute('aria-expanded', 'true');
+        await expect(retry).toBeVisible({ timeout: T.action });
+        await page.keyboard.press('Tab');
+        await expect(retry, message).toBeFocused();
+
+        await releaseCopy(idB, key);
+        await blockCopy(idB, key);
+        const [repeated] = await Promise.all([waitForB(), page.keyboard.press(activation)]);
+        await expect(rowB.locator('.diff-loading')).toBeVisible({ timeout: T.action });
+        await expect(rowButton, `${message}: фокус во время чтения`).toBeFocused();
+        await releaseCopy(idB, key);
+        await answered(repeated, 200, `${message}: повтор читает B`);
+        await expectShowsB(message);
+        await expect(rowButton, `${message}: фокус после показа сравнения`).toBeFocused();
+        await page.keyboard.press('Tab');
+        await expect(rowB.locator('.diff-body'), message).toBeFocused();
+        await page.keyboard.press('Shift+Tab');
+        await expect(rowButton, message).toBeFocused();
+        await page.keyboard.press(activation);
+        await expectNothingSelected(list, message);
       }
-      await answered(reqB4, 200, 'повтор читает B');
-      await expect(
-        rowB.locator('.apply-row-btn'),
-        'G149-02 retry keeps selection and fetches'
-      ).toHaveAttribute('aria-expanded', 'true');
-      await expectShowsB('G149-02 retry keeps selection and fetches');
 
       // 4. A, сменить файл: поздний ответ A не оставляет следов выбора
       await blockCopy(idA, key);
