@@ -232,6 +232,8 @@
   maxWidth="720px"
   class="apply-preview"
   testid="apply-preview-modal"
+  closeDisabled={confirming}
+  closeTitle={$t('cfg.preview.close_busy')}
   onclose={close}
 >
   <div class="ap-body">
@@ -433,6 +435,7 @@
           class="ap-btn"
           data-testid="apply-preview-cancel"
           disabled={confirming}
+          title={confirming ? $t('cfg.preview.close_busy') : undefined}
           onclick={close}
         >
           {$t('cfg.preview.cancel')}

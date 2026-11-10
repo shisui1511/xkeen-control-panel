@@ -11,6 +11,8 @@
     class: className = '',
     ariaLabel = '',
     testid: dataTestid = '',
+    closeDisabled = false,
+    closeTitle = '',
     onclose,
     children
   }: {
@@ -22,6 +24,10 @@
     ariaLabel?: string;
     /** Optional `data-testid` on the container, for callers whose E2E specs target a specific dialog instance. */
     testid?: string;
+    /** Крестик неактивен (идёт операция, которую нельзя прервать); причина — в `closeTitle`. */
+    closeDisabled?: boolean;
+    /** Подсказка неактивного крестика: почему окно сейчас не закрывается. */
+    closeTitle?: string;
     onclose: () => void;
     children?: Snippet;
   } = $props();
@@ -175,8 +181,9 @@
         <button
           class="modal-close-btn"
           onclick={onclose}
+          disabled={closeDisabled}
           aria-label={$t('app.close')}
-          title={$t('app.close')}
+          title={closeDisabled && closeTitle ? closeTitle : $t('app.close')}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -263,7 +270,11 @@
       background var(--transition-fast),
       color var(--transition-fast);
   }
-  .modal-close-btn:hover {
+  .modal-close-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+  .modal-close-btn:hover:not(:disabled) {
     background: var(--surface-tint);
     color: var(--fg-primary);
   }
