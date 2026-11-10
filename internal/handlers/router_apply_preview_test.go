@@ -235,5 +235,40 @@ func TestRouterApplyPreview(t *testing.T) {
 	if got := e.rtRtDraftChanges(); got != draft {
 		t.Errorf("после отказа draft_conflict draft_changes %d, было %d", got, draft)
 	}
-	// (5) Черновик сбрасывает очистка enableLayer.
+
+	// (5) Секреты секций «Входящие»: decryption VLESS Xray и authentication
+	// Mihomo в «станет»-стороне заменены маской и в ответ не попадают.
+	e.rtRstIdle()
+	decSecret := "mlkem768x25519plus.native.0rtt." + rtPvRandHex(t, 24)
+	authSecret := "xcprt:" + rtPvRandHex(t, 16)
+	e.rtPvDraftInbounds(configlayer.SectionXrayInbounds, `[{"tag":"xcp-rt-pv","listen":"127.0.0.1","port":61290,`+
+		`"protocol":"vless","settings":{"decryption":"`+decSecret+`","clients":[]}}]`)
+	e.rtPvDraftInbounds(configlayer.SectionMihomoInbounds, `{"authentication":["`+authSecret+`"]}`)
+	_, rawSec, _ := e.rtPvFetch()
+	rtNoSecrets(t, "предпросмотр: секреты секций «Входящие»", rawSec, decSecret, authSecret)
+	// (6) Черновик сбрасывает очистка enableLayer.
+}
+
+// rtPvRandHex — случайная hex-строка из n байт для обезличенного секрета теста.
+func rtPvRandHex(t *testing.T, n int) string {
+	t.Helper()
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatalf("случайные байты: %v", err)
+	}
+	return hex.EncodeToString(b)
+}
+
+// rtPvDraftInbounds правит секцию входящих ядра в черновике как управляемую
+// панелью: значение value — массив (Xray) или объект (Mihomo).
+func (e *rtSrc) rtPvDraftInbounds(section, value string) {
+	e.t.Helper()
+	raw, err := configlayer.EncodeCoreSection(configlayer.CoreSection{Managed: true, Value: json.RawMessage(value)})
+	if err != nil {
+		e.t.Fatalf("секция %s: кодирование: %v", section, err)
+	}
+	r := e.call(http.MethodPost, "/api/configlayer/draft", map[string]any{"revision": e.revision(), "section": section, "value": json.RawMessage(raw)})
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("секция %s: правка черновика: %d %s", section, r.Status, r.Code)
+	}
 }
