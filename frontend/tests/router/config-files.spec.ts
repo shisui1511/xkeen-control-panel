@@ -290,6 +290,30 @@ test('config-files sheet vp:390', async ({ page }) => {
       timeout: T.action
     })
     .toBe(true);
+
+  const newFile = sheet.locator('.btn-new-file');
+  await newFile.click({ timeout: T.action });
+  const modal = page.locator('.modal-container').filter({ has: page.locator('#new-file-name') });
+  const close = modal.locator('.modal-close-btn');
+  await expect(close).toBeFocused({ timeout: T.action });
+  for (const key of ['Tab', 'Shift+Tab']) {
+    const edge = key === 'Tab' ? 'first' : 'last';
+    await modal.locator('.modal-title').click();
+    await expect(modal, 'G149-10: клик по заголовку фокусирует контейнер').toBeFocused();
+    await page.keyboard.press(key);
+    expect((await focusEdge(modal, 'where')).at, `G149-10: ${key} с контейнера`).toBe(edge);
+
+    await close.focus();
+    await close.evaluate((button) => (button as HTMLElement).blur());
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await page.keyboard.press(key);
+    expect((await focusEdge(modal, 'where')).at, `G149-10: ${key} с body`).toBe(edge);
+  }
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveCount(0, { timeout: T.action });
+  await expect(sheet).toBeVisible();
+  await expect(newFile, 'G149-10: первый Escape возвращает фокус в лист').toBeFocused();
+
   await page.keyboard.press('Escape');
   await expect(sheet).toHaveCount(0, { timeout: T.action });
   await expect(

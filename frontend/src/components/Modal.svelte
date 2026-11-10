@@ -26,7 +26,16 @@
     children?: Snippet;
   } = $props();
 
-  const MODAL_SELECTOR = '[role="dialog"][aria-modal="true"]';
+  const MODAL_SELECTOR = '.modal-backdrop > .modal-container[aria-modal="true"]';
+
+  function topVisibleModal(): HTMLElement | undefined {
+    return Array.from(document.querySelectorAll<HTMLElement>(MODAL_SELECTOR))
+      .reverse()
+      .find(
+        (dialog) =>
+          dialog.getClientRects().length > 0 && getComputedStyle(dialog).visibility === 'visible'
+      );
+  }
 
   // Телефон: лист тянут вниз за шапку (с ручкой), чтобы закрыть
   let containerEl: HTMLDivElement | null = $state(null);
@@ -71,15 +80,11 @@
   // перерисовке), и на вызвавшей кнопке (Tab пришёл раньше начального фокуса, который
   // ставится через setTimeout). Такой Tab не доходит до обработчика на самом диалоге и
   // увёл бы фокус на страницу под модалью. Пока диалог открыт и он верхний, Tab
-  // возвращает фокус на первый элемент диалога, Shift+Tab: на последний. Фокус внутри
-  // любого диалога aria-modal (свой или лежащего поверх подтверждения) не трогаем.
+  // возвращает фокус на первый элемент диалога, Shift+Tab ведёт на последний.
   const trapWindowTab: Attachment<HTMLDivElement> = (dialog) => {
     const onWindowKeydown = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab') return;
-      const active = document.activeElement;
-      if (active && active !== document.body && active.closest(MODAL_SELECTOR)) return;
-      const dialogs = document.querySelectorAll(MODAL_SELECTOR);
-      if (dialogs[dialogs.length - 1] !== dialog) return;
+      if (event.key !== 'Tab' || event.defaultPrevented) return;
+      if (dialog.contains(document.activeElement) || topVisibleModal() !== dialog) return;
       event.preventDefault();
       const focusables = getFocusableElements(dialog);
       if (focusables.length === 0) dialog.focus();
@@ -98,8 +103,7 @@
     const observer = new MutationObserver(() => {
       const active = document.activeElement;
       if (active && active !== document.body) return;
-      const dialogs = document.querySelectorAll(MODAL_SELECTOR);
-      if (dialogs[dialogs.length - 1] !== dialog) return;
+      if (topVisibleModal() !== dialog) return;
       dialog.focus();
     });
     observer.observe(dialog, { childList: true, subtree: true });
@@ -112,9 +116,9 @@
     // like the dat-drawer variant hide Modal's own header (and its close button) via
     // CSS in favor of a custom in-content header. .focus() on such an element is a
     // silent no-op, so it must be excluded here rather than merely deprioritized.
-    return Array.from(dialog.querySelectorAll(selectors)).filter(
-      (el) => (el as HTMLElement).offsetParent !== null
-    ) as HTMLElement[];
+    return Array.from(dialog.querySelectorAll<HTMLElement>(selectors)).filter(
+      (el) => el.tabIndex >= 0 && !el.matches(':disabled') && el.offsetParent !== null
+    );
   }
 
   function handleKeydown(event: KeyboardEvent) {
@@ -122,8 +126,9 @@
       onclose();
       return;
     }
-    if (event.key === 'Tab') {
-      const focusables = getFocusableElements(event.currentTarget as HTMLElement);
+    if (event.key === 'Tab' && !event.defaultPrevented) {
+      const dialog = event.currentTarget as HTMLElement;
+      const focusables = getFocusableElements(dialog);
       if (focusables.length === 0) {
         event.preventDefault();
         return;
@@ -131,16 +136,9 @@
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
       const active = document.activeElement;
-      if (event.shiftKey) {
-        if (active === first) {
-          last.focus();
-          event.preventDefault();
-        }
-      } else {
-        if (active === last) {
-          first.focus();
-          event.preventDefault();
-        }
+      if (active === dialog || active === (event.shiftKey ? first : last)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
       }
     }
   }
