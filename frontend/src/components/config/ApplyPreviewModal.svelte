@@ -49,7 +49,8 @@
   let confirming = $state(false);
   // Черновик изменился, пока окно было открыто (событие draft или 409 draft_conflict)
   let stale = $state(false);
-  let applyError = $state('');
+  // Сбой запуска применения: в окне — фраза на языке панели, текст сервера — только в тосте
+  let applyFailed = $state(false);
   let filesOpen = $state(false);
   let expanded = $state<Record<string, boolean>>({});
   // Растёт с каждым чтением: устаревший ответ не затирает более свежий
@@ -81,7 +82,7 @@
     failed = false;
     confirming = false;
     stale = false;
-    applyError = '';
+    applyFailed = false;
     filesOpen = false;
     expanded = {};
   }
@@ -205,7 +206,7 @@
   async function confirm() {
     if (!canConfirm || preview === null || $conflictVisible) return;
     confirming = true;
-    applyError = '';
+    applyFailed = false;
     try {
       await onconfirm(preview.draft_revision);
     } catch (err) {
@@ -217,7 +218,7 @@
         return;
       }
       handleLayerError(err);
-      applyError = err instanceof Error ? err.message : String(err);
+      applyFailed = true;
       return;
     }
     confirming = false;
@@ -415,10 +416,10 @@
       {/if}
     {/if}
 
-    {#if applyError !== ''}
+    {#if applyFailed}
       <div class="alert alert-error ap-alert" role="alert" data-testid="apply-preview-apply-error">
         <Icon name="warning" size={16} class="ap-alert-icon" />
-        <span>{applyError}</span>
+        <span>{$t('cfg.preview.apply_failed')}</span>
       </div>
     {/if}
 

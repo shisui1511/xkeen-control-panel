@@ -55,11 +55,6 @@
   let listSeq = 0;
   let contentSeq = 0;
 
-  function errorText(e: unknown): string {
-    const msg = e instanceof Error ? e.message : String(e);
-    return msg || $t('cfg.files.applies_error');
-  }
-
   // Сбросить раскрытую строку и инвалидировать её незавершённое чтение.
   function clearSelection(): void {
     contentSeq++;
@@ -96,8 +91,9 @@
       if (selectedId !== null && !next.slice(0, MAX_ROWS).some((a) => a.id === selectedId)) {
         clearSelection();
       }
-    } catch (e) {
-      if (owns()) error = errorText(e);
+    } catch {
+      // Текст сервера в строку не выводится: только фраза на языке панели
+      if (owns()) error = $t('cfg.files.applies_error');
     } finally {
       if (owns()) loading = false;
     }
@@ -123,8 +119,8 @@
       if (!owns()) return;
       selectedContent = res.content;
       selectedTruncated = res.truncated;
-    } catch (e) {
-      if (owns()) contentError = errorText(e);
+    } catch {
+      if (owns()) contentError = $t('cfg.files.applies_error');
     } finally {
       if (owns()) contentLoading = false;
     }

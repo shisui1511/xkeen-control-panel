@@ -3074,6 +3074,7 @@
   "cfg.preview.error": "Could not build the list of changes. The draft is unchanged. Press “Retry” or close the window.",
   "cfg.preview.retry": "Retry",
   "cfg.preview.stale": "The draft changed, the list was updated.",
+  "cfg.preview.apply_failed": "Apply did not start. The draft is unchanged; details are in the notification.",
   "cfg.draft_blocked": "Apply is blocked: files have drifted ({k})",
   "cfg.apply_blocked_hint": "Resolve the file drift in the list first",
   "cfg.apply_blocked_conflict": "Apply is unavailable: both kernels are running. Stop one in the banner above.",
