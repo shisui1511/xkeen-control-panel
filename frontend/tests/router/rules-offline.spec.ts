@@ -246,15 +246,20 @@ test(
   }
 );
 
-/** Mihomo установлен на устройстве (чтение /api/capabilities). */
+/**
+ * Mihomo установлен на устройстве (чтение /api/capabilities). Сбой самой панели или ответ
+ * без булева installed — красный сценарий, а не «Mihomo не установлен».
+ */
 async function mihomoInstalled(page: Page): Promise<boolean> {
   const res = await page.request.get('/api/capabilities');
-  if (!res.ok()) return false;
+  expect(res.status(), 'GET /api/capabilities').toBe(200);
   const body = (await res.json()) as {
-    data?: { kernels?: { mihomo?: { installed?: boolean } } };
-    kernels?: { mihomo?: { installed?: boolean } };
+    data?: { kernels?: { mihomo?: { installed?: unknown } } };
+    kernels?: { mihomo?: { installed?: unknown } };
   };
-  return (body.data ?? body).kernels?.mihomo?.installed !== false;
+  const installed = (body.data ?? body).kernels?.mihomo?.installed;
+  expect(typeof installed, 'kernels.mihomo.installed в ответе /api/capabilities').toBe('boolean');
+  return installed === true;
 }
 
 const CONFIG_TABS = ['nodes', 'groups', 'rules', 'lists', 'cores', 'files'];
