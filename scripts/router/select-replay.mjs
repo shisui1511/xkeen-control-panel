@@ -34,15 +34,29 @@
 // проверяется локально: ничего не скачивается, checkout не меняется, панель не собирается и не
 // запускается, выбранные тесты не исполняются.
 //
-// Оценка минут (по медианам снимка):
-//   сумма медиан секунд тестов первой ветви (RT_GO_SEQ или тесты пакетов RT_GO_PKGS, спеки
-//   RT_SPECS с учётом RT_PW_GREP; спеки только чтения делятся на число воркеров 3) плюс тесты
-//   второй ветви (RT_GO_CORE_RUN и тесты спеков RT_SPECS_CORE с тегом ядра) плюс оболочка
-//   4,5 мин (деплой, смоук, снимок). Медиана ядер усредняется: ядро ветви зависит от SHA.
-//   Тест без истории — unknownSec снимка (30 с). Полный выбор — сумма медиан всех тестов по двум
-//   ядрам плюс оболочка.
-// Оценка грубая: факты тестов для оценки берутся из рабочей копии этого скрипта, а не из коммита
-// слияния, поэтому для давних PR набор тестов мог быть другим.
+// Оценка минут — по составу run-plan.mjs (runPlan, набор changed), как его исполняет run.sh, и
+// медианам снимка:
+//   ветви плана — первая (Go по именам RT_GO_SEQ или тестам пакетов, спеки read и state с учётом
+//   RT_PW_GREP и отсева яруса full по RT_PW_INVERT), вторая (тесты с меткой ядра) и этапы набора
+//   harness в каждой ветви при правке обвязки (Go и спеки блока целиком на обоих ядрах). Спеки read
+//   делятся на число воркеров 3. Ветвь: переключение ядра и смоук (40 с), окно наблюдения
+//   (smoke-settle 30 с плюс окно смоука по умолчанию из плана) параллельно pw-read и
+//   pw-harness-read, затем go, pw, go-harness, pw-harness-state. Оболочка прогона — 180 с один раз
+//   (сборка, установка, снимок, восстановление; по отчёту harness 11.11). Без ветвей — деплой и
+//   один смоук с окном. Полный выбор — по тому же плану: первая ветвь — все тесты, вторая — тесты
+//   с меткой ядра. Медиана ядер усредняется: ядро первой ветви зависит от SHA и на состав не влияет.
+//   Тест без истории — unknownSec снимка (30 с).
+//   Самопроверка сессии (план: RT_HARNESS=1) — секунды из поля selfcheck снимка; не наблюдалась —
+//   не подставляется числом: строка получает harness.selfcheck='unknown', итог перечисляет такие
+//   PR (unknownParts), вердикт о целях и о 15 минутах обвязки при неизвестной части не выносится.
+//   «В т. ч. harness» — разница с тем же выбором без правки обвязки (RT_HARNESS=0) плюс самопроверка.
+// Снимок (версия 2) хранит selfcheck — { seconds, source }: длительность по самому свежему отчёту
+// `build/router/*-harness-session` основной копии (от started= в meta до конца последнего этапа
+// вложенных timings.tsv; без started — сумма этапов); отчёта нет — { seconds: null, source: null }.
+// Снимок версии 1 читается с неизвестной самопроверкой.
+// Ограничения: оценка грубая — факты тестов, блок harness и вид спеков берутся из рабочей копии
+// этого скрипта, а не из коммита слияния (для давних PR набор тестов мог быть другим); догон,
+// подтверждающий перепрогон и повторы при падениях не учитываются; самопроверка — одно наблюдение.
 //
 // Две оценки (p50/p90 методом ближайшего ранга). «Все PR» — по каждой строке с оценкой. «Целевая»
 // — без строк, у которых селектор назвал обязательное основание полного выбора: строка stderr
@@ -60,9 +74,11 @@
 // вердикт о целях не выносится, код выхода 1.
 //
 // --json — тот же расчёт одним объектом JSON в stdout: snapshot (хеш снимка), originMain, since,
-// until, rows (pr, id, base, head, kind, areas, go, specs, requiredFullReasons, minutes, why,
-// error), all и target ({ p50, p90 } или null без оценки), excluded ([{ pr, id, reasons }]),
-// errors (число), complete.
+// until, rows (pr, id, base, head, kind, areas, go, specs, requiredFullReasons, minutes, harness
+// ({ minutes, selfcheck: observed | unknown | none } или null у ошибки), why, error), all и target
+// ({ p50, p90 } или null без оценки), excluded ([{ pr, id, reasons }]), selfcheck ({ seconds,
+// source }), unknownParts ([{ pr, id, part }] — PR с неизвестной самопроверкой), errors (число),
+// complete.
 //
 // Выводится только номер PR из темы слияния (`#<число>`) или SHA слияния; имена веток не
 // печатаются. Диагностика селектора очищается: управляющие символы убираются, абсолютные пути
@@ -77,14 +93,20 @@
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import coreMarks from './core-marks.cjs';
+import { runPlan } from './run-plan.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SELECTOR = 'scripts/router/select-changed.mjs';
-const SHELL_MIN = 4.5;
+// Оболочка прогона по отчёту harness 11.11 (timings.tsv): сборка фронтенда, установка, снимок,
+// восстановление и проверка — один раз; переключение ядра и смоук — на ветвь; окно наблюдения —
+// smoke-settle 30 с плюс окно смоука, идёт параллельно pw-read ветви.
+const SHELL_BASE_SEC = 180;
+const BRANCH_SEC = 40;
+const OBSERVE_SETTLE_SEC = 30;
 const UNKNOWN_SEC = 30;
 const READ_WORKERS = 3;
 const HISTORY_DAYS = 60;
@@ -93,7 +115,9 @@ const DEFAULT_SINCE = '2026-10-15';
 const KINDS = ['полный', 'обвязка', 'зависимости', 'области', 'смоук'];
 const GOALS = { p50: 20, p90: 45, support: 15 };
 const SNAPSHOT_FORMAT = 'xcp-select-replay-snapshot';
-const SNAPSHOT_VERSION = 1;
+// версия 2 — поле selfcheck; снимок версии 1 читается с неизвестной самопроверкой
+const SNAPSHOT_VERSION = 2;
+const SESSION_DIR_RE = /^[0-9]{8}-[0-9]{6}-[0-9a-f]{8}-[A-Za-z0-9._-]*harness-session$/;
 const SHA_RE = /^[0-9a-f]{40}$/;
 const DAY_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
 const DATE_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}([ T][0-9:]+)?$/;
@@ -248,6 +272,61 @@ async function captureMedians(at) {
   return { medians, rows: rows.length, latest: latest || null };
 }
 
+/** Корень основной копии: отчёты стенда лежат там, а не в worktree исполнителя. */
+function mainRoot() {
+  try {
+    return path.dirname(git(['rev-parse', '--path-format=absolute', '--git-common-dir']).trim());
+  } catch {
+    return ROOT;
+  }
+}
+
+/**
+ * Длительность самопроверки сессии по самому свежему отчёту `*-harness-session` основной копии:
+ * от начала по meta (started=) до конца последнего этапа во вложенных timings.tsv; без started —
+ * сумма этапов. Отчёта нет или он без этапов — { seconds: null, source: null }.
+ */
+function captureSelfcheck() {
+  const dir = path.join(mainRoot(), 'build', 'router');
+  let names = [];
+  try {
+    names = readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && SESSION_DIR_RE.test(e.name))
+      .map((e) => e.name)
+      .sort()
+      .reverse();
+  } catch {
+    names = [];
+  }
+  for (const name of names) {
+    const base = path.join(dir, name);
+    if (!existsSync(path.join(base, 'summary.md'))) continue;
+    const rows = [];
+    for (const sub of readdirSync(base, { withFileTypes: true })) {
+      const file = sub.isDirectory() ? path.join(base, sub.name, 'timings.tsv') : null;
+      if (!file || !existsSync(file)) continue;
+      for (const line of readFileSync(file, 'utf8').split('\n')) {
+        const f = line.split('\t');
+        const sec = Number(f[2]);
+        const at = Number(f[4]);
+        if (f.length >= 5 && Number.isFinite(sec) && Number.isFinite(at)) rows.push({ sec, at });
+      }
+    }
+    if (rows.length === 0) continue;
+    let started = NaN;
+    try {
+      const m = /^started=(.+)$/m.exec(readFileSync(path.join(base, 'meta'), 'utf8'));
+      started = m ? Date.parse(m[1].trim()) / 1000 : NaN;
+    } catch {
+      started = NaN;
+    }
+    const end = Math.max(...rows.map((r) => r.at + r.sec));
+    const seconds = Number.isFinite(started) && end >= started ? end - started : rows.reduce((s, r) => s + r.sec, 0);
+    return { seconds, source: name };
+  }
+  return { seconds: null, source: null };
+}
+
 async function buildSnapshot(args) {
   const since = normalizeBound(args.since || DEFAULT_SINCE, false);
   const until = normalizeBound(args.until, true);
@@ -272,6 +351,7 @@ async function buildSnapshot(args) {
       latest: hist.latest
     },
     unknownSec: UNKNOWN_SEC,
+    selfcheck: captureSelfcheck(),
     merges,
     medians: hist.medians
   };
@@ -284,8 +364,11 @@ function validateSnapshot(snap) {
   const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
   if (!isObj(snap)) throw new Error('не объект JSON');
   if (snap.format !== SNAPSHOT_FORMAT) throw new Error(`формат ${JSON.stringify(snap.format)}, ожидается ${SNAPSHOT_FORMAT}`);
-  if (snap.version !== SNAPSHOT_VERSION) throw new Error(`версия ${JSON.stringify(snap.version)}, поддерживается ${SNAPSHOT_VERSION}`);
+  if (snap.version !== SNAPSHOT_VERSION && snap.version !== 1) {
+    throw new Error(`версия ${JSON.stringify(snap.version)}, поддерживаются 1 и ${SNAPSHOT_VERSION}`);
+  }
   const keys = ['format', 'version', 'since', 'until', 'originMain', 'history', 'unknownSec', 'merges', 'medians', 'hash'];
+  if (snap.version === SNAPSHOT_VERSION) keys.push('selfcheck');
   const extra = Object.keys(snap).filter((k) => !keys.includes(k));
   if (extra.length > 0) throw new Error(`лишние поля: ${extra.join(', ')}`);
   if (typeof snap.hash !== 'string' || !/^[0-9a-f]{64}$/.test(snap.hash)) throw new Error('нет контрольного хеша');
@@ -304,6 +387,14 @@ function validateSnapshot(snap) {
   }
   if (typeof snap.unknownSec !== 'number' || !Number.isFinite(snap.unknownSec) || snap.unknownSec < 0) {
     throw new Error('unknownSec: нужно неотрицательное число');
+  }
+  if (snap.version === SNAPSHOT_VERSION) {
+    const s = snap.selfcheck;
+    const okSec = s && (s.seconds === null || (typeof s.seconds === 'number' && Number.isFinite(s.seconds) && s.seconds >= 0));
+    const okSrc = s && (s.source === null || (typeof s.source === 'string' && SESSION_DIR_RE.test(s.source)));
+    if (!isObj(s) || Object.keys(s).sort().join(',') !== 'seconds,source' || !okSec || !okSrc || (s.seconds === null) !== (s.source === null)) {
+      throw new Error('selfcheck: нужны seconds (число или null) и source (имя отчёта или null)');
+    }
   }
   if (!Array.isArray(snap.merges) || snap.merges.length === 0) throw new Error('merges: пустой список слияний');
   const heads = new Set();
@@ -485,7 +576,7 @@ function buildModel(snap) {
   for (const r of facts) {
     if (r.kind !== 'go') continue;
     if (!goByPkg.has(r.pkg)) goByPkg.set(r.pkg, []);
-    goByPkg.get(r.pkg).push(r.test);
+    if (!goByPkg.get(r.pkg).includes(r.test)) goByPkg.get(r.pkg).push(r.test);
   }
   // Playwright: проверки истории по спекам (название теста → спек)
   const literal = new Map();
@@ -499,70 +590,142 @@ function buildModel(snap) {
     row: r,
     re: new RegExp('^' + r.titleTemplate.replace(/[.*+?^()|[\]\\]/g, '\\$&').replace(/\$\{[^}]*\}/g, '.*') + '$')
   }));
-  const pwBySpec = new Map(); // спек → [{ title, sec, core }]
-  const pwAll = [];
+  const pwBySpec = new Map(); // спек → [{ title, sec, coreMarked, tier }]
+  let pwUnmapped = 0; // секунды проверок истории без спека в фактах (полный выбор их учитывает)
   for (const check of Object.keys(snap.medians).sort()) {
     if (!check.startsWith('pw:')) continue;
     const title = check.slice(3);
     const row = literal.get(title) || tplRe.find((t) => t.re.test(title))?.row;
     const sec = secs(check);
     if (sec === null) continue;
-    pwAll.push(sec);
-    if (!row) continue;
+    if (!row) {
+      pwUnmapped += sec;
+      continue;
+    }
     if (!pwBySpec.has(row.spec)) pwBySpec.set(row.spec, []);
-    pwBySpec.get(row.spec).push({ title, sec, coreMarked: row.coreMarked });
+    pwBySpec.get(row.spec).push({ title, sec, coreMarked: row.coreMarked, tier: row.tier });
   }
   const goAll = [...new Set(facts.filter((r) => r.kind === 'go').map((r) => r.test))].map((t) => secs(`go:${t}`) ?? unknown);
-  const specKnown = (spec) => pwBySpec.has(spec);
-  const isRead = (spec) => {
-    const file = path.join(ROOT, 'frontend', spec);
-    if (!existsSync(file)) return false;
-    return readFileSync(file, 'utf8').split('\n', 5).some((l) => /^\/\/\s*e2e-kind:\s*read\b/.test(l));
-  };
-  return { secs, unknown, goByPkg, pwBySpec, goAll, pwAll, specKnown, isRead };
+  const specsAll = [...new Set(facts.filter((r) => r.kind === 'pw').map((r) => r.spec))].sort();
+  return { secs, unknown, goByPkg, pwBySpec, goAll, pwUnmapped, specsAll };
 }
 
-/** Оценка минут по выбору. */
-function estimate(model, v) {
-  if (v.SELECT_ALL === '1') {
-    // две ветви: сумма медиан всех тестов обоих ядер (каждое ядро — полный набор)
-    const one = model.goAll.reduce((a, b) => a + b, 0) + model.pwAll.reduce((a, b) => a + b, 0);
-    return (2 * one) / 60 + SHELL_MIN;
+const words = (s) => (s ? String(s).split(/\s+/).filter(Boolean) : []);
+const safeRe = (src) => {
+  if (!src) return null;
+  try {
+    return new RegExp(src);
+  } catch {
+    return null;
   }
-  const words = (s) => (s ? s.split(/\s+/).filter(Boolean) : []);
+};
+
+/** Секунды этапа Go плана run-plan.mjs: { all } | { seq } | { pkgs, run }. */
+function goStageSec(model, st) {
+  if (st.all) return model.goAll.reduce((a, b) => a + b, 0);
   let sec = 0;
-  // первая ветвь: Go
-  const seq = words(v.GO_SEQ);
-  if (seq.length > 0) {
-    for (const e of seq) sec += model.secs(`go:${e.slice(e.indexOf(':') + 1)}`) ?? model.unknown;
-  } else {
-    for (const pkg of words(v.GO_PKGS)) {
-      for (const t of model.goByPkg.get(pkg.replace(/^\.\//, '')) || []) sec += model.secs(`go:${t}`) ?? model.unknown;
+  if (st.seq) {
+    for (const e of st.seq) sec += model.secs(`go:${e.slice(e.indexOf(':') + 1)}`) ?? model.unknown;
+    return sec;
+  }
+  const run = safeRe(st.run);
+  for (const pkg of st.pkgs || []) {
+    for (const t of model.goByPkg.get(pkg.replace(/^\.\//, '')) || []) {
+      if (run && !run.test(t)) continue;
+      sec += model.secs(`go:${t}`) ?? model.unknown;
     }
   }
-  // первая ветвь: Playwright
-  let grep = null;
-  try {
-    grep = v.PW_GREP ? new RegExp(v.PW_GREP) : null;
-  } catch {
-    grep = null;
-  }
-  const specSec = (spec, onlyCore) => {
-    if (!model.specKnown(spec)) return model.unknown;
+  return sec;
+}
+
+/**
+ * Секунды этапа Playwright плана: спеки read делятся на число воркеров, state — подряд. Отбор:
+ * grep по названию, invert `@full` — без тестов яруса full, coreOnly — только тесты с меткой ядра.
+ * Полный выбор ({ all }) — все спеки этого вида; проверки без спека в фактах идут в state.
+ */
+function pwStageSec(model, root, st, read) {
+  const grep = safeRe(st.grep);
+  const noFull = typeof st.invert === 'string' && st.invert.includes('@full');
+  const specSec = (spec) => {
+    if (!model.pwBySpec.has(spec)) return model.unknown;
     let s = 0;
     for (const t of model.pwBySpec.get(spec)) {
       if (grep && !grep.test(t.title)) continue;
-      if (onlyCore && !t.coreMarked) continue;
+      if (noFull && t.tier === 'full') continue;
+      if (st.coreOnly && !t.coreMarked) continue;
       s += t.sec;
     }
-    return model.isRead(spec) ? s / READ_WORKERS : s;
+    return s;
   };
-  for (const spec of words(v.SPECS)) sec += specSec(spec, false);
-  // вторая ветвь: тесты с меткой ядра
-  const coreRun = (v.GO_CORE_RUN || '').replace(/^\^\(|\)\$$/g, '');
-  for (const name of coreRun ? coreRun.split('|') : []) sec += model.secs(`go:${name}`) ?? model.unknown;
-  for (const spec of words(v.SPECS_CORE)) sec += specSec(spec, true);
-  return sec / 60 + SHELL_MIN;
+  let sec = 0;
+  if (st.all) {
+    for (const spec of model.specsAll) if ((specKind(root, spec) === 'read') === read) sec += specSec(spec);
+    if (!read) sec += model.pwUnmapped;
+  } else {
+    for (const spec of st.specs || []) sec += specSec(spec);
+  }
+  return read ? sec / READ_WORKERS : sec;
+}
+
+/** Вид спека — как в run-plan.mjs: `// e2e-kind: read` в первых пяти строках, иначе state. */
+function specKind(root, spec) {
+  const file = path.join(root, 'frontend', spec);
+  if (!existsSync(file)) return 'state';
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .slice(0, 5)
+    .some((l) => /^\s*\/\/\s*e2e-kind:\s*read\s*$/.test(l))
+    ? 'read'
+    : 'state';
+}
+
+/**
+ * Секунды ветви плана, как её исполняет run.sh (full_target): переключение ядра и смоук, затем
+ * окно наблюдения параллельно pw-read и pw-harness-read, затем go, pw, go-harness, pw-harness-state.
+ */
+function branchSec(model, root, branch) {
+  let window = 0;
+  let parallel = 0;
+  let serial = 0;
+  for (const st of branch.stages) {
+    if (st.stage === 'observe') window = OBSERVE_SETTLE_SEC + st.seconds;
+    else if (st.stage === 'pw-read' || st.stage === 'pw-harness-read') parallel += pwStageSec(model, root, st, true);
+    else if (st.stage === 'go' || st.stage === 'go-harness') serial += goStageSec(model, st);
+    else if (st.stage === 'pw' || st.stage === 'pw-harness-state') serial += pwStageSec(model, root, st, false);
+  }
+  return BRANCH_SEC + Math.max(window, parallel) + serial;
+}
+
+/** Секунды плана без самопроверки: оболочка, ветви; без ветвей — деплой и один смоук с окном. */
+function planSec(model, root, plan) {
+  if (plan.branches.length === 0) return SHELL_BASE_SEC + BRANCH_SEC + OBSERVE_SETTLE_SEC + plan.smokeDefault;
+  return SHELL_BASE_SEC + plan.branches.reduce((s, b) => s + branchSec(model, root, b), 0);
+}
+
+/**
+ * Оценка строки PR по составу run-plan.mjs (набор changed). Составляющая harness — разница с тем
+ * же выбором без правки обвязки (RT_HARNESS=0: без этапов harness и ветви, нужной только им) плюс
+ * самопроверка сессии по снимку. Самопроверка не наблюдалась — её секунды не подставляются,
+ * строка помечается unknown.
+ */
+function planEstimate(model, v, selfcheckSec) {
+  const vars = Object.fromEntries(Object.entries(v).map(([k, val]) => [`RT_${k}`, val]));
+  // b1 влияет только на имя ядра; медианы ядер в оценке усредняются
+  const plan = runPlan({ suite: 'changed', vars, b1: CORES[0], root: ROOT });
+  let sec = planSec(model, ROOT, plan);
+  let harnessSec = 0;
+  if (plan.harness) harnessSec = sec - planSec(model, ROOT, runPlan({ suite: 'changed', vars: { ...vars, RT_HARNESS: '0' }, b1: CORES[0], root: ROOT }));
+  let selfcheck = 'none';
+  if (plan.selfcheck === 1) {
+    if (typeof selfcheckSec === 'number') {
+      selfcheck = 'observed';
+      sec += selfcheckSec;
+      harnessSec += selfcheckSec;
+    } else {
+      selfcheck = 'unknown';
+    }
+  }
+  return { minutes: sec / 60, harness: { minutes: harnessSec / 60, selfcheck } };
 }
 
 const label = (m) => (m.pr ? `#${m.pr}` : m.head.slice(0, 12));
@@ -584,10 +747,12 @@ function replay(snap, args) {
     go: '-',
     specs: '-',
     min: null,
+    harness: null,
     why: error.message,
     requiredFullReasons: [],
     error
   });
+  const selfcheckSec = snap.selfcheck ? snap.selfcheck.seconds : null;
   for (const m of snap.merges) {
     const base = { pr: m.pr, id: label(m), base: m.base, head: m.head };
     const lost = [m.base, m.head].filter((s) => sel.missing.has(s));
@@ -617,18 +782,34 @@ function replay(snap, args) {
       continue;
     }
     const v = out.vars;
-    const words = (s) => (s ? s.split(/\s+/).filter(Boolean).length : 0);
+    let est;
+    try {
+      est = planEstimate(model, v, selfcheckSec);
+    } catch (e) {
+      // состав не получен (значения выбора не прошли проверку run-plan.mjs): строка — ошибка
+      rows.push(
+        errorRow(base, {
+          code: r.status ?? null,
+          signal: null,
+          message: `план состава run-plan.mjs не получен: ${e.message}`,
+          diagnostic: [],
+          stops: []
+        })
+      );
+      continue;
+    }
     let goCount;
     if (v.SELECT_ALL === '1') goCount = model.goAll.length;
-    else if (v.GO_SEQ) goCount = words(v.GO_SEQ);
-    else goCount = (v.GO_PKGS ? v.GO_PKGS.split(/\s+/).filter(Boolean) : []).reduce((n, p) => n + (model.goByPkg.get(p.replace(/^\.\//, '')) || []).length, 0);
+    else if (v.GO_SEQ) goCount = words(v.GO_SEQ).length;
+    else goCount = words(v.GO_PKGS).reduce((n, p) => n + (model.goByPkg.get(p.replace(/^\.\//, '')) || []).length, 0);
     rows.push({
       ...base,
       kind: out.kind || (v.SELECT_ALL === '1' ? 'полный' : 'смоук'),
       areas: v.AREAS || '-',
       go: goCount,
-      specs: v.SELECT_ALL === '1' ? 'все' : words(v.SPECS),
-      min: estimate(model, v),
+      specs: v.SELECT_ALL === '1' ? 'все' : words(v.SPECS).length,
+      min: est.minutes,
+      harness: est.harness,
       why: out.why,
       requiredFullReasons: res.requiredFullReasons,
       error: null
@@ -645,6 +826,9 @@ function replay(snap, args) {
   const all = group(ok);
   const target = group(ok.filter((r) => r.requiredFullReasons.length === 0));
   const complete = errors.length === 0;
+  // PR, в чьей оценке самопроверка сессии нужна, но не наблюдалась (не подставлена числом)
+  const unknownParts = ok.filter((r) => r.harness && r.harness.selfcheck === 'unknown');
+  const sc = snap.selfcheck || { seconds: null, source: null };
 
   if (args.json) {
     const pick = (g) => (g ? { p50: g.p50, p90: g.p90 } : null);
@@ -664,12 +848,15 @@ function replay(snap, args) {
         specs: typeof r.specs === 'number' || r.specs === 'все' ? r.specs : null,
         requiredFullReasons: r.requiredFullReasons,
         minutes: r.min,
+        harness: r.harness,
         why: r.why || null,
         error: r.error
       })),
       all: pick(all),
       target: pick(target),
       excluded: excluded.map((r) => ({ pr: r.pr, id: r.id, reasons: r.requiredFullReasons })),
+      selfcheck: { seconds: sc.seconds, source: sc.source },
+      unknownParts: unknownParts.map((r) => ({ pr: r.pr, id: r.id, part: 'самопроверка сессии' })),
       errors: errors.length,
       complete
     };
@@ -684,11 +871,18 @@ function replay(snap, args) {
     `Снимок ${snap.hash.slice(0, 12)}: origin/main ${snap.originMain.slice(0, 12)}, история на ${snap.history.at} (окно ${snap.history.days} дн., строк ${snap.history.rows}), тест без истории — ${snap.unknownSec} с.`
   );
   console.log();
-  console.log('| PR | Вид выбора | Области | Go-тестов | Спеков | Оценка, мин | Целевая |');
-  console.log('|---|---|---|---|---|---|---|');
+  console.log(
+    sc.seconds !== null
+      ? `Самопроверка сессии: ${Math.round(sc.seconds)} с по отчёту ${sc.source} (одно наблюдение — оценка, не медиана).`
+      : `Самопроверка сессии: неизвестно — не учтена в ${unknownParts.length} PR.`
+  );
+  console.log();
+  console.log('| PR | Вид выбора | Области | Go-тестов | Спеков | Оценка, мин | в т. ч. harness, мин | Целевая |');
+  console.log('|---|---|---|---|---|---|---|---|');
   for (const r of rows) {
     const inTarget = r.error ? '-' : r.requiredFullReasons.length > 0 ? 'нет' : 'да';
-    console.log(`| ${r.id} | ${r.kind} | ${r.areas} | ${r.go} | ${r.specs} | ${fmt(r.min)} | ${inTarget} |`);
+    const h = r.harness ? `${fmt(r.harness.minutes)}${r.harness.selfcheck === 'unknown' ? ' + самопроверка неизвестна' : ''}` : '-';
+    console.log(`| ${r.id} | ${r.kind} | ${r.areas} | ${r.go} | ${r.specs} | ${fmt(r.min)} | ${h} | ${inTarget} |`);
   }
   console.log();
   const counts = KINDS.map((k) => `${k} ${rows.filter((r) => r.kind === k).length}`);
@@ -699,8 +893,11 @@ function replay(snap, args) {
     `Целевая выборка (без обязательных полных выборов): ${line(target)}; цели p50 ≤ ${GOALS.p50}, p90 ≤ ${GOALS.p90}.`
   );
   for (const k of ['зависимости', 'обвязка']) {
-    const m = ok.filter((r) => r.kind === k).map((r) => r.min);
-    console.log(`${k}: PR ${m.length}, максимум ${fmt(m.length ? Math.max(...m) : null)} мин (цель ≤ ${GOALS.support})`);
+    const list = ok.filter((r) => r.kind === k);
+    const m = list.map((r) => r.min);
+    const unk = list.filter((r) => r.harness && r.harness.selfcheck === 'unknown').length;
+    const note = unk > 0 ? `; самопроверка неизвестна в ${unk} PR — соответствие цели не объявляется` : '';
+    console.log(`${k}: PR ${m.length}, максимум ${fmt(m.length ? Math.max(...m) : null)} мин (цель ≤ ${GOALS.support})${note}`);
   }
   console.log(`медиана оценок (для сверки): ${fmt(median(ok.map((r) => r.min)))} мин`);
   if (excluded.length > 0) {
@@ -730,6 +927,10 @@ function replay(snap, args) {
     process.exitCode = 1;
   } else if (!target) {
     console.log('Целевая выборка пуста: оценки нет, вердикт о целях не выносится.');
+  } else if (unknownParts.some((r) => r.requiredFullReasons.length === 0) && target.p50 <= GOALS.p50 && target.p90 <= GOALS.p90) {
+    console.log(
+      `Нижняя граница в целях (p50 ${fmt(target.p50)}, p90 ${fmt(target.p90)}), но самопроверка сессии неизвестна в ${unknownParts.length} PR: вердикт о целях не выносится.`
+    );
   } else {
     const met = target.p50 <= GOALS.p50 && target.p90 <= GOALS.p90;
     console.log(
