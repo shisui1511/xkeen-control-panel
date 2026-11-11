@@ -21,15 +21,17 @@
 //               импортов (scripts/router/import-graph.mjs) обеих ревизий (база и head: перенос
 //               или удаление импорта не теряет потребителей старой стороны): спек выбирается,
 //               если открывает затронутый маршрут (`#/<маршрут>`, вкладка `#/config/<вкладка>`
-//               или `// e2e-pages: …`). Обычный общий компонент добавляет pages с маршрутами
+//               или `// e2e-pages: …`; вход через корень `/` — маршрут dashboard только у спека
+//               без других маршрутов, D-32). Обычный общий компонент добавляет pages с маршрутами
 //               потребителей и читающую канарейку оболочки (RTR-13, D-09). Область карты у
 //               файла frontend/src — только отметка RT_AREAS и объяснения: тесты области
 //               целиком не выбираются. Раньше графа — отдельные основания со своими
 //               объяснениями: локали (D-07) — по изменённым ключам обеих ревизий (литералы
 //               t('…') и шаблоны `…${…}…`, комментарии не считаются) → файлы-потребители →
 //               маршруты, ключ без потребителей выбор не расширяет (статика i18n, смоук);
-//               стили, токены и тема (D-08) — pages без сужения и читающая канарейка оболочки;
-//               каркас (D-09: App, main, Dashboard, tabFromHash, PageHeader) — pages без сужения
+//               стили, токены, тема и frontend/public/ (D-08) — pages без сужения и читающая
+//               канарейка оболочки; каркас (D-09: index.html, App, main, Dashboard, tabFromHash,
+//               PageHeader) — pages без сужения
 //               и одна канарейка «правка → Применить»; хаб (D-10: модуль оболочки или
 //               достижимый строго больше чем с половины страниц) — как каркас плюс спеки,
 //               ссылающиеся на модуль напрямую.
@@ -68,8 +70,11 @@
 // ревизии; потребители — корни, в чьей цепочке extends есть файл, по всем уровням и обеим
 // ревизиям (удалённый — по базе, новый — по head, смена extends — обе цепочки). Только тесты —
 // RT_HARNESS=1; есть сборка панели — RT_HARNESS=1 и все браузерные спеки; строка «конфигурация:
-// <файл> — потребители: … — …». Широкая проверка сборочных файлов (FRONTEND_ALL: vite.config.ts,
-// svelte.config.js, index.html, public/) — прежняя. Неразрешимая связь (extends на
+// <файл> — потребители: … — …». Широкая проверка сборочных конфигураций (FRONTEND_ALL:
+// vite.config.ts, svelte.config.js; D-26) — все роутерные спеки. index.html (шаблон точки входа)
+// и public/ (статика, копируется в сборку без обработки) — не конфигурации: проверяются обходом
+// всех маршрутов pages и канарейкой — index.html как каркас (D-09), public/ как тема (D-08), D-32.
+// Неразрешимая связь (extends на
 // несуществующий файл, цикл наследования, неразбираемый JSON, ссылка на удалённую
 // конфигурацию) или потребитель не определён ни на одной ревизии — остановка с кодом 3 по тому
 // же контракту, что у карты: ни сужения, ни полного выбора.
@@ -267,10 +272,14 @@ const SHELL_READ_CANARY = 'tests/router/config-visual.spec.ts';
 const SHELL_APPLY_CANARY = 'tests/router/config-presets.spec.ts';
 
 // Стили, токены и тема (D-08): pages со всеми маршрутами и читающая канарейка оболочки.
-const FRONT_STYLE = [/^src\/styles\//, /^src\/assets\//, /\.css$/, /^src\/lib\/theme\.ts$/];
+// public/ — статика первого кадра и PWA (theme-init.js, manifest.json, иконки), Vite копирует её в
+// сборку без обработки: отрисовывается на каждой странице одинаково, как тема (D-32).
+const FRONT_STYLE = [/^src\/styles\//, /^src\/assets\//, /\.css$/, /^src\/lib\/theme\.ts$/, /^public\//];
 // Каркас (D-09): точка входа, корневой компонент, маршрутизация и заголовок страниц — pages со
 // всеми маршрутами и канарейка «правка → Применить». Dashboard.svelte ещё и страница dashboard.
+// index.html — HTML-шаблон точки входа (подключает /theme-init.js и /src/main.ts), как main.ts (D-32).
 const FRONT_FRAME = [
+  /^index\.html$/,
   /^src\/App\.svelte$/,
   /^src\/main\.ts$/,
   /^src\/Dashboard\.svelte$/,
@@ -288,14 +297,14 @@ const FRONT_LOCALE = /^src\/locales\/[\w-]+\.json$/;
 const HUB_PERCENT_DEFAULT = 50;
 let hubPercent = HUB_PERCENT_DEFAULT;
 
-// Файлы frontend/ вне src/, меняющие сборку панели: все роутерные спеки (не Go). Конфигурации
-// TypeScript сюда не входят: их выбор — по конечным потребителям (TS_CONFIG, D-26).
-const FRONTEND_ALL = [
-  /^frontend\/vite\.config\.ts$/,
-  /^frontend\/svelte\.config\.js$/,
-  /^frontend\/index\.html$/,
-  /^frontend\/public\//
-];
+// Сборочные конфигурации фронтенда (D-26): все роутерные спеки (не Go) — широкая проверка
+// сохраняется. Конфигурации TypeScript сюда не входят: их выбор — по конечным потребителям
+// (TS_CONFIG, D-26). index.html (шаблон точки входа) и public/ (статика, копируется в сборку без
+// обработки) — не конфигурации: они идут в touchedSrc и проверяются обходом всех маршрутов pages
+// и канарейкой (FRONT_FRAME и FRONT_STYLE, D-32).
+const FRONTEND_ALL = [/^frontend\/vite\.config\.ts$/, /^frontend\/svelte\.config\.js$/];
+// Файлы frontend/ вне src/, которые разбираются как файлы фронтенда (каркас и тема, D-32)
+const FRONTEND_SHELL_STATIC = [/^frontend\/index\.html$/, /^frontend\/public\//];
 
 // Конфигурации TypeScript фронтенда (D-26…D-28): frontend/**/tsconfig*.json и jsconfig*.json
 // вне node_modules. Выбор — по потребителям обеих ревизий (tsConfigConsumers).
@@ -1695,7 +1704,7 @@ async function select(changed) {
       reasons.push(`${file}: влияет на сборку панели — все роутерные спеки`);
       continue;
     }
-    if (file.startsWith('frontend/src/')) {
+    if (file.startsWith('frontend/src/') || FRONTEND_SHELL_STATIC.some((re) => re.test(file))) {
       touchedSrc.push(file.slice('frontend/'.length));
       for (const n of areasOf(file)) {
         frontMarked.add(n);
@@ -1960,10 +1969,16 @@ async function select(changed) {
       else if (FRONT_FRAME.some((re) => re.test(rel))) frameHit.push(rel);
     }
     for (const rel of styleHit) {
-      reasons.push(`frontend/${rel}: стили, токены или тема (D-08) — pages со всеми маршрутами и читающая канарейка оболочки`);
+      reasons.push(
+        rel.startsWith('public/')
+          ? `frontend/${rel}: статика первого кадра и PWA (D-08, как тема) — pages со всеми маршрутами и читающая канарейка оболочки`
+          : `frontend/${rel}: стили, токены или тема (D-08) — pages со всеми маршрутами и читающая канарейка оболочки`
+      );
     }
     for (const rel of frameHit) {
-      if (rel === 'src/Dashboard.svelte') {
+      if (rel === 'index.html') {
+        reasons.push(`frontend/${rel}: точка входа страницы (D-09, как main.ts) — pages со всеми маршрутами и канарейка «правка → Применить»`);
+      } else if (rel === 'src/Dashboard.svelte') {
         // переключатель маршрутов и одновременно страница dashboard: её спеки — по маршруту
         affected.add('dashboard');
         reasons.push(`frontend/${rel}: каркас приложения (D-09) и страница dashboard — pages со всеми маршрутами, канарейка «правка → Применить» и спеки dashboard`);
