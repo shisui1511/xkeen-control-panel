@@ -149,6 +149,22 @@
 // После SIGKILL run.sh не успевает восстановить стенд и оставляет снимок на цели: стенд по нему
 // (rt_restore со сверкой) возвращает сессия, вердикт «interrupt: возврат стенда сессией»; не
 // вернулся — сессия останавливается. Снимок, оставшийся к концу сессии, возвращает cleanup.
+// Подмена версии посреди этапа (необязательно, только у changed, не сочетается с interrupt;
+// проверка сверки версии стенда настоящей посторонней установкой, D-13):
+//     "foreign_version": {
+//       "stage": "go",                      go или pw (часть state Playwright)
+//       "version": "v0.34.1",               тег vX.Y.Z[-<суффикс>.N], есть в локальном git
+//       "after": 5                          1..600 с после начала этапа
+//     }
+// Начало этапа — файл go-*.raw (go) или каталог pw части state (pw; pw-read и pw-switch не
+// считаются) в <отчёт прохода>/<цель>/<ядро>/ или на уровень ниже. Через after секунд сессия
+// ставит на цель сборку HEAD под номером version отдельным деплоем (deploy.sh --target <цель>
+// --no-frontend, XCP_VERSION, под блокировкой сессии, отчёт <NN>-<проход>-foreign, вывод — его
+// deploy.log), не дожидаясь конца вложенного прогона; вложенный прогон вышел раньше — деплоя нет.
+// Вердикты прохода, кроме exit и summary: «подмена версии: этап начался» и «подмена версии:
+// установлена <тег>» (PASS — код деплоя 0 и файл version с тегом). После прохода стенд не на HEAD:
+// следующий проход и конец сессии ставят HEAD. dry-run печатает строку «подмена версии: …» и
+// добавляет к оценке 120 с (деплой подмены и деплой HEAD после прохода).
 // С go, specs, grep и product проход-прогон не сочетается. Вложенный `sh run.sh [changed]`
 // идёт под блокировкой сессии (RT_LOCK_HELD=1) без RT_HOLD_MINUTES, RT_CORES, RT_BASE и
 // SPEC (SPEC — только у session), сам ставит сборку HEAD, снимает снимок и восстанавливает стенд. Его отчёт — в
@@ -183,6 +199,20 @@
 // «## Остановлено на первом несовпадении»: проход, ядро, тест, ожидаемый и полученный статус и
 // «Не выполнено:» (ядра прохода и проходы); код выхода 1. Несовпадение в последнем этапе
 // остановкой не считается: невыполненного нет.
+//
+// Смена версии стенда (D-13, контракт сверки версии): перед каждым этапом go-suite.sh и
+// pw-suite.sh (и переключением ядра pw-suite.sh --switch) сессия пишет <этап>/<цель>/expect-version
+// — версию последнего деплоя сессии (файл version каталога деплоя, у прохода с version — его номер)
+// или вложенного прогона (version его отчёта, у вложенной сессии — её последнего деплоя); версия
+// неизвестна — файла нет, сверка этапа выключена. Этапы сверяют версию на каждой границе пакета
+// и спека. Код этапа 4 или строка stop в <этап>/<цель>/version-stop.tsv — остановка сессии
+// независимо от keep_going: тесты остановленного этапа с ожиданиями не сверяются (их падения —
+// класс stand), сторож Go, оборвавший этап раньше границы, сверяет версию стенда сам (xcp -v).
+// В summary.md — раздел «## Остановлено: смена версии стенда» (проход, ядро, граница, ожидалась,
+// на стенде, «Не выполнено:» с ядрами, спеками, проходами и строками notrun этапа), в session.json
+// — stopped.reason: version (остановка на несовпадении — mismatch); код выхода 1. На стенде могла
+// остаться чужая сборка: конец сессии ставит сборку HEAD заново. Отчёт со строкой stop (этап
+// сессии или вложенный прогон) в историю не пишется — прогон неполный.
 //
 // Ядра как в гейте (D-23): на первом ядре прохода (активное ядро стенда, если оно среди ядер
 // прохода) идут все тесты прохода, на остальных ядрах — только тесты с меткой ядра (core-marks):
@@ -373,6 +403,35 @@ function loadInterrupt(i, where) {
   return { stage: 'go', signal, after: i.after, deadline };
 }
 
+// Поле foreign_version прохода-прогона changed: посторонняя установка версии посреди этапа go или
+// части state Playwright вложенного прогона (проверка сверки версии стенда на стенде, D-13).
+function loadForeign(f, where) {
+  if (!f || typeof f !== 'object' || Array.isArray(f)) die(`${where}.foreign_version: объект`);
+  for (const k of Object.keys(f)) {
+    if (!['stage', 'version', 'after'].includes(k)) {
+      die(`${where}.foreign_version.${k}: допустимы stage, version, after`);
+    }
+  }
+  if (f.stage !== 'go' && f.stage !== 'pw') die(`${where}.foreign_version.stage: go или pw`);
+  if (typeof f.version !== 'string' || !RELEASE_TAG.test(f.version)) {
+    die(`${where}.foreign_version.version: тег vX.Y.Z[-<суффикс>.N] вышедшего релиза`);
+  }
+  if (!localTagExists(f.version)) {
+    die(
+      `${where}.foreign_version.version: тега ${f.version} нет — нужен номер вышедшего релиза (git fetch --tags)`
+    );
+  }
+  if (!Number.isInteger(f.after) || f.after < 1 || f.after > 600) {
+    die(`${where}.foreign_version.after: целое от 1 до 600 (с)`);
+  }
+  return { stage: f.stage, version: f.version, after: f.after };
+}
+
+// Где идёт этап подмены версии: строка плана и вердиктов.
+function foreignStageTitle(stage) {
+  return stage === 'go' ? 'go' : 'части state Playwright';
+}
+
 // Название прохода-прогона для плана и журнала: «smoke (релиз <тег>)», «changed по файлам …».
 function suiteTitle(p, release) {
   if (p.suite === 'smoke') return `smoke (релиз ${release})`;
@@ -457,6 +516,12 @@ function loadSuitePass(p, where, earlier, ctx) {
   if (p.dry_run !== undefined && p.suite !== 'delta') die(`${where}.dry_run: только у delta`);
   if (['rerun', 'bisect'].includes(p.suite) && p.interrupt !== undefined) {
     die(`${where}.interrupt: у ${p.suite} не поддерживается`);
+  }
+  let foreign = null;
+  if (p.foreign_version !== undefined) {
+    if (p.suite !== 'changed') die(`${where}.foreign_version: только у changed`);
+    if (p.interrupt !== undefined) die(`${where}.foreign_version: не сочетается с interrupt`);
+    foreign = loadForeign(p.foreign_version, where);
   }
   let from = null;
   let dryRun = false;
@@ -556,6 +621,7 @@ function loadSuitePass(p, where, earlier, ctx) {
     dryRun,
     bisect,
     interrupt: p.interrupt === undefined ? null : loadInterrupt(p.interrupt, where),
+    foreign,
     version: null,
     product: null,
     go: null,
@@ -958,8 +1024,17 @@ function composition(p, full, root, core, h) {
 const BUDGET_MIN = 20;
 // Накладные расходы оценки, секунды: деплой и смоук на смену продукта, переключение ядра,
 // settle после Go, запуск pw-suite.sh на спек, тест без медианы; проход-прогон — max_minutes
-// или suiteMinutes минут.
-const EST = { deploy: 180, switch: 45, settle: 30, pwStart: 15, unknownTest: 30, suiteMinutes: 15 };
+// или suiteMinutes минут; подмена версии (foreign_version) — деплой подмены и деплой HEAD после
+// прохода.
+const EST = {
+  deploy: 180,
+  switch: 45,
+  settle: 30,
+  pwStart: 15,
+  unknownTest: 30,
+  suiteMinutes: 15,
+  foreign: 120
+};
 
 // Оценка теста на ядре: медиана на этом ядре, иначе на другом, иначе unknownTest.
 function testSeconds(h, check, core) {
@@ -1012,6 +1087,63 @@ function compositionTitle(comp) {
   if (comp.full) return 'все';
   const goN = comp.go ? (comp.go.legacy ? `все (${comp.go.legacy})` : comp.go.tests.length) : 0;
   return `только с меткой ядра (Go ${goN}, спеков ${comp.specs.length})`;
+}
+
+// Файл version каталога деплоя или отчёта (ожидаемая версия, как её печатает xcp -v); нет — null.
+function readVersionFile(dir) {
+  try {
+    const v = readFileSync(path.join(dir, 'version'), 'utf8').split('\n')[0].trim();
+    return v || null;
+  } catch {
+    return null;
+  }
+}
+
+// <отчёт этапа>/<цель>/version-stop.tsv (контракт сверки версии стенда): первая строка stop
+// (ядро, граница, ожидалась, на стенде), строки notrun (ядро, что не выполнено) и число строк
+// suspect. Нет файла — { stop: null, notrun: [], suspect: 0 }.
+function readVersionStop(file) {
+  const out = { stop: null, notrun: [], suspect: 0 };
+  let text = '';
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch {
+    return out;
+  }
+  for (const line of text.split('\n')) {
+    const f = line.split('\t');
+    if (f[0] === 'stop' && !out.stop) {
+      out.stop = {
+        core: f[1] || '-',
+        boundary: f[2] || '-',
+        expected: f[3] || '-',
+        observed: f[4] || '-'
+      };
+    } else if (f[0] === 'notrun' && f[2]) {
+      out.notrun.push({ core: f[1] || '-', what: f[2] });
+    } else if (f[0] === 'suspect') {
+      out.suspect++;
+    }
+  }
+  return out;
+}
+
+// В отчёте есть строка stop: <отчёт>/<цель>/version-stop.tsv или то же в его каталогах этапов
+// <NN>-<этап> (отчёт сессии).
+function hasVersionStop(dir, target) {
+  if (readVersionStop(path.join(dir, target, 'version-stop.tsv')).stop) return true;
+  let ents = [];
+  try {
+    ents = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  return ents.some(
+    (e) =>
+      e.isDirectory() &&
+      /^\d{2}-/.test(e.name) &&
+      readVersionStop(path.join(dir, e.name, target, 'version-stop.tsv')).stop !== null
+  );
 }
 
 // Тег есть в локальном git (коммит, на который он указывает, достижим).
@@ -1114,6 +1246,14 @@ function planSession(spec, specFile, root) {
       // смоук релиза оставляет на стенде сборку релиза, а не HEAD; вложенная сессия
       // возвращает стенд сама (сборка HEAD и её исходное ядро)
       deployed = p.suite === 'smoke' || p.suite === 'delta' ? null : 'HEAD';
+      if (p.foreign) {
+        // деплой подмены посреди прогона и деплой HEAD после прохода
+        seconds += EST.foreign;
+        lines.push(
+          `   подмена версии: ${p.foreign.version} через ${p.foreign.after} с после начала ${foreignStageTitle(p.foreign.stage)}; после прохода стенд не на HEAD`
+        );
+        deployed = null;
+      }
       continue;
     }
     const key = productKey(p);
@@ -1228,8 +1368,15 @@ class Session {
     this.cleaning = false;
     this.network = false;
     this.broken = false;
-    // остановка на первом несовпадении: { pass, core, test, expected, actual, how, live, todo }
+    // остановка сессии: reason 'mismatch' — первое несовпадение { pass, core, test, expected,
+    // actual, how, live, todo }; reason 'version' — смена версии стенда { pass, core, boundary,
+    // expected, observed, stage, suspect, how, todo } (expected и observed — строки версий)
     this.stopped = null;
+    // ожидаемая версия стенда для сверки на границах этапов: версия последнего деплоя сессии
+    // (файл version каталога деплоя) или вложенного прогона; null — неизвестна, сверка выключена
+    this.expectVersion = null;
+    // параллельный этап: деплой подмены версии посреди вложенного прогона (foreign_version)
+    this.sideChild = null;
     // вердикты с этим индексом и дальше ещё не проверены на остановку (checkStop)
     this.checked = 0;
   }
@@ -1254,6 +1401,14 @@ class Session {
     const dirs = [this.dir, ...this.steps.filter((x) => x.kind === 'suite').map((x) => x.dir)];
     for (const d of [...new Set(dirs)]) {
       if (!existsSync(d)) continue;
+      // отчёт со строкой stop (смена версии стенда) неполный и снят с чужой версии: в историю
+      // не идёт, как и у run.sh; у отчёта сессии — если stop есть хоть в одном её этапе
+      if (hasVersionStop(d, this.t)) {
+        this.notes.push(
+          `история: отчёт ${path.relative(this.root, d)} не записан — смена версии стенда, прогон неполный`
+        );
+        continue;
+      }
       try {
         appendReport(d);
       } catch (e) {
@@ -1281,29 +1436,7 @@ class Session {
   // — true, если после выхода лидера нужно дождаться опустения группы.
   run(cmd, args, env = {}, opts = {}) {
     if (this.aborted && !this.cleaning) return Promise.resolve(130);
-    const base = { ...process.env };
-    for (const k of [
-      'RT_SPECS',
-      'RT_PW_GREP',
-      'RT_GO_PKGS',
-      'RT_GO_RUN',
-      // состав и порядок этапа задаёт сессия, не окружение оператора
-      'RT_GO_RUN_SEQ',
-      'RT_PW_CORE_ONLY',
-      'RT_ART_SUB',
-      'RT_SPECS_FIRST',
-      'RT_REPORT',
-      'RT_REPORT_DIR',
-      'RT_CORE',
-      'XCP_WANT_CORE',
-      // номер сборки задаёт только проход с version (env его деплоя), не оператор и не прошлый этап
-      'XCP_VERSION'
-    ]) {
-      delete base[k];
-    }
-    const full = { ...base, RT_LOCK_HELD: '1', ROUTERS: this.t, ...env };
-    // undefined в env — снять переменную (вложенный прогон набора не наследует настройки сессии)
-    for (const k of Object.keys(full)) if (full[k] === undefined) delete full[k];
+    const full = this.stageEnv(env);
     // проход tree: скрипты этапов — из HEAD (SCRIPT_DIR), каталог запуска — worktree дерева коммита,
     // поэтому deploy.sh, go-suite.sh и pw-suite.sh собирают и гоняют продукт и тесты коммита; отчёт этапа
     // rt_report_use принимает только под build/router каталога запуска — путь переписывается на ссылку
@@ -1354,9 +1487,75 @@ class Session {
     });
   }
 
+  // Окружение этапа: без настроек оператора и прошлых этапов, с RT_LOCK_HELD=1 и целью сессии;
+  // undefined в env — снять переменную.
+  stageEnv(env) {
+    const base = { ...process.env };
+    for (const k of [
+      'RT_SPECS',
+      'RT_PW_GREP',
+      'RT_GO_PKGS',
+      'RT_GO_RUN',
+      // состав и порядок этапа задаёт сессия, не окружение оператора
+      'RT_GO_RUN_SEQ',
+      'RT_PW_CORE_ONLY',
+      'RT_ART_SUB',
+      'RT_SPECS_FIRST',
+      'RT_REPORT',
+      'RT_REPORT_DIR',
+      'RT_CORE',
+      'XCP_WANT_CORE',
+      // номер сборки задаёт только проход с version (env его деплоя), не оператор и не прошлый этап
+      'XCP_VERSION'
+    ]) {
+      delete base[k];
+    }
+    const full = { ...base, RT_LOCK_HELD: '1', ROUTERS: this.t, ...env };
+    // undefined в env — снять переменную (вложенный прогон набора не наследует настройки сессии)
+    for (const k of Object.keys(full)) if (full[k] === undefined) delete full[k];
+    return full;
+  }
+
+  // Параллельный этап (деплой подмены версии посреди вложенного прогона): своя группа процессов,
+  // вывод — в файл log (не в консоль: там идёт вывод вложенного прогона), запуск — из корня
+  // рабочей копии. Код выхода (сигнал — 128+n).
+  runSide(cmd, args, env, log) {
+    if (this.aborted) return Promise.resolve(130);
+    appendFileSync(
+      this.log,
+      `\n$ ${[cmd, ...args].join(' ')} (параллельно, вывод — ${path.relative(this.root, log)})\n`
+    );
+    return new Promise((resolve) => {
+      const fd = openSync(log, 'a');
+      const child = spawn(cmd, args, {
+        cwd: this.root,
+        env: this.stageEnv(env),
+        stdio: ['ignore', fd, fd],
+        detached: true
+      });
+      closeSync(fd);
+      this.sideChild = child;
+      child.on('error', () => {
+        // запуск не удался: close придёт с кодом
+      });
+      child.on('close', (code, sig) => {
+        this.sideChild = null;
+        resolve(code ?? 128 + (osConstants.signals[sig] ?? 15));
+      });
+    });
+  }
+
   // Сигнал текущему этапу: всей его группе (лидер группы — сам этап, см. run); не вышло —
-  // самому процессу.
+  // самому процессу. Параллельный этап (runSide) получает тот же сигнал своей группе.
   signalChild(sig) {
+    const side = this.sideChild;
+    if (side && Number.isInteger(side.pid) && side.pid > 1) {
+      try {
+        process.kill(-side.pid, sig);
+      } catch {
+        // группа уже вышла
+      }
+    }
     const c = this.child;
     if (!c) return;
     const pid = c.pid;
@@ -1534,11 +1733,14 @@ class Session {
     this.record({ kind: 'deploy', label, dir, rc: drc, version });
     if (drc !== 0) {
       this.deployed = null;
+      this.expectVersion = null;
       if (drc !== 3) this.broken = true;
       return drc;
     }
     this.deployed = key;
     const ver = readFileSync(path.join(dir, 'version'), 'utf8').trim();
+    // ожидаемая версия этапов сессии до следующего деплоя (expect-version этапов go и pw)
+    this.expectVersion = ver || null;
     const src = await this.run('sh', [path.join(SCRIPT_DIR, 'smoke.sh'), this.t, ver], {
       RT_REPORT: dir
     });
@@ -1599,9 +1801,11 @@ class Session {
     return true;
   }
 
-  async switchTo(core) {
+  // pass — имя прохода, ради которого переключение (для причины остановки по смене версии).
+  async switchTo(core, pass = '-') {
     const dir = this.stepDir(`switch-${core}`);
     this.say(`переключение ядра ${this.cur ?? '-'} → ${core}`);
+    this.writeExpect(dir);
     const rc = await this.run(
       'sh',
       [path.join(SCRIPT_DIR, 'pw-suite.sh'), this.t, core, '--switch', core],
@@ -1610,9 +1814,92 @@ class Session {
       }
     );
     this.record({ kind: 'switch', core, dir, rc });
+    // смена версии на границе pw:core-switch.spec.ts: ядро стенда не известно, сессия остановлена
+    if (this.versionStop('switch', pass, core, dir, rc)) {
+      this.cur = null;
+      return 4;
+    }
     if (rc === 0) this.cur = core;
     else if (rc !== 3) this.broken = true;
     return rc;
+  }
+
+  // --- смена версии стенда (D-13) ---
+
+  // <этап>/<цель>/expect-version перед этапом go, pw или переключения ядра: версия последнего
+  // деплоя сессии (контракт сверки версии стенда); версия неизвестна — файла нет, сверка этапа
+  // выключена (rt_version_guard пишет skip).
+  writeExpect(dir) {
+    if (!this.expectVersion) return;
+    const file = path.join(dir, this.t, 'expect-version');
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, `${this.expectVersion}\n`);
+  }
+
+  // После этапа: код 4 или строка stop в <этап>/<цель>/version-stop.tsv — смена версии стенда,
+  // сессия останавливается независимо от keep_going (класс stand: тесты этапа не сверяются с
+  // ожиданиями). seen — смена, найденная сессией сама ({ boundary, observed }: этап остановлен
+  // сторожем Go раньше, чем дошёл до границы). Итог: true — сессия остановлена.
+  versionStop(kind, pass, core, dir, rc, seen = null) {
+    if (this.cleaning) return false;
+    const vs = readVersionStop(path.join(dir, this.t, 'version-stop.tsv'));
+    if (!vs.stop && rc !== 4 && !seen) return false;
+    const s = vs.stop ?? {
+      core,
+      boundary: seen ? seen.boundary : `${kind}: этап вернул код 4 без строки stop`,
+      expected: this.expectVersion ?? '-',
+      observed: seen ? seen.observed : 'не прочитана'
+    };
+    const rel = path.relative(this.root, dir);
+    const prev = this.stopped;
+    const todo = [
+      ...(prev?.todo ?? []),
+      ...vs.notrun.map((n) => `${path.basename(dir)}: ${n.what} (${n.core})`)
+    ];
+    this.stopped = {
+      reason: 'version',
+      pass,
+      core: s.core !== '-' ? s.core : core,
+      boundary: s.boundary,
+      expected: s.expected,
+      observed: s.observed,
+      stage: rel,
+      suspect: vs.suspect,
+      how: `после этапа ${kind}`,
+      live: false,
+      todo
+    };
+    this.say(
+      `остановка: смена версии стенда (граница ${s.boundary}) — ожидалась ${s.expected}, на стенде ${s.observed}; проход ${pass}, ядро ${this.stopped.core}`
+    );
+    this.verdicts.push({
+      pass,
+      core: this.stopped.core,
+      test: `смена версии стенда: ${s.boundary}`,
+      expected: [s.expected],
+      actual: s.observed,
+      detail: 'класс stand: сессия остановлена, тесты этапа с ожиданиями не сверялись',
+      ok: false,
+      report: rel
+    });
+    // checkStop эту строку не пересматривает: остановка уже задана
+    this.checked = this.verdicts.length;
+    // на стенде может остаться чужая сборка: конец сессии ставит HEAD заново
+    this.deployed = null;
+    this.expectVersion = null;
+    // сторож Go успел оборвать этап посреди пакета: тестовый бинарник мог остаться на цели
+    if (prev?.live) this.killRemoteTests();
+    return true;
+  }
+
+  // Версия на стенде (первая строка xcp -v) отличается от ожидаемой: { observed } или null (совпала,
+  // ожидание неизвестно или стенд не ответил — тогда решает обычная остановка).
+  standVersionChanged() {
+    if (!this.expectVersion) return null;
+    const r = this.remote('/opt/sbin/xcp -v 2>/dev/null | head -n 1');
+    if (r.rc !== 0 || !r.out) return null;
+    const observed = r.out.split('\n')[0].trim();
+    return observed && observed !== this.expectVersion ? { observed } : null;
   }
 
   // Возврат стенда по снимку, который оставил незавершённый вложенный прогон (SIGKILL по
@@ -1688,6 +1975,7 @@ class Session {
         env.RT_GO_RUN_SEQ = comp.go.tests.map((t) => `${t.pkg}:${t.test}`).join(' ');
       }
       const watch = this.spec.keepGoing ? {} : this.goWatch(p, core, dir);
+      this.writeExpect(dir);
       const g = await this.run(
         'sh',
         [path.join(SCRIPT_DIR, 'go-suite.sh'), this.t, core],
@@ -1695,6 +1983,25 @@ class Session {
         watch
       );
       this.record({ kind: 'go', pass: p.name, core, dir, rc: g, version: p.resolved ?? null });
+      // сторож Go оборвал этап на несовпадении раньше границы пакета: падение могло быть
+      // следствием смены версии — сверить версию стенда самой сессией
+      let seen = null;
+      if (this.stopped?.live && this.stopped.reason === 'mismatch') {
+        const ch = this.standVersionChanged();
+        if (ch) {
+          seen = { boundary: `go: этап остановлен сессией на ${this.stopped.test}`, ...ch };
+        }
+      }
+      if (this.versionStop('go', p.name, core, dir, g, seen)) {
+        if (comp.specs.length) {
+          this.stopped.todo.push(
+            `проход ${p.name} на ${core}: спеки ${comp.specs.map((s) => path.basename(s.spec)).join(', ')}`
+          );
+        }
+        // тесты этапа шли на чужой версии: с ожиданиями не сверяются
+        this.judge(p, core, [], comp);
+        return 0;
+      }
       if (g === 3 && !this.stopped?.live) return 3;
       if (!this.stopped && comp.specs.length && !this.spec.keepGoing && !this.aborted) {
         // несовпадение в Go-части, которое видно только после этапа (например, PASS вместо
@@ -1749,10 +2056,21 @@ class Session {
       if (p.grep) env.RT_PW_GREP = p.grep;
       // только тесты с тегом @core, как во второй ветви changed
       if (comp.coreOnly) env.RT_PW_CORE_ONLY = '1';
+      this.writeExpect(dir);
       const rc = await this.run('sh', [path.join(SCRIPT_DIR, 'pw-suite.sh'), this.t, core], env);
       this.record({ kind: 'pw', pass: p.name, core, dir, rc, version: p.resolved ?? null });
-      if (rc === 3) return 3;
       const rest = comp.specs.slice(k + 1);
+      if (this.versionStop('pw', p.name, core, dir, rc)) {
+        if (rest.length) {
+          this.stopped.todo.push(
+            `проход ${p.name} на ${core}: спеки ${rest.map((s) => path.basename(s.spec)).join(', ')}`
+          );
+        }
+        // спек остановленного этапа шёл на чужой версии: сверяются только этапы до него
+        this.judge(p, core, dirs.slice(0, -1), comp);
+        return 0;
+      }
+      if (rc === 3) return 3;
       if (rest.length && !this.spec.keepGoing && !this.aborted) {
         // остановка между спеками: следующие спеки прохода не запускаются
         const m = this.firstMismatch(p, dir);
@@ -1772,7 +2090,7 @@ class Session {
   // --- остановка на первом несовпадении ---
 
   setStopped(s) {
-    this.stopped = { todo: [], ...s };
+    this.stopped = { reason: 'mismatch', todo: [], ...s };
     this.say(
       `остановка на первом несовпадении (${s.how}): проход ${s.pass}, ядро ${s.core}: ${s.test} — ожидалось ${s.expected.join('|')}, получено ${s.actual}`
     );
@@ -2129,6 +2447,86 @@ class Session {
     return { opts, state };
   }
 
+  // Подмена версии посреди вложенного прогона по спеке (foreign_version, D-13). Опрос раз в
+  // секунду: этап начался — в <отчёт>/<цель>/<ядро>/ (и на уровень ниже, подкаталог ветви)
+  // появился файл go-*.raw (stage go) или каталог pw части state (stage pw; pw-read и pw-switch
+  // не считаются); через after секунд — деплой HEAD под номером version на цель параллельно
+  // вложенному прогону (deploy.sh --no-frontend под блокировкой сессии, отчёт <NN>-<проход>-foreign
+  // сессии), без ожидания его конца. Вложенный прогон вышел раньше — деплоя нет. Возвращает opts
+  // для run и состояние для вердиктов.
+  foreignWatch(fv, dir, p) {
+    const state = { startedAt: 0, at: '', deployAt: 0, rc: null, dir: '', done: null };
+    const started = () => {
+      const tdir = path.join(dir, this.t);
+      let cores;
+      try {
+        cores = readdirSync(tdir, { withFileTypes: true }).filter((d) => d.isDirectory());
+      } catch {
+        return '';
+      }
+      const hit = (d, depth) => {
+        let ents;
+        try {
+          ents = readdirSync(d, { withFileTypes: true });
+        } catch {
+          return '';
+        }
+        for (const e of ents) {
+          if (fv.stage === 'go' && e.isFile() && /^go-.+\.raw$/.test(e.name)) return e.name;
+          if (fv.stage === 'pw' && e.isDirectory() && e.name === 'pw') {
+            return path.relative(tdir, path.join(d, e.name));
+          }
+        }
+        if (depth > 0) return '';
+        for (const e of ents) {
+          if (!e.isDirectory() || /^pw(-|$)/.test(e.name)) continue;
+          const r = hit(path.join(d, e.name), depth + 1);
+          if (r) return r;
+        }
+        return '';
+      };
+      for (const c of cores) {
+        const r = hit(path.join(tdir, c.name), 0);
+        if (r) return fv.stage === 'go' ? `${c.name}/${r}` : r;
+      }
+      return '';
+    };
+    const opts = {
+      onSpawn: () => {
+        const poll = setInterval(() => {
+          if (state.deployAt || this.aborted) return;
+          if (!state.startedAt) {
+            const at = started();
+            if (!at) return;
+            state.startedAt = Date.now();
+            state.at = at;
+            this.say(
+              `подмена версии: этап ${foreignStageTitle(fv.stage)} начался (${at}), установка ${fv.version} через ${fv.after} с`
+            );
+            return;
+          }
+          if (Date.now() - state.startedAt < fv.after * 1000) return;
+          state.deployAt = Date.now();
+          state.dir = this.stepDir(`${p.name}-foreign`);
+          this.say(
+            `подмена версии: деплой HEAD под номером ${fv.version} посреди прогона → ${path.relative(this.root, state.dir)}`
+          );
+          state.done = this.runSide(
+            'sh',
+            [path.join(SCRIPT_DIR, 'deploy.sh'), '--target', this.t, '--no-frontend'],
+            { RT_REPORT: state.dir, XCP_VERSION: fv.version },
+            path.join(state.dir, 'deploy.log')
+          ).then((rc) => {
+            state.rc = rc;
+            this.say(`подмена версии: деплой ${fv.version} завершился с кодом ${rc}`);
+          });
+        }, 1000);
+        return () => clearInterval(poll);
+      }
+    };
+    return { opts, state };
+  }
+
   // Проход-прогон набора: вложенный run.sh под блокировкой сессии, отчёт в build/router.
   // Вложенный прогон сам ставит сборку HEAD, снимает снимок и восстанавливает стенд.
   async runSuite(p) {
@@ -2237,15 +2635,27 @@ class Session {
     const args = [path.join(SCRIPT_DIR, 'run.sh')];
     if (p.suite !== 'full') args.push(p.suite);
     const irq = p.interrupt ? this.interruptWatch(p.interrupt, dir) : null;
+    const fw = p.foreign ? this.foreignWatch(p.foreign, dir, p) : null;
     const t0 = Date.now();
     const rc = await this.run(
       'sh',
       args,
       env,
-      irq ? irq.opts : { leaderOnly: p.suite === 'session' }
+      irq ? irq.opts : fw ? fw.opts : { leaderOnly: p.suite === 'session' }
     );
     const took = Math.round((Date.now() - t0) / 1000);
     if (irq) irq.state.closedAt = Date.now();
+    // деплой подмены мог пережить вложенный прогон: следующий этап не идёт одновременно с ним
+    if (fw && fw.state.done) await fw.state.done;
+    if (fw && fw.state.dir) {
+      this.record({
+        kind: 'foreign-deploy',
+        pass: p.name,
+        dir: fw.state.dir,
+        rc: fw.state.rc ?? 130,
+        version: p.foreign.version
+      });
+    }
     this.record({
       kind: 'suite',
       pass: p.name,
@@ -2284,6 +2694,17 @@ class Session {
     } else {
       // (после смоука релиза и добора на стенде артефакт релиза — признак тоже сбрасывается)
       this.deployed = p.suite !== 'smoke' && p.suite !== 'delta' && deployOk ? 'HEAD' : null;
+    }
+    // ожидаемая версия следующих этапов — то, что поставил вложенный прогон (файл version его
+    // отчёта); прогон без деплоя оставляет прежнюю, неудачный деплой — неизвестную
+    if (p.suite !== 'rerun' || rerunTouched) {
+      this.expectVersion = deployOk ? readVersionFile(dir) : null;
+    }
+    // вложенный прогон остановлен сменой версии или проход ставил чужую версию (foreign_version):
+    // на стенде может остаться чужая сборка — следующий проход и конец сессии ставят HEAD
+    if (hasVersionStop(dir, this.t) || (fw && fw.state.deployAt)) {
+      this.deployed = null;
+      this.expectVersion = null;
     }
     if (p.suite === 'session') this.nestedEnd(p, dir, rc);
     // сбой связи — только проверка reachable и потеря связи при восстановлении; по подстроке
@@ -2402,6 +2823,36 @@ class Session {
       );
     }
     if (irq) this.judgeInterrupt(irq.state, rows, push);
+    if (fw) {
+      const st = fw.state;
+      const where = foreignStageTitle(p.foreign.stage);
+      push(
+        'подмена версии: этап начался',
+        ['да'],
+        st.startedAt ? 'да' : 'нет',
+        st.startedAt ? `${where}: ${st.at}` : `этап ${where} не начался до выхода run.sh`,
+        st.startedAt > 0
+      );
+      const got = st.dir ? readVersionFile(st.dir) : null;
+      const ok = st.rc === 0 && got === p.foreign.version;
+      let detail;
+      if (!st.startedAt) {
+        detail = 'этап не начался — деплоя не было';
+      } else if (!st.dir) {
+        detail = `run.sh вышел раньше, чем через ${p.foreign.after} с после начала этапа`;
+      } else {
+        const secs = Math.round((st.deployAt - st.startedAt) / 1000);
+        detail = `деплой через ${secs} с после начала ${where}: код ${st.rc ?? '-'}, version ${got ?? 'нет'} (${path.relative(this.root, st.dir)})`;
+      }
+      push(
+        `подмена версии: установлена ${p.foreign.version}`,
+        ['PASS'],
+        ok ? 'PASS' : 'FAIL',
+        detail,
+        ok
+      );
+      if (st.rc === 3) this.network = true;
+    }
     if (irq && irq.state.killed && !this.network) {
       // run.sh убит до конца восстановления: стенд возвращает сессия, иначе следующие проходы
       // откажут на preflight. Не вернулся — сессия останавливается
@@ -2467,6 +2918,20 @@ class Session {
     }
     const end = j.stand_end ?? {};
     this.deployed = end.product_head === true ? 'HEAD' : null;
+    // ожидаемая версия — версия последнего удачного деплоя вложенной сессии (её возврат стенда)
+    const last = (Array.isArray(j.steps) ? j.steps : [])
+      .filter(
+        (x) =>
+          x &&
+          x.kind === 'deploy' &&
+          x.rc === 0 &&
+          typeof x.dir === 'string' &&
+          SAFE_PATH.test(x.dir) &&
+          !x.dir.includes('..')
+      )
+      .pop();
+    this.expectVersion =
+      this.deployed === 'HEAD' && last ? readVersionFile(path.join(this.root, last.dir)) : null;
     if (CORES.includes(j.core_initial) && !this.c0) {
       this.c0 = j.core_initial;
       this.say(`исходное ядро стенда: ${this.c0}`);
@@ -2743,7 +3208,15 @@ class Session {
     );
     L.push(`- Отчёт: ${path.relative(this.root, this.dir)}`, '');
     const st = this.stopped;
-    if (st) {
+    if (st?.reason === 'version') {
+      L.push('## Остановлено: смена версии стенда', '');
+      L.push(`- Проход: ${st.pass}, ядро: ${st.core}, граница: ${esc(st.boundary)}`);
+      L.push(`- Ожидалась: ${esc(st.expected)}; на стенде: ${esc(st.observed)}`);
+      L.push(`- Этап: ${st.stage}; падений на сменённой версии (класс stand): ${st.suspect}`);
+      L.push(`- Не выполнено:${st.todo.length ? '' : ' —'}`);
+      for (const t of st.todo) L.push(`  - ${esc(t)}`);
+      L.push('');
+    } else if (st) {
       L.push('## Остановлено на первом несовпадении', '');
       L.push(
         `- проход ${st.pass}, ядро ${st.core}: ${esc(st.test)} — ожидалось ${st.expected.join('|')}, получено ${st.actual} (${st.how})`
@@ -2947,8 +3420,12 @@ async function main() {
           continue;
         }
         if (s.cur !== core) {
-          const rc = await s.switchTo(core);
-          if (rc !== 0) break;
+          const rc = await s.switchTo(core, p.name);
+          if (rc !== 0) {
+            // смена версии на переключении ядра: это ядро и дальше — не выполнены
+            if (s.stopped) stopAt(i, order.slice(j));
+            break;
+          }
         }
         const rc = await s.runPass(p, core, comp);
         if (s.checkStop()) {
@@ -2958,8 +3435,11 @@ async function main() {
         if (rc === 3) break;
       }
     }
-    // несовпадение в последнем этапе без остановки посреди вывода — не остановка: невыполненного нет
-    if (s.stopped && !s.stopped.live && !s.stopped.todo.length) s.stopped = null;
+    // несовпадение в последнем этапе без остановки посреди вывода — не остановка: невыполненного
+    // нет; смена версии стенда — остановка всегда (причина нужна в summary.md)
+    if (s.stopped && s.stopped.reason !== 'version' && !s.stopped.live && !s.stopped.todo.length) {
+      s.stopped = null;
+    }
   } catch (e) {
     s.notes.push(`сессия упала: ${e.message}`);
     s.broken = true;
@@ -2985,7 +3465,11 @@ async function main() {
   } else if (s.broken || s.stopped || mismatches || !end?.ok) {
     code = 1;
     const why = [];
-    if (s.stopped) {
+    if (s.stopped?.reason === 'version') {
+      why.push(
+        `остановлено: смена версии стенда — проход ${s.stopped.pass}, ядро ${s.stopped.core}, граница ${s.stopped.boundary}`
+      );
+    } else if (s.stopped) {
       why.push(
         `остановлено на первом несовпадении: проход ${s.stopped.pass}, ядро ${s.stopped.core}, ${s.stopped.test}`
       );
