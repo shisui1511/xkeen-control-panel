@@ -605,7 +605,7 @@ EOF
       VSTOP=1
       break
     elif [ "$vrc" != 0 ]; then
-      rt_result "$ID" FAIL version-guard "сверка версии стенда не выполнена (код $vrc, граница $vbound)"
+      rt_result "$ID" FAIL version-guard-error "сверка версии стенда не выполнена (код $vrc, граница $vbound)"
       BAD=$((BAD + 1))
     fi
   fi

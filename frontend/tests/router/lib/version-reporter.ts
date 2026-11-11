@@ -26,7 +26,7 @@ import type { FullConfig, Reporter, Suite, TestCase } from '@playwright/test/rep
 //      XCP_PW_STOPPED, затем процессу Playwright один раз уходит SIGINT: штатная мягкая
 //      остановка, идущие тесты прерываются, новые не стартуют, JSON-отчёт пишется;
 //   иное  строка в stderr и строка `<граница><TAB><код>` в XCP_PW_GUARD_ERRORS (pw-suite.sh
-//         превращает её в FAIL version-guard), прогон идёт: сбой сверки не отключает её молча.
+//         превращает её в FAIL version-guard-error), прогон идёт: сбой сверки не отключает её молча.
 // После остановки сверка больше не вызывается.
 //
 // Потребитель файлов — pw-suite.sh: по XCP_PW_STOPPED он не начинает следующие запуски и

@@ -50,7 +50,8 @@
 //     <проверка>, notrun<TAB><ядро><TAB><что не выполнено>) и <цель>/version-guard.tsv (ok, transition,
 //     skip по границам; пишут rt_version_guard из lib.sh, go-suite.sh, pw-suite.sh и run.sh). Класс
 //     stand, открытый (run.sh считает его красным), не new и без подтверждающего перепрогона: FAIL
-//     version-guard — «смена версии стенда»; падение из строк suspect того же ядра и xcp-after-restore
+//     version-guard — «смена версии стенда» (сбой самой сверки — отдельная проверка version-guard-error,
+//     обычное падение класса new, в подтверждающем перепрогоне — «без сверки версии стенда»); падение из строк suspect того же ядра и xcp-after-restore
 //     отчёта со строкой stop — «падение на сменённой версии стенда». В начале «Классы падений» —
 //     строка «- Сверка версии стенда: N границ, смен нет» (с принятыми переходами — «N границ,
 //     принятых переходов M, смен нет»; при остановке — «остановлено на границе <B>»; без ожидания —
@@ -776,10 +777,14 @@ for (const n of needMark) {
   if (!existingMarks.has(n.check)) mainRows.push({ st: "FAIL", core: "-", check: `core-mark:${n.check}`, detail: "" });
 }
 const mainWorst = worstBy(mainRows, exactOf);
+const confirmRows = readRows("confirm.tsv");
 const confirmWorst = worstBy(
-  readRows("confirm.tsv").filter((r) => /^(go|pw):/.test(r.check)),
+  confirmRows.filter((r) => /^(go|pw):/.test(r.check)),
   famOf
 );
+// сверка версии стенда в подтверждающем перепрогоне не выполнилась: прошедший перепрогон без сверки
+// не подтверждает нестабильность (границу никто не проверил)
+const confirmGuardBroken = confirmRows.some((r) => r.st === "FAIL" && r.check === "version-guard-error");
 // «без перепрогона: …» — перепрогон пропущен из-за потолка (run.sh пишет причину в confirm-skip)
 const catchupExists = readText("catchup.tsv") !== null;
 const catchupRows = readRows("catchup.tsv");
@@ -846,6 +851,7 @@ function classify(core, check, st, detail) {
   }
   if (!/^(go|pw):/.test(check)) return { cls: "new", why: "падение проверки" };
   if (confirmSkipWhy !== null) return { cls: "new", why: confirmSkipWhy };
+  if (confirmGuardBroken) return { cls: "new", why: "подтверждающий перепрогон без сверки версии стенда" };
   const c = confirmWorst.get(famOf(core, check));
   if (c && PASSED.has(c.st)) return { cls: "flaky", why: "прошёл при подтверждающем перепрогоне" };
   if (c && (c.st === "FAIL" || c.st === "XPASS")) return { cls: "new", why: "упал снова при подтверждающем перепрогоне" };

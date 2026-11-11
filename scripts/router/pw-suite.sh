@@ -78,7 +78,8 @@
 # XCP_PW_GUARD_ERRORS=<каталог запуска>/version-guard-errors (границы, где сама сверка не
 # выполнилась: код version-guard.sh не 0, 3 и 4, тайм-аут или сигнал; строка `<граница><TAB><код>`).
 # Файлы сбрасываются при выборе каталога запуска; каждая строка version-guard-errors — FAIL
-# version-guard в finish_run (как в go-suite.sh), сверка не отключается молча. После каждого спека репортёр зовёт version-guard.sh; при смене версии он
+# version-guard-error в finish_run (как в go-suite.sh; это не смена версии: класс new), сверка не
+# отключается молча. После каждого спека репортёр зовёт version-guard.sh; при смене версии он
 # пишет version-stopped и шлёт процессу Playwright SIGINT (мягкая остановка). Тогда этап
 # не начинает следующие запуски (часть state после read, pw-2), дописывает их спеки строками
 # `notrun<TAB><ядро><TAB>Playwright: tests/router/<спек>` в <отчёт>/<id>/version-stop.tsv,
@@ -425,7 +426,7 @@ finish_run() {
   if [ -s "$PW_DIR/version-guard-errors" ]; then
     while IFS="$TAB" read -r _gb _gc || [ -n "$_gb" ]; do
       [ -n "$_gb" ] || continue
-      rt_result "$ID" FAIL version-guard "сверка версии стенда не выполнена (код ${_gc:--}, граница $_gb)"
+      rt_result "$ID" FAIL version-guard-error "сверка версии стенда не выполнена (код ${_gc:--}, граница $_gb)"
       RUN_BAD=$((RUN_BAD + 1))
     done <"$PW_DIR/version-guard-errors"
   fi
