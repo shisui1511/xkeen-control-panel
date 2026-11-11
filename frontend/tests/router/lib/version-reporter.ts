@@ -16,6 +16,7 @@ import type { FullConfig, Reporter, Suite, TestCase } from '@playwright/test/rep
 //   XCP_PW_GUARD_SCRIPT   абсолютный путь version-guard.sh
 //   XCP_PW_OK_SPECS       файл спеков, прошедших границу (`tests/router/<спек>` по строке)
 //   XCP_PW_STOPPED        признак остановки: одна строка — граница, на которой сменилась версия
+//   XCP_PW_GUARD_ERRORS   файл границ, где сверка не выполнилась (`<граница><TAB><код>`)
 //
 // Коды version-guard.sh:
 //   0  версия совпала (или переход принят, или сверка выключена) — спек дописывается в
@@ -24,7 +25,8 @@ import type { FullConfig, Reporter, Suite, TestCase } from '@playwright/test/rep
 //   4  версия сменилась (строки stop и FAIL version-guard уже записаны) — сначала пишется
 //      XCP_PW_STOPPED, затем процессу Playwright один раз уходит SIGINT: штатная мягкая
 //      остановка, идущие тесты прерываются, новые не стартуют, JSON-отчёт пишется;
-//   иное  строка в stderr, прогон идёт.
+//   иное  строка в stderr и строка `<граница><TAB><код>` в XCP_PW_GUARD_ERRORS (pw-suite.sh
+//         превращает её в FAIL version-guard), прогон идёт: сбой сверки не отключает её молча.
 // После остановки сверка больше не вызывается.
 //
 // Потребитель файлов — pw-suite.sh: по XCP_PW_STOPPED он не начинает следующие запуски и
@@ -53,6 +55,7 @@ export default class VersionReporter implements Reporter {
   private readonly script = process.env.XCP_PW_GUARD_SCRIPT ?? '';
   private readonly okFile = process.env.XCP_PW_OK_SPECS ?? '';
   private readonly stopFile = process.env.XCP_PW_STOPPED ?? '';
+  private readonly errorsFile = process.env.XCP_PW_GUARD_ERRORS ?? '';
 
   private rootDir = '';
   /** спек → id тестов, ещё не закончившихся */
@@ -121,6 +124,7 @@ export default class VersionReporter implements Reporter {
         process.kill(process.pid, 'SIGINT');
         return;
       default:
+        if (this.errorsFile) appendFileSync(this.errorsFile, `${boundary}\t${code ?? '-'}\n`);
         process.stderr.write(
           `сверка версии: version-guard.sh завершился ${code === null ? 'без кода (тайм-аут или сигнал)' : `с кодом ${code}`} (граница ${boundary})${where}\n`
         );

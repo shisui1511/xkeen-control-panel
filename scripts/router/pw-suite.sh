@@ -74,8 +74,11 @@
 # XCP_PW_GUARD_SCRIPT=<абсолютный путь scripts/router/version-guard.sh>,
 # XCP_PW_OK_SPECS=<каталог запуска>/version-ok-specs.txt (спеки, прошедшие границу, по строке
 # `tests/router/<спек>`) и XCP_PW_STOPPED=<каталог запуска>/version-stopped (признак остановки:
-# граница, на которой сменилась версия; пишется до сигнала). Оба файла сбрасываются при выборе
-# каталога запуска. После каждого спека репортёр зовёт version-guard.sh; при смене версии он
+# граница, на которой сменилась версия; пишется до сигнала) и
+# XCP_PW_GUARD_ERRORS=<каталог запуска>/version-guard-errors (границы, где сама сверка не
+# выполнилась: код version-guard.sh не 0, 3 и 4, тайм-аут или сигнал; строка `<граница><TAB><код>`).
+# Файлы сбрасываются при выборе каталога запуска; каждая строка version-guard-errors — FAIL
+# version-guard в finish_run (как в go-suite.sh), сверка не отключается молча. После каждого спека репортёр зовёт version-guard.sh; при смене версии он
 # пишет version-stopped и шлёт процессу Playwright SIGINT (мягкая остановка). Тогда этап
 # не начинает следующие запуски (часть state после read, pw-2), дописывает их спеки строками
 # `notrun<TAB><ядро><TAB>Playwright: tests/router/<спек>` в <отчёт>/<id>/version-stop.tsv,
@@ -203,7 +206,7 @@ use_dir() {
   rm -f "$STATE" "$STATE.restore.json" "$PW_DIR/report.json" "$PW_DIR/report-pages.json"
   # файлы сверки версии прошлого запуска: признак остановки удаляется (его наличие — сигнал),
   # список спеков, прошедших границу, обнуляется
-  rm -f "$PW_DIR/version-stopped"
+  rm -f "$PW_DIR/version-stopped" "$PW_DIR/version-guard-errors"
   : >"$PW_DIR/version-ok-specs.txt"
   case " $USED " in
     *" $1 "*) ;;
@@ -288,6 +291,7 @@ run_pw() {
       XCP_PW_GUARD_SCRIPT="$SCRIPT_DIR/version-guard.sh" \
       XCP_PW_OK_SPECS="$PW_DIR/version-ok-specs.txt" \
       XCP_PW_STOPPED="$PW_DIR/version-stopped" \
+      XCP_PW_GUARD_ERRORS="$PW_DIR/version-guard-errors" \
       "$PWBIN" test -c playwright.router.config.ts "$@"
   ) >>"$LOG" 2>&1 || _pwrc=$?
   # временные каталоги воркеров Playwright — только сироты после выхода процесса
@@ -416,6 +420,14 @@ finish_run() {
   elif [ "$_frc" != 0 ] && [ "$RUN_BAD" = 0 ] && [ "$QFAILS" = 0 ] && [ "$_stopped" = 0 ]; then
     rt_result "$ID" FAIL "pw:run" "Playwright завершился с кодом $_frc без упавших тестов"
     RUN_BAD=$((RUN_BAD + 1))
+  fi
+  # сама сверка версии не выполнилась (код version-guard.sh не 0, 3 и 4): открытый отказ запрещён
+  if [ -s "$PW_DIR/version-guard-errors" ]; then
+    while IFS="$TAB" read -r _gb _gc || [ -n "$_gb" ]; do
+      [ -n "$_gb" ] || continue
+      rt_result "$ID" FAIL version-guard "сверка версии стенда не выполнена (код ${_gc:--}, граница $_gb)"
+      RUN_BAD=$((RUN_BAD + 1))
+    done <"$PW_DIR/version-guard-errors"
   fi
   BAD=$((BAD + RUN_BAD))
 
