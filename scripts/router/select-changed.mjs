@@ -754,7 +754,7 @@ const GO_IDENT_LIST = /^[ \t]*([A-Za-z_]\w*(?:[ \t]*,[ \t]*[A-Za-z_]\w*)*)/;
 
 /**
  * Объявления верхнего уровня Go-файла: { ok, why, build, pkg, blankDot, imports, decls }.
- * decls — [{ kind: func|var|const|type, names, receiver, code (нормализованный, без
+ * decls — [{ kind: func|var|const|type, names, receiver, receiverType (тип получателя метода), code (нормализованный, без
  * комментариев), masked (строки замаскированы), idents (Set слов кода), calls (вызовы в
  * инициализаторе var) }]. ok=false — разбор ненадёжен (раскладка не gofmt, нет package, имена не
  * разобраны): вызывающий откатывается на пакет целиком.
@@ -842,10 +842,14 @@ function goDeclIndexOf(text) {
       // немедленный вызов литерала функции или выражения: }() , )( , ](
       if (/[)\]}][ \t]*\(/.test(d.masked)) calls.push('(…)(…)');
     }
+    // тип получателя метода: правка метода — правка его типа (метод вызывает не код тестов, а
+    // стандартная библиотека или другой пакет через интерфейс: Write, RoundTrip, Read, ServeHTTP)
+    const rm = kind === 'func' && d.receiver ? /^func[ \t]*\([ \t]*(?:[A-Za-z_]\w*[ \t]+)?\*?[ \t]*([A-Za-z_]\w*)/.exec(head) : null;
     out.decls.push({
       kind,
       names,
       receiver: d.receiver,
+      receiverType: rm ? rm[1] : null,
       code: d.code.replace(/\s+/g, ' ').trim(),
       masked: d.masked,
       idents: new Set(d.masked.match(/[A-Za-z_]\w*/g) || []),
@@ -898,6 +902,11 @@ function goDeclDiff(baseText, headText) {
   for (const [n, codes] of hm) if (JSON.stringify(codes) !== JSON.stringify(bm.get(n) || [])) changed.add(n);
   for (const n of bm.keys()) if (!hm.has(n)) changed.add(n);
   const all = [...(h ? h.decls : []), ...(b ? b.decls : [])];
+  // изменённый метод изменяет тип получателя: его неявные вызовы (через интерфейс) по имени метода
+  // не находятся, а тип встречается в потребителях (литерал, поле, конструктор)
+  for (const d of all) {
+    if (d.receiverType && d.names.some((n) => changed.has(n))) changed.add(d.receiverType);
+  }
   for (const n of changed) {
     for (const d of all) {
       if (!d.names.includes(n)) continue;
