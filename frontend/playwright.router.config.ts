@@ -8,6 +8,9 @@ import { defineConfig, devices } from '@playwright/test';
 //   XCP_PW_OUT     каталог трасс и снимков
 //   XCP_PW_JSON    файл JSON-отчёта
 //   XCP_PW_WORKERS воркеров (по умолчанию 1; больше одного — только для обхода страниц)
+//   XCP_PW_VERSION_GUARD  id цели: подключает tests/router/lib/version-reporter.ts — сверку
+//                  версии стенда после каждого спека и мягкую остановку при её смене (D-13);
+//                  без переменной репортёра нет (ручной запуск, --list)
 // Вход в панель делает global-setup, выход — global-teardown (лимит панели — 20 сессий; cookie
 // в трассах после выхода недействительны).
 // Конфиг не падает без переменных (нужно для `--list`): их наличие проверяет global-setup.
@@ -32,7 +35,10 @@ export default defineConfig({
   outputDir: process.env.XCP_PW_OUT || './test-results-router',
   reporter: [
     ['list'],
-    ['json', { outputFile: process.env.XCP_PW_JSON || 'test-results-router.json' }]
+    ['json', { outputFile: process.env.XCP_PW_JSON || 'test-results-router.json' }],
+    ...(process.env.XCP_PW_VERSION_GUARD
+      ? [['./tests/router/lib/version-reporter.ts'] as [string]]
+      : [])
   ],
   use: {
     baseURL: process.env.XCP_URL,
