@@ -25,7 +25,9 @@
 //               маршруты, ключ без потребителей выбор не расширяет (статика i18n, смоук);
 //               стили, токены и тема (D-08) — pages без сужения и читающая канарейка оболочки;
 //               каркас (D-09: App, main, Dashboard, tabFromHash, PageHeader) — pages без сужения
-//               и одна канарейка «правка → Применить».
+//               и одна канарейка «правка → Применить»; хаб (D-10: модуль оболочки или
+//               достижимый строго больше чем с половины страниц) — как каркас плюс спеки,
+//               ссылающиеся на модуль напрямую.
 //               `// e2e-pages: *` — спек обходит все страницы: при выборе только по маршрутам он
 //               сужается до них через --grep; выбранный по иной причине (область, зависимости,
 //               правка самого спека) идёт без сужения. core-switch.spec.ts не выбирается: его
@@ -36,8 +38,10 @@
 // scripts/router/**, frontend/tests/router/lib/**, playwright.router.config.ts, global-setup/
 // teardown, internal/routertest, цели стенда и VERSION в Makefile) — RT_HARNESS=1 без полного
 // выбора. Зависимости (DEPS: package.json, package-lock.json, go.mod, go.sum) — патч/минор:
-// pages.spec.ts без сужения и канарейки всех областей; мажор (D-13) — канарейки плюс все спеки
-// (npm) или все Go-тесты (go.mod). Неизвестный файл — только смоук и предупреждение в причинах.
+// pages.spec.ts без сужения и канарейки всех областей, в том числе патч и минор svelte, vite и
+// @playwright/test (D-11 фазы 148.1.1); мажор (D-13) — смена мажора спецификации в package.json
+// или версии svelte/vite/@playwright/test в lock — канарейки плюс все спеки (npm) или все
+// Go-тесты (go.mod). Неизвестный файл — только смоук и предупреждение в причинах.
 //
 // Ярус full (D-14). Тест яруса full (метка Tier full у Go, @full у Playwright; core-marks.cjs,
 // testFacts → tier) идёт в гейте, только если его область затронута напрямую: изменён файл
@@ -93,6 +97,8 @@
 // Использование (из корня репозитория):
 //   node scripts/router/select-changed.mjs [--base <ref>] [--head <ref>] [--explain]
 //   node scripts/router/select-changed.mjs --files a,b,c [--explain]   # без git
+// --hub-percent <0…100> — диагностика: другой порог хаба (по умолчанию HUB_PERCENT_DEFAULT) для
+// сравнения вариантов в select-replay.mjs --hub-percent; штатный гейт его не задаёт.
 // --head <ref> — сравнивать <база>..<head> без рабочего дерева (прогон по слитым PR,
 // select-replay.mjs); карта областей, факты тестов и граф импортов при этом берутся из
 // рабочей копии. Без --base база — merge-base origin/main и head (или HEAD).
@@ -137,7 +143,8 @@ const HARNESS = [
 
 // Зависимости: узкий набор (смоук, pages, канарейки), при мажоре — шире (D-13).
 const DEPS = [/^frontend\/package\.json$/, /^frontend\/package-lock\.json$/, /^go\.mod$/, /^go\.sum$/];
-// Смена версии этих пакетов npm считается мажорной (любая).
+// У этих пакетов мажор проверяется и по версии в package-lock.json, не только в package.json.
+// Патч и минор — узкий выбор, как у прочих пакетов (D-11 фазы 148.1.1, RTR-13).
 const WATCHED_NPM = new Set(['svelte', 'vite', '@playwright/test']);
 
 // Цели Makefile, влияющие на стенд: сборка для роутеров и версия.
@@ -208,6 +215,14 @@ const FRONT_FRAME = [
 ];
 // Локали (D-07): выбор по изменённым ключам.
 const FRONT_LOCALE = /^src\/locales\/[\w-]+\.json$/;
+// Хаб фронтенда (D-10): модуль оболочки или достижимый строго больше чем с HUB_PERCENT процентов
+// страниц (маршрутов Dashboard; вкладки config считаются одной страницей) в любой из ревизий.
+// Хаб — pages без сужения, канарейка «правка → Применить» и спеки, ссылающиеся на модуль
+// напрямую. Порог выбран повтором выбора (148.1.1-03: >45% и >50% дали одинаковый выбор на
+// одном снимке, >55% расширил один PR до всех спеков; при равенстве — >50%); подтверждается
+// повтором после интеграции фазы. --hub-percent — для сравнения вариантов.
+const HUB_PERCENT_DEFAULT = 50;
+let hubPercent = HUB_PERCENT_DEFAULT;
 
 // Файлы frontend/ вне src/, меняющие сборку панели: все роутерные спеки (не Go).
 const FRONTEND_ALL = [
@@ -349,19 +364,27 @@ function majorOf(spec) {
   return m[1] === '0' && m[2] !== undefined ? `0.${m[2]}` : m[1];
 }
 
-/** Мажор npm: причина (строка) или null. Нет базы или текста — мажор (расширение). */
+/**
+ * Зависимости npm (D-11, RTR-13): { major, changed }. major — причина широкого выбора (строка)
+ * или null: смена мажора спецификации в package.json у любого пакета, у svelte, vite и
+ * @playwright/test — ещё и смена мажора версии в lock. Патч и минор (в том числе этих трёх
+ * пакетов) мажором не считаются: changed — их список для объяснения. Нет базы или текста —
+ * мажор (расширение).
+ */
 function npmMajorReason(files) {
-  if (!ctx.from) return 'нет базы сравнения — считается мажором';
+  const changed = [];
+  const major = (why) => ({ major: why, changed });
+  if (!ctx.from) return major('нет базы сравнения — считается мажором');
   const baseTxt = gitShow(ctx.from, 'frontend/package.json');
   const headTxt = headText('frontend/package.json');
-  if (baseTxt === null || headTxt === null) return 'package.json не прочитан — считается мажором';
+  if (baseTxt === null || headTxt === null) return major('package.json не прочитан — считается мажором');
   let a;
   let b;
   try {
     a = JSON.parse(baseTxt);
     b = JSON.parse(headTxt);
   } catch {
-    return 'package.json не разобран — считается мажором';
+    return major('package.json не разобран — считается мажором');
   }
   const flat = (o) => ({
     ...(o.optionalDependencies || {}),
@@ -371,28 +394,37 @@ function npmMajorReason(files) {
   });
   const da = flat(a);
   const db = flat(b);
-  for (const name of new Set([...Object.keys(da), ...Object.keys(db)])) {
-    if (da[name] === db[name] || da[name] === undefined || db[name] === undefined) continue;
-    if (WATCHED_NPM.has(name)) return `${name}: ${da[name]} → ${db[name]}`;
-    if (majorOf(da[name]) !== majorOf(db[name])) return `${name}: ${da[name]} → ${db[name]}`;
+  for (const name of [...new Set([...Object.keys(da), ...Object.keys(db)])].sort()) {
+    if (da[name] === db[name]) continue;
+    if (da[name] === undefined || db[name] === undefined) {
+      changed.push(`${name} ${da[name] === undefined ? 'добавлен' : 'удалён'}`);
+      continue;
+    }
+    if (majorOf(da[name]) !== majorOf(db[name])) return major(`${name}: ${da[name]} → ${db[name]}`);
+    changed.push(`${name} ${da[name]} → ${db[name]}`);
   }
   if (files.has('frontend/package-lock.json')) {
     const baseLock = gitShow(ctx.from, 'frontend/package-lock.json');
     const headLock = headText('frontend/package-lock.json');
-    if (baseLock === null || headLock === null) return 'package-lock.json не прочитан — считается мажором';
+    if (baseLock === null || headLock === null) return major('package-lock.json не прочитан — считается мажором');
     try {
       const la = JSON.parse(baseLock).packages || {};
       const lb = JSON.parse(headLock).packages || {};
       for (const name of WATCHED_NPM) {
         const va = (la[`node_modules/${name}`] || {}).version;
         const vb = (lb[`node_modules/${name}`] || {}).version;
-        if (va !== vb) return `${name} (lock): ${va ?? '-'} → ${vb ?? '-'}`;
+        if (va === vb) continue;
+        // пакет появился, пропал или сменил мажор в lock — широкий выбор
+        if (va === undefined || vb === undefined || majorOf(va) !== majorOf(vb)) {
+          return major(`${name} (lock): ${va ?? '-'} → ${vb ?? '-'}`);
+        }
+        changed.push(`${name} (lock) ${va} → ${vb}`);
       }
     } catch {
-      return 'package-lock.json не разобран — считается мажором';
+      return major('package-lock.json не разобран — считается мажором');
     }
   }
-  return null;
+  return { major: null, changed };
 }
 
 /** Мажор Go: смена `go`, `toolchain` или модуля с суффиксом /vN. Нет базы — мажор. */
@@ -510,7 +542,23 @@ async function frontGraph() {
     if (!cache.has(specAbs)) cache.set(specAbs, mod.specSources(specAbs, srcFiles, fe));
     return cache.get(specAbs);
   };
-  return { mod, models, routes, srcFiles, specSources };
+  /**
+   * Хаб (D-10) по ревизиям present ([{ side, model }]): null — не хаб, иначе строка основания.
+   * Оболочка (рендерится на каждой странице) — хаб всегда.
+   */
+  const hubOf = (abs, present) => {
+    const shell = present.filter((m) => m.model.shell.has(abs)).map((m) => m.side);
+    if (shell.length > 0) return `оболочка приложения (${shell.join(', ')})`;
+    for (const m of present) {
+      const pages = new Set(m.model.routesOf(abs).map((r) => mod.topRoute(r)));
+      const total = m.model.topRoutes.size;
+      if (total > 0 && (pages.size * 100) / total > hubPercent) {
+        return `достижим с ${pages.size} из ${total} страниц (${m.side}) — больше ${hubPercent}%`;
+      }
+    }
+    return null;
+  };
+  return { mod, models, routes, srcFiles, specSources, hubOf };
 }
 
 // --- локали: ключи и потребители (D-07) ------------------------------------------------------
@@ -650,7 +698,7 @@ function localeSelect(graph, localeFiles, specsAll) {
         if (!where.has(rel)) where.set(rel, { sides: new Set(), routes: new Set(), shell: false });
         const w = where.get(rel);
         w.sides.add(ix.side);
-        if (ix.model.shell.has(row.file)) w.shell = true;
+        if (graph.hubOf(row.file, [ix])) w.shell = true;
         for (const r of ix.model.routesOf(row.file)) w.routes.add(r);
       }
     }
@@ -668,7 +716,7 @@ function localeSelect(graph, localeFiles, specsAll) {
       const sides = [...w.sides].join(', ');
       if (w.shell) {
         out.shell = true;
-        parts.push(`${rel} (${sides}) — оболочка`);
+        parts.push(`${rel} (${sides}) — оболочка или хаб`);
       } else if (w.routes.size > 0) {
         for (const r of w.routes) out.routes.add(r);
         parts.push(`${rel} (${sides}) → страницы ${[...w.routes].join(', ')}`);
@@ -984,13 +1032,19 @@ async function select(changed) {
     addCanaries(`зависимости: ${files}`);
     reasons.push(`${files}: зависимости — смоук, pages без сужения и канарейки`);
     if (npmTouched) {
-      const why = npmMajorReason(depFiles);
-      if (why) {
+      const npm = npmMajorReason(depFiles);
+      if (npm.major) {
+        const why = npm.major;
         specsAll.forEach((s) => {
           res.specsOther.add(s);
           res.specsForced.add(s);
         });
         reasons.push(`npm: мажорное обновление или смена Svelte/Vite/Playwright (${why}) — канарейки и все спеки`);
+      } else {
+        // D-11: патч и минор любого пакета, в том числе svelte, vite и @playwright/test
+        reasons.push(
+          `npm: патч или минор без смены мажора (${npm.changed.join(', ') || 'версии пакетов не изменились, только lock'}) — смоук, pages и канарейки областей`
+        );
       }
     }
     if (depFiles.has('go.mod')) {
@@ -1131,6 +1185,7 @@ async function select(changed) {
       }
     }
     let componentHit = false;
+    const hubHit = [];
     const styleHit = [];
     const frameHit = [];
     const localeFiles = [];
@@ -1171,8 +1226,8 @@ async function select(changed) {
         sayOnce(`${s}: читает изменённые ключи локали`);
       }
       if (lr.shell) {
-        addForced(PAGES_SPEC, 'обход всех маршрутов без сужения (ключ локали в оболочке)');
-        addShellCanary(SHELL_READ_CANARY, isReadSpec, 'читающая канарейка оболочки', 'ключ локали в оболочке');
+        addForced(PAGES_SPEC, 'обход всех маршрутов без сужения (ключ локали в оболочке или хабе)');
+        addShellCanary(SHELL_READ_CANARY, isReadSpec, 'читающая канарейка оболочки', 'ключ локали в оболочке или хабе');
       }
     }
     if (graph) {
@@ -1184,10 +1239,9 @@ async function select(changed) {
           reasons.push(`frontend/${rel}: удалён (нет в ${graph.models.map((m) => m.side).join(' и ')})`);
           continue;
         }
-        const inShell = present.filter((m) => m.model.shell.has(abs)).map((m) => m.side);
-        if (inShell.length > 0) {
-          pwAll = true;
-          reasons.push(`frontend/${rel}: оболочка приложения (${inShell.join(', ')}) — все роутерные спеки`);
+        const hub = graph.hubOf(abs, present);
+        if (hub) {
+          hubHit.push({ rel, abs, why: hub });
           continue;
         }
         // Маршруты обеих ревизий: перенос или удаление импорта не теряет потребителей старой стороны
@@ -1205,6 +1259,23 @@ async function select(changed) {
             : '';
         reasons.push(`frontend/${rel}: страницы ${routes.join(', ')}${sides}`);
       }
+    }
+    // Хаб (D-10): как каркас — pages без сужения и канарейка «правка → Применить», плюс спеки,
+    // ссылающиеся на модуль напрямую; прочие основания выбора сохраняются
+    if (hubHit.length > 0) {
+      for (const h of hubHit) {
+        const direct = specsAll.filter((s) => graph.specSources(path.join(ROOT, 'frontend', s)).has(h.abs));
+        reasons.push(
+          `frontend/${h.rel}: хаб — ${h.why}; pages со всеми маршрутами, канарейка «правка → Применить»` +
+            (direct.length > 0 ? `, спеки с прямой ссылкой: ${direct.join(', ')}` : ', спеков с прямой ссылкой нет')
+        );
+        for (const s of direct) {
+          res.specsDirect.add(s);
+          res.specsForced.add(s);
+        }
+      }
+      addForced(PAGES_SPEC, 'обход всех маршрутов без сужения (хаб)');
+      addShellCanary(SHELL_APPLY_CANARY, (t) => /\bconfirmApply\(/.test(t), 'канарейка каркаса «правка → Применить»', 'правка хаба');
     }
     // Обычный общий компонент: спеки маршрутов-потребителей, pages с их маршрутами и читающая
     // канарейка оболочки (D-09)
@@ -1538,7 +1609,15 @@ async function main(argv) {
     else if (a === '--head') args.head = argv[++i];
     else if (a === '--files') args.files = (argv[++i] ?? '').split(',').filter(Boolean);
     else if (a === '--explain') args.explain = true;
-    else {
+    else if (a === '--hub-percent') {
+      // диагностика: сравнение порогов хаба (D-10) в select-replay.mjs
+      const v = argv[++i] ?? '';
+      if (!/^\d{1,3}(?:\.\d+)?$/.test(v) || Number(v) > 100) {
+        console.error(`select-changed: --hub-percent: нужно число 0…100, получено ${JSON.stringify(v)}`);
+        process.exit(2);
+      }
+      hubPercent = Number(v);
+    } else {
       console.error(`select-changed: неизвестный аргумент ${a}`);
       process.exit(2);
     }

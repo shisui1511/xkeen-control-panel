@@ -25,6 +25,10 @@
 // приводится: у --since к `ГГГГ-ММ-ДД 00:00:00`, у --until к `ГГГГ-ММ-ДД 23:59:59` (местное
 // время); значение со временем передаётся без изменений. По умолчанию --since 2026-10-15.
 //
+// --hub-percent <n> — передать select-changed.mjs тот же параметр (порог хаба фронтенда, D-10)
+// для сравнения вариантов на одном снимке; без него селектор берёт свой порог. Прежняя ревизия
+// выбора (--selector-root) параметра может не знать: строки PR станут ошибками.
+//
 // --selector-root <каталог> — запускать select-changed.mjs из другой рабочей копии того же
 // репозитория (например, прежней ревизии выбора для сравнения «до»). Наличие коммитов пар
 // проверяется локально: ничего не скачивается, checkout не меняется, панель не собирается и не
@@ -119,9 +123,9 @@ const DIAG_WIDTH = 300;
 
 const USAGE = [
   'Использование:',
-  '  node scripts/router/select-replay.mjs [--since <дата>] [--until <дата>] [--selector-root <каталог>] [--json]',
+  '  node scripts/router/select-replay.mjs [--since <дата>] [--until <дата>] [--selector-root <каталог>] [--hub-percent <n>] [--json]',
   '  node scripts/router/select-replay.mjs [--since <дата>] [--until <дата>] --capture <файл>',
-  '  node scripts/router/select-replay.mjs --snapshot <файл> [--selector-root <каталог>] [--json]'
+  '  node scripts/router/select-replay.mjs --snapshot <файл> [--selector-root <каталог>] [--hub-percent <n>] [--json]'
 ].join('\n');
 
 function usage(msg) {
@@ -136,7 +140,7 @@ function fail(msg) {
 }
 
 function parseArgs(argv) {
-  const out = { since: null, until: null, capture: null, snapshot: null, selectorRoot: null, json: false };
+  const out = { since: null, until: null, capture: null, snapshot: null, selectorRoot: null, json: false, hubPercent: null };
   const value = (i, name) => {
     const v = argv[i];
     if (v === undefined || v === '') usage(`${name}: нужно значение`);
@@ -150,8 +154,13 @@ function parseArgs(argv) {
     else if (a === '--snapshot') out.snapshot = value(++i, a);
     else if (a === '--selector-root') out.selectorRoot = value(++i, a);
     else if (a === '--json') out.json = true;
+    else if (a === '--hub-percent') out.hubPercent = value(++i, a);
     else usage(`неизвестный аргумент ${a}`);
   }
+  if (out.hubPercent !== null && (!/^\d{1,3}(?:\.\d+)?$/.test(out.hubPercent) || Number(out.hubPercent) > 100)) {
+    usage(`--hub-percent: нужно число 0…100, получено ${out.hubPercent}`);
+  }
+  if (out.capture && out.hubPercent !== null) usage('--hub-percent относится к повтору выбора, не к --capture');
   if (out.capture && out.snapshot) usage('--capture и --snapshot взаимоисключающие');
   if (out.capture && out.json) usage('--json относится к повтору выбора, не к --capture');
   if (out.snapshot && (out.since || out.until)) usage('границы периода берутся из снимка: --since и --until с --snapshot не задаются');
@@ -594,7 +603,9 @@ function replay(snap, args) {
       );
       continue;
     }
-    const r = spawnSync(process.execPath, [path.join(sel.root, SELECTOR), '--base', m.base, '--head', m.head, '--explain'], {
+    // Аргументы — массивом, без shell; --hub-percent передаётся, только если задан
+    const hub = args.hubPercent !== null ? ['--hub-percent', args.hubPercent] : [];
+    const r = spawnSync(process.execPath, [path.join(sel.root, SELECTOR), '--base', m.base, '--head', m.head, '--explain', ...hub], {
       cwd: sel.root,
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024
