@@ -61,6 +61,18 @@
 // «стоп: <файл>: <причина>» в stderr (всегда, не только с --explain); полный выбор вместо
 // остановки не подставляется. Обязательный полный выбор того же диффа перекрывает остановку —
 // строка «карта: не сравнить (…) — перекрыто обязательным полным выбором».
+// Конфигурации TypeScript фронтенда (TS_CONFIG: frontend/**/tsconfig*.json, jsconfig*.json и
+// любые вершины их extends; D-26…D-28 фазы 148.1.1) — по конечным потребителям базы и head:
+// корни тестов — поле tsconfig конфигов frontend/playwright*.config.ts, корни сборки —
+// frontend/tsconfig.json и --tsconfig скриптов build, check, lint из package.json той же
+// ревизии; потребители — корни, в чьей цепочке extends есть файл, по всем уровням и обеим
+// ревизиям (удалённый — по базе, новый — по head, смена extends — обе цепочки). Только тесты —
+// RT_HARNESS=1; есть сборка панели — RT_HARNESS=1 и все браузерные спеки; строка «конфигурация:
+// <файл> — потребители: … — …». Широкая проверка сборочных файлов (FRONTEND_ALL: vite.config.ts,
+// svelte.config.js, index.html, public/) — прежняя. Неразрешимая связь (extends на
+// несуществующий файл, цикл наследования, неразбираемый JSON, ссылка на удалённую
+// конфигурацию) или потребитель не определён ни на одной ревизии — остановка с кодом 3 по тому
+// же контракту, что у карты: ни сужения, ни полного выбора.
 // Обвязка стенда (HARNESS: прочие
 // scripts/router/**, frontend/tests/router/lib/**, playwright.router.config.ts, global-setup/
 // teardown, internal/routertest, цели стенда и VERSION в Makefile) — RT_HARNESS=1 без полного
@@ -86,8 +98,9 @@
 //
 // При сомнении выбор только расширяется (D-25, T-148.1-24): небезопасное имя, ошибка карты
 // рабочей копии, фактов тестов или разбора, нет базы сравнения у зависимостей и Makefile —
-// полный выбор или расширение (пакет целиком, мажор, обвязка). Исключение — правка карты, которую
-// нельзя надёжно сравнить: остановка (код 3), не полный выбор.
+// полный выбор или расширение (пакет целиком, мажор, обвязка). Исключения — правка карты, которую
+// нельзя надёжно сравнить, и конфигурация TypeScript без определимого потребителя: остановка
+// (код 3), не полный выбор.
 //
 // Вывод (stdout) — 13 строк для eval в sh в фиксированном порядке, значения в одинарных
 // кавычках и только из безопасных символов (T-144.1-23, T-148.1-23); run.sh сверяет число и
@@ -465,7 +478,7 @@ function tsConfigGraph(ref) {
       if (reach.has(f)) return;
       const n = node(f);
       if (!n.exists) {
-        issue(from, `extends на несуществующий файл ${f}`);
+        issue(from ?? f, `extends на несуществующий файл ${f}`);
         return;
       }
       reach.add(f);
@@ -1370,6 +1383,7 @@ async function select(changed) {
   const depFiles = new Set();
   let makefile = false;
   let pwAll = false;
+  const cfgStops = []; // конфигурации TypeScript без определимого потребителя: { file, why }
   let sharedHit = false;
   // Области, чьи тесты выбираются целиком (RT_AREAS шире: подобласти и отметки фронтенда)
   const wholeAreas = new Set();
@@ -1615,17 +1629,21 @@ async function select(changed) {
       const c = tsConfigConsumers(file);
       const kinds = ['build', 'tests'].filter((k) => c.kinds.has(k));
       const who = kinds.map((k) => TS_CONSUMER_LABEL[k]).join(', ');
+      // Неразрешимая связь или потребителя нет ни на одной ревизии (D-28) — остановка после
+      // разбора всех файлов: ни сужения, ни полного выбора
+      if (c.issues.length > 0 || kinds.length === 0) {
+        const list = c.issues.length > 0 ? c.issues : [{ file, why: 'потребитель не определён' }];
+        for (const x of list) {
+          if (!cfgStops.some((y) => y.file === x.file && y.why === x.why)) cfgStops.push(x);
+        }
+        continue;
+      }
+      res.harness = true;
       if (c.kinds.has('build')) {
-        res.harness = true;
         pwAll = true;
         reasons.push(`конфигурация: ${file} — потребители: ${who} — обвязка и все браузерные спеки`);
-      } else if (c.kinds.has('tests')) {
-        res.harness = true;
-        reasons.push(`конфигурация: ${file} — потребители: ${who} — обвязка`);
       } else {
-        res.harness = true;
-        pwAll = true;
-        reasons.push(`конфигурация: ${file} — потребители не найдены — обвязка и все браузерные спеки`);
+        reasons.push(`конфигурация: ${file} — потребители: ${who} — обвязка`);
       }
       continue;
     }
@@ -1722,6 +1740,22 @@ async function select(changed) {
       continue;
     }
     warnUnknown(file);
+  }
+
+  // Конфигурации TypeScript, чьих потребителей нельзя определить (D-28): остановка — res.stop
+  // даёт код EXIT_STOP в main; обязательный полный выбор того же диффа её перекрывает.
+  if (cfgStops.length > 0) {
+    if (required.length > 0) {
+      for (const x of cfgStops) {
+        reasons.push(`конфигурация: не определить (${x.file}: ${x.why}) — перекрыто обязательным полным выбором`);
+      }
+    } else {
+      for (const x of cfgStops) {
+        res.stop.push(`${x.file}: ${x.why}`);
+        reasons.push(`стоп: ${x.file}: ${x.why}`);
+      }
+      return { res, routerPkgs, specsAll };
+    }
   }
 
   // --- Makefile ---------------------------------------------------------------
