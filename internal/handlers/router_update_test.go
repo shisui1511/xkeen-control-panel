@@ -588,7 +588,9 @@ func TestRouterUpdateManualInstall(t *testing.T) {
 		if code != 0 || !strings.Contains(stdout, "v"+latest) {
 			t.Errorf("xcp -v: код %d, вывод %q %q, ожидался тег v%s", code, strings.TrimSpace(stdout), strings.TrimSpace(stderr), latest)
 		} else {
-			// стенд на новой версии до отката: обвязка не примет её за постороннюю установку
+			// объявление версии оставлено по правилу стенда (тест, ставящий другую сборку, объявляет её).
+			// Защиты оно не даёт: граница группы видит версию только после отката (rollback() ниже),
+			// а при неудачном откате тест падает и Cleanup ExpectVersion объявление снимает
 			first, _, _ := strings.Cut(stdout, "\n")
 			routertest.ExpectVersion(t, strings.TrimSpace(first))
 		}
