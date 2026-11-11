@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -438,6 +439,67 @@ func RoutingContractFile(t testing.TB) string {
 		t.Fatal("нет XCP_RT_ROUTING_CONTRACT: тест запускается только через make router-test")
 	}
 	return path
+}
+
+// expectVersionNameRE — алфавит имени теста, который принимает rt_version_guard
+// (scripts/router/lib.sh): имя вне него обвязка отбрасывает, и переход не принимается.
+var expectVersionNameRE = regexp.MustCompile(`^[A-Za-z0-9_./=+,:#-]+$`)
+
+// ExpectVersion объявляет обвязке стенда версию панели, на которой тест оставляет
+// стенд, — первую строку `/opt/sbin/xcp -v` в том виде, как её печатает панель.
+// Обвязка (scripts/router/go-suite.sh, rt_version_guard) сверяет версию стенда после
+// каждого запуска группы тестов: без объявления другая версия — посторонняя
+// установка, этап останавливается. Объявленная версия принимается как новая
+// ожидаемая на ближайшей границе, только если она совпала с наблюдаемой и тест
+// прошёл (строка PASS, KNOWN или QPASS в разборе запуска); упавший тест снимает
+// объявление сам (Cleanup). Имя теста, включая подтесты, — только из [A-Za-z0-9_./=+,:#-]
+// (иначе ExpectVersion завершает тест ошибкой: обвязка не примет такое имя). Если тест сам возвращает
+// исходную версию (откат), объявление безвредно: на границе версия совпадёт с
+// прежней ожидаемой, а файл обвязка удалит после чтения.
+//
+// Объявление — файл $XCP_RT_WORKDIR/expect-version, одна строка
+// «<версия><TAB><имя теста>», запись атомарная (временный файл и переименование).
+// Файл один на группу тестов: объявлять версию может только один тест группы. Второй вызов
+// затирает объявление первого, а Cleanup упавшего второго теста удаляет файл целиком, и законный
+// переход первого теряется (обвязка остановит этап как посторонний).
+func ExpectVersion(t testing.TB, version string) {
+	t.Helper()
+	dir := os.Getenv("XCP_RT_WORKDIR")
+	if dir == "" {
+		t.Fatal("нет XCP_RT_WORKDIR: тест запущен мимо make router-test")
+	}
+	if version == "" || strings.ContainsAny(version, "\t\r\n") {
+		t.Fatalf("ExpectVersion: версия %q пустая или с табуляцией либо переводом строки", version)
+	}
+	name := t.Name()
+	if !expectVersionNameRE.MatchString(name) {
+		t.Fatalf("ExpectVersion: имя теста %q вне [A-Za-z0-9_./=+,:#-]: обвязка (rt_version_guard) не примет переход", name)
+	}
+	path := dir + "/expect-version"
+	tmp, err := os.CreateTemp(dir, ".expect-version-*")
+	if err != nil {
+		t.Fatalf("ExpectVersion: временный файл: %v", err)
+	}
+	_, werr := tmp.WriteString(version + "\t" + name + "\n")
+	cerr := tmp.Close()
+	if werr == nil {
+		werr = cerr
+	}
+	if werr == nil {
+		werr = os.Chmod(tmp.Name(), 0o600)
+	}
+	if werr == nil {
+		werr = os.Rename(tmp.Name(), path)
+	}
+	if werr != nil {
+		_ = os.Remove(tmp.Name())
+		t.Fatalf("ExpectVersion: запись %s: %v", path, werr)
+	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			_ = os.Remove(path)
+		}
+	})
 }
 
 // LinksDir — каталог с данными share-ссылок, скопированный на устройство.

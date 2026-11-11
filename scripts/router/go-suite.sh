@@ -66,7 +66,21 @@
 # без упавших тестов» пишется только при PKG_BAD=0 и PKG_QFAIL=0: прежний общий счётчик BAD
 # прятал её, если упал любой предыдущий пакет.
 #
-# Код выхода: 0 — нет FAIL и XPASS, 3 — цель недоступна, иначе 1.
+# Сверка версии стенда (D-13, RTR-15): после каждого запуска группы (пакет целиком или k-й запуск
+# пакета в RT_GO_RUN_SEQ) rt_version_guard (lib.sh) сравнивает первую строку `/opt/sbin/xcp -v` с
+# ожидаемой версией цели (<отчёт>/<id>/expect-version, иначе <отчёт>/version; нет обоих — строка
+# skip, сверка выключена). Граница — go:<каталог пакета> или go:<каталог пакета>#<k>. Тест, который
+# оставляет стенд на другой версии, объявляет её файлом $XCP_RT_WORKDIR/expect-version
+# (routertest.ExpectVersion); скрипт запуска группы удаляет этот файл перед тестами, сверка его только читает (повтор
+# после обрыва связи его находит). Переход принимается, только если объявивший тест прошёл в этой группе.
+# Файлы отчёта цели: version-guard.tsv (ok, transition, skip — по строке на границу) и
+# version-stop.tsv (stop — первая остановка; suspect<TAB><ядро><TAB><проверка> — FAIL и XPASS
+# группы, на которой сменилась версия, и её строка go:<пакет>; notrun<TAB><ядро><TAB>Go: <каталог
+# пакета>: <выражение запуска> — группы, которые не запускались). Потребители: run.sh,
+# branch-report.mjs, session.mjs, unattended.sh; код 4 разбирает ещё tree-step.sh (шаг bisect — SKIP). go-done.txt и догон класса stand не меняются.
+#
+# Код выхода: 0 — нет FAIL и XPASS, 3 — цель недоступна, 4 — смена версии стенда (этап
+# остановлен на границе группы), иначе 1. Код 3 — только потеря связи.
 
 set -eu
 
@@ -164,6 +178,7 @@ BIN_DIR="$ROOT/build/router/bin/$ARCH"
 mkdir -p "$BIN_DIR"
 BAD=0
 LOST=0
+VSTOP=0
 
 URL=$(rt_get "$ID" URL)
 JAR="$RT_REPORT/$ID/.go-cookies"
@@ -488,6 +503,7 @@ for _grp in $GROUPS; do
     runner="$RT_REPORT/$ID/.go-run.sh"
     cat >"$runner" <<EOF
 cd $RWD
+rm -f $RWD/expect-version
 XCP_RT_ARCH=$ARCH XCP_RT_CORE=$CORE XCP_RT_WORKDIR=$RWD $SESSION_ENV $LINKS_ENV $INPUTS_ENV $CONTRACT_ENV $ROUTING_CONTRACT_ENV $SETUP_ENV $SUB_ENV ./$name.test -test.v=test2json -test.run '$runre' -test.timeout 120m &
 T=\$!
 ( while kill -0 \$T 2>/dev/null; do grep VmHWM /proc/\$T/status > $RWD/$tag.hwm 2>/dev/null; sleep 1; done ) &
@@ -521,6 +537,8 @@ EOF
     found=0
     PKG_BAD=0
     PKG_QFAIL=0
+    # строка провала запуска go:<пакет> этой группы (её нет в parsed): для suspect при смене версии
+    grp_fail=""
     parse_jsonl "$pkg" <"$jsonl" >"$parsed"
     while IFS="$TAB" read -r st chk det || [ -n "$st" ]; do
       found=$((found + 1))
@@ -536,13 +554,58 @@ EOF
     if [ "$found" = 0 ]; then
       rt_result "$ID" FAIL "go:$name" "тесты не найдены или бинарник не запустился (код $rc)$where: $(tail -n 2 "$errlog" | tr '\n' ' ')"
       BAD=$((BAD + 1))
+      grp_fail="go:$name"
     elif [ "$rc" != 0 ] && [ "$PKG_BAD" = 0 ] && [ "$PKG_QFAIL" = 0 ]; then
       # ненулевой код без упавших тестов этого запуска (panic в TestMain, os.Exit); упавший тест
       # в карантине объясняет код 1 и строки FAIL не даёт
       rt_result "$ID" FAIL "go:$name" "бинарник завершился с кодом $rc без упавших тестов$where"
       BAD=$((BAD + 1))
+      grp_fail="go:$name"
     fi
+
+    # Граница группы (D-13, RTR-15): версия стенда сверяется с ожидаемой; объявление теста
+    # ($RWD/expect-version) читается, переход принимается только при PASS, KNOWN или QPASS объявившего.
+    if [ "$SEQ" = 1 ]; then
+      vbound="go:$pkg#$k"
+    else
+      vbound="go:$pkg"
+    fi
+    vrc=0
+    rt_version_guard "$ID" "$vbound" "$RWD/expect-version" "$parsed" || vrc=$?
     rm -f "$raw"
+    if [ "$vrc" = 3 ]; then
+      LOST=1
+      # граница не сверена даже после повторов (lib.sh), а объявление теста не прочитано: пакет в
+      # go-done.txt не пишется и повторяется в догоне — дубли в catchup.tsv дешевле несверенной
+      # границы и потерянного объявления
+      break
+    elif [ "$vrc" = 4 ]; then
+      # падения этой группы — на сменённой версии (класс stand), остальные группы не запускаются
+      vstop="$RT_REPORT/$ID/version-stop.tsv"
+      vcore=${CORE:--}
+      awk -F'\t' -v c="$vcore" '$1 == "FAIL" || $1 == "XPASS" { printf "suspect\t%s\t%s\n", c, $2 }' "$parsed" >>"$vstop"
+      [ -z "$grp_fail" ] || printf 'suspect\t%s\t%s\n' "$vcore" "$grp_fail" >>"$vstop"
+      _ifs2=$IFS
+      IFS='
+'
+      set -f
+      for _rest in $(printf '%s' "$GROUPS" | sed -n "$((_gi + 1)),\$p"); do
+        rpkg=${_rest%%"$TAB"*}
+        if [ "$SEQ" = 1 ]; then
+          rexpr="^(${_rest#*"$TAB"})\$"
+        else
+          rexpr=${RT_GO_RUN:-^TestRouter}
+        fi
+        printf 'notrun\t%s\tGo: %s: %s\n' "$vcore" "$rpkg" "$rexpr" >>"$vstop"
+      done
+      IFS=$_ifs2
+      set +f
+      VSTOP=1
+      break
+    elif [ "$vrc" != 0 ]; then
+      rt_result "$ID" FAIL version-guard-error "сверка версии стенда не выполнена (код $vrc, граница $vbound)"
+      BAD=$((BAD + 1))
+    fi
   fi
 
   # последняя группа пакета прошла без обрыва связи — пакет в go-done.txt
@@ -557,5 +620,7 @@ if [ "$LOST" = 1 ]; then
   rt_result "$ID" FAIL reachable "нет связи в ходе Go-тестов"
   exit 3
 fi
+# смена версии стенда: строки stop и FAIL version-guard записал rt_version_guard
+[ "$VSTOP" = 0 ] || exit 4
 [ "$BAD" = 0 ] || exit 1
 exit 0

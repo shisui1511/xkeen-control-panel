@@ -3,18 +3,28 @@
 // Граф строится заново при каждом запуске, поэтому карту «файл → страница → спеки»
 // не нужно поддерживать вручную:
 //   1. «Оболочка» — всё, что статически достижимо из src/main.ts (App,
-//      Dashboard, Sidebar, i18n, стили…). Она рендерится на каждой странице,
-//      её изменение запускает все спеки.
-//   2. Страницы — ленивые import() в ветках `currentTab === '<маршрут>'`
-//      в Dashboard.svelte. Для маршрута dashboard страницей считаются
-//      импорты Dashboard.svelte, которые используются только в его ветке.
+//      Dashboard, Sidebar, i18n, стили…). Она рендерится на каждой странице.
+//   2. Страницы — ленивые import() в ветках `{:else if currentTab === '<маршрут>' …}`
+//      в Dashboard.svelte (ветка может нести дополнительное условие, как у editor и dat).
+//      Для маршрута dashboard страницей считаются импорты Dashboard.svelte, которые
+//      используются только в его ветке.
 //   3. Спек привязан к маршрутам, которые он открывает (`#/<маршрут>`,
-//      строковые литералы с именем маршрута, переход на '/'), и к
-//      маршрутам из комментария `// e2e-pages: a, b`.
+//      строковые литералы с именем маршрута), и к маршрутам из комментария
+//      `// e2e-pages: a, b`. Вход через корень ('/') — маршрут dashboard только
+//      у спека без других маршрутов (D-32 фазы 148.1.1).
+//
+// Ревизии (148.1.1, RTR-13). Модель строится из рабочего дерева (fsReader) или из снимка git
+// (gitReader: ls-tree и cat-file --batch по ref, содержимое не исполняется). Выбор сравнивает
+// модели базы и head, чтобы перенос или удаление импорта не теряли потребителей старой стороны.
+// Импорты разрешаются относительно файла и по алиасам compilerOptions.paths из
+// frontend/tsconfig.json (с baseUrl); index-файлы каталогов (barrel), реэкспорт `export … from`
+// и динамический import() — рёбра графа, циклы обход отсекает. Модель хранит прямые рёбра
+// (graph) и обратные (importers).
 //
 // Всё, что не удалось однозначно разобрать, трактуется в пользу запуска:
 // неизвестный файл во frontend/ → все спеки, спек без маршрутов → всегда.
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,14 +38,136 @@ const ROUTE_ALIASES = {
   subscriptions: 'proxies'
 };
 
-const RESOLVE_EXTENSIONS = ['', '.ts', '.js', '.svelte', '.svelte.ts', '.svelte.js'];
+// Вход спека через корень: goto('/') или visitPage('/') — литерал «/» без хэша, допускается
+// строка запроса. Маршрут dashboard только у спека без других маршрутов (specRoutes, D-32).
+const ROOT_ENTRY = /(?:goto|visitPage)\([^)]*?['"`]\/(?:\?[^'"`#]*)?['"`]/;
 
-function listFiles(dir, filter) {
+const RESOLVE_EXTENSIONS = ['', '.ts', '.js', '.svelte', '.svelte.ts', '.svelte.js'];
+const INDEX_FILES = ['index.ts', 'index.js', 'index.svelte.ts', 'index.svelte.js'];
+const SOURCE_RE = /\.(svelte|ts|js|css|json)$/;
+const GRAPH_RE = /\.(svelte|ts|js|css)$/;
+
+/** Чтение рабочего дерева: абсолютные пути внутри frontendDir. */
+export function fsReader(frontendDir = FRONTEND_DIR) {
+  const cache = new Map();
+  const listFiles = (dir) => {
+    const out = [];
+    if (!existsSync(dir)) return out;
+    for (const entry of readdirSync(dir)) {
+      const full = path.join(dir, entry);
+      if (statSync(full).isDirectory()) out.push(...listFiles(full));
+      else out.push(full);
+    }
+    return out;
+  };
+  return {
+    name: 'рабочее дерево',
+    frontendDir,
+    files: (dir) => listFiles(dir),
+    isFile: (abs) => {
+      try {
+        return statSync(abs).isFile();
+      } catch {
+        return false;
+      }
+    },
+    read(abs) {
+      if (!cache.has(abs)) {
+        let text = null;
+        try {
+          text = readFileSync(abs, 'utf8');
+        } catch {
+          text = null;
+        }
+        cache.set(abs, text);
+      }
+      return cache.get(abs);
+    }
+  };
+}
+
+/**
+ * Чтение снимка git: frontend/src и frontend/tsconfig*.json в ref. Пути — те же абсолютные, что у
+ * fsReader (repoRoot/frontend/…), поэтому модели базы и head сопоставимы по ключам. Ошибка git
+ * (нет ref, сбой чтения) — исключение: вызывающий расширяет выбор.
+ */
+export function gitReader(repoRoot, ref) {
+  const frontendDir = path.join(repoRoot, 'frontend');
+  const run = (args, input) =>
+    execFileSync('git', args, {
+      cwd: repoRoot,
+      input,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      maxBuffer: 512 * 1024 * 1024
+    });
+  const names = run(['ls-tree', '-r', '-z', '--name-only', ref, '--', 'frontend/src', 'frontend/tsconfig.json'])
+    .toString('utf8')
+    .split('\0')
+    .filter(Boolean);
+  const all = new Set(names.map((n) => path.join(repoRoot, n)));
+  const text = new Map();
+  const wanted = names.filter((n) => SOURCE_RE.test(n));
+  if (wanted.length > 0) {
+    const out = run(['cat-file', '--batch'], wanted.map((n) => `${ref}:${n}`).join('\n') + '\n');
+    let pos = 0;
+    for (const n of wanted) {
+      const nl = out.indexOf(0x0a, pos);
+      if (nl === -1) throw new Error(`git cat-file: оборван ответ на ${n}`);
+      const header = out.subarray(pos, nl).toString('utf8');
+      const m = /^[0-9a-f]+ (\w+) (\d+)$/.exec(header);
+      if (!m) throw new Error(`git cat-file: ${n} не прочитан (${header})`);
+      const size = Number(m[2]);
+      text.set(path.join(repoRoot, n), out.subarray(nl + 1, nl + 1 + size).toString('utf8'));
+      pos = nl + 1 + size + 1;
+    }
+  }
+  return {
+    name: `ревизия ${ref}`,
+    frontendDir,
+    files: (dir) => [...all].filter((f) => f.startsWith(dir + path.sep)),
+    isFile: (abs) => all.has(abs),
+    read: (abs) => (text.has(abs) ? text.get(abs) : null)
+  };
+}
+
+/** JSON с комментариями и висячими запятыми (tsconfig); null — не разобран. */
+function parseJsonc(text) {
+  if (text === null) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    // строки не трогаем: комментарий вне строки начинается с // или /*
+    const stripped = text
+      .replace(/("(?:[^"\\\n]|\\.)*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (m, str) => str ?? '')
+      .replace(/,(\s*[}\]])/g, '$1');
+    try {
+      return JSON.parse(stripped);
+    } catch {
+      return null;
+    }
+  }
+}
+
+/**
+ * Алиасы проекта из frontend/tsconfig.json: compilerOptions.paths относительно baseUrl.
+ * Возвращает [{ prefix, exact, targets: [абсолютный префикс] }]. Наследование через extends
+ * пакетов (@tsconfig/svelte) путей проекта не задаёт и не читается.
+ */
+function loadAliases(reader) {
+  const cfg = parseJsonc(reader.read(path.join(reader.frontendDir, 'tsconfig.json')));
+  const opts = (cfg && cfg.compilerOptions) || {};
+  const paths = opts.paths || {};
+  const baseDir = path.resolve(reader.frontendDir, opts.baseUrl || '.');
   const out = [];
-  for (const entry of readdirSync(dir)) {
-    const full = path.join(dir, entry);
-    if (statSync(full).isDirectory()) out.push(...listFiles(full, filter));
-    else if (filter(full)) out.push(full);
+  for (const [key, targets] of Object.entries(paths)) {
+    if (!Array.isArray(targets)) continue;
+    const exact = !key.endsWith('*');
+    const prefix = exact ? key : key.slice(0, -1);
+    out.push({
+      prefix,
+      exact,
+      targets: targets.map((t) => path.resolve(baseDir, exact ? t : t.replace(/\*$/, '')))
+    });
   }
   return out;
 }
@@ -54,30 +186,44 @@ function parseImports(source) {
   return { staticImports, dynamicImports };
 }
 
-function resolveImport(fromFile, spec) {
-  if (!spec.startsWith('.')) return null;
-  const clean = spec.replace(/\?.*$/, '');
-  const base = path.resolve(path.dirname(fromFile), clean);
+function resolveBase(reader, base) {
   for (const ext of RESOLVE_EXTENSIONS) {
     const candidate = base + ext;
-    if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+    if (reader.isFile(candidate)) return candidate;
   }
-  for (const idx of ['index.ts', 'index.js']) {
+  for (const idx of INDEX_FILES) {
     const candidate = path.join(base, idx);
-    if (existsSync(candidate)) return candidate;
+    if (reader.isFile(candidate)) return candidate;
+  }
+  return null;
+}
+
+function resolveImport(reader, aliases, fromFile, spec) {
+  const clean = spec.replace(/\?.*$/, '');
+  if (clean.startsWith('.')) return resolveBase(reader, path.resolve(path.dirname(fromFile), clean));
+  for (const a of aliases) {
+    if (a.exact ? clean !== a.prefix : !clean.startsWith(a.prefix)) continue;
+    for (const t of a.targets) {
+      const hit = resolveBase(reader, a.exact ? t : t + clean.slice(a.prefix.length));
+      if (hit) return hit;
+    }
   }
   return null;
 }
 
 /** Граф импортов src/: файл → { static: Set, dynamic: Set } */
-export function buildGraph(frontendDir = FRONTEND_DIR) {
+export function buildGraph(frontendDir = FRONTEND_DIR, reader = fsReader(frontendDir), aliases = loadAliases(reader)) {
   const srcDir = path.join(frontendDir, 'src');
-  const files = listFiles(srcDir, (f) => /\.(svelte|ts|js|css)$/.test(f) && !/\.test\.ts$/.test(f));
+  const files = reader.files(srcDir).filter((f) => GRAPH_RE.test(f) && !/\.test\.ts$/.test(f));
   const graph = new Map();
   for (const file of files) {
-    const { staticImports, dynamicImports } = parseImports(readFileSync(file, 'utf8'));
+    const { staticImports, dynamicImports } = parseImports(reader.read(file) ?? '');
     const resolve = (list) =>
-      new Set(list.map((s) => resolveImport(file, s)).filter((f) => f && f.startsWith(srcDir)));
+      new Set(
+        list
+          .map((s) => resolveImport(reader, aliases, file, s))
+          .filter((f) => f && f.startsWith(srcDir + path.sep))
+      );
     graph.set(file, { static: resolve(staticImports), dynamic: resolve(dynamicImports) });
   }
   return graph;
@@ -102,10 +248,13 @@ function reach(graph, starts, { followDynamic, skip = new Set() }) {
  * Страницы из Dashboard.svelte: маршрут → входные файлы.
  * Для dashboard — статические импорты, используемые только в его ветке.
  */
-export function parsePages(frontendDir = FRONTEND_DIR) {
+export function parsePages(frontendDir = FRONTEND_DIR, reader = fsReader(frontendDir), aliases = loadAliases(reader)) {
   const dashFile = path.join(frontendDir, 'src', 'Dashboard.svelte');
-  const text = readFileSync(dashFile, 'utf8');
-  const branchRe = /currentTab === '([a-z][\w-]*)'\}/g;
+  const text = reader.read(dashFile);
+  if (text === null) throw new Error(`${reader.name}: нет src/Dashboard.svelte — маршруты не определить`);
+  // Ветка маршрута: `{:else if currentTab === 'x'}` или с дополнительным условием
+  // (`currentTab === 'editor' && !(…)}`)
+  const branchRe = /\{(?:#if|:else if)\s+currentTab === '([a-z][\w-]*)'/g;
   const branches = [...text.matchAll(branchRe)].map((m) => ({ route: m[1], start: m.index }));
   const pages = new Map();
   let dashboardRange = null;
@@ -113,9 +262,9 @@ export function parsePages(frontendDir = FRONTEND_DIR) {
   branches.forEach((b, i) => {
     const end = i + 1 < branches.length ? branches[i + 1].start : text.indexOf('</main>', b.start);
     const body = text.slice(b.start, end === -1 ? undefined : end);
-    const entries = new Set();
+    const entries = pages.get(b.route) ?? new Set();
     for (const m of body.matchAll(/import\(\s*['"]([^'"]+)['"]\s*\)/g)) {
-      const resolved = resolveImport(dashFile, m[1]);
+      const resolved = resolveImport(reader, aliases, dashFile, m[1]);
       if (resolved) entries.add(resolved);
     }
     if (b.route === 'dashboard') dashboardRange = [b.start, end];
@@ -135,7 +284,7 @@ export function parsePages(frontendDir = FRONTEND_DIR) {
         usages.length > 0 &&
         usages.every((idx) => idx >= dashboardRange[0] && idx < dashboardRange[1])
       ) {
-        const resolved = resolveImport(dashFile, spec);
+        const resolved = resolveImport(reader, aliases, dashFile, spec);
         if (resolved) dashboardOnly.add(resolved);
       }
     }
@@ -144,10 +293,56 @@ export function parsePages(frontendDir = FRONTEND_DIR) {
   return { pages, dashFile, dashboardOnly };
 }
 
-/** Оболочка и файлы каждой страницы */
-export function buildModel(frontendDir = FRONTEND_DIR) {
-  const graph = buildGraph(frontendDir);
-  const { pages, dashboardOnly } = parsePages(frontendDir);
+/**
+ * Вкладки страницы: Map вкладка → Set входных файлов её компонентов; null — вкладок нет.
+ * Компонент относится к вкладке, если его тег стоит в ветке `{#if|:else if subTab === 'x'}`
+ * (до `{/if}`, `{:else}` или `{:else if …}` — тег в ветке else вкладке не принадлежит) или сам тег
+ * содержит `subTab === 'x'` (FilesTab active={…}). Компонент, у которого есть тег вне веток, — общий
+ * для всех вкладок и в Map не входит (иначе правка выбрала бы спеки одной вкладки).
+ */
+function parseSubTabs(reader, aliases, pageFile) {
+  const text = reader.read(pageFile);
+  if (text === null) return null;
+  const openers = [...text.matchAll(/\{(?:#if|:else if)\s+subTab === '([a-z][\w-]*)'\s*\}/g)].map((m) => ({
+    tab: m[1],
+    at: m.index,
+    end: m.index + m[0].length
+  }));
+  if (openers.length === 0) return null;
+  const tabs = new Map();
+  for (const m of text.matchAll(/import\s+([A-Z]\w*)\s+from\s+['"](\.[^'"]+)['"]/g)) {
+    const [, name, spec] = m;
+    const file = resolveImport(reader, aliases, pageFile, spec);
+    if (!file) continue;
+    const used = new Set();
+    let common = false;
+    for (const u of text.matchAll(new RegExp(`<${name}\\b[^>]*>`, 'g'))) {
+      let tab = /subTab === '([a-z][\w-]*)'/.exec(u[0])?.[1] ?? null;
+      if (!tab) {
+        const prev = openers.filter((o) => o.at < u.index).pop();
+        if (prev && !/\{(?:\/if|:else)\b/.test(text.slice(prev.end, u.index))) tab = prev.tab;
+      }
+      if (tab) used.add(tab);
+      else common = true;
+    }
+    if (common) continue;
+    for (const tab of used) {
+      if (!tabs.has(tab)) tabs.set(tab, new Set());
+      tabs.get(tab).add(file);
+    }
+  }
+  return tabs;
+}
+
+/**
+ * Оболочка и файлы каждой страницы.
+ * opts.reader — источник файлов (по умолчанию рабочее дерево frontendDir).
+ */
+export function buildModel(frontendDir = FRONTEND_DIR, opts = {}) {
+  const reader = opts.reader ?? fsReader(frontendDir);
+  const aliases = loadAliases(reader);
+  const graph = buildGraph(frontendDir, reader, aliases);
+  const { pages, dashboardOnly } = parsePages(frontendDir, reader, aliases);
   const mainFile = path.join(frontendDir, 'src', 'main.ts');
 
   // Оболочка: статически достижимое из main.ts, кроме dashboard-only веток.
@@ -173,29 +368,147 @@ export function buildModel(frontendDir = FRONTEND_DIR) {
 
   const pageFiles = new Map();
   for (const [route, entries] of pages) {
-    pageFiles.set(route, reach(graph, [...entries], { followDynamic: true }));
+    // Страница с вкладками (`{:else if subTab === 'x'}`, Config.svelte) делится на маршруты
+    // `<маршрут>/<вкладка>`: компоненты чужих вкладок в обход вкладки не входят
+    const tabs = [...entries].map((e) => parseSubTabs(reader, aliases, e)).find((t) => t && t.size > 0);
+    if (!tabs) {
+      pageFiles.set(route, reach(graph, [...entries], { followDynamic: true }));
+      continue;
+    }
+    const all = new Set([...tabs.values()].flatMap((s) => [...s]));
+    for (const [tab, own] of tabs) {
+      const skip = new Set([...all].filter((f) => !own.has(f)));
+      pageFiles.set(`${route}/${tab}`, reach(graph, [...entries], { followDynamic: true, skip }));
+    }
   }
-  return { graph, shell, pageFiles, routes: new Set(pages.keys()), shared };
+
+  // Обратные рёбра: файл → прямые импортёры (статические и динамические)
+  const importers = new Map();
+  for (const [f, node] of graph) {
+    for (const d of [...node.static, ...node.dynamic]) {
+      if (!importers.has(d)) importers.set(d, new Set());
+      importers.get(d).add(f);
+    }
+  }
+
+  /** Маршруты, на которых файл достижим. */
+  const routesOf = (abs) => [...pageFiles].filter(([, files]) => files.has(abs)).map(([r]) => r);
+
+  // routes — маршруты обхода (вкладки как `config/<вкладка>`), topRoutes — страницы Dashboard
+  return {
+    graph,
+    importers,
+    shell,
+    pageFiles,
+    routes: new Set(pageFiles.keys()),
+    topRoutes: new Set(pages.keys()),
+    shared,
+    reader,
+    routesOf
+  };
 }
 
-/** Маршруты, которые открывает спек; null — определить не удалось */
+/** Страница маршрута: `config/files` → `config`. */
+export function topRoute(route) {
+  return route.split('/', 1)[0];
+}
+
+/**
+ * Маршруты, которые открывает спек; null — определить не удалось.
+ * Вкладка (`#/config/cores`, `e2e-pages: config/cores`) — свой маршрут; страница без вкладки
+ * (`#/config`, литерал 'config', `#/config/${…}`) — все её вкладки: спек может переключать их.
+ */
 export function specRoutes(specText, knownRoutes) {
   const routes = new Set();
   const norm = (r) => ROUTE_ALIASES[r] ?? r;
-  // `#/logs` в URL и `#\/logs` в регулярках toHaveURL(/#\/logs/)
-  for (const m of specText.matchAll(/#\\?\/([a-z][\w-]*)/g)) routes.add(norm(m[1]));
+  // `#/logs` и `#/config/cores` в URL, `#\/logs` и `#\/config\/cores` в регулярках toHaveURL
+  for (const m of specText.matchAll(/#\\?\/([a-z][\w-]*)(?:\\?\/([a-z][\w-]*))?/g)) {
+    routes.add(m[2] ? `${norm(m[1])}/${m[2]}` : norm(m[1]));
+  }
   // Литералы с именем маршрута: списки страниц в sweep-спеках и т.п.
   for (const m of specText.matchAll(/['"`]([a-z][\w-]*)['"`]/g)) {
     const r = norm(m[1]);
-    if (knownRoutes.has(r)) routes.add(r);
+    if (knownRoutes.has(r) || [...knownRoutes].some((k) => k.startsWith(`${r}/`))) routes.add(r);
   }
-  // Переход на корень без хэша — дашборд (оболочка входит всегда)
-  if (/(?:goto|visitPage)\([^)]*?['"`]\/(?:\?[^'"`#]*)?['"`]/.test(specText)) {
-    routes.add('dashboard');
-  }
+  // Аннотация: маршруты через запятую или пробел
   for (const m of specText.matchAll(/\/\/\s*e2e-pages:\s*([^\n]+)/g)) {
-    for (const r of m[1].split(',')) routes.add(norm(r.trim()));
+    for (const r of m[1].split(/[,\s]+/).filter(Boolean)) {
+      const [top, tab] = r.split('/');
+      routes.add(tab ? `${norm(top)}/${tab}` : norm(top));
+    }
   }
-  const valid = [...routes].filter((r) => knownRoutes.has(r));
-  return valid.length ? new Set(valid) : null;
+  const valid = new Set();
+  const addValid = (r) => {
+    if (knownRoutes.has(r)) {
+      valid.add(r);
+      return;
+    }
+    // Страница без вкладки или незнакомая вкладка — все вкладки страницы (или сама страница)
+    const top = topRoute(r);
+    if (knownRoutes.has(top)) valid.add(top);
+    else for (const k of knownRoutes) if (k.startsWith(`${top}/`)) valid.add(k);
+  };
+  for (const r of routes) addValid(r);
+  // Вход через корень без хэша — страница dashboard (D-32), только если спек не назвал других
+  // маршрутов: спек со своими маршрутами проходит dashboard по пути к ним и его не проверяет.
+  // Спек, у которого вход через корень — единственный признак, остаётся спеком dashboard: иначе
+  // он стал бы «маршруты не определены» и выбирался бы на любую правку (расширение, не сужение).
+  // Сеть безопасности страницы dashboard: pages.spec.ts (read-обход `e2e-pages: *`, при выборе
+  // по маршрутам сужается до затронутых, включая dashboard; обе темы, ширины, axe), спеки с
+  // литералом маршрута или `#/dashboard`, читающая канарейка оболочки при правке общего
+  // компонента; правка Dashboard.svelte остаётся каркасом (D-09: pages без сужения и канарейка
+  // «правка → Применить»).
+  if (valid.size === 0 && ROOT_ENTRY.test(specText)) addValid('dashboard');
+  return valid.size ? valid : null;
+}
+
+/**
+ * Вход через корень без хэша у спека, которому specRoutes не отдал dashboard: у спека есть другие
+ * маршруты (в том числе случайный литерал с именем маршрута), и dashboard он не проверяет.
+ * Нужна только как диагностика выбора (--explain).
+ */
+export function rootEntryIgnored(specText, routes) {
+  return ROOT_ENTRY.test(specText) && routes instanceof Set && !routes.has('dashboard');
+}
+
+/**
+ * Файлы frontend/src, на которые спек ссылается напрямую: относительные импорты и
+ * `new URL('…', import.meta.url)` самого спека и его помощников из tests/router (транзитивно
+ * по помощникам, не по src). Шаблон `${…}` в пути — любой сегмент. srcFiles — абсолютные пути
+ * файлов src (для шаблонов). Возвращает Set абсолютных путей.
+ */
+export function specSources(specAbs, srcFiles, frontendDir = FRONTEND_DIR) {
+  const reader = fsReader(frontendDir);
+  const srcDir = path.join(frontendDir, 'src') + path.sep;
+  const testsDir = path.join(frontendDir, 'tests', 'router') + path.sep;
+  const out = new Set();
+  const seen = new Set();
+  const stack = [specAbs];
+  while (stack.length) {
+    const file = stack.pop();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    const text = reader.read(file);
+    if (text === null) continue;
+    const refs = [];
+    for (const m of text.matchAll(/(?:^|[;\s])(?:import|export)\s+(?:[^'";]*?\sfrom\s*)?['"]([^'"\n]+)['"]/g)) refs.push(m[1]);
+    for (const m of text.matchAll(/import\(\s*['"]([^'"\n]+)['"]\s*\)/g)) refs.push(m[1]);
+    for (const m of text.matchAll(/new URL\(\s*(['"`])([^'"`\n]+)\1\s*,\s*import\.meta\.url/g)) refs.push(m[2]);
+    for (const ref of refs) {
+      if (!ref.startsWith('.')) continue;
+      if (ref.includes('${')) {
+        const abs = path.resolve(path.dirname(file), ref.replace(/\$\{[^}]*\}/g, '\u0000'));
+        const re = new RegExp(
+          '^' + abs.split('\u0000').map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[^/]+') + '$'
+        );
+        for (const f of srcFiles) if (re.test(f)) out.add(f);
+        continue;
+      }
+      const hit = resolveBase(reader, path.resolve(path.dirname(file), ref));
+      if (!hit) continue;
+      if (hit.startsWith(srcDir)) out.add(hit);
+      else if (hit.startsWith(testsDir)) stack.push(hit);
+    }
+  }
+  return out;
 }

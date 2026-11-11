@@ -32,6 +32,8 @@
 //       - Итог: зелёный
 //       - Итог: красный (новых N, нестабильных N, xpass N, обрывов N)
 //       - Итог: красный: нестабильный (нестабильных N)       (одни flaky)
+//       - Итог: красный: смена версии стенда (новых N, нестабильных N, xpass N, обрывов N)
+//                                                         (строка stop в version-stop.tsv, D-13)
 //     Падения без confirm.tsv (старый отчёт, потолок перепрогона, проверка вне go:/pw:) — new.
 //     Потеря связи (проверка reachable или признаки в детали: «нет связи», ERR_NETWORK_CHANGED и
 //     т. п.) — stand; догнанная проверка (строка в <цель>/catchup.tsv, run.sh) получает класс по
@@ -43,6 +45,21 @@
 //     обрыва связи» (по <цель>/notrun.txt, D-26).
 //     Причина класса — короткая фраза без текста ошибки; причина открытого stand (связь не
 //     вернулась, догона не было) начинается со слов «не догнан» (run.sh считает их красными).
+//   - Смена версии стенда (D-13, RTR-15) по <цель>/version-stop.tsv (stop<TAB><ядро><TAB><граница>
+//     <TAB><ожидалась><TAB><на стенде><TAB><эпоха ПК> — первая остановка, suspect<TAB><ядро><TAB>
+//     <проверка>, notrun<TAB><ядро><TAB><что не выполнено>) и <цель>/version-guard.tsv (ok, transition, unverified,
+//     skip по границам; пишут rt_version_guard из lib.sh, go-suite.sh, pw-suite.sh и run.sh). Класс
+//     stand, открытый (run.sh считает его красным), не new и без подтверждающего перепрогона: FAIL
+//     version-guard — «смена версии стенда» (сбой самой сверки — отдельная проверка version-guard-error,
+//     обычное падение класса new, в подтверждающем перепрогоне — «без сверки версии стенда»); падение из строк suspect того же ядра и xcp-after-restore
+//     отчёта со строкой stop — «падение на сменённой версии стенда». В начале «Классы падений» —
+//     строка «- Сверка версии стенда: N границ, смен нет» (с принятыми переходами — «N границ,
+//     принятых переходов M, смен нет»; при остановке — «остановлено на границе <B>»; без ожидания —
+//     «выключена — ожидаемая версия неизвестна»; нет version-guard.tsv и строки stop — строки нет).
+//     При строке stop итог — «- Итог: красный: смена версии стенда (новых N, нестабильных N, xpass N,
+//     обрывов N)» (обрывы — только потеря связи), за ним раздел «## Остановлено: смена версии
+//     стенда»: цель, ядро и граница, ожидалась и на стенде, «- Падения на сменённой версии (класс
+//     stand): N», «- Не выполнено:» и пункты из строк notrun. Отчёт без этих файлов — сводка прежняя.
 //   - «## Тренд набора» (только --suite full, D-16) — число проверок go:/pw: и время тестов этого
 //     отчёта против прошлого полного прогона истории (history.mjs, lastFull строго до начала
 //     отчёта из meta) и до 5 самых долгих новых тестов; нет истории — «- Тренд: история
@@ -760,10 +777,14 @@ for (const n of needMark) {
   if (!existingMarks.has(n.check)) mainRows.push({ st: "FAIL", core: "-", check: `core-mark:${n.check}`, detail: "" });
 }
 const mainWorst = worstBy(mainRows, exactOf);
+const confirmRows = readRows("confirm.tsv");
 const confirmWorst = worstBy(
-  readRows("confirm.tsv").filter((r) => /^(go|pw):/.test(r.check)),
+  confirmRows.filter((r) => /^(go|pw):/.test(r.check)),
   famOf
 );
+// сверка версии стенда в подтверждающем перепрогоне не выполнилась: прошедший перепрогон без сверки
+// не подтверждает нестабильность (границу никто не проверил)
+const confirmGuardBroken = confirmRows.some((r) => r.st === "FAIL" && r.check === "version-guard-error");
 // «без перепрогона: …» — перепрогон пропущен из-за потолка (run.sh пишет причину в confirm-skip)
 const catchupExists = readText("catchup.tsv") !== null;
 const catchupRows = readRows("catchup.tsv");
@@ -778,6 +799,36 @@ const notrunLines = (readText("notrun.txt") || "")
 const confirmSkipText = readText("confirm-skip");
 const confirmSkipWhy = confirmSkipText === null ? null : confirmSkipText.split("\n")[0].trim() || "без перепрогона";
 
+// Сверка версии стенда (D-13, контракт сверки версии): <цель>/version-stop.tsv — первая строка stop
+// (ядро, граница, ожидалась, на стенде, эпоха ПК), строки suspect (ядро, проверка — падение на
+// сменённой версии) и notrun (ядро, что не выполнено); <цель>/version-guard.tsv — строки ok,
+// transition, skip и unverified (связь пропала на сверке) по границам. Нет файлов (старый отчёт) — сводка прежняя.
+const vStopText = readText("version-stop.tsv");
+const vGuardText = readText("version-guard.tsv");
+const vStopRows = (vStopText || "")
+  .split("\n")
+  .filter(Boolean)
+  .map((l) => l.split("\t"));
+const vStop = vStopRows.find((f) => f[0] === "stop") || null;
+const vSuspect = new Set(vStopRows.filter((f) => f[0] === "suspect" && f.length >= 3).map((f) => famOf(f[1], f[2])));
+const vNotrun = vStopRows
+  .filter((f) => f[0] === "notrun" && f.length >= 3)
+  .map((f) => (f[1] && f[1] !== "-" ? `${f[1]}: ${f.slice(2).join(" ")}` : f.slice(2).join(" ")));
+const vGuardKinds = (vGuardText || "")
+  .split("\n")
+  .filter(Boolean)
+  .map((l) => l.split("\t")[0]);
+// Класс stand смены версии (открытый, не находка): строка version-guard, падение из строк suspect и
+// xcp-after-restore отчёта со строкой stop. В подтверждающий перепрогон такие строки не идут: цикл
+// ветвей при смене версии останавливается раньше него (run.sh).
+function versionClass(core, check) {
+  if (check === "version-guard") return { cls: "stand", why: "смена версии стенда", open: true, version: true };
+  if (vSuspect.has(famOf(core, check)) || (vStop && check === "xcp-after-restore")) {
+    return { cls: "stand", why: "падение на сменённой версии стенда", open: true, version: true };
+  }
+  return null;
+}
+
 // Класс одной проверки. stand — потеря связи; open — связь не вернулась или догона не было
 // (причина начинается со слов «не догнан»: run.sh краснит такие строки).
 function classify(core, check, st, detail) {
@@ -786,6 +837,8 @@ function classify(core, check, st, detail) {
   if (st === "QFAIL") return { cls: "quarantine", why: "карантин: упал" };
   if (st === "QPASS") return { cls: "quarantine", why: "карантин: прошёл", quiet: true };
   if (st !== "FAIL") return null;
+  const v = versionClass(core, check);
+  if (v) return v;
   if (check === "reachable" || STAND_RE.test(detail)) {
     if (check === "reachable") {
       if (catchupExists && notrunLines.length === 0) return { cls: "stand", why: "потеря связи, догон выполнен" };
@@ -798,6 +851,7 @@ function classify(core, check, st, detail) {
   }
   if (!/^(go|pw):/.test(check)) return { cls: "new", why: "падение проверки" };
   if (confirmSkipWhy !== null) return { cls: "new", why: confirmSkipWhy };
+  if (confirmGuardBroken) return { cls: "new", why: "подтверждающий перепрогон без сверки версии стенда" };
   const c = confirmWorst.get(famOf(core, check));
   if (c && PASSED.has(c.st)) return { cls: "flaky", why: "прошёл при подтверждающем перепрогоне" };
   if (c && (c.st === "FAIL" || c.st === "XPASS")) return { cls: "new", why: "упал снова при подтверждающем перепрогоне" };
@@ -817,6 +871,7 @@ for (const [key, v] of worstBy(catchupRows, exactOf)) {
   const m = mainWorst.get(key);
   if (m && (m.st === "FAIL" || m.st === "XPASS")) continue;
   if (v.st === "XPASS") classRows.push({ core, check, cls: "xpass", why: "метка известного падения больше не нужна" });
+  else if (v.st === "FAIL" && versionClass(core, check)) classRows.push({ core, check, ...versionClass(core, check) });
   else if (v.st === "FAIL") {
     const standLike = STAND_RE.test(v.detail);
     classRows.push({
@@ -828,8 +883,13 @@ for (const [key, v] of worstBy(catchupRows, exactOf)) {
     });
   }
 }
-// часть набора не выполнена, а строк открытого stand нет: итог всё равно красный
-if (notrunLines.length > 0 && !classRows.some((r) => r.open)) {
+// смена версии стенда, а строки version-guard среди результатов нет (её записал этап подтверждающего
+// перепрогона в confirm.tsv): строка класса всё равно есть — итог красный, run.sh видит класс
+if (vStop && !classRows.some((r) => r.check === "version-guard")) {
+  classRows.push({ core: vStop[1] || "-", check: "version-guard", cls: "stand", why: "смена версии стенда", open: true, version: true });
+}
+// часть набора не выполнена, а строк открытого stand из-за связи нет: итог всё равно красный
+if (notrunLines.length > 0 && !classRows.some((r) => r.open && !r.version)) {
   classRows.push({ core: "-", check: "notrun:связь", cls: "stand", why: "не догнан: часть набора не выполнена (notrun.txt)", open: true });
 }
 const nOf = (pred) => new Set(classRows.filter(pred).map((r) => `${r.cls}\t${famOf(r.core, r.check)}`)).size;
@@ -837,6 +897,9 @@ const nNew = nOf((r) => r.cls === "new");
 const nFlaky = nOf((r) => r.cls === "flaky");
 const nXpass = nOf((r) => r.cls === "xpass");
 const nOpen = nOf((r) => r.open);
+// обрывы связи без строк смены версии: их счёт в итоге «красный: смена версии стенда»
+const nLink = nOf((r) => r.open && !r.version);
+const nOnChanged = nOf((r) => r.version && r.why === "падение на сменённой версии стенда");
 const haveResults = readText("results.tsv") !== null;
 
 // «падений/прогонов за 30 дней» по истории; ошибка истории — «-»
@@ -853,6 +916,16 @@ const histCell = (check) => {
 };
 
 out.push("## Классы падений", "");
+// строка сверки версии стенда (D-13): нет version-guard.tsv и остановки (старый отчёт) — строки нет
+if (vStop) out.push(`- Сверка версии стенда: остановлено на границе ${cleanName(vStop[2] || "-")}`);
+else if (vGuardText !== null) {
+  const nChecked = vGuardKinds.filter((k) => k === "ok" || k === "transition").length;
+  const nTrans = vGuardKinds.filter((k) => k === "transition").length;
+  const nUnver = vGuardKinds.filter((k) => k === "unverified").length;
+  if (nChecked === 0 && vGuardKinds.includes("skip")) out.push("- Сверка версии стенда: выключена — ожидаемая версия неизвестна");
+  else if (nTrans > 0) out.push(`- Сверка версии стенда: ${nChecked} границ, принятых переходов ${nTrans}, смен нет${nUnver > 0 ? `, не сверено из-за связи ${nUnver}` : ""}`);
+  else out.push(`- Сверка версии стенда: ${nChecked} границ, смен нет${nUnver > 0 ? `, не сверено из-за связи ${nUnver}` : ""}`);
+}
 const lossRows = (readText("link-loss.tsv") || "").split("\n").filter(Boolean);
 if (lossRows.length > 0) {
   const caught = lossRows.filter((l) => l.split("\t")[2] === "догон").length;
@@ -870,10 +943,21 @@ else {
 }
 out.push("");
 if (!haveResults) out.push("- Итог: красный (результатов нет)");
+else if (vStop) out.push(`- Итог: красный: смена версии стенда (новых ${nNew}, нестабильных ${nFlaky}, xpass ${nXpass}, обрывов ${nLink})`);
 else if (nNew + nFlaky + nXpass + nOpen === 0) out.push("- Итог: зелёный");
 else if (nNew + nXpass + nOpen === 0) out.push(`- Итог: красный: нестабильный (нестабильных ${nFlaky})`);
 else out.push(`- Итог: красный (новых ${nNew}, нестабильных ${nFlaky}, xpass ${nXpass}, обрывов ${nOpen})`);
 out.push("");
+if (vStop) {
+  out.push("## Остановлено: смена версии стенда", "");
+  out.push(`- Цель: ${target}, ядро: ${cleanName(vStop[1] || "-")}, граница: ${cleanName(vStop[2] || "-")}`);
+  out.push(`- Ожидалась: ${cleanName(vStop[3] || "-")}; на стенде: ${cleanName(vStop[4] || "-")}`);
+  out.push(`- Падения на сменённой версии (класс stand): ${nOnChanged}`);
+  out.push("- Не выполнено:");
+  if (vNotrun.length === 0) out.push("  - нет");
+  for (const l of vNotrun) out.push(`  - ${cleanName(l)}`);
+  out.push("");
+}
 if (notrunLines.length > 0) {
   out.push("## Не выполнено из-за обрыва связи", "");
   for (const l of notrunLines) out.push(`- ${cleanName(l)}`);

@@ -4,6 +4,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
+import { knownFailure } from './lib/known';
 
 // Откат конструктора Mihomo привязан к имени профиля (PART-03, D-23): снимок, сохранённый
 // на другом профиле, не предлагается и стирается; снимок активного профиля доступен.
@@ -47,6 +48,7 @@ async function constructorReady(page: Page): Promise<void> {
 
 test.describe('undo', () => {
   test('undo: снимок другого профиля не предлагается', async ({ page }) => {
+    knownFailure('*', 'router-harness-undo-spec-gen-layout');
     const guard = attachConsoleGuard(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.addInitScript(
@@ -72,6 +74,7 @@ test.describe('undo', () => {
   });
 
   test('undo: снимок другого файла не предлагается и не стирается', async ({ page }) => {
+    knownFailure('*', 'router-harness-undo-spec-gen-layout');
     const guard = attachConsoleGuard(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     const active = await activeProfile(page);
@@ -97,6 +100,7 @@ test.describe('undo', () => {
   });
 
   test('undo: снимок активного профиля доступен', async ({ page }) => {
+    knownFailure('*', 'router-harness-undo-spec-gen-layout');
     const guard = attachConsoleGuard(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     const active = await activeProfile(page);

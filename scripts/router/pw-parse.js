@@ -18,17 +18,52 @@
 //   - остальные: expected -> PASS, unexpected/flaky -> FAIL, skipped -> SKIP (деталь — описание
 //     аннотации 'skip', то есть причина test.skip(условие, причина); без неё — «пропущен»).
 // Ошибки вне тестов (глобальная настройка: панель не отвечает, вход не удался) -> FAIL global-setup.
+//
+// Необязательные ключи (pw-suite.sh, сверка версии стенда D-13); без них вывод прежний:
+//   --files-out <файл>        для каждой выведенной строки теста — строка
+//                             «<проверка><TAB>tests/router/<файл спека>» в том же порядке
+//                             (проверка — как в выводе, без «pw:»; файл — из ближайшего набора
+//                             с полем file). Строки global-setup идут последними и спека не имеют:
+//                             в файл не пишутся.
+//   --interrupted-out <файл>  прогон остановлен (мягкая остановка по смене версии): тест, чей
+//                             последний результат interrupted, тест без результатов и тест,
+//                             пропущенный без ожидаемого пропуска (Playwright «did not run»),
+//                             в вывод не идут, а пишутся строкой «tests/router/<спек><TAB><название>».
+// Неизвестный ключ, ключ без значения или лишний аргумент — код 2.
 // Без зависимостей: только встроенные модули Node.
 
 "use strict";
 
 const fs = require("fs");
 
-const file = process.argv[2];
-if (!file) {
-  console.error("usage: pw-parse.js <report.json>");
+function usage() {
+  console.error(
+    "usage: pw-parse.js <report.json> [--files-out <файл>] [--interrupted-out <файл>]",
+  );
   process.exit(2);
 }
+
+let file = null;
+let filesOut = null;
+let interruptedOut = null;
+{
+  const args = process.argv.slice(2);
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--files-out" || a === "--interrupted-out") {
+      const v = args[i + 1];
+      if (v === undefined || v === "") usage();
+      if (a === "--files-out") filesOut = v;
+      else interruptedOut = v;
+      i++;
+    } else if (a.startsWith("-") || file !== null) {
+      usage();
+    } else {
+      file = a;
+    }
+  }
+}
+if (!file) usage();
 
 let report;
 try {
@@ -49,8 +84,25 @@ function clean(text, limit) {
   return flat.length > limit ? flat.slice(0, limit) + "…" : flat;
 }
 
-function out(status, check, detail) {
-  console.log([status, clean(check, 300), clean(detail, 400)].join("\t"));
+// строки --files-out и --interrupted-out
+const fileLines = [];
+const interruptedLines = [];
+
+// spec — файл спека строки теста (для --files-out; строка пишется всегда, даже с пустым
+// спеком, чтобы порядок совпадал с выводом); у global-setup спека нет — строки нет
+function outLine(status, check, detail, spec) {
+  const name = clean(check, 300);
+  console.log([status, name, clean(detail, 400)].join("\t"));
+  if (spec !== undefined) fileLines.push(`${name}\t${spec}`);
+}
+
+// Тест, не выполненный из-за остановки прогона: последний результат interrupted, результатов нет
+// или пропуск без ожидаемого пропуска (так Playwright помечает тест, начатый после остановки).
+function interrupted(test) {
+  const last = (test.results || []).at(-1);
+  if (!last) return true;
+  if (last.status === "interrupted") return true;
+  return last.status === "skipped" && test.expectedStatus !== "skipped";
 }
 
 function knownSlug(test) {
@@ -101,10 +153,19 @@ function errorText(test) {
   return "";
 }
 
-function visit(suite, titles) {
+function visit(suite, titles, parentFile) {
+  const file = suite.file || parentFile;
+  const specFile = file ? `tests/router/${file}` : "";
   for (const spec of suite.specs || []) {
     const name = [...titles, spec.title].join(" > ");
     for (const test of spec.tests || []) {
+      if (interruptedOut !== null && interrupted(test)) {
+        interruptedLines.push(`${specFile}\t${clean(name, 300)}`);
+        continue;
+      }
+      // строка результата с файлом спека (для --files-out)
+      const out = (status, check, detail) =>
+        outLine(status, check, detail, specFile);
       const slug = knownSlug(test);
       const qslug = quarantineSlug(test);
       const st = test.status;
@@ -161,13 +222,18 @@ function visit(suite, titles) {
   }
   // вложенные наборы — это test.describe, их названия входят в имя проверки
   for (const child of suite.suites || [])
-    visit(child, [...titles, child.title]);
+    visit(child, [...titles, child.title], file);
 }
 
 for (const top of report.suites || []) {
-  visit(top, top.file === top.title ? [] : [top.title]);
+  visit(top, top.file === top.title ? [] : [top.title], "");
 }
 
 for (const e of report.errors || []) {
-  out("FAIL", "global-setup", e.message || e.value || "ошибка вне тестов");
+  outLine("FAIL", "global-setup", e.message || e.value || "ошибка вне тестов");
 }
+
+const joinLines = (lines) => lines.map((l) => l + "\n").join("");
+if (filesOut !== null) fs.writeFileSync(filesOut, joinLines(fileLines));
+if (interruptedOut !== null)
+  fs.writeFileSync(interruptedOut, joinLines(interruptedLines));

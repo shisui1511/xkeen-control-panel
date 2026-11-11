@@ -519,6 +519,66 @@ function areaOfText(text) {
   return { area: issues.length === 0 && found.length === 1 ? found[0] : null, issues };
 }
 
+/** Запись поля tests (области или подобласти): go:TestRouter* или tests/router/<спек>.spec.ts. */
+function isTestEntry(t) {
+  return typeof t === 'string' && ((t.startsWith('go:') && TEST_NAME.test(t.slice(3))) || SPEC_PATH.test(t));
+}
+
+/** Глоб карты безопасен: символы пути, без «..» и «***». */
+function isSafeGlob(g) {
+  return typeof g === 'string' && SAFE_GLOB.test(g) && !g.split('/').includes('..') && !g.includes('***');
+}
+
+/**
+ * Подобласти общей области (RTR-14, D-12 фазы 148.1.1): areas.<родитель>.subareas —
+ * { '<имя>': { title, paths, tests } }. Правка файла подобласти выбирает её тесты по именам из
+ * tests (прямое затрагивание: ярус full разрешён) и, если родитель shared, канарейки всех
+ * областей; тесты родителя целиком не выбираются. Строка router-area у файлов тестов остаётся
+ * родительской. Совпадение путей с путями родителя, существование тестов и полноту покрытия
+ * проверяет scripts/check-router-areas.js (ему нужен git ls-files и факты тестов).
+ */
+function validateSubareas(at, a, issues) {
+  const s = a.subareas;
+  if (!s || typeof s !== 'object' || Array.isArray(s) || Object.keys(s).length === 0) {
+    issues.push(`${at}: subareas — непустой объект «имя → подобласть»`);
+    return;
+  }
+  if ('tests' in a) issues.push(`${at}: subareas и tests вместе недопустимы — тесты перечисляют подобласти`);
+  for (const [sub, v] of Object.entries(s)) {
+    const st = `${at}: подобласть ${sub}`;
+    if (!AREA_NAME.test(sub)) issues.push(`${st}: имя не по шаблону [a-z][a-z0-9-]*`);
+    if (!v || typeof v !== 'object' || Array.isArray(v)) {
+      issues.push(`${st}: не объект`);
+      continue;
+    }
+    for (const k of Object.keys(v)) {
+      if (!['title', 'paths', 'tests'].includes(k)) issues.push(`${st}: неизвестный ключ ${JSON.stringify(k)}`);
+    }
+    if (typeof v.title !== 'string' || !v.title.trim()) issues.push(`${st}: нет title`);
+    if (!Array.isArray(v.paths) || v.paths.length === 0) issues.push(`${st}: paths — непустой список глобов`);
+    else {
+      for (const g of v.paths) if (!isSafeGlob(g)) issues.push(`${st}: недопустимый глоб ${JSON.stringify(g)}`);
+      const dup = v.paths.filter((g, i) => v.paths.indexOf(g) !== i);
+      if (dup.length > 0) issues.push(`${st}: paths — повтор ${[...new Set(dup)].join(', ')}`);
+    }
+    if (!Array.isArray(v.tests) || v.tests.length === 0) issues.push(`${st}: tests — непустой список`);
+    else {
+      for (const t of v.tests) {
+        if (!isTestEntry(t)) issues.push(`${st}: tests — запись ${JSON.stringify(t)} не go:TestRouter* и не tests/router/<спек>.spec.ts`);
+      }
+      const dup = v.tests.filter((t, i) => v.tests.indexOf(t) !== i);
+      if (dup.length > 0) issues.push(`${st}: tests — повтор ${[...new Set(dup)].join(', ')}`);
+    }
+  }
+}
+
+/** Подобласти области name, чьи глобы находят файл: [имя] (пусто — нет подобластей или совпадений). */
+function subareasOf(areas, name, file) {
+  const s = areas[name] && areas[name].subareas;
+  if (!s) return [];
+  return Object.keys(s).filter((sub) => s[sub].paths.some((g) => matchGlob(g, file)));
+}
+
 /** Проверка схемы карты областей: список нарушений (пустой — карта годна). */
 function validateAreas(data, root) {
   const issues = [];
@@ -540,18 +600,17 @@ function validateAreas(data, root) {
       continue;
     }
     for (const k of Object.keys(a)) {
-      if (!['title', 'shared', 'paths', 'canary', 'tests'].includes(k)) issues.push(`${at}: неизвестный ключ ${JSON.stringify(k)}`);
+      if (!['title', 'shared', 'paths', 'canary', 'tests', 'subareas'].includes(k)) {
+        issues.push(`${at}: неизвестный ключ ${JSON.stringify(k)}`);
+      }
     }
     if (typeof a.title !== 'string' || !a.title.trim()) issues.push(`${at}: нет title`);
     if (typeof a.shared !== 'boolean') issues.push(`${at}: shared — true или false`);
     if (!Array.isArray(a.paths) || a.paths.length === 0) issues.push(`${at}: paths — непустой список глобов`);
     else {
-      for (const g of a.paths) {
-        if (typeof g !== 'string' || !SAFE_GLOB.test(g) || g.split('/').includes('..') || g.includes('***')) {
-          issues.push(`${at}: недопустимый глоб ${JSON.stringify(g)}`);
-        }
-      }
+      for (const g of a.paths) if (!isSafeGlob(g)) issues.push(`${at}: недопустимый глоб ${JSON.stringify(g)}`);
     }
+    if ('subareas' in a) validateSubareas(at, a, issues);
     const c = a.canary;
     if (!c || typeof c !== 'object' || Array.isArray(c)) issues.push(`${at}: нет canary { go, spec, reason? }`);
     else {
@@ -573,8 +632,7 @@ function validateAreas(data, root) {
       if (!Array.isArray(a.tests) || a.tests.length === 0) issues.push(`${at}: tests — непустой список`);
       else {
         for (const t of a.tests) {
-          const ok = typeof t === 'string' && ((t.startsWith('go:') && TEST_NAME.test(t.slice(3))) || SPEC_PATH.test(t));
-          if (!ok) issues.push(`${at}: tests — запись ${JSON.stringify(t)} не go:TestRouter* и не tests/router/<спек>.spec.ts`);
+          if (!isTestEntry(t)) issues.push(`${at}: tests — запись ${JSON.stringify(t)} не go:TestRouter* и не tests/router/<спек>.spec.ts`);
         }
       }
     }
@@ -619,6 +677,171 @@ function loadAreas(root) {
   const issues = validateAreas(data, root);
   if (issues.length > 0) throw new Error(`${AREAS_FILE}: ${issues.join('; ')}`);
   return { version: data.version, areas: data.areas, harness: data.harness || null };
+}
+
+/**
+ * Карта областей из текста (версия из git, RTR-14, D-21 фазы 148.1.1): разобранный объект карты
+ * после того же validateAreas, что у стража и loadAreas. root — корень для проверки путей
+ * harness.session; null — без проверки файлов (ревизия базы или head не в рабочем дереве).
+ * Ошибка JSON или схемы — исключение с перечнем нарушений.
+ */
+function areasFromText(text, root) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    throw new Error(`не JSON (${String(e.message ?? e).split('\n', 1)[0]})`);
+  }
+  const issues = validateAreas(data, root);
+  if (issues.length > 0) throw new Error(issues.join('; '));
+  return data;
+}
+
+/** Значение в каноническом виде: ключи объектов по алфавиту, порядок массивов значим. */
+function canonJson(v) {
+  if (Array.isArray(v)) return `[${v.map(canonJson).join(',')}]`;
+  if (v && typeof v === 'object') {
+    return `{${Object.keys(v)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonJson(v[k])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(v === undefined ? null : v);
+}
+
+const listMinus = (a, b) => [...new Set(a.filter((x) => !b.includes(x)))];
+const keysOf = (objs) => [...new Set(objs.flatMap((o) => (o && typeof o === 'object' ? Object.keys(o) : [])))].sort();
+
+/**
+ * Смысловое сравнение двух проверенных карт областей (база и head; RTR-14, D-21…D-23 фазы
+ * 148.1.1). Сравнение по идентификаторам областей и подобластей, а не по тексту:
+ *   format    изменения формата: version, набор ключей верхнего уровня, набор ключей,
+ *             используемых областями, подобластями или канарейками (строки «что изменилось»)
+ *   shared    [{ area, from, to }] — признак shared области, которая есть в обеих картах
+ *   paths     [{ pattern, from: [области], to: [области] }] — шаблон убран из областей from и
+ *             добавлен в области to (обе карты); перенос — оба списка непусты
+ *   tests     [{ area, added, removed }] — записи поля tests области (обе карты)
+ *   subareas  [{ area, sub, kind: added|removed|changed, paths: { added, removed },
+ *             tests: { added, removed }, baseTests, headTests }]
+ *   canary    [{ area, kind: go|spec, from, to }] — тест канарейки (null — нет); у добавленной
+ *             области from — null, у удалённой to — null
+ *   added, removed  области только в head или только в базе; переименование идентификатора —
+ *             удаление плюс добавление (однозначного соответствия нет)
+ *   cosmetic  только отображаемое: title, пояснение канарейки (reason) при том же тесте, порядок
+ *             ключей и записей — выбор не расширяет
+ *   harness   изменён блок harness (обвязка стенда)
+ */
+function diffAreaMaps(base, head) {
+  const out = {
+    format: [],
+    shared: [],
+    paths: [],
+    tests: [],
+    subareas: [],
+    canary: [],
+    added: [],
+    removed: [],
+    cosmetic: [],
+    harness: false
+  };
+  const ba = base.areas;
+  const ha = head.areas;
+  if (base.version !== head.version) out.format.push(`version ${base.version} → ${head.version}`);
+  const setChange = (what, b, h) => {
+    if (b.join() === h.join()) return;
+    const plus = listMinus(h, b).map((k) => `+${k}`);
+    const minus = listMinus(b, h).map((k) => `−${k}`);
+    out.format.push(`${what}: ${[...plus, ...minus].join(' ')}`);
+  };
+  setChange('ключи верхнего уровня', Object.keys(base).sort(), Object.keys(head).sort());
+  setChange('ключи областей', keysOf(Object.values(ba)), keysOf(Object.values(ha)));
+  const subObjs = (areas) => Object.values(areas).flatMap((a) => Object.values(a.subareas || {}));
+  const bSub = subObjs(ba);
+  const hSub = subObjs(ha);
+  if (bSub.length > 0 && hSub.length > 0) setChange('ключи подобластей', keysOf(bSub), keysOf(hSub));
+  setChange('ключи канареек', keysOf(Object.values(ba).map((a) => a.canary)), keysOf(Object.values(ha).map((a) => a.canary)));
+
+  const bNames = Object.keys(ba);
+  const hNames = Object.keys(ha);
+  const both = bNames.filter((n) => n in ha).sort();
+  out.added = hNames.filter((n) => !(n in ba)).sort();
+  out.removed = bNames.filter((n) => !(n in ha)).sort();
+  if (out.added.length === 0 && out.removed.length === 0 && bNames.join() !== hNames.join()) {
+    out.cosmetic.push('порядок областей');
+  }
+
+  const moves = new Map();
+  const move = (pattern) => {
+    if (!moves.has(pattern)) moves.set(pattern, { pattern, from: [], to: [] });
+    return moves.get(pattern);
+  };
+  const canaryOf = (a) => ({ go: (a && a.canary && a.canary.go) || null, spec: (a && a.canary && a.canary.spec) || null });
+  for (const name of both) {
+    const b = ba[name];
+    const h = ha[name];
+    for (const p of listMinus(b.paths, h.paths)) move(p).from.push(name);
+    for (const p of listMinus(h.paths, b.paths)) move(p).to.push(name);
+    if (listMinus(b.paths, h.paths).length === 0 && listMinus(h.paths, b.paths).length === 0 && b.paths.join() !== h.paths.join()) {
+      out.cosmetic.push(`область ${name}: порядок paths`);
+    }
+    const bt = b.tests || [];
+    const ht = h.tests || [];
+    const tAdd = listMinus(ht, bt);
+    const tRem = listMinus(bt, ht);
+    if (tAdd.length > 0 || tRem.length > 0) out.tests.push({ area: name, added: tAdd, removed: tRem });
+    else if (bt.join() !== ht.join()) out.cosmetic.push(`область ${name}: порядок tests`);
+    if (b.shared !== h.shared) out.shared.push({ area: name, from: b.shared, to: h.shared });
+    if (b.title !== h.title) out.cosmetic.push(`область ${name}: title`);
+    const bc = canaryOf(b);
+    const hc = canaryOf(h);
+    for (const kind of ['go', 'spec']) {
+      if (bc[kind] !== hc[kind]) out.canary.push({ area: name, kind, from: bc[kind], to: hc[kind] });
+    }
+    if (bc.go === hc.go && bc.spec === hc.spec && (b.canary.reason || '') !== (h.canary.reason || '')) {
+      out.cosmetic.push(`область ${name}: пояснение канарейки`);
+    }
+    if (canonJson(b) === canonJson(h) && JSON.stringify(b) !== JSON.stringify(h)) {
+      out.cosmetic.push(`область ${name}: порядок ключей`);
+    }
+    const bs = b.subareas || {};
+    const hs = h.subareas || {};
+    for (const sub of [...new Set([...Object.keys(bs), ...Object.keys(hs)])].sort()) {
+      const sb = bs[sub];
+      const sh = hs[sub];
+      if (!sh) {
+        out.subareas.push({ area: name, sub, kind: 'removed', paths: { added: [], removed: [...sb.paths] }, tests: { added: [], removed: [...sb.tests] }, baseTests: sb.tests, headTests: [] });
+        continue;
+      }
+      if (!sb) {
+        out.subareas.push({ area: name, sub, kind: 'added', paths: { added: [...sh.paths], removed: [] }, tests: { added: [...sh.tests], removed: [] }, baseTests: [], headTests: sh.tests });
+        continue;
+      }
+      const paths = { added: listMinus(sh.paths, sb.paths), removed: listMinus(sb.paths, sh.paths) };
+      const tests = { added: listMinus(sh.tests, sb.tests), removed: listMinus(sb.tests, sh.tests) };
+      if (paths.added.length + paths.removed.length + tests.added.length + tests.removed.length > 0) {
+        out.subareas.push({ area: name, sub, kind: 'changed', paths, tests, baseTests: sb.tests, headTests: sh.tests });
+      } else if (canonJson(sb.paths) !== canonJson(sh.paths) || canonJson(sb.tests) !== canonJson(sh.tests)) {
+        out.cosmetic.push(`подобласть ${name}/${sub}: порядок записей`);
+      }
+      if (sb.title !== sh.title) out.cosmetic.push(`подобласть ${name}/${sub}: title`);
+    }
+    if (Object.keys(bs).length > 0 && Object.keys(hs).length > 0 && Object.keys(bs).join() !== Object.keys(hs).join()) {
+      if (listMinus(Object.keys(bs), Object.keys(hs)).length === 0 && listMinus(Object.keys(hs), Object.keys(bs)).length === 0) {
+        out.cosmetic.push(`область ${name}: порядок подобластей`);
+      }
+    }
+  }
+  for (const name of out.added) {
+    const c = canaryOf(ha[name]);
+    for (const kind of ['go', 'spec']) if (c[kind]) out.canary.push({ area: name, kind, from: null, to: c[kind] });
+  }
+  for (const name of out.removed) {
+    const c = canaryOf(ba[name]);
+    for (const kind of ['go', 'spec']) if (c[kind]) out.canary.push({ area: name, kind, from: c[kind], to: null });
+  }
+  out.paths = [...moves.values()].sort((x, y) => (x.pattern < y.pattern ? -1 : x.pattern > y.pattern ? 1 : 0));
+  out.harness = canonJson(base.harness ?? null) !== canonJson(head.harness ?? null);
+  return out;
 }
 
 /** Аргументы вызова от открывающей скобки (в тексте без комментариев): [{text, start}] или null. */
@@ -944,6 +1167,8 @@ function median(xs) {
 module.exports = {
   analyzeGo,
   contractReaders,
+  declarations,
+  lex,
   goMarks,
   goViolations,
   specFacts,
@@ -953,7 +1178,10 @@ module.exports = {
   trackedFiles,
   AREAS_FILE,
   loadAreas,
+  areasFromText,
+  diffAreaMaps,
   validateAreas,
+  subareasOf,
   matchGlob,
   areaOfText,
   goTestFacts,

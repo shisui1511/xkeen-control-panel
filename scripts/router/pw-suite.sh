@@ -69,7 +69,32 @@
 #                    для mipsle и mips — 2)
 #   XCP_T_<id>_PAGE_WORKERS  воркеров части read (по умолчанию 3)
 #
-# Код выхода: 0 — нет FAIL и XPASS, 3 — цель недоступна, иначе 1.
+# Сверка версии стенда на границе спека (D-13, RTR-15). Каждому запуску Playwright передаются
+# XCP_PW_VERSION_GUARD=<id цели> (подключает репортёр frontend/tests/router/lib/version-reporter.ts),
+# XCP_PW_GUARD_SCRIPT=<абсолютный путь scripts/router/version-guard.sh>,
+# XCP_PW_OK_SPECS=<каталог запуска>/version-ok-specs.txt (спеки, прошедшие границу, по строке
+# `tests/router/<спек>`) и XCP_PW_STOPPED=<каталог запуска>/version-stopped (признак остановки:
+# граница, на которой сменилась версия; пишется до сигнала) и
+# XCP_PW_GUARD_ERRORS=<каталог запуска>/version-guard-errors (границы, где сама сверка не
+# выполнилась: код version-guard.sh не 0 и 4, тайм-аут или сигнал; строка `<граница><TAB><код>`;
+# код 3 — нет связи: finish_run повторяет сверку границы, четвёртый исход — FAIL version-guard-error).
+# Файлы сбрасываются при выборе каталога запуска; каждая строка version-guard-errors — FAIL
+# version-guard-error в finish_run (как в go-suite.sh; это не смена версии: класс new), сверка не
+# отключается молча. После каждого спека репортёр зовёт version-guard.sh; при смене версии он
+# пишет version-stopped и шлёт процессу Playwright SIGINT (мягкая остановка). Тогда этап
+# не начинает следующие запуски (часть state после read, pw-2), дописывает их спеки строками
+# `notrun<TAB><ядро><TAB>Playwright: tests/router/<спек>` в <отчёт>/<id>/version-stop.tsv,
+# собирает хвост xcp.log и выходит с кодом 4. Разбор остановленного запуска (finish_run):
+# прерванные остановкой тесты — не FAIL, а строки `notrun … (прервано остановкой, тестов N)`;
+# FAIL и XPASS спеков, не прошедших границу, — ещё и строки `suspect<TAB><ядро><TAB>pw:<проверка>`
+# (класс stand); падения спеков из version-ok-specs.txt — обычные. Служебные файлы запуска:
+# files.tsv (проверка → спек, pw-parse.js --files-out) и interrupted.tsv (--interrupted-out).
+# Потребители кода 4 и version-stop.tsv — run.sh
+# и branch-report.mjs (остановка цикла ветвей, раздел остановки), session.mjs (остановка
+# сессии) и tree-step.sh (шаг bisect при коде 4 — SKIP, а не вердикт коммита); формы строк — контракт сверки версии (rt_version_guard в scripts/router/lib.sh).
+#
+# Код выхода: 0 — нет FAIL и XPASS, 3 — цель недоступна, 4 — смена версии стенда, этап
+# остановлен, иначе 1.
 
 set -eu
 
@@ -181,6 +206,10 @@ use_dir() {
   LOG="$PW_DIR/run.log"
   OUT="$PW_DIR/artifacts"
   rm -f "$STATE" "$STATE.restore.json" "$PW_DIR/report.json" "$PW_DIR/report-pages.json"
+  # файлы сверки версии прошлого запуска: признак остановки удаляется (его наличие — сигнал),
+  # список спеков, прошедших границу, обнуляется
+  rm -f "$PW_DIR/version-stopped" "$PW_DIR/version-guard-errors"
+  : >"$PW_DIR/version-ok-specs.txt"
   case " $USED " in
     *" $1 "*) ;;
     *) USED="$USED $1" ;;
@@ -260,6 +289,11 @@ run_pw() {
       XCP_PW_OUT=$OUT \
       XCP_PW_JSON=$_json \
       XCP_PW_WORKERS=$_workers \
+      XCP_PW_VERSION_GUARD=$ID \
+      XCP_PW_GUARD_SCRIPT="$SCRIPT_DIR/version-guard.sh" \
+      XCP_PW_OK_SPECS="$PW_DIR/version-ok-specs.txt" \
+      XCP_PW_STOPPED="$PW_DIR/version-stopped" \
+      XCP_PW_GUARD_ERRORS="$PW_DIR/version-guard-errors" \
       "$PWBIN" test -c playwright.router.config.ts "$@"
   ) >>"$LOG" 2>&1 || _pwrc=$?
   # временные каталоги воркеров Playwright — только сироты после выхода процесса
@@ -333,12 +367,59 @@ BAD=0
 # finish_run <json> <код запуска>: разбор JSON-отчёта запуска в PW_DIR/parsed.tsv, строки
 # результатов и проверки запуска. RUN_BAD — FAIL и XPASS запуска, QFAILS — упавшие тесты в
 # карантине (в BAD не входят): ненулевой код, объяснённый ими, строки FAIL pw:run не даёт (D-17).
+#
+# Сверка версии (D-13): разбор пишет files.tsv (проверка → спек, по строке на строку теста
+# parsed.tsv, в том же порядке). Если репортёр остановил запуск (есть version-stopped), разбор
+# ещё и выносит прерванные и не начатые тесты в interrupted.tsv (в результаты они не идут), а
+# после разбора в <отчёт>/<id>/version-stop.tsv дописываются: `suspect<TAB><ядро><TAB>pw:<проверка>`
+# — на каждую строку FAIL и XPASS, чей спек не прошёл границу (нет в version-ok-specs.txt:
+# падение могло быть на сменённой версии, класс stand); `notrun<TAB><ядро><TAB>Playwright:
+# <спек> (прервано остановкой, тестов N)` — на каждый спек из interrupted.tsv. Падения спеков,
+# прошедших границу, остаются обычными. Ненулевой код Playwright, объяснённый остановкой,
+# строки FAIL pw:run не даёт.
 finish_run() {
   _fj=$1
   _frc=$2
+  # граница, где связь пропала на сверке (код 3 в version-guard-errors), перепроверяется: 0 — версия
+  # совпала; 4 — версия сменилась (признак остановки, дальше как при остановке репортёром); связь
+  # снова не вернулась — строка остаётся и становится FAIL version-guard-error ниже
+  # (остановка уже есть — такие границы покрыты ею и строк не дают)
+  if [ -s "$PW_DIR/version-guard-errors" ]; then
+    _gtmp="$PW_DIR/version-guard-errors.tmp"
+    : >"$_gtmp"
+    while IFS="$TAB" read -r _gb _gc || [ -n "$_gb" ]; do
+      [ -n "$_gb" ] || continue
+      if [ "$_gc" = 3 ]; then
+        [ ! -f "$PW_DIR/version-stopped" ] || continue
+        _grc=0
+        rt_version_guard "$ID" "$_gb" || _grc=$?
+        case "$_grc" in
+          0) continue ;;
+          4)
+            printf '%s\n' "$_gb" >"$PW_DIR/version-stopped"
+            continue
+            ;;
+        esac
+        _gc=$_grc
+      fi
+      printf '%s\t%s\n' "$_gb" "$_gc" >>"$_gtmp"
+    done <"$PW_DIR/version-guard-errors"
+    mv "$_gtmp" "$PW_DIR/version-guard-errors"
+  fi
+  _stopped=0
+  [ ! -f "$PW_DIR/version-stopped" ] || _stopped=1
   rt_redact <"$LOG" >"$LOG.red" && mv "$LOG.red" "$LOG"
   : >"$PW_DIR/parsed.tsv"
-  [ ! -f "$_fj" ] || node "$SCRIPT_DIR/pw-parse.js" "$_fj" >>"$PW_DIR/parsed.tsv" || true
+  : >"$PW_DIR/files.tsv"
+  : >"$PW_DIR/interrupted.tsv"
+  if [ -f "$_fj" ]; then
+    if [ "$_stopped" = 1 ]; then
+      node "$SCRIPT_DIR/pw-parse.js" "$_fj" --files-out "$PW_DIR/files.tsv" \
+        --interrupted-out "$PW_DIR/interrupted.tsv" >>"$PW_DIR/parsed.tsv" || true
+    else
+      node "$SCRIPT_DIR/pw-parse.js" "$_fj" --files-out "$PW_DIR/files.tsv" >>"$PW_DIR/parsed.tsv" || true
+    fi
+  fi
   _found=0
   RUN_BAD=0
   QFAILS=0
@@ -355,22 +436,75 @@ finish_run() {
   if [ "$_found" = 0 ] && [ "$_frc" = 0 ] && [ -z "$SWITCH" ] && { [ "${RT_PW_CORE_ONLY:-}" = 1 ] || [ -n "${RT_PW_GREP_INVERT:-}" ]; }; then
     # отбор @core или отсев --grep-invert не оставил тестов: строк результата нет и FAIL pw:run тоже
     :
+  elif [ "$_found" = 0 ] && [ "$_stopped" = 1 ] && [ -s "$PW_DIR/interrupted.tsv" ]; then
+    # остановка по смене версии прервала все тесты запуска: они — строки notrun ниже
+    :
   elif [ "$_found" = 0 ]; then
     # отчёта нет или он пуст: причина — в журнале запуска (панель не отвечает и т. п.)
     reason=$(grep -m 1 -E 'панель не отвечает|вход в панель не удался|не заданы переменные' "$LOG" || true)
     [ -n "$reason" ] || reason="Playwright завершился с кодом $_frc без результатов: $(tail -n 3 "$LOG" | tr '\n' ' ')"
     rt_result "$ID" FAIL "pw:run" "$reason"
     RUN_BAD=$((RUN_BAD + 1))
-  elif [ "$_frc" != 0 ] && [ "$RUN_BAD" = 0 ] && [ "$QFAILS" = 0 ]; then
+  elif [ "$_frc" != 0 ] && [ "$RUN_BAD" = 0 ] && [ "$QFAILS" = 0 ] && [ "$_stopped" = 0 ]; then
     rt_result "$ID" FAIL "pw:run" "Playwright завершился с кодом $_frc без упавших тестов"
     RUN_BAD=$((RUN_BAD + 1))
   fi
+  # сама сверка версии не выполнилась (код version-guard.sh не 0, 3 и 4): открытый отказ запрещён
+  if [ -s "$PW_DIR/version-guard-errors" ]; then
+    while IFS="$TAB" read -r _gb _gc || [ -n "$_gb" ]; do
+      [ -n "$_gb" ] || continue
+      rt_result "$ID" FAIL version-guard-error "сверка версии стенда не выполнена (код ${_gc:--}, граница $_gb)"
+      RUN_BAD=$((RUN_BAD + 1))
+    done <"$PW_DIR/version-guard-errors"
+  fi
   BAD=$((BAD + RUN_BAD))
+
+  [ "$_stopped" = 1 ] || return 0
+  # падения спеков, не прошедших границу до остановки: строки parsed.tsv и files.tsv идут в одном
+  # порядке (global-setup — в конце parsed.tsv, без спека)
+  awk -F "$TAB" -v core="$CORE_DIR" '
+    FILENAME == ARGV[1] { ok[$0] = 1; next }
+    FILENAME == ARGV[2] { spec[FNR] = $2; next }
+    ($1 == "FAIL" || $1 == "XPASS") && !((FNR in spec) && (spec[FNR] in ok)) {
+      printf "suspect\t%s\tpw:%s\n", core, $2
+    }
+  ' "$PW_DIR/version-ok-specs.txt" "$PW_DIR/files.tsv" "$PW_DIR/parsed.tsv" >>"$VSTOP"
+  # прерванные и не начатые тесты — по строке notrun на спек, в порядке появления
+  awk -F "$TAB" -v core="$CORE_DIR" '
+    !($1 in n) { order[++k] = $1 }
+    { n[$1]++ }
+    END {
+      for (i = 1; i <= k; i++)
+        printf "notrun\t%s\tPlaywright: %s (прервано остановкой, тестов %d)\n", core, order[i], n[order[i]]
+    }
+  ' "$PW_DIR/interrupted.tsv" >>"$VSTOP"
+}
+
+# --- артефакты падения (D-16): хвост xcp.log ---------------------------------------
+pull_tail() {
+  TAIL="$RT_REPORT/$ID/$CORE_DIR$SUB/xcp-tail.log"
+  rt_ssh "$ID" "tail -n 200 /opt/var/log/xcp.log" 2>/dev/null | rt_redact >"$TAIL" || true
+  [ -s "$TAIL" ] || echo "хвост xcp.log недоступен" >"$TAIL"
+}
+
+# stop_check <спеки следующих запусков...>: репортёр сверки версии (version-reporter.ts) записал
+# признак остановки — версия стенда сменилась после спека этого запуска (D-13). Следующие запуски
+# не начинаются: их спеки — строки notrun в version-stop.tsv; хвост xcp.log, как при падении;
+# выход 4. Строки stop и FAIL version-guard уже записал version-guard.sh.
+stop_check() {
+  [ -f "$PW_DIR/version-stopped" ] || return 0
+  for _s in "$@"; do
+    printf 'notrun\t%s\tPlaywright: tests/router/%s\n' "$CORE_DIR" "${_s#tests/router/}" >>"$VSTOP"
+  done
+  pull_tail
+  exit 4
 }
 
 # Запуски по порядку: часть read (pw-read, report-pages.json), затем часть state — первый
 # запуск в pw, второй (RT_SPECS_FIRST) в pw-2; --switch — pw-switch. Каждый запуск со своим
-# каталогом, state.json и JSON-отчётом.
+# каталогом, state.json и JSON-отчётом. После каждого запуска — проверка остановки по смене
+# версии (stop_check): следующие запуски при ней не идут.
+VSTOP="$RT_REPORT/$ID/version-stop.tsv"
 RUNS=0
 if [ -n "$READ_SPECS" ]; then
   use_dir pw-read
@@ -380,6 +514,8 @@ if [ -n "$READ_SPECS" ]; then
   run_pw "$PW_DIR/report-pages.json" "$PAGE_WORKERS" $READ_SPECS || rc=$?
   finish_run "$PW_DIR/report-pages.json" "$rc"
   RUNS=$((RUNS + 1))
+  # shellcheck disable=SC2086
+  stop_check $FIRST_SPECS $SECOND_SPECS
 fi
 if [ -n "$FIRST_SPECS" ]; then
   if [ -n "$SWITCH" ]; then use_dir pw-switch; else use_dir pw; fi
@@ -389,6 +525,8 @@ if [ -n "$FIRST_SPECS" ]; then
   run_pw "$PW_DIR/report.json" 1 $FIRST_SPECS || rc=$?
   finish_run "$PW_DIR/report.json" "$rc"
   RUNS=$((RUNS + 1))
+  # shellcheck disable=SC2086
+  stop_check $SECOND_SPECS
 fi
 if [ -n "$SECOND_SPECS" ]; then
   use_dir pw-2
@@ -398,6 +536,7 @@ if [ -n "$SECOND_SPECS" ]; then
   run_pw "$PW_DIR/report.json" 1 $SECOND_SPECS || rc=$?
   finish_run "$PW_DIR/report.json" "$rc"
   RUNS=$((RUNS + 1))
+  stop_check
 fi
 if [ "$RUNS" = 0 ]; then
   # без --part и без спеков: запуска не было — FAIL pw:run, журнал в pw/
@@ -406,12 +545,7 @@ if [ "$RUNS" = 0 ]; then
   finish_run "$PW_DIR/report.json" 0
 fi
 
-# --- артефакты падения (D-16): хвост xcp.log ---------------------------------------
-if [ "$BAD" != 0 ]; then
-  TAIL="$RT_REPORT/$ID/$CORE_DIR$SUB/xcp-tail.log"
-  rt_ssh "$ID" "tail -n 200 /opt/var/log/xcp.log" 2>/dev/null | rt_redact >"$TAIL" || true
-  [ -s "$TAIL" ] || echo "хвост xcp.log недоступен" >"$TAIL"
-fi
+[ "$BAD" = 0 ] || pull_tail
 
 [ "$BAD" = 0 ] || exit 1
 exit 0
