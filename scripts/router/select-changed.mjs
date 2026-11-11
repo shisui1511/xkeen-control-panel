@@ -19,7 +19,13 @@
 //               или `// e2e-pages: …`). Обычный общий компонент добавляет pages с маршрутами
 //               потребителей и читающую канарейку оболочки (RTR-13, D-09). Область карты у
 //               файла frontend/src — только отметка RT_AREAS и объяснения: тесты области
-//               целиком не выбираются.
+//               целиком не выбираются. Раньше графа — отдельные основания со своими
+//               объяснениями: локали (D-07) — по изменённым ключам обеих ревизий (литералы
+//               t('…') и шаблоны `…${…}…`, комментарии не считаются) → файлы-потребители →
+//               маршруты, ключ без потребителей выбор не расширяет (статика i18n, смоук);
+//               стили, токены и тема (D-08) — pages без сужения и читающая канарейка оболочки;
+//               каркас (D-09: App, main, Dashboard, tabFromHash, PageHeader) — pages без сужения
+//               и одна канарейка «правка → Применить».
 //               `// e2e-pages: *` — спек обходит все страницы: при выборе только по маршрутам он
 //               сужается до них через --grep; выбранный по иной причине (область, зависимости,
 //               правка самого спека) идёт без сужения. core-switch.spec.ts не выбирается: его
@@ -185,6 +191,23 @@ const IGNORED = [
 // проверяется при каждом выборе. Не найден или не read — все спеки (расширение).
 const PAGES_SPEC = 'tests/router/pages.spec.ts';
 const SHELL_READ_CANARY = 'tests/router/config-visual.spec.ts';
+// Канарейка каркаса (D-09) — один существующий спек с путём «правка → Применить»: в тексте есть
+// вызов confirmApply(. Не найден — все спеки.
+const SHELL_APPLY_CANARY = 'tests/router/config-presets.spec.ts';
+
+// Стили, токены и тема (D-08): pages со всеми маршрутами и читающая канарейка оболочки.
+const FRONT_STYLE = [/^src\/styles\//, /^src\/assets\//, /\.css$/, /^src\/lib\/theme\.ts$/];
+// Каркас (D-09): точка входа, корневой компонент, маршрутизация и заголовок страниц — pages со
+// всеми маршрутами и канарейка «правка → Применить». Dashboard.svelte ещё и страница dashboard.
+const FRONT_FRAME = [
+  /^src\/App\.svelte$/,
+  /^src\/main\.ts$/,
+  /^src\/Dashboard\.svelte$/,
+  /^src\/lib\/tabFromHash\.ts$/,
+  /^src\/PageHeader\.svelte$/
+];
+// Локали (D-07): выбор по изменённым ключам.
+const FRONT_LOCALE = /^src\/locales\/[\w-]+\.json$/;
 
 // Файлы frontend/ вне src/, меняющие сборку панели: все роутерные спеки (не Go).
 const FRONTEND_ALL = [
@@ -488,6 +511,178 @@ async function frontGraph() {
     return cache.get(specAbs);
   };
   return { mod, models, routes, srcFiles, specSources };
+}
+
+// --- локали: ключи и потребители (D-07) ------------------------------------------------------
+
+/** Ключи вложенного JSON локали: Map 'раздел.ключ' → JSON значения (лист или массив). */
+function flattenLocale(obj, prefix = '', out = new Map()) {
+  for (const [k, v] of Object.entries(obj)) {
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) flattenLocale(v, key, out);
+    else out.set(key, JSON.stringify(v));
+  }
+  return out;
+}
+
+/**
+ * Изменённые ключи файла локали между базой и head: [{ key, status }], status — изменён,
+ * добавлен, удалён, сменил тип, переименован (старое имя → новое: оба ключа в списке).
+ * Нет базы сравнения или файл не разобран — исключение (вызывающий расширяет выбор).
+ */
+function localeKeyChanges(file) {
+  if (!ctx.from) throw new Error('нет базы сравнения ключей');
+  const parse = (text, side) => {
+    if (text === null) return new Map();
+    try {
+      const v = JSON.parse(text);
+      if (v === null || typeof v !== 'object' || Array.isArray(v)) throw new Error('не объект');
+      return flattenLocale(v);
+    } catch (e) {
+      throw new Error(`${side}: JSON не разобран (${String(e.message ?? e).split('\n', 1)[0]})`);
+    }
+  };
+  const a = parse(gitShow(ctx.from, file), 'база');
+  const b = parse(headText(file), 'head');
+  const kindOf = (s) => (s.startsWith('{') ? 'object' : s.startsWith('[') ? 'array' : typeof JSON.parse(s));
+  const out = [];
+  const removed = [];
+  const added = [];
+  for (const k of new Set([...a.keys(), ...b.keys()])) {
+    const va = a.get(k);
+    const vb = b.get(k);
+    if (va === vb) continue;
+    if (va === undefined) added.push(k);
+    else if (vb === undefined) removed.push(k);
+    else out.push({ key: k, status: kindOf(va) === kindOf(vb) ? 'изменён' : 'сменил тип' });
+  }
+  for (const k of removed) {
+    const to = added.find((n) => b.get(n) === a.get(k));
+    out.push({ key: k, status: to ? `переименован в ${to}` : 'удалён' });
+  }
+  for (const k of added) {
+    const from = removed.find((o) => a.get(o) === b.get(k));
+    out.push({ key: k, status: from ? `переименован из ${from}` : 'добавлен' });
+  }
+  return out.sort((x, y) => (x.key < y.key ? -1 : x.key > y.key ? 1 : 0));
+}
+
+/** Текст без комментариев JS/CSS/разметки: использование ключа в комментарии не считается. */
+function stripComments(text) {
+  return text
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:\\'"`\w])\/\/[^\n]*/g, '$1');
+}
+
+/**
+ * Использования ключей в файле: точные строковые литералы вида 'раздел.ключ' (в t('…'), $t("…")
+ * и переданные как значение) и шаблоны `…${…}…`: внутри t(…) — любой шаблон, вне — только со
+ * статическим началом, содержащим точку. Шаблон проверяется как регулярное выражение по ключу
+ * (`${…}` — любая непустая часть): совпадающий статический префикс или суффикс выбирает файл,
+ * шаблон без статической части (`${key}`) — любой ключ.
+ */
+function keyUsages(text) {
+  const code = stripComments(text);
+  const literals = new Set();
+  for (const m of code.matchAll(/(['"`])([A-Za-z_][\w-]*(?:\.[\w-]+)+)\1/g)) literals.add(m[2]);
+  const patterns = [];
+  for (const m of code.matchAll(/`([^`]*\$\{[^`]*)`/g)) {
+    const inT = /(?:^|[^\w$.])\$?t\(\s*$/.test(code.slice(Math.max(0, m.index - 12), m.index));
+    const parts = m[1].split(/\$\{[^}]*\}/);
+    if (!inT && !parts[0].includes('.')) continue;
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    patterns.push({ src: m[1], re: new RegExp(`^${parts.map(esc).join('.+')}$`) });
+  }
+  return { literals, patterns };
+}
+
+/**
+ * Выбор по изменённым ключам локалей (D-07): ключ → файлы, где он используется (в базе для
+ * прежнего имени, в head для нового) → маршруты по графу той же ревизии. Потребитель в оболочке —
+ * pages без сужения и читающая канарейка. Спек, читающий файл локали и называющий ключ, —
+ * напрямую. Ключ без потребителей выбор не расширяет: его ловит статика i18n, идёт базовый смоук.
+ * Ошибка сравнения ключей — все спеки. Возвращает { reasons, all, routes, specs, shell }.
+ */
+function localeSelect(graph, localeFiles, specsAll) {
+  const out = { reasons: [], all: false, routes: new Set(), specs: new Set(), shell: false };
+  const keys = new Map(); // ключ → { statuses: Set, files: Set }
+  for (const rel of localeFiles) {
+    const file = `frontend/${rel}`;
+    let changes;
+    try {
+      changes = localeKeyChanges(file);
+    } catch (e) {
+      out.all = true;
+      out.reasons.push(`${file}: ключи не сравнить (${e.message}) — все роутерные спеки`);
+      continue;
+    }
+    if (changes.length === 0) out.reasons.push(`${file}: ключи и значения не изменились — проверок не добавляет`);
+    for (const c of changes) {
+      if (!keys.has(c.key)) keys.set(c.key, { statuses: new Set(), files: new Set() });
+      keys.get(c.key).statuses.add(c.status);
+      keys.get(c.key).files.add(path.posix.basename(rel));
+    }
+  }
+  if (keys.size === 0) return out;
+  // Индекс использований по ревизиям: файлы графа (без стилей), литералы и шаблоны
+  const index = graph.models.map((m) => {
+    const rows = [];
+    for (const f of m.model.graph.keys()) {
+      if (/\.css$/.test(f)) continue;
+      const text = m.model.reader.read(f);
+      if (text !== null) rows.push({ file: f, ...keyUsages(text) });
+    }
+    return { side: m.side, model: m.model, rows };
+  });
+  const localeAbs = new Set(localeFiles.map((rel) => path.join(ROOT, 'frontend', rel)));
+  const readers = specsAll.filter((s) => {
+    const src = graph.specSources(path.join(ROOT, 'frontend', s));
+    return [...localeAbs].some((a) => src.has(a));
+  });
+  const readerUsages = new Map(readers.map((s) => [s, keyUsages(readFileSync(path.join(ROOT, 'frontend', s), 'utf8'))]));
+  for (const [key, info] of [...keys].sort((x, y) => (x[0] < y[0] ? -1 : 1))) {
+    const where = new Map(); // файл → { sides: Set, routes: Set, shell: bool }
+    for (const ix of index) {
+      for (const row of ix.rows) {
+        if (!row.literals.has(key) && !row.patterns.some((p) => p.re.test(key))) continue;
+        const rel = path.relative(path.join(ROOT, 'frontend'), row.file);
+        if (!where.has(rel)) where.set(rel, { sides: new Set(), routes: new Set(), shell: false });
+        const w = where.get(rel);
+        w.sides.add(ix.side);
+        if (ix.model.shell.has(row.file)) w.shell = true;
+        for (const r of ix.model.routesOf(row.file)) w.routes.add(r);
+      }
+    }
+    const specHits = readers.filter((s) => {
+      const u = readerUsages.get(s);
+      return u.literals.has(key) || u.patterns.some((p) => p.re.test(key));
+    });
+    const head = `${[...info.files].sort().join(', ')}: ключ ${key} (${[...info.statuses].join(', ')})`;
+    if (where.size === 0 && specHits.length === 0) {
+      out.reasons.push(`${head}: потребителей нет ни в одной ревизии — выбор не расширяет (статика i18n, базовый смоук)`);
+      continue;
+    }
+    const parts = [];
+    for (const [rel, w] of [...where].sort((x, y) => (x[0] < y[0] ? -1 : 1))) {
+      const sides = [...w.sides].join(', ');
+      if (w.shell) {
+        out.shell = true;
+        parts.push(`${rel} (${sides}) — оболочка`);
+      } else if (w.routes.size > 0) {
+        for (const r of w.routes) out.routes.add(r);
+        parts.push(`${rel} (${sides}) → страницы ${[...w.routes].join(', ')}`);
+      } else {
+        parts.push(`${rel} (${sides}) — не импортируется приложением`);
+      }
+    }
+    for (const s of specHits) {
+      out.specs.add(s);
+      parts.push(`${s} читает ключ из файла локали`);
+    }
+    out.reasons.push(`${head}: ${parts.join('; ')}`);
+  }
+  return out;
 }
 
 // --- факты тестов и порядок -------------------------------------------------------------
@@ -936,8 +1131,53 @@ async function select(changed) {
       }
     }
     let componentHit = false;
+    const styleHit = [];
+    const frameHit = [];
+    const localeFiles = [];
+    // Стили, каркас и локали — раньше общего графа: у каждого основания своё правило и объяснение
+    for (const rel of touchedSrc) {
+      if (FRONT_LOCALE.test(rel)) localeFiles.push(rel);
+      else if (FRONT_STYLE.some((re) => re.test(rel))) styleHit.push(rel);
+      else if (FRONT_FRAME.some((re) => re.test(rel))) frameHit.push(rel);
+    }
+    for (const rel of styleHit) {
+      reasons.push(`frontend/${rel}: стили, токены или тема (D-08) — pages со всеми маршрутами и читающая канарейка оболочки`);
+    }
+    for (const rel of frameHit) {
+      if (rel === 'src/Dashboard.svelte') {
+        // переключатель маршрутов и одновременно страница dashboard: её спеки — по маршруту
+        affected.add('dashboard');
+        reasons.push(`frontend/${rel}: каркас приложения (D-09) и страница dashboard — pages со всеми маршрутами, канарейка «правка → Применить» и спеки dashboard`);
+      } else {
+        reasons.push(`frontend/${rel}: каркас приложения (D-09) — pages со всеми маршрутами и канарейка «правка → Применить»`);
+      }
+    }
+    if (styleHit.length > 0) {
+      addForced(PAGES_SPEC, 'обход всех маршрутов без сужения (стили)');
+      addShellCanary(SHELL_READ_CANARY, isReadSpec, 'читающая канарейка оболочки', 'правка стилей');
+    }
+    if (frameHit.length > 0) {
+      addForced(PAGES_SPEC, 'обход всех маршрутов без сужения (каркас)');
+      addShellCanary(SHELL_APPLY_CANARY, (t) => /\bconfirmApply\(/.test(t), 'канарейка каркаса «правка → Применить»', 'правка каркаса');
+    }
+    const special = new Set([...styleHit, ...frameHit, ...localeFiles]);
+    if (graph && localeFiles.length > 0) {
+      const lr = localeSelect(graph, localeFiles, specsAll);
+      for (const line of lr.reasons) reasons.push(line);
+      if (lr.all) pwAll = true;
+      for (const r of lr.routes) affected.add(r);
+      for (const s of lr.specs) {
+        res.specsDirect.add(s);
+        sayOnce(`${s}: читает изменённые ключи локали`);
+      }
+      if (lr.shell) {
+        addForced(PAGES_SPEC, 'обход всех маршрутов без сужения (ключ локали в оболочке)');
+        addShellCanary(SHELL_READ_CANARY, isReadSpec, 'читающая канарейка оболочки', 'ключ локали в оболочке');
+      }
+    }
     if (graph) {
       for (const rel of touchedSrc) {
+        if (special.has(rel)) continue;
         const abs = path.join(ROOT, 'frontend', rel);
         const present = graph.models.filter((m) => m.model.reader.isFile(abs));
         if (present.length === 0) {
