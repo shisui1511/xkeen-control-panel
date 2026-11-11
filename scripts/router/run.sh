@@ -24,7 +24,12 @@
 #                обвязка стенда даёт RT_HARNESS=1, зависимости — pages и канарейки (D-13).
 #                Порядок гейта: сначала тесты затронутых областей, затем по частоте падений из
 #                истории (RTR-03); гейт идёт до конца. Вывод выбора — 13 строк eval, run.sh
-#                сверяет число, порядок и форму строк. В summary.md строки «Области» и «Выбор».
+#                сверяет число, порядок и форму строк и пишет его в <отчёт>/select.env. Код 3
+#                выбора — выбор остановлен (нельзя надёжно получить): красный до деплоя, причины
+#                в select.txt, полный выбор не подставляется. Состав этапов по выбору (вторая
+#                ветвь, окно смоука по умолчанию, набор harness, самопроверка сессии) решает
+#                scripts/router/run-plan.mjs — тот же план читает повтор выбора select-replay.mjs.
+#                В summary.md строки «Области» и «Выбор».
 #                Ветви строятся гибридом (D-01…D-03): первая — ядро из SHA HEAD (cksum SHA
 #                чётный — xray, нечётный — mihomo; повтор на том же HEAD идёт под тем же
 #                ядром) со всем выбором; вторая — другое ядро и только тесты с меткой ядра
@@ -624,54 +629,72 @@ if [ "$SUITE" = session ]; then
   exit "$SRC"
 fi
 
-# --- блок harness (T2h, D-07) ---------------------------------------------------------
-# Блок harness файла areas.json (go, specs, grep, session) читает node через loadAreas
-# core-marks.cjs; run.sh сверяет вывод по числу строк, порядку имён и шаблону каждой перед eval
-# (T-148.1-28): значения уходят в окружение этапов и во вложенный run.sh. Не прошёл — код 1,
-# причина в <отчёт>/harness-load.err.
-RT_H_GO_SEQ=""
-RT_H_GO_PKGS=""
-RT_H_SPECS=""
-RT_H_GREP=""
-RT_H_SESSION=""
-# 1 — в changed к выбору добавлены этапы набора harness (RT_HARNESS=1)
-RT_H_EXTRA=0
+# --- план состава прогона (T2h, D-07, D-12) -------------------------------------------
+# Решения о составе наборов changed, harness и delta — блок harness файла areas.json (go, specs,
+# grep, session), его добавление к changed (RT_H_EXTRA), вторая ветвь гибрида (RT_B2, RT_B2_RUN),
+# окно смоука по умолчанию (RT_SMOKE_DEFAULT) и самопроверка сессии (RT_SELFCHECK) — принимает
+# один модуль run-plan.mjs; тот же план читает повтор выбора select-replay.mjs. run.sh вызывает
+# его через rt_harness_load <набор> [<select.env>] [<ядро b1>] и сверяет вывод по числу строк,
+# порядку имён и шаблону каждой перед eval (T-148.1-28, T-148.1.1-12): значения уходят в окружение
+# этапов и во вложенный run.sh. Не прошёл — код 1, значения прежние (по умолчанию), причина в
+# <отчёт>/harness-load.err; что делать дальше, решает набор (changed — полный выбор, harness —
+# красный до деплоя, delta — delta_abort). Наборы full, rerun, smoke, reboot и bisect модуль не
+# вызывают: самопроверки у них нет (RT_SELFCHECK=0).
+rt_plan_defaults() {
+  RT_H_GO_SEQ=""
+  RT_H_GO_PKGS=""
+  RT_H_SPECS=""
+  RT_H_GREP=""
+  RT_H_SESSION=""
+  # 1 — в changed к выбору добавлены этапы набора harness (RT_HARNESS=1)
+  RT_H_EXTRA=0
+  # вторая ветвь гибрида changed: ядро и признак запуска
+  RT_B2=""
+  RT_B2_RUN=0
+  # окно смоука по умолчанию (явный RT_SMOKE_WINDOW приоритетнее — решение run.sh)
+  RT_SMOKE_DEFAULT=120
+  # 1 — после ветвей идёт самопроверка сессии (harness_selfcheck)
+  RT_SELFCHECK=0
+}
+rt_plan_defaults
 # итог самопроверки сессии для summary.md: «да», «нет» или пусто (не требовалась)
 RT_H_SELF=""
 RT_H_SELF_WHY=""
 rt_harness_load() {
+  _hl_suite=$1
+  _hl_sel=${2:-}
+  _hl_b1=${3:-}
+  set -- --sh --suite "$_hl_suite"
+  [ -z "$_hl_sel" ] || set -- "$@" --select "$_hl_sel"
+  [ -z "$_hl_b1" ] || set -- "$@" --b1 "$_hl_b1"
   _hl_rc=0
-  _hl_out=$(node -e '
-const cm = require(process.argv[1] + "/scripts/router/core-marks.cjs");
-const h = cm.loadAreas(process.argv[1]).harness;
-if (!h || !Array.isArray(h.go) || !h.go.length || !Array.isArray(h.specs) || !h.specs.length || !h.session) {
-  process.stderr.write("в areas.json нет блока harness с go, specs и session\n");
-  process.exit(1);
-}
-const pkgs = [...new Set(h.go.map((x) => "./" + x.split(":")[0]))];
-const Q = String.fromCharCode(39);
-console.log("RT_H_GO_SEQ=" + Q + h.go.join(" ") + Q);
-console.log("RT_H_GO_PKGS=" + Q + pkgs.join(" ") + Q);
-console.log("RT_H_SPECS=" + Q + h.specs.join(" ") + Q);
-console.log("RT_H_GREP=" + Q + (h.grep || "") + Q);
-console.log("RT_H_SESSION=" + Q + h.session + Q);
-' "$(rt_repo_root)" 2>"$RT_REPORT/harness-load.err") || _hl_rc=$?
+  _hl_out=$(node "$SCRIPT_DIR/run-plan.mjs" "$@" 2>"$RT_REPORT/harness-load.err") || _hl_rc=$?
   _q="'"
   if [ "$_hl_rc" != 0 ] ||
-    [ "$(printf '%s\n' "$_hl_out" | wc -l)" != 5 ] ||
-    [ "$(printf '%s\n' "$_hl_out" | sed 's/=.*//' | tr '\n' ' ')" != "RT_H_GO_SEQ RT_H_GO_PKGS RT_H_SPECS RT_H_GREP RT_H_SESSION " ] ||
-    printf '%s\n' "$_hl_out" | grep -qvE "^(RT_H_GO_SEQ=${_q}[A-Za-z0-9_./: -]+${_q}|RT_H_GO_PKGS=${_q}[A-Za-z0-9_./ -]+${_q}|RT_H_SPECS=${_q}[A-Za-z0-9_./ -]+${_q}|RT_H_GREP=${_q}[A-Za-z0-9_|()?!^*.: -]*${_q}|RT_H_SESSION=${_q}scripts/router/[A-Za-z0-9_./-]+${_q})\$"; then
-    echo "блок harness не прочитан или не прошёл проверку (код $_hl_rc)" >>"$RT_REPORT/harness-load.err"
+    [ "$(printf '%s\n' "$_hl_out" | wc -l)" != 10 ] ||
+    [ "$(printf '%s\n' "$_hl_out" | sed 's/=.*//' | tr '\n' ' ')" != "RT_H_EXTRA RT_B2 RT_B2_RUN RT_SMOKE_DEFAULT RT_SELFCHECK RT_H_GO_SEQ RT_H_GO_PKGS RT_H_SPECS RT_H_GREP RT_H_SESSION " ] ||
+    printf '%s\n' "$_hl_out" | grep -qvE "^(RT_H_EXTRA=${_q}[01]${_q}|RT_B2=${_q}(xray|mihomo)?${_q}|RT_B2_RUN=${_q}[01]${_q}|RT_SMOKE_DEFAULT=${_q}(30|120)${_q}|RT_SELFCHECK=${_q}[01]${_q}|RT_H_GO_SEQ=${_q}[A-Za-z0-9_./: -]*${_q}|RT_H_GO_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_H_SPECS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_H_GREP=${_q}[A-Za-z0-9_|()?!^*.: -]*${_q}|RT_H_SESSION=${_q}(scripts/router/[A-Za-z0-9_./-]+)?${_q})\$"; then
+    echo "план состава не получен или не прошёл проверку (run-plan.mjs --suite $_hl_suite, код $_hl_rc)" >>"$RT_REPORT/harness-load.err"
     return 1
   fi
   eval "$_hl_out"
+  # Набор harness, этапы harness в changed и самопроверка сессии требуют прочитанного блока.
+  if { [ "$_hl_suite" = harness ] || [ "$RT_H_EXTRA" = 1 ] || [ "$RT_SELFCHECK" = 1 ]; } &&
+    { [ -z "$RT_H_GO_SEQ" ] || [ -z "$RT_H_GO_PKGS" ] || [ -z "$RT_H_SPECS" ] || [ -z "$RT_H_SESSION" ]; }; then
+    echo "план состава: блок harness пуст при этапах harness или самопроверке (run-plan.mjs --suite $_hl_suite)" >>"$RT_REPORT/harness-load.err"
+    rt_plan_defaults
+    return 1
+  fi
 }
 
 # --- выбор проверок набора changed (D-25) ------------------------------------------
 # select-changed.mjs печатает тринадцать строк для eval; перед eval вывод проверяется по
 # строгому шаблону на каждую строку, по их числу и порядку имён (T-144.1-23, T-145.1-18,
 # T-148.1-23), при любом сомнении выбирается всё, а вторая ветвь идёт со всеми тестами
-# (RT_SEL_BAD=1).
+# (RT_SEL_BAD=1). Проверенный вывод — <отчёт>/select.env: по нему run-plan.mjs составляет план
+# (rt_harness_load changed). Код 3 селектора — выбор остановлен (его нельзя надёжно получить,
+# D-24, D-28): красный до деплоя и обращений к стенду, причины — строки «  - стоп: …» в
+# select.txt; полный выбор вместо него не подставляется.
 SEL_ANY=1
 RT_SEL_BAD=0
 RT_KERNEL_TOUCHED=0
@@ -685,7 +708,7 @@ RT_HARNESS=0
 RT_AREAS=""
 RT_SEL_KIND=""
 if [ "$SUITE" = harness ]; then
-  if ! rt_harness_load; then
+  if ! rt_harness_load harness; then
     echo "router-test: красный — блок harness в scripts/router/areas.json не прочитан или не прошёл проверку (причина — $RT_REPORT/harness-load.err)" >&2
     exit 1
   fi
@@ -705,6 +728,13 @@ if [ "$SUITE" = changed ]; then
   _sel_rc=0
   # shellcheck disable=SC2086
   _sel=$(node "$SCRIPT_DIR/select-changed.mjs" --explain $_sel_args 2>"$RT_REPORT/select.txt") || _sel_rc=$?
+  if [ "$_sel_rc" = 3 ]; then
+    # выбор остановлен: причины уже в select.txt (stderr селектора), стенд не тронут
+    _sel_stop=$(sed -n 's/^  - стоп: //p' "$RT_REPORT/select.txt" | head -n 1)
+    echo "итог: выбор остановлен — прогон не идёт (полный выбор не подставляется)" >>"$RT_REPORT/select.txt"
+    echo "router-test: красный — выбор остановлен: ${_sel_stop:-причина не названа} (все — $RT_REPORT/select.txt)" >&2
+    exit 1
+  fi
   _q="'"
   if [ "$_sel_rc" != 0 ] ||
     [ "$(printf '%s\n' "$_sel" | wc -l)" != 13 ] ||
@@ -716,6 +746,7 @@ if [ "$SUITE" = changed ]; then
     RT_KERNEL_TOUCHED=1
     RT_SEL_KIND="полный"
   else
+    printf '%s\n' "$_sel" >"$RT_REPORT/select.env"
     eval "$_sel"
     # вид выбора — строка причин «вид выбора: …» (select-changed.mjs --explain)
     RT_SEL_KIND=$(sed -n 's/^  - вид выбора: //p' "$RT_REPORT/select.txt" | tail -n 1)
@@ -739,26 +770,37 @@ if [ "$SUITE" = changed ]; then
     echo "итог: Go: ${RT_GO_PKGS:--}; спеки: ${RT_SPECS:--}; области: ${RT_AREAS:--}" >>"$RT_REPORT/select.txt"
     export RT_GO_PKGS RT_SPECS RT_PW_GREP
   fi
-  # Правка обвязки стенда (RT_HARNESS=1): к выбору добавляется набор harness — его Go-тесты и
-  # спеки идут отдельными этапами в обеих ветвях (full_target, _harness_go и _harness_pw),
-  # а после ветвей идёт самопроверка сессии. Полный выбор набор уже содержит: этапы не добавляются.
-  # Блок не прочитан — выбор расширяется до полного, как при сбое самого выбора.
-  if [ "$RT_HARNESS" = 1 ]; then
-    if ! rt_harness_load; then
+  # План состава (run-plan.mjs по select.env и ядру первой ветви из SHA HEAD): вторая ветвь
+  # гибрида, окно смоука по умолчанию, самопроверка сессии. Правка обвязки стенда (RT_HARNESS=1):
+  # к выбору добавляется набор harness (RT_H_EXTRA=1) — его Go-тесты и спеки идут отдельными
+  # этапами в обеих ветвях (full_target, _harness_go и _harness_pw), а после ветвей идёт
+  # самопроверка сессии (RT_SELFCHECK=1). Полный выбор набор уже содержит: этапы не добавляются.
+  # План не получен (блок harness не прочитан, вывод модуля не прошёл проверку) — выбор
+  # расширяется до полного, как при сбое самого выбора; самопроверка — по RT_HARNESS выбора.
+  _rp_fail=0
+  if [ "$RT_SEL_BAD" = 0 ] && ! rt_harness_load changed "$RT_REPORT/select.env" "$(rt_sha_core "$(git rev-parse HEAD)")"; then
+    _rp_fail=1
+    if [ "$RT_HARNESS" = 1 ]; then
       echo "всё: блок harness не прочитан (см. harness-load.err) — выбор расширен до полного" >>"$RT_REPORT/select.txt"
-      unset RT_GO_PKGS RT_SPECS RT_PW_GREP
-      RT_SELECT_ALL=1
-      RT_SEL_BAD=1
-      RT_KERNEL_TOUCHED=1
-      RT_SEL_KIND="полный"
-      RT_GO_SEQ=""
-      RT_SPECS_FIRST=""
-      RT_PW_INVERT=""
-      SEL_ANY=1
-    elif [ "$RT_SELECT_ALL" = 1 ]; then
+    else
+      echo "всё: план состава не получен (см. harness-load.err) — выбор расширен до полного" >>"$RT_REPORT/select.txt"
+    fi
+    unset RT_GO_PKGS RT_SPECS RT_PW_GREP
+    RT_SELECT_ALL=1
+    RT_SEL_BAD=1
+    RT_KERNEL_TOUCHED=1
+    RT_SEL_KIND="полный"
+    RT_GO_SEQ=""
+    RT_SPECS_FIRST=""
+    RT_PW_INVERT=""
+    SEL_ANY=1
+    RT_SELFCHECK=$RT_HARNESS
+  elif [ "$RT_SEL_BAD" = 1 ]; then
+    RT_SELFCHECK=$RT_HARNESS
+  elif [ "$RT_HARNESS" = 1 ]; then
+    if [ "$RT_H_EXTRA" != 1 ]; then
       echo "обвязка: набор harness входит в полный выбор, самопроверка сессии — в конце" >>"$RT_REPORT/select.txt"
     else
-      RT_H_EXTRA=1
       SEL_ANY=1
       # shellcheck disable=SC2086
       _hn_go=$(printf '%s\n' $RT_H_GO_SEQ | grep -c . || true)
@@ -768,7 +810,7 @@ if [ "$SUITE" = changed ]; then
     fi
   fi
   echo "router-test: выбор — $(grep '^итог:' "$RT_REPORT/select.txt" | tail -n 1)"
-  [ "$RT_HARNESS" != 1 ] || echo "router-test: $(grep '^\(обвязка\|всё\):' "$RT_REPORT/select.txt" | tail -n 1)"
+  { [ "$RT_HARNESS" != 1 ] && [ "$_rp_fail" != 1 ]; } || echo "router-test: $(grep '^\(обвязка\|всё\):' "$RT_REPORT/select.txt" | tail -n 1)"
 fi
 
 # --- состав набора delta (RTR-11, D-24, D-25) ------------------------------------------------
@@ -803,9 +845,11 @@ delta_compose() {
   DELTA_B1=$(rt_sha_core "$(git rev-parse HEAD)")
   case "$DELTA_B1" in xray) DELTA_B2=mihomo ;; *) DELTA_B2=xray ;; esac
   RT_CORES="$DELTA_B1 $DELTA_B2"
-  # Правка обвязки между тегами: тесты и спеки блока harness входят в обе ветви, самопроверка сессии идёт в конце
+  # Правка обвязки между тегами: тесты и спеки блока harness входят в обе ветви через delta-plan.mjs
+  # --extra-* (отдельных этапов harness у добора нет), самопроверка сессии идёт в конце. Из плана
+  # delta (run-plan.mjs) берутся только RT_H_* и RT_SELFCHECK: ветви, состав и окно смоука — здесь.
   if [ "$RT_HARNESS" = 1 ]; then
-    rt_harness_load || delta_abort "блок harness в areas.json не прочитан (причина — $RT_REPORT/harness-load.err)"
+    rt_harness_load delta "$RT_REPORT/delta-select.env" || delta_abort "блок harness в areas.json не прочитан (причина — $RT_REPORT/harness-load.err)"
   fi
   RT_PW_INVERT=""
   _dc_first=1
@@ -850,12 +894,12 @@ delta_compose() {
 # Полный прогон — полная матрица (оба ядра, все тесты); явный RT_CORES — прежняя семантика
 # для ручной отладки. Строки плана — в <отчёт>/plan.txt: раздел «Выбор» report.md и начало
 # раздела цели в summary.md.
+# Вторую ветвь гибрида (RT_B2, RT_B2_RUN) и окно смоука по умолчанию (RT_SMOKE_DEFAULT) решает план
+# состава (rt_harness_load выше); RT_B2 читается только при RT_HYBRID=1.
 RT_HYBRID=0
 RT_B1=""
-RT_B2=""
-RT_B2_RUN=0
 if [ "$SUITE" = harness ]; then
-  # набор harness: оба ядра, все тесты набора в каждой ветви (гибрида нет), окно смоука 30 с
+  # набор harness: оба ядра, все тесты набора в каждой ветви (гибрида нет), окно смоука по плану (30 с)
   : >"$RT_REPORT/plan.txt"
   # shellcheck disable=SC2086
   _hn_go=$(printf '%s\n' $RT_H_GO_SEQ | grep -c . || true)
@@ -866,8 +910,8 @@ if [ "$SUITE" = harness ]; then
   if [ -n "${RT_SMOKE_WINDOW:-}" ]; then
     echo "- Окно смоука: $RT_SMOKE_WINDOW с (RT_SMOKE_WINDOW задан явно)" >>"$RT_REPORT/plan.txt"
   else
-    RT_SMOKE_WINDOW=30
-    echo "- Окно смоука: 30 с (набор harness)" >>"$RT_REPORT/plan.txt"
+    RT_SMOKE_WINDOW=$RT_SMOKE_DEFAULT
+    echo "- Окно смоука: $RT_SMOKE_WINDOW с (набор harness)" >>"$RT_REPORT/plan.txt"
   fi
   export RT_SMOKE_WINDOW
   echo "router-test: ветви — $(head -n 1 "$RT_REPORT/plan.txt")"
@@ -915,10 +959,10 @@ elif [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
   elif [ -n "$RT_CORES_SET" ]; then
     echo "- Ветви: $RT_CORES (отладка RT_CORES: все выбранные тесты в каждой ветви, гибрид выключен)" >>"$RT_REPORT/plan.txt"
   elif [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ] && [ "$RT_SEL_BAD" = 0 ]; then
+    # вторую ветвь (другое ядро) и её запуск (тесты с меткой ядра или набор harness) решил план
+    # состава по тому же ядру первой ветви
     RT_B1=$(rt_sha_core "$(git rev-parse HEAD)")
-    case "$RT_B1" in xray) RT_B2=mihomo ;; *) RT_B2=xray ;; esac
-    if [ -n "$RT_GO_CORE_PKGS" ] || [ -n "$RT_SPECS_CORE" ] || [ "$RT_H_EXTRA" = 1 ]; then
-      RT_B2_RUN=1
+    if [ "$RT_B2_RUN" = 1 ] && [ -n "$RT_B2" ]; then
       RT_CORES="$RT_B1 $RT_B2"
     else
       RT_CORES="$RT_B1"
@@ -947,12 +991,13 @@ elif [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
   else
     echo "- Ветви: $RT_CORES (полная матрица: все тесты под каждым ядром)" >>"$RT_REPORT/plan.txt"
   fi
-  # окно смоука: в changed 120 с при затронутом коде запуска ядра, иначе 30 с; заданный в
-  # окружении RT_SMOKE_WINDOW приоритетнее; в полном прогоне — RT_SMOKE_WINDOW или 120 с (D-07)
+  # окно смоука: в changed — по плану состава (120 с при затронутом коде запуска ядра или полном
+  # выборе, иначе 30 с); заданный в окружении RT_SMOKE_WINDOW приоритетнее; в полном прогоне —
+  # RT_SMOKE_WINDOW или 120 с (D-07)
   if [ "$SUITE" = changed ]; then
     if [ -n "${RT_SMOKE_WINDOW:-}" ]; then
       echo "- Окно смоука: $RT_SMOKE_WINDOW с (RT_SMOKE_WINDOW задан явно)" >>"$RT_REPORT/plan.txt"
-    elif [ "$RT_KERNEL_TOUCHED" = 1 ]; then
+    elif [ "$RT_SMOKE_DEFAULT" = 120 ]; then
       RT_SMOKE_WINDOW=120
       echo "- Окно смоука: 120 с (затронут код запуска ядра или выбор полный)" >>"$RT_REPORT/plan.txt"
     else
@@ -2352,7 +2397,7 @@ if [ "$SUITE" = rerun ]; then
   rerun_finish
 fi
 
-# --- самопроверка сессии (набор harness; changed при RT_HARNESS=1) ------------------------
+# --- самопроверка сессии (RT_SELFCHECK=1: набор harness; changed и delta при RT_HARNESS=1) ---
 # Сама остановка на первом несовпадении — механика сессии (session.mjs), и править обвязку, не
 # сломав её, нельзя. Вложенная сессия по спеке блока harness (проход fail-fast-probe нарочно ждёт
 # FAIL у проходящего дешёвого теста) обязана: выйти с кодом 1, написать в summary.md раздел
@@ -2463,7 +2508,9 @@ if (bad.length) {
   rt_result "$_hs_rt" PASS harness-session-fail-fast "сессия остановилась на первом несовпадении (код 1), второй проход не выполнялся, стенд вернулся; отчёт $_hs_rel"
 }
 
-if [ "$RT_INTR" != 1 ] && { [ "$SUITE" = harness ] || { { [ "$SUITE" = changed ] || [ "$SUITE" = delta ]; } && [ "$RT_HARNESS" = 1 ]; }; }; then
+# Самопроверка сессии — по плану состава (RT_SELFCHECK: набор harness, changed и delta при правке
+# обвязки); наборы без плана состава её не запускают.
+if [ "$RT_INTR" != 1 ] && [ "$RT_SELFCHECK" = 1 ]; then
   if [ -n "$RT_VSTOP" ]; then
     # смена версии стенда остановила прогон (D-13): самопроверка — тоже невыполненный этап
     printf 'notrun\t-\t%s\n' "самопроверка сессии: не выполнена" >>"$RT_REPORT/${RT_VSTOP%% *}/version-stop.tsv"
