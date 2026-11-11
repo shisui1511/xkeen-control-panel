@@ -1814,7 +1814,6 @@ class Session {
       }
     );
     this.record({ kind: 'switch', core, dir, rc });
-    this.adoptExpect(dir);
     // смена версии на границе pw:core-switch.spec.ts: ядро стенда не известно, сессия остановлена
     if (this.versionStop('switch', pass, core, dir, rc)) {
       this.cur = null;
@@ -1837,8 +1836,9 @@ class Session {
     writeFileSync(file, `${this.expectVersion}\n`);
   }
 
-  // После этапа: принятый объявленный переход версии (rt_version_guard переписывает
-  // <этап>/<цель>/expect-version) становится ожиданием следующих этапов и границ сессии. Стенд при
+  // После этапа go (объявления переходов есть только у Go-тестов; у спеков Playwright и переключения
+  // ядра их нет, expect-version этапа остаётся тем, что записал writeExpect): принятый объявленный
+  // переход версии (rt_version_guard переписывает <этап>/<цель>/expect-version) становится ожиданием следующих этапов и границ сессии. Стенд при
   // этом на сборке, отличной от деплоя сессии: конец сессии и следующий проход ставят сборку заново.
   adoptExpect(dir) {
     const file = path.join(dir, this.t, 'expect-version');
@@ -2074,7 +2074,6 @@ class Session {
       this.writeExpect(dir);
       const rc = await this.run('sh', [path.join(SCRIPT_DIR, 'pw-suite.sh'), this.t, core], env);
       this.record({ kind: 'pw', pass: p.name, core, dir, rc, version: p.resolved ?? null });
-      this.adoptExpect(dir);
       const rest = comp.specs.slice(k + 1);
       if (this.versionStop('pw', p.name, core, dir, rc)) {
         if (rest.length) {
