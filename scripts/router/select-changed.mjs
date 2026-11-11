@@ -13,8 +13,13 @@
 //   Go          записи RT_GO_SEQ `<каталог пакета>:<TestRouterИмя>`; пакеты — каталоги записей.
 //               Роутерный пакет — каталог с `_test.go`, у которого первая строка `//go:build router`.
 //   Playwright  роутерные спеки frontend/tests/router/*.spec.ts. Правка frontend/src — по графу
-//               импортов (scripts/router/import-graph.mjs): спек выбирается, если открывает
-//               затронутый маршрут (`#/<маршрут>` в тексте или `// e2e-pages: …`).
+//               импортов (scripts/router/import-graph.mjs) обеих ревизий (база и head: перенос
+//               или удаление импорта не теряет потребителей старой стороны): спек выбирается,
+//               если открывает затронутый маршрут (`#/<маршрут>`, вкладка `#/config/<вкладка>`
+//               или `// e2e-pages: …`). Обычный общий компонент добавляет pages с маршрутами
+//               потребителей и читающую канарейку оболочки (RTR-13, D-09). Область карты у
+//               файла frontend/src — только отметка RT_AREAS и объяснения: тесты области
+//               целиком не выбираются.
 //               `// e2e-pages: *` — спек обходит все страницы: при выборе только по маршрутам он
 //               сужается до них через --grep; выбранный по иной причине (область, зависимости,
 //               правка самого спека) идёт без сужения. core-switch.spec.ts не выбирается: его
@@ -174,6 +179,12 @@ const IGNORED = [
   /^frontend\/eslint\.config\./,
   /^frontend\/\.gitignore$/
 ];
+
+// Спеки фронтенда с особой ролью (RTR-13). pages — read-обход всех маршрутов (`e2e-pages: *`).
+// Читающая канарейка оболочки (D-08) — существующий read-спек: шапка `// e2e-kind: read`
+// проверяется при каждом выборе. Не найден или не read — все спеки (расширение).
+const PAGES_SPEC = 'tests/router/pages.spec.ts';
+const SHELL_READ_CANARY = 'tests/router/config-visual.spec.ts';
 
 // Файлы frontend/ вне src/, меняющие сборку панели: все роутерные спеки (не Go).
 const FRONTEND_ALL = [
@@ -453,6 +464,32 @@ function makefileStand() {
   return { stand: false, why: '' };
 }
 
+// --- граф импортов фронтенда (RTR-13) ----------------------------------------------------
+
+/**
+ * Модели графа обеих ревизий: база (снимок ctx.from, если он есть) и head (снимок ctx.to или
+ * рабочее дерево). Ошибка чтения или разбора — исключение: вызывающий выбирает все спеки.
+ * specSources(абсолютный путь спека) — прямые ссылки спека на файлы src (кэш).
+ */
+async function frontGraph() {
+  const mod = await import(pathToFileURL(path.join(ROOT, 'scripts/router/import-graph.mjs')));
+  const fe = path.join(ROOT, 'frontend');
+  const models = [];
+  if (ctx.from) models.push({ side: 'база', model: mod.buildModel(fe, { reader: mod.gitReader(ROOT, ctx.from) }) });
+  models.push({
+    side: 'head',
+    model: mod.buildModel(fe, { reader: ctx.to ? mod.gitReader(ROOT, ctx.to) : mod.fsReader(fe) })
+  });
+  const routes = new Set(models.flatMap((m) => [...m.model.routes]));
+  const srcFiles = [...new Set(models.flatMap((m) => m.model.reader.files(path.join(fe, 'src'))))];
+  const cache = new Map();
+  const specSources = (specAbs) => {
+    if (!cache.has(specAbs)) cache.set(specAbs, mod.specSources(specAbs, srcFiles, fe));
+    return cache.get(specAbs);
+  };
+  return { mod, models, routes, srcFiles, specSources };
+}
+
 // --- факты тестов и порядок -------------------------------------------------------------
 
 /** Факты роутерных тестов: индекс git плюс новые (ещё не в индексе) изменённые тесты с диска. */
@@ -601,6 +638,9 @@ async function select(changed) {
   };
 
   const touchedSrc = [];
+  // Области, отмеченные только файлами frontend/src: в RT_AREAS и объяснении, но тесты области
+  // целиком не выбираются — фронтенд классифицирует граф импортов (D-09)
+  const frontMarked = new Set();
   const touchedSpecs = new Set();
   const goChanged = new Set(); // каталоги изменённых Go-пакетов без области (откат на пакет)
   const goTestFiles = new Set(); // изменённые _test.go
@@ -672,8 +712,8 @@ async function select(changed) {
     if (file.startsWith('frontend/src/')) {
       touchedSrc.push(file.slice('frontend/'.length));
       for (const n of areasOf(file)) {
-        res.areas.add(n);
-        reasons.push(`${file}: область ${n} (выбор — по графу импортов)`);
+        frontMarked.add(n);
+        reasons.push(`${file}: область ${n} (выбор — по графу импортов, не всеми тестами области)`);
       }
       continue;
     }
@@ -776,6 +816,12 @@ async function select(changed) {
       reasons.push(`область ${name}: тестов Go ${n.go}, спеков ${n.specs}`);
     }
     if (sharedHit) addCanaries('правка общего кода');
+    // Отметка фронтенда: только RT_AREAS и объяснение, тесты выбирает граф импортов
+    for (const name of [...frontMarked].sort()) {
+      if (res.areas.has(name)) continue;
+      res.areas.add(name);
+      reasons.push(`область ${name}: отмечена правкой frontend/src — тесты области целиком не выбираются`);
+    }
   }
 
   // --- изменённые роутерные тесты ---------------------------------------------
@@ -851,31 +897,79 @@ async function select(changed) {
   // --- Playwright -------------------------------------------------------------
   if (!res.all) {
     const affected = new Set();
-    let model = null;
-    let specRoutes = null;
+    const touchedAbs = touchedSrc.map((rel) => path.join(ROOT, 'frontend', rel));
+    let graph = null;
+    const said = new Set();
+    const sayOnce = (line) => {
+      if (said.has(line)) return;
+      said.add(line);
+      reasons.push(line);
+    };
+    // Спек с особой ролью (pages без сужения, канарейки оболочки): выбран не по маршрутам
+    const addForced = (spec, why) => {
+      if (!specSelectable(spec)) return false;
+      res.specsForced.add(spec);
+      if (!res.specsDirect.has(spec)) res.specsOther.add(spec);
+      sayOnce(`${spec}: ${why}`);
+      return true;
+    };
+    // Канарейка оболочки: существующий спек, шапка или содержимое сверяются при каждом выборе
+    const addShellCanary = (spec, fits, what, why) => {
+      const abs = path.join(ROOT, 'frontend', spec);
+      const text = existsSync(abs) ? readFileSync(abs, 'utf8') : null;
+      if (text === null || !specSelectable(spec) || !fits(text)) {
+        pwAll = true;
+        sayOnce(`${spec}: ${what} не найдена или не подходит — все роутерные спеки`);
+        return;
+      }
+      addForced(spec, `${what} (${why})`);
+    };
+    const isReadSpec = (text) => text.split('\n', 5).some((l) => /^\/\/\s*e2e-kind:\s*read\s*$/.test(l.trim()));
+
     if (touchedSrc.length > 0) {
-      const mod = await import(pathToFileURL(path.join(ROOT, 'scripts/router/import-graph.mjs')));
-      specRoutes = mod.specRoutes;
-      model = mod.buildModel(path.join(ROOT, 'frontend'));
+      try {
+        graph = await frontGraph();
+        reasons.push(`граф импортов: ${graph.models.map((m) => `${m.side} — маршрутов ${m.model.routes.size}, оболочка ${m.model.shell.size} файлов`).join('; ')}`);
+      } catch (e) {
+        pwAll = true;
+        reasons.push(`граф импортов не построен (${String(e.message ?? e).split('\n', 1)[0]}) — все роутерные спеки`);
+      }
+    }
+    let componentHit = false;
+    if (graph) {
       for (const rel of touchedSrc) {
         const abs = path.join(ROOT, 'frontend', rel);
-        if (!existsSync(abs)) {
-          reasons.push(`frontend/${rel}: удалён`);
+        const present = graph.models.filter((m) => m.model.reader.isFile(abs));
+        if (present.length === 0) {
+          reasons.push(`frontend/${rel}: удалён (нет в ${graph.models.map((m) => m.side).join(' и ')})`);
           continue;
         }
-        if (model.shell.has(abs)) {
+        const inShell = present.filter((m) => m.model.shell.has(abs)).map((m) => m.side);
+        if (inShell.length > 0) {
           pwAll = true;
-          reasons.push(`frontend/${rel}: оболочка приложения — все роутерные спеки`);
+          reasons.push(`frontend/${rel}: оболочка приложения (${inShell.join(', ')}) — все роутерные спеки`);
           continue;
         }
-        const routes = [...model.pageFiles].filter(([, files]) => files.has(abs)).map(([r]) => r);
+        // Маршруты обеих ревизий: перенос или удаление импорта не теряет потребителей старой стороны
+        const per = present.map((m) => ({ side: m.side, routes: m.model.routesOf(abs) }));
+        const routes = [...new Set(per.flatMap((p) => p.routes))];
         if (routes.length === 0) {
-          reasons.push(`frontend/${rel}: не импортируется приложением`);
+          reasons.push(`frontend/${rel}: не импортируется приложением (${per.map((p) => p.side).join(', ')})`);
           continue;
         }
         routes.forEach((r) => affected.add(r));
-        reasons.push(`frontend/${rel}: страницы ${routes.join(', ')}`);
+        componentHit = true;
+        const sides =
+          per.length > 1 && per.some((p) => p.routes.join() !== per[0].routes.join())
+            ? ` (${per.map((p) => `${p.side}: ${p.routes.join(', ') || '-'}`).join('; ')})`
+            : '';
+        reasons.push(`frontend/${rel}: страницы ${routes.join(', ')}${sides}`);
       }
+    }
+    // Обычный общий компонент: спеки маршрутов-потребителей, pages с их маршрутами и читающая
+    // канарейка оболочки (D-09)
+    if (componentHit && !pwAll) {
+      addShellCanary(SHELL_READ_CANARY, isReadSpec, 'читающая канарейка оболочки', 'правка общего компонента');
     }
 
     for (const s of touchedSpecs) {
@@ -905,22 +999,32 @@ async function select(changed) {
           reasons.push(`${spec}: обходит все страницы — сужается до затронутых`);
           continue;
         }
-        const text = readFileSync(path.join(ROOT, 'frontend', spec), 'utf8');
-        const routes = specRoutes(text, model.routes);
+        const specAbs = path.join(ROOT, 'frontend', spec);
+        const text = readFileSync(specAbs, 'utf8');
+        const routes = graph.mod.specRoutes(text, graph.routes);
         if (routes === null) {
+          // Маршрут не известен: прямые ссылки спека на изменённые файлы называются, иначе
+          // включение консервативное
           res.specsDirect.add(spec);
-          reasons.push(`${spec}: маршруты не определены — запускается всегда`);
+          const hit = touchedAbs.filter((a) => graph.specSources(specAbs).has(a));
+          reasons.push(
+            hit.length > 0
+              ? `${spec}: маршруты не определены, ссылается напрямую на ${hit.map((a) => path.relative(ROOT, a)).join(', ')}`
+              : `${spec}: маршруты не определены (нет #/…, литералов маршрутов и e2e-pages) — включается консервативно`
+          );
         } else if ([...routes].some((r) => affected.has(r))) {
           res.specsDirect.add(spec);
-          reasons.push(`${spec}: открывает затронутые страницы`);
+          reasons.push(`${spec}: открывает затронутые страницы (${[...routes].filter((r) => affected.has(r)).sort().join(', ')})`);
         }
       }
       const all = new Set([...res.specsDirect, ...res.specsOther]);
       const walkSelected = [...all].some((s) => star.has(s));
       const walkForced = [...res.specsForced].some((s) => star.has(s));
       if (walkSelected && !walkForced) {
-        const routes = [...affected].filter((r) => SAFE_ROUTE.test(r)).sort();
-        if (routes.length !== affected.size) {
+        // Обход pages называет страницы (`page:config`), не вкладки: вкладка сужает до страницы
+        const tops = new Set([...affected].map((r) => graph.mod.topRoute(r)));
+        const routes = [...tops].filter((r) => SAFE_ROUTE.test(r)).sort();
+        if (routes.length !== tops.size) {
           reasons.push('маршрут с небезопасным именем — обход идёт целиком');
         } else {
           res.grepRoutes = routes;
