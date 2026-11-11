@@ -149,6 +149,22 @@
 // После SIGKILL run.sh не успевает восстановить стенд и оставляет снимок на цели: стенд по нему
 // (rt_restore со сверкой) возвращает сессия, вердикт «interrupt: возврат стенда сессией»; не
 // вернулся — сессия останавливается. Снимок, оставшийся к концу сессии, возвращает cleanup.
+// Подмена версии посреди этапа (необязательно, только у changed, не сочетается с interrupt;
+// проверка сверки версии стенда настоящей посторонней установкой, D-13):
+//     "foreign_version": {
+//       "stage": "go",                      go или pw (часть state Playwright)
+//       "version": "v0.34.1",               тег vX.Y.Z[-<суффикс>.N], есть в локальном git
+//       "after": 5                          1..600 с после начала этапа
+//     }
+// Начало этапа — файл go-*.raw (go) или каталог pw части state (pw; pw-read и pw-switch не
+// считаются) в <отчёт прохода>/<цель>/<ядро>/ или на уровень ниже. Через after секунд сессия
+// ставит на цель сборку HEAD под номером version отдельным деплоем (deploy.sh --target <цель>
+// --no-frontend, XCP_VERSION, под блокировкой сессии, отчёт <NN>-<проход>-foreign, вывод — его
+// deploy.log), не дожидаясь конца вложенного прогона; вложенный прогон вышел раньше — деплоя нет.
+// Вердикты прохода, кроме exit и summary: «подмена версии: этап начался» и «подмена версии:
+// установлена <тег>» (PASS — код деплоя 0 и файл version с тегом). После прохода стенд не на HEAD:
+// следующий проход и конец сессии ставят HEAD. dry-run печатает строку «подмена версии: …» и
+// добавляет к оценке 120 с (деплой подмены и деплой HEAD после прохода).
 // С go, specs, grep и product проход-прогон не сочетается. Вложенный `sh run.sh [changed]`
 // идёт под блокировкой сессии (RT_LOCK_HELD=1) без RT_HOLD_MINUTES, RT_CORES, RT_BASE и
 // SPEC (SPEC — только у session), сам ставит сборку HEAD, снимает снимок и восстанавливает стенд. Его отчёт — в
@@ -387,6 +403,35 @@ function loadInterrupt(i, where) {
   return { stage: 'go', signal, after: i.after, deadline };
 }
 
+// Поле foreign_version прохода-прогона changed: посторонняя установка версии посреди этапа go или
+// части state Playwright вложенного прогона (проверка сверки версии стенда на стенде, D-13).
+function loadForeign(f, where) {
+  if (!f || typeof f !== 'object' || Array.isArray(f)) die(`${where}.foreign_version: объект`);
+  for (const k of Object.keys(f)) {
+    if (!['stage', 'version', 'after'].includes(k)) {
+      die(`${where}.foreign_version.${k}: допустимы stage, version, after`);
+    }
+  }
+  if (f.stage !== 'go' && f.stage !== 'pw') die(`${where}.foreign_version.stage: go или pw`);
+  if (typeof f.version !== 'string' || !RELEASE_TAG.test(f.version)) {
+    die(`${where}.foreign_version.version: тег vX.Y.Z[-<суффикс>.N] вышедшего релиза`);
+  }
+  if (!localTagExists(f.version)) {
+    die(
+      `${where}.foreign_version.version: тега ${f.version} нет — нужен номер вышедшего релиза (git fetch --tags)`
+    );
+  }
+  if (!Number.isInteger(f.after) || f.after < 1 || f.after > 600) {
+    die(`${where}.foreign_version.after: целое от 1 до 600 (с)`);
+  }
+  return { stage: f.stage, version: f.version, after: f.after };
+}
+
+// Где идёт этап подмены версии: строка плана и вердиктов.
+function foreignStageTitle(stage) {
+  return stage === 'go' ? 'go' : 'части state Playwright';
+}
+
 // Название прохода-прогона для плана и журнала: «smoke (релиз <тег>)», «changed по файлам …».
 function suiteTitle(p, release) {
   if (p.suite === 'smoke') return `smoke (релиз ${release})`;
@@ -471,6 +516,12 @@ function loadSuitePass(p, where, earlier, ctx) {
   if (p.dry_run !== undefined && p.suite !== 'delta') die(`${where}.dry_run: только у delta`);
   if (['rerun', 'bisect'].includes(p.suite) && p.interrupt !== undefined) {
     die(`${where}.interrupt: у ${p.suite} не поддерживается`);
+  }
+  let foreign = null;
+  if (p.foreign_version !== undefined) {
+    if (p.suite !== 'changed') die(`${where}.foreign_version: только у changed`);
+    if (p.interrupt !== undefined) die(`${where}.foreign_version: не сочетается с interrupt`);
+    foreign = loadForeign(p.foreign_version, where);
   }
   let from = null;
   let dryRun = false;
@@ -570,6 +621,7 @@ function loadSuitePass(p, where, earlier, ctx) {
     dryRun,
     bisect,
     interrupt: p.interrupt === undefined ? null : loadInterrupt(p.interrupt, where),
+    foreign,
     version: null,
     product: null,
     go: null,
@@ -972,8 +1024,17 @@ function composition(p, full, root, core, h) {
 const BUDGET_MIN = 20;
 // Накладные расходы оценки, секунды: деплой и смоук на смену продукта, переключение ядра,
 // settle после Go, запуск pw-suite.sh на спек, тест без медианы; проход-прогон — max_minutes
-// или suiteMinutes минут.
-const EST = { deploy: 180, switch: 45, settle: 30, pwStart: 15, unknownTest: 30, suiteMinutes: 15 };
+// или suiteMinutes минут; подмена версии (foreign_version) — деплой подмены и деплой HEAD после
+// прохода.
+const EST = {
+  deploy: 180,
+  switch: 45,
+  settle: 30,
+  pwStart: 15,
+  unknownTest: 30,
+  suiteMinutes: 15,
+  foreign: 120
+};
 
 // Оценка теста на ядре: медиана на этом ядре, иначе на другом, иначе unknownTest.
 function testSeconds(h, check, core) {
@@ -1185,6 +1246,14 @@ function planSession(spec, specFile, root) {
       // смоук релиза оставляет на стенде сборку релиза, а не HEAD; вложенная сессия
       // возвращает стенд сама (сборка HEAD и её исходное ядро)
       deployed = p.suite === 'smoke' || p.suite === 'delta' ? null : 'HEAD';
+      if (p.foreign) {
+        // деплой подмены посреди прогона и деплой HEAD после прохода
+        seconds += EST.foreign;
+        lines.push(
+          `   подмена версии: ${p.foreign.version} через ${p.foreign.after} с после начала ${foreignStageTitle(p.foreign.stage)}; после прохода стенд не на HEAD`
+        );
+        deployed = null;
+      }
       continue;
     }
     const key = productKey(p);
@@ -1306,6 +1375,8 @@ class Session {
     // ожидаемая версия стенда для сверки на границах этапов: версия последнего деплоя сессии
     // (файл version каталога деплоя) или вложенного прогона; null — неизвестна, сверка выключена
     this.expectVersion = null;
+    // параллельный этап: деплой подмены версии посреди вложенного прогона (foreign_version)
+    this.sideChild = null;
     // вердикты с этим индексом и дальше ещё не проверены на остановку (checkStop)
     this.checked = 0;
   }
@@ -1365,29 +1436,7 @@ class Session {
   // — true, если после выхода лидера нужно дождаться опустения группы.
   run(cmd, args, env = {}, opts = {}) {
     if (this.aborted && !this.cleaning) return Promise.resolve(130);
-    const base = { ...process.env };
-    for (const k of [
-      'RT_SPECS',
-      'RT_PW_GREP',
-      'RT_GO_PKGS',
-      'RT_GO_RUN',
-      // состав и порядок этапа задаёт сессия, не окружение оператора
-      'RT_GO_RUN_SEQ',
-      'RT_PW_CORE_ONLY',
-      'RT_ART_SUB',
-      'RT_SPECS_FIRST',
-      'RT_REPORT',
-      'RT_REPORT_DIR',
-      'RT_CORE',
-      'XCP_WANT_CORE',
-      // номер сборки задаёт только проход с version (env его деплоя), не оператор и не прошлый этап
-      'XCP_VERSION'
-    ]) {
-      delete base[k];
-    }
-    const full = { ...base, RT_LOCK_HELD: '1', ROUTERS: this.t, ...env };
-    // undefined в env — снять переменную (вложенный прогон набора не наследует настройки сессии)
-    for (const k of Object.keys(full)) if (full[k] === undefined) delete full[k];
+    const full = this.stageEnv(env);
     // проход tree: скрипты этапов — из HEAD (SCRIPT_DIR), каталог запуска — worktree дерева коммита,
     // поэтому deploy.sh, go-suite.sh и pw-suite.sh собирают и гоняют продукт и тесты коммита; отчёт этапа
     // rt_report_use принимает только под build/router каталога запуска — путь переписывается на ссылку
@@ -1438,9 +1487,75 @@ class Session {
     });
   }
 
+  // Окружение этапа: без настроек оператора и прошлых этапов, с RT_LOCK_HELD=1 и целью сессии;
+  // undefined в env — снять переменную.
+  stageEnv(env) {
+    const base = { ...process.env };
+    for (const k of [
+      'RT_SPECS',
+      'RT_PW_GREP',
+      'RT_GO_PKGS',
+      'RT_GO_RUN',
+      // состав и порядок этапа задаёт сессия, не окружение оператора
+      'RT_GO_RUN_SEQ',
+      'RT_PW_CORE_ONLY',
+      'RT_ART_SUB',
+      'RT_SPECS_FIRST',
+      'RT_REPORT',
+      'RT_REPORT_DIR',
+      'RT_CORE',
+      'XCP_WANT_CORE',
+      // номер сборки задаёт только проход с version (env его деплоя), не оператор и не прошлый этап
+      'XCP_VERSION'
+    ]) {
+      delete base[k];
+    }
+    const full = { ...base, RT_LOCK_HELD: '1', ROUTERS: this.t, ...env };
+    // undefined в env — снять переменную (вложенный прогон набора не наследует настройки сессии)
+    for (const k of Object.keys(full)) if (full[k] === undefined) delete full[k];
+    return full;
+  }
+
+  // Параллельный этап (деплой подмены версии посреди вложенного прогона): своя группа процессов,
+  // вывод — в файл log (не в консоль: там идёт вывод вложенного прогона), запуск — из корня
+  // рабочей копии. Код выхода (сигнал — 128+n).
+  runSide(cmd, args, env, log) {
+    if (this.aborted) return Promise.resolve(130);
+    appendFileSync(
+      this.log,
+      `\n$ ${[cmd, ...args].join(' ')} (параллельно, вывод — ${path.relative(this.root, log)})\n`
+    );
+    return new Promise((resolve) => {
+      const fd = openSync(log, 'a');
+      const child = spawn(cmd, args, {
+        cwd: this.root,
+        env: this.stageEnv(env),
+        stdio: ['ignore', fd, fd],
+        detached: true
+      });
+      closeSync(fd);
+      this.sideChild = child;
+      child.on('error', () => {
+        // запуск не удался: close придёт с кодом
+      });
+      child.on('close', (code, sig) => {
+        this.sideChild = null;
+        resolve(code ?? 128 + (osConstants.signals[sig] ?? 15));
+      });
+    });
+  }
+
   // Сигнал текущему этапу: всей его группе (лидер группы — сам этап, см. run); не вышло —
-  // самому процессу.
+  // самому процессу. Параллельный этап (runSide) получает тот же сигнал своей группе.
   signalChild(sig) {
+    const side = this.sideChild;
+    if (side && Number.isInteger(side.pid) && side.pid > 1) {
+      try {
+        process.kill(-side.pid, sig);
+      } catch {
+        // группа уже вышла
+      }
+    }
     const c = this.child;
     if (!c) return;
     const pid = c.pid;
@@ -2332,6 +2447,86 @@ class Session {
     return { opts, state };
   }
 
+  // Подмена версии посреди вложенного прогона по спеке (foreign_version, D-13). Опрос раз в
+  // секунду: этап начался — в <отчёт>/<цель>/<ядро>/ (и на уровень ниже, подкаталог ветви)
+  // появился файл go-*.raw (stage go) или каталог pw части state (stage pw; pw-read и pw-switch
+  // не считаются); через after секунд — деплой HEAD под номером version на цель параллельно
+  // вложенному прогону (deploy.sh --no-frontend под блокировкой сессии, отчёт <NN>-<проход>-foreign
+  // сессии), без ожидания его конца. Вложенный прогон вышел раньше — деплоя нет. Возвращает opts
+  // для run и состояние для вердиктов.
+  foreignWatch(fv, dir, p) {
+    const state = { startedAt: 0, at: '', deployAt: 0, rc: null, dir: '', done: null };
+    const started = () => {
+      const tdir = path.join(dir, this.t);
+      let cores;
+      try {
+        cores = readdirSync(tdir, { withFileTypes: true }).filter((d) => d.isDirectory());
+      } catch {
+        return '';
+      }
+      const hit = (d, depth) => {
+        let ents;
+        try {
+          ents = readdirSync(d, { withFileTypes: true });
+        } catch {
+          return '';
+        }
+        for (const e of ents) {
+          if (fv.stage === 'go' && e.isFile() && /^go-.+\.raw$/.test(e.name)) return e.name;
+          if (fv.stage === 'pw' && e.isDirectory() && e.name === 'pw') {
+            return path.relative(tdir, path.join(d, e.name));
+          }
+        }
+        if (depth > 0) return '';
+        for (const e of ents) {
+          if (!e.isDirectory() || /^pw(-|$)/.test(e.name)) continue;
+          const r = hit(path.join(d, e.name), depth + 1);
+          if (r) return r;
+        }
+        return '';
+      };
+      for (const c of cores) {
+        const r = hit(path.join(tdir, c.name), 0);
+        if (r) return fv.stage === 'go' ? `${c.name}/${r}` : r;
+      }
+      return '';
+    };
+    const opts = {
+      onSpawn: () => {
+        const poll = setInterval(() => {
+          if (state.deployAt || this.aborted) return;
+          if (!state.startedAt) {
+            const at = started();
+            if (!at) return;
+            state.startedAt = Date.now();
+            state.at = at;
+            this.say(
+              `подмена версии: этап ${foreignStageTitle(fv.stage)} начался (${at}), установка ${fv.version} через ${fv.after} с`
+            );
+            return;
+          }
+          if (Date.now() - state.startedAt < fv.after * 1000) return;
+          state.deployAt = Date.now();
+          state.dir = this.stepDir(`${p.name}-foreign`);
+          this.say(
+            `подмена версии: деплой HEAD под номером ${fv.version} посреди прогона → ${path.relative(this.root, state.dir)}`
+          );
+          state.done = this.runSide(
+            'sh',
+            [path.join(SCRIPT_DIR, 'deploy.sh'), '--target', this.t, '--no-frontend'],
+            { RT_REPORT: state.dir, XCP_VERSION: fv.version },
+            path.join(state.dir, 'deploy.log')
+          ).then((rc) => {
+            state.rc = rc;
+            this.say(`подмена версии: деплой ${fv.version} завершился с кодом ${rc}`);
+          });
+        }, 1000);
+        return () => clearInterval(poll);
+      }
+    };
+    return { opts, state };
+  }
+
   // Проход-прогон набора: вложенный run.sh под блокировкой сессии, отчёт в build/router.
   // Вложенный прогон сам ставит сборку HEAD, снимает снимок и восстанавливает стенд.
   async runSuite(p) {
@@ -2440,15 +2635,27 @@ class Session {
     const args = [path.join(SCRIPT_DIR, 'run.sh')];
     if (p.suite !== 'full') args.push(p.suite);
     const irq = p.interrupt ? this.interruptWatch(p.interrupt, dir) : null;
+    const fw = p.foreign ? this.foreignWatch(p.foreign, dir, p) : null;
     const t0 = Date.now();
     const rc = await this.run(
       'sh',
       args,
       env,
-      irq ? irq.opts : { leaderOnly: p.suite === 'session' }
+      irq ? irq.opts : fw ? fw.opts : { leaderOnly: p.suite === 'session' }
     );
     const took = Math.round((Date.now() - t0) / 1000);
     if (irq) irq.state.closedAt = Date.now();
+    // деплой подмены мог пережить вложенный прогон: следующий этап не идёт одновременно с ним
+    if (fw && fw.state.done) await fw.state.done;
+    if (fw && fw.state.dir) {
+      this.record({
+        kind: 'foreign-deploy',
+        pass: p.name,
+        dir: fw.state.dir,
+        rc: fw.state.rc ?? 130,
+        version: p.foreign.version
+      });
+    }
     this.record({
       kind: 'suite',
       pass: p.name,
@@ -2493,8 +2700,9 @@ class Session {
     if (p.suite !== 'rerun' || rerunTouched) {
       this.expectVersion = deployOk ? readVersionFile(dir) : null;
     }
-    // вложенный прогон остановлен сменой версии: на стенде может остаться чужая сборка
-    if (hasVersionStop(dir, this.t)) {
+    // вложенный прогон остановлен сменой версии или проход ставил чужую версию (foreign_version):
+    // на стенде может остаться чужая сборка — следующий проход и конец сессии ставят HEAD
+    if (hasVersionStop(dir, this.t) || (fw && fw.state.deployAt)) {
       this.deployed = null;
       this.expectVersion = null;
     }
@@ -2615,6 +2823,36 @@ class Session {
       );
     }
     if (irq) this.judgeInterrupt(irq.state, rows, push);
+    if (fw) {
+      const st = fw.state;
+      const where = foreignStageTitle(p.foreign.stage);
+      push(
+        'подмена версии: этап начался',
+        ['да'],
+        st.startedAt ? 'да' : 'нет',
+        st.startedAt ? `${where}: ${st.at}` : `этап ${where} не начался до выхода run.sh`,
+        st.startedAt > 0
+      );
+      const got = st.dir ? readVersionFile(st.dir) : null;
+      const ok = st.rc === 0 && got === p.foreign.version;
+      let detail;
+      if (!st.startedAt) {
+        detail = 'этап не начался — деплоя не было';
+      } else if (!st.dir) {
+        detail = `run.sh вышел раньше, чем через ${p.foreign.after} с после начала этапа`;
+      } else {
+        const secs = Math.round((st.deployAt - st.startedAt) / 1000);
+        detail = `деплой через ${secs} с после начала ${where}: код ${st.rc ?? '-'}, version ${got ?? 'нет'} (${path.relative(this.root, st.dir)})`;
+      }
+      push(
+        `подмена версии: установлена ${p.foreign.version}`,
+        ['PASS'],
+        ok ? 'PASS' : 'FAIL',
+        detail,
+        ok
+      );
+      if (st.rc === 3) this.network = true;
+    }
     if (irq && irq.state.killed && !this.network) {
       // run.sh убит до конца восстановления: стенд возвращает сессия, иначе следующие проходы
       // откажут на preflight. Не вернулся — сессия останавливается
