@@ -2615,7 +2615,7 @@ async function select(changed) {
         } else if ([...routes].some((r) => affected.has(r))) {
           res.specsDirect.add(spec);
           reasons.push(`${spec}: открывает затронутые страницы (${[...routes].filter((r) => affected.has(r)).sort().join(', ')})`);
-        } else if (affected.has('dashboard') && graph.mod.rootEntryIgnored?.(text, routes)) {
+        } else if (affected.has('dashboard') && graph.mod.rootEntryIgnored(text, routes)) {
           // сужение принято (D-32): вход через корень не считается маршрутом dashboard, если у спека
           // есть другие маршруты (в том числе случайный литерал); страховка — pages и канарейка
           reasons.push(`${spec}: вход через корень не считается маршрутом dashboard (у спека есть другие маршруты) — не выбран`);
