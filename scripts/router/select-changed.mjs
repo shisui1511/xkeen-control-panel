@@ -15,6 +15,8 @@
 //               из поля tests. Изменённый роутерный тест (со строкой области или без неё)
 //               выбирает тесты своего файла по именам и, по объявлениям (D-32), тесты TestRouter
 //               пакета, использующие изменённые объявления файла (goDeclDiff, goDeclClosure);
+//               правка или удаление существующего метода — правка его типа (WR-09), добавленный
+//               метод — только по своему имени, кроме имён из STD_IFACE_METHODS (D-33);
 //               файл без тестов TestRouter (помощники, обычный Test, Fuzz) в роутерном пакете —
 //               только по объявлениям. Неразобранное (init, TestMain, переменная `_` или с вызовом
 //               вне PURE_INIT_CALLS, пустой или точечный импорт, строка build или package,
@@ -750,6 +752,103 @@ const PURE_INIT_CALLS = [
   /^time\.Duration$/,
   /^(?:len|make|new|append)$/
 ];
+// Имена методов стандартных интерфейсов (D-33): добавленный метод с таким именем помечает тип
+// получателя изменённым, как правка существующего метода, — его вызывает не код тестов, а
+// библиотека через интерфейсное значение, и по имени метода потребители не находятся. Пополнять
+// именем метода интерфейса стандартной библиотеки или зависимости из go.mod, если этот метод
+// вызывает библиотека через интерфейс, а не код тестов. Метод, который тесты вызывают явно
+// (`x.Имя(`), сюда не нужен: его находит поиск по имени; метод интерфейса из пакета самих тестов —
+// тоже: вызов через интерфейс содержит имя метода. Только экспортируемые имена: неэкспортируемый
+// метод не реализует интерфейс другого пакета.
+const STD_IFACE_METHODS = new Set([
+  // io
+  'Read',
+  'Write',
+  'Close',
+  'ReadFrom',
+  'WriteTo',
+  'Seek',
+  'ReadAt',
+  'WriteAt',
+  'ReadByte',
+  'UnreadByte',
+  'WriteByte',
+  'ReadRune',
+  'UnreadRune',
+  'WriteString',
+  // fmt, errors
+  'String',
+  'GoString',
+  'Format',
+  'Error',
+  'Unwrap',
+  'Is',
+  'As',
+  // net/http
+  'RoundTrip',
+  'ServeHTTP',
+  'Flush',
+  'Header',
+  'WriteHeader',
+  'Hijack',
+  'Push',
+  // net
+  'Accept',
+  'Addr',
+  'Network',
+  'LocalAddr',
+  'RemoteAddr',
+  'SetDeadline',
+  'SetReadDeadline',
+  'SetWriteDeadline',
+  'Timeout',
+  'Temporary',
+  // context.Context
+  'Deadline',
+  'Done',
+  'Err',
+  'Value',
+  // sort, container/heap
+  'Len',
+  'Less',
+  'Swap',
+  'Pop',
+  // encoding, encoding/json, YAML
+  'MarshalJSON',
+  'UnmarshalJSON',
+  'MarshalText',
+  'UnmarshalText',
+  'MarshalBinary',
+  'UnmarshalBinary',
+  'MarshalYAML',
+  'UnmarshalYAML',
+  // database/sql
+  'Scan',
+  // sync.Locker
+  'Lock',
+  'Unlock',
+  // io/fs
+  'Open',
+  'Stat',
+  'ReadDir',
+  'ReadFile',
+  'Name',
+  'Size',
+  'Mode',
+  'ModTime',
+  'IsDir',
+  'Sys',
+  'Info',
+  'Type',
+  // log/slog
+  'Enabled',
+  'Handle',
+  'WithAttrs',
+  'WithGroup',
+  'LogValue',
+  // flag.Value
+  'Set'
+]);
 // Литералы Go в коде без комментариев (lex): строка, сырая строка, руна
 const GO_LITERAL = /"(?:[^"\\\n]|\\.)*"|`[^`]*`|'(?:[^'\\\n]|\\.)*'/g;
 const GO_IDENT_LIST = /^[ \t]*([A-Za-z_]\w*(?:[ \t]*,[ \t]*[A-Za-z_]\w*)*)/;
@@ -864,12 +963,16 @@ function goDeclIndexOf(text) {
 }
 
 /**
- * Сравнение базы и head одного Go-файла по объявлениям: { changed: Set имён, wide: причина | null }.
- * null на стороне — файла нет (добавлен: пустая база; удалён: пустой head): все объявления
- * существующей стороны изменены, строки build и package не сравниваются. По имени сравнивается
- * мультимножество нормализованных кодов всех одноимённых объявлений файла, а не «имя → один код»:
- * declarations() отдаёт получатель только как признак, и правка второго одноимённого метода иначе
- * потерялась бы. Порядок changed — объявления head, затем удалённые.
+ * Сравнение базы и head одного Go-файла по объявлениям: { changed: Set имён, wide: причина | null,
+ * addedMethods: [`<Тип>.<имя>`] }. null на стороне — файла нет (добавлен: пустая база; удалён:
+ * пустой head): все объявления существующей стороны изменены, строки build и package не
+ * сравниваются. По имени сравнивается мультимножество нормализованных кодов всех одноимённых
+ * объявлений файла, а не «имя → один код»: declarations() отдаёт получатель только как признак, и
+ * правка второго одноимённого метода иначе потерялась бы. Порядок changed — объявления head, затем
+ * удалённые. Правка или удаление существующего метода добавляет к changed тип получателя (WR-09);
+ * добавленный метод (в базе файла нет метода того же типа с тем же именем) — только своё имя, кроме
+ * имён из STD_IFACE_METHODS (D-33). addedMethods — такие добавленные методы в порядке объявлений
+ * head, чей тип в changed так и не попал (для строки причины).
  */
 function goDeclDiff(baseText, headText) {
   const b = baseText == null ? null : goDeclIndex(baseText);
@@ -881,7 +984,7 @@ function goDeclDiff(baseText, headText) {
   };
   if (b && !b.ok) setWide(`база: ${b.why}`);
   if (h && !h.ok) setWide(`head: ${h.why}`);
-  if (wide) return { changed, wide };
+  if (wide) return { changed, wide, addedMethods: [] };
   if (b && h) {
     if (b.build !== h.build) setWide('изменена строка //go:build');
     if (b.pkg !== h.pkg) setWide('изменена строка package');
@@ -926,11 +1029,30 @@ function goDeclDiff(baseText, headText) {
     if (impSet(b) !== impSet(h)) setWide('изменены импорты при неизменных объявлениях');
   }
   const all = [...(h ? h.decls : []), ...(b ? b.decls : [])];
-  // изменённый метод изменяет тип получателя: его неявные вызовы (через интерфейс) по имени метода
-  // не находятся, а тип встречается в потребителях (литерал, поле, конструктор)
+  // Изменённый или удалённый существующий метод изменяет тип получателя (WR-09): его неявные вызовы
+  // (через интерфейс) по имени метода не находятся, а тип встречается в потребителях (литерал, поле,
+  // конструктор). Добавленный метод — объявление head без метода того же типа с тем же именем в базе
+  // файла (у добавленного файла база пустая) — тип не помечает (D-33): прежде его никто не вызывал
+  // ни явно, ни через интерфейс, потребители ищутся по имени метода. Исключение — имя из
+  // STD_IFACE_METHODS: такой метод вызывает библиотека через интерфейс, и тип помечается, как
+  // раньше. Сравнения кодов по паре «тип, имя» нет: неизменённый T1.Foo при добавленном T2.Foo
+  // помечает T1; метод с неразобранным типом получателя (receiverType null) тип не помечает.
+  const basePairs = new Set((b ? b.decls : []).filter((d) => d.receiverType).flatMap((d) => d.names.map((n) => `${d.receiverType}.${n}`)));
+  const headSet = new Set(h ? h.decls : []);
+  const added = [];
   for (const d of all) {
-    if (d.receiverType && d.names.some((n) => changed.has(n))) changed.add(d.receiverType);
+    if (!d.receiverType || !d.names.some((n) => changed.has(n))) continue;
+    if (headSet.has(d) && d.names.every((n) => !basePairs.has(`${d.receiverType}.${n}`))) {
+      if (!d.names.some((n) => STD_IFACE_METHODS.has(n))) {
+        for (const n of d.names) added.push({ type: d.receiverType, label: `${d.receiverType}.${n}` });
+        continue;
+      }
+    }
+    changed.add(d.receiverType);
   }
+  // тип мог попасть в changed иначе (изменённый существующий метод того же типа, правка самого
+  // типа): строка причины не утверждает, что он не помечен
+  const addedMethods = [...new Set(added.filter((a) => !changed.has(a.type)).map((a) => a.label))];
   for (const n of changed) {
     for (const d of all) {
       if (!d.names.includes(n)) continue;
@@ -941,7 +1063,12 @@ function goDeclDiff(baseText, headText) {
       if (impure) setWide(`переменная ${n}: вызов ${impure} вне PURE_INIT_CALLS`);
     }
   }
-  return { changed, wide };
+  return { changed, wide, addedMethods };
+}
+
+/** Строка причины для добавленных методов, не пометивших тип (D-33). */
+function addedMethodsReason(file, addedMethods) {
+  return `${file}: по объявлениям — добавлены методы ${addedMethods.join(', ')}; тип не помечен изменённым (D-33), потребители — по имени метода`;
 }
 
 const goDirCache = new Map();
@@ -1679,6 +1806,7 @@ async function select(changed) {
       return;
     }
     if (r.missing.length > 0) reasons.push(`${file}: по объявлениям — ${r.missing.join(', ')} нет в фактах — пропущен`);
+    if (d.addedMethods.length > 0) reasons.push(addedMethodsReason(file, d.addedMethods));
     reasons.push(`${file}: по объявлениям — изменены ${[...d.changed].join(', ')}; тестов TestRouter, использующих их: ${r.n}`);
   };
   const specSelectable = (s) => specsAll.includes(s);
@@ -2374,6 +2502,7 @@ async function select(changed) {
           hitPkgs.push(pkg);
         }
       }
+      if (d.addedMethods.length > 0) reasons.push(addedMethodsReason(file, d.addedMethods));
       reasons.push(
         `${file}: по объявлениям — изменены ${[...d.changed].join(', ')}; тестов TestRouter в зависимых пакетах, использующих их: ${total} (${hitPkgs.join(', ') || 'нет'})`
       );
