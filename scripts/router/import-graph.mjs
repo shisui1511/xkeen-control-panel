@@ -282,15 +282,17 @@ export function parsePages(frontendDir = FRONTEND_DIR, reader = fsReader(fronten
 /**
  * Вкладки страницы: Map вкладка → Set входных файлов её компонентов; null — вкладок нет.
  * Компонент относится к вкладке, если его тег стоит в ветке `{#if|:else if subTab === 'x'}`
- * (до закрытия `{/if}`) или сам тег содержит `subTab === 'x'` (FilesTab active={…}). Компоненты
- * вне веток — общие для всех вкладок и в Map не входят.
+ * (до `{/if}`, `{:else}` или `{:else if …}` — тег в ветке else вкладке не принадлежит) или сам тег
+ * содержит `subTab === 'x'` (FilesTab active={…}). Компонент, у которого есть тег вне веток, — общий
+ * для всех вкладок и в Map не входит (иначе правка выбрала бы спеки одной вкладки).
  */
 function parseSubTabs(reader, aliases, pageFile) {
   const text = reader.read(pageFile);
   if (text === null) return null;
   const openers = [...text.matchAll(/\{(?:#if|:else if)\s+subTab === '([a-z][\w-]*)'\s*\}/g)].map((m) => ({
     tab: m[1],
-    at: m.index
+    at: m.index,
+    end: m.index + m[0].length
   }));
   if (openers.length === 0) return null;
   const tabs = new Map();
@@ -298,13 +300,19 @@ function parseSubTabs(reader, aliases, pageFile) {
     const [, name, spec] = m;
     const file = resolveImport(reader, aliases, pageFile, spec);
     if (!file) continue;
+    const used = new Set();
+    let common = false;
     for (const u of text.matchAll(new RegExp(`<${name}\\b[^>]*>`, 'g'))) {
       let tab = /subTab === '([a-z][\w-]*)'/.exec(u[0])?.[1] ?? null;
       if (!tab) {
         const prev = openers.filter((o) => o.at < u.index).pop();
-        if (prev && !text.slice(prev.at, u.index).includes('{/if}')) tab = prev.tab;
+        if (prev && !/\{(?:\/if|:else)\b/.test(text.slice(prev.end, u.index))) tab = prev.tab;
       }
-      if (!tab) continue;
+      if (tab) used.add(tab);
+      else common = true;
+    }
+    if (common) continue;
+    for (const tab of used) {
       if (!tabs.has(tab)) tabs.set(tab, new Set());
       tabs.get(tab).add(file);
     }
