@@ -886,6 +886,15 @@ function goDeclDiff(baseText, headText) {
     if (b.build !== h.build) setWide('изменена строка //go:build');
     if (b.pkg !== h.pkg) setWide('изменена строка package');
     if (b.blankDot.join('\n') !== h.blankDot.join('\n')) setWide('изменён пустой или точечный импорт');
+    // тот же идентификатор пакета указывает на другой путь (x/v1 → x/v2, подмена пакета): код
+    // объявлений не меняется, а поведение — да
+    const impBy = (ix) => {
+      const m = new Map();
+      for (const i of ix.imports) m.set(i.name || i.path.replace(/\/v\d+$/, '').split('/').pop(), i.path);
+      return m;
+    };
+    const bi = impBy(b);
+    for (const [id, p] of impBy(h)) if (bi.has(id) && bi.get(id) !== p) setWide(`изменён путь импорта ${id}`);
   } else {
     const side = b || h;
     if (side && side.blankDot.length > 0) setWide(`пустой или точечный импорт (${side.blankDot.join(', ')})`);
@@ -2595,6 +2604,10 @@ async function select(changed) {
         } else if ([...routes].some((r) => affected.has(r))) {
           res.specsDirect.add(spec);
           reasons.push(`${spec}: открывает затронутые страницы (${[...routes].filter((r) => affected.has(r)).sort().join(', ')})`);
+        } else if (affected.has('dashboard') && graph.mod.rootEntryIgnored?.(text, routes)) {
+          // сужение принято (D-32): вход через корень не считается маршрутом dashboard, если у спека
+          // есть другие маршруты (в том числе случайный литерал); страховка — pages и канарейка
+          reasons.push(`${spec}: вход через корень не считается маршрутом dashboard (у спека есть другие маршруты) — не выбран`);
         }
       }
       const all = new Set([...res.specsDirect, ...res.specsOther]);

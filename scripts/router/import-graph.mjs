@@ -449,6 +449,15 @@ export function specRoutes(specText, knownRoutes) {
 }
 
 /**
+ * Вход через корень без хэша у спека, которому specRoutes не отдал dashboard: у спека есть другие
+ * маршруты (в том числе случайный литерал с именем маршрута), и dashboard он не проверяет.
+ * Нужна только как диагностика выбора (--explain).
+ */
+export function rootEntryIgnored(specText, routes) {
+  return ROOT_ENTRY.test(specText) && routes instanceof Set && !routes.has('dashboard');
+}
+
+/**
  * Файлы frontend/src, на которые спек ссылается напрямую: относительные импорты и
  * `new URL('…', import.meta.url)` самого спека и его помощников из tests/router (транзитивно
  * по помощникам, не по src). Шаблон `${…}` в пути — любой сегмент. srcFiles — абсолютные пути
