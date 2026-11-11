@@ -254,11 +254,12 @@ if (map) {
 
   // Правило 8: полнота подобластей. Каждый файл продукта родителя входит в подобласть (иначе
   // его правка выбирала бы область целиком), и каждый тест с меткой родителя назван в tests
-  // какой-либо подобласти (иначе правка родителя его больше не выбирает).
-  const subListed = new Set();
-  for (const a of Object.values(areas)) for (const s of Object.values(a.subareas || {})) for (const t of s.tests) subListed.add(t);
+  // какой-либо подобласти этого же родителя (иначе правка родителя его больше не выбирает).
   for (const [name, a] of Object.entries(areas)) {
     if (!a.subareas) continue;
+    // подобласти именно этой области: тест, названный лишь в подобласти другой области, правкой
+    // файлов родителя не выбирается
+    const subListed = new Set(Object.values(a.subareas).flatMap((s) => s.tests));
     for (const f of product) {
       if (a.paths.some((g) => matchGlob(g, f)) && subareasOf(areas, name, f).length === 0) {
         violations.push(`${AREAS_FILE}: область ${name}: файл продукта ${f} не входит ни в одну подобласть`);
