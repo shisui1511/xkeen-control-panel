@@ -76,7 +76,8 @@
 # `tests/router/<спек>`) и XCP_PW_STOPPED=<каталог запуска>/version-stopped (признак остановки:
 # граница, на которой сменилась версия; пишется до сигнала) и
 # XCP_PW_GUARD_ERRORS=<каталог запуска>/version-guard-errors (границы, где сама сверка не
-# выполнилась: код version-guard.sh не 0, 3 и 4, тайм-аут или сигнал; строка `<граница><TAB><код>`).
+# выполнилась: код version-guard.sh не 0 и 4, тайм-аут или сигнал; строка `<граница><TAB><код>`;
+# код 3 — нет связи: finish_run повторяет сверку границы, четвёртый исход — FAIL version-guard-error).
 # Файлы сбрасываются при выборе каталога запуска; каждая строка version-guard-errors — FAIL
 # version-guard-error в finish_run (как в go-suite.sh; это не смена версии: класс new), сверка не
 # отключается молча. После каждого спека репортёр зовёт version-guard.sh; при смене версии он
@@ -379,6 +380,32 @@ BAD=0
 finish_run() {
   _fj=$1
   _frc=$2
+  # граница, где связь пропала на сверке (код 3 в version-guard-errors), перепроверяется: 0 — версия
+  # совпала; 4 — версия сменилась (признак остановки, дальше как при остановке репортёром); связь
+  # снова не вернулась — строка остаётся и становится FAIL version-guard-error ниже
+  # (остановка уже есть — такие границы покрыты ею и строк не дают)
+  if [ -s "$PW_DIR/version-guard-errors" ]; then
+    _gtmp="$PW_DIR/version-guard-errors.tmp"
+    : >"$_gtmp"
+    while IFS="$TAB" read -r _gb _gc || [ -n "$_gb" ]; do
+      [ -n "$_gb" ] || continue
+      if [ "$_gc" = 3 ]; then
+        [ ! -f "$PW_DIR/version-stopped" ] || continue
+        _grc=0
+        rt_version_guard "$ID" "$_gb" || _grc=$?
+        case "$_grc" in
+          0) continue ;;
+          4)
+            printf '%s\n' "$_gb" >"$PW_DIR/version-stopped"
+            continue
+            ;;
+        esac
+        _gc=$_grc
+      fi
+      printf '%s\t%s\n' "$_gb" "$_gc" >>"$_gtmp"
+    done <"$PW_DIR/version-guard-errors"
+    mv "$_gtmp" "$PW_DIR/version-guard-errors"
+  fi
   _stopped=0
   [ ! -f "$PW_DIR/version-stopped" ] || _stopped=1
   rt_redact <"$LOG" >"$LOG.red" && mv "$LOG.red" "$LOG"

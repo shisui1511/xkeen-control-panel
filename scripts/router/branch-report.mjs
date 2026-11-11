@@ -47,7 +47,7 @@
 //     вернулась, догона не было) начинается со слов «не догнан» (run.sh считает их красными).
 //   - Смена версии стенда (D-13, RTR-15) по <цель>/version-stop.tsv (stop<TAB><ядро><TAB><граница>
 //     <TAB><ожидалась><TAB><на стенде><TAB><эпоха ПК> — первая остановка, suspect<TAB><ядро><TAB>
-//     <проверка>, notrun<TAB><ядро><TAB><что не выполнено>) и <цель>/version-guard.tsv (ok, transition,
+//     <проверка>, notrun<TAB><ядро><TAB><что не выполнено>) и <цель>/version-guard.tsv (ok, transition, unverified,
 //     skip по границам; пишут rt_version_guard из lib.sh, go-suite.sh, pw-suite.sh и run.sh). Класс
 //     stand, открытый (run.sh считает его красным), не new и без подтверждающего перепрогона: FAIL
 //     version-guard — «смена версии стенда» (сбой самой сверки — отдельная проверка version-guard-error,
@@ -802,7 +802,7 @@ const confirmSkipWhy = confirmSkipText === null ? null : confirmSkipText.split("
 // Сверка версии стенда (D-13, контракт сверки версии): <цель>/version-stop.tsv — первая строка stop
 // (ядро, граница, ожидалась, на стенде, эпоха ПК), строки suspect (ядро, проверка — падение на
 // сменённой версии) и notrun (ядро, что не выполнено); <цель>/version-guard.tsv — строки ok,
-// transition и skip по границам. Нет файлов (старый отчёт) — сводка прежняя.
+// transition, skip и unverified (связь пропала на сверке) по границам. Нет файлов (старый отчёт) — сводка прежняя.
 const vStopText = readText("version-stop.tsv");
 const vGuardText = readText("version-guard.tsv");
 const vStopRows = (vStopText || "")
@@ -921,9 +921,10 @@ if (vStop) out.push(`- Сверка версии стенда: остановл�
 else if (vGuardText !== null) {
   const nChecked = vGuardKinds.filter((k) => k === "ok" || k === "transition").length;
   const nTrans = vGuardKinds.filter((k) => k === "transition").length;
+  const nUnver = vGuardKinds.filter((k) => k === "unverified").length;
   if (nChecked === 0 && vGuardKinds.includes("skip")) out.push("- Сверка версии стенда: выключена — ожидаемая версия неизвестна");
-  else if (nTrans > 0) out.push(`- Сверка версии стенда: ${nChecked} границ, принятых переходов ${nTrans}, смен нет`);
-  else out.push(`- Сверка версии стенда: ${nChecked} границ, смен нет`);
+  else if (nTrans > 0) out.push(`- Сверка версии стенда: ${nChecked} границ, принятых переходов ${nTrans}, смен нет${nUnver > 0 ? `, не сверено из-за связи ${nUnver}` : ""}`);
+  else out.push(`- Сверка версии стенда: ${nChecked} границ, смен нет${nUnver > 0 ? `, не сверено из-за связи ${nUnver}` : ""}`);
 }
 const lossRows = (readText("link-loss.tsv") || "").split("\n").filter(Boolean);
 if (lossRows.length > 0) {

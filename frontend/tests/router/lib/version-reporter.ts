@@ -21,7 +21,9 @@ import type { FullConfig, Reporter, Suite, TestCase } from '@playwright/test/rep
 // Коды version-guard.sh:
 //   0  версия совпала (или переход принят, или сверка выключена) — спек дописывается в
 //      XCP_PW_OK_SPECS, прогон идёт дальше;
-//   3  нет связи — строка в stderr, прогон идёт (потерю связи разбирает run.sh после этапа);
+//   3  нет связи (version-guard.sh уже повторил обращение) — строка в stderr и строка
+//      `<граница><TAB>3` в XCP_PW_GUARD_ERRORS, прогон идёт; pw-suite.sh повторит сверку границы
+//      в finish_run;
 //   4  версия сменилась (строки stop и FAIL version-guard уже записаны) — сначала пишется
 //      XCP_PW_STOPPED, затем процессу Playwright один раз уходит SIGINT: штатная мягкая
 //      остановка, идущие тесты прерываются, новые не стартуют, JSON-отчёт пишется;
@@ -112,6 +114,7 @@ export default class VersionReporter implements Reporter {
         if (this.okFile) appendFileSync(this.okFile, `${key}\n`);
         return;
       case 3:
+        if (this.errorsFile) appendFileSync(this.errorsFile, `${boundary}\t3\n`);
         process.stderr.write(`сверка версии: нет связи (граница ${boundary})${where}\n`);
         return;
       case 4:
