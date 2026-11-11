@@ -40,14 +40,36 @@
 // Оценка грубая: факты тестов для оценки берутся из рабочей копии этого скрипта, а не из коммита
 // слияния, поэтому для давних PR набор тестов мог быть другим.
 //
+// Две оценки (p50/p90 методом ближайшего ранга). «Все PR» — по каждой строке с оценкой. «Целевая»
+// — без строк, у которых селектор назвал обязательное основание полного выбора: строка stderr
+// `  - обязательный полный выбор: <основание>`. У прежней ревизии выбора (без этой строки)
+// основанием считается только однозначная причина `всё: <файл механизма выбора>: правка самого
+// выбора` (select-changed.mjs, core-marks.cjs, import-graph.mjs); прочие полные выборы (правка
+// areas.json в прежних правилах, защитный откат, непонятная причина) остаются в целевой выборке
+// как диагностика. Цели p50 ≤ 20 и p90 ≤ 45 мин относятся к целевой оценке; исключённые PR
+// перечисляются с причинами. Пустая целевая выборка — отсутствие оценки, а не ноль.
+//
+// Ошибки выбора. Строка PR — ошибка, если селектор завершился не нулём (код 3 — выбор
+// остановлен, причины «стоп»), сигналом, не запустился, нет коммита пары или в stdout нет хотя бы
+// одного обязательного поля RT_* (пустое значение допустимо, отсутствие — нет). Ошибка остаётся в
+// таблице с PR, кодом или сигналом и очищенной диагностикой; оценка незавершена (complete=false),
+// вердикт о целях не выносится, код выхода 1.
+//
+// --json — тот же расчёт одним объектом JSON в stdout: snapshot (хеш снимка), originMain, since,
+// until, rows (pr, id, base, head, kind, areas, go, specs, requiredFullReasons, minutes, why,
+// error), all и target ({ p50, p90 } или null без оценки), excluded ([{ pr, id, reasons }]),
+// errors (число), complete.
+//
 // Выводится только номер PR из темы слияния (`#<число>`) или SHA слияния; имена веток не
-// печатаются.
+// печатаются. Диагностика селектора очищается: управляющие символы убираются, абсолютные пути
+// рабочих копий и домашнего каталога заменяются, число и длина строк ограничены.
 //
 // Использование (из корня репозитория):
-//   node scripts/router/select-replay.mjs [--since <дата>] [--until <дата>] [--selector-root <каталог>]
+//   node scripts/router/select-replay.mjs [--since <дата>] [--until <дата>] [--selector-root <каталог>] [--json]
 //   node scripts/router/select-replay.mjs [--since <дата>] [--until <дата>] --capture <файл>
-//   node scripts/router/select-replay.mjs --snapshot <файл> [--selector-root <каталог>]
+//   node scripts/router/select-replay.mjs --snapshot <файл> [--selector-root <каталог>] [--json]
 // Таблица Markdown: первая ячейка строки PR — `#<номер>` (или SHA слияния); затем итоговые строки.
+// Код выхода: 0 — оценка завершена, 1 — ошибка выбора хотя бы одного PR или ошибка входа, 2 — аргументы.
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -71,12 +93,35 @@ const SNAPSHOT_VERSION = 1;
 const SHA_RE = /^[0-9a-f]{40}$/;
 const DAY_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
 const DATE_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}([ T][0-9:]+)?$/;
+// Поля вывода селектора: все обязательны (значение может быть пустым)
+const RT_FIELDS = [
+  'SELECT_ALL',
+  'GO_PKGS',
+  'SPECS',
+  'PW_GREP',
+  'GO_CORE_PKGS',
+  'GO_CORE_RUN',
+  'SPECS_CORE',
+  'KERNEL_TOUCHED',
+  'GO_SEQ',
+  'SPECS_FIRST',
+  'PW_INVERT',
+  'HARNESS',
+  'AREAS'
+];
+const RT_FLAGS = ['SELECT_ALL', 'KERNEL_TOUCHED', 'HARNESS'];
+// Код выхода селектора «выбор остановлен» (D-24, D-28)
+const SELECT_STOP = 3;
+// Прежняя ревизия выбора: однозначная причина полного выбора — правка механизма выбора
+const LEGACY_SELF = /^всё: (scripts\/router\/(?:select-changed\.mjs|core-marks\.cjs|import-graph\.mjs)): правка самого выбора$/;
+const DIAG_LINES = 8;
+const DIAG_WIDTH = 300;
 
 const USAGE = [
   'Использование:',
-  '  node scripts/router/select-replay.mjs [--since <дата>] [--until <дата>] [--selector-root <каталог>]',
+  '  node scripts/router/select-replay.mjs [--since <дата>] [--until <дата>] [--selector-root <каталог>] [--json]',
   '  node scripts/router/select-replay.mjs [--since <дата>] [--until <дата>] --capture <файл>',
-  '  node scripts/router/select-replay.mjs --snapshot <файл> [--selector-root <каталог>]'
+  '  node scripts/router/select-replay.mjs --snapshot <файл> [--selector-root <каталог>] [--json]'
 ].join('\n');
 
 function usage(msg) {
@@ -91,7 +136,7 @@ function fail(msg) {
 }
 
 function parseArgs(argv) {
-  const out = { since: null, until: null, capture: null, snapshot: null, selectorRoot: null };
+  const out = { since: null, until: null, capture: null, snapshot: null, selectorRoot: null, json: false };
   const value = (i, name) => {
     const v = argv[i];
     if (v === undefined || v === '') usage(`${name}: нужно значение`);
@@ -104,9 +149,11 @@ function parseArgs(argv) {
     else if (a === '--capture') out.capture = value(++i, a);
     else if (a === '--snapshot') out.snapshot = value(++i, a);
     else if (a === '--selector-root') out.selectorRoot = value(++i, a);
+    else if (a === '--json') out.json = true;
     else usage(`неизвестный аргумент ${a}`);
   }
   if (out.capture && out.snapshot) usage('--capture и --snapshot взаимоисключающие');
+  if (out.capture && out.json) usage('--json относится к повтору выбора, не к --capture');
   if (out.snapshot && (out.since || out.until)) usage('границы периода берутся из снимка: --since и --until с --snapshot не задаются');
   if (out.capture && out.selectorRoot) usage('--selector-root относится к повтору выбора, не к --capture');
   for (const v of [out.since, out.until]) {
@@ -326,9 +373,77 @@ function parseSelect(stdout, stderr) {
     const m = /^RT_([A-Z_]+)=(.*)$/.exec(line);
     if (m) vars[m[1]] = m[2].replace(/^'(.*)'$/, '$1');
   }
-  const kind = (/^ {2}- вид выбора: (.+)$/m.exec(stderr) || [])[1] || null;
-  const why = (/^ {2}- всё: (.+)$/m.exec(stderr) || [])[1] || '';
-  return { vars, kind, why };
+  // причины --explain: строки «  - <причина>» после «причины:»
+  const reasons = [];
+  for (const line of stderr.split('\n')) {
+    const m = /^ {2}- (.+)$/.exec(line);
+    if (m) reasons.push(m[1].trim());
+  }
+  const after = (prefix) => reasons.filter((r) => r.startsWith(prefix)).map((r) => r.slice(prefix.length).trim());
+  const kind = after('вид выбора:')[0] || null;
+  const why = after('всё:')[0] || '';
+  // контракт селектора: явное основание обязательного полного выбора
+  const required = after('обязательный полный выбор:').filter(Boolean);
+  const legacy = reasons.map((r) => LEGACY_SELF.exec(r)?.[1]).filter(Boolean).map((f) => `правка механизма выбора: ${f}`);
+  const stops = reasons.filter((r) => /^стоп\b/.test(r));
+  return { vars, kind, why, reasons, required, legacy, stops };
+}
+
+/** Диагностика без управляющих символов и абсолютных путей рабочих копий; ограничена по объёму. */
+function cleanDiag(lines, roots, max = DIAG_LINES) {
+  const home = process.env.HOME || '';
+  const subs = [...new Set(roots.filter(Boolean))].sort((a, b) => b.length - a.length);
+  const out = [];
+  for (const raw of lines) {
+    // eslint-disable-next-line no-control-regex
+    let s = String(raw).replace(/\u001b\[[0-9;]*m/g, '').replace(/[\u0000-\u001f\u007f]+/g, ' ');
+    for (const r of subs) s = s.split(r).join('.');
+    if (home.length > 1) s = s.split(home).join('~');
+    s = s.replace(/\s+/g, ' ').trim();
+    if (!s) continue;
+    out.push(s.length > DIAG_WIDTH ? `${s.slice(0, DIAG_WIDTH)}…` : s);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/**
+ * Строка PR по результату селектора: ошибка или выбор с оценкой. Ошибка — не нулевой код (3 —
+ * остановка), сигнал, сбой запуска, нет обязательного поля RT_*, недопустимый флаг или
+ * противоречие «обязательный полный выбор» при RT_SELECT_ALL=0.
+ */
+function selectRow(r, out, roots) {
+  const stderrLines = (r.stderr || '').split('\n');
+  const err = (message, extra = {}) => ({
+    code: r.status ?? null,
+    signal: r.signal ?? null,
+    message,
+    diagnostic: cleanDiag(extra.lines ?? (out.reasons.length > 0 ? out.reasons : stderrLines), roots),
+    stops: extra.stops ?? []
+  });
+  if (r.error) return { error: err(`селектор не запущен: ${r.error.code || r.error.message}`) };
+  if (r.signal) return { error: err(`селектор прерван сигналом ${r.signal}`) };
+  if (r.status === SELECT_STOP) {
+    const stops = cleanDiag(out.stops.length > 0 ? out.stops : out.reasons.length > 0 ? out.reasons : stderrLines, roots);
+    return { error: err('стоп: выбор остановлен селектором', { stops, lines: stops }) };
+  }
+  if (r.status !== 0) {
+    // без причин --explain — строки ошибки (без исходного кода и стека), иначе хвост stderr
+    const errLines = stderrLines.filter((l) => /^(\w*Error\b|select-changed:)/.test(l.trim()));
+    const tail = errLines.length > 0 ? errLines : stderrLines.filter((l) => l.trim()).slice(-DIAG_LINES);
+    return { error: err(`селектор завершился с кодом ${r.status}`, { lines: out.reasons.length > 0 ? out.reasons : tail }) };
+  }
+  const missing = RT_FIELDS.filter((f) => !Object.prototype.hasOwnProperty.call(out.vars, f));
+  if (missing.length > 0) return { error: err(`в выводе селектора нет полей ${missing.map((f) => `RT_${f}`).join(', ')}`) };
+  const badFlag = RT_FLAGS.find((f) => out.vars[f] !== '0' && out.vars[f] !== '1');
+  if (badFlag) return { error: err(`RT_${badFlag}=${JSON.stringify(out.vars[badFlag].slice(0, 20))}: ожидается 0 или 1`) };
+  const full = out.vars.SELECT_ALL === '1';
+  if (out.required.length > 0 && !full) {
+    return { error: err('противоречие: обязательный полный выбор при RT_SELECT_ALL=0') };
+  }
+  // основание исключения из целевой выборки: контракт селектора, иначе однозначная прежняя причина
+  const requiredFullReasons = full ? (out.required.length > 0 ? out.required : out.legacy) : [];
+  return { error: null, requiredFullReasons: cleanDiag(requiredFullReasons, roots, Infinity) };
 }
 
 const median = (list) => {
@@ -451,11 +566,32 @@ function replay(snap, args) {
   } catch (e) {
     fail(`--selector-root ${e.message}`);
   }
+  const roots = [sel.root, ROOT];
   const rows = [];
+  const errorRow = (base, error) => ({
+    ...base,
+    kind: 'ошибка',
+    areas: '-',
+    go: '-',
+    specs: '-',
+    min: null,
+    why: error.message,
+    requiredFullReasons: [],
+    error
+  });
   for (const m of snap.merges) {
     const base = { pr: m.pr, id: label(m), base: m.base, head: m.head };
-    if (sel.missing.has(m.base) || sel.missing.has(m.head)) {
-      rows.push({ ...base, kind: 'ошибка', areas: '-', go: '-', specs: '-', min: null, why: 'нет локального коммита пары' });
+    const lost = [m.base, m.head].filter((s) => sel.missing.has(s));
+    if (lost.length > 0) {
+      rows.push(
+        errorRow(base, {
+          code: null,
+          signal: null,
+          message: `нет локального коммита ${lost.map((s) => s.slice(0, 12)).join(', ')} в рабочей копии выбора`,
+          diagnostic: [],
+          stops: []
+        })
+      );
       continue;
     }
     const r = spawnSync(process.execPath, [path.join(sel.root, SELECTOR), '--base', m.base, '--head', m.head, '--explain'], {
@@ -464,8 +600,9 @@ function replay(snap, args) {
       maxBuffer: 64 * 1024 * 1024
     });
     const out = parseSelect(r.stdout || '', r.stderr || '');
-    if (r.status !== 0 || !out.vars.SELECT_ALL) {
-      rows.push({ ...base, kind: 'ошибка', areas: '-', go: '-', specs: '-', min: null, why: 'выбор не получен' });
+    const res = selectRow(r, out, roots);
+    if (res.error) {
+      rows.push(errorRow(base, res.error));
       continue;
     }
     const v = out.vars;
@@ -481,8 +618,53 @@ function replay(snap, args) {
       go: goCount,
       specs: v.SELECT_ALL === '1' ? 'все' : words(v.SPECS),
       min: estimate(model, v),
-      why: out.why
+      why: out.why,
+      requiredFullReasons: res.requiredFullReasons,
+      error: null
     });
+  }
+
+  const ok = rows.filter((r) => !r.error);
+  const errors = rows.filter((r) => r.error);
+  const excluded = ok.filter((r) => r.requiredFullReasons.length > 0);
+  const group = (list) => {
+    const mins = list.map((r) => r.min).filter((n) => typeof n === 'number');
+    return mins.length > 0 ? { p50: percentile(mins, 50), p90: percentile(mins, 90), n: mins.length } : null;
+  };
+  const all = group(ok);
+  const target = group(ok.filter((r) => r.requiredFullReasons.length === 0));
+  const complete = errors.length === 0;
+
+  if (args.json) {
+    const pick = (g) => (g ? { p50: g.p50, p90: g.p90 } : null);
+    const report = {
+      snapshot: snap.hash,
+      originMain: snap.originMain,
+      since: snap.since,
+      until: snap.until,
+      rows: rows.map((r) => ({
+        pr: r.pr,
+        id: r.id,
+        base: r.base,
+        head: r.head,
+        kind: r.kind,
+        areas: r.areas === '-' ? [] : r.areas.split(/\s+/).filter(Boolean),
+        go: typeof r.go === 'number' ? r.go : null,
+        specs: typeof r.specs === 'number' || r.specs === 'все' ? r.specs : null,
+        requiredFullReasons: r.requiredFullReasons,
+        minutes: r.min,
+        why: r.why || null,
+        error: r.error
+      })),
+      all: pick(all),
+      target: pick(target),
+      excluded: excluded.map((r) => ({ pr: r.pr, id: r.id, reasons: r.requiredFullReasons })),
+      errors: errors.length,
+      complete
+    };
+    console.log(JSON.stringify(report, null, 2));
+    if (!complete) process.exitCode = 1;
+    return;
   }
 
   const period = `${snap.since} … ${snap.until || `origin/main ${snap.originMain.slice(0, 12)}`}`;
@@ -491,32 +673,59 @@ function replay(snap, args) {
     `Снимок ${snap.hash.slice(0, 12)}: origin/main ${snap.originMain.slice(0, 12)}, история на ${snap.history.at} (окно ${snap.history.days} дн., строк ${snap.history.rows}), тест без истории — ${snap.unknownSec} с.`
   );
   console.log();
-  console.log('| PR | Вид выбора | Области | Go-тестов | Спеков | Оценка, мин |');
-  console.log('|---|---|---|---|---|---|');
+  console.log('| PR | Вид выбора | Области | Go-тестов | Спеков | Оценка, мин | Целевая |');
+  console.log('|---|---|---|---|---|---|---|');
   for (const r of rows) {
-    console.log(`| ${r.id} | ${r.kind} | ${r.areas} | ${r.go} | ${r.specs} | ${fmt(r.min)} |`);
+    const inTarget = r.error ? '-' : r.requiredFullReasons.length > 0 ? 'нет' : 'да';
+    console.log(`| ${r.id} | ${r.kind} | ${r.areas} | ${r.go} | ${r.specs} | ${fmt(r.min)} | ${inTarget} |`);
   }
   console.log();
   const counts = KINDS.map((k) => `${k} ${rows.filter((r) => r.kind === k).length}`);
-  console.log(`Вид выбора: ${counts.join(', ')}.`);
-  const mins = rows.filter((r) => r.min !== null).map((r) => r.min);
-  const p50 = percentile(mins, 50);
-  const p90 = percentile(mins, 90);
-  console.log(`p50: ${fmt(p50)} мин (цель ≤ ${GOALS.p50})`);
-  console.log(`p90: ${fmt(p90)} мин (цель ≤ ${GOALS.p90})`);
-  const nonFull = rows.filter((r) => r.kind !== 'полный' && r.min !== null).map((r) => r.min);
-  console.log(`p50 без полного выбора: ${fmt(percentile(nonFull, 50))} мин, p90: ${fmt(percentile(nonFull, 90))} мин`);
+  console.log(`Вид выбора: ${counts.join(', ')}, ошибка ${errors.length}.`);
+  const line = (g) => (g ? `p50 ${fmt(g.p50)} мин, p90 ${fmt(g.p90)} мин (PR ${g.n})` : 'нет оценки');
+  console.log(`Все PR: ${line(all)}.`);
+  console.log(
+    `Целевая выборка (без обязательных полных выборов): ${line(target)}; цели p50 ≤ ${GOALS.p50}, p90 ≤ ${GOALS.p90}.`
+  );
   for (const k of ['зависимости', 'обвязка']) {
-    const m = rows.filter((r) => r.kind === k && r.min !== null).map((r) => r.min);
+    const m = ok.filter((r) => r.kind === k).map((r) => r.min);
     console.log(`${k}: PR ${m.length}, максимум ${fmt(m.length ? Math.max(...m) : null)} мин (цель ≤ ${GOALS.support})`);
   }
-  const med = median(mins);
-  console.log(`медиана оценок (для сверки): ${fmt(med)} мин`);
-  const fulls = rows.filter((r) => r.kind === 'полный');
-  if (fulls.length > 0) {
+  console.log(`медиана оценок (для сверки): ${fmt(median(ok.map((r) => r.min)))} мин`);
+  if (excluded.length > 0) {
     console.log();
-    console.log('Полный выбор:');
-    for (const r of fulls) console.log(`- ${r.id}: ${r.why || 'причина не получена'}`);
+    console.log('Исключены из целевой выборки (обязательный полный выбор):');
+    for (const r of excluded) console.log(`- ${r.id}: ${r.requiredFullReasons.join('; ')}`);
+  }
+  const diagFull = ok.filter((r) => r.kind === 'полный' && r.requiredFullReasons.length === 0);
+  if (diagFull.length > 0) {
+    console.log();
+    console.log('Полный выбор без обязательного основания (в целевой выборке):');
+    for (const r of diagFull) console.log(`- ${r.id}: ${r.why || 'причина не получена'}`);
+  }
+  if (errors.length > 0) {
+    console.log();
+    console.log('Ошибки выбора:');
+    for (const r of errors) {
+      const e = r.error;
+      const how = e.signal ? `сигнал ${e.signal}` : e.code !== null ? `код ${e.code}` : 'без запуска';
+      console.log(`- ${r.id} (${r.head.slice(0, 12)}, ${how}): ${e.message}`);
+      for (const d of e.diagnostic) console.log(`  - ${d}`);
+    }
+  }
+  console.log();
+  if (!complete) {
+    console.log(`Оценка незавершена: ошибок выбора ${errors.length}. Вердикт о целях не выносится до разбора ошибок.`);
+    process.exitCode = 1;
+  } else if (!target) {
+    console.log('Целевая выборка пуста: оценки нет, вердикт о целях не выносится.');
+  } else {
+    const met = target.p50 <= GOALS.p50 && target.p90 <= GOALS.p90;
+    console.log(
+      met
+        ? `Цели достигнуты: p50 ${fmt(target.p50)} ≤ ${GOALS.p50}, p90 ${fmt(target.p90)} ≤ ${GOALS.p90}.`
+        : `Цели не достигнуты: p50 ${fmt(target.p50)} (цель ≤ ${GOALS.p50}), p90 ${fmt(target.p90)} (цель ≤ ${GOALS.p90}).`
+    );
   }
 }
 
