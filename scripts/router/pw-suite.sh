@@ -88,8 +88,8 @@
 # (класс stand); падения спеков из version-ok-specs.txt — обычные. Служебные файлы запуска:
 # files.tsv (проверка → спек, pw-parse.js --files-out) и interrupted.tsv (--interrupted-out).
 # Потребители кода 4 и version-stop.tsv — run.sh
-# и branch-report.mjs (остановка цикла ветвей, раздел остановки) и session.mjs (остановка
-# сессии); формы строк — контракт сверки версии (rt_version_guard в scripts/router/lib.sh).
+# и branch-report.mjs (остановка цикла ветвей, раздел остановки), session.mjs (остановка
+# сессии) и tree-step.sh (шаг bisect при коде 4 — SKIP, а не вердикт коммита); формы строк — контракт сверки версии (rt_version_guard в scripts/router/lib.sh).
 #
 # Код выхода: 0 — нет FAIL и XPASS, 3 — цель недоступна, 4 — смена версии стенда, этап
 # остановлен, иначе 1.

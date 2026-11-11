@@ -77,7 +77,7 @@
 # version-stop.tsv (stop — первая остановка; suspect<TAB><ядро><TAB><проверка> — FAIL и XPASS
 # группы, на которой сменилась версия, и её строка go:<пакет>; notrun<TAB><ядро><TAB>Go: <каталог
 # пакета>: <выражение запуска> — группы, которые не запускались). Потребители: run.sh,
-# branch-report.mjs, session.mjs, unattended.sh. go-done.txt и догон класса stand не меняются.
+# branch-report.mjs, session.mjs, unattended.sh; код 4 разбирает ещё tree-step.sh (шаг bisect — SKIP). go-done.txt и догон класса stand не меняются.
 #
 # Код выхода: 0 — нет FAIL и XPASS, 3 — цель недоступна, 4 — смена версии стенда (этап
 # остановлен на границе группы), иначе 1. Код 3 — только потеря связи.
