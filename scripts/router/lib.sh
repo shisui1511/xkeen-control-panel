@@ -392,6 +392,157 @@ rt_restore() {
   rt_ssh "$_id" "sh $RT_SNAP_DIR/snapshot.sh cleanup; rm -rf $RT_SNAP_DIR" >/dev/null 2>&1 || true
 }
 
+# --- сверка версии стенда на границе единицы работы (D-13, RTR-15) ------------------------------
+#
+# Файлы отчёта цели (<отчёт>/<цель>/):
+#   expect-version    ожидаемая версия — одна строка, как первая строка `/opt/sbin/xcp -v`. Пишут run.sh
+#                     после деплоя цели и session.mjs перед этапом; меняет только rt_version_guard при
+#                     принятом объявленном переходе (rt_version_set: временный файл и mv -f).
+#   version-guard.tsv по строке на границу:
+#                       ok<TAB><ядро><TAB><граница><TAB><версия>
+#                       transition<TAB><ядро><TAB><граница><TAB><было><TAB><стало>
+#                       skip<TAB><ядро><TAB><граница><TAB><причина>
+#   version-stop.tsv  stop<TAB><ядро><TAB><граница><TAB><ожидалась><TAB><на стенде><TAB><эпоха ПК> (одна,
+#                     первая остановка); suspect<TAB><ядро><TAB><проверка> и notrun<TAB><ядро><TAB><что>
+#                     дописывает этап (go-suite.sh, pw-suite.sh).
+# Читают: run.sh, branch-report.mjs, session.mjs, unattended.sh.
+# Граница: go:<каталог пакета>, go:<каталог пакета>#<k> (k-й запуск пакета в RT_GO_RUN_SEQ),
+# pw:<спек без tests/router/>.
+
+# Ожидаемая версия цели: rt_version_expected <цель>. Печатает expect-version цели, иначе
+# <отчёт>/version (деплой прогона), иначе ничего. Код всегда 0.
+rt_version_expected() {
+  if [ -s "$RT_REPORT/$1/expect-version" ]; then
+    head -n 1 "$RT_REPORT/$1/expect-version"
+  elif [ -s "$RT_REPORT/version" ]; then
+    head -n 1 "$RT_REPORT/version"
+  fi
+}
+
+# Новая ожидаемая версия цели: rt_version_set <цель> <версия>. Атомарно: временный файл в том же
+# каталоге и mv -f (expect-version читают параллельные этапы и репортёр Playwright).
+rt_version_set() {
+  _vs_dir="$RT_REPORT/$1"
+  mkdir -p "$_vs_dir"
+  _vs_tmp=$(mktemp "$_vs_dir/.expect-version.XXXXXX") || return 1
+  if printf '%s\n' "$2" >"$_vs_tmp" && mv -f "$_vs_tmp" "$_vs_dir/expect-version"; then
+    return 0
+  fi
+  rm -f "$_vs_tmp"
+  return 1
+}
+
+# Сверка версии стенда на границе:
+#   rt_version_guard <цель> <граница> [<файл объявления на устройстве> <файл parsed запуска на ПК>]
+# Одно обращение по ssh читает код и первую строку `/opt/sbin/xcp -v`, а с файлом объявления — ещё
+# его первую строку («<версия><TAB><имя теста>», пишет routertest.ExpectVersion) и удаляет его.
+# Совпало с ожиданием — строка ok. Не совпало: объявлена ровно наблюдаемая версия, и объявивший
+# тест прошёл в этом запуске (строка PASS<TAB>go:<тест> в parsed), — новая ожидаемая версия, строка
+# transition. Иначе (в том числе код `xcp -v` не 0 при живой связи — «ошибка чтения: код N»)
+# остановка: строка stop в version-stop.tsv (если её ещё нет) и строка результата FAIL version-guard.
+# Наблюдаемая версия без объявления прошедшего теста новой ожидаемой не становится.
+# Нет ожидания — строка skip, связи с цели не требуется.
+# Коды: 0 — совпало, переход принят или сверка выключена; 3 — нет связи (строк нет);
+# 4 — смена версии, этап останавливается; 2 — неверный вызов.
+rt_version_guard() {
+  [ $# -eq 2 ] || [ $# -eq 4 ] || {
+    echo "rt_version_guard: <цель> <граница> [<объявление> <parsed>]" >&2
+    return 2
+  }
+  _vg_id=$1
+  _vg_b=$2
+  _vg_decl=${3:-}
+  _vg_parsed=${4:-}
+  case "$_vg_id" in
+    '' | *[!a-z0-9]*)
+      echo "rt_version_guard: недопустимая цель" >&2
+      return 2
+      ;;
+  esac
+  case "$_vg_b" in
+    '' | *[!A-Za-z0-9_.:#/-]*)
+      echo "rt_version_guard: недопустимая граница" >&2
+      return 2
+      ;;
+  esac
+  # путь объявления встраивается в команду на устройстве: только абсолютный путь без «..»
+  case "$_vg_decl" in
+    '') ;;
+    /*[!A-Za-z0-9_./-]* | */../* | */..)
+      echo "rt_version_guard: недопустимый путь объявления" >&2
+      return 2
+      ;;
+    /*) ;;
+    *)
+      echo "rt_version_guard: путь объявления не абсолютный" >&2
+      return 2
+      ;;
+  esac
+  _vg_tab=$(printf '\t')
+  _vg_core=${RT_CORE:-}
+  [ -n "$_vg_core" ] || _vg_core=-
+  _vg_dir="$RT_REPORT/$_vg_id"
+  mkdir -p "$_vg_dir"
+  _vg_exp=$(rt_version_expected "$_vg_id" | tr -d '\000-\037')
+  if [ -z "$_vg_exp" ]; then
+    printf 'skip\t%s\t%s\t%s\n' "$_vg_core" "$_vg_b" "ожидаемая версия неизвестна" >>"$_vg_dir/version-guard.tsv"
+    return 0
+  fi
+
+  _vg_cmd='v=$(/opt/sbin/xcp -v 2>/dev/null); c=$?; printf "rc=%s\n" "$c"; printf "v=%s\n" "$(printf "%s\n" "$v" | head -n 1)"'
+  if [ -n "$_vg_decl" ]; then
+    _vg_cmd="$_vg_cmd; if [ -f $_vg_decl ]; then printf 'd=%s\n' \"\$(head -n 1 $_vg_decl)\"; fi; rm -f $_vg_decl"
+  fi
+  _vg_rc=0
+  _vg_out=$(rt_ssh "$_vg_id" "$_vg_cmd; exit 0" 2>/dev/null) || _vg_rc=$?
+  [ "$_vg_rc" != 3 ] || return 3
+
+  _vg_xrc=$(printf '%s\n' "$_vg_out" | sed -n 's/^rc=//p' | head -n 1)
+  if [ "$_vg_rc" != 0 ]; then
+    _vg_obs="ошибка чтения: код $_vg_rc"
+  elif [ "$_vg_xrc" != 0 ]; then
+    _vg_obs="ошибка чтения: код ${_vg_xrc:--}"
+  else
+    _vg_obs=$(printf '%s\n' "$_vg_out" | sed -n 's/^v=//p' | head -n 1 | tr -d '\000-\037' | sed 's/^ *//; s/ *$//')
+    [ -n "$_vg_obs" ] || _vg_obs="ошибка чтения: пустой вывод"
+  fi
+  if [ "$_vg_obs" = "$_vg_exp" ]; then
+    printf 'ok\t%s\t%s\t%s\n' "$_vg_core" "$_vg_b" "$_vg_obs" >>"$_vg_dir/version-guard.tsv"
+    return 0
+  fi
+
+  # объявленный переход: версия равна наблюдаемой и объявивший тест прошёл в этом запуске
+  _vg_dline=$(printf '%s\n' "$_vg_out" | sed -n 's/^d=//p' | head -n 1)
+  if [ -n "$_vg_dline" ] && [ -n "$_vg_parsed" ] && [ -f "$_vg_parsed" ]; then
+    _vg_dver=$(printf '%s' "${_vg_dline%%"$_vg_tab"*}" | tr -d '\000-\037' | sed 's/^ *//; s/ *$//')
+    _vg_dtest=${_vg_dline#*"$_vg_tab"}
+    case "$_vg_dline" in *"$_vg_tab"*) ;; *) _vg_dtest="" ;; esac
+    case "$_vg_dtest" in
+      '' | *[!A-Za-z0-9_./=+,:#-]*) _vg_dtest="" ;;
+    esac
+    if [ -n "$_vg_dtest" ] && [ -n "$_vg_dver" ] && [ "$_vg_dver" = "$_vg_obs" ] &&
+      awk -F'\t' -v n="go:$_vg_dtest" '$1 == "PASS" && $2 == n { f = 1 } END { exit !f }' "$_vg_parsed"; then
+      if rt_version_set "$_vg_id" "$_vg_obs"; then
+        printf 'transition\t%s\t%s\t%s\t%s\n' "$_vg_core" "$_vg_b" "$_vg_exp" "$_vg_obs" >>"$_vg_dir/version-guard.tsv"
+        return 0
+      fi
+    fi
+  fi
+
+  if ! grep -q "^stop$_vg_tab" "$_vg_dir/version-stop.tsv" 2>/dev/null; then
+    printf 'stop\t%s\t%s\t%s\t%s\t%s\n' "$_vg_core" "$_vg_b" "$_vg_exp" "$_vg_obs" "$(date +%s)" >>"$_vg_dir/version-stop.tsv"
+  fi
+  case "$_vg_obs" in
+    "ошибка чтения"*)
+      rt_result "$_vg_id" FAIL version-guard "версия стенда не прочитана: ожидалась $_vg_exp, на стенде: $_vg_obs (граница $_vg_b)"
+      ;;
+    *)
+      rt_result "$_vg_id" FAIL version-guard "версия стенда сменилась: ожидалась $_vg_exp, на стенде $_vg_obs (граница $_vg_b)"
+      ;;
+  esac
+  return 4
+}
+
 # Значение ключа из строк «ключ=значение»: rt_kv <ключ> (текст на stdin).
 rt_kv() {
   sed -n "s/^$1=//p" | head -n 1
