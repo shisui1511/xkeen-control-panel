@@ -13,8 +13,21 @@
 //   Go          записи RT_GO_SEQ `<каталог пакета>:<TestRouterИмя>`; пакеты — каталоги записей.
 //               Роутерный пакет — каталог с `_test.go`, у которого первая строка `//go:build router`.
 //   Playwright  роутерные спеки frontend/tests/router/*.spec.ts. Правка frontend/src — по графу
-//               импортов (scripts/router/import-graph.mjs): спек выбирается, если открывает
-//               затронутый маршрут (`#/<маршрут>` в тексте или `// e2e-pages: …`).
+//               импортов (scripts/router/import-graph.mjs) обеих ревизий (база и head: перенос
+//               или удаление импорта не теряет потребителей старой стороны): спек выбирается,
+//               если открывает затронутый маршрут (`#/<маршрут>`, вкладка `#/config/<вкладка>`
+//               или `// e2e-pages: …`). Обычный общий компонент добавляет pages с маршрутами
+//               потребителей и читающую канарейку оболочки (RTR-13, D-09). Область карты у
+//               файла frontend/src — только отметка RT_AREAS и объяснения: тесты области
+//               целиком не выбираются. Раньше графа — отдельные основания со своими
+//               объяснениями: локали (D-07) — по изменённым ключам обеих ревизий (литералы
+//               t('…') и шаблоны `…${…}…`, комментарии не считаются) → файлы-потребители →
+//               маршруты, ключ без потребителей выбор не расширяет (статика i18n, смоук);
+//               стили, токены и тема (D-08) — pages без сужения и читающая канарейка оболочки;
+//               каркас (D-09: App, main, Dashboard, tabFromHash, PageHeader) — pages без сужения
+//               и одна канарейка «правка → Применить»; хаб (D-10: модуль оболочки или
+//               достижимый строго больше чем с половины страниц) — как каркас плюс спеки,
+//               ссылающиеся на модуль напрямую.
 //               `// e2e-pages: *` — спек обходит все страницы: при выборе только по маршрутам он
 //               сужается до них через --grep; выбранный по иной причине (область, зависимости,
 //               правка самого спека) идёт без сужения. core-switch.spec.ts не выбирается: его
@@ -25,8 +38,10 @@
 // scripts/router/**, frontend/tests/router/lib/**, playwright.router.config.ts, global-setup/
 // teardown, internal/routertest, цели стенда и VERSION в Makefile) — RT_HARNESS=1 без полного
 // выбора. Зависимости (DEPS: package.json, package-lock.json, go.mod, go.sum) — патч/минор:
-// pages.spec.ts без сужения и канарейки всех областей; мажор (D-13) — канарейки плюс все спеки
-// (npm) или все Go-тесты (go.mod). Неизвестный файл — только смоук и предупреждение в причинах.
+// pages.spec.ts без сужения и канарейки всех областей, в том числе патч и минор svelte, vite и
+// @playwright/test (D-11 фазы 148.1.1); мажор (D-13) — смена мажора спецификации в package.json
+// или версии svelte/vite/@playwright/test в lock — канарейки плюс все спеки (npm) или все
+// Go-тесты (go.mod). Неизвестный файл — только смоук и предупреждение в причинах.
 //
 // Ярус full (D-14). Тест яруса full (метка Tier full у Go, @full у Playwright; core-marks.cjs,
 // testFacts → tier) идёт в гейте, только если его область затронута напрямую: изменён файл
@@ -82,6 +97,8 @@
 // Использование (из корня репозитория):
 //   node scripts/router/select-changed.mjs [--base <ref>] [--head <ref>] [--explain]
 //   node scripts/router/select-changed.mjs --files a,b,c [--explain]   # без git
+// --hub-percent <0…100> — диагностика: другой порог хаба (по умолчанию HUB_PERCENT_DEFAULT) для
+// сравнения вариантов в select-replay.mjs --hub-percent; штатный гейт его не задаёт.
 // --head <ref> — сравнивать <база>..<head> без рабочего дерева (прогон по слитым PR,
 // select-replay.mjs); карта областей, факты тестов и граф импортов при этом берутся из
 // рабочей копии. Без --base база — merge-base origin/main и head (или HEAD).
@@ -126,7 +143,8 @@ const HARNESS = [
 
 // Зависимости: узкий набор (смоук, pages, канарейки), при мажоре — шире (D-13).
 const DEPS = [/^frontend\/package\.json$/, /^frontend\/package-lock\.json$/, /^go\.mod$/, /^go\.sum$/];
-// Смена версии этих пакетов npm считается мажорной (любая).
+// У этих пакетов мажор проверяется и по версии в package-lock.json, не только в package.json.
+// Патч и минор — узкий выбор, как у прочих пакетов (D-11 фазы 148.1.1, RTR-13).
 const WATCHED_NPM = new Set(['svelte', 'vite', '@playwright/test']);
 
 // Цели Makefile, влияющие на стенд: сборка для роутеров и версия.
@@ -174,6 +192,37 @@ const IGNORED = [
   /^frontend\/eslint\.config\./,
   /^frontend\/\.gitignore$/
 ];
+
+// Спеки фронтенда с особой ролью (RTR-13). pages — read-обход всех маршрутов (`e2e-pages: *`).
+// Читающая канарейка оболочки (D-08) — существующий read-спек: шапка `// e2e-kind: read`
+// проверяется при каждом выборе. Не найден или не read — все спеки (расширение).
+const PAGES_SPEC = 'tests/router/pages.spec.ts';
+const SHELL_READ_CANARY = 'tests/router/config-visual.spec.ts';
+// Канарейка каркаса (D-09) — один существующий спек с путём «правка → Применить»: в тексте есть
+// вызов confirmApply(. Не найден — все спеки.
+const SHELL_APPLY_CANARY = 'tests/router/config-presets.spec.ts';
+
+// Стили, токены и тема (D-08): pages со всеми маршрутами и читающая канарейка оболочки.
+const FRONT_STYLE = [/^src\/styles\//, /^src\/assets\//, /\.css$/, /^src\/lib\/theme\.ts$/];
+// Каркас (D-09): точка входа, корневой компонент, маршрутизация и заголовок страниц — pages со
+// всеми маршрутами и канарейка «правка → Применить». Dashboard.svelte ещё и страница dashboard.
+const FRONT_FRAME = [
+  /^src\/App\.svelte$/,
+  /^src\/main\.ts$/,
+  /^src\/Dashboard\.svelte$/,
+  /^src\/lib\/tabFromHash\.ts$/,
+  /^src\/PageHeader\.svelte$/
+];
+// Локали (D-07): выбор по изменённым ключам.
+const FRONT_LOCALE = /^src\/locales\/[\w-]+\.json$/;
+// Хаб фронтенда (D-10): модуль оболочки или достижимый строго больше чем с HUB_PERCENT процентов
+// страниц (маршрутов Dashboard; вкладки config считаются одной страницей) в любой из ревизий.
+// Хаб — pages без сужения, канарейка «правка → Применить» и спеки, ссылающиеся на модуль
+// напрямую. Порог выбран повтором выбора (148.1.1-03: >45% и >50% дали одинаковый выбор на
+// одном снимке, >55% расширил один PR до всех спеков; при равенстве — >50%); подтверждается
+// повтором после интеграции фазы. --hub-percent — для сравнения вариантов.
+const HUB_PERCENT_DEFAULT = 50;
+let hubPercent = HUB_PERCENT_DEFAULT;
 
 // Файлы frontend/ вне src/, меняющие сборку панели: все роутерные спеки (не Go).
 const FRONTEND_ALL = [
@@ -315,19 +364,27 @@ function majorOf(spec) {
   return m[1] === '0' && m[2] !== undefined ? `0.${m[2]}` : m[1];
 }
 
-/** Мажор npm: причина (строка) или null. Нет базы или текста — мажор (расширение). */
+/**
+ * Зависимости npm (D-11, RTR-13): { major, changed }. major — причина широкого выбора (строка)
+ * или null: смена мажора спецификации в package.json у любого пакета, у svelte, vite и
+ * @playwright/test — ещё и смена мажора версии в lock. Патч и минор (в том числе этих трёх
+ * пакетов) мажором не считаются: changed — их список для объяснения. Нет базы или текста —
+ * мажор (расширение).
+ */
 function npmMajorReason(files) {
-  if (!ctx.from) return 'нет базы сравнения — считается мажором';
+  const changed = [];
+  const major = (why) => ({ major: why, changed });
+  if (!ctx.from) return major('нет базы сравнения — считается мажором');
   const baseTxt = gitShow(ctx.from, 'frontend/package.json');
   const headTxt = headText('frontend/package.json');
-  if (baseTxt === null || headTxt === null) return 'package.json не прочитан — считается мажором';
+  if (baseTxt === null || headTxt === null) return major('package.json не прочитан — считается мажором');
   let a;
   let b;
   try {
     a = JSON.parse(baseTxt);
     b = JSON.parse(headTxt);
   } catch {
-    return 'package.json не разобран — считается мажором';
+    return major('package.json не разобран — считается мажором');
   }
   const flat = (o) => ({
     ...(o.optionalDependencies || {}),
@@ -337,28 +394,37 @@ function npmMajorReason(files) {
   });
   const da = flat(a);
   const db = flat(b);
-  for (const name of new Set([...Object.keys(da), ...Object.keys(db)])) {
-    if (da[name] === db[name] || da[name] === undefined || db[name] === undefined) continue;
-    if (WATCHED_NPM.has(name)) return `${name}: ${da[name]} → ${db[name]}`;
-    if (majorOf(da[name]) !== majorOf(db[name])) return `${name}: ${da[name]} → ${db[name]}`;
+  for (const name of [...new Set([...Object.keys(da), ...Object.keys(db)])].sort()) {
+    if (da[name] === db[name]) continue;
+    if (da[name] === undefined || db[name] === undefined) {
+      changed.push(`${name} ${da[name] === undefined ? 'добавлен' : 'удалён'}`);
+      continue;
+    }
+    if (majorOf(da[name]) !== majorOf(db[name])) return major(`${name}: ${da[name]} → ${db[name]}`);
+    changed.push(`${name} ${da[name]} → ${db[name]}`);
   }
   if (files.has('frontend/package-lock.json')) {
     const baseLock = gitShow(ctx.from, 'frontend/package-lock.json');
     const headLock = headText('frontend/package-lock.json');
-    if (baseLock === null || headLock === null) return 'package-lock.json не прочитан — считается мажором';
+    if (baseLock === null || headLock === null) return major('package-lock.json не прочитан — считается мажором');
     try {
       const la = JSON.parse(baseLock).packages || {};
       const lb = JSON.parse(headLock).packages || {};
       for (const name of WATCHED_NPM) {
         const va = (la[`node_modules/${name}`] || {}).version;
         const vb = (lb[`node_modules/${name}`] || {}).version;
-        if (va !== vb) return `${name} (lock): ${va ?? '-'} → ${vb ?? '-'}`;
+        if (va === vb) continue;
+        // пакет появился, пропал или сменил мажор в lock — широкий выбор
+        if (va === undefined || vb === undefined || majorOf(va) !== majorOf(vb)) {
+          return major(`${name} (lock): ${va ?? '-'} → ${vb ?? '-'}`);
+        }
+        changed.push(`${name} (lock) ${va} → ${vb}`);
       }
     } catch {
-      return 'package-lock.json не разобран — считается мажором';
+      return major('package-lock.json не разобран — считается мажором');
     }
   }
-  return null;
+  return { major: null, changed };
 }
 
 /** Мажор Go: смена `go`, `toolchain` или модуля с суффиксом /vN. Нет базы — мажор. */
@@ -451,6 +517,220 @@ function makefileStand() {
     }
   }
   return { stand: false, why: '' };
+}
+
+// --- граф импортов фронтенда (RTR-13) ----------------------------------------------------
+
+/**
+ * Модели графа обеих ревизий: база (снимок ctx.from, если он есть) и head (снимок ctx.to или
+ * рабочее дерево). Ошибка чтения или разбора — исключение: вызывающий выбирает все спеки.
+ * specSources(абсолютный путь спека) — прямые ссылки спека на файлы src (кэш).
+ */
+async function frontGraph() {
+  const mod = await import(pathToFileURL(path.join(ROOT, 'scripts/router/import-graph.mjs')));
+  const fe = path.join(ROOT, 'frontend');
+  const models = [];
+  if (ctx.from) models.push({ side: 'база', model: mod.buildModel(fe, { reader: mod.gitReader(ROOT, ctx.from) }) });
+  models.push({
+    side: 'head',
+    model: mod.buildModel(fe, { reader: ctx.to ? mod.gitReader(ROOT, ctx.to) : mod.fsReader(fe) })
+  });
+  const routes = new Set(models.flatMap((m) => [...m.model.routes]));
+  const srcFiles = [...new Set(models.flatMap((m) => m.model.reader.files(path.join(fe, 'src'))))];
+  const cache = new Map();
+  const specSources = (specAbs) => {
+    if (!cache.has(specAbs)) cache.set(specAbs, mod.specSources(specAbs, srcFiles, fe));
+    return cache.get(specAbs);
+  };
+  /**
+   * Хаб (D-10) по ревизиям present ([{ side, model }]): null — не хаб, иначе строка основания.
+   * Оболочка (рендерится на каждой странице) — хаб всегда.
+   */
+  const hubOf = (abs, present) => {
+    const shell = present.filter((m) => m.model.shell.has(abs)).map((m) => m.side);
+    if (shell.length > 0) return `оболочка приложения (${shell.join(', ')})`;
+    for (const m of present) {
+      const pages = new Set(m.model.routesOf(abs).map((r) => mod.topRoute(r)));
+      const total = m.model.topRoutes.size;
+      if (total > 0 && (pages.size * 100) / total > hubPercent) {
+        return `достижим с ${pages.size} из ${total} страниц (${m.side}) — больше ${hubPercent}%`;
+      }
+    }
+    return null;
+  };
+  return { mod, models, routes, srcFiles, specSources, hubOf };
+}
+
+// --- локали: ключи и потребители (D-07) ------------------------------------------------------
+
+/** Ключи вложенного JSON локали: Map 'раздел.ключ' → JSON значения (лист или массив). */
+function flattenLocale(obj, prefix = '', out = new Map()) {
+  for (const [k, v] of Object.entries(obj)) {
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) flattenLocale(v, key, out);
+    else out.set(key, JSON.stringify(v));
+  }
+  return out;
+}
+
+/**
+ * Изменённые ключи файла локали между базой и head: [{ key, status }], status — изменён,
+ * добавлен, удалён, сменил тип, переименован (старое имя → новое: оба ключа в списке).
+ * Нет базы сравнения или файл не разобран — исключение (вызывающий расширяет выбор).
+ */
+function localeKeyChanges(file) {
+  if (!ctx.from) throw new Error('нет базы сравнения ключей');
+  const parse = (text, side) => {
+    if (text === null) return new Map();
+    try {
+      const v = JSON.parse(text);
+      if (v === null || typeof v !== 'object' || Array.isArray(v)) throw new Error('не объект');
+      return flattenLocale(v);
+    } catch (e) {
+      throw new Error(`${side}: JSON не разобран (${String(e.message ?? e).split('\n', 1)[0]})`);
+    }
+  };
+  const a = parse(gitShow(ctx.from, file), 'база');
+  const b = parse(headText(file), 'head');
+  const kindOf = (s) => (s.startsWith('{') ? 'object' : s.startsWith('[') ? 'array' : typeof JSON.parse(s));
+  const out = [];
+  const removed = [];
+  const added = [];
+  for (const k of new Set([...a.keys(), ...b.keys()])) {
+    const va = a.get(k);
+    const vb = b.get(k);
+    if (va === vb) continue;
+    if (va === undefined) added.push(k);
+    else if (vb === undefined) removed.push(k);
+    else out.push({ key: k, status: kindOf(va) === kindOf(vb) ? 'изменён' : 'сменил тип' });
+  }
+  for (const k of removed) {
+    const to = added.find((n) => b.get(n) === a.get(k));
+    out.push({ key: k, status: to ? `переименован в ${to}` : 'удалён' });
+  }
+  for (const k of added) {
+    const from = removed.find((o) => a.get(o) === b.get(k));
+    out.push({ key: k, status: from ? `переименован из ${from}` : 'добавлен' });
+  }
+  return out.sort((x, y) => (x.key < y.key ? -1 : x.key > y.key ? 1 : 0));
+}
+
+/** Текст без комментариев JS/CSS/разметки: использование ключа в комментарии не считается. */
+function stripComments(text) {
+  return text
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:\\'"`\w])\/\/[^\n]*/g, '$1');
+}
+
+/**
+ * Использования ключей в файле: точные строковые литералы вида 'раздел.ключ' (в t('…'), $t("…")
+ * и переданные как значение) и шаблоны `…${…}…`: внутри t(…) — любой шаблон, вне — только со
+ * статическим началом, содержащим точку. Шаблон проверяется как регулярное выражение по ключу
+ * (`${…}` — любая непустая часть): совпадающий статический префикс или суффикс выбирает файл,
+ * шаблон без статической части (`${key}`) — любой ключ.
+ */
+function keyUsages(text) {
+  const code = stripComments(text);
+  const literals = new Set();
+  for (const m of code.matchAll(/(['"`])([A-Za-z_][\w-]*(?:\.[\w-]+)+)\1/g)) literals.add(m[2]);
+  const patterns = [];
+  for (const m of code.matchAll(/`([^`]*\$\{[^`]*)`/g)) {
+    const inT = /(?:^|[^\w$.])\$?t\(\s*$/.test(code.slice(Math.max(0, m.index - 12), m.index));
+    const parts = m[1].split(/\$\{[^}]*\}/);
+    if (!inT && !parts[0].includes('.')) continue;
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    patterns.push({ src: m[1], re: new RegExp(`^${parts.map(esc).join('.+')}$`) });
+  }
+  return { literals, patterns };
+}
+
+/**
+ * Выбор по изменённым ключам локалей (D-07): ключ → файлы, где он используется (в базе для
+ * прежнего имени, в head для нового) → маршруты по графу той же ревизии. Потребитель в оболочке —
+ * pages без сужения и читающая канарейка. Спек, читающий файл локали и называющий ключ, —
+ * напрямую. Ключ без потребителей выбор не расширяет: его ловит статика i18n, идёт базовый смоук.
+ * Ошибка сравнения ключей — все спеки. Возвращает { reasons, all, routes, specs, shell }.
+ */
+function localeSelect(graph, localeFiles, specsAll) {
+  const out = { reasons: [], all: false, routes: new Set(), specs: new Set(), shell: false };
+  const keys = new Map(); // ключ → { statuses: Set, files: Set }
+  for (const rel of localeFiles) {
+    const file = `frontend/${rel}`;
+    let changes;
+    try {
+      changes = localeKeyChanges(file);
+    } catch (e) {
+      out.all = true;
+      out.reasons.push(`${file}: ключи не сравнить (${e.message}) — все роутерные спеки`);
+      continue;
+    }
+    if (changes.length === 0) out.reasons.push(`${file}: ключи и значения не изменились — проверок не добавляет`);
+    for (const c of changes) {
+      if (!keys.has(c.key)) keys.set(c.key, { statuses: new Set(), files: new Set() });
+      keys.get(c.key).statuses.add(c.status);
+      keys.get(c.key).files.add(path.posix.basename(rel));
+    }
+  }
+  if (keys.size === 0) return out;
+  // Индекс использований по ревизиям: файлы графа (без стилей), литералы и шаблоны
+  const index = graph.models.map((m) => {
+    const rows = [];
+    for (const f of m.model.graph.keys()) {
+      if (/\.css$/.test(f)) continue;
+      const text = m.model.reader.read(f);
+      if (text !== null) rows.push({ file: f, ...keyUsages(text) });
+    }
+    return { side: m.side, model: m.model, rows };
+  });
+  const localeAbs = new Set(localeFiles.map((rel) => path.join(ROOT, 'frontend', rel)));
+  const readers = specsAll.filter((s) => {
+    const src = graph.specSources(path.join(ROOT, 'frontend', s));
+    return [...localeAbs].some((a) => src.has(a));
+  });
+  const readerUsages = new Map(readers.map((s) => [s, keyUsages(readFileSync(path.join(ROOT, 'frontend', s), 'utf8'))]));
+  for (const [key, info] of [...keys].sort((x, y) => (x[0] < y[0] ? -1 : 1))) {
+    const where = new Map(); // файл → { sides: Set, routes: Set, shell: bool }
+    for (const ix of index) {
+      for (const row of ix.rows) {
+        if (!row.literals.has(key) && !row.patterns.some((p) => p.re.test(key))) continue;
+        const rel = path.relative(path.join(ROOT, 'frontend'), row.file);
+        if (!where.has(rel)) where.set(rel, { sides: new Set(), routes: new Set(), shell: false });
+        const w = where.get(rel);
+        w.sides.add(ix.side);
+        if (graph.hubOf(row.file, [ix])) w.shell = true;
+        for (const r of ix.model.routesOf(row.file)) w.routes.add(r);
+      }
+    }
+    const specHits = readers.filter((s) => {
+      const u = readerUsages.get(s);
+      return u.literals.has(key) || u.patterns.some((p) => p.re.test(key));
+    });
+    const head = `${[...info.files].sort().join(', ')}: ключ ${key} (${[...info.statuses].join(', ')})`;
+    if (where.size === 0 && specHits.length === 0) {
+      out.reasons.push(`${head}: потребителей нет ни в одной ревизии — выбор не расширяет (статика i18n, базовый смоук)`);
+      continue;
+    }
+    const parts = [];
+    for (const [rel, w] of [...where].sort((x, y) => (x[0] < y[0] ? -1 : 1))) {
+      const sides = [...w.sides].join(', ');
+      if (w.shell) {
+        out.shell = true;
+        parts.push(`${rel} (${sides}) — оболочка или хаб`);
+      } else if (w.routes.size > 0) {
+        for (const r of w.routes) out.routes.add(r);
+        parts.push(`${rel} (${sides}) → страницы ${[...w.routes].join(', ')}`);
+      } else {
+        parts.push(`${rel} (${sides}) — не импортируется приложением`);
+      }
+    }
+    for (const s of specHits) {
+      out.specs.add(s);
+      parts.push(`${s} читает ключ из файла локали`);
+    }
+    out.reasons.push(`${head}: ${parts.join('; ')}`);
+  }
+  return out;
 }
 
 // --- факты тестов и порядок -------------------------------------------------------------
@@ -601,6 +881,9 @@ async function select(changed) {
   };
 
   const touchedSrc = [];
+  // Области, отмеченные только файлами frontend/src: в RT_AREAS и объяснении, но тесты области
+  // целиком не выбираются — фронтенд классифицирует граф импортов (D-09)
+  const frontMarked = new Set();
   const touchedSpecs = new Set();
   const goChanged = new Set(); // каталоги изменённых Go-пакетов без области (откат на пакет)
   const goTestFiles = new Set(); // изменённые _test.go
@@ -672,8 +955,8 @@ async function select(changed) {
     if (file.startsWith('frontend/src/')) {
       touchedSrc.push(file.slice('frontend/'.length));
       for (const n of areasOf(file)) {
-        res.areas.add(n);
-        reasons.push(`${file}: область ${n} (выбор — по графу импортов)`);
+        frontMarked.add(n);
+        reasons.push(`${file}: область ${n} (выбор — по графу импортов, не всеми тестами области)`);
       }
       continue;
     }
@@ -749,13 +1032,19 @@ async function select(changed) {
     addCanaries(`зависимости: ${files}`);
     reasons.push(`${files}: зависимости — смоук, pages без сужения и канарейки`);
     if (npmTouched) {
-      const why = npmMajorReason(depFiles);
-      if (why) {
+      const npm = npmMajorReason(depFiles);
+      if (npm.major) {
+        const why = npm.major;
         specsAll.forEach((s) => {
           res.specsOther.add(s);
           res.specsForced.add(s);
         });
         reasons.push(`npm: мажорное обновление или смена Svelte/Vite/Playwright (${why}) — канарейки и все спеки`);
+      } else {
+        // D-11: патч и минор любого пакета, в том числе svelte, vite и @playwright/test
+        reasons.push(
+          `npm: патч или минор без смены мажора (${npm.changed.join(', ') || 'версии пакетов не изменились, только lock'}) — смоук, pages и канарейки областей`
+        );
       }
     }
     if (depFiles.has('go.mod')) {
@@ -776,6 +1065,12 @@ async function select(changed) {
       reasons.push(`область ${name}: тестов Go ${n.go}, спеков ${n.specs}`);
     }
     if (sharedHit) addCanaries('правка общего кода');
+    // Отметка фронтенда: только RT_AREAS и объяснение, тесты выбирает граф импортов
+    for (const name of [...frontMarked].sort()) {
+      if (res.areas.has(name)) continue;
+      res.areas.add(name);
+      reasons.push(`область ${name}: отмечена правкой frontend/src — тесты области целиком не выбираются`);
+    }
   }
 
   // --- изменённые роутерные тесты ---------------------------------------------
@@ -851,31 +1146,141 @@ async function select(changed) {
   // --- Playwright -------------------------------------------------------------
   if (!res.all) {
     const affected = new Set();
-    let model = null;
-    let specRoutes = null;
+    const touchedAbs = touchedSrc.map((rel) => path.join(ROOT, 'frontend', rel));
+    let graph = null;
+    const said = new Set();
+    const sayOnce = (line) => {
+      if (said.has(line)) return;
+      said.add(line);
+      reasons.push(line);
+    };
+    // Спек с особой ролью (pages без сужения, канарейки оболочки): выбран не по маршрутам
+    const addForced = (spec, why) => {
+      if (!specSelectable(spec)) return false;
+      res.specsForced.add(spec);
+      if (!res.specsDirect.has(spec)) res.specsOther.add(spec);
+      sayOnce(`${spec}: ${why}`);
+      return true;
+    };
+    // Канарейка оболочки: существующий спек, шапка или содержимое сверяются при каждом выборе
+    const addShellCanary = (spec, fits, what, why) => {
+      const abs = path.join(ROOT, 'frontend', spec);
+      const text = existsSync(abs) ? readFileSync(abs, 'utf8') : null;
+      if (text === null || !specSelectable(spec) || !fits(text)) {
+        pwAll = true;
+        sayOnce(`${spec}: ${what} не найдена или не подходит — все роутерные спеки`);
+        return;
+      }
+      addForced(spec, `${what} (${why})`);
+    };
+    const isReadSpec = (text) => text.split('\n', 5).some((l) => /^\/\/\s*e2e-kind:\s*read\s*$/.test(l.trim()));
+
     if (touchedSrc.length > 0) {
-      const mod = await import(pathToFileURL(path.join(ROOT, 'scripts/router/import-graph.mjs')));
-      specRoutes = mod.specRoutes;
-      model = mod.buildModel(path.join(ROOT, 'frontend'));
+      try {
+        graph = await frontGraph();
+        reasons.push(`граф импортов: ${graph.models.map((m) => `${m.side} — маршрутов ${m.model.routes.size}, оболочка ${m.model.shell.size} файлов`).join('; ')}`);
+      } catch (e) {
+        pwAll = true;
+        reasons.push(`граф импортов не построен (${String(e.message ?? e).split('\n', 1)[0]}) — все роутерные спеки`);
+      }
+    }
+    let componentHit = false;
+    const hubHit = [];
+    const styleHit = [];
+    const frameHit = [];
+    const localeFiles = [];
+    // Стили, каркас и локали — раньше общего графа: у каждого основания своё правило и объяснение
+    for (const rel of touchedSrc) {
+      if (FRONT_LOCALE.test(rel)) localeFiles.push(rel);
+      else if (FRONT_STYLE.some((re) => re.test(rel))) styleHit.push(rel);
+      else if (FRONT_FRAME.some((re) => re.test(rel))) frameHit.push(rel);
+    }
+    for (const rel of styleHit) {
+      reasons.push(`frontend/${rel}: стили, токены или тема (D-08) — pages со всеми маршрутами и читающая канарейка оболочки`);
+    }
+    for (const rel of frameHit) {
+      if (rel === 'src/Dashboard.svelte') {
+        // переключатель маршрутов и одновременно страница dashboard: её спеки — по маршруту
+        affected.add('dashboard');
+        reasons.push(`frontend/${rel}: каркас приложения (D-09) и страница dashboard — pages со всеми маршрутами, канарейка «правка → Применить» и спеки dashboard`);
+      } else {
+        reasons.push(`frontend/${rel}: каркас приложения (D-09) — pages со всеми маршрутами и канарейка «правка → Применить»`);
+      }
+    }
+    if (styleHit.length > 0) {
+      addForced(PAGES_SPEC, 'обход всех маршрутов без сужения (стили)');
+      addShellCanary(SHELL_READ_CANARY, isReadSpec, 'читающая канарейка оболочки', 'правка стилей');
+    }
+    if (frameHit.length > 0) {
+      addForced(PAGES_SPEC, 'обход всех маршрутов без сужения (каркас)');
+      addShellCanary(SHELL_APPLY_CANARY, (t) => /\bconfirmApply\(/.test(t), 'канарейка каркаса «правка → Применить»', 'правка каркаса');
+    }
+    const special = new Set([...styleHit, ...frameHit, ...localeFiles]);
+    if (graph && localeFiles.length > 0) {
+      const lr = localeSelect(graph, localeFiles, specsAll);
+      for (const line of lr.reasons) reasons.push(line);
+      if (lr.all) pwAll = true;
+      for (const r of lr.routes) affected.add(r);
+      for (const s of lr.specs) {
+        res.specsDirect.add(s);
+        sayOnce(`${s}: читает изменённые ключи локали`);
+      }
+      if (lr.shell) {
+        addForced(PAGES_SPEC, 'обход всех маршрутов без сужения (ключ локали в оболочке или хабе)');
+        addShellCanary(SHELL_READ_CANARY, isReadSpec, 'читающая канарейка оболочки', 'ключ локали в оболочке или хабе');
+      }
+    }
+    if (graph) {
       for (const rel of touchedSrc) {
+        if (special.has(rel)) continue;
         const abs = path.join(ROOT, 'frontend', rel);
-        if (!existsSync(abs)) {
-          reasons.push(`frontend/${rel}: удалён`);
+        const present = graph.models.filter((m) => m.model.reader.isFile(abs));
+        if (present.length === 0) {
+          reasons.push(`frontend/${rel}: удалён (нет в ${graph.models.map((m) => m.side).join(' и ')})`);
           continue;
         }
-        if (model.shell.has(abs)) {
-          pwAll = true;
-          reasons.push(`frontend/${rel}: оболочка приложения — все роутерные спеки`);
+        const hub = graph.hubOf(abs, present);
+        if (hub) {
+          hubHit.push({ rel, abs, why: hub });
           continue;
         }
-        const routes = [...model.pageFiles].filter(([, files]) => files.has(abs)).map(([r]) => r);
+        // Маршруты обеих ревизий: перенос или удаление импорта не теряет потребителей старой стороны
+        const per = present.map((m) => ({ side: m.side, routes: m.model.routesOf(abs) }));
+        const routes = [...new Set(per.flatMap((p) => p.routes))];
         if (routes.length === 0) {
-          reasons.push(`frontend/${rel}: не импортируется приложением`);
+          reasons.push(`frontend/${rel}: не импортируется приложением (${per.map((p) => p.side).join(', ')})`);
           continue;
         }
         routes.forEach((r) => affected.add(r));
-        reasons.push(`frontend/${rel}: страницы ${routes.join(', ')}`);
+        componentHit = true;
+        const sides =
+          per.length > 1 && per.some((p) => p.routes.join() !== per[0].routes.join())
+            ? ` (${per.map((p) => `${p.side}: ${p.routes.join(', ') || '-'}`).join('; ')})`
+            : '';
+        reasons.push(`frontend/${rel}: страницы ${routes.join(', ')}${sides}`);
       }
+    }
+    // Хаб (D-10): как каркас — pages без сужения и канарейка «правка → Применить», плюс спеки,
+    // ссылающиеся на модуль напрямую; прочие основания выбора сохраняются
+    if (hubHit.length > 0) {
+      for (const h of hubHit) {
+        const direct = specsAll.filter((s) => graph.specSources(path.join(ROOT, 'frontend', s)).has(h.abs));
+        reasons.push(
+          `frontend/${h.rel}: хаб — ${h.why}; pages со всеми маршрутами, канарейка «правка → Применить»` +
+            (direct.length > 0 ? `, спеки с прямой ссылкой: ${direct.join(', ')}` : ', спеков с прямой ссылкой нет')
+        );
+        for (const s of direct) {
+          res.specsDirect.add(s);
+          res.specsForced.add(s);
+        }
+      }
+      addForced(PAGES_SPEC, 'обход всех маршрутов без сужения (хаб)');
+      addShellCanary(SHELL_APPLY_CANARY, (t) => /\bconfirmApply\(/.test(t), 'канарейка каркаса «правка → Применить»', 'правка хаба');
+    }
+    // Обычный общий компонент: спеки маршрутов-потребителей, pages с их маршрутами и читающая
+    // канарейка оболочки (D-09)
+    if (componentHit && !pwAll) {
+      addShellCanary(SHELL_READ_CANARY, isReadSpec, 'читающая канарейка оболочки', 'правка общего компонента');
     }
 
     for (const s of touchedSpecs) {
@@ -905,22 +1310,32 @@ async function select(changed) {
           reasons.push(`${spec}: обходит все страницы — сужается до затронутых`);
           continue;
         }
-        const text = readFileSync(path.join(ROOT, 'frontend', spec), 'utf8');
-        const routes = specRoutes(text, model.routes);
+        const specAbs = path.join(ROOT, 'frontend', spec);
+        const text = readFileSync(specAbs, 'utf8');
+        const routes = graph.mod.specRoutes(text, graph.routes);
         if (routes === null) {
+          // Маршрут не известен: прямые ссылки спека на изменённые файлы называются, иначе
+          // включение консервативное
           res.specsDirect.add(spec);
-          reasons.push(`${spec}: маршруты не определены — запускается всегда`);
+          const hit = touchedAbs.filter((a) => graph.specSources(specAbs).has(a));
+          reasons.push(
+            hit.length > 0
+              ? `${spec}: маршруты не определены, ссылается напрямую на ${hit.map((a) => path.relative(ROOT, a)).join(', ')}`
+              : `${spec}: маршруты не определены (нет #/…, литералов маршрутов и e2e-pages) — включается консервативно`
+          );
         } else if ([...routes].some((r) => affected.has(r))) {
           res.specsDirect.add(spec);
-          reasons.push(`${spec}: открывает затронутые страницы`);
+          reasons.push(`${spec}: открывает затронутые страницы (${[...routes].filter((r) => affected.has(r)).sort().join(', ')})`);
         }
       }
       const all = new Set([...res.specsDirect, ...res.specsOther]);
       const walkSelected = [...all].some((s) => star.has(s));
       const walkForced = [...res.specsForced].some((s) => star.has(s));
       if (walkSelected && !walkForced) {
-        const routes = [...affected].filter((r) => SAFE_ROUTE.test(r)).sort();
-        if (routes.length !== affected.size) {
+        // Обход pages называет страницы (`page:config`), не вкладки: вкладка сужает до страницы
+        const tops = new Set([...affected].map((r) => graph.mod.topRoute(r)));
+        const routes = [...tops].filter((r) => SAFE_ROUTE.test(r)).sort();
+        if (routes.length !== tops.size) {
           reasons.push('маршрут с небезопасным именем — обход идёт целиком');
         } else {
           res.grepRoutes = routes;
@@ -1194,7 +1609,15 @@ async function main(argv) {
     else if (a === '--head') args.head = argv[++i];
     else if (a === '--files') args.files = (argv[++i] ?? '').split(',').filter(Boolean);
     else if (a === '--explain') args.explain = true;
-    else {
+    else if (a === '--hub-percent') {
+      // диагностика: сравнение порогов хаба (D-10) в select-replay.mjs
+      const v = argv[++i] ?? '';
+      if (!/^\d{1,3}(?:\.\d+)?$/.test(v) || Number(v) > 100) {
+        console.error(`select-changed: --hub-percent: нужно число 0…100, получено ${JSON.stringify(v)}`);
+        process.exit(2);
+      }
+      hubPercent = Number(v);
+    } else {
       console.error(`select-changed: неизвестный аргумент ${a}`);
       process.exit(2);
     }

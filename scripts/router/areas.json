@@ -231,14 +231,12 @@
       }
     },
     "ui-shell": {
-      "title": "Оболочка интерфейса: каркас страниц, редактор, стили",
+      "title": "Оболочка интерфейса: каркас страниц и стили",
       "shared": false,
       "paths": [
         "frontend/src/App.svelte",
         "frontend/src/main.ts",
         "frontend/src/PageHeader.svelte",
-        "frontend/src/Editor.svelte",
-        "frontend/src/components/editor/**",
         "frontend/src/styles/**"
       ],
       "canary": {
