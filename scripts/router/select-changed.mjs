@@ -126,6 +126,8 @@ const { goMarks, analyzeGo, loadAreas, subareasOf, matchGlob, testFacts, goTestF
 let changedFiles = [];
 // Границы сравнения: from — база (null без git), to — head (null — рабочее дерево)
 const ctx = { from: null, to: null };
+// С --head: Go-тесты рабочей копии из изменённых в диффе файлов (имя → файл), см. buildFacts
+const replacedTests = new Map();
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SPEC_DIR = 'frontend/tests/router';
@@ -748,8 +750,13 @@ function buildFacts(changed) {
   const isGoTest = (f) => /^(internal|cmd)\/.*_test\.go$/.test(f) && !f.startsWith('internal/routertest/');
   const isSpec = (f) => /^frontend\/tests\/router\/[\w.-]+\.spec\.ts$/.test(f);
   const own = new Set(changed.filter((f) => SAFE_PATH.test(f) && (isGoTest(f) || isSpec(f))));
-  // С --head изменённые тесты берутся из коммита слияния, а не из рабочей копии
-  if (ctx.to) rows = rows.filter((r) => !own.has(r.file));
+  // С --head изменённые тесты берутся из коммита слияния, а не из рабочей копии. Имена, которые
+  // были только в рабочей копии, запоминаются: подобласть, назвавшая такой тест, при повторе
+  // слитого PR не расширяет выбор до полного — в ревизии head этого теста ещё (или уже) нет
+  if (ctx.to) {
+    for (const r of rows) if (own.has(r.file) && r.kind === 'go') replacedTests.set(r.test, r.file);
+    rows = rows.filter((r) => !own.has(r.file));
+  }
   const have = new Set(rows.map((r) => r.file));
   for (const file of own) {
     if (have.has(file)) continue;
@@ -882,6 +889,14 @@ async function select(changed) {
     for (const t of areaMap[name].subareas[sub].tests) {
       if (t.startsWith('go:')) {
         const hit = goRows.filter((r) => r.test === t.slice(3));
+        if (hit.length === 0 && replacedTests.has(t.slice(3))) {
+          // Повтор слитого PR (--head): файл теста изменён в диффе, его тесты выбраны по правке
+          // файла из ревизии head, а этого имени в head нет — запускать нечего
+          reasons.push(
+            `подобласть ${name}/${sub}: ${t} нет в ревизии head (${replacedTests.get(t.slice(3))} изменён в диффе) — пропущен`
+          );
+          continue;
+        }
         if (hit.length === 0) escalate(`подобласть ${name}/${sub}: тест ${t} из поля tests не найден`);
         for (const r of hit) { addGo(r.pkg, r.test, true, true); go++; }
       } else {
