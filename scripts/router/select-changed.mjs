@@ -38,8 +38,30 @@
 //               правка самого спека) идёт без сужения. core-switch.spec.ts не выбирается: его
 //               запускает матрица ядер.
 //
-// Триггеры (RTR-02). Полный выбор — только правка самого выбора (SELECTOR_SELF: этот файл,
-// areas.json, core-marks.cjs, import-graph.mjs). Обвязка стенда (HARNESS: прочие
+// Триггеры (RTR-02 в редакции D-21…D-25 фазы 148.1.1). Обязательный полный выбор — только три
+// основания, каждое со строкой причин «обязательный полный выбор: <основание>» (её читает
+// select-replay.mjs, D-29): механизм выбора (SELECTOR_SELF: этот файл, core-marks.cjs,
+// import-graph.mjs) — «механизм выбора (<файл>)»; формат карты (version, набор ключей верхнего
+// уровня, ключей областей, подобластей или канареек; карта появилась) — «формат карты (<что>)»;
+// признак shared области — «признак shared (<область>: <было> → <стало>)».
+// Карта областей (areas.json) выбирается по смыслу: обе версии (база диффа, в режиме --files —
+// HEAD; head — рабочее дерево или --head) разбираются areasFromText и сравниваются diffAreaMaps
+// (core-marks.cjs). Изменённый шаблон paths — тесты затронутых областей по обеим картам
+// (метки базы и head, поле tests; ярус full, если область не shared; канарейки, если shared),
+// перенос — обе области, даже если набор файлов совпал (D-21); записи tests и подобластей —
+// свои тесты, если они существуют; добавленная, удалённая или переименованная область — тесты по
+// обеим картам (D-23); канарейка (D-22) — добавленная новая, замена — прежняя и новая, удалённая
+// — прежняя, если тест есть; блок harness — RT_HARNESS=1; только title, пояснение канарейки или
+// порядок — выбор не расширяется. Каждое изменение — строка «карта: <что> — Go n, спеков m»
+// (D-25). Выбор по карте объединяется с выбором по продукту без повторов.
+// Остановка (D-24, код EXIT_STOP = 3): карту базы или head нельзя разобрать или она не проходит
+// validateAreas (в том числе канарейка null без reason), карта удалена, в режиме --files нет
+// git, метки `// router-area:` существующих тестов ссылаются на область, которой нет в head
+// (при --head — только удалённые диффом области). stdout пуст, причины — строки
+// «стоп: <файл>: <причина>» в stderr (всегда, не только с --explain); полный выбор вместо
+// остановки не подставляется. Обязательный полный выбор того же диффа перекрывает остановку —
+// строка «карта: не сравнить (…) — перекрыто обязательным полным выбором».
+// Обвязка стенда (HARNESS: прочие
 // scripts/router/**, frontend/tests/router/lib/**, playwright.router.config.ts, global-setup/
 // teardown, internal/routertest, цели стенда и VERSION в Makefile) — RT_HARNESS=1 без полного
 // выбора. Зависимости (DEPS: package.json, package-lock.json, go.mod, go.sum) — патч/минор:
@@ -62,9 +84,10 @@
 // по убыванию частоты падений из истории (history.mjs failFreq, окно 30 дней). Спеки затронутых
 // областей — RT_SPECS_FIRST. Ошибка истории — без сортировки (причина в stderr).
 //
-// При сомнении выбор только расширяется (D-25, T-148.1-24): небезопасное имя, ошибка карты,
-// фактов тестов или разбора, нет базы сравнения у зависимостей и Makefile — полный выбор или
-// расширение (пакет целиком, мажор, обвязка).
+// При сомнении выбор только расширяется (D-25, T-148.1-24): небезопасное имя, ошибка карты
+// рабочей копии, фактов тестов или разбора, нет базы сравнения у зависимостей и Makefile —
+// полный выбор или расширение (пакет целиком, мажор, обвязка). Исключение — правка карты, которую
+// нельзя надёжно сравнить: остановка (код 3), не полный выбор.
 //
 // Вывод (stdout) — 13 строк для eval в sh в фиксированном порядке, значения в одинарных
 // кавычках и только из безопасных символов (T-144.1-23, T-148.1-23); run.sh сверяет число и
@@ -98,7 +121,8 @@
 // пусто; RT_HARNESS — изменена обвязка стенда; RT_AREAS — затронутые области.
 // Сбой расчёта ядра не роняет выбор: списки расширяются (все пакеты, все спеки), не сужаются.
 // Причины выбора — в stderr при --explain; последняя строка «вид выбора: …» (полный | обвязка |
-// зависимости | области | смоук) читают run.sh и select-replay.mjs.
+// зависимости | области | смоук) читают run.sh и select-replay.mjs. Код 3 — выбор остановлен:
+// stdout пуст, в stderr «выбор: остановлен …» и причины «стоп: …».
 //
 // Использование (из корня репозитория):
 //   node scripts/router/select-changed.mjs [--base <ref>] [--head <ref>] [--explain]
@@ -148,6 +172,11 @@ const SPEC_DIR = 'frontend/tests/router';
 const SAFE_PATH = /^[A-Za-z0-9_.][A-Za-z0-9_./-]*$/;
 const SAFE_ROUTE = /^[a-z][a-z0-9_-]*$/;
 const SEQ_ENTRY = /^[A-Za-z0-9_./-]+:TestRouter[A-Za-z0-9_]+$/;
+
+// Выбор остановлен (D-24, D-28): его нельзя надёжно получить. stdout пуст, причины — строки
+// stderr «  - стоп: <файл>: <причина>»; run.sh краснеет до деплоя, select-replay.mjs пишет
+// строку PR как ошибку. Полный выбор вместо остановки не подставляется.
+const EXIT_STOP = 3;
 
 // Правка механизма выбора: полный выбор (RTR-02). Карта областей сюда не входит: её правка
 // разбирается по смыслу сравнением двух версий (compareMaps, D-21…D-23 фазы 148.1.1).
@@ -910,6 +939,7 @@ async function select(changed) {
     deps: false,
     kernelTouched: false, // затронут код запуска ядра или watchdog (KERNEL_PATHS)
     kind: 'смоук',
+    stop: [], // причины остановки выбора (D-24): непусто — код 3, stdout пуст
     reasons
   };
   const escalate = (why) => {
@@ -919,17 +949,44 @@ async function select(changed) {
   const warnUnknown = (file) =>
     reasons.push(`предупреждение: неизвестный файл ${file} — только смоук; добавьте путь в areas.json или в список не влияющих`);
 
+  // Обязательный полный выбор (D-23) — только три основания: механизм выбора, формат карты,
+  // признак shared. Строки «обязательный полный выбор: <основание>» читает повтор выбора (D-29).
+  const required = [];
+  for (const f of changed) {
+    if (SAFE_PATH.test(f) && SELECTOR_SELF.some((re) => re.test(f))) required.push(`механизм выбора (${f})`);
+  }
   // Правка карты областей: две версии сравниваются по смыслу (D-21), выбор — ниже, в разделе
-  // областей. Формат, shared, канарейки и несравнимые карты пока — полный выбор.
+  // областей. Карты нельзя надёжно сравнить — остановка (D-24), если её не перекрывает
+  // обязательный полный выбор того же диффа.
   const cmp = changed.includes(AREAS_FILE) ? compareMaps() : null;
+  const mapRequired = [];
   if (cmp) {
-    for (const p of cmp.problems) escalate(`${AREAS_FILE}: ${p}`);
-    if (cmp.appeared) escalate(`${AREAS_FILE}: карта появилась — сравнивать не с чем`);
+    if (cmp.appeared) mapRequired.push('формат карты (карта появилась: в базе её нет)');
     if (cmp.diff) {
-      if (cmp.diff.format.length > 0) escalate(`${AREAS_FILE}: формат карты (${cmp.diff.format.join('; ')})`);
-      for (const s of cmp.diff.shared) escalate(`${AREAS_FILE}: признак shared (${s.area}: ${s.from} → ${s.to})`);
-      if (cmp.diff.canary.length > 0) escalate(`${AREAS_FILE}: изменены канарейки`);
+      if (cmp.diff.format.length > 0) mapRequired.push(`формат карты (${cmp.diff.format.join('; ')})`);
+      for (const s of cmp.diff.shared) {
+        reasons.push(`карта: признак shared области ${s.area}: ${s.from} → ${s.to}`);
+        mapRequired.push(`признак shared (${s.area}: ${s.from} → ${s.to})`);
+      }
     }
+    required.push(...mapRequired);
+  }
+  for (const r of required) reasons.push(`обязательный полный выбор: ${r}`);
+  for (const r of mapRequired) escalate(`${AREAS_FILE}: ${r}`);
+  /** Остановка выбора (D-24): без обязательного полного выбора — код 3, иначе — только пометка. */
+  const stopOr = (why) => {
+    if (required.length > 0) {
+      reasons.push(`карта: не сравнить (${why}) — перекрыто обязательным полным выбором`);
+      return false;
+    }
+    res.stop.push(`${AREAS_FILE}: ${why}`);
+    reasons.push(`стоп: ${AREAS_FILE}: ${why}`);
+    return true;
+  };
+  if (cmp) {
+    let stopped = false;
+    for (const p of cmp.problems) stopped = stopOr(p) || stopped;
+    if (stopped) return { res, routerPkgs, specsAll };
   }
 
   // Карта областей и факты тестов: без них имена не выбрать — расширение до полного выбора
@@ -941,6 +998,16 @@ async function select(changed) {
   } catch (e) {
     escalate(`карта областей или факты тестов не получены (${String(e.message ?? e).split('\n', 1)[0]})`);
     return { res, routerPkgs, specsAll };
+  }
+  // Метки существующих тестов ссылаются на область, которой нет в head (D-24): карту и разметку
+  // исправляют вместе. В гейте факты и карта head — одно дерево, проверяются все метки; при
+  // повторе слитого PR (--head) факты из рабочей копии — только метки областей, удалённых диффом.
+  if (cmp?.diff) {
+    const gone = (area) => area && !(area in cmp.head.areas) && (!ctx.to || cmp.diff.removed.includes(area));
+    const stale = [...new Set(facts.filter((r) => gone(r.area)).map((r) => `${r.file}: ${r.area}`))].sort();
+    if (stale.length > 0 && stopOr(`метки router-area ссылаются на области, которых нет в карте: ${stale.join(', ')}`)) {
+      return { res, routerPkgs, specsAll };
+    }
   }
   const areasOf = (file) => Object.keys(areaMap).filter((n) => areaMap[n].paths.some((g) => matchGlob(g, file)));
   const goRows = facts.filter((r) => r.kind === 'go');
@@ -1098,7 +1165,7 @@ async function select(changed) {
       return a;
     };
     const tally = (a) =>
-      `Go ${a.go.size}, спеков ${a.specs.size}` + (a.missing.length > 0 ? ` (нет среди тестов: ${a.missing.join(', ')})` : '');
+      `Go ${a.go.size}, спеков ${a.specs.size}` + (a.missing.length > 0 ? ` (не выбраны: ${a.missing.join(', ')})` : '');
     const pickGo = (r, fullOk, a) => {
       addGo(r.pkg, r.test, true, fullOk);
       a.go.add(`${r.pkg}:${r.test}`);
@@ -1206,6 +1273,43 @@ async function select(changed) {
         what = parts.join(', ');
       }
       reasons.push(`карта: подобласть ${key} ${what} — ${tally(a)}`);
+    }
+    // Канарейки (D-22): добавленная — новая, замена — прежняя (если тест есть) и новая,
+    // удалённая (null с reason) — прежняя, если тест есть. Удаление без reason карта head не
+    // проходит validateAreas — до сюда не доходит (остановка). Канарейка — не прямое
+    // затрагивание: ярус full ей не положен, область в RT_AREAS не отмечается.
+    for (const ch of d.canary) {
+      const a = acc();
+      if (ch.kind === 'go') {
+        for (const name of [ch.to, ch.from]) {
+          if (!name) continue;
+          const hit = goRows.filter((r) => r.test === name);
+          if (hit.length === 0) {
+            // новая канарейка не найдена — расширение, как в addCanaries
+            if (name === ch.to) escalate(`канарейка ${name} области ${ch.area} не найдена`);
+            a.missing.push(`go:${name}`);
+            continue;
+          }
+          for (const r of hit) {
+            addGo(r.pkg, r.test, false);
+            a.go.add(`${r.pkg}:${r.test}`);
+          }
+        }
+      } else {
+        for (const s of [ch.to, ch.from]) {
+          if (!s) continue;
+          if (!specSelectable(s)) {
+            a.missing.push(s.endsWith('/core-switch.spec.ts') ? `${s} — спек матрицы ядер, идёт в каждой ветви` : s);
+            continue;
+          }
+          res.specsForced.add(s);
+          if (!res.specsDirect.has(s)) res.specsOther.add(s);
+          a.specs.add(s);
+        }
+      }
+      reasons.push(
+        `карта: канарейка ${ch.kind === 'go' ? 'Go' : 'спек'} области ${ch.area}: ${ch.from ?? 'нет'} → ${ch.to ?? 'нет'} — ${tally(a)}`
+      );
     }
     for (const name of d.added) reasons.push(`карта: область ${name} добавлена — ${tally(wholeArea(name))}`);
     for (const name of d.removed) reasons.push(`карта: область ${name} удалена — ${tally(wholeArea(name))}`);
@@ -1968,6 +2072,7 @@ async function main(argv) {
 
   let out;
   let reasons;
+  let stopped = false;
   try {
     let changed;
     if (args.files) {
@@ -1980,8 +2085,13 @@ async function main(argv) {
     }
     changedFiles = changed;
     const { res, routerPkgs, specsAll } = await select(changed);
-    out = await emit(res, routerPkgs, specsAll);
     reasons = res.reasons;
+    if (res.stop.length > 0) {
+      stopped = true;
+      out = '';
+    } else {
+      out = await emit(res, routerPkgs, specsAll);
+    }
   } catch (e) {
     // Не смогли посчитать — безопасный вариант: всё
     const orEmpty = (fn) => {
@@ -2005,6 +2115,14 @@ async function main(argv) {
     reasons = res.reasons;
   }
 
+  if (stopped) {
+    // причины остановки печатаются всегда, не только с --explain: stdout пуст
+    console.error('выбор: остановлен (код 3) — полный выбор не подставляется');
+    console.error('причины:');
+    for (const r of reasons) console.error(`  - ${r}`);
+    process.exitCode = EXIT_STOP;
+    return;
+  }
   if (args.explain) {
     const first = out.split('\n')[0];
     console.error(`выбор: ${first}`);
