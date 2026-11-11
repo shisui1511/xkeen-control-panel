@@ -440,6 +440,58 @@ func RoutingContractFile(t testing.TB) string {
 	return path
 }
 
+// ExpectVersion объявляет обвязке стенда версию панели, на которой тест оставляет
+// стенд, — первую строку `/opt/sbin/xcp -v` в том виде, как её печатает панель.
+// Обвязка (scripts/router/go-suite.sh, rt_version_guard) сверяет версию стенда после
+// каждого запуска группы тестов: без объявления другая версия — посторонняя
+// установка, этап останавливается. Объявленная версия принимается как новая
+// ожидаемая на ближайшей границе, только если она совпала с наблюдаемой и тест
+// прошёл; упавший тест снимает объявление сам (Cleanup). Если тест сам возвращает
+// исходную версию (откат), объявление безвредно: на границе версия совпадёт с
+// прежней ожидаемой, а файл обвязка удалит после чтения.
+//
+// Объявление — файл $XCP_RT_WORKDIR/expect-version, одна строка
+// «<версия><TAB><имя теста>», запись атомарная (временный файл и переименование).
+func ExpectVersion(t testing.TB, version string) {
+	t.Helper()
+	dir := os.Getenv("XCP_RT_WORKDIR")
+	if dir == "" {
+		t.Fatal("нет XCP_RT_WORKDIR: тест запущен мимо make router-test")
+	}
+	if version == "" || strings.ContainsAny(version, "\t\r\n") {
+		t.Fatalf("ExpectVersion: версия %q пустая или с табуляцией либо переводом строки", version)
+	}
+	name := t.Name()
+	if strings.ContainsAny(name, "\t\r\n") {
+		t.Fatalf("ExpectVersion: имя теста %q с табуляцией либо переводом строки", name)
+	}
+	path := dir + "/expect-version"
+	tmp, err := os.CreateTemp(dir, ".expect-version-*")
+	if err != nil {
+		t.Fatalf("ExpectVersion: временный файл: %v", err)
+	}
+	_, werr := tmp.WriteString(version + "\t" + name + "\n")
+	cerr := tmp.Close()
+	if werr == nil {
+		werr = cerr
+	}
+	if werr == nil {
+		werr = os.Chmod(tmp.Name(), 0o600)
+	}
+	if werr == nil {
+		werr = os.Rename(tmp.Name(), path)
+	}
+	if werr != nil {
+		_ = os.Remove(tmp.Name())
+		t.Fatalf("ExpectVersion: запись %s: %v", path, werr)
+	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			_ = os.Remove(path)
+		}
+	})
+}
+
 // LinksDir — каталог с данными share-ссылок, скопированный на устройство.
 func LinksDir(t testing.TB) string {
 	t.Helper()
