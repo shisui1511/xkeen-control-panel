@@ -6,7 +6,12 @@
 //               scripts/router/areas.json (глобы paths). Правка файла области выбирает по
 //               ИМЕНАМ все Go-тесты области (строка `// router-area:` в файле теста) и все спеки
 //               области (D-12). Область с флагом shared (kernel, configlayer, server) добавляет
-//               канарейки всех областей, Go и спеки (D-10). Области contract-* выбирают проверки
+//               канарейки всех областей, Go и спеки (D-10). Подобласти (поле subareas, RTR-14,
+//               D-12 фазы 148.1.1): файл, найденный глобом подобласти, выбирает только её tests
+//               по именам — прямое затрагивание, ярус full разрешён — и канарейки shared-родителя;
+//               тесты родителя целиком не выбираются, откат на пакет не нужен. Файл родителя вне
+//               всех подобластей выбирает область целиком, как раньше (страж требует покрытия).
+//               Области contract-* выбирают проверки
 //               из поля tests. Изменённый роутерный тест выбирает тесты своего файла; файл без
 //               строки области, файл без тестов (помощники) и продукт без области — пакет целиком
 //               (откат, как раньше: пакет и пакеты, от которых он зависит, `go list -deps`).
@@ -45,7 +50,8 @@
 //
 // Ярус full (D-14). Тест яруса full (метка Tier full у Go, @full у Playwright; core-marks.cjs,
 // testFacts → tier) идёт в гейте, только если его область затронута напрямую: изменён файл
-// продукта области по areas.json (область без флага shared) или сам файл теста. Через канарейку,
+// продукта области по areas.json (область без флага shared), файл подобласти (тест в её tests)
+// или сам файл теста. Через канарейку,
 // зависимости, граф импортов фронтенда и общий код (shared) тесты full не выбираются. Playwright:
 // RT_PW_INVERT='@full', пока ни один выбранный спек не выбран напрямую по области и не изменён
 // сам (иначе тесты full выбранных спеков идут все, расширение). Откат на
@@ -113,7 +119,8 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import coreMarks from './core-marks.cjs';
 
-const { goMarks, analyzeGo, loadAreas, matchGlob, testFacts, goTestFacts, specTestFacts, areaOfText } = coreMarks;
+const { goMarks, analyzeGo, loadAreas, subareasOf, matchGlob, testFacts, goTestFacts, specTestFacts, areaOfText } =
+  coreMarks;
 
 // Изменённые файлы текущего выбора: goMarks читает только индекс, новые тесты он не видит
 let changedFiles = [];
@@ -864,6 +871,31 @@ async function select(changed) {
     }
     return { go, specs: pick.length };
   };
+  /**
+   * Тесты подобласти по именам из её tests (RTR-14): прямое затрагивание — тесты идут первыми,
+   * ярус full разрешён (fullOk); канарейки и признак shared родителя его не дают. Нет теста —
+   * расширение до полного выбора, как у поля tests области.
+   */
+  const addSubareaTests = (name, sub) => {
+    let go = 0;
+    const specs = new Set();
+    for (const t of areaMap[name].subareas[sub].tests) {
+      if (t.startsWith('go:')) {
+        const hit = goRows.filter((r) => r.test === t.slice(3));
+        if (hit.length === 0) escalate(`подобласть ${name}/${sub}: тест ${t} из поля tests не найден`);
+        for (const r of hit) { addGo(r.pkg, r.test, true, true); go++; }
+      } else {
+        specs.add(t);
+      }
+    }
+    const pick = [...specs].filter(specSelectable);
+    for (const s of pick) {
+      res.specsDirect.add(s);
+      res.specsForced.add(s);
+      res.specsFullOk.add(s);
+    }
+    return { go, specs: pick.length };
+  };
   /** Канарейки: по одному Go-тесту и спеку каждой области (D-11). */
   const addCanaries = (why) => {
     for (const [name, a] of Object.entries(areaMap)) {
@@ -891,6 +923,35 @@ async function select(changed) {
   let makefile = false;
   let pwAll = false;
   let sharedHit = false;
+  // Области, чьи тесты выбираются целиком (RT_AREAS шире: подобласти и отметки фронтенда)
+  const wholeAreas = new Set();
+  // Затронутые подобласти: '<родитель>/<подобласть>'
+  const subHits = new Set();
+  /**
+   * Файл продукта в областях hit: подобласть, если её глоб находит файл, иначе область целиком
+   * (файл родителя вне подобластей — до заполнения раздела, страж требует покрытия).
+   */
+  const markProduct = (file, hit, shared) => {
+    for (const n of hit) {
+      res.areas.add(n);
+      if (areaMap[n].shared) sharedHit = true;
+      const tag = shared && areaMap[n].shared ? ' (общий код)' : '';
+      const subs = subareasOf(areaMap, n, file);
+      if (subs.length > 0) {
+        for (const s of subs) {
+          subHits.add(`${n}/${s}`);
+          reasons.push(`${file}: подобласть ${n}/${s}${tag}`);
+        }
+        continue;
+      }
+      wholeAreas.add(n);
+      reasons.push(
+        areaMap[n].subareas
+          ? `${file}: область ${n}${tag} — ни одна подобласть не находит файл, тесты области целиком`
+          : `${file}: область ${n}${tag}`
+      );
+    }
+  };
 
   for (const file of changed) {
     if (!SAFE_PATH.test(file)) {
@@ -919,11 +980,13 @@ async function select(changed) {
       makefile = true;
       continue;
     }
-    // Контракты и данные тестов — области contract-* (поле tests)
-    const contract = areasOf(file).filter((n) => areaMap[n].tests);
+    // Контракты и данные тестов — области contract-* (поле tests). Подобласти общего кода
+    // тоже несут tests, но вложенные: их разбирает ветка файлов продукта ниже.
+    const contract = areasOf(file).filter((n) => n.startsWith('contract-') && areaMap[n].tests);
     if (contract.length > 0) {
       for (const n of contract) {
         res.areas.add(n);
+        wholeAreas.add(n);
         reasons.push(`${file}: область ${n} — проверки из поля tests`);
       }
       continue;
@@ -975,11 +1038,8 @@ async function select(changed) {
       }
       const hit = areasOf(file);
       if (hit.length > 0) {
-        for (const n of hit) {
-          res.areas.add(n);
-          if (areaMap[n].shared) sharedHit = true;
-          reasons.push(`${file}: область ${n}${areaMap[n].shared ? ' (общий код)' : ''}`);
-        }
+        // Найденная привязка (область или подобласть) — без отката на пакет и go list
+        markProduct(file, hit, true);
         continue;
       }
       const dir = goDirOf(file);
@@ -996,11 +1056,7 @@ async function select(changed) {
     // прочие файлы продукта, покрытые картой (scripts/setup.sh)
     const hit = areasOf(file);
     if (hit.length > 0) {
-      for (const n of hit) {
-        res.areas.add(n);
-        if (areaMap[n].shared) sharedHit = true;
-        reasons.push(`${file}: область ${n}`);
-      }
+      markProduct(file, hit, false);
       continue;
     }
     warnUnknown(file);
@@ -1060,9 +1116,14 @@ async function select(changed) {
 
   // --- области: тесты по именам -----------------------------------------------
   if (!res.all) {
-    for (const name of [...res.areas].sort()) {
+    for (const name of [...wholeAreas].sort()) {
       const n = addAreaTests(name, true);
       reasons.push(`область ${name}: тестов Go ${n.go}, спеков ${n.specs}`);
+    }
+    for (const key of [...subHits].sort()) {
+      const [name, sub] = key.split('/');
+      const n = addSubareaTests(name, sub);
+      reasons.push(`подобласть ${key}: тестов Go ${n.go}, спеков ${n.specs}`);
     }
     if (sharedHit) addCanaries('правка общего кода');
     // Отметка фронтенда: только RT_AREAS и объяснение, тесты выбирает граф импортов

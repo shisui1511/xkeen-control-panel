@@ -50,6 +50,36 @@
         "go": "TestRouterTakeoverApplyAndRelease",
         "spec": null,
         "reason": "спек config-cascade длиннее 30 с, preflight-save несёт тег ядра — кандидат 148.1.1"
+      },
+      "subareas": {
+        "config-apply": {
+          "title": "Конвейер «Применить»: план, запись, перезапуск ядра, предпросмотр, замок применения",
+          "paths": [
+            "internal/services/configlayer/pipeline.go",
+            "internal/services/configlayer/build.go",
+            "internal/services/configlayer/restart.go",
+            "internal/services/configlayer/preview.go",
+            "internal/services/configlayer/describe.go",
+            "internal/services/configlayer/mask.go",
+            "internal/services/configlayer/write.go",
+            "internal/services/configlayer/exclusive.go",
+            "internal/services/configlayer/registry.go",
+            "internal/handlers/configlayer.go"
+          ],
+          "tests": [
+            "go:TestRouterApplyPreview",
+            "go:TestRouterConfigApplyRestartsRunningKernel",
+            "go:TestRouterLiveCommittersAndAfterApply",
+            "go:TestRouterApplyRightAfterDone",
+            "go:TestRouterApplyRevisionSnapshot",
+            "go:TestRouterInertPlan",
+            "go:TestRouterCheckerBlocksApply",
+            "go:TestRouterTakeoverValidationFailKeepsAll",
+            "go:TestRouterExclusiveGeodata",
+            "go:TestRouterExclusiveFlagRecheck",
+            "go:TestRouterSettleSection"
+          ]
+        }
       }
     },
     "dns": {
