@@ -1312,6 +1312,10 @@ EOF
     fi
   }
   _vs_base=$(_vs_count)
+  # эпоха старта цели: rt_version_guard не считает строку stop прежнего прогона (из отчёта FROM) уже
+  # записанной остановкой текущего, иначе новая смена версии не даёт строки stop (счёт выше _vs_base)
+  RT_VSTOP_SINCE=$(date +%s)
+  export RT_VSTOP_SINCE
   _vstop=0
   # Что в ветви идёт после этапа: _vs_rest <switch|pw-read|h-read|go|pw|h-go|h-state> — по флагам
   # ветви (_b_go, _b_pw) и набору harness, добавленному к changed (RT_H_EXTRA); пусто — ничего.

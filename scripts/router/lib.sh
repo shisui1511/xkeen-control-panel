@@ -403,7 +403,8 @@ rt_restore() {
 #                       transition<TAB><ядро><TAB><граница><TAB><было><TAB><стало>
 #                       skip<TAB><ядро><TAB><граница><TAB><причина>
 #   version-stop.tsv  stop<TAB><ядро><TAB><граница><TAB><ожидалась><TAB><на стенде><TAB><эпоха ПК> (одна,
-#                     первая остановка); suspect<TAB><ядро><TAB><проверка> и notrun<TAB><ядро><TAB><что>
+#                     первая остановка прогона; в отчёте перепрогона — и прежняя, и новая, граница по
+#                     эпохе: RT_VSTOP_SINCE); suspect<TAB><ядро><TAB><проверка> и notrun<TAB><ядро><TAB><что>
 #                     дописывает этап (go-suite.sh, pw-suite.sh).
 # Читают: run.sh, branch-report.mjs, session.mjs, unattended.sh.
 # Граница: go:<каталог пакета>, go:<каталог пакета>#<k> (k-й запуск пакета в RT_GO_RUN_SEQ),
@@ -529,7 +530,9 @@ rt_version_guard() {
     fi
   fi
 
-  if ! grep -q "^stop$_vg_tab" "$_vg_dir/version-stop.tsv" 2>/dev/null; then
+  # одна строка stop на прогон: строки прежних прогонов того же отчёта (перепрогон пишет в отчёт FROM)
+  # не в счёт — у них эпоха ПК раньше RT_VSTOP_SINCE (его задаёт run.sh при старте цели)
+  if ! awk -F'\t' -v s="${RT_VSTOP_SINCE:-0}" '$1 == "stop" && $6 + 0 >= s + 0 { f = 1 } END { exit !f }' "$_vg_dir/version-stop.tsv" 2>/dev/null; then
     printf 'stop\t%s\t%s\t%s\t%s\t%s\n' "$_vg_core" "$_vg_b" "$_vg_exp" "$_vg_obs" "$(date +%s)" >>"$_vg_dir/version-stop.tsv"
   fi
   case "$_vg_obs" in
