@@ -12,9 +12,15 @@
 //               тесты родителя целиком не выбираются, откат на пакет не нужен. Файл родителя вне
 //               всех подобластей выбирает область целиком, как раньше (страж требует покрытия).
 //               Области contract-* выбирают проверки
-//               из поля tests. Изменённый роутерный тест выбирает тесты своего файла; файл без
-//               строки области, файл без тестов (помощники) и продукт без области — пакет целиком
-//               (откат, как раньше: пакет и пакеты, от которых он зависит, `go list -deps`).
+//               из поля tests. Изменённый роутерный тест (со строкой области или без неё)
+//               выбирает тесты своего файла по именам и, по объявлениям (D-32), тесты TestRouter
+//               пакета, использующие изменённые объявления файла (goDeclDiff, goDeclClosure);
+//               файл без тестов TestRouter (помощники, обычный Test, Fuzz) в роутерном пакете —
+//               только по объявлениям. Неразобранное (init, TestMain, переменная `_` или с вызовом
+//               вне PURE_INIT_CALLS, пустой или точечный импорт, строка build или package,
+//               раскладка не gofmt, нет базы) — пакет целиком с причиной. Продукт без области —
+//               пакет целиком (откат, как раньше: пакет и пакеты, от которых он зависит,
+//               `go list -deps`).
 //   Go          записи RT_GO_SEQ `<каталог пакета>:<TestRouterИмя>`; пакеты — каталоги записей.
 //               Роутерный пакет — каталог с `_test.go`, у которого первая строка `//go:build router`.
 //   Playwright  роутерные спеки frontend/tests/router/*.spec.ts. Правка frontend/src — по графу
@@ -81,7 +87,12 @@
 // Обвязка стенда (HARNESS: прочие
 // scripts/router/**, frontend/tests/router/lib/**, playwright.router.config.ts, global-setup/
 // teardown, internal/routertest, цели стенда и VERSION в Makefile) — RT_HARNESS=1 без полного
-// выбора. Зависимости (DEPS: package.json, package-lock.json, go.mod, go.sum) — патч/минор:
+// выбора. Правка .go internal/routertest ещё и выбирает по объявлениям (D-32) тесты TestRouter
+// зависимых пакетов, которые используют изменённое: экспортируемое — через имя импорта
+// (`routertest.<Имя>`), методы — через селектор `.<Имя>`; изменённый тип — через функции
+// routertest, которые его возвращают. Неразобранное — прежний откат через go list -deps
+// (зависимые пакеты целиком, у каждого строка «использует internal/routertest — правка не
+// разобрана по объявлениям»). Зависимости (DEPS: package.json, package-lock.json, go.mod, go.sum) — патч/минор:
 // pages.spec.ts без сужения и канарейки всех областей, в том числе патч и минор svelte, vite и
 // @playwright/test (D-11 фазы 148.1.1); мажор (D-13) — смена мажора спецификации в package.json
 // или версии svelte/vite/@playwright/test в lock — канарейки плюс все спеки (npm) или все
@@ -173,6 +184,8 @@ const {
   goTestFacts,
   specTestFacts,
   areaOfText,
+  declarations,
+  lex,
   AREAS_FILE
 } = coreMarks;
 
@@ -209,6 +222,10 @@ const HARNESS = [
   /^frontend\/tests\/router\/lib\//,
   /^frontend\/tests\/router\/global-(setup|teardown)\.ts$/
 ];
+
+// Помощники роутерных тестов: правка — обвязка (RT_HARNESS=1) и тесты зависимых пакетов,
+// использующие изменённые объявления (D-32)
+const RT_DIR = 'internal/routertest';
 
 // Зависимости: узкий набор (смоук, pages, канарейки), при мажоре — шире (D-13).
 const DEPS = [/^frontend\/package\.json$/, /^frontend\/package-lock\.json$/, /^go\.mod$/, /^go\.sum$/];
@@ -710,6 +727,286 @@ function goDirOf(file) {
     dir = path.posix.dirname(dir);
   }
   return null;
+}
+
+/*
+ * Выбор по объявлениям Go (RTR-14, D-32 фазы 148.1.1). Изменённый `_test.go` роутерного пакета и
+ * файл internal/routertest сравниваются с базой по объявлениям верхнего уровня (func, var, const,
+ * type; core-marks.cjs declarations): изменённые имена → объявления пакета, которые их упоминают
+ * (по границе слова, до неподвижной точки, и переменные пакета, упомянутые функциями множества, —
+ * общее состояние) → тесты TestRouter замыкания. Одноимённые объявления файла (методы разных
+ * получателей, несколько func init) сравниваются мультимножеством кодов: имя изменено при любом
+ * расхождении. Неразобранное — пакет целиком с причиной (неизвестное — широко).
+ */
+
+// Вызовы, допустимые в инициализаторе переменной пакета без отката на пакет целиком. Пополнять
+// только функциями стандартной библиотеки без побочных эффектов, кроме возврата значения или
+// паники: инициализатор с иным вызовом может менять общее состояние до запуска тестов.
+const PURE_INIT_CALLS = [
+  /^regexp\.MustCompile(?:POSIX)?$/,
+  /^errors\.New$/,
+  /^fmt\.(?:Errorf|Sprintf)$/,
+  /^strings\.[A-Za-z_]\w*$/,
+  /^time\.Duration$/,
+  /^(?:len|make|new|append)$/
+];
+const GO_IDENT_LIST = /^[ \t]*([A-Za-z_]\w*(?:[ \t]*,[ \t]*[A-Za-z_]\w*)*)/;
+
+/**
+ * Объявления верхнего уровня Go-файла: { ok, why, build, pkg, blankDot, imports, decls }.
+ * decls — [{ kind: func|var|const|type, names, receiver, code (нормализованный, без
+ * комментариев), masked (строки замаскированы), idents (Set слов кода), calls (вызовы в
+ * инициализаторе var) }]. ok=false — разбор ненадёжен (раскладка не gofmt, нет package, имена не
+ * разобраны): вызывающий откатывается на пакет целиком.
+ */
+const goDeclCache = new Map();
+function goDeclIndex(text) {
+  if (!goDeclCache.has(text)) goDeclCache.set(text, goDeclIndexOf(text));
+  return goDeclCache.get(text);
+}
+
+function goDeclIndexOf(text) {
+  const out ={ ok: true, why: null, build: null, pkg: null, blankDot: [], imports: [], decls: [] };
+  const fail = (why) => {
+    if (out.ok) {
+      out.ok = false;
+      out.why = why;
+    }
+  };
+  const { code, masked } = lex(text);
+  // Раскладка gofmt: на нулевой глубине скобок строка начинается с колонки 0 — иначе деление на
+  // объявления по колонке 0 (declarations) ненадёжно. Сырые строки в бэктиках не считаются;
+  // продолжение выражения (предыдущая строка кончается бинарным оператором, запятой или точкой:
+  // по правилу точки с запятой Go оператор там не кончается) gofmt сдвигает — это допустимо.
+  let depth = 0;
+  let raw = false;
+  let cont = false;
+  const lines = masked.split('\n');
+  for (let li = 0; li < lines.length && out.ok; li++) {
+    const line = lines[li];
+    if (!raw && depth === 0 && !cont && /^[ \t]+\S/.test(line)) fail(`раскладка не gofmt (строка ${li + 1})`);
+    const tail = line.trimEnd();
+    if (tail) cont = !/(?:\+\+|--)$/.test(tail) && /[-+*/%&|^<>=,.!:]$/.test(tail);
+    for (const c of line) {
+      if (c === '`') raw = !raw;
+      else if (raw) continue;
+      else if (c === '{' || c === '(' || c === '[') depth++;
+      else if (c === '}' || c === ')' || c === ']') depth--;
+    }
+    if (depth < 0) fail(`скобки не сходятся (строка ${li + 1})`);
+  }
+  const decls = declarations(text);
+  const firstStart = code.length - decls.reduce((s, d) => s + d.code.length, 0);
+  const preText = text.slice(0, firstStart);
+  const preCode = code.slice(0, firstStart);
+  out.build = (preText.match(/^\/\/(?:go:build| \+build)[^\n]*/gm) || []).join('\n') || null;
+  const pkg = /^package[ \t]+([A-Za-z_]\w*)/m.exec(masked.slice(0, firstStart));
+  if (pkg) out.pkg = pkg[1];
+  else fail('нет строки package');
+  for (const m of preCode.matchAll(/(?:^import[ \t]+(?:\([ \t]*)?|^[ \t]+)(?:([A-Za-z_]\w*|[_.])[ \t]+)?"([^"\n]+)"/gm)) {
+    out.imports.push({ name: m[1] || null, path: m[2] });
+    if (m[1] === '_' || m[1] === '.') out.blankDot.push(`${m[1]} "${m[2]}"`);
+  }
+  out.blankDot.sort();
+  for (const d of decls) {
+    const head = d.masked.split('\n', 1)[0];
+    const kw = /^(func|var|const|type)\b[ \t]*(.*)$/.exec(head);
+    const kind = kw ? kw[1] : 'other';
+    let names = [];
+    if (kind === 'func') {
+      if (d.kind !== 'func' || !d.name) fail(`не разобрано объявление func: ${head.slice(0, 60)}`);
+      else names = [d.name];
+    } else if (kw && kw[2].startsWith('(')) {
+      // блок var ( … ), const ( … ), type ( … ): имена — в начале строк на глубине 1
+      let dd = 0;
+      for (const line of d.masked.split('\n')) {
+        if (dd === 1) {
+          const m = GO_IDENT_LIST.exec(line);
+          if (m) names.push(...m[1].split(',').map((s) => s.trim()));
+        }
+        for (const c of line) {
+          if (c === '{' || c === '(' || c === '[') dd++;
+          else if (c === '}' || c === ')' || c === ']') dd--;
+        }
+      }
+    } else if (kw) {
+      const m = GO_IDENT_LIST.exec(kw[2]);
+      if (m) names = m[1].split(',').map((s) => s.trim());
+      else fail(`не разобраны имена объявления ${kind}: ${head.slice(0, 60)}`);
+    }
+    const calls = [];
+    if (kind === 'var') {
+      for (const m of d.masked.matchAll(/(?<![\w.])([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)[ \t]*\(/g)) {
+        if (m[1] !== 'func' && m[1] !== 'var') calls.push(m[1]);
+      }
+      // немедленный вызов литерала функции или выражения: }() , )( , ](
+      if (/[)\]}][ \t]*\(/.test(d.masked)) calls.push('(…)(…)');
+    }
+    out.decls.push({
+      kind,
+      names,
+      receiver: d.receiver,
+      code: d.code.replace(/\s+/g, ' ').trim(),
+      masked: d.masked,
+      idents: new Set(d.masked.match(/[A-Za-z_]\w*/g) || []),
+      calls
+    });
+  }
+  return out;
+}
+
+/**
+ * Сравнение базы и head одного Go-файла по объявлениям: { changed: Set имён, wide: причина | null }.
+ * null на стороне — файла нет (добавлен: пустая база; удалён: пустой head): все объявления
+ * существующей стороны изменены, строки build и package не сравниваются. По имени сравнивается
+ * мультимножество нормализованных кодов всех одноимённых объявлений файла, а не «имя → один код»:
+ * declarations() отдаёт получатель только как признак, и правка второго одноимённого метода иначе
+ * потерялась бы. Порядок changed — объявления head, затем удалённые.
+ */
+function goDeclDiff(baseText, headText) {
+  const b = baseText == null ? null : goDeclIndex(baseText);
+  const h = headText == null ? null : goDeclIndex(headText);
+  const changed = new Set();
+  let wide = null;
+  const setWide = (w) => {
+    if (!wide) wide = w;
+  };
+  if (b && !b.ok) setWide(`база: ${b.why}`);
+  if (h && !h.ok) setWide(`head: ${h.why}`);
+  if (wide) return { changed, wide };
+  if (b && h) {
+    if (b.build !== h.build) setWide('изменена строка //go:build');
+    if (b.pkg !== h.pkg) setWide('изменена строка package');
+    if (b.blankDot.join('\n') !== h.blankDot.join('\n')) setWide('изменён пустой или точечный импорт');
+  } else {
+    const side = b || h;
+    if (side && side.blankDot.length > 0) setWide(`пустой или точечный импорт (${side.blankDot.join(', ')})`);
+  }
+  const multi = (ix) => {
+    const m = new Map();
+    for (const d of ix ? ix.decls : []) {
+      for (const n of d.names) {
+        if (!m.has(n)) m.set(n, []);
+        m.get(n).push(d.code);
+      }
+    }
+    for (const v of m.values()) v.sort();
+    return m;
+  };
+  const bm = multi(b);
+  const hm = multi(h);
+  for (const [n, codes] of hm) if (JSON.stringify(codes) !== JSON.stringify(bm.get(n) || [])) changed.add(n);
+  for (const n of bm.keys()) if (!hm.has(n)) changed.add(n);
+  const all = [...(h ? h.decls : []), ...(b ? b.decls : [])];
+  for (const n of changed) {
+    for (const d of all) {
+      if (!d.names.includes(n)) continue;
+      if (d.kind === 'func' && !d.receiver && (n === 'init' || n === 'TestMain')) setWide(`изменена func ${n}`);
+      if (d.kind !== 'var') continue;
+      if (n === '_') setWide('изменена переменная _');
+      const impure = d.calls.find((c) => !PURE_INIT_CALLS.some((re) => re.test(c)));
+      if (impure) setWide(`переменная ${n}: вызов ${impure} вне PURE_INIT_CALLS`);
+    }
+  }
+  return { changed, wide };
+}
+
+const goDirCache = new Map();
+/**
+ * Go-файлы каталога на стороне head (рабочее дерево или --head): [{ file, text }], с кешем.
+ * Подкаталоги не входят.
+ */
+function goDirFiles(dir) {
+  if (goDirCache.has(dir)) return goDirCache.get(dir);
+  let names;
+  if (ctx.to) {
+    names = git(['ls-tree', '--name-only', ctx.to, '--', `${dir}/`])
+      .split('\n')
+      .filter((f) => f.endsWith('.go') && path.posix.dirname(f) === dir);
+  } else {
+    const abs = path.join(ROOT, dir);
+    names = existsSync(abs)
+      ? readdirSync(abs, { withFileTypes: true })
+          .filter((e) => e.isFile() && e.name.endsWith('.go'))
+          .map((e) => `${dir}/${e.name}`)
+      : [];
+  }
+  const out = [];
+  for (const file of names.sort()) {
+    const text = headText(file);
+    if (text !== null) out.push({ file, text });
+  }
+  goDirCache.set(dir, out);
+  return out;
+}
+
+/** `_test.go` каталога на стороне head: [{ file, text }]. */
+function goPkgTestFiles(dir) {
+  return goDirFiles(dir).filter((f) => f.file.endsWith('_test.go'));
+}
+
+/**
+ * Объявления набора файлов: { ok, why, decls } — decls с полем file; ok=false — какой-то файл не
+ * разобран (why — «<файл>: <причина>»).
+ */
+function goFilesIndex(files) {
+  const decls = [];
+  for (const f of files) {
+    const ix = goDeclIndex(f.text);
+    if (!ix.ok) return { ok: false, why: `${f.file}: ${ix.why}`, decls: [] };
+    for (const d of ix.decls) decls.push({ ...d, file: f.file });
+  }
+  return { ok: true, why: null, decls };
+}
+
+/**
+ * Замыкание имён по объявлениям (точка неподвижности): объявление, в коде которого есть слово из
+ * множества, добавляет свои имена; переменная пакета, упомянутая функцией из множества, тоже
+ * добавляется (общее состояние: функция её читает или пишет). Возвращает Set имён.
+ */
+function goDeclClosure(decls, seed) {
+  const set = new Set(seed);
+  const vars = decls.filter((d) => d.kind === 'var');
+  const expanded = new Set();
+  const addAll = (d) => {
+    let grew = false;
+    for (const n of d.names) {
+      if (!set.has(n)) {
+        set.add(n);
+        grew = true;
+      }
+    }
+    return grew;
+  };
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const d of decls) {
+      if (d.names.every((n) => set.has(n))) continue;
+      for (const w of d.idents) {
+        if (set.has(w) && !d.names.includes(w)) {
+          grew = addAll(d) || grew;
+          break;
+        }
+      }
+    }
+    for (const f of decls) {
+      if (f.kind !== 'func' || expanded.has(f) || !f.names.some((n) => set.has(n))) continue;
+      expanded.add(f);
+      for (const v of vars) if (v.names.some((n) => f.idents.has(n))) grew = addAll(v) || grew;
+    }
+  }
+  return set;
+}
+
+/** Тесты TestRouter (без получателя) среди объявлений, чьё имя в множестве: [имя] без повторов. */
+function goRouterTestsIn(decls, set) {
+  const out = new Set();
+  for (const d of decls) {
+    if (d.kind === 'func' && !d.receiver && /^TestRouter[A-Za-z0-9_]+$/.test(d.names[0]) && set.has(d.names[0])) {
+      out.add(d.names[0]);
+    }
+  }
+  return [...out];
 }
 
 /** Все пакеты, от которых зависит роутерный пакет (импорт-пути), по двум архитектурам стендов. */
@@ -1305,6 +1602,52 @@ async function select(changed) {
   const addWholePkg = (pkg, direct) => {
     for (const r of goRows) if (r.pkg === pkg) addGo(r.pkg, r.test, direct, true);
   };
+  /** База файла для сравнения по объявлениям: текст, null (файла в базе нет) или undefined (нет базы). */
+  const declBase = (file) => (ctx.from ? gitShow(ctx.from, file) : undefined);
+  /**
+   * Тесты TestRouter пакета pkg из замыкания по объявлениям (seed — имена): добавляет в выбор
+   * (прямое затрагивание, ярус full разрешён). own — тесты своего файла (уже выбраны, в N не
+   * идут). Возвращает { n, missing } или { wide } — пакет не разобран.
+   */
+  const addDeclConsumers = (pkg, seed, own) => {
+    const ix = goFilesIndex(goPkgTestFiles(pkg));
+    if (!ix.ok) return { wide: ix.why };
+    const set = goDeclClosure(ix.decls, seed);
+    const facts = new Set(goRows.filter((r) => r.pkg === pkg).map((r) => r.test));
+    let n = 0;
+    const missing = [];
+    for (const t of goRouterTestsIn(ix.decls, set)) {
+      if (own.has(t)) continue;
+      if (facts.has(t)) {
+        addGo(pkg, t, true, true);
+        n++;
+      } else {
+        missing.push(t);
+      }
+    }
+    return { n, missing };
+  };
+  /**
+   * Изменённый `_test.go` роутерного пакета по объявлениям (D-32): изменённые объявления файла →
+   * тесты TestRouter пакета, которые их используют. Неразобранное — пакет целиком с причиной.
+   */
+  const selectByDecls = (file, dir, own) => {
+    const base = declBase(file);
+    const d = base === undefined ? { changed: new Set(), wide: 'нет базы сравнения' } : goDeclDiff(base, headText(file));
+    let r = d.wide ? { wide: d.wide } : null;
+    if (!r && d.changed.size > 0) r = addDeclConsumers(dir, d.changed, own);
+    if (r && r.wide) {
+      addWholePkg(dir, true);
+      reasons.push(`${file}: по объявлениям — пакет ${dir} целиком (${r.wide})`);
+      return;
+    }
+    if (d.changed.size === 0) {
+      reasons.push(`${file}: по объявлениям — объявления не изменены (комментарии, импорты или пробелы)`);
+      return;
+    }
+    if (r.missing.length > 0) reasons.push(`${file}: по объявлениям — ${r.missing.join(', ')} нет в фактах — пропущен`);
+    reasons.push(`${file}: по объявлениям — изменены ${[...d.changed].join(', ')}; тестов TestRouter, использующих их: ${r.n}`);
+  };
   const specSelectable = (s) => specsAll.includes(s);
 
   /** Тесты области: Go и спеки (факты + поле tests). Нет теста из tests — расширение. */
@@ -1388,6 +1731,10 @@ async function select(changed) {
   const frontMarked = new Set();
   const touchedSpecs = new Set();
   const goChanged = new Set(); // каталоги изменённых Go-пакетов без области (откат на пакет)
+  // Каталоги, попавшие в goChanged откатом по объявлениям (только internal/routertest): у
+  // зависимых пакетов своя строка причины, отличимая от прежнего правила (D-32)
+  const goChangedByDecls = new Set();
+  const rtFiles = []; // изменённые .go internal/routertest — выбор по объявлениям
   const goTestFiles = new Set(); // изменённые _test.go
   const depFiles = new Set();
   let makefile = false;
@@ -1721,14 +2068,24 @@ async function select(changed) {
         goTestFiles.add(file);
         continue;
       }
-      if (file.startsWith('internal/routertest/')) {
+      const rtGo = file.startsWith(`${RT_DIR}/`) && file.endsWith('.go');
+      if (file.startsWith(`${RT_DIR}/`)) {
         res.harness = true;
-        reasons.push(`${file}: помощники роутерных тестов — обвязка; тесты пакетов, зависящих от них, выбираются как раньше`);
+        reasons.push(
+          rtGo
+            ? `${file}: помощники роутерных тестов — обвязка; тесты зависимых пакетов — по объявлениям`
+            : `${file}: помощники роутерных тестов — обвязка; тесты пакетов, зависящих от них, выбираются как раньше`
+        );
       }
       const hit = areasOf(file);
       if (hit.length > 0) {
         // Найденная привязка (область или подобласть) — без отката на пакет и go list
         markProduct(file, hit, true);
+        continue;
+      }
+      if (rtGo) {
+        // Разбор по объявлениям — после разделов областей и изменённых тестов (D-32)
+        rtFiles.push(file);
         continue;
       }
       const dir = goDirOf(file);
@@ -1853,7 +2210,7 @@ async function select(changed) {
       const fileRows = goRows.filter((r) => r.file === file);
       if (headText(file) === null) {
         // Удалён: роутерные тесты файла исчезли — запускать нечего; иначе (помощники, обычный
-        // тест, база неизвестна) — пакет целиком, как для изменённого
+        // тест) — по объявлениям с пустым head, база неизвестна — пакет целиком
         const baseText = ctx.from ? gitShow(ctx.from, file) : null;
         const tagged = baseText !== null && baseText.split('\n', 1)[0].trim() === '//go:build router';
         if (tagged && goTestFacts(baseText).length > 0) {
@@ -1861,19 +2218,132 @@ async function select(changed) {
           continue;
         }
       }
-      if (fileRows.length > 0 && fileRows[0].area) {
+      if (fileRows.length > 0) {
+        // Тесты своего файла — по именам из фактов, строка области для этого не нужна (страж
+        // check-router-areas.js в CI её всё равно требует); затем потребители изменённых
+        // объявлений файла из других файлов пакета (D-32)
         for (const r of fileRows) addGo(r.pkg, r.test, true, true);
-        reasons.push(`${file}: изменён роутерный тест — тесты файла (${fileRows.length})`);
+        const untagged = fileRows[0].area ? '' : ', без строки router-area';
+        reasons.push(`${file}: изменён роутерный тест — тесты файла (${fileRows.length}${untagged})`);
+        selectByDecls(file, dir, new Set(fileRows.map((r) => r.test)));
       } else if (routerPkgs.includes(dir)) {
-        addWholePkg(dir, true);
-        reasons.push(
-          fileRows.length > 0
-            ? `${file}: нет строки router-area — пакет ${dir} целиком`
-            : `${file}: тестов TestRouter в файле нет (помощники, обычный тест или удалён) — пакет ${dir} целиком`
-        );
+        // Помощники, обычный тест или удалённый файл без тестов TestRouter (D-32): тесты пакета,
+        // использующие изменённые объявления файла
+        selectByDecls(file, dir, new Set());
       } else {
         reasons.push(`${file}: изменён обычный тест, роутерных тестов в пакете ${dir} нет`);
       }
+    }
+  }
+
+  // --- internal/routertest: по объявлениям (D-32) -------------------------------
+  // Изменённые объявления routertest → замыкание внутри routertest (изменённый тип доходит до
+  // функций, которые его возвращают или содержат) → в каждом роутерном пакете объявления
+  // `_test.go`, где есть `<имя импорта>.<Экспортируемое>` или селектор `.<Метод>` (метод вызывают на
+  // значении без имени пакета; одноимённые методы других типов только расширяют выбор) → замыкание
+  // пакета → его тесты TestRouter. Неразобранное — прежний откат через go list: зависимые пакеты
+  // целиком, у каждого своя строка причины.
+  if (!res.all) {
+    for (const file of rtFiles) {
+      const fallback = (why) => {
+        goChanged.add(RT_DIR);
+        goChangedByDecls.add(RT_DIR);
+        reasons.push(`${file}: нет области — пакет ${RT_DIR} целиком`);
+        reasons.push(`${file}: по объявлениям — зависимые пакеты целиком (${why})`);
+      };
+      const base = declBase(file);
+      if (base === undefined) {
+        fallback('нет базы сравнения');
+        continue;
+      }
+      const d = goDeclDiff(base, headText(file));
+      if (d.wide) {
+        fallback(d.wide);
+        continue;
+      }
+      if (d.changed.size === 0) {
+        reasons.push(`${file}: по объявлениям — объявления не изменены; тестов TestRouter в зависимых пакетах не выбрано`);
+        continue;
+      }
+      const rix = goFilesIndex(goDirFiles(RT_DIR).filter((f) => !f.file.endsWith('_test.go')));
+      if (!rix.ok) {
+        fallback(rix.why);
+        continue;
+      }
+      const inRt = goDeclClosure(rix.decls, d.changed);
+      const exported = new Set();
+      const methods = new Set();
+      for (const x of rix.decls) {
+        for (const n of x.names) {
+          if (!inRt.has(n)) continue;
+          if (x.kind === 'func' && x.receiver) methods.add(n);
+          else if (/^[A-Z]/.test(n)) exported.add(n);
+        }
+      }
+      // удалённое из routertest имя: вид неизвестен — ищется и через пакет, и через селектор
+      for (const n of d.changed) {
+        if (/^[A-Z]/.test(n) && !rix.decls.some((x) => x.names.includes(n))) {
+          exported.add(n);
+          methods.add(n);
+        }
+      }
+      const alt = (s) => [...s].sort().join('|');
+      const methodRe = methods.size > 0 ? new RegExp(`\\.[ \\t]*(?:${alt(methods)})\\b`) : null;
+      const rtImport = `${modulePath()}/${RT_DIR}`;
+      let total = 0;
+      const hitPkgs = [];
+      for (const pkg of routerPkgs) {
+        let whole = null;
+        const decls = [];
+        const seeds = new Set();
+        for (const f of goPkgTestFiles(pkg)) {
+          const ix = goDeclIndex(f.text);
+          if (!ix.ok) {
+            whole = `${f.file}: ${ix.why}`;
+            break;
+          }
+          const imp = ix.imports.find((i) => i.path === rtImport);
+          const alias = imp ? imp.name || 'routertest' : null;
+          if (alias === '.' || alias === '_') {
+            whole = `${f.file}: ${alias === '.' ? 'точечный' : 'пустой'} импорт ${RT_DIR}`;
+            break;
+          }
+          const exportRe = alias && exported.size > 0 ? new RegExp(`\\b${alias}[ \\t]*\\.[ \\t]*(?:${alt(exported)})\\b`) : null;
+          for (const x of ix.decls) {
+            decls.push(x);
+            if ((exportRe && exportRe.test(x.masked)) || (methodRe && methodRe.test(x.masked))) {
+              for (const n of x.names) seeds.add(n);
+            }
+          }
+        }
+        if (whole) {
+          addWholePkg(pkg, true);
+          hitPkgs.push(pkg);
+          reasons.push(`${pkg}: по объявлениям ${RT_DIR} — пакет целиком (${whole})`);
+          continue;
+        }
+        if (seeds.size === 0) continue;
+        const set = goDeclClosure(decls, seeds);
+        const facts = new Set(goRows.filter((r) => r.pkg === pkg).map((r) => r.test));
+        let n = 0;
+        const missing = [];
+        for (const t of goRouterTestsIn(decls, set)) {
+          if (facts.has(t)) {
+            addGo(pkg, t, true, true);
+            n++;
+          } else {
+            missing.push(t);
+          }
+        }
+        if (missing.length > 0) reasons.push(`${pkg}: по объявлениям ${RT_DIR} — ${missing.join(', ')} нет в фактах — пропущен`);
+        if (n > 0) {
+          total += n;
+          hitPkgs.push(pkg);
+        }
+      }
+      reasons.push(
+        `${file}: по объявлениям — изменены ${[...d.changed].join(', ')}; тестов TestRouter в зависимых пакетах, использующих их: ${total} (${hitPkgs.join(', ') || 'нет'})`
+      );
     }
   }
 
@@ -1883,17 +2353,24 @@ async function select(changed) {
       reasons.push('Go: все роутерные пакеты целиком');
     } else if (goChanged.size > 0) {
       const mod = modulePath();
-      const changedImports = new Set([...goChanged].map((d) => (d === '.' ? mod : `${mod}/${d}`)));
+      const imp = (d) => (d === '.' ? mod : `${mod}/${d}`);
+      const changedImports = new Set([...goChanged].map(imp));
+      const byDecls = new Set([...goChangedByDecls].map(imp));
       let any = false;
       for (const pkg of routerPkgs) {
         const own = `${mod}/${pkg}`;
         const deps = depsOf(pkg);
-        const hit = [...changedImports].find((p) => p === own || deps.has(p));
-        if (hit) {
-          addWholePkg(pkg, true);
-          any = true;
-          reasons.push(`${pkg}: зависит от изменённого пакета ${hit.slice(mod.length + 1) || '.'} — пакет целиком`);
-        }
+        const hits = [...changedImports].filter((p) => p === own || deps.has(p));
+        if (hits.length === 0) continue;
+        addWholePkg(pkg, true);
+        any = true;
+        // Откат по объявлениям (неизвестное — широко) отличим от прежнего правила: своя строка
+        const plain = hits.find((p) => !byDecls.has(p));
+        reasons.push(
+          plain
+            ? `${pkg}: зависит от изменённого пакета ${plain.slice(mod.length + 1) || '.'} — пакет целиком`
+            : `${pkg}: использует ${RT_DIR} — правка не разобрана по объявлениям, пакет целиком`
+        );
       }
       if (!any) reasons.push('Go: ни один роутерный пакет не затронут');
     }
