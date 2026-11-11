@@ -61,6 +61,18 @@
 // «стоп: <файл>: <причина>» в stderr (всегда, не только с --explain); полный выбор вместо
 // остановки не подставляется. Обязательный полный выбор того же диффа перекрывает остановку —
 // строка «карта: не сравнить (…) — перекрыто обязательным полным выбором».
+// Конфигурации TypeScript фронтенда (TS_CONFIG: frontend/**/tsconfig*.json, jsconfig*.json и
+// любые вершины их extends; D-26…D-28 фазы 148.1.1) — по конечным потребителям базы и head:
+// корни тестов — поле tsconfig конфигов frontend/playwright*.config.ts, корни сборки —
+// frontend/tsconfig.json и --tsconfig скриптов build, check, lint из package.json той же
+// ревизии; потребители — корни, в чьей цепочке extends есть файл, по всем уровням и обеим
+// ревизиям (удалённый — по базе, новый — по head, смена extends — обе цепочки). Только тесты —
+// RT_HARNESS=1; есть сборка панели — RT_HARNESS=1 и все браузерные спеки; строка «конфигурация:
+// <файл> — потребители: … — …». Широкая проверка сборочных файлов (FRONTEND_ALL: vite.config.ts,
+// svelte.config.js, index.html, public/) — прежняя. Неразрешимая связь (extends на
+// несуществующий файл, цикл наследования, неразбираемый JSON, ссылка на удалённую
+// конфигурацию) или потребитель не определён ни на одной ревизии — остановка с кодом 3 по тому
+// же контракту, что у карты: ни сужения, ни полного выбора.
 // Обвязка стенда (HARNESS: прочие
 // scripts/router/**, frontend/tests/router/lib/**, playwright.router.config.ts, global-setup/
 // teardown, internal/routertest, цели стенда и VERSION в Makefile) — RT_HARNESS=1 без полного
@@ -86,8 +98,9 @@
 //
 // При сомнении выбор только расширяется (D-25, T-148.1-24): небезопасное имя, ошибка карты
 // рабочей копии, фактов тестов или разбора, нет базы сравнения у зависимостей и Makefile —
-// полный выбор или расширение (пакет целиком, мажор, обвязка). Исключение — правка карты, которую
-// нельзя надёжно сравнить: остановка (код 3), не полный выбор.
+// полный выбор или расширение (пакет целиком, мажор, обвязка). Исключения — правка карты, которую
+// нельзя надёжно сравнить, и конфигурация TypeScript без определимого потребителя: остановка
+// (код 3), не полный выбор.
 //
 // Вывод (stdout) — 13 строк для eval в sh в фиксированном порядке, значения в одинарных
 // кавычках и только из безопасных символов (T-144.1-23, T-148.1-23); run.sh сверяет число и
@@ -275,14 +288,25 @@ const FRONT_LOCALE = /^src\/locales\/[\w-]+\.json$/;
 const HUB_PERCENT_DEFAULT = 50;
 let hubPercent = HUB_PERCENT_DEFAULT;
 
-// Файлы frontend/ вне src/, меняющие сборку панели: все роутерные спеки (не Go).
+// Файлы frontend/ вне src/, меняющие сборку панели: все роутерные спеки (не Go). Конфигурации
+// TypeScript сюда не входят: их выбор — по конечным потребителям (TS_CONFIG, D-26).
 const FRONTEND_ALL = [
   /^frontend\/vite\.config\.ts$/,
   /^frontend\/svelte\.config\.js$/,
-  /^frontend\/tsconfig[\w.-]*\.json$/,
   /^frontend\/index\.html$/,
   /^frontend\/public\//
 ];
+
+// Конфигурации TypeScript фронтенда (D-26…D-28): frontend/**/tsconfig*.json и jsconfig*.json
+// вне node_modules. Выбор — по потребителям обеих ревизий (tsConfigConsumers).
+const TS_CONFIG = /^frontend\/(?:(?!node_modules\/)[\w.-]+\/)*(?:tsconfig|jsconfig)[\w.-]*\.json$/;
+// Конфиги Playwright: их поле tsconfig — корни цепочки тестов
+const PW_CONFIG = /^frontend\/playwright[\w.-]*\.config\.ts$/;
+// Корень цепочки сборки панели: ближайшая к frontend/src конфигурация
+const BUILD_TS_ROOT = 'frontend/tsconfig.json';
+// Скрипты package.json, чей --tsconfig — тоже корень цепочки сборки
+const BUILD_SCRIPTS = ['build', 'check', 'lint'];
+const TS_CONSUMER_LABEL = { build: 'сборка панели', tests: 'тесты' };
 
 function git(args) {
   return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
@@ -309,9 +333,259 @@ function headText(file) {
   return existsSync(abs) ? readFileSync(abs, 'utf8') : null;
 }
 
-// --- карта областей: сравнение двух версий (RTR-14, D-21…D-25 фазы 148.1.1) ----------------
-
 const firstLine = (e) => String(e?.message ?? e).split('\n', 1)[0];
+
+// --- конфигурации TypeScript фронтенда: потребители двух ревизий (D-26…D-28) ---------------
+
+/**
+ * JSON с комментариями `//`, `/* *\/` и висячими запятыми — как tsconfig читает tsc. Разбор как
+ * данных, без исполнения (T-148.1.1-25).
+ */
+function parseJsonc(text) {
+  const src = text.replace(/^﻿/, '');
+  // строка JSON с позиции i: индекс после закрывающей кавычки
+  const strEnd = (s, i) => {
+    let j = i + 1;
+    while (j < s.length && s[j] !== '"') j += s[j] === '\\' ? 2 : 1;
+    if (j >= s.length) throw new Error('незакрытая строка');
+    return j + 1;
+  };
+  let bare = '';
+  for (let i = 0; i < src.length; ) {
+    if (src[i] === '"') {
+      const j = strEnd(src, i);
+      bare += src.slice(i, j);
+      i = j;
+    } else if (src.startsWith('//', i)) {
+      while (i < src.length && src[i] !== '\n') i++;
+    } else if (src.startsWith('/*', i)) {
+      const end = src.indexOf('*/', i + 2);
+      if (end < 0) throw new Error('незакрытый комментарий /*');
+      bare += ' ';
+      i = end + 2;
+    } else {
+      bare += src[i++];
+    }
+  }
+  let out = '';
+  for (let i = 0; i < bare.length; ) {
+    if (bare[i] === '"') {
+      const j = strEnd(bare, i);
+      out += bare.slice(i, j);
+      i = j;
+      continue;
+    }
+    if (bare[i] === ',') {
+      let j = i + 1;
+      while (j < bare.length && /\s/.test(bare[j])) j++;
+      if (bare[j] === '}' || bare[j] === ']') {
+        i++;
+        continue;
+      }
+    }
+    out += bare[i++];
+  }
+  return JSON.parse(out);
+}
+
+/** Файлы frontend/ ревизии ref (null — рабочее дерево, вне node_modules). */
+function frontendFilesAt(ref) {
+  if (ref) return git(['ls-tree', '-r', '--name-only', ref, '--', 'frontend']).split('\n').filter(Boolean);
+  const out = [];
+  const walk = (dir) => {
+    for (const d of readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+      if (d.name === 'node_modules' || d.name.startsWith('.')) continue;
+      const rel = `${dir}/${d.name}`;
+      if (d.isDirectory()) walk(rel);
+      else out.push(rel);
+    }
+  };
+  if (existsSync(path.join(ROOT, 'frontend'))) walk('frontend');
+  return out;
+}
+
+/** Путь p относительно каталога dir; null — вне frontend/ («..» за пределы, абсолютный путь). */
+function frontendPath(dir, p) {
+  if (p.startsWith('/') || /^[A-Za-z]:/.test(p)) return null;
+  const out = path.posix.normalize(path.posix.join(dir, p));
+  return out.startsWith('frontend/') ? out : null;
+}
+
+/**
+ * Цепочки extends конфигураций TypeScript фронтенда на ревизии ref (null — рабочее дерево):
+ * { roots, nodes, issues, chainIssues(file) }. roots — { kind: 'tests' | 'build', file, source,
+ * reach } (reach — все конфигурации цепочки корня, включая его самого). Корни тестов — поле
+ * tsconfig конфигов frontend/playwright*.config.ts (без поля — ближайший к testDir tsconfig.json,
+ * как ищет Playwright); корни сборки — frontend/tsconfig.json и пути --tsconfig в скриптах
+ * build, check, lint frontend/package.json той же ревизии. extends с «.» в начале — локальный
+ * файл относительно конфигурации (без расширения — с .json); иное — пакет, внешняя вершина: его
+ * изменения приходят через правила зависимостей. issues — неразрешимые связи: { file, why }.
+ */
+function tsConfigGraph(ref) {
+  const read = (f) => {
+    if (ref) return gitShow(ref, f);
+    const abs = path.join(ROOT, f);
+    return existsSync(abs) ? readFileSync(abs, 'utf8') : null;
+  };
+  const files = frontendFilesAt(ref);
+  const has = new Set(files);
+  const nodes = new Map(); // файл → { exists, ext: [локальные пути], error }
+  const issues = [];
+  const issue = (file, why) => {
+    if (!issues.some((x) => x.file === file && x.why === why)) issues.push({ file, why });
+  };
+  const node = (f) => {
+    if (nodes.has(f)) return nodes.get(f);
+    const text = read(f);
+    const n = { exists: text !== null, ext: [], error: null };
+    nodes.set(f, n);
+    if (text === null) return n;
+    let cfg;
+    try {
+      cfg = parseJsonc(text);
+    } catch (e) {
+      n.error = `не разбирается: ${firstLine(e)}`;
+      return n;
+    }
+    const raw = cfg && typeof cfg === 'object' && !Array.isArray(cfg) ? cfg.extends : undefined;
+    const list = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
+    for (const v of list) {
+      if (typeof v !== 'string') {
+        n.error = 'не разбирается: extends — не строка и не массив строк';
+        break;
+      }
+      if (!v.startsWith('.') && !v.startsWith('/') && !/^[A-Za-z]:/.test(v)) continue; // пакет
+      let p = frontendPath(path.posix.dirname(f), v);
+      if (p === null) {
+        n.error = `extends вне frontend/: ${v}`;
+        break;
+      }
+      if (!p.endsWith('.json')) p += '.json';
+      n.ext.push(p);
+    }
+    return n;
+  };
+  // Обход цепочки от start: все вершины; неразрешимое — в issues
+  const chain = (start) => {
+    const reach = new Set();
+    const stack = [];
+    const visit = (f, from) => {
+      const at = stack.indexOf(f);
+      if (at >= 0) {
+        issue(f, `цикл наследования ${[...stack.slice(at), f].join(' → ')}`);
+        return;
+      }
+      if (reach.has(f)) return;
+      const n = node(f);
+      if (!n.exists) {
+        issue(from ?? f, `extends на несуществующий файл ${f}`);
+        return;
+      }
+      reach.add(f);
+      if (n.error) {
+        issue(f, n.error);
+        return;
+      }
+      stack.push(f);
+      for (const p of n.ext) visit(p, f);
+      stack.pop();
+    };
+    visit(start, null);
+    return reach;
+  };
+  const roots = [];
+  const addRoot = (kind, file, source) => {
+    if (file === null || !has.has(file)) {
+      issue(source, `tsconfig на несуществующий файл ${file ?? 'вне frontend/'}`);
+      return;
+    }
+    roots.push({ kind, file, source, reach: chain(file) });
+  };
+  for (const f of files.filter((x) => PW_CONFIG.test(x)).sort()) {
+    const text = stripComments(read(f) ?? '');
+    const m = /\btsconfig\s*:\s*(['"`])([^'"`]+)\1/.exec(text);
+    if (m) {
+      const p = frontendPath('frontend', m[2]);
+      addRoot('tests', p, f);
+      continue;
+    }
+    // Без поля tsconfig Playwright берёт ближайший к файлам тестов tsconfig.json
+    const td = /\btestDir\s*:\s*(['"`])([^'"`]+)\1/.exec(text);
+    let dir = frontendPath('frontend', td ? td[2] : '.') ?? 'frontend';
+    while (dir.startsWith('frontend/') && !has.has(`${dir}/tsconfig.json`)) dir = path.posix.dirname(dir);
+    if (has.has(`${dir}/tsconfig.json`)) addRoot('tests', `${dir}/tsconfig.json`, `${f} (без поля tsconfig)`);
+  }
+  if (has.has(BUILD_TS_ROOT)) addRoot('build', BUILD_TS_ROOT, 'frontend/src');
+  const pkgText = has.has('frontend/package.json') ? read('frontend/package.json') : null;
+  if (pkgText !== null) {
+    let scripts = {};
+    try {
+      scripts = JSON.parse(pkgText).scripts || {};
+    } catch (e) {
+      issue('frontend/package.json', `не разбирается: ${firstLine(e)}`);
+    }
+    for (const name of BUILD_SCRIPTS) {
+      const cmd = scripts[name];
+      if (typeof cmd !== 'string') continue;
+      for (const m of cmd.matchAll(/--tsconfig(?:=|\s+)(['"]?)([^\s'"]+)\1/g)) {
+        addRoot('build', frontendPath('frontend', m[2]), `frontend/package.json (скрипт ${name})`);
+      }
+    }
+  }
+  // Все конфигурации ревизии: неразрешимое в цепочке любой из них тоже видно (D-28)
+  for (const f of files.filter((x) => TS_CONFIG.test(x))) chain(f);
+  return { roots, nodes, issues };
+}
+
+const tsGraphs = { done: false, base: null, head: null, baseRef: null, error: null };
+
+/** Графы конфигураций базы (база диффа, в режиме --files — HEAD) и head; строятся один раз. */
+function tsConfigGraphs() {
+  if (tsGraphs.done) return tsGraphs;
+  tsGraphs.done = true;
+  tsGraphs.baseRef = mapBaseRef();
+  try {
+    if (tsGraphs.baseRef) tsGraphs.base = tsConfigGraph(tsGraphs.baseRef);
+    tsGraphs.head = tsConfigGraph(ctx.to);
+  } catch (e) {
+    tsGraphs.error = `конфигурации ревизий не прочитаны: ${firstLine(e)}`;
+  }
+  return tsGraphs;
+}
+
+/** Файл — конфигурация TypeScript фронтенда: по шаблону или вершина extends на любой ревизии. */
+function isTsConfig(file) {
+  if (TS_CONFIG.test(file)) return true;
+  if (!/^frontend\/(?!src\/|node_modules\/)[\w./-]*\.json$/.test(file) || /\/package(-lock)?\.json$/.test(file)) return false;
+  const g = tsConfigGraphs();
+  return [g.base, g.head].some((x) => x?.nodes.get(file)?.exists);
+}
+
+/**
+ * Потребители изменённой конфигурации: { kinds: Set('tests' | 'build'), issues }. Объединение
+ * корней, в чьей цепочке extends есть файл, по базе и head: удалённый — по базе, новый — по head,
+ * смена extends — обе цепочки, даже если итоговые настройки совпали (D-27). issues — неразрешимые
+ * связи обеих ревизий: { file, why } с пометкой ревизии.
+ */
+function tsConfigConsumers(file) {
+  const g = tsConfigGraphs();
+  const out = { kinds: new Set(), issues: [] };
+  if (g.error) {
+    out.issues.push({ file, why: g.error });
+    return out;
+  }
+  for (const [side, graph] of [
+    [`база ${g.baseRef}`, g.base],
+    ['head', g.head]
+  ]) {
+    if (!graph) continue;
+    for (const r of graph.roots) if (r.reach.has(file)) out.kinds.add(r.kind);
+    for (const x of graph.issues) out.issues.push({ file: x.file, why: `${x.why} (${side})` });
+  }
+  return out;
+}
+
+// --- карта областей: сравнение двух версий (RTR-14, D-21…D-25 фазы 148.1.1) ----------------
 
 /** Ревизия базы для сравнения карты: база диффа, в режиме --files — HEAD; null — git нет. */
 function mapBaseRef() {
@@ -1109,6 +1383,7 @@ async function select(changed) {
   const depFiles = new Set();
   let makefile = false;
   let pwAll = false;
+  const cfgStops = []; // конфигурации TypeScript без определимого потребителя: { file, why }
   let sharedHit = false;
   // Области, чьи тесты выбираются целиком (RT_AREAS шире: подобласти и отметки фронтенда)
   const wholeAreas = new Set();
@@ -1346,6 +1621,32 @@ async function select(changed) {
     }
     // Карта областей: выбор по сравнению двух версий (compareMaps), не обвязка и не полный
     if (file === AREAS_FILE) continue;
+    // Конфигурация TypeScript фронтенда (D-26): по конечным потребителям базы и head. Только
+    // тесты — обвязка; есть сборка панели — обвязка и все браузерные спеки (прежняя широкая
+    // проверка сборочных файлов FRONTEND_ALL остаётся отдельно). Правки продукта того же диффа
+    // разбираются своими ветками — выборы объединяются.
+    if (isTsConfig(file)) {
+      const c = tsConfigConsumers(file);
+      const kinds = ['build', 'tests'].filter((k) => c.kinds.has(k));
+      const who = kinds.map((k) => TS_CONSUMER_LABEL[k]).join(', ');
+      // Неразрешимая связь или потребителя нет ни на одной ревизии (D-28) — остановка после
+      // разбора всех файлов: ни сужения, ни полного выбора
+      if (c.issues.length > 0 || kinds.length === 0) {
+        const list = c.issues.length > 0 ? c.issues : [{ file, why: 'потребитель не определён' }];
+        for (const x of list) {
+          if (!cfgStops.some((y) => y.file === x.file && y.why === x.why)) cfgStops.push(x);
+        }
+        continue;
+      }
+      res.harness = true;
+      if (c.kinds.has('build')) {
+        pwAll = true;
+        reasons.push(`конфигурация: ${file} — потребители: ${who} — обвязка и все браузерные спеки`);
+      } else {
+        reasons.push(`конфигурация: ${file} — потребители: ${who} — обвязка`);
+      }
+      continue;
+    }
     if (HARNESS.some((re) => re.test(file))) {
       res.harness = true;
       reasons.push(`${file}: обвязка стенда — набор обвязки, полный выбор не нужен`);
@@ -1439,6 +1740,22 @@ async function select(changed) {
       continue;
     }
     warnUnknown(file);
+  }
+
+  // Конфигурации TypeScript, чьих потребителей нельзя определить (D-28): остановка — res.stop
+  // даёт код EXIT_STOP в main; обязательный полный выбор того же диффа её перекрывает.
+  if (cfgStops.length > 0) {
+    if (required.length > 0) {
+      for (const x of cfgStops) {
+        reasons.push(`конфигурация: не определить (${x.file}: ${x.why}) — перекрыто обязательным полным выбором`);
+      }
+    } else {
+      for (const x of cfgStops) {
+        res.stop.push(`${x.file}: ${x.why}`);
+        reasons.push(`стоп: ${x.file}: ${x.why}`);
+      }
+      return { res, routerPkgs, specsAll };
+    }
   }
 
   // --- Makefile ---------------------------------------------------------------
