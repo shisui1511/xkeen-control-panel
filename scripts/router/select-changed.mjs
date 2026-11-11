@@ -119,8 +119,20 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import coreMarks from './core-marks.cjs';
 
-const { goMarks, analyzeGo, loadAreas, subareasOf, matchGlob, testFacts, goTestFacts, specTestFacts, areaOfText } =
-  coreMarks;
+const {
+  goMarks,
+  analyzeGo,
+  loadAreas,
+  areasFromText,
+  diffAreaMaps,
+  subareasOf,
+  matchGlob,
+  testFacts,
+  goTestFacts,
+  specTestFacts,
+  areaOfText,
+  AREAS_FILE
+} = coreMarks;
 
 // Изменённые файлы текущего выбора: goMarks читает только индекс, новые тесты он не видит
 let changedFiles = [];
@@ -137,8 +149,9 @@ const SAFE_PATH = /^[A-Za-z0-9_.][A-Za-z0-9_./-]*$/;
 const SAFE_ROUTE = /^[a-z][a-z0-9_-]*$/;
 const SEQ_ENTRY = /^[A-Za-z0-9_./-]+:TestRouter[A-Za-z0-9_]+$/;
 
-// Правка самого выбора: единственная причина полного выбора (RTR-02).
-const SELECTOR_SELF = [/^scripts\/router\/(select-changed\.mjs|areas\.json|core-marks\.cjs|import-graph\.mjs)$/];
+// Правка механизма выбора: полный выбор (RTR-02). Карта областей сюда не входит: её правка
+// разбирается по смыслу сравнением двух версий (compareMaps, D-21…D-23 фазы 148.1.1).
+const SELECTOR_SELF = [/^scripts\/router\/(select-changed\.mjs|core-marks\.cjs|import-graph\.mjs)$/];
 
 // Обвязка стенда: RT_HARNESS=1 без полного выбора (набор обвязки — 148.1-11). Цели стенда в
 // Makefile разбирает makefileStand(), internal/routertest — ветка Go.
@@ -265,6 +278,85 @@ function headText(file) {
   if (ctx.to) return gitShow(ctx.to, file);
   const abs = path.join(ROOT, file);
   return existsSync(abs) ? readFileSync(abs, 'utf8') : null;
+}
+
+// --- карта областей: сравнение двух версий (RTR-14, D-21…D-25 фазы 148.1.1) ----------------
+
+const firstLine = (e) => String(e?.message ?? e).split('\n', 1)[0];
+
+/** Ревизия базы для сравнения карты: база диффа, в режиме --files — HEAD; null — git нет. */
+function mapBaseRef() {
+  if (ctx.from) return ctx.from;
+  try {
+    execFileSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], { cwd: ROOT, stdio: 'ignore' });
+    return 'HEAD';
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Две версии карты: { baseRef, base, head, diff, appeared, problems }. Обе разбираются
+ * areasFromText(текст, null) — тот же validateAreas, что у стража; problems — причины, по
+ * которым карты нельзя надёжно сравнить; appeared — в базе карты нет.
+ */
+function compareMaps() {
+  const out = { baseRef: mapBaseRef(), base: null, head: null, diff: null, appeared: false, problems: [] };
+  if (out.baseRef === null) {
+    out.problems.push('нет базы сравнения: режим --files без git (ревизии HEAD нет)');
+  } else {
+    const text = gitShow(out.baseRef, AREAS_FILE);
+    if (text === null) out.appeared = true;
+    else {
+      try {
+        out.base = areasFromText(text, null);
+      } catch (e) {
+        out.problems.push(`карта базы (${out.baseRef}) не разбирается или не проходит проверку: ${firstLine(e)}`);
+      }
+    }
+  }
+  const text = headText(AREAS_FILE);
+  if (text === null) out.problems.push('карта удалена — сравнивать не с чем');
+  else {
+    try {
+      out.head = areasFromText(text, null);
+    } catch (e) {
+      out.problems.push(`карта head не разбирается или не проходит проверку: ${firstLine(e)}`);
+    }
+  }
+  if (out.base && out.head) out.diff = diffAreaMaps(out.base, out.head);
+  return out;
+}
+
+/** Метки `// router-area:` роутерных тестов в ревизии ref: Map файл → область. */
+function areaMarksAt(ref) {
+  const marks = new Map();
+  let text;
+  try {
+    text = execFileSync('git', ['grep', '-n', '-I', '-e', '^// router-area: ', ref, '--', 'internal', 'cmd', 'frontend/tests/router'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      maxBuffer: 64 * 1024 * 1024
+    });
+  } catch (e) {
+    if (e.status === 1) return marks; // совпадений нет
+    throw new Error(`метки router-area ревизии ${ref} не прочитаны (${firstLine(e)})`);
+  }
+  const seen = new Map();
+  for (const line of text.split('\n')) {
+    if (!line.startsWith(`${ref}:`)) continue;
+    const rest = line.slice(ref.length + 1);
+    const m = /^([^:]+):(\d+):\/\/ router-area: ([a-z][a-z0-9-]*)$/.exec(rest);
+    if (!m || Number(m[2]) > 5) continue;
+    const file = m[1];
+    if (!/_test\.go$/.test(file) && !/^frontend\/tests\/router\/[\w.-]+\.spec\.ts$/.test(file)) continue;
+    seen.set(file, (seen.get(file) || 0) + 1);
+    marks.set(file, m[3]);
+  }
+  // строка области повторяется — метка неоднозначна, файл не считается (так же, как areaOfText)
+  for (const [file, n] of seen) if (n > 1) marks.delete(file);
+  return marks;
 }
 
 function modulePath() {
@@ -827,6 +919,19 @@ async function select(changed) {
   const warnUnknown = (file) =>
     reasons.push(`предупреждение: неизвестный файл ${file} — только смоук; добавьте путь в areas.json или в список не влияющих`);
 
+  // Правка карты областей: две версии сравниваются по смыслу (D-21), выбор — ниже, в разделе
+  // областей. Формат, shared, канарейки и несравнимые карты пока — полный выбор.
+  const cmp = changed.includes(AREAS_FILE) ? compareMaps() : null;
+  if (cmp) {
+    for (const p of cmp.problems) escalate(`${AREAS_FILE}: ${p}`);
+    if (cmp.appeared) escalate(`${AREAS_FILE}: карта появилась — сравнивать не с чем`);
+    if (cmp.diff) {
+      if (cmp.diff.format.length > 0) escalate(`${AREAS_FILE}: формат карты (${cmp.diff.format.join('; ')})`);
+      for (const s of cmp.diff.shared) escalate(`${AREAS_FILE}: признак shared (${s.area}: ${s.from} → ${s.to})`);
+      if (cmp.diff.canary.length > 0) escalate(`${AREAS_FILE}: изменены канарейки`);
+    }
+  }
+
   // Карта областей и факты тестов: без них имена не выбрать — расширение до полного выбора
   let areaMap;
   let facts;
@@ -968,6 +1073,159 @@ async function select(changed) {
     }
   };
 
+  /**
+   * Выбор по смысловому сравнению карт (D-21, D-23, D-25): изменённая привязка путей выбирает
+   * тесты области по правилам прямой правки (метки базы и head, поле tests, ярус full — если
+   * область не shared, канарейки — если shared); записи tests и подобластей — свои тесты, если
+   * они существуют; добавленная или удалённая область — тесты по обеим картам. Каждое изменение —
+   * строка «карта: …» с числом выбранных им проверок; повторы с выбором по продукту не считаются
+   * дважды (общие множества res).
+   */
+  const applyMapDiff = (c) => {
+    const d = c.diff;
+    const base = c.base.areas;
+    const head = c.head.areas;
+    let baseMarks = null;
+    const marksAtBase = () => (baseMarks ??= areaMarksAt(c.baseRef));
+    const acc = () => ({ go: new Set(), specs: new Set(), missing: [] });
+    const merged = (list) => {
+      const a = acc();
+      for (const x of list) {
+        x.go.forEach((k) => a.go.add(k));
+        x.specs.forEach((s) => a.specs.add(s));
+        a.missing.push(...x.missing.filter((m) => !a.missing.includes(m)));
+      }
+      return a;
+    };
+    const tally = (a) =>
+      `Go ${a.go.size}, спеков ${a.specs.size}` + (a.missing.length > 0 ? ` (нет среди тестов: ${a.missing.join(', ')})` : '');
+    const pickGo = (r, fullOk, a) => {
+      addGo(r.pkg, r.test, true, fullOk);
+      a.go.add(`${r.pkg}:${r.test}`);
+    };
+    const pickSpec = (s, fullOk, a) => {
+      if (!specSelectable(s)) return false;
+      res.specsDirect.add(s);
+      res.specsForced.add(s);
+      if (fullOk) res.specsFullOk.add(s);
+      a.specs.add(s);
+      return true;
+    };
+    // strict — запись head: нет теста — расширение, как у поля tests области; иначе (запись
+    // базы, удалённая) — выбирается, только если тест ещё существует
+    const pickEntries = (list, fullOk, strict, where, a) => {
+      for (const t of list) {
+        if (!t.startsWith('go:')) {
+          if (!pickSpec(t, fullOk, a)) a.missing.push(t);
+          continue;
+        }
+        const hit = goRows.filter((r) => r.test === t.slice(3));
+        if (hit.length === 0) {
+          if (strict && !replacedTests.has(t.slice(3))) escalate(`${where}: тест ${t} из карты не найден`);
+          a.missing.push(t);
+          continue;
+        }
+        for (const r of hit) pickGo(r, fullOk, a);
+      }
+    };
+    const sharedOf = (name) => Boolean(head[name]?.shared || base[name]?.shared);
+    const touch = (name) => {
+      res.areas.add(name);
+      if (sharedOf(name)) sharedHit = true;
+    };
+    const whole = new Map();
+    // Тесты области целиком по обеим картам: метки head (факты) и базы, поле tests head и базы
+    const wholeArea = (name) => {
+      if (whole.has(name)) return whole.get(name);
+      const a = acc();
+      const fullOk = !sharedOf(name);
+      touch(name);
+      const marked = new Set();
+      for (const [file, area] of marksAtBase()) if (area === name) marked.add(file);
+      for (const r of facts) {
+        if (r.area !== name && !marked.has(r.file)) continue;
+        if (r.kind === 'go') pickGo(r, fullOk, a);
+        else if (r.spec) pickSpec(r.spec, fullOk, a);
+      }
+      const headTests = head[name]?.tests || [];
+      pickEntries(headTests, fullOk, true, `область ${name}`, a);
+      pickEntries(
+        (base[name]?.tests || []).filter((t) => !headTests.includes(t)),
+        fullOk,
+        false,
+        `область ${name}`,
+        a
+      );
+      whole.set(name, a);
+      return a;
+    };
+    const signed = (added, removed) => [...added.map((x) => `+${x}`), ...removed.map((x) => `−${x}`)].join(' ');
+
+    for (const m of d.paths) {
+      const names = [...new Set([...m.from, ...m.to])].sort();
+      const a = merged(names.map(wholeArea));
+      const what =
+        m.from.length > 0 && m.to.length > 0
+          ? `перенесён: ${m.from.join(', ')} → ${m.to.join(', ')}`
+          : m.to.length > 0
+            ? `добавлен: ${m.to.join(', ')}`
+            : `удалён: ${m.from.join(', ')}`;
+      reasons.push(`карта: шаблон ${m.pattern} ${what} — ${tally(a)}`);
+    }
+    for (const t of d.tests) {
+      const a = acc();
+      const fullOk = !sharedOf(t.area);
+      touch(t.area);
+      pickEntries(t.added, fullOk, true, `область ${t.area}`, a);
+      pickEntries(t.removed, fullOk, false, `область ${t.area}`, a);
+      reasons.push(`карта: область ${t.area}, tests ${signed(t.added, t.removed)} — ${tally(a)}`);
+    }
+    for (const s of d.subareas) {
+      const a = acc();
+      const key = `${s.area}/${s.sub}`;
+      touch(s.area);
+      let what;
+      if (s.kind === 'added') {
+        pickEntries(s.headTests, true, true, `подобласть ${key}`, a);
+        what = 'добавлена';
+      } else if (s.kind === 'removed') {
+        pickEntries(s.baseTests, true, false, `подобласть ${key}`, a);
+        what = 'удалена';
+      } else {
+        const parts = [];
+        if (s.paths.added.length + s.paths.removed.length > 0) {
+          // изменена привязка путей: тесты подобласти обеих карт
+          pickEntries(s.headTests, true, true, `подобласть ${key}`, a);
+          pickEntries(s.baseTests.filter((t) => !s.headTests.includes(t)), true, false, `подобласть ${key}`, a);
+          parts.push(`paths ${signed(s.paths.added, s.paths.removed)}`);
+        } else {
+          pickEntries(s.tests.added, true, true, `подобласть ${key}`, a);
+          pickEntries(s.tests.removed, true, false, `подобласть ${key}`, a);
+        }
+        if (s.tests.added.length + s.tests.removed.length > 0) parts.push(`tests ${signed(s.tests.added, s.tests.removed)}`);
+        what = parts.join(', ');
+      }
+      reasons.push(`карта: подобласть ${key} ${what} — ${tally(a)}`);
+    }
+    for (const name of d.added) reasons.push(`карта: область ${name} добавлена — ${tally(wholeArea(name))}`);
+    for (const name of d.removed) reasons.push(`карта: область ${name} удалена — ${tally(wholeArea(name))}`);
+    if (d.harness) {
+      res.harness = true;
+      reasons.push('карта: изменён блок harness — обвязка стенда (RT_HARNESS=1)');
+    }
+    const substantive =
+      d.format.length + d.shared.length + d.paths.length + d.tests.length + d.subareas.length + d.canary.length +
+        d.added.length + d.removed.length >
+        0 || d.harness;
+    if (!substantive) {
+      reasons.push(
+        `карта: изменены только названия или порядок — выбор не расширяется${d.cosmetic.length > 0 ? ` (${d.cosmetic.slice(0, 8).join('; ')}${d.cosmetic.length > 8 ? '; …' : ''})` : ''}`
+      );
+    } else if (d.cosmetic.length > 0) {
+      reasons.push(`карта: без влияния на выбор — ${d.cosmetic.slice(0, 8).join('; ')}${d.cosmetic.length > 8 ? '; …' : ''}`);
+    }
+  };
+
   for (const file of changed) {
     if (!SAFE_PATH.test(file)) {
       escalate(`небезопасное имя файла ${JSON.stringify(file)}`);
@@ -982,6 +1240,8 @@ async function select(changed) {
       escalate(`${file}: правка самого выбора`);
       continue;
     }
+    // Карта областей: выбор по сравнению двух версий (compareMaps), не обвязка и не полный
+    if (file === AREAS_FILE) continue;
     if (HARNESS.some((re) => re.test(file))) {
       res.harness = true;
       reasons.push(`${file}: обвязка стенда — набор обвязки, полный выбор не нужен`);
@@ -1140,7 +1400,14 @@ async function select(changed) {
       const n = addSubareaTests(name, sub);
       reasons.push(`подобласть ${key}: тестов Go ${n.go}, спеков ${n.specs}`);
     }
-    if (sharedHit) addCanaries('правка общего кода');
+    if (cmp?.diff) {
+      try {
+        applyMapDiff(cmp);
+      } catch (e) {
+        escalate(`${AREAS_FILE}: выбор по сравнению карт не получен (${firstLine(e)})`);
+      }
+    }
+    if (sharedHit && !res.all) addCanaries('правка общего кода');
     // Отметка фронтенда: только RT_AREAS и объяснение, тесты выбирает граф импортов
     for (const name of [...frontMarked].sort()) {
       if (res.areas.has(name)) continue;
