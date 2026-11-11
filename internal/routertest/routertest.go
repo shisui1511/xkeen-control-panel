@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -440,13 +441,19 @@ func RoutingContractFile(t testing.TB) string {
 	return path
 }
 
+// expectVersionNameRE — алфавит имени теста, который принимает rt_version_guard
+// (scripts/router/lib.sh): имя вне него обвязка отбрасывает, и переход не принимается.
+var expectVersionNameRE = regexp.MustCompile(`^[A-Za-z0-9_./=+,:#-]+$`)
+
 // ExpectVersion объявляет обвязке стенда версию панели, на которой тест оставляет
 // стенд, — первую строку `/opt/sbin/xcp -v` в том виде, как её печатает панель.
 // Обвязка (scripts/router/go-suite.sh, rt_version_guard) сверяет версию стенда после
 // каждого запуска группы тестов: без объявления другая версия — посторонняя
 // установка, этап останавливается. Объявленная версия принимается как новая
 // ожидаемая на ближайшей границе, только если она совпала с наблюдаемой и тест
-// прошёл; упавший тест снимает объявление сам (Cleanup). Если тест сам возвращает
+// прошёл (строка PASS, KNOWN или QPASS в разборе запуска); упавший тест снимает
+// объявление сам (Cleanup). Имя теста, включая подтесты, — только из [A-Za-z0-9_./=+,:#-]
+// (иначе ExpectVersion завершает тест ошибкой: обвязка не примет такое имя). Если тест сам возвращает
 // исходную версию (откат), объявление безвредно: на границе версия совпадёт с
 // прежней ожидаемой, а файл обвязка удалит после чтения.
 //
@@ -462,8 +469,8 @@ func ExpectVersion(t testing.TB, version string) {
 		t.Fatalf("ExpectVersion: версия %q пустая или с табуляцией либо переводом строки", version)
 	}
 	name := t.Name()
-	if strings.ContainsAny(name, "\t\r\n") {
-		t.Fatalf("ExpectVersion: имя теста %q с табуляцией либо переводом строки", name)
+	if !expectVersionNameRE.MatchString(name) {
+		t.Fatalf("ExpectVersion: имя теста %q вне [A-Za-z0-9_./=+,:#-]: обвязка (rt_version_guard) не примет переход", name)
 	}
 	path := dir + "/expect-version"
 	tmp, err := os.CreateTemp(dir, ".expect-version-*")

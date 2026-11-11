@@ -437,7 +437,7 @@ rt_version_set() {
 # Одно обращение по ssh читает код и первую строку `/opt/sbin/xcp -v`, а с файлом объявления — ещё
 # его первую строку («<версия><TAB><имя теста>», пишет routertest.ExpectVersion) и удаляет его.
 # Совпало с ожиданием — строка ok. Не совпало: объявлена ровно наблюдаемая версия, и объявивший
-# тест прошёл в этом запуске (строка PASS<TAB>go:<тест> в parsed), — новая ожидаемая версия, строка
+# тест прошёл в этом запуске (строка PASS, KNOWN или QPASS<TAB>go:<тест> в parsed), — новая ожидаемая версия, строка
 # transition. Иначе (в том числе код `xcp -v` не 0 при живой связи — «ошибка чтения: код N»)
 # остановка: строка stop в version-stop.tsv (если её ещё нет) и строка результата FAIL version-guard.
 # Наблюдаемая версия без объявления прошедшего теста новой ожидаемой не становится.
@@ -521,7 +521,7 @@ rt_version_guard() {
       '' | *[!A-Za-z0-9_./=+,:#-]*) _vg_dtest="" ;;
     esac
     if [ -n "$_vg_dtest" ] && [ -n "$_vg_dver" ] && [ "$_vg_dver" = "$_vg_obs" ] &&
-      awk -F'\t' -v n="go:$_vg_dtest" '$1 == "PASS" && $2 == n { f = 1 } END { exit !f }' "$_vg_parsed"; then
+      awk -F'\t' -v n="go:$_vg_dtest" '($1 == "PASS" || $1 == "KNOWN" || $1 == "QPASS") && $2 == n { f = 1 } END { exit !f }' "$_vg_parsed"; then
       if rt_version_set "$_vg_id" "$_vg_obs"; then
         printf 'transition\t%s\t%s\t%s\t%s\n' "$_vg_core" "$_vg_b" "$_vg_exp" "$_vg_obs" >>"$_vg_dir/version-guard.tsv"
         return 0
