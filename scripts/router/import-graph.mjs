@@ -9,8 +9,9 @@
 //      Для маршрута dashboard страницей считаются импорты Dashboard.svelte, которые
 //      используются только в его ветке.
 //   3. Спек привязан к маршрутам, которые он открывает (`#/<маршрут>`,
-//      строковые литералы с именем маршрута, переход на '/'), и к
-//      маршрутам из комментария `// e2e-pages: a, b`.
+//      строковые литералы с именем маршрута), и к маршрутам из комментария
+//      `// e2e-pages: a, b`. Вход через корень ('/') — маршрут dashboard только
+//      у спека без других маршрутов (D-32 фазы 148.1.1).
 //
 // Ревизии (148.1.1, RTR-13). Модель строится из рабочего дерева (fsReader) или из снимка git
 // (gitReader: ls-tree и cat-file --batch по ref, содержимое не исполняется). Выбор сравнивает
@@ -36,6 +37,10 @@ const ROUTE_ALIASES = {
   'mihomo-gen': 'editor',
   subscriptions: 'proxies'
 };
+
+// Вход спека через корень: goto('/') или visitPage('/') — литерал «/» без хэша, допускается
+// строка запроса. Маршрут dashboard только у спека без других маршрутов (specRoutes, D-32).
+const ROOT_ENTRY = /(?:goto|visitPage)\([^)]*?['"`]\/(?:\?[^'"`#]*)?['"`]/;
 
 const RESOLVE_EXTENSIONS = ['', '.ts', '.js', '.svelte', '.svelte.ts', '.svelte.js'];
 const INDEX_FILES = ['index.ts', 'index.js', 'index.svelte.ts', 'index.svelte.js'];
@@ -403,10 +408,6 @@ export function specRoutes(specText, knownRoutes) {
     const r = norm(m[1]);
     if (knownRoutes.has(r) || [...knownRoutes].some((k) => k.startsWith(`${r}/`))) routes.add(r);
   }
-  // Переход на корень без хэша — дашборд (оболочка входит всегда)
-  if (/(?:goto|visitPage)\([^)]*?['"`]\/(?:\?[^'"`#]*)?['"`]/.test(specText)) {
-    routes.add('dashboard');
-  }
   // Аннотация: маршруты через запятую или пробел
   for (const m of specText.matchAll(/\/\/\s*e2e-pages:\s*([^\n]+)/g)) {
     for (const r of m[1].split(/[,\s]+/).filter(Boolean)) {
@@ -415,16 +416,27 @@ export function specRoutes(specText, knownRoutes) {
     }
   }
   const valid = new Set();
-  for (const r of routes) {
+  const addValid = (r) => {
     if (knownRoutes.has(r)) {
       valid.add(r);
-      continue;
+      return;
     }
     // Страница без вкладки или незнакомая вкладка — все вкладки страницы (или сама страница)
     const top = topRoute(r);
     if (knownRoutes.has(top)) valid.add(top);
     else for (const k of knownRoutes) if (k.startsWith(`${top}/`)) valid.add(k);
-  }
+  };
+  for (const r of routes) addValid(r);
+  // Вход через корень без хэша — страница dashboard (D-32), только если спек не назвал других
+  // маршрутов: спек со своими маршрутами проходит dashboard по пути к ним и его не проверяет.
+  // Спек, у которого вход через корень — единственный признак, остаётся спеком dashboard: иначе
+  // он стал бы «маршруты не определены» и выбирался бы на любую правку (расширение, не сужение).
+  // Сеть безопасности страницы dashboard: pages.spec.ts (read-обход `e2e-pages: *`, при выборе
+  // по маршрутам сужается до затронутых, включая dashboard; обе темы, ширины, axe), спеки с
+  // литералом маршрута или `#/dashboard`, читающая канарейка оболочки при правке общего
+  // компонента; правка Dashboard.svelte остаётся каркасом (D-09: pages без сужения и канарейка
+  // «правка → Применить»).
+  if (valid.size === 0 && ROOT_ENTRY.test(specText)) addValid('dashboard');
   return valid.size ? valid : null;
 }
 
