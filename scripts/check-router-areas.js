@@ -26,9 +26,16 @@
  *      пропускается с пометкой.
  *   6. Поле tests у областей contract-*: каждая запись существует (тест или спек), и каждый
  *      тест или спек, читающий контракт или testdata (contractReaders), в списке есть.
+ *   7. Подобласти (areas.<родитель>.subareas, RTR-14): схема — в validateAreas core-marks.cjs
+ *      (безопасные глобы, записи tests, повторы); каждый глоб подобласти находит отслеживаемый
+ *      файл и не выходит за пути родителя; каждая запись tests существует.
+ *   8. Полнота подобластей: у области с subareas каждый её файл продукта найден глобом хотя бы
+ *      одной подобласти, и каждый тест с её строкой router-area (Go-тест или спек) назван в
+ *      tests хотя бы одной подобласти — этой или другой области, если сценарий проверяет
+ *      её файлы. Канарейки остаются у родителя и проверяются правилом 5.
  * Самопроверка разбора на образцах идёт при каждом запуске: расхождение — код 1.
  *
- * Флаг --map-only: только карта, покрытие продукта и поле tests (правила 2-4, 6) — без разметки
+ * Флаг --map-only: только карта, покрытие продукта, поле tests и подобласти (правила 2-4, 6-8) — без разметки
  * файлов тестов и канареек.
  *
  * Usage: node scripts/check-router-areas.js [--map-only]
@@ -40,6 +47,7 @@ const {
   AREAS_FILE,
   loadAreas,
   validateAreas,
+  subareasOf,
   matchGlob,
   areaOfText,
   goTestFacts,
@@ -153,6 +161,25 @@ for (const [text, title, tier, tierReason, slow, quar, core] of specFactSamples)
 if (validateAreas({ version: 1, areas: { Bad: {} }, extra: 1 }, root).length < 3) {
   problems.push('самопроверка схемы карты: неверная карта прошла проверку');
 }
+{
+  // Подобласти: небезопасный глоб, неверная запись tests, повтор и лишний ключ отклоняются
+  const area = (subareas) => ({
+    version: 1,
+    areas: { x: { title: 't', shared: true, paths: ['internal/x/**'], canary: { go: null, spec: null, reason: 'r' }, subareas } }
+  });
+  const good = area({ s: { title: 't', paths: ['internal/x/a.go'], tests: ['go:TestRouterA', 'tests/router/a.spec.ts'] } });
+  const bad = [
+    area({ s: { title: 't', paths: ['internal/../x/a.go'], tests: ['go:TestRouterA'] } }),
+    area({ s: { title: 't', paths: ['internal/x/a.go'], tests: ['go:TestA; rm'] } }),
+    area({ s: { title: 't', paths: ['internal/x/a.go'], tests: ['go:TestRouterA', 'go:TestRouterA'] } }),
+    area({ s: { title: 't', paths: ['internal/x/a.go'], tests: ['go:TestRouterA'], extra: 1 } }),
+    area({ S: { title: 't', paths: ['internal/x/a.go'], tests: ['go:TestRouterA'] } }),
+    area({})
+  ];
+  if (validateAreas(good, root).length !== 0 || bad.some((d) => validateAreas(d, root).length === 0)) {
+    problems.push('самопроверка схемы подобластей: верная карта отклонена или неверная прошла');
+  }
+}
 
 // ── Карта и отслеживаемые файлы ──
 let map = null;
@@ -197,7 +224,7 @@ if (map) {
     if (!product.includes(f)) problems.push(`файл продукта ${f} не найден в git ls-files — список стража устарел`);
   }
 
-  // Факты тестов (нужны правилам 1, 5, 6).
+  // Факты тестов (нужны правилам 1, 5, 6, 7).
   let facts = [];
   try {
     facts = testFacts(root);
@@ -206,6 +233,46 @@ if (map) {
   }
   if (facts.length === 0) problems.push('сканер не нашёл ни одного роутерного теста — разбор сломан');
   const specFiles = tracked.filter((f) => /^frontend\/tests\/router\/[^/]+\.spec\.ts$/.test(f));
+  const testExists = (t) =>
+    t.startsWith('go:') ? facts.some((x) => x.kind === 'go' && x.test === t.slice(3)) : specFiles.includes('frontend/' + t);
+
+  // Правило 7: подобласти — пути внутри родителя, живые глобы, существующие тесты.
+  for (const [name, a] of Object.entries(areas)) {
+    if (!a.subareas) continue;
+    const inParent = (f) => a.paths.some((g) => matchGlob(g, f));
+    for (const [sub, s] of Object.entries(a.subareas)) {
+      const at = `${AREAS_FILE}: подобласть ${name}/${sub}`;
+      for (const g of s.paths) {
+        const files = tracked.filter((f) => matchGlob(g, f));
+        if (files.length === 0) violations.push(`${at}: глоб ${g} не находит ни одного отслеживаемого файла`);
+        const outside = files.filter((f) => !inParent(f));
+        if (outside.length > 0) violations.push(`${at}: глоб ${g} выходит за пути родителя ${name} (${outside.slice(0, 3).join(', ')})`);
+      }
+      for (const t of s.tests) if (!testExists(t)) violations.push(`${at}: tests — ${t} не найден`);
+    }
+  }
+
+  // Правило 8: полнота подобластей. Каждый файл продукта родителя входит в подобласть (иначе
+  // его правка выбирала бы область целиком), и каждый тест с меткой родителя назван в tests
+  // какой-либо подобласти (иначе правка родителя его больше не выбирает).
+  const subListed = new Set();
+  for (const a of Object.values(areas)) for (const s of Object.values(a.subareas || {})) for (const t of s.tests) subListed.add(t);
+  for (const [name, a] of Object.entries(areas)) {
+    if (!a.subareas) continue;
+    for (const f of product) {
+      if (a.paths.some((g) => matchGlob(g, f)) && subareasOf(areas, name, f).length === 0) {
+        violations.push(`${AREAS_FILE}: область ${name}: файл продукта ${f} не входит ни в одну подобласть`);
+      }
+    }
+    const own = new Set();
+    for (const x of facts) {
+      if (x.area !== name) continue;
+      own.add(x.kind === 'go' ? 'go:' + x.test : x.spec);
+    }
+    for (const t of [...own].sort()) {
+      if (!subListed.has(t)) violations.push(`${AREAS_FILE}: область ${name}: ${t} с меткой области не назван ни в одной подобласти`);
+    }
+  }
 
   // Правило 6: поле tests у contract-*.
   let readers = {};
@@ -217,10 +284,7 @@ if (map) {
   for (const [name, a] of Object.entries(areas)) {
     const listed = new Set(a.tests || []);
     for (const t of listed) {
-      const ok = t.startsWith('go:')
-        ? facts.some((x) => x.kind === 'go' && x.test === t.slice(3))
-        : specFiles.includes('frontend/' + t);
-      if (!ok) violations.push(`${AREAS_FILE}: область ${name}: tests — ${t} не найден`);
+      if (!testExists(t)) violations.push(`${AREAS_FILE}: область ${name}: tests — ${t} не найден`);
     }
     if (readers[name]) {
       for (const t of readers[name]) {

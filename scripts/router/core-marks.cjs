@@ -519,6 +519,66 @@ function areaOfText(text) {
   return { area: issues.length === 0 && found.length === 1 ? found[0] : null, issues };
 }
 
+/** Запись поля tests (области или подобласти): go:TestRouter* или tests/router/<спек>.spec.ts. */
+function isTestEntry(t) {
+  return typeof t === 'string' && ((t.startsWith('go:') && TEST_NAME.test(t.slice(3))) || SPEC_PATH.test(t));
+}
+
+/** Глоб карты безопасен: символы пути, без «..» и «***». */
+function isSafeGlob(g) {
+  return typeof g === 'string' && SAFE_GLOB.test(g) && !g.split('/').includes('..') && !g.includes('***');
+}
+
+/**
+ * Подобласти общей области (RTR-14, D-12 фазы 148.1.1): areas.<родитель>.subareas —
+ * { '<имя>': { title, paths, tests } }. Правка файла подобласти выбирает её тесты по именам из
+ * tests (прямое затрагивание: ярус full разрешён) и, если родитель shared, канарейки всех
+ * областей; тесты родителя целиком не выбираются. Строка router-area у файлов тестов остаётся
+ * родительской. Совпадение путей с путями родителя, существование тестов и полноту покрытия
+ * проверяет scripts/check-router-areas.js (ему нужен git ls-files и факты тестов).
+ */
+function validateSubareas(at, a, issues) {
+  const s = a.subareas;
+  if (!s || typeof s !== 'object' || Array.isArray(s) || Object.keys(s).length === 0) {
+    issues.push(`${at}: subareas — непустой объект «имя → подобласть»`);
+    return;
+  }
+  if ('tests' in a) issues.push(`${at}: subareas и tests вместе недопустимы — тесты перечисляют подобласти`);
+  for (const [sub, v] of Object.entries(s)) {
+    const st = `${at}: подобласть ${sub}`;
+    if (!AREA_NAME.test(sub)) issues.push(`${st}: имя не по шаблону [a-z][a-z0-9-]*`);
+    if (!v || typeof v !== 'object' || Array.isArray(v)) {
+      issues.push(`${st}: не объект`);
+      continue;
+    }
+    for (const k of Object.keys(v)) {
+      if (!['title', 'paths', 'tests'].includes(k)) issues.push(`${st}: неизвестный ключ ${JSON.stringify(k)}`);
+    }
+    if (typeof v.title !== 'string' || !v.title.trim()) issues.push(`${st}: нет title`);
+    if (!Array.isArray(v.paths) || v.paths.length === 0) issues.push(`${st}: paths — непустой список глобов`);
+    else {
+      for (const g of v.paths) if (!isSafeGlob(g)) issues.push(`${st}: недопустимый глоб ${JSON.stringify(g)}`);
+      const dup = v.paths.filter((g, i) => v.paths.indexOf(g) !== i);
+      if (dup.length > 0) issues.push(`${st}: paths — повтор ${[...new Set(dup)].join(', ')}`);
+    }
+    if (!Array.isArray(v.tests) || v.tests.length === 0) issues.push(`${st}: tests — непустой список`);
+    else {
+      for (const t of v.tests) {
+        if (!isTestEntry(t)) issues.push(`${st}: tests — запись ${JSON.stringify(t)} не go:TestRouter* и не tests/router/<спек>.spec.ts`);
+      }
+      const dup = v.tests.filter((t, i) => v.tests.indexOf(t) !== i);
+      if (dup.length > 0) issues.push(`${st}: tests — повтор ${[...new Set(dup)].join(', ')}`);
+    }
+  }
+}
+
+/** Подобласти области name, чьи глобы находят файл: [имя] (пусто — нет подобластей или совпадений). */
+function subareasOf(areas, name, file) {
+  const s = areas[name] && areas[name].subareas;
+  if (!s) return [];
+  return Object.keys(s).filter((sub) => s[sub].paths.some((g) => matchGlob(g, file)));
+}
+
 /** Проверка схемы карты областей: список нарушений (пустой — карта годна). */
 function validateAreas(data, root) {
   const issues = [];
@@ -540,18 +600,17 @@ function validateAreas(data, root) {
       continue;
     }
     for (const k of Object.keys(a)) {
-      if (!['title', 'shared', 'paths', 'canary', 'tests'].includes(k)) issues.push(`${at}: неизвестный ключ ${JSON.stringify(k)}`);
+      if (!['title', 'shared', 'paths', 'canary', 'tests', 'subareas'].includes(k)) {
+        issues.push(`${at}: неизвестный ключ ${JSON.stringify(k)}`);
+      }
     }
     if (typeof a.title !== 'string' || !a.title.trim()) issues.push(`${at}: нет title`);
     if (typeof a.shared !== 'boolean') issues.push(`${at}: shared — true или false`);
     if (!Array.isArray(a.paths) || a.paths.length === 0) issues.push(`${at}: paths — непустой список глобов`);
     else {
-      for (const g of a.paths) {
-        if (typeof g !== 'string' || !SAFE_GLOB.test(g) || g.split('/').includes('..') || g.includes('***')) {
-          issues.push(`${at}: недопустимый глоб ${JSON.stringify(g)}`);
-        }
-      }
+      for (const g of a.paths) if (!isSafeGlob(g)) issues.push(`${at}: недопустимый глоб ${JSON.stringify(g)}`);
     }
+    if ('subareas' in a) validateSubareas(at, a, issues);
     const c = a.canary;
     if (!c || typeof c !== 'object' || Array.isArray(c)) issues.push(`${at}: нет canary { go, spec, reason? }`);
     else {
@@ -573,8 +632,7 @@ function validateAreas(data, root) {
       if (!Array.isArray(a.tests) || a.tests.length === 0) issues.push(`${at}: tests — непустой список`);
       else {
         for (const t of a.tests) {
-          const ok = typeof t === 'string' && ((t.startsWith('go:') && TEST_NAME.test(t.slice(3))) || SPEC_PATH.test(t));
-          if (!ok) issues.push(`${at}: tests — запись ${JSON.stringify(t)} не go:TestRouter* и не tests/router/<спек>.spec.ts`);
+          if (!isTestEntry(t)) issues.push(`${at}: tests — запись ${JSON.stringify(t)} не go:TestRouter* и не tests/router/<спек>.spec.ts`);
         }
       }
     }
@@ -954,6 +1012,7 @@ module.exports = {
   AREAS_FILE,
   loadAreas,
   validateAreas,
+  subareasOf,
   matchGlob,
   areaOfText,
   goTestFacts,

@@ -18,6 +18,84 @@
         "go": null,
         "spec": "tests/router/core-switch.spec.ts",
         "reason": "Go: тесты области с путём «Применить → ядро» размечены CoreSpecific, единственный без метки (TestRouterMihomoSwitchDraftOpen) длиннее 30 с — кандидат 148.1.1; спек core-switch идёт в каждой ветви ядра"
+      },
+      "subareas": {
+        "kernel-restart": {
+          "title": "Запуск, остановка и перезапуск ядра, версии ядер, прокси Clash API",
+          "paths": [
+            "internal/services/kernel.go",
+            "internal/services/kernel_apply.go",
+            "internal/services/kernel_exec_gate.go",
+            "internal/services/kernel_process.go",
+            "internal/services/kernel_stop.go",
+            "internal/handlers/kernel.go",
+            "internal/handlers/mihomo.go",
+            "internal/handlers/service.go"
+          ],
+          "tests": [
+            "go:TestRouterRestartWithKernelHelper",
+            "go:TestRouterSwitchKernelDuringDetachedRestart",
+            "go:TestRouterMihomoProxyClientAbort",
+            "go:TestRouterMihomoProxyDuringRestart",
+            "go:TestRouterMihomoSwitch",
+            "go:TestRouterMihomoSwitchRollback",
+            "go:TestRouterMihomoSwitchDraftOpen",
+            "go:TestRouterKernelVersions",
+            "go:TestRouterTrafficSeparateCore",
+            "go:TestRouterTproxyRules",
+            "tests/router/service-control.spec.ts"
+          ]
+        },
+        "kernel-switch": {
+          "title": "Смена активного ядра и доступ к маршрутам по активному ядру",
+          "paths": [
+            "internal/services/kernel_switch.go",
+            "internal/services/kernel_active.go",
+            "internal/handlers/kernel_gate.go",
+            "internal/handlers/service.go"
+          ],
+          "tests": [
+            "go:TestRouterSwitchKernelDuringDetachedRestart",
+            "go:TestRouterTproxyRules",
+            "tests/router/service-control.spec.ts",
+            "tests/router/core-switch.spec.ts"
+          ]
+        },
+        "kernel-watchdog": {
+          "title": "Watchdog и кэш статуса XKeen",
+          "paths": [
+            "internal/services/watchdog.go",
+            "internal/handlers/watchdog.go",
+            "internal/services/xkeen_status_cache.go"
+          ],
+          "tests": [
+            "go:TestRouterPanelRestartDuringWatchdogRulesCheck",
+            "go:TestRouterPanelRestartDuringXKeenStatus",
+            "go:TestRouterXKeenLifecycle"
+          ]
+        },
+        "kernel-xkeen": {
+          "title": "XKeen: статус, перезапуск, проверка конфигурации, установщик и настройки",
+          "paths": [
+            "internal/services/xkeen.go",
+            "internal/services/xkeen_installer.go",
+            "internal/services/xkeen_names.go",
+            "internal/services/xkeen_settings.go",
+            "internal/services/xkeen_status_cache.go",
+            "internal/handlers/xkeen_settings.go"
+          ],
+          "tests": [
+            "go:TestRouterXKeenLifecycle",
+            "go:TestRouterKernelVersions",
+            "go:TestRouterActiveConfigAccepted",
+            "go:TestRouterPanelRestartDuringXKeenStatus",
+            "go:TestRouterRestartWithKernelHelper",
+            "go:TestRouterSwitchKernelDuringDetachedRestart",
+            "go:TestRouterGeodataView",
+            "go:TestRouterGeodataEdit",
+            "tests/router/config-lists-actions.spec.ts"
+          ]
+        }
       }
     },
     "cores": {
@@ -50,6 +128,191 @@
         "go": "TestRouterTakeoverApplyAndRelease",
         "spec": null,
         "reason": "спек config-cascade длиннее 30 с, preflight-save несёт тег ядра — кандидат 148.1.1"
+      },
+      "subareas": {
+        "config-apply": {
+          "title": "Конвейер «Применить»: план, запись, перезапуск ядра, предпросмотр, замок применения",
+          "paths": [
+            "internal/services/configlayer/pipeline.go",
+            "internal/services/configlayer/build.go",
+            "internal/services/configlayer/restart.go",
+            "internal/services/configlayer/preview.go",
+            "internal/services/configlayer/describe.go",
+            "internal/services/configlayer/mask.go",
+            "internal/services/configlayer/write.go",
+            "internal/services/configlayer/exclusive.go",
+            "internal/services/configlayer/registry.go",
+            "internal/services/configlayer/state.go",
+            "internal/services/configlayer/events.go",
+            "internal/services/configlayer/layer.go",
+            "internal/services/configlayer/types.go",
+            "internal/handlers/configlayer.go"
+          ],
+          "tests": [
+            "go:TestRouterApplyPreview",
+            "go:TestRouterConfigApplyRestartsRunningKernel",
+            "go:TestRouterLiveCommittersAndAfterApply",
+            "go:TestRouterApplyRightAfterDone",
+            "go:TestRouterApplyRevisionSnapshot",
+            "go:TestRouterInertPlan",
+            "go:TestRouterCheckerBlocksApply",
+            "go:TestRouterTakeoverValidationFailKeepsAll",
+            "go:TestRouterExclusiveGeodata",
+            "go:TestRouterExclusiveFlagRecheck",
+            "go:TestRouterSettleSection"
+          ]
+        },
+        "config-snapshots": {
+          "title": "Наборы копий, журнал записи, восстановление, снимки и вкладка «Файлы»",
+          "paths": [
+            "internal/services/configlayer/backup.go",
+            "internal/services/configlayer/recover.go",
+            "internal/services/configlayer/applies.go",
+            "internal/services/configlayer/write.go",
+            "internal/services/configlayer/diff.go",
+            "internal/services/configlayer/files_owner.go",
+            "internal/services/configlayer/layer.go",
+            "internal/services/configlayer/types.go",
+            "internal/handlers/configlayer.go",
+            "internal/handlers/snapshots.go",
+            "internal/services/snapshots.go"
+          ],
+          "tests": [
+            "go:TestRouterConfigFilesScope",
+            "go:TestRouterProfileTargetKeepsXKeen",
+            "go:TestRouterDisableReleasesRouting",
+            "go:TestRouterCoresDisableReturnsOriginals",
+            "go:TestRouterLayerRestore"
+          ]
+        },
+        "config-preflight": {
+          "title": "Проверка конфигурации ядрами, предполётная проверка и редактор файлов",
+          "paths": [
+            "internal/services/configlayer/validate.go",
+            "internal/services/configlayer/registry.go",
+            "internal/services/configlayer/layer.go",
+            "internal/services/configlayer/types.go",
+            "internal/services/preflight_content.go",
+            "internal/handlers/config.go",
+            "internal/services/config.go"
+          ],
+          "tests": [
+            "go:TestRouterPreflightNoController",
+            "go:TestRouterConfigFilesScope",
+            "go:TestRouterTakeoverValidationFailKeepsAll",
+            "go:TestRouterCheckerBlocksApply",
+            "go:TestRouterRestartWithKernelHelper",
+            "go:TestRouterActiveConfigAccepted",
+            "tests/router/preflight-save.spec.ts"
+          ]
+        },
+        "config-sections": {
+          "title": "Секции ядер: скан чужих файлов, взятие и возврат секций, дрейф, пороги версий",
+          "paths": [
+            "internal/services/configlayer/sections.go",
+            "internal/services/configlayer/sections_drift.go",
+            "internal/services/configlayer/sections_ops.go",
+            "internal/services/configlayer/sections_restart.go",
+            "internal/services/configlayer/sections_scan.go",
+            "internal/services/configlayer/versions.go",
+            "internal/services/configlayer/dns_takeover.go",
+            "internal/services/configlayer/layer.go",
+            "internal/services/configlayer/types.go"
+          ],
+          "tests": [
+            "go:TestRouterCoresDisableReturnsOriginals",
+            "go:TestRouterCoresSectionDrift",
+            "go:TestRouterCoresScanXray",
+            "go:TestRouterCoresScanMihomoActive",
+            "go:TestRouterCoresMergeSemantics",
+            "go:TestRouterCoresRestartProfileLimit",
+            "go:TestRouterCoresTakeoverApplyAndRelease",
+            "go:TestRouterCoresTakeoverGuards",
+            "go:TestRouterSettleSection",
+            "go:TestRouterFeatureThresholdsNodes"
+          ]
+        },
+        "config-mihomo": {
+          "title": "Слой Mihomo: Clash API, провайдеры, файлы панели Mihomo, профили при отпускании",
+          "paths": [
+            "internal/services/mihomo.go",
+            "internal/services/configlayer/names.go",
+            "internal/services/configlayer/ordered.go",
+            "internal/services/configlayer/layer.go",
+            "internal/services/configlayer/types.go"
+          ],
+          "tests": [
+            "go:TestRouterMihomoProviderUpdateTargeted",
+            "go:TestRouterTextRuleProvider",
+            "go:TestRouterCoresScanMihomoActive",
+            "go:TestRouterActiveConfigAccepted",
+            "go:TestRouterMihomoProxyDuringRestart",
+            "go:TestRouterProfileSplitOps",
+            "go:TestRouterProfileTargetRelease"
+          ]
+        },
+        "config-takeover": {
+          "title": "Взятие и возврат маршрутизации, дрейф, выключение слоя, переключение профиля Mihomo",
+          "paths": [
+            "internal/services/configlayer/takeover.go",
+            "internal/services/configlayer/routing.go",
+            "internal/services/configlayer/drift.go",
+            "internal/services/configlayer/flag.go",
+            "internal/services/configlayer/names.go",
+            "internal/services/configlayer/dns_takeover.go",
+            "internal/services/configlayer/layer.go",
+            "internal/services/configlayer/types.go"
+          ],
+          "tests": [
+            "go:TestRouterTakeoverApplyAndRelease",
+            "go:TestRouterTakeoverValidationFailKeepsAll",
+            "go:TestRouterTakeoverScan",
+            "go:TestRouterDisableReleasesRouting",
+            "go:TestRouterRoutingDrift",
+            "go:TestRouterKernelInstalledAutoTake",
+            "go:TestRouterProfileSplitOps",
+            "go:TestRouterProfileTargetRelease",
+            "go:TestRouterProfileTargetKeepsXKeen",
+            "go:TestRouterMihomoSwitch",
+            "go:TestRouterMihomoSwitchDraftOpen",
+            "go:TestRouterMihomoSwitchRollback",
+            "go:TestRouterConfigApplyRestartsRunningKernel",
+            "go:TestRouterCoresDisableReturnsOriginals",
+            "go:TestRouterExclusiveFlagRecheck"
+          ]
+        },
+        "config-draft": {
+          "title": "Черновик, живые данные, источники, уведомления и события слоя",
+          "paths": [
+            "internal/services/configlayer/state.go",
+            "internal/services/configlayer/layer.go",
+            "internal/services/configlayer/events.go",
+            "internal/services/configlayer/view.go",
+            "internal/services/configlayer/types.go",
+            "internal/services/configlayer/doc.go",
+            "internal/services/configlayer/diag.go",
+            "internal/services/configlayer/ordered.go",
+            "internal/services/configlayer/describe.go",
+            "internal/services/configlayer/versions.go",
+            "internal/handlers/configlayer.go"
+          ],
+          "tests": [
+            "go:TestRouterLiveStore",
+            "go:TestRouterLiveLayer",
+            "go:TestRouterLiveDisabled",
+            "go:TestRouterSectionLive",
+            "go:TestRouterLayerSectionLiveHooks",
+            "go:TestRouterLayerRestore",
+            "go:TestRouterSourceNotices",
+            "go:TestRouterPublishSources",
+            "go:TestRouterSourceRefresh",
+            "go:TestRouterSourceRefreshDisabled",
+            "go:TestRouterApplyRevisionSnapshot",
+            "go:TestRouterDraftEditWithDirtyDisk",
+            "go:TestRouterLegacyEntriesBlocked",
+            "tests/router/config-cascade.spec.ts"
+          ]
+        }
       }
     },
     "dns": {
@@ -228,6 +491,81 @@
         "go": "TestRouterPanelRestartWithOpenStreams",
         "spec": null,
         "reason": "пути «Применить → ядро» у области нет; у области нет спеков"
+      },
+      "subareas": {
+        "server-lifecycle": {
+          "title": "Запуск и остановка панели, HTTP-сервер, отдача фронтенда, конфигурация панели",
+          "paths": [
+            "cmd/xcp/**",
+            "embed.go",
+            "internal/server/**",
+            "internal/config/**"
+          ],
+          "tests": [
+            "go:TestRouterPanelRestartWithOpenStreams",
+            "go:TestRouterPanelRestartWithDirtyDisk",
+            "go:TestRouterPanelRestartDuringXKeenStatus",
+            "go:TestRouterPanelRestartDuringWatchdogRulesCheck",
+            "go:TestRouterPanelRestartWithLateExit",
+            "go:TestRouterStaticGzip",
+            "go:TestRouterPanelSession"
+          ]
+        },
+        "server-common": {
+          "title": "Общие помощники: утилиты, iptables, сертификат, базовые ответы обработчиков, очистка вывода",
+          "paths": [
+            "internal/utils/**",
+            "internal/cert/**",
+            "internal/config/**",
+            "internal/handlers/base.go",
+            "internal/handlers/response.go",
+            "internal/services/redact.go",
+            "internal/services/script_output.go"
+          ],
+          "tests": [
+            "go:TestRouterSafeHTTPClientBlocksLocal",
+            "go:TestRouterWaitArgsAccepted"
+          ]
+        },
+        "server-i18n": {
+          "title": "Переводы сообщений сервера",
+          "paths": [
+            "internal/i18n/**"
+          ],
+          "tests": [
+            "go:TestRouterLegacyEntriesBlocked"
+          ]
+        },
+        "server-system": {
+          "title": "Система и устройство: статистика, клиенты, сеть, трафик, консоль, настройки, API Xray",
+          "paths": [
+            "internal/handlers/capabilities.go",
+            "internal/handlers/system.go",
+            "internal/handlers/diagnostics.go",
+            "internal/handlers/network.go",
+            "internal/handlers/console.go",
+            "internal/handlers/terminal.go",
+            "internal/handlers/clients.go",
+            "internal/handlers/settings.go",
+            "internal/handlers/traffic.go",
+            "internal/services/clients.go",
+            "internal/services/console.go",
+            "internal/services/network.go",
+            "internal/services/pty.go",
+            "internal/services/device_info.go",
+            "internal/services/sysctl.go",
+            "internal/services/traffic.go",
+            "internal/services/xray_grpc.go",
+            "internal/xrayapi/**"
+          ],
+          "tests": [
+            "go:TestRouterNdmcDeviceInfo",
+            "go:TestRouterNdmcHotspot",
+            "go:TestRouterRestartWithKernelHelper",
+            "go:TestRouterPanelRestartWithDirtyDisk",
+            "go:TestRouterConfigApplyRestartsRunningKernel"
+          ]
+        }
       }
     },
     "ui-shell": {
