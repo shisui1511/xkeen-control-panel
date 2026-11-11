@@ -1167,6 +1167,8 @@ function median(xs) {
 module.exports = {
   analyzeGo,
   contractReaders,
+  declarations,
+  lex,
   goMarks,
   goViolations,
   specFacts,
