@@ -64,9 +64,23 @@ export function fsReader(frontendDir = FRONTEND_DIR) {
     name: 'рабочее дерево',
     frontendDir,
     files: (dir) => listFiles(dir),
-    isFile: (abs) => existsSync(abs) && statSync(abs).isFile(),
+    isFile: (abs) => {
+      try {
+        return statSync(abs).isFile();
+      } catch {
+        return false;
+      }
+    },
     read(abs) {
-      if (!cache.has(abs)) cache.set(abs, existsSync(abs) && statSync(abs).isFile() ? readFileSync(abs, 'utf8') : null);
+      if (!cache.has(abs)) {
+        let text = null;
+        try {
+          text = readFileSync(abs, 'utf8');
+        } catch {
+          text = null;
+        }
+        cache.set(abs, text);
+      }
       return cache.get(abs);
     }
   };

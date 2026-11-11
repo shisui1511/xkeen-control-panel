@@ -313,7 +313,7 @@ function captureSelfcheck() {
       }
     }
     if (rows.length === 0) continue;
-    let started = NaN;
+    let started;
     try {
       const m = /^started=(.+)$/m.exec(readFileSync(path.join(base, 'meta'), 'utf8'));
       started = m ? Date.parse(m[1].trim()) / 1000 : NaN;
