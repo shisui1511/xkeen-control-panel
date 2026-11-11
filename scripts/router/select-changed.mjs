@@ -750,11 +750,13 @@ const PURE_INIT_CALLS = [
   /^time\.Duration$/,
   /^(?:len|make|new|append)$/
 ];
+// Литералы Go в коде без комментариев (lex): строка, сырая строка, руна
+const GO_LITERAL = /"(?:[^"\\\n]|\\.)*"|`[^`]*`|'(?:[^'\\\n]|\\.)*'/g;
 const GO_IDENT_LIST = /^[ \t]*([A-Za-z_]\w*(?:[ \t]*,[ \t]*[A-Za-z_]\w*)*)/;
 
 /**
  * Объявления верхнего уровня Go-файла: { ok, why, build, pkg, blankDot, imports, decls }.
- * decls — [{ kind: func|var|const|type, names, receiver, receiverType (тип получателя метода), code (нормализованный, без
+ * decls — [{ kind: func|var|const|type, names, receiver, code (нормализованный, без
  * комментариев), masked (строки замаскированы), idents (Set слов кода), calls (вызовы в
  * инициализаторе var) }]. ok=false — разбор ненадёжен (раскладка не gofmt, нет package, имена не
  * разобраны): вызывающий откатывается на пакет целиком.
@@ -850,7 +852,9 @@ function goDeclIndexOf(text) {
       names,
       receiver: d.receiver,
       receiverType: rm ? rm[1] : null,
-      code: d.code.replace(/\s+/g, ' ').trim(),
+      // пробелы схлопываются только вне литералов (в masked их содержимое замещено пробелами);
+      // литералы сравниваются дословно: отступ в сырой строке (YAML, вывод команды) значим
+      code: `${d.masked.replace(/\s+/g, ' ').trim()}\u0001${[...d.code.matchAll(GO_LITERAL)].map((m) => m[0]).join('\u0000')}`,
       masked: d.masked,
       idents: new Set(d.masked.match(/[A-Za-z_]\w*/g) || []),
       calls
