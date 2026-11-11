@@ -406,7 +406,8 @@
       ],
       "canary": {
         "go": "TestRouterProfileSaveMirror",
-        "spec": "tests/router/mihomo-undo-profile.spec.ts"
+        "spec": null,
+        "reason": "спек mihomo-undo-profile (бывшая канарейка) целиком под меткой известного падения router-harness-undo-spec-gen-layout до 2026-11-25: канарейка под такой меткой ничего не ловит; вернуть спек после закрытия todo"
       }
     },
     "access-log": {

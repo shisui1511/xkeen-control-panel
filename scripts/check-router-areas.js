@@ -19,8 +19,8 @@
  *      frontend/src/lib/sourcesContract.json и routingContract.json.
  *   5. Канарейка области (D-11): Go-тест есть в файле этой области (у contract-* — в её поле
  *      tests), не в карантине, без
- *      CoreSpecific и метки known с ядром, не в ярусе full; спек — в своей области, ни один его
- *      тест не несёт тег ядра, карантин или ярус full. null допустим только с непустым reason.
+ *      CoreSpecific и метки known (любые: известное падение оставляет канарейку слепой), не в ярусе full; спек — в своей области, ни один его
+ *      тест не несёт тег ядра, карантин или ярус full, спек без knownFailure. null допустим только с непустым reason.
  *      Длительность — медиана по build/router/history.tsv основной копии за 60 дней на каждом
  *      ядре короче 30 с (спек — сумма медиан его тестов); истории нет (CI) — проверка
  *      пропускается с пометкой.
@@ -327,6 +327,9 @@ if (map) {
           if (x.quarantine !== null) violations.push(`канарейка ${name}: ${c.go} в карантине`);
           if (x.coreMarked) violations.push(`канарейка ${name}: ${c.go} с меткой ядра (CoreSpecific или known с ядром)`);
           if (x.tier !== 'gate') violations.push(`канарейка ${name}: ${c.go} в ярусе full`);
+          if (hasKnownMark(goTestBody(x.file, c.go), /\broutertest\.Known\(/)) {
+            violations.push(`канарейка ${name}: ${c.go} несёт метку известного падения — канарейка ничего не проверяет`);
+          }
         }
         if (history) checkDuration(history, name, c.go, [(check) => check === 'go:' + c.go]);
       }
@@ -336,7 +339,11 @@ if (map) {
           continue;
         }
         const rows = facts.filter((x) => x.kind === 'pw' && x.spec === c.spec);
-        const { area } = areaOfText(fs.readFileSync(path.join(root, 'frontend', c.spec), 'utf8'));
+        const specText = fs.readFileSync(path.join(root, 'frontend', c.spec), 'utf8');
+        const { area } = areaOfText(specText);
+        if (hasKnownMark(specText, /\bknownFailure\(/)) {
+          violations.push(`канарейка ${name}: спек ${c.spec} несёт метку известного падения — канарейка ничего не проверяет`);
+        }
         if (area !== name && !listed.has(c.spec)) violations.push(`канарейка ${name}: спек ${c.spec} в области ${area}`);
         for (const x of rows) {
           const t = x.test || x.titleTemplate || '(вычисляемое название)';
@@ -348,6 +355,22 @@ if (map) {
       }
     }
   }
+}
+
+/** Текст функции теста из Go-файла (до следующего func верхнего уровня); нет функции — пустая строка. */
+function goTestBody(file, test) {
+  const text = fs.readFileSync(path.join(root, file), 'utf8');
+  const start = text.search(new RegExp(`^func ${test}\\(`, 'm'));
+  if (start < 0) return '';
+  const next = text.slice(start + 1).search(/^func /m);
+  return next < 0 ? text.slice(start) : text.slice(start, start + 1 + next);
+}
+
+/** Есть ли в тексте вызов метки известного падения вне строк-комментариев. */
+function hasKnownMark(text, re) {
+  return text
+    .split('\n')
+    .some((l) => !/^\s*\/\//.test(l) && re.test(l));
 }
 
 /** Длительность канарейки по ядрам: сумма медиан подходящих проверок, каждое ядро короче порога. */
