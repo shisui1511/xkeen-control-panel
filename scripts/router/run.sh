@@ -1341,7 +1341,7 @@ EOF
     if [ "$(_vs_count)" -le "$_vs_base" ]; then
       [ "$2" = 4 ] || return 1
       rt_result "$_t" FAIL version-guard "этап $1 вернул код 4 без строки stop"
-      _vs_exp=$(rt_version_expected "$_t") || _vs_exp=""
+      _vs_exp=$(rt_version_expected "$_t")
       printf 'stop\t%s\t%s\t%s\t%s\t%s\n' "${RT_CORE:--}" "этап:$1" "$_vs_exp" "неизвестно" "$(date +%s)" >>"$_vs_file"
     fi
     _vs_core=${RT_CORE:--}
@@ -1810,7 +1810,9 @@ EOF
     fi
     # Ожидаемая версия — текущее ожидание цели (D-13), а не увиденная: принятый объявленный переход
     # прошлой ветви его меняет, посторонняя установка — нет.
-    _exp=$(rt_version_expected "$_t") || _exp=$EXPECT
+    # rt_version_expected всегда возвращает 0: пустой вывод проверяется явно
+    _exp=$(rt_version_expected "$_t")
+    [ -n "$_exp" ] || _exp=$EXPECT
     # shellcheck disable=SC2086
     rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$_exp" --no-observe $_fargs || true
     _smrc=$_brc
