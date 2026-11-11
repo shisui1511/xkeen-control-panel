@@ -914,6 +914,17 @@ function goDeclDiff(baseText, headText) {
   const hm = multi(h);
   for (const [n, codes] of hm) if (JSON.stringify(codes) !== JSON.stringify(bm.get(n) || [])) changed.add(n);
   for (const n of bm.keys()) if (!hm.has(n)) changed.add(n);
+  // импорты изменились, а объявления нет (gopkg.in/yaml.v2 → v3, пакет на одноимённый с другим
+  // последним сегментом пути): ключ по последнему сегменту этого не различает, сравниваются пары
+  // «имя, путь» целиком
+  if (b && h && changed.size === 0) {
+    const impSet = (ix) =>
+      ix.imports
+        .map((i) => `${i.name || ''} ${i.path}`)
+        .sort()
+        .join('\n');
+    if (impSet(b) !== impSet(h)) setWide('изменены импорты при неизменных объявлениях');
+  }
   const all = [...(h ? h.decls : []), ...(b ? b.decls : [])];
   // изменённый метод изменяет тип получателя: его неявные вызовы (через интерфейс) по имени метода
   // не находятся, а тип встречается в потребителях (литерал, поле, конструктор)
