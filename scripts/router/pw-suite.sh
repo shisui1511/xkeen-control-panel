@@ -69,7 +69,22 @@
 #                    для mipsle и mips — 2)
 #   XCP_T_<id>_PAGE_WORKERS  воркеров части read (по умолчанию 3)
 #
-# Код выхода: 0 — нет FAIL и XPASS, 3 — цель недоступна, иначе 1.
+# Сверка версии стенда на границе спека (D-13, RTR-15). Каждому запуску Playwright передаются
+# XCP_PW_VERSION_GUARD=<id цели> (подключает репортёр frontend/tests/router/lib/version-reporter.ts),
+# XCP_PW_GUARD_SCRIPT=<абсолютный путь scripts/router/version-guard.sh>,
+# XCP_PW_OK_SPECS=<каталог запуска>/version-ok-specs.txt (спеки, прошедшие границу, по строке
+# `tests/router/<спек>`) и XCP_PW_STOPPED=<каталог запуска>/version-stopped (признак остановки:
+# граница, на которой сменилась версия; пишется до сигнала). Оба файла сбрасываются при выборе
+# каталога запуска. После каждого спека репортёр зовёт version-guard.sh; при смене версии он
+# пишет version-stopped и шлёт процессу Playwright SIGINT (мягкая остановка). Тогда этап
+# не начинает следующие запуски (часть state после read, pw-2), дописывает их спеки строками
+# `notrun<TAB><ядро><TAB>Playwright: tests/router/<спек>` в <отчёт>/<id>/version-stop.tsv,
+# собирает хвост xcp.log и выходит с кодом 4. Потребители кода 4 и version-stop.tsv — run.sh
+# и branch-report.mjs (остановка цикла ветвей, раздел остановки) и session.mjs (остановка
+# сессии); формы строк — контракт сверки версии (rt_version_guard в scripts/router/lib.sh).
+#
+# Код выхода: 0 — нет FAIL и XPASS, 3 — цель недоступна, 4 — смена версии стенда, этап
+# остановлен, иначе 1.
 
 set -eu
 
@@ -181,6 +196,10 @@ use_dir() {
   LOG="$PW_DIR/run.log"
   OUT="$PW_DIR/artifacts"
   rm -f "$STATE" "$STATE.restore.json" "$PW_DIR/report.json" "$PW_DIR/report-pages.json"
+  # файлы сверки версии прошлого запуска: признак остановки удаляется (его наличие — сигнал),
+  # список спеков, прошедших границу, обнуляется
+  rm -f "$PW_DIR/version-stopped"
+  : >"$PW_DIR/version-ok-specs.txt"
   case " $USED " in
     *" $1 "*) ;;
     *) USED="$USED $1" ;;
@@ -260,6 +279,10 @@ run_pw() {
       XCP_PW_OUT=$OUT \
       XCP_PW_JSON=$_json \
       XCP_PW_WORKERS=$_workers \
+      XCP_PW_VERSION_GUARD=$ID \
+      XCP_PW_GUARD_SCRIPT="$SCRIPT_DIR/version-guard.sh" \
+      XCP_PW_OK_SPECS="$PW_DIR/version-ok-specs.txt" \
+      XCP_PW_STOPPED="$PW_DIR/version-stopped" \
       "$PWBIN" test -c playwright.router.config.ts "$@"
   ) >>"$LOG" 2>&1 || _pwrc=$?
   # временные каталоги воркеров Playwright — только сироты после выхода процесса
@@ -368,9 +391,31 @@ finish_run() {
   BAD=$((BAD + RUN_BAD))
 }
 
+# --- артефакты падения (D-16): хвост xcp.log ---------------------------------------
+pull_tail() {
+  TAIL="$RT_REPORT/$ID/$CORE_DIR$SUB/xcp-tail.log"
+  rt_ssh "$ID" "tail -n 200 /opt/var/log/xcp.log" 2>/dev/null | rt_redact >"$TAIL" || true
+  [ -s "$TAIL" ] || echo "хвост xcp.log недоступен" >"$TAIL"
+}
+
+# stop_check <спеки следующих запусков...>: репортёр сверки версии (version-reporter.ts) записал
+# признак остановки — версия стенда сменилась после спека этого запуска (D-13). Следующие запуски
+# не начинаются: их спеки — строки notrun в version-stop.tsv; хвост xcp.log, как при падении;
+# выход 4. Строки stop и FAIL version-guard уже записал version-guard.sh.
+stop_check() {
+  [ -f "$PW_DIR/version-stopped" ] || return 0
+  for _s in "$@"; do
+    printf 'notrun\t%s\tPlaywright: tests/router/%s\n' "$CORE_DIR" "${_s#tests/router/}" >>"$VSTOP"
+  done
+  pull_tail
+  exit 4
+}
+
 # Запуски по порядку: часть read (pw-read, report-pages.json), затем часть state — первый
 # запуск в pw, второй (RT_SPECS_FIRST) в pw-2; --switch — pw-switch. Каждый запуск со своим
-# каталогом, state.json и JSON-отчётом.
+# каталогом, state.json и JSON-отчётом. После каждого запуска — проверка остановки по смене
+# версии (stop_check): следующие запуски при ней не идут.
+VSTOP="$RT_REPORT/$ID/version-stop.tsv"
 RUNS=0
 if [ -n "$READ_SPECS" ]; then
   use_dir pw-read
@@ -380,6 +425,8 @@ if [ -n "$READ_SPECS" ]; then
   run_pw "$PW_DIR/report-pages.json" "$PAGE_WORKERS" $READ_SPECS || rc=$?
   finish_run "$PW_DIR/report-pages.json" "$rc"
   RUNS=$((RUNS + 1))
+  # shellcheck disable=SC2086
+  stop_check $FIRST_SPECS $SECOND_SPECS
 fi
 if [ -n "$FIRST_SPECS" ]; then
   if [ -n "$SWITCH" ]; then use_dir pw-switch; else use_dir pw; fi
@@ -389,6 +436,8 @@ if [ -n "$FIRST_SPECS" ]; then
   run_pw "$PW_DIR/report.json" 1 $FIRST_SPECS || rc=$?
   finish_run "$PW_DIR/report.json" "$rc"
   RUNS=$((RUNS + 1))
+  # shellcheck disable=SC2086
+  stop_check $SECOND_SPECS
 fi
 if [ -n "$SECOND_SPECS" ]; then
   use_dir pw-2
@@ -398,6 +447,7 @@ if [ -n "$SECOND_SPECS" ]; then
   run_pw "$PW_DIR/report.json" 1 $SECOND_SPECS || rc=$?
   finish_run "$PW_DIR/report.json" "$rc"
   RUNS=$((RUNS + 1))
+  stop_check
 fi
 if [ "$RUNS" = 0 ]; then
   # без --part и без спеков: запуска не было — FAIL pw:run, журнал в pw/
@@ -406,12 +456,7 @@ if [ "$RUNS" = 0 ]; then
   finish_run "$PW_DIR/report.json" 0
 fi
 
-# --- артефакты падения (D-16): хвост xcp.log ---------------------------------------
-if [ "$BAD" != 0 ]; then
-  TAIL="$RT_REPORT/$ID/$CORE_DIR$SUB/xcp-tail.log"
-  rt_ssh "$ID" "tail -n 200 /opt/var/log/xcp.log" 2>/dev/null | rt_redact >"$TAIL" || true
-  [ -s "$TAIL" ] || echo "хвост xcp.log недоступен" >"$TAIL"
-fi
+[ "$BAD" = 0 ] || pull_tail
 
 [ "$BAD" = 0 ] || exit 1
 exit 0
