@@ -48,7 +48,7 @@
 //
 // Триггеры (RTR-02 в редакции D-21…D-25 фазы 148.1.1). Обязательный полный выбор — только три
 // основания, каждое со строкой причин «обязательный полный выбор: <основание>» (её читает
-// select-replay.mjs, D-29): механизм выбора (SELECTOR_SELF: этот файл, core-marks.cjs,
+// select-replay.mjs, D-29): механизм выбора (SELECTOR_SELF: этот файл, core-marks.cjs, run-plan.mjs — состав гейта,
 // import-graph.mjs) — «механизм выбора (<файл>)»; формат карты (version, набор ключей верхнего
 // уровня, ключей областей, подобластей или канареек; карта появилась) — «формат карты (<что>)»;
 // признак shared области — «признак shared (<область>: <было> → <стало>)».
@@ -211,7 +211,7 @@ const EXIT_STOP = 3;
 
 // Правка механизма выбора: полный выбор (RTR-02). Карта областей сюда не входит: её правка
 // разбирается по смыслу сравнением двух версий (compareMaps, D-21…D-23 фазы 148.1.1).
-const SELECTOR_SELF = [/^scripts\/router\/(select-changed\.mjs|core-marks\.cjs|import-graph\.mjs)$/];
+const SELECTOR_SELF = [/^scripts\/router\/(select-changed\.mjs|core-marks\.cjs|import-graph\.mjs|run-plan\.mjs)$/];
 
 // Обвязка стенда: RT_HARNESS=1 без полного выбора (набор обвязки — 148.1-11). Цели стенда в
 // Makefile разбирает makefileStand(), internal/routertest — ветка Go.
