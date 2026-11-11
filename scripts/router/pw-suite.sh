@@ -79,7 +79,12 @@
 # пишет version-stopped и шлёт процессу Playwright SIGINT (мягкая остановка). Тогда этап
 # не начинает следующие запуски (часть state после read, pw-2), дописывает их спеки строками
 # `notrun<TAB><ядро><TAB>Playwright: tests/router/<спек>` в <отчёт>/<id>/version-stop.tsv,
-# собирает хвост xcp.log и выходит с кодом 4. Потребители кода 4 и version-stop.tsv — run.sh
+# собирает хвост xcp.log и выходит с кодом 4. Разбор остановленного запуска (finish_run):
+# прерванные остановкой тесты — не FAIL, а строки `notrun … (прервано остановкой, тестов N)`;
+# FAIL и XPASS спеков, не прошедших границу, — ещё и строки `suspect<TAB><ядро><TAB>pw:<проверка>`
+# (класс stand); падения спеков из version-ok-specs.txt — обычные. Служебные файлы запуска:
+# files.tsv (проверка → спек, pw-parse.js --files-out) и interrupted.tsv (--interrupted-out).
+# Потребители кода 4 и version-stop.tsv — run.sh
 # и branch-report.mjs (остановка цикла ветвей, раздел остановки) и session.mjs (остановка
 # сессии); формы строк — контракт сверки версии (rt_version_guard в scripts/router/lib.sh).
 #
@@ -356,12 +361,33 @@ BAD=0
 # finish_run <json> <код запуска>: разбор JSON-отчёта запуска в PW_DIR/parsed.tsv, строки
 # результатов и проверки запуска. RUN_BAD — FAIL и XPASS запуска, QFAILS — упавшие тесты в
 # карантине (в BAD не входят): ненулевой код, объяснённый ими, строки FAIL pw:run не даёт (D-17).
+#
+# Сверка версии (D-13): разбор пишет files.tsv (проверка → спек, по строке на строку теста
+# parsed.tsv, в том же порядке). Если репортёр остановил запуск (есть version-stopped), разбор
+# ещё и выносит прерванные и не начатые тесты в interrupted.tsv (в результаты они не идут), а
+# после разбора в <отчёт>/<id>/version-stop.tsv дописываются: `suspect<TAB><ядро><TAB>pw:<проверка>`
+# — на каждую строку FAIL и XPASS, чей спек не прошёл границу (нет в version-ok-specs.txt:
+# падение могло быть на сменённой версии, класс stand); `notrun<TAB><ядро><TAB>Playwright:
+# <спек> (прервано остановкой, тестов N)` — на каждый спек из interrupted.tsv. Падения спеков,
+# прошедших границу, остаются обычными. Ненулевой код Playwright, объяснённый остановкой,
+# строки FAIL pw:run не даёт.
 finish_run() {
   _fj=$1
   _frc=$2
+  _stopped=0
+  [ ! -f "$PW_DIR/version-stopped" ] || _stopped=1
   rt_redact <"$LOG" >"$LOG.red" && mv "$LOG.red" "$LOG"
   : >"$PW_DIR/parsed.tsv"
-  [ ! -f "$_fj" ] || node "$SCRIPT_DIR/pw-parse.js" "$_fj" >>"$PW_DIR/parsed.tsv" || true
+  : >"$PW_DIR/files.tsv"
+  : >"$PW_DIR/interrupted.tsv"
+  if [ -f "$_fj" ]; then
+    if [ "$_stopped" = 1 ]; then
+      node "$SCRIPT_DIR/pw-parse.js" "$_fj" --files-out "$PW_DIR/files.tsv" \
+        --interrupted-out "$PW_DIR/interrupted.tsv" >>"$PW_DIR/parsed.tsv" || true
+    else
+      node "$SCRIPT_DIR/pw-parse.js" "$_fj" --files-out "$PW_DIR/files.tsv" >>"$PW_DIR/parsed.tsv" || true
+    fi
+  fi
   _found=0
   RUN_BAD=0
   QFAILS=0
@@ -378,17 +404,40 @@ finish_run() {
   if [ "$_found" = 0 ] && [ "$_frc" = 0 ] && [ -z "$SWITCH" ] && { [ "${RT_PW_CORE_ONLY:-}" = 1 ] || [ -n "${RT_PW_GREP_INVERT:-}" ]; }; then
     # отбор @core или отсев --grep-invert не оставил тестов: строк результата нет и FAIL pw:run тоже
     :
+  elif [ "$_found" = 0 ] && [ "$_stopped" = 1 ] && [ -s "$PW_DIR/interrupted.tsv" ]; then
+    # остановка по смене версии прервала все тесты запуска: они — строки notrun ниже
+    :
   elif [ "$_found" = 0 ]; then
     # отчёта нет или он пуст: причина — в журнале запуска (панель не отвечает и т. п.)
     reason=$(grep -m 1 -E 'панель не отвечает|вход в панель не удался|не заданы переменные' "$LOG" || true)
     [ -n "$reason" ] || reason="Playwright завершился с кодом $_frc без результатов: $(tail -n 3 "$LOG" | tr '\n' ' ')"
     rt_result "$ID" FAIL "pw:run" "$reason"
     RUN_BAD=$((RUN_BAD + 1))
-  elif [ "$_frc" != 0 ] && [ "$RUN_BAD" = 0 ] && [ "$QFAILS" = 0 ]; then
+  elif [ "$_frc" != 0 ] && [ "$RUN_BAD" = 0 ] && [ "$QFAILS" = 0 ] && [ "$_stopped" = 0 ]; then
     rt_result "$ID" FAIL "pw:run" "Playwright завершился с кодом $_frc без упавших тестов"
     RUN_BAD=$((RUN_BAD + 1))
   fi
   BAD=$((BAD + RUN_BAD))
+
+  [ "$_stopped" = 1 ] || return 0
+  # падения спеков, не прошедших границу до остановки: строки parsed.tsv и files.tsv идут в одном
+  # порядке (global-setup — в конце parsed.tsv, без спека)
+  awk -F "$TAB" -v core="$CORE_DIR" '
+    FILENAME == ARGV[1] { ok[$0] = 1; next }
+    FILENAME == ARGV[2] { spec[FNR] = $2; next }
+    ($1 == "FAIL" || $1 == "XPASS") && !((FNR in spec) && (spec[FNR] in ok)) {
+      printf "suspect\t%s\tpw:%s\n", core, $2
+    }
+  ' "$PW_DIR/version-ok-specs.txt" "$PW_DIR/files.tsv" "$PW_DIR/parsed.tsv" >>"$VSTOP"
+  # прерванные и не начатые тесты — по строке notrun на спек, в порядке появления
+  awk -F "$TAB" -v core="$CORE_DIR" '
+    !($1 in n) { order[++k] = $1 }
+    { n[$1]++ }
+    END {
+      for (i = 1; i <= k; i++)
+        printf "notrun\t%s\tPlaywright: %s (прервано остановкой, тестов %d)\n", core, order[i], n[order[i]]
+    }
+  ' "$PW_DIR/interrupted.tsv" >>"$VSTOP"
 }
 
 # --- артефакты падения (D-16): хвост xcp.log ---------------------------------------
