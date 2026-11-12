@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/rtenv"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
 
@@ -19,9 +20,10 @@ import (
 // окна; первым шагом отката DNS роутера возвращается прошивке (Pitfall 2), затем
 // строка proxy_dns и только потом конфиг ядра с перезапуском.
 
-const (
-	// windowDuration — длительность окна подтверждения (D-05: не настраивается).
-	windowDuration = 60 * time.Second
+var (
+	// windowDuration — длительность окна подтверждения: по умолчанию 60 с; на
+	// стенде сокращается обвязкой через XCP_RT_DNS_WINDOW_S (rtenv.DNSWindow).
+	windowDuration = rtenv.DNSWindow.Get()
 	// windowTotalS — длительность окна в секундах для DNSWindow.total_s.
 	windowTotalS = int(windowDuration / time.Second)
 )

@@ -24,6 +24,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/handlers"
 	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
+	"github.com/shisui1511/xkeen-control-panel/internal/rtenv"
 	"github.com/shisui1511/xkeen-control-panel/internal/server"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
@@ -1025,6 +1026,11 @@ func main() {
 
 	log.Printf("XKeen Control Panel v%s starting... (Go: %s, GOMEMLIMIT: %s, GOGC: %s, GOEXPERIMENT: %s)",
 		strings.TrimPrefix(Version, "v"), runtime.Version(), effectiveMemLimit, effectiveGC, goExp)
+	// Сроки, сокращённые обвязкой стенда (XCP_RT_*): смоук читает эти строки после
+	// последнего баннера старта. Без переменных строк нет.
+	for _, n := range rtenv.Notes() {
+		log.Printf("xcp-rt: %s", n)
+	}
 	if cfg.Auth.PasswordHash == "" {
 		log.Printf("⚠️  No password set. Please visit https://<router-ip>:%d to complete setup.", cfg.Port)
 	}

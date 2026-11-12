@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/rtenv"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
@@ -39,18 +40,23 @@ const (
 	// guardRestartBudget — сколько раз сторож перезапускает ядро, прежде чем
 	// вернуть DNS прошивке (T-148-52).
 	guardRestartBudget = 2
-	// guardBusyGrace — пауза после операции над ядрами (как watchdogKernelBusyGrace
-	// у WatchdogService) и после старта панели: ядро поднимается не сразу.
-	guardBusyGrace = 60 * time.Second
-	// guardRearmMinInterval — не чаще этого сторож возвращает перехват после
-	// аварийного возврата и в состоянии waiting: то же значение, что
-	// watchdogRearmMinInterval в services/watchdog.go (цикл перезапусков ядра
-	// роняет трафик).
-	guardRearmMinInterval = 90 * time.Second
 	// guardRestartSettle — через сколько после перезапуска ядра проба повторяется.
 	guardRestartSettle = 15 * time.Second
 	// guardProbeName — имя пробы сторожа во встроенной зоне lan.
 	guardProbeName = "xcp-guard.lan"
+)
+
+var (
+	// guardBusyGrace — пауза после операции над ядрами (как watchdogKernelBusyGrace
+	// у WatchdogService) и после старта панели: ядро поднимается не сразу. По
+	// умолчанию 60 с; на стенде сокращается обвязкой (rtenv.DNSGuardBusyGrace).
+	guardBusyGrace = rtenv.DNSGuardBusyGrace.Get()
+	// guardRearmMinInterval — не чаще этого сторож возвращает перехват после
+	// аварийного возврата и в состоянии waiting: то же значение, что
+	// watchdogRearmMinInterval в services/watchdog.go (цикл перезапусков ядра
+	// роняет трафик). По умолчанию 90 с; на стенде сокращается обвязкой
+	// (rtenv.DNSGuardRearm).
+	guardRearmMinInterval = rtenv.DNSGuardRearm.Get()
 )
 
 const (
