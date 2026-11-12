@@ -13,6 +13,10 @@
  *   - goViolations(root)     — нарушения: тест читает ядро (.Core, XCP_RT_CORE)
  *       или переключает его (switch_kernel), но не размечен; помощник сам берёт
  *       ядро из Current/CoreSpecific/XCP_RT_CORE.
+ * Метка «одно ядро» (D-01…D-04) — вызов routertest.OneCore(t, причина, покрытие) в теле
+ * теста: правило «тест, читающий ядро, размечен» она выполняет, но метку ядра не даёт
+ * (coreMarked остаётся false, тест идёт в одну ветвь); факт oneCore — в goTestFacts и
+ * specTestFacts, покрытие проверяет oneCoreIssues(testFacts(root)).
  * TS-часть (specFacts, specIssues, specViolations): спеки Playwright, читающие ядро
  * (RT.core, XCP_CORE, selectorApplies, переключение, помощник спека, читающий ядро),
  * обязаны нести тег ядра (CORE_TAG) на каждом таком test(...),
@@ -39,6 +43,9 @@ const CORE_READ = /\.Core\b/;
 const ENV_CORE = /XCP_RT_CORE/;
 const SWITCH_KERNEL = /switch_kernel/;
 const CORE_SPECIFIC = /\broutertest\.CoreSpecific\(/;
+// Метка «одно ядро» (D-01…D-04): выполняет правило 1, но метку ядра не ставит.
+const ONE_CORE = /\broutertest\.OneCore\(/;
+const ONE_CORE_ALL = /\broutertest\.OneCore\(/g;
 const CURRENT_CALL = /\broutertest\.Current\(/;
 const TARGET_PARAM = /\broutertest\.Target\b/;
 const KNOWN_WITH_SLASH = /\broutertest\.Known\(\s*"[^"\n]*\/[^"\n]*"/;
@@ -133,24 +140,34 @@ function analyzeGo(text) {
   const marks = [];
   const violations = [];
   for (const d of decls) {
+    const inTestBody = d.kind === 'func' && !d.receiver && TEST_NAME.test(d.name);
+    if (!inTestBody && ONE_CORE.test(d.masked)) {
+      violations.push({
+        name: d.name || '(объявление уровня файла)',
+        reason: 'routertest.OneCore вне тела TestRouter*: метку «одно ядро» читают только из тела теста'
+      });
+    }
     if (d.kind !== 'func' || d.receiver) continue;
     const isTest = /^Test/.test(d.name);
     if (isTest) {
       if (!TEST_NAME.test(d.name)) continue;
       const marked = CORE_SPECIFIC.test(d.masked);
+      const oneCore = ONE_CORE.test(d.masked);
       const known = KNOWN_WITH_SLASH.test(d.code) || fileKnown;
       if (marked) marks.push({ test: d.name, reason: 'core' });
       else if (known) marks.push({ test: d.name, reason: 'known-core' });
       const reads = CORE_READ.test(d.masked) || ENV_CORE.test(d.code) || SWITCH_KERNEL.test(d.code);
-      if (reads && !marked) {
+      if (reads && !marked && !oneCore) {
         violations.push({
           name: d.name,
-          reason: 'тест читает или переключает ядро, но не вызывает routertest.CoreSpecific(t)'
+          reason: 'тест читает или переключает ядро, но не вызывает routertest.CoreSpecific(t) или routertest.OneCore(t, …)'
         });
       }
+      if (oneCore) violations.push(...oneCoreCallIssues(d, marked));
     } else if (
       ENV_CORE.test(d.code) ||
-      (CORE_READ.test(d.masked) && (CURRENT_CALL.test(d.masked) || CORE_SPECIFIC.test(d.masked)))
+      (CORE_READ.test(d.masked) &&
+        (CURRENT_CALL.test(d.masked) || CORE_SPECIFIC.test(d.masked) || ONE_CORE.test(d.masked)))
     ) {
       violations.push({
         name: d.name,
@@ -167,6 +184,44 @@ function analyzeGo(text) {
     }
   }
   return { marks, violations };
+}
+
+/** Аргументы первого вызова routertest.OneCore в объявлении: { args, reason, covers } или null. */
+function oneCoreCall(d) {
+  const m = ONE_CORE.exec(d.masked);
+  if (!m) return null;
+  const open = m.index + m[0].length - 1;
+  return { args: splitArgs(d.code, open), reason: goStringArg(d.code, open, 1), covers: goStringArg(d.code, open, 2) };
+}
+
+/**
+ * Нарушения вызова routertest.OneCore в теле TestRouter* (правило 6 стража): причина и
+ * покрытие — непустые строковые литералы, покрытие — имя другого TestRouter*, вызов один и
+ * не вместе с CoreSpecific (метки «одно ядро» и «ядро» взаимоисключают).
+ */
+function oneCoreCallIssues(d, coreSpecific) {
+  const name = d.name;
+  const issues = [];
+  if (coreSpecific) {
+    issues.push({
+      name,
+      reason: 'метки «одно ядро» и «ядро» взаимоисключают: routertest.OneCore ставится вместо routertest.CoreSpecific'
+    });
+  }
+  if ([...d.masked.matchAll(ONE_CORE_ALL)].length > 1) {
+    issues.push({ name, reason: 'routertest.OneCore вызван больше одного раза' });
+  }
+  const { args, reason, covers } = oneCoreCall(d);
+  const arity = Boolean(args) && args.length === 3;
+  if (!arity || !reason || !reason.trim()) {
+    issues.push({ name, reason: 'routertest.OneCore: причина — непустой строковый литерал' });
+  }
+  if (!arity || !covers || !covers.trim()) {
+    issues.push({ name, reason: 'routertest.OneCore: покрытие — непустой строковый литерал' });
+  } else if (!TEST_NAME.test(covers) || covers === name) {
+    issues.push({ name, reason: `routertest.OneCore: покрытие «${covers}» — имя другого теста TestRouter*` });
+  }
+  return issues;
 }
 
 /** Роутерные тестовые файлы Go из индекса git: [{file, pkg, text}]. */
@@ -889,7 +944,10 @@ function goStringArg(code, open, n) {
   return literalValue(args[n].text);
 }
 
-/** Факты тестов одного роутерного Go-файла (без области): [{test, tier, tierReason, slowReason, quarantine, coreMarked}]. */
+/**
+ * Факты тестов одного роутерного Go-файла (без области):
+ * [{test, tier, tierReason, slowReason, quarantine, coreMarked, oneCore: {reason, covers} | null}].
+ */
 function goTestFacts(text) {
   const decls = declarations(text);
   const fileKnown = decls.some((d) => d.kind !== 'func' && KNOWN_WITH_SLASH.test(d.code));
@@ -912,13 +970,16 @@ function goTestFacts(text) {
     }
     const slowAt = call(/\broutertest\.Slow\(/);
     const quarAt = call(/\broutertest\.Quarantine\(/);
+    const one = oneCoreCall(d);
     rows.push({
       test: d.name,
       tier,
       tierReason,
       slowReason: slowAt >= 0 ? goStringArg(d.code, slowAt, 1) || null : null,
       quarantine: quarAt >= 0 ? goStringArg(d.code, quarAt, 1) || '' : null,
-      coreMarked: CORE_SPECIFIC.test(d.masked) || KNOWN_WITH_SLASH.test(d.code) || fileKnown
+      // метка «одно ядро» метку ядра не даёт: тест идёт в одну ветвь, как неразмеченный (D-03)
+      coreMarked: CORE_SPECIFIC.test(d.masked) || KNOWN_WITH_SLASH.test(d.code) || fileKnown,
+      oneCore: one ? { reason: (one.reason || '').trim(), covers: (one.covers || '').trim() } : null
     });
   }
   return rows;
@@ -1041,7 +1102,7 @@ function specTierIssues(text) {
  * Факты всех роутерных тестов репозитория (по индексу git): массив
  * { kind: 'go'|'pw', file, pkg|null, spec|null, test (имя или null у PW с вычисляемым
  *   названием), area (null — нет строки области), tier: 'gate'|'full', tierReason,
- *   slowReason, quarantine (slug или null), coreMarked }.
+ *   slowReason, quarantine (slug или null), coreMarked, oneCore ({reason, covers} или null) }.
  */
 function testFacts(root) {
   const rows = [];
@@ -1056,6 +1117,45 @@ function testFacts(root) {
     for (const t of specTestFacts(text)) rows.push({ kind: 'pw', file, pkg: null, spec, area, ...t });
   }
   return rows;
+}
+
+/**
+ * Покрытие тестов с меткой «одно ядро» (правило 7 стража, D-04): по фактам testFacts —
+ * [{file, test, reason}]. Покрытие ищется среди тестов того же семейства: Go — тот же вид,
+ * пакет и router-area, спек — тот же вид и router-area. Нарушения: покрытия нет; у покрытия
+ * нет метки ядра (coreMarked); покрытие в карантине; покрытие само с меткой «одно ядро».
+ * Пустое покрытие здесь не разбирается: его отклоняют analyzeGo и specIssues (правило 6).
+ */
+function oneCoreIssues(facts) {
+  const issues = [];
+  for (const f of facts) {
+    if (!f.oneCore || !f.oneCore.covers) continue;
+    const covers = f.oneCore.covers;
+    const test = f.test || '(название не литерал)';
+    const family = facts.filter(
+      (x) => x !== f && x.kind === f.kind && x.test === covers && x.area === f.area && (f.kind !== 'go' || x.pkg === f.pkg)
+    );
+    if (family.length === 0) {
+      const elsewhere = facts.some((x) => x !== f && x.test === covers);
+      issues.push({
+        file: f.file,
+        test,
+        reason: elsewhere
+          ? `покрытие «${covers}» из другого семейства: нужен тест того же ${f.kind === 'go' ? 'пакета и ' : ''}router-area`
+          : `покрытие «${covers}» не найдено`
+      });
+      continue;
+    }
+    const why = (x) => {
+      if (x.oneCore) return `покрытие «${covers}» само с меткой «одно ядро»`;
+      if (x.coreMarked !== true) return `покрытие «${covers}» без метки ядра: ему нужен ${f.kind === 'go' ? 'routertest.CoreSpecific' : 'тег CORE_TAG'}`;
+      if (x.quarantine !== null && x.quarantine !== undefined) return `покрытие «${covers}» в карантине`;
+      return null;
+    };
+    if (family.some((x) => why(x) === null)) continue;
+    issues.push({ file: f.file, test, reason: why(family[0]) });
+  }
+  return issues;
 }
 
 /*
@@ -1191,7 +1291,8 @@ module.exports = {
   loadHistory,
   median,
   specTierIssues,
-  testFacts
+  testFacts,
+  oneCoreIssues
 };
 
 if (require.main === module) {

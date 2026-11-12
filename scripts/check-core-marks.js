@@ -20,12 +20,30 @@
  *   4. Метка knownFailure с ядром в селекторе («арх/ядро», «* / ядро») идёт через coreTagsOf:
  *      тег @core-label выводится автоматически.
  *   5. Помощник frontend/tests/router/lib/*.ts (кроме env.ts и known.ts) не читает RT.core.
+ * Правила метки «одно ядро» (D-01…D-04): тест идёт на одном ядре (ядро из SHA HEAD), его
+ * зависимость от ядра на обоих ядрах проверяет названный тест-покрытие. Метка выполняет
+ * правило 1, но метку ядра не даёт. Числового потолка на метки нет.
+ *   6. Go: routertest.OneCore(t, "<причина>", "TestRouter<Покрытие>") — прямо в теле
+ *      TestRouter* (не в помощнике и не в объявлении уровня файла), один раз, причина и
+ *      покрытие — непустые строковые литералы, покрытие — имя другого TestRouter*;
+ *      вместе с routertest.CoreSpecific метка не ставится.
+ *   7. Покрытие существует и того же семейства (Go — тот же пакет и router-area), несёт
+ *      метку ядра (CoreSpecific), не в карантине и само не «одно ядро».
  * Самопроверка сканера на образцах идёт при каждом запуске: расхождение — код 1.
  *
  * Usage: node scripts/check-core-marks.js
  */
 const path = require('path');
-const { analyzeGo, goMarks, goViolations, specIssues, specViolations } = require('./router/core-marks.cjs');
+const {
+  analyzeGo,
+  goMarks,
+  goTestFacts,
+  goViolations,
+  oneCoreIssues,
+  specIssues,
+  specViolations,
+  testFacts
+} = require('./router/core-marks.cjs');
 
 const root = path.resolve(__dirname, '..');
 
@@ -59,7 +77,25 @@ const samples = [
   [HEAD + 'func TestRouterG(t *testing.T) {\n\t// читает tg.Core и XCP_RT_CORE\n\t/* switch_kernel */\n\troutertest.Current(t)\n}\n', 0, 0, ''],
   [HEAD + 'func TestRouterH(t *testing.T) {\n\ts := "//" + routertest.Current(t).Core\n\t_ = s\n}\n', 1, 0, ''],
   [HEAD + 'func TestRouterI(t *testing.T) {\n\ts := `\nfunc TestRouterJ() {}\n.Core`\n\t_ = s\n}\n', 0, 0, ''],
-  [HEAD + 'func TestRouter_Bad;rm(t *testing.T) {\n\troutertest.CoreSpecific(t)\n}\n', 0, 0, '']
+  [HEAD + 'func TestRouter_Bad;rm(t *testing.T) {\n\troutertest.CoreSpecific(t)\n}\n', 0, 0, ''],
+  // метка «одно ядро»: правило 1 выполнено, метки ядра нет
+  [
+    HEAD +
+      'func TestRouterK(t *testing.T) {\n\ttg := routertest.OneCore(t, "перезапуск ядра", "TestRouterC")\n\t_ = tg.Core\n}\n',
+    0,
+    0,
+    ''
+  ],
+  [HEAD + 'func TestRouterL(t *testing.T) {\n\ttg := routertest.OneCore(t, "", "TestRouterC")\n\t_ = tg.Core\n}\n', 1, 0, ''],
+  [HEAD + 'func TestRouterM(t *testing.T) {\n\ttg := routertest.OneCore(t, "перезапуск ядра", "TestRouterM")\n\t_ = tg.Core\n}\n', 1, 0, ''],
+  [HEAD + 'func rtV(t *testing.T) {\n\troutertest.OneCore(t, "перезапуск ядра", "TestRouterC")\n}\n', 1, 0, ''],
+  [
+    HEAD +
+      'func TestRouterN(t *testing.T) {\n\troutertest.CoreSpecific(t)\n\ttg := routertest.OneCore(t, "перезапуск ядра", "TestRouterC")\n\t_ = tg.Core\n}\n',
+    1,
+    1,
+    'core'
+  ]
 ];
 for (const [text, wantViolations, wantMarks, wantReason] of samples) {
   const got = analyzeGo(text);
@@ -68,6 +104,37 @@ for (const [text, wantViolations, wantMarks, wantReason] of samples) {
     problems.push(
       `самопроверка сканера: образец ${JSON.stringify(text.slice(HEAD.length))} дал нарушений ${got.violations.length}, меток ${got.marks.length} (${reason || '-'}); ожидалось ${wantViolations}, ${wantMarks} (${wantReason || '-'})`
     );
+  }
+}
+
+// Факт «одно ядро» у Go-теста: причина и покрытие есть, метки ядра нет (тест идёт в одну ветвь)
+{
+  const f = goTestFacts(samples.find(([t]) => t.includes('TestRouterK('))[0])[0];
+  if (!f || !f.oneCore || f.oneCore.reason !== 'перезапуск ядра' || f.oneCore.covers !== 'TestRouterC' || f.coreMarked !== false) {
+    problems.push(`самопроверка сканера: факт «одно ядро» у Go-теста разобран неверно: ${JSON.stringify(f)}`);
+  }
+}
+
+// Самопроверка покрытия «одно ядро» на синтетических фактах: [описание, правка покрытия, нарушений]
+const oneCoreBase = { kind: 'go', file: 'a_test.go', pkg: 'internal/x', area: 'dns', tier: 'gate', quarantine: null };
+const oneCoreSamples = [
+  ['правильное покрытие', {}, 0],
+  ['покрытие из другого пакета', { pkg: 'internal/y' }, 1],
+  ['покрытие из другой router-area', { area: 'routing' }, 1],
+  ['покрытие без метки ядра', { coreMarked: false }, 1],
+  ['покрытие в карантине', { quarantine: 'flaky-x' }, 1],
+  ['покрытие само «одно ядро»', { coreMarked: false, oneCore: { reason: 'r', covers: 'TestRouterK' } }, 1],
+  ['покрытия нет', { test: 'TestRouterZ' }, 1]
+];
+for (const [what, patch, want] of oneCoreSamples) {
+  const facts = [
+    { ...oneCoreBase, test: 'TestRouterK', coreMarked: false, oneCore: { reason: 'r', covers: 'TestRouterC' } },
+    { ...oneCoreBase, test: 'TestRouterC', coreMarked: true, oneCore: null, ...patch }
+  ];
+  // у покрытия «одно ядро» нарушение даёт и оно само (его покрытие K без метки ядра): считаем только K
+  const got = oneCoreIssues(facts).filter((i) => i.test === 'TestRouterK').length;
+  if (got !== want) {
+    problems.push(`самопроверка покрытия «одно ядро»: ${what} дало нарушений ${got}; ожидалось ${want}`);
   }
 }
 
@@ -123,7 +190,10 @@ for (const [text, want] of specSamples) {
 let violations = [];
 let marks = [];
 try {
-  violations = goViolations(root).concat(specViolations(root));
+  violations = goViolations(root).concat(
+    specViolations(root),
+    oneCoreIssues(testFacts(root)).map((i) => ({ file: i.file, name: i.test, reason: i.reason }))
+  );
   marks = goMarks(root);
 } catch (e) {
   problems.push(`сканер не отработал: ${e.message}`);
@@ -138,7 +208,7 @@ if (violations.length > 0 || problems.length > 0) {
   for (const p of problems) console.error('  ' + p);
   if (violations.length > 0) {
     console.error(
-      'Go: тест, читающий ядро, получает цель через routertest.CoreSpecific(t) прямо в своём теле. Playwright: тест, читающий ядро, объявляется с { tag: CORE_TAG }.'
+      'Go: тест, читающий ядро, получает цель через routertest.CoreSpecific(t) (или routertest.OneCore(t, "<причина>", "<покрытие>")) прямо в своём теле. Playwright: тест, читающий ядро, объявляется с { tag: CORE_TAG }.'
     );
   }
   process.exit(1);
