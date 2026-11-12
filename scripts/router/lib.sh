@@ -421,13 +421,15 @@ RT_RTENV_FILE=/opt/etc/xcp/xcp.env
 RT_RTENV_BEGIN='# xcp-rt begin'
 RT_RTENV_END='# xcp-rt end'
 
-# Сценарий POSIX sh для устройства (печатает в stdout): rt_rtenv_script <write|clear|status> [--no-restart].
+# Сценарий POSIX sh для устройства (печатает в stdout): rt_rtenv_script <write|clear|status|restart> [--no-restart].
 #   write   блок совпал с таблицей — «unchanged» без перезапуска; иначе прежний блок вырезается, новый
 #           дописывается в конец, панель перезапускается (S99xcp restart, ожидание нового PID не дольше
 #           90 с), печать «written»
 #   clear   блока нет — «absent»; есть — вырезается и (без --no-restart) панель перезапускается с тем же
 #           ожиданием, печать «cleared»
 #   status  строки блока или «absent»
+#   restart только перезапуск панели с тем же ожиданием (блок не трогается), печать «restarted»;
+#           --no-restart с ним — неверный вызов
 # Файл переписывается содержимым временного файла рядом (`cat tmp > файл`: права и владелец остаются;
 # без `sed -i`); awk дописывает перевод строки к последней строке без него. Файла нет: write создаёт
 # его (права 600), clear и status — «absent». Сценарий пригоден и для `set -e`, и для подоболочки.
@@ -439,14 +441,14 @@ rt_rtenv_script() {
     '') ;;
     --no-restart) _rs_restart=0 ;;
     *)
-      echo "rt_rtenv_script: write|clear|status [--no-restart]" >&2
+      echo "rt_rtenv_script: write|clear|status|restart [--no-restart]" >&2
       return 2
       ;;
   esac
-  case "$_rs_mode" in
-    write | clear | status) ;;
+  case "$_rs_mode:$_rs_restart" in
+    write:* | clear:* | status:* | restart:1) ;;
     *)
-      echo "rt_rtenv_script: write|clear|status [--no-restart]" >&2
+      echo "rt_rtenv_script: write|clear|status|restart [--no-restart]" >&2
       return 2
       ;;
   esac
@@ -542,6 +544,10 @@ EOF
       fi
       echo 'echo cleared'
       ;;
+    restart)
+      echo 'restart || exit 1'
+      echo 'echo restarted'
+      ;;
     status)
       cat <<'EOF'
 c=$(cur)
@@ -620,6 +626,31 @@ rt_rtenv_clear() {
     *absent*) ;;
     *)
       echo "цель $_rcl_id: сценарий снятия блока xcp-rt не сообщил итог" >&2
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+# Перезапуск панели без правки xcp.env: rt_rtenv_restart <цель>. Нужен, когда блок снят с --no-restart
+# в расчёте на перезапуск установкой, а деплой до установки не дошёл: работающий процесс иначе
+# остаётся на сокращённых сроках. Печатает итог сценария (restarted), ждёт ответа панели с ПК.
+# Коды: 0 — панель перезапущена и отвечает, 1 — сценарий упал или панель не поднялась, 3 — нет связи.
+rt_rtenv_restart() {
+  _rrs_id=$1
+  _rrs_scr=$(rt_rtenv_script restart) || return 1
+  _rrs_rc=0
+  _rrs_out=$(rt_ssh "$_rrs_id" "$_rrs_scr") || _rrs_rc=$?
+  [ -z "$_rrs_out" ] || printf '%s\n' "$_rrs_out"
+  [ "$_rrs_rc" != 3 ] || return 3
+  if [ "$_rrs_rc" != 0 ]; then
+    echo "цель $_rrs_id: панель не перезапущена (код $_rrs_rc)" >&2
+    return 1
+  fi
+  case "$_rrs_out" in
+    *restarted*) rt_rtenv_wait_api "$_rrs_id" || return 1 ;;
+    *)
+      echo "цель $_rrs_id: сценарий перезапуска панели не сообщил итог" >&2
       return 1
       ;;
   esac
