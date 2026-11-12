@@ -47,15 +47,17 @@ const (
 )
 
 var (
-	// guardBusyGrace — пауза после операции над ядрами (как watchdogKernelBusyGrace
-	// у WatchdogService) и после старта панели: ядро поднимается не сразу. По
-	// умолчанию 60 с; на стенде сокращается обвязкой (rtenv.DNSGuardBusyGrace).
+	// guardBusyGrace — пауза после операции над ядрами и после старта панели:
+	// ядро поднимается не сразу. По умолчанию 60 с — столько же, сколько
+	// watchdogKernelBusyGrace у WatchdogService. На стенде обвязка сокращает
+	// только эту паузу (rtenv.DNSGuardBusyGrace), пауза watchdog остаётся
+	// прежней: равенство держится только на умолчании.
 	guardBusyGrace = rtenv.DNSGuardBusyGrace.Get()
 	// guardRearmMinInterval — не чаще этого сторож возвращает перехват после
-	// аварийного возврата и в состоянии waiting: то же значение, что
-	// watchdogRearmMinInterval в services/watchdog.go (цикл перезапусков ядра
-	// роняет трафик). По умолчанию 90 с; на стенде сокращается обвязкой
-	// (rtenv.DNSGuardRearm).
+	// аварийного возврата и в состоянии waiting (цикл перезапусков ядра роняет
+	// трафик). По умолчанию 90 с — столько же, сколько watchdogRearmMinInterval
+	// в services/watchdog.go. На стенде обвязка сокращает только этот интервал
+	// (rtenv.DNSGuardRearm): равенство держится только на умолчании.
 	guardRearmMinInterval = rtenv.DNSGuardRearm.Get()
 )
 
