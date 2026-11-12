@@ -21,9 +21,19 @@
 //     Playwright — теги и аннотации JSON-отчёта): таблица Тест, Ядро, с, бюджет с либо «- нет».
 //     Только предупреждение: итог прогона не меняется; решение (full, Slow с причиной или todo) —
 //     на ship:pre;
-//   - «## Нужна метка ядра» (только --suite full) — страховка D-05б: проверка go:/pw: без метки
-//     ядра, чей исход в ветвях xray и mihomo различается как класс (PASS / SKIP / KNOWN /
-//     FAIL и XPASS), либо «- нет»; проверки с QPASS или QFAIL (карантин) в раздел не входят;
+//   - «## Нужна метка ядра» (--suite full всегда; --suite changed — только при строках) —
+//     страховка D-05б: проверка go:/pw: без метки ядра (или «одно ядро», прошедшая обе ветви), чей
+//     исход в ветвях xray и mihomo различается как класс (PASS / SKIP / KNOWN / FAIL и XPASS), либо
+//     «- нет»; проверки с QPASS или QFAIL (карантин) в раздел не входят.
+//     D-05 (метка «одно ядро», --suite full и changed): тест «одно ядро» идёт на одном ядре, поэтому
+//     его исход (PASS, FAIL или XPASS ровно на одном ядре) сравнивается с последним исходом на другом
+//     ядре по истории (history.mjs lastOutcome: 60 дней, без этого отчёта и вложенных, без SKIP и
+//     классов quarantine, stand, known). PASS на одном и FAIL или XPASS на другом — строка
+//       - core-mark:<проверка>: нужна метка ядра: xray <ст>, mihomo <ст> (одно ядро: расхождение
+//         по истории, <отчёт>)
+//     и с --write строка FAIL core-mark:<проверка> в results.tsv (красный прогон): метка «одно ядро»
+//     снимается, падение — обычная находка. История не прочитана — строка «- история не прочитана:
+//     сравнение «одно ядро» не выполнено»;
 //   - «## Классы падений» (RTR-05, D-19…D-21) — класс каждого падения: new (находка по продукту),
 //     flaky (упал в основном проходе и прошёл при подтверждающем перепрогоне, <цель>/confirm.tsv),
 //     known (метка известного падения), xpass, stand (потеря связи со стендом), quarantine
@@ -78,9 +88,12 @@
 // интервалу ветви.
 // Метка ядра: Go — core-marks.cjs (goMarks по текущему дереву; подтесты наследуют метку
 // родителя), Playwright — теги @core и @core-label спека в JSON-отчёте (<цель>/<ядро>/pw*/).
+// Метка «одно ядро» (one-core): Go — факт oneCore из core-marks.cjs testFacts, спеки — тег
+// @one-core в JSON-отчёте; метку ядра она не даёт.
 //
 // Без --write скрипт только читает отчёт. С --write он дописывает в <цель>/results.tsv строку
 //   FAIL<TAB>-<TAB>core-mark:<проверка><TAB>нужна метка ядра: xray <статус>, mihomo <статус>
+//   (у теста «одно ядро» — с пометкой « (одно ядро: расхождение по истории, <отчёт>)»)
 // на каждую такую проверку (повторный запуск не дублирует строки) и пишет <цель>/layout.tsv:
 // «проверка<TAB>ядра через пробел<TAB>причина» (метка ядра | метка падения с ядром | ротация —
 // ядро из SHA | полная матрица | отладка RT_CORES; причина берётся по plan.txt).
@@ -553,12 +566,19 @@ if (goTests.length > 0) {
 // Бюджет теста gate: Go 60 с, Playwright 30 с. Тесты яруса full и с меткой Slow бюджетом не
 // ограничены. Только предупреждение: итог прогона не меняется.
 const BUDGET = { go: 60, pw: 30 };
+// факты роутерных тестов (core-marks.cjs testFacts) читаются один раз: бюджет gate и метка
+// «одно ядро»; ошибка чтения бросается вызывающему
+let factsCache = null;
+function routerFacts() {
+  if (!factsCache) factsCache = coreMarks.testFacts(ROOT);
+  return factsCache;
+}
 if (testMap.size > 0) {
   // факты Go: имя теста -> { full, slow }; не прочитаны - null (разметка Go не учитывается)
   let goFacts = null;
   try {
     goFacts = new Map();
-    for (const r of coreMarks.testFacts(ROOT)) {
+    for (const r of routerFacts()) {
       if (r.kind !== "go") continue;
       const prev = goFacts.get(r.test);
       goFacts.set(r.test, { full: r.tier === "full" || (prev && prev.full), slow: !!r.slowReason || (prev && prev.slow) });
@@ -619,7 +639,8 @@ for (const line of resultsRaw.split("\n")) {
   if (!prev || RESULT_ORDER.indexOf(st) < RESULT_ORDER.indexOf(prev)) perCore.set(core, st);
 }
 
-// метка проверки: "" (нет), "core" (метка ядра) или "known-core" (метка падения с ядром)
+// метка проверки: "" (нет), "core" (метка ядра), "known-core" (метка падения с ядром) или
+// "one-core" (метка «одно ядро»: тест идёт на одном ядре, D-01/D-03)
 let goMarkMap = null;
 try {
   goMarkMap = new Map();
@@ -629,19 +650,61 @@ try {
 } catch {
   goMarkMap = null; // разметка Go не прочитана: Go-проверки в D-05б не участвуют
 }
+// Go-тесты «одно ядро» (факт oneCore из testFacts); не прочитаны — null: такие Go-тесты считаются
+// неразмеченными и сравниваются только в двух ветвях
+let goOneCore = null;
+try {
+  goOneCore = new Set(
+    routerFacts()
+      .filter((r) => r.kind === "go" && r.oneCore)
+      .map((r) => r.test)
+  );
+} catch {
+  goOneCore = null;
+}
 function markOf(check) {
   if (check.startsWith("go:")) {
     if (!goMarkMap) return null;
-    return goMarkMap.get(check.slice(3).split("/")[0]) || "";
+    const name = check.slice(3).split("/")[0];
+    const mark = goMarkMap.get(name);
+    if (mark) return mark;
+    return goOneCore && goOneCore.has(name) ? "one-core" : "";
   }
   const tags = pwTags.get(check.slice(3));
   if (!tags) return "";
   if (tags.has("core")) return "core";
   if (tags.has("core-label")) return "known-core";
+  if (tags.has("one-core")) return "one-core";
   return "";
 }
 
+// История прогонов (history.mjs) для сравнения по ядрам: читается один раз и только при нужде;
+// ошибка чтения — null (раздел пишет об этом строкой, а не молчит).
+let histCache;
+async function loadHistory() {
+  if (histCache !== undefined) return histCache;
+  try {
+    const hist = await import("./history.mjs");
+    histCache = { hist, rows: hist.readHistory() };
+  } catch {
+    histCache = null;
+  }
+  return histCache;
+}
+// имя отчёта в истории: каталог build/router/<отчёт>; этап сессии — <сессия>/<NN>-<этап>
+const REPORT_NAME_RE = /^\d{8}-\d{6}-[0-9a-f]{7,40}(-dirty)?(-\d{2}-.+)?$/;
+const reportName = (() => {
+  const abs = path.resolve(report);
+  const base = path.basename(abs);
+  const parent = path.basename(path.dirname(abs));
+  return REPORT_NAME_RE.test(parent) && /^\d{2}-[A-Za-z0-9._-]+$/.test(base) ? `${parent}/${base}` : base;
+})();
+const otherCore = (core) => (core === "xray" ? "mihomo" : "xray");
+const FAILED = new Set(["FAIL", "XPASS"]);
+
 const needMark = [];
+// пометка истории не прочитана (строка в разделе вместо молчаливого пропуска)
+let oneCoreHistoryMissing = false;
 const bothBranches = [...byCheck.values()].some((m) => m.has("xray")) && [...byCheck.values()].some((m) => m.has("mihomo"));
 if (suite === "full" && bothBranches) {
   for (const [check, perCore] of byCheck) {
@@ -649,18 +712,57 @@ if (suite === "full" && bothBranches) {
     // проверка в карантине хоть в одной ветви метки ядра не требует (D-17)
     if (classOf(perCore.get("xray")) === "quarantine" || classOf(perCore.get("mihomo")) === "quarantine") continue;
     if (classOf(perCore.get("xray")) === classOf(perCore.get("mihomo"))) continue;
-    if (markOf(check) !== "") continue; // размечен или Go-разметка не прочитана
+    // размечен меткой ядра или Go-разметка не прочитана; тест «одно ядро», прошедший обе ветви,
+    // сравнивается как неразмеченный
+    const mark = markOf(check);
+    if (mark !== "" && mark !== "one-core") continue;
     needMark.push({ check, xray: perCore.get("xray"), mihomo: perCore.get("mihomo") });
   }
 }
 
-if (suite === "full") {
+// D-05: тест «одно ядро» идёт в прогоне на одном ядре, поэтому его исход сравнивается с последним
+// исходом на другом ядре по истории (60 дней, без этого отчёта, без SKIP и классов quarantine,
+// stand, known). На одном ядре PASS, на другом FAIL или XPASS — «нужна метка ядра» (красный прогон):
+// метка «одно ядро» снимается, падение — обычная находка.
+if (suite === "full" || suite === "changed") {
+  const candidates = [];
+  for (const [check, perCore] of byCheck) {
+    if (perCore.size !== 1 || markOf(check) !== "one-core") continue;
+    const [core, st] = [...perCore][0];
+    if (st === "PASS" || FAILED.has(st)) candidates.push({ check, core, st });
+  }
+  if (candidates.length > 0) {
+    const h = await loadHistory();
+    if (!h) oneCoreHistoryMissing = true;
+    else {
+      for (const c of candidates) {
+        const other = otherCore(c.core);
+        const o = h.hist.lastOutcome(h.rows, c.check, other, { excludeReport: reportName, target });
+        if (!o) continue;
+        const diverge = (c.st === "PASS" && FAILED.has(o.status)) || (FAILED.has(c.st) && o.status === "PASS");
+        if (!diverge) continue;
+        const sts = { [c.core]: c.st, [other]: o.status };
+        needMark.push({
+          check: c.check,
+          xray: sts.xray,
+          mihomo: sts.mihomo,
+          note: `одно ядро: расхождение по истории, ${o.report}`,
+        });
+      }
+    }
+  }
+}
+// текст строки «нужна метка ядра» (пункт раздела и деталь строки results.tsv)
+const needText = (n) => `нужна метка ядра: xray ${n.xray}, mihomo ${n.mihomo}${n.note ? ` (${n.note})` : ""}`;
+
+if (suite === "full" || (suite === "changed" && (needMark.length > 0 || oneCoreHistoryMissing))) {
   out.push("## Нужна метка ядра", "");
   if (needMark.length === 0) out.push("- нет");
   // пункт списка: cleanName без экранирования — текст совпадает с именем проверки в results.tsv
   for (const n of needMark) {
-    out.push(`- core-mark:${cleanName(n.check)}: нужна метка ядра: xray ${n.xray}, mihomo ${n.mihomo}`);
+    out.push(`- core-mark:${cleanName(n.check)}: ${needText(n)}`);
   }
+  if (oneCoreHistoryMissing) out.push("- история не прочитана: сравнение «одно ядро» не выполнено");
   out.push("");
 }
 
@@ -969,7 +1071,7 @@ if (write) {
   const rows = needMark.filter((n) => !existingMarks.has(n.check));
   if (rows.length > 0) {
     const text = rows
-      .map((n) => `FAIL\t-\tcore-mark:${n.check}\tнужна метка ядра: xray ${n.xray}, mihomo ${n.mihomo}\n`)
+      .map((n) => `FAIL\t-\tcore-mark:${n.check}\t${needText(n)}\n`)
       .join("");
     try {
       fs.appendFileSync(resultsFile, text);
