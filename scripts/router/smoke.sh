@@ -638,15 +638,34 @@ EOF
   if [ "$rc" != 0 ]; then
     chk FAIL rt-env "проверка блока xcp-rt не выполнилась (код ssh $rc)"
   elif [ "${RT_EXPECT_RT_ENV:-0}" = 1 ]; then
+    # Подтверждение — только строка принятого значения с тем же числом, что в блоке
+    # («xcp-rt: <имя>=<секунды> (по умолчанию …)», rtenv.Var.Parse). Строка «… отклонено: …»
+    # значит, что панель работает на сроке по умолчанию: это FAIL с текстом строки, не PASS.
     rte_miss=""
+    rte_rej=""
     for rte_kv in $rte_vars; do
       rte_n=${rte_kv%%=*}
-      printf '%s\n' "$rte_log" | grep -qE "xcp-rt: .*${rte_n}([^A-Z0-9_]|\$)" || rte_miss="$rte_miss $rte_n"
+      rte_v=${rte_kv#*=}
+      if printf '%s\n' "$rte_log" | grep -qE "xcp-rt: ${rte_n}=.* отклонено"; then
+        rte_rej="$rte_rej $rte_n"
+        continue
+      fi
+      case "$rte_v" in
+        '' | *[!0-9]*)
+          rte_miss="$rte_miss $rte_n"
+          continue
+          ;;
+      esac
+      printf '%s\n' "$rte_log" | grep -qE "xcp-rt: ${rte_n}=${rte_v} \\(" || rte_miss="$rte_miss $rte_n"
     done
     if [ -z "$rte_blk" ]; then
       chk FAIL rt-env "прогон записал блок xcp-rt, а в xcp.env его нет"
     elif [ -z "$rte_vars" ]; then
       chk FAIL rt-env "блок xcp-rt в xcp.env без переменных"
+    elif [ -n "$rte_rej" ]; then
+      rte_rlines=$(printf '%s\n' "$rte_log" | grep -E "xcp-rt: XCP_RT_[A-Z0-9_]+=.* отклонено" |
+        sed 's/.*xcp-rt: */xcp-rt: /' | cut -c1-160 | tr '\n' '|' | sed 's/|*$//')
+      chk FAIL rt-env "блок: $rte_vlist; панель отклонила значения, сроки по умолчанию:$rte_rej; журнал: $rte_rlines"
     elif [ -z "$rte_miss" ]; then
       chk PASS rt-env "блок: $rte_vlist; журнал: $rte_lines"
     elif [ -z "$rte_log" ] && [ "$rte_bin" = 0 ]; then
