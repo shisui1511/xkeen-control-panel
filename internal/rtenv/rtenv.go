@@ -32,6 +32,16 @@ type Var struct {
 var (
 	// DNSWindow — окно подтверждения перехвата DNS (dnstakeover.windowDuration).
 	DNSWindow = Var{Name: "XCP_RT_DNS_WINDOW_S", Default: 60 * time.Second, Min: 20 * time.Second}
+	// DNSGuardBusyGrace — пауза сторожа перехвата после операции над ядрами и
+	// после старта панели (dnstakeover.guardBusyGrace).
+	DNSGuardBusyGrace = Var{Name: "XCP_RT_DNS_GUARD_BUSY_GRACE_S", Default: 60 * time.Second, Min: 10 * time.Second}
+	// DNSGuardRearm — не чаще этого сторож возвращает перехват
+	// (dnstakeover.guardRearmMinInterval).
+	DNSGuardRearm = Var{Name: "XCP_RT_DNS_GUARD_REARM_S", Default: 90 * time.Second, Min: 10 * time.Second}
+	// GeodataCatchUp — через сколько после старта панели запускается пропущенный
+	// слот обновления баз (geodata.catchUpDelay). Нижняя граница — шаг
+	// планировщика schedMaxWait: раньше слот всё равно не заметят.
+	GeodataCatchUp = Var{Name: "XCP_RT_GEODATA_CATCHUP_S", Default: 3 * time.Minute, Min: 30 * time.Second}
 )
 
 var (
