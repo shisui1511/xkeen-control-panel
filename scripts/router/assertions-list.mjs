@@ -19,13 +19,13 @@
 //   verdict — routertest.Verdict(
 //   helper  — функции и методы с Expect, Require, Verdict или Must в имени (кроме Must* стандартной
 //             библиотеки: regexp.MustCompile, template.Must и т. п.)
-// Текст — первый строковый литерал аргументов, иначе имя вызова; строки помощника помечены
-// «в <помощник>:».
+// Текст — первый строковый литерал аргументов, иначе имя вызова (у вида helper — имя и литерал);
+// строки из тела помощника помечены «в <помощник>:».
 // Спеки: test(...) с названием, содержащим подстроку (без неё — все тесты спека); в теле теста —
 // expect(, expect.poll(, expect.soft(, expect.fail(. Текст — сообщение (второй аргумент, если
 // литерал; у expect.poll — поле message) и цепочка сопоставителя (`.not.toHaveCount`); без
 // сообщения — выражение-субъект (до 80 знаков).
-// Во всех текстах IP-адреса и URL заменяются на `<адрес>`.
+// Во всех текстах IP-адреса (кроме loopback 127.*) и URL заменяются на `<адрес>`.
 //
 // Вывод TSV: сторона (base|head), проверка, №, вид, файл:строка, текст (табуляции и переводы
 // строк — пробелы); затем по проверке строка-итог `# <проверка>: до N, после M`. Тест не найден
@@ -120,7 +120,8 @@ function lineAt(text, offset) {
 function clean(s) {
   return s
     .replace(/[a-z][a-z0-9+.-]*:\/\/[^\s'"`]+/gi, '<адрес>')
-    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, '<адрес>')
+    // loopback (127.0.0.1:53) — не адрес стенда и несёт смысл утверждения
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, (a) => (a.startsWith('127.') ? a : '<адрес>'))
     .replace(/\b(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}\b/gi, '<адрес>')
     .replace(/[\t\r\n]+/g, ' ')
     .replace(/\s{2,}/g, ' ')
@@ -187,7 +188,7 @@ function splitArgs(code, open, ts) {
 function literalValue(s) {
   const m = /^(['"`])((?:[^\\\n]|\\.)*)\1$/s.exec(s.trim());
   if (!m || (m[1] === '`' && m[2].includes('${'))) return null;
-  return m[2].replace(/\\(.)/g, '$1');
+  return m[2].replace(/\\[nrt]/g, ' ').replace(/\\(.)/g, '$1');
 }
 
 /** Шаблонная строка с подстановками: сырое содержимое или null. */
@@ -261,7 +262,9 @@ function goAssertions(decl, fileText) {
       }
     }
     const callName = (c.qualifier ? c.qualifier + '.' : '') + c.name;
-    rows.push({ kind, offset: decl.start + c.at, text: text ?? callName });
+    // у помощника имя значимо и при литерале: rtPanelRestartVerdict(t, «…»)
+    const shown = text === null ? callName : kind === 'helper' ? `${callName} «${text}»` : text;
+    rows.push({ kind, offset: decl.start + c.at, text: shown });
   }
   return rows;
 }
