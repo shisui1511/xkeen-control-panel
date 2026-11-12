@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
+	"github.com/shisui1511/xkeen-control-panel/internal/rtenv"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/dnstakeover"
 )
@@ -315,6 +316,7 @@ func TestRouterDNSApplyReleaseWindow(t *testing.T) {
 	routertest.Tier(t, routertest.Full, "внесение сбоя: закрытый порт 53 и две пробы мимо, откат по дедлайну окна")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
+	routertest.RealTime(t, rtenv.DNSGuardRearm)
 	e := rtNewSrc(t)
 	rtDNSPrepare(t, e, kernel)
 	overrideBefore := rtDNSOverrideOn(t)
@@ -391,6 +393,6 @@ func TestRouterDNSEnablePanelRestart(t *testing.T) {
 	e.rtDNSWaitStep("probe", "running", rtDNSStateWait)
 	res := rtPanelRestart(t, e.p, old, nil)
 	rtPanelRestartVerdict(t, old, res, "перезапуск посреди пробы включения перехвата DNS")
-	off := e.rtDNSWaitState("off", rtDNSWindowS*time.Second)
+	off := e.rtDNSWaitState("off", rtDNSWindowDur(t))
 	e.rtDNSExpectRolledBack(off, kernel, overrideBefore)
 }

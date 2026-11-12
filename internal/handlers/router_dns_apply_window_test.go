@@ -183,7 +183,7 @@ func TestRouterDNSApplyWindow(t *testing.T) {
 		t.Errorf("в окне в применённой секции %s нет добавленного сервера", section)
 	}
 
-	on := e.rtDNSWaitState("on", rtDNSTimeoutWait)
+	on := e.rtDNSWaitState("on", rtDNSTimeoutWaitOf(t))
 	if code, detail := rtDNSFailure(on); code != "" {
 		t.Errorf("после отката «Применить» сбой %q: %.300s", code, detail)
 	}

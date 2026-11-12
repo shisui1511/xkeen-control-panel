@@ -24,7 +24,7 @@ const layer = layerFlag();
 
 test.describe.configure({ mode: 'serial' });
 
-// Включение — транзакция с перезапуском ядра; окно длится 60 с
+// Включение — транзакция с перезапуском ядра; окно длится window.total_s (по умолчанию 60 с)
 const ENABLE_TIMEOUT = T.save;
 const TEST_TIMEOUT = T.save * 4;
 
@@ -198,8 +198,11 @@ test(
     const body = banner(page).locator('.dns-banner__body');
     const bodyBefore = await body.textContent();
     const first = await bannerSeconds(page);
+    // Длина окна — из ответа службы (срок, который действует у панели), а не копия в тесте
+    const total = (await dnsView(page)).window?.total_s ?? 0;
     expect(first, 'остаток окна в секундах').toBeGreaterThan(0);
-    expect(first, 'остаток окна не больше 60 с').toBeLessThanOrEqual(60);
+    expect(total, 'window.total_s в ответе службы').toBeGreaterThan(0);
+    expect(first, 'остаток окна не больше total_s').toBeLessThanOrEqual(total);
     await expect.poll(() => bannerSeconds(page), { timeout: T.action }).toBeLessThan(first);
     expect(await body.textContent(), 'тело баннера не меняется с отсчётом').toBe(bodyBefore);
 

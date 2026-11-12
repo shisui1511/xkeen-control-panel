@@ -19,6 +19,7 @@ import (
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
+	"github.com/shisui1511/xkeen-control-panel/internal/rtenv"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/dnstakeover"
 )
@@ -132,6 +133,7 @@ func TestRouterDNSGuard(t *testing.T) {
 	routertest.Tier(t, routertest.Full, "внесение сбоя: kill -9 ядра-перехватчика, сторож перезапускает ядро")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
+	routertest.RealTime(t, rtenv.DNSGuardBusyGrace)
 	e := rtNewSrc(t)
 	rtDNSPrepare(t, e, kernel)
 	e.rtDNSEnableOK()
@@ -147,11 +149,18 @@ func TestRouterDNSGuard(t *testing.T) {
 
 	since := time.Now().Unix()
 	killed := rtDNSKill9(t, kernel)
+	killedAt := time.Now()
 	deadline := time.Now().Add(rtDNSGuardWait)
 	var v map[string]any
+	// Замер D-20 (пауза сторожа): когда появился новый процесс ядра и когда :53
+	// ответил у ядра. Строка наблюдения для значения в таблице lib.sh, не утверждение.
+	var freshAt time.Time
 	for {
 		pids, _ := rtRstKernelPIDs(kernel)
 		fresh := len(pids) > 0 && !slices.ContainsFunc(pids, func(p int) bool { return slices.Contains(killed, p) })
+		if fresh && freshAt.IsZero() {
+			freshAt = time.Now()
+		}
 		v = e.rtDNSView()
 		st, _ := v["state"].(string)
 		if fresh && st == "on" && dnstakeover.PortOwner().Kind == dnstakeover.OwnerKernel {
@@ -164,6 +173,8 @@ func TestRouterDNSGuard(t *testing.T) {
 		}
 		time.Sleep(time.Second)
 	}
+	t.Logf("замер D-20: %s — новый процесс ядра через %.0f с после kill -9, :53 отвечает через %.0f с после появления процесса",
+		kernel, freshAt.Sub(killedAt).Seconds(), time.Since(freshAt).Seconds())
 	e.rtDNSExpectOn(v, kernel)
 	if !e.rtDNSActionSince(rtDNSGuardRestartAction, since) {
 		t.Errorf("в истории действий нет успешной записи %s после сбоя ядра", rtDNSGuardRestartAction)
