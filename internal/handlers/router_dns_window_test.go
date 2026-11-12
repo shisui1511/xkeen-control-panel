@@ -171,10 +171,11 @@ func (e *rtSrc) rtDNSExpectRolledBack(v map[string]any, kernel string, overrideB
 // Трасса: подготовка → включение → state window, window.kind=enable, total_s равен
 // окну у процесса панели, до дедлайна от окна минус 10 с до окна по часам сервера, блокировка window, выключение в окне —
 // 409 window_active → «Оставить» → state on, действующий перехват → повторное
-// «Оставить» (вторая вкладка) → 200, state on. Метка ядра: перехват ведёт активное ядро.
+// «Оставить» (вторая вкладка) → 200, state on. Одно ядро (D-01, D-02): зависимость
+// от ядра проверяет TestRouterDNSEnableDisable на обоих ядрах.
 func TestRouterDNSWindowKeep(t *testing.T) {
 	routertest.Slow(t, "включение перехвата DNS с перезапуском ядра и окном подтверждения")
-	tg := routertest.CoreSpecific(t)
+	tg := routertest.OneCore(t, "окно «Оставить»: ядро влияет только на подготовку, перезапуск при включении и слушатель в файлах ядра", "TestRouterDNSEnableDisable")
 	kernel := tg.Core
 	e := rtNewSrc(t)
 	rtDNSPrepare(t, e, kernel)
