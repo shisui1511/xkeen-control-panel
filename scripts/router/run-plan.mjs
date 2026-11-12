@@ -15,7 +15,13 @@
 //            иначе 30 с. Самопроверка сессии — при RT_HARNESS=1 (в том числе при полном выборе).
 //   harness  обе ветви, все тесты блока основными этапами (go, pw-read, pw), окно 30 с,
 //            самопроверка сессии.
-//   full     полная матрица: обе ветви, все тесты, окно 120 с, самопроверки нет.
+//   full     полная матрица: обе ветви, все тесты, окно 120 с, самопроверки нет. Исключение —
+//            тесты с меткой «одно ядро» (факт oneCore core-marks.cjs, D-01, D-03): они идут только
+//            на ядре из SHA HEAD (--b1, обязателен набору full), как неразмеченные в гейте; ветвь
+//            другого ядра исключает их Go-имена (go.skip → RT_GO_SKIP → -test.skip) и спеки тегом
+//            (pw.invert '@one-core' → --grep-invert). Самопропуск t.Skip не используется: он дал бы
+//            строки SKIP и ложное «нужна метка ядра». Поле плана oneCore: { core, go, pw } — ядро,
+//            Go-имена по алфавиту и число спек-тестов с меткой.
 //   delta    hExtra=0: тесты блока входят в состав добора через delta-plan.mjs --extra-* (отдельные
 //            этапы harness прогнали бы блок дважды); b2 пусто и b2Run=0 — ветви добора DELTA_B1 и
 //            DELTA_B2 по delta.sel.d; окно 120 с; самопроверка и строки блока harness — только при
@@ -28,22 +34,29 @@
 // API: harnessBlock(root) — блок harness areas.json (loadAreas core-marks.cjs) с проверкой, как
 // прежде в run.sh: непустые go, specs и session, значения по шаблонам безопасных символов; ошибка —
 // исключение. runPlan({ suite, vars, b1, root }) — план: { suite, hExtra, b2, b2Run, smokeDefault,
-// selfcheck, harness, branches, harnessStages, selfcheckStage }; vars — 13 значений select.env
+// selfcheck, harness, branches, harnessStages, selfcheckStage, oneCore }; oneCore — только у full,
+// у остальных наборов null (в changed «одно ядро» и так идёт в одну ветвь как неразмеченный, D-03;
+// harness и delta читают coreMarked без изменений); vars — 13 значений select.env
 // (ключи RT_*), обязательны для changed и delta. branches — ветви с этапами по порядку run.sh
 // (switch, smoke, observe, pw-read, pw-harness-read, go, settle, pw, go-harness, settle-harness,
-// pw-harness-state): Go по именам (seq) или пакетами (pkgs, run), спеки read и state (вид — строка
-// `// e2e-kind: read` в первых пяти строках спека), отбор @core второй ветви (coreOnly); у delta — null.
+// pw-harness-state): Go по именам (seq), пакетами (pkgs, run) или все ({ all, skip? }), спеки read и
+// state (вид — строка `// e2e-kind: read` в первых пяти строках спека), отбор @core второй ветви
+// (coreOnly), отсев invert; у delta — null.
 //
 // CLI (из корня рабочей копии):
 //   node scripts/router/run-plan.mjs --sh --suite <changed|harness|full|delta> [--select <select.env>]
 //     [--b1 <xray|mihomo>]
 //   node scripts/router/run-plan.mjs --json --suite … — план целиком.
-// --sh печатает десять строк для eval в фиксированном порядке, значения в одинарных кавычках и только
-// из безопасных символов (run.sh сверяет число строк, порядок имён и форму каждой, T-148.1.1-12):
+// --sh печатает тринадцать строк для eval в фиксированном порядке, значения в одинарных кавычках и
+// только из безопасных символов (run.sh сверяет число строк, порядок имён и форму каждой, T-148.1.1-12,
+// T-148.1.2-16):
 //   RT_H_EXTRA='0|1'  RT_B2='xray|mihomo|'  RT_B2_RUN='0|1'  RT_SMOKE_DEFAULT='30|120'
 //   RT_SELFCHECK='0|1'  RT_H_GO_SEQ  RT_H_GO_PKGS  RT_H_SPECS  RT_H_GREP  RT_H_SESSION
+//   RT_OC_CORE='xray|mihomo|'  RT_OC_GO_SKIP='^(A|B)$|'  RT_OC_PW_INVERT='@one-core|'
+// Строки RT_OC_* непусты только у full: ядро «одно ядро» (ядро из SHA HEAD), регэксп -test.skip
+// Go-имён и отсев спеков для ветви другого ядра.
 // --select — файл из 13 строк вывода select-changed.mjs (select.env отчёта); проверяется так же, как
-// в run.sh. --b1 обязателен набору changed. Код 0 — план напечатан; 1 — блок harness не прочитан или
+// в run.sh. --b1 обязателен наборам changed и full. Код 0 — план напечатан; 1 — блок harness не прочитан или
 // не прошёл проверку (причина в stderr); 2 — неверный вызов или ввод (причина в stderr).
 // Без зависимостей: только встроенные модули Node и core-marks.cjs.
 
@@ -92,7 +105,14 @@ const SH_KEYS = [
   ['RT_H_SPECS', /^[A-Za-z0-9_./ -]*$/],
   ['RT_H_GREP', /^[A-Za-z0-9_|()?!^*.: -]*$/],
   ['RT_H_SESSION', /^(scripts\/router\/[A-Za-z0-9_./-]+)?$/],
+  ['RT_OC_CORE', /^(xray|mihomo|)$/],
+  ['RT_OC_GO_SKIP', /^(\^\([A-Za-z0-9_|]+\)\$)?$/],
+  ['RT_OC_PW_INVERT', /^(@one-core)?$/],
 ];
+
+// Имя Go-теста «одно ядро» в регэкспе -test.skip: только [A-Za-z0-9_] (T-148.1.2-16).
+const GO_TEST_NAME = /^TestRouter[A-Za-z0-9_]+$/;
+const ONE_CORE_TAG = '@one-core';
 
 class InputError extends Error {}
 
@@ -154,16 +174,35 @@ function splitSpecs(root, specs) {
   return { read, state };
 }
 
-// Этапы ветви по порядку run.sh (full_target). go: { seq } | { pkgs, run } | { all: true } | null;
-// pw: { specs, grep, invert, first, coreOnly } | { all: true } | null; harness — блок или null.
+/**
+ * Тесты с меткой «одно ядро» дерева (testFacts): Go-имена (уникальные, по алфавиту) и число
+ * спек-тестов. Имя не по шаблону — исключение: в регэксп -test.skip идут только проверенные имена.
+ */
+function oneCoreFacts(root) {
+  const go = new Set();
+  let pw = 0;
+  for (const f of coreMarks.testFacts(root)) {
+    if (!f.oneCore) continue;
+    if (f.kind === 'go') {
+      if (typeof f.test !== 'string' || !GO_TEST_NAME.test(f.test)) throw new Error(`«одно ядро»: недопустимое имя Go-теста: ${String(f.test).slice(0, 80)}`);
+      go.add(f.test);
+    } else if (f.kind === 'pw') {
+      pw++;
+    }
+  }
+  return { go: [...go].sort(), pw };
+}
+
+// Этапы ветви по порядку run.sh (full_target). go: { seq } | { pkgs, run } | { all: true, skip? } | null;
+// pw: { specs, grep, invert, first, coreOnly } | { all: true, invert? } | null; harness — блок или null.
 function branchStages(root, { go, pw, harness, window }) {
   const st = [{ stage: 'switch' }, { stage: 'smoke' }, { stage: 'observe', seconds: window }];
   const pwSplit = pw && !pw.all ? splitSpecs(root, pw.specs) : null;
-  if (pw) st.push({ stage: 'pw-read', ...(pw.all ? { all: true } : { ...pw, specs: pwSplit.read }) });
+  if (pw) st.push({ stage: 'pw-read', ...(pw.all ? { ...pw } : { ...pw, specs: pwSplit.read }) });
   const hSplit = harness ? splitSpecs(root, harness.specs) : null;
   if (harness) st.push({ stage: 'pw-harness-read', specs: hSplit.read, grep: harness.grep });
   if (go) st.push({ stage: 'go', ...go }, { stage: 'settle' });
-  if (pw) st.push({ stage: 'pw', ...(pw.all ? { all: true } : { ...pw, specs: pwSplit.state }) });
+  if (pw) st.push({ stage: 'pw', ...(pw.all ? { ...pw } : { ...pw, specs: pwSplit.state }) });
   if (harness) {
     st.push({ stage: 'go-harness', seq: harness.go }, { stage: 'settle-harness' });
     st.push({ stage: 'pw-harness-state', specs: hSplit.state, grep: harness.grep });
@@ -182,6 +221,7 @@ export function runPlan({ suite, vars = null, b1 = '', root = ROOT } = {}) {
   }
   if (b1 && !CORES.includes(b1)) throw new InputError('--b1: xray или mihomo');
   if (suite === 'changed' && !b1) throw new InputError('набору changed нужен --b1 <xray|mihomo> (ядро из SHA HEAD)');
+  if (suite === 'full' && !b1) throw new InputError('набору full нужен --b1 <xray|mihomo> (ядро из SHA HEAD)');
 
   const plan = {
     suite,
@@ -194,6 +234,7 @@ export function runPlan({ suite, vars = null, b1 = '', root = ROOT } = {}) {
     branches: null,
     harnessStages: [],
     selfcheckStage: null,
+    oneCore: null,
   };
 
   if (suite === 'harness') {
@@ -209,7 +250,15 @@ export function runPlan({ suite, vars = null, b1 = '', root = ROOT } = {}) {
     }));
   } else if (suite === 'full') {
     plan.smokeDefault = 120;
-    plan.branches = CORES.map((core) => ({ core, role: 'matrix', stages: branchStages(root, { go: { all: true }, pw: { all: true }, harness: null, window: 120 }) }));
+    // «одно ядро» (D-01, D-03): ветвь b1 — все тесты, ветвь другого ядра — без тестов с меткой
+    const oc = oneCoreFacts(root);
+    plan.oneCore = { core: b1, go: oc.go, pw: oc.pw };
+    plan.branches = CORES.map((core) => {
+      const own = core === b1;
+      const go = own ? { all: true } : { all: true, skip: oc.go };
+      const pw = own ? { all: true } : { all: true, invert: oc.pw > 0 ? ONE_CORE_TAG : '' };
+      return { core, role: 'matrix', stages: branchStages(root, { go, pw, harness: null, window: 120 }) };
+    });
   } else if (suite === 'delta') {
     plan.smokeDefault = 120;
     if (vars.RT_HARNESS === '1') {
@@ -260,9 +309,10 @@ export function runPlan({ suite, vars = null, b1 = '', root = ROOT } = {}) {
   return plan;
 }
 
-/** Десять строк для eval в run.sh. */
+/** Тринадцать строк для eval в run.sh. */
 export function shLines(plan) {
   const h = plan.harness;
+  const oc = plan.oneCore;
   const vals = {
     RT_H_EXTRA: String(plan.hExtra),
     RT_B2: plan.b2,
@@ -274,6 +324,9 @@ export function shLines(plan) {
     RT_H_SPECS: h ? h.specs.join(' ') : '',
     RT_H_GREP: h ? h.grep : '',
     RT_H_SESSION: h ? h.session : '',
+    RT_OC_CORE: oc ? oc.core : '',
+    RT_OC_GO_SKIP: oc && oc.go.length > 0 ? `^(${oc.go.join('|')})$` : '',
+    RT_OC_PW_INVERT: oc && oc.pw > 0 ? ONE_CORE_TAG : '',
   };
   return SH_KEYS.map(([key, re]) => {
     if (!re.test(vals[key])) throw new Error(`значение ${key} не прошло проверку`);
