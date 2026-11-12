@@ -509,7 +509,6 @@
             "go:TestRouterPanelRestartDuringXKeenStatus",
             "go:TestRouterPanelRestartDuringWatchdogRulesCheck",
             "go:TestRouterPanelRestartWithLateExit",
-            "go:TestRouterStaticGzip",
             "go:TestRouterPanelSession"
           ]
         },
