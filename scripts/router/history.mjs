@@ -86,7 +86,8 @@
 //                                        старше days (по умолчанию 60) дней от сейчас; без отчёта
 //                                        excludeReport и вложенных в него (<имя>-…, <имя>/…: проходы
 //                                        и этапы сессии, перепрогоны); без статуса SKIP, исходов
-//                                        карантина (QPASS, QFAIL) и классов quarantine, stand, known;
+//                                        карантина (QPASS, QFAIL) и классов quarantine, stand, known,
+//                                        flaky;
 //                                        target — только эта цель (не задана — любая)
 //   hasPass(rows, check, core, opts)     { report, finished_utc } последнего PASS в том же окне
 //                                        и с теми же отсечениями, что lastOutcome, или null —
@@ -543,8 +544,9 @@ export function failFreq(rows, opts = {}) {
 
 // Окно сравнения исходов по ядрам (D-05, F14): строки проверки на ядре за days дней без текущего
 // отчёта и вложенных в него, без SKIP, без исходов карантина и без классов, не говорящих об исходе
-// по продукту (quarantine — карантин, stand — связь или смена версии стенда, known — метка падения).
-const OUTCOME_SKIP_CLASSES = new Set(['quarantine', 'stand', 'known']);
+// по продукту (quarantine — карантин, stand — связь или смена версии стенда, known — метка падения,
+// flaky — упал в основном проходе и прошёл при подтверждающем перепрогоне).
+const OUTCOME_SKIP_CLASSES = new Set(['quarantine', 'stand', 'known', 'flaky']);
 function outcomeRows(rows, check, core, opts = {}) {
   const { excludeReport = '', days = 60, target } = opts;
   const now = Date.now();

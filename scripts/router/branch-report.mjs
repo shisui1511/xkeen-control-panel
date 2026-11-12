@@ -43,7 +43,8 @@
 //     D-05 (метка «одно ядро», --suite full и changed): тест «одно ядро» идёт на одном ядре, поэтому
 //     его исход (PASS, FAIL или XPASS ровно на одном ядре) сравнивается с последним исходом на другом
 //     ядре по истории (history.mjs lastOutcome: 60 дней, без этого отчёта и вложенных, без SKIP и
-//     классов quarantine, stand, known). PASS на одном и FAIL или XPASS на другом — строка
+//     классов quarantine, stand, known, flaky); FAIL этого прогона, прошедший подтверждающий
+//     перепрогон (класс flaky), не сравнивается. PASS на одном и FAIL или XPASS на другом — строка
 //       - core-mark:<проверка>: нужна метка ядра: xray <ст>, mihomo <ст> (одно ядро: расхождение
 //         по истории, <отчёт>)
 //     и с --write строка FAIL core-mark:<проверка> в results.tsv (красный прогон): метка «одно ядро»
@@ -759,13 +760,42 @@ if (suite === "full" && bothBranches) {
 
 // D-05: тест «одно ядро» идёт в прогоне на одном ядре, поэтому его исход сравнивается с последним
 // исходом на другом ядре по истории (60 дней, без этого отчёта, без SKIP и классов quarantine,
-// stand, known). На одном ядре PASS, на другом FAIL или XPASS — «нужна метка ядра» (красный прогон):
-// метка «одно ядро» снимается, падение — обычная находка.
+// stand, known, flaky). На одном ядре PASS, на другом FAIL или XPASS — «нужна метка ядра» (красный
+// прогон): метка «одно ядро» снимается, падение — обычная находка. FAIL этого прогона класса flaky
+// (прошёл при подтверждающем перепрогоне) исходом по продукту не считается и не сравнивается.
 if (suite === "full" || suite === "changed") {
+  // Тот же признак flaky, что у classify ниже (раздел классов ещё не построен): семья проверки
+  // прошла в <цель>/confirm.tsv, перепрогон не пропущен (confirm-skip) и сверка версии в нём
+  // выполнилась (нет FAIL version-guard-error).
+  const confirmPassed = (() => {
+    let text;
+    try {
+      text = fs.readFileSync(path.join(report, target, "confirm.tsv"), "utf8");
+    } catch {
+      return () => false;
+    }
+    if (fs.existsSync(path.join(report, target, "confirm-skip"))) return () => false;
+    const fam = (core, check) => `${core}\t${check.startsWith("go:") ? "go:" + check.slice(3).split("/")[0] : check}`;
+    const worst = new Map();
+    for (const line of text.split("\n")) {
+      const [st, core, check] = line.split("\t");
+      if (!check || !RESULT_ORDER.includes(st)) continue;
+      if (st === "FAIL" && check === "version-guard-error") return () => false;
+      if (!/^(go|pw):/.test(check)) continue;
+      const k = fam(core, check);
+      const prev = worst.get(k);
+      if (!prev || RESULT_ORDER.indexOf(st) < RESULT_ORDER.indexOf(prev)) worst.set(k, st);
+    }
+    return (core, check) => {
+      const st = worst.get(fam(core, check));
+      return st === "PASS" || st === "QPASS";
+    };
+  })();
   const candidates = [];
   for (const [check, perCore] of byCheck) {
     if (perCore.size !== 1 || markOf(check) !== "one-core") continue;
     const [core, st] = [...perCore][0];
+    if (st === "FAIL" && confirmPassed(core, check)) continue;
     if (st === "PASS" || FAILED.has(st)) candidates.push({ check, core, st });
   }
   if (candidates.length > 0) {
