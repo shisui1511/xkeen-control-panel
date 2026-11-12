@@ -392,6 +392,247 @@ rt_restore() {
   rt_ssh "$_id" "sh $RT_SNAP_DIR/snapshot.sh cleanup; rm -rf $RT_SNAP_DIR" >/dev/null 2>&1 || true
 }
 
+# --- сокращённые сроки на время прогона (D-16 фазы 148.1.1, D-20…D-23) ---------------------------
+#
+# Сроки продукта, которые тесты пережидают, на время прогона сокращаются блоком строк в xcp.env
+# панели: init-скрипт S99xcp (scripts/setup.sh) подключает этот файл с `set -a`, поэтому блок
+# работает с init-скриптом любого тега и без правки установщика. Блок — строки между маркерами
+# RT_RTENV_BEGIN и RT_RTENV_END; строки пользователя в файле не трогаются.
+# Жизненный цикл: run.sh пишет блок после снимка цели (восстановление по снимку возвращает
+# xcp.env без него), deploy.sh и начало run.sh снимают оставшийся после обрыва (D-23), смоук
+# проверяет rt-env (блок и строки `xcp-rt:` журнала после баннера старта).
+#
+# Таблица значений (D-20; D-17 фазы 148.1.1): значение = худшая соседняя пауза плюс запас 15 с,
+# округление вверх до 5 с. Значение, не меньшее умолчания продукта, в таблицу не пишется.
+#   XCP_RT_DNS_GUARD_BUSY_GRACE_S=35  пауза сторожа DNS после операции над ядром (умолчание 60 с):
+#                                     худшая наблюдённая пауза «перезапуск mihomo -> живой :53» 19 с
+#                                     (журнал отчёта 20261107-131558-aeaff473) + 15 = 34 -> 35 (T2)
+#   XCP_RT_DNS_GUARD_REARM_S=65       повтор сторожа (умолчание 90 с): цикл «рестарт ядра -> проба»
+#                                     до 50 с + 15 = 65 (T3)
+#   XCP_RT_GEODATA_CATCHUP_S=45       догон geodata после старта (умолчание 180 с): тик планировщика
+#                                     30 с + 15 = 45 (T4)
+#   окно подтверждения DNS (T1)       в таблице нет: худшая пауза 46–50 с (затык записи 26 с + шаги
+#                                     внутри окна 20 с; «Применить» внутри окна — до 50 с) плюс запас
+#                                     не ниже умолчания 60 с, переменная окна остаётся на умолчании
+# Падение по сроку или замер выше в сессии поднимает значение здесь; тест не ослабляется (D-20).
+# Значения уходят в удалённую команду оболочки: только литералы этой строки, без ввода и окружения.
+RT_RTENV_VALUES='XCP_RT_DNS_GUARD_BUSY_GRACE_S=35 XCP_RT_DNS_GUARD_REARM_S=65 XCP_RT_GEODATA_CATCHUP_S=45'
+RT_RTENV_FILE=/opt/etc/xcp/xcp.env
+RT_RTENV_BEGIN='# xcp-rt begin'
+RT_RTENV_END='# xcp-rt end'
+
+# Сценарий POSIX sh для устройства (печатает в stdout): rt_rtenv_script <write|clear|status> [--no-restart].
+#   write   блок совпал с таблицей — «unchanged» без перезапуска; иначе прежний блок вырезается, новый
+#           дописывается в конец, панель перезапускается (S99xcp restart, ожидание нового PID не дольше
+#           90 с), печать «written»
+#   clear   блока нет — «absent»; есть — вырезается и (без --no-restart) панель перезапускается с тем же
+#           ожиданием, печать «cleared»
+#   status  строки блока или «absent»
+# Файл переписывается содержимым временного файла рядом (`cat tmp > файл`: права и владелец остаются;
+# без `sed -i`); awk дописывает перевод строки к последней строке без него. Файла нет: write создаёт
+# его (права 600), clear и status — «absent». Сценарий пригоден и для `set -e`, и для подоболочки.
+# Коды: 0 — текст напечатан, 2 — неверный вызов или строка таблицы вне шаблона XCP_RT_<ИМЯ>=<секунды>.
+rt_rtenv_script() {
+  _rs_mode=${1:-}
+  _rs_restart=1
+  case "${2:-}" in
+    '') ;;
+    --no-restart) _rs_restart=0 ;;
+    *)
+      echo "rt_rtenv_script: write|clear|status [--no-restart]" >&2
+      return 2
+      ;;
+  esac
+  case "$_rs_mode" in
+    write | clear | status) ;;
+    *)
+      echo "rt_rtenv_script: write|clear|status [--no-restart]" >&2
+      return 2
+      ;;
+  esac
+  _rs_want=""
+  for _rs_kv in $RT_RTENV_VALUES; do
+    _rs_name=${_rs_kv%%=*}
+    _rs_val=${_rs_kv#*=}
+    case "$_rs_name" in
+      XCP_RT_*) ;;
+      *)
+        echo "rt_rtenv_script: строка таблицы вне шаблона: $_rs_kv" >&2
+        return 2
+        ;;
+    esac
+    case "$_rs_name" in
+      *[!A-Z0-9_]*)
+        echo "rt_rtenv_script: строка таблицы вне шаблона: $_rs_kv" >&2
+        return 2
+        ;;
+    esac
+    case "$_rs_val" in
+      '' | *[!0-9]*)
+        echo "rt_rtenv_script: строка таблицы вне шаблона: $_rs_kv" >&2
+        return 2
+        ;;
+    esac
+    _rs_want="$_rs_want '$_rs_name=$_rs_val'"
+  done
+  cat <<EOF
+F=$RT_RTENV_FILE
+B='$RT_RTENV_BEGIN'
+E='$RT_RTENV_END'
+T="\$F.xcp-rt.\$\$"
+want() { printf '%s\n' "\$B"$_rs_want "\$E"; }
+cur() {
+  if [ -f "\$F" ]; then
+    awk -v b="\$B" -v e="\$E" '\$0 == b { s = 1 } s { print } s && \$0 == e { exit }' "\$F"
+  fi
+}
+body() { awk -v b="\$B" -v e="\$E" '\$0 == b { s = 1; next } s && \$0 == e { s = 0; next } !s { print }' "\$F"; }
+restart() {
+  old=\$(pidof xcp || true)
+  /opt/etc/init.d/S99xcp restart >/dev/null 2>&1 || true
+  i=0
+  while [ \$i -lt 90 ]; do
+    new=\$(pidof xcp || true)
+    case "\$new" in
+      '' | *' '*) ;;
+      *) if [ "\$new" != "\$old" ]; then return 0; fi ;;
+    esac
+    sleep 1
+    i=\$((i + 1))
+  done
+  echo "xcp-rt: панель не поднялась за 90 с после перезапуска" >&2
+  return 1
+}
+EOF
+  case "$_rs_mode" in
+    write)
+      cat <<'EOF'
+if [ ! -f "$F" ]; then
+  : >"$F" && chmod 600 "$F"
+fi
+if [ "$(cur)" = "$(want)" ]; then
+  echo unchanged
+  exit 0
+fi
+if ! { body && want; } >"$T" || ! cat "$T" >"$F"; then
+  rm -f "$T"
+  echo "xcp-rt: $F не переписан" >&2
+  exit 1
+fi
+rm -f "$T"
+restart || exit 1
+echo written
+EOF
+      ;;
+    clear)
+      cat <<'EOF'
+if [ -z "$(cur)" ]; then
+  echo absent
+  exit 0
+fi
+if ! body >"$T" || ! cat "$T" >"$F"; then
+  rm -f "$T"
+  echo "xcp-rt: $F не переписан" >&2
+  exit 1
+fi
+rm -f "$T"
+EOF
+      if [ "$_rs_restart" = 1 ]; then
+        echo 'restart || exit 1'
+      fi
+      echo 'echo cleared'
+      ;;
+    status)
+      cat <<'EOF'
+c=$(cur)
+if [ -n "$c" ]; then
+  printf '%s\n' "$c"
+else
+  echo absent
+fi
+EOF
+      ;;
+  esac
+}
+
+# Ожидание ответа 200 на GET <URL панели>/api/version с ПК: rt_rtenv_wait_api <цель>. Не дольше 90 с.
+# URL не печатается. Коды: 0 — ответила, 1 — нет.
+rt_rtenv_wait_api() {
+  _rwa_url=$(rt_get "$1" URL)
+  _rwa_t0=$(date +%s)
+  while :; do
+    _rwa_code=$(curl -sk --connect-timeout 5 --max-time 10 -o /dev/null -w '%{http_code}' "$_rwa_url/api/version" 2>/dev/null) || _rwa_code=000
+    [ "$_rwa_code" != 200 ] || return 0
+    if [ $(($(date +%s) - _rwa_t0)) -ge 90 ]; then
+      echo "цель $1: панель не ответила 200 на /api/version за 90 с после перезапуска (последний код ${_rwa_code:-000})" >&2
+      return 1
+    fi
+    sleep 2
+  done
+}
+
+# Запись блока сокращённых сроков: rt_rtenv_write <цель>. Печатает итог сценария (written|unchanged).
+# После перезапуска (written) ждёт ответа панели с ПК. Коды: 0 — блок на месте и панель отвечает,
+# 1 — сценарий упал или панель не поднялась, 3 — нет связи.
+rt_rtenv_write() {
+  _rw_id=$1
+  _rw_scr=$(rt_rtenv_script write) || return 1
+  _rw_rc=0
+  _rw_out=$(rt_ssh "$_rw_id" "$_rw_scr") || _rw_rc=$?
+  [ -z "$_rw_out" ] || printf '%s\n' "$_rw_out"
+  [ "$_rw_rc" != 3 ] || return 3
+  if [ "$_rw_rc" != 0 ]; then
+    echo "цель $_rw_id: блок xcp-rt не записан (код $_rw_rc)" >&2
+    return 1
+  fi
+  case "$_rw_out" in
+    *written*) rt_rtenv_wait_api "$_rw_id" || return 1 ;;
+    *unchanged*) ;;
+    *)
+      echo "цель $_rw_id: сценарий записи блока xcp-rt не сообщил итог" >&2
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+# Снятие блока: rt_rtenv_clear <цель> [--no-restart]. Печатает итог сценария (cleared|absent).
+# Без --no-restart после снятия панель перезапускается, и функция ждёт её ответа с ПК.
+# Коды: 0 — блока нет, 1 — сценарий упал или панель не поднялась, 2 — неверный вызов, 3 — нет связи.
+rt_rtenv_clear() {
+  _rcl_id=$1
+  _rcl_nr=${2:-}
+  _rcl_scr=$(rt_rtenv_script clear $_rcl_nr) || return 2
+  _rcl_rc=0
+  _rcl_out=$(rt_ssh "$_rcl_id" "$_rcl_scr") || _rcl_rc=$?
+  [ -z "$_rcl_out" ] || printf '%s\n' "$_rcl_out"
+  [ "$_rcl_rc" != 3 ] || return 3
+  if [ "$_rcl_rc" != 0 ]; then
+    echo "цель $_rcl_id: блок xcp-rt не снят (код $_rcl_rc)" >&2
+    return 1
+  fi
+  case "$_rcl_out" in
+    *cleared*)
+      if [ "$_rcl_nr" != --no-restart ]; then
+        rt_rtenv_wait_api "$_rcl_id" || return 1
+      fi
+      ;;
+    *absent*) ;;
+    *)
+      echo "цель $_rcl_id: сценарий снятия блока xcp-rt не сообщил итог" >&2
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+# Состояние блока: rt_rtenv_status <цель>. Печатает строки блока или «absent».
+# Коды: 0 — прочитано, 1 — сбой сценария, 3 — нет связи.
+rt_rtenv_status() {
+  _rst_scr=$(rt_rtenv_script status) || return 1
+  rt_ssh "$1" "$_rst_scr"
+}
+
 # --- сверка версии стенда на границе единицы работы (D-13, RTR-15) ------------------------------
 #
 # Файлы отчёта цели (<отчёт>/<цель>/):
