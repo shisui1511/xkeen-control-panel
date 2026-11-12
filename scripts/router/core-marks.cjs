@@ -1010,7 +1010,7 @@ function goStringArg(code, open, n) {
 
 /**
  * Факты тестов одного роутерного Go-файла (без области):
- * [{test, tier, tierReason, slowReason, quarantine, coreMarked, oneCore: {reason, covers} | null}].
+ * [{test, tier, tierReason, slowReason, quarantine, coreMarked, coreSpecific, oneCore: {reason, covers} | null}].
  */
 function goTestFacts(text) {
   const decls = declarations(text);
@@ -1043,6 +1043,8 @@ function goTestFacts(text) {
       quarantine: quarAt >= 0 ? goStringArg(d.code, quarAt, 1) || '' : null,
       // метка «одно ядро» метку ядра не даёт: тест идёт в одну ветвь, как неразмеченный (D-03)
       coreMarked: CORE_SPECIFIC.test(d.masked) || KNOWN_WITH_SLASH.test(d.code) || fileKnown,
+      // только routertest.CoreSpecific: метка известного падения с ядром временная (правило 7)
+      coreSpecific: CORE_SPECIFIC.test(d.masked),
       oneCore: one ? { reason: (one.reason || '').trim(), covers: (one.covers || '').trim() } : null
     });
   }
@@ -1197,7 +1199,7 @@ function testFacts(root) {
  * Покрытие тестов с меткой «одно ядро» (правило 7 стража, D-04): по фактам testFacts —
  * [{file, test, reason}]. Покрытие ищется среди тестов того же семейства: Go — тот же вид,
  * пакет и router-area, спек — тот же вид и router-area. Нарушения: покрытия нет; у покрытия
- * нет метки ядра (coreMarked); покрытие в карантине; покрытие само с меткой «одно ядро».
+ * нет метки ядра (Go — routertest.CoreSpecific, coreSpecific; спек — тег ядра, coreMarked); покрытие в карантине; покрытие само с меткой «одно ядро».
  * Пустое покрытие здесь не разбирается: его отклоняют analyzeGo и specIssues (правило 6).
  */
 function oneCoreIssues(facts) {
@@ -1222,7 +1224,7 @@ function oneCoreIssues(facts) {
     }
     const why = (x) => {
       if (x.oneCore) return `покрытие «${covers}» само с меткой «одно ядро»`;
-      if (x.coreMarked !== true) return `покрытие «${covers}» без метки ядра: ему нужен ${f.kind === 'go' ? 'routertest.CoreSpecific' : 'тег CORE_TAG'}`;
+      if (f.kind === 'go' ? x.coreSpecific !== true : x.coreMarked !== true) return `покрытие «${covers}» без метки ядра: ему нужен ${f.kind === 'go' ? 'routertest.CoreSpecific' : 'тег CORE_TAG'}`;
       if (x.quarantine !== null && x.quarantine !== undefined) return `покрытие «${covers}» в карантине`;
       return null;
     };

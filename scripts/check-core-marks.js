@@ -116,7 +116,7 @@ for (const [text, wantViolations, wantMarks, wantReason] of samples) {
 // Факт «одно ядро» у Go-теста: причина и покрытие есть, метки ядра нет (тест идёт в одну ветвь)
 {
   const f = goTestFacts(samples.find(([t]) => t.includes('TestRouterK('))[0])[0];
-  if (!f || !f.oneCore || f.oneCore.reason !== 'перезапуск ядра' || f.oneCore.covers !== 'TestRouterC' || f.coreMarked !== false) {
+  if (!f || !f.oneCore || f.oneCore.reason !== 'перезапуск ядра' || f.oneCore.covers !== 'TestRouterC' || f.coreMarked !== false || f.coreSpecific !== false) {
     problems.push(`самопроверка сканера: факт «одно ядро» у Go-теста разобран неверно: ${JSON.stringify(f)}`);
   }
 }
@@ -127,9 +127,10 @@ const oneCoreSamples = [
   ['правильное покрытие', {}, 0],
   ['покрытие из другого пакета', { pkg: 'internal/y' }, 1],
   ['покрытие из другой router-area', { area: 'routing' }, 1],
-  ['покрытие без метки ядра', { coreMarked: false }, 1],
+  ['покрытие без метки ядра', { coreMarked: false, coreSpecific: false }, 1],
+  ['покрытие с меткой известного падения ядра вместо CoreSpecific', { coreSpecific: false }, 1],
   ['покрытие в карантине', { quarantine: 'flaky-x' }, 1],
-  ['покрытие само «одно ядро»', { coreMarked: false, oneCore: { reason: 'r', covers: 'TestRouterK' } }, 1],
+  ['покрытие само «одно ядро»', { coreMarked: false, coreSpecific: false, oneCore: { reason: 'r', covers: 'TestRouterK' } }, 1],
   ['покрытия нет', { test: 'TestRouterZ' }, 1],
   // спек: семейство — та же router-area, пакета нет
   ['спек: правильное покрытие', { kind: 'pw', pkg: null }, 0, { kind: 'pw', pkg: null }],
@@ -139,7 +140,7 @@ const oneCoreSamples = [
 for (const [what, patch, want, selfPatch = {}] of oneCoreSamples) {
   const facts = [
     { ...oneCoreBase, test: 'TestRouterK', coreMarked: false, oneCore: { reason: 'r', covers: 'TestRouterC' }, ...selfPatch },
-    { ...oneCoreBase, test: 'TestRouterC', coreMarked: true, oneCore: null, ...patch }
+    { ...oneCoreBase, test: 'TestRouterC', coreMarked: true, coreSpecific: true, oneCore: null, ...patch }
   ];
   // у покрытия «одно ядро» нарушение даёт и оно само (его покрытие K без метки ядра): считаем только K
   const got = oneCoreIssues(facts).filter((i) => i.test === 'TestRouterK').length;
