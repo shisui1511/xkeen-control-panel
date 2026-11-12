@@ -450,21 +450,29 @@ if [ "$OBSERVE_ONLY" != 1 ]; then
       200:text/html*) ;;
       *) gs_err="$gs_err; GET /: http $gs_code, тип ${gs_idx_ct:--}, ожидалось 200 text/html" ;;
     esac
-    gs_list=$({ grep -oE 'assets/[A-Za-z0-9._-]+\.js' "$GZ.idx.b" 2>/dev/null || true; } | awk '!s[$0]++' | head -n 5)
+    gs_list=$({ grep -oE 'assets/[A-Za-z0-9._-]+\.js' "$GZ.idx.b" 2>/dev/null || true; } | awk '!s[$0]++' | head -n 40)
     gs_icon=$({ grep -oE 'icons/[A-Za-z0-9._-]+\.png' "$GZ.idx.b" 2>/dev/null || true; } | head -n 1)
     gs_asset=""
     gs_small=""
     gs_raw=0
+    # Первый ассет больше порога идёт в основную проверку, первый не больше порога — в проверку
+    # «малый не сжимается»; порядок в index.html не важен, цикл идёт, пока не найдены оба.
     for gs_a in $gs_list; do
       gs_c=$(gz_get raw "/$gs_a")
-      gs_raw=$(gz_size raw)
-      if [ "$gs_c" = 200 ] && [ "$gs_raw" -gt 1024 ]; then
-        gs_asset=$gs_a
-        break
+      gs_sz=$(gz_size raw)
+      if [ "$gs_c" = 200 ] && [ "$gs_sz" -gt 1024 ]; then
+        [ -n "$gs_asset" ] || gs_asset=$gs_a
+      elif [ "$gs_c" = 200 ]; then
+        [ -n "$gs_small" ] || gs_small=$gs_a
       fi
-      # Ассет не больше порога (если встретился среди кандидатов): сжиматься не должен.
-      if [ "$gs_c" = 200 ] && [ -z "$gs_small" ]; then gs_small=$gs_a; fi
+      if [ -n "$gs_asset" ] && [ -n "$gs_small" ]; then break; fi
     done
+    # слот raw мог занять другой ассет: основной берётся заново
+    if [ -n "$gs_asset" ]; then
+      gs_c=$(gz_get raw "/$gs_asset")
+      gs_raw=$(gz_size raw)
+      [ "$gs_c" = 200 ] || gs_asset=""
+    fi
     if [ -z "$gs_asset" ]; then
       gs_err="$gs_err; в index.html нет ассета assets/*.js больше 1024 байт (кандидатов: $(printf '%s\n' "$gs_list" | grep -c . || true))"
     else
@@ -486,9 +494,9 @@ if [ "$OBSERVE_ONLY" != 1 ]; then
       [ "$gs_c" = 200 ] && [ -z "$gs_ce" ] || gs_err="$gs_err; с gzip;q=0 http $gs_c, Content-Encoding ${gs_ce:--}, ожидалось 200 без сжатия"
     fi
     # Постоянного маленького ассета у встроенной статики нет (имена с хэшем сборки, все
-    # стабильные файлы больше порога), поэтому проверка идёт по случайно попавшемуся
-    # кандидату из index.html и в отчёт не попадает, если такого нет.
-    gs_smallnote=""
+    # стабильные файлы больше порога), поэтому проверка идёт по первому подходящему кандидату
+    # из index.html; если такого нет, деталь PASS прямо говорит, что проверка не выполнялась.
+    gs_smallnote=", малого ассета нет — не проверено"
     if [ -n "$gs_small" ]; then
       gs_c=$(gz_get small "/$gs_small" -H 'Accept-Encoding: gzip')
       gs_ce=$(gz_hdr small content-encoding)
