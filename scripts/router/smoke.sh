@@ -436,6 +436,9 @@ if [ "$OBSERVE_ONLY" != 1 ]; then
   # --- gzip-static: сжатие встроенной статики (internal/server/static.go) ------
   # Ассет — первый assets/*.js из index.html больше gzipMinSize (1024 байта); имя с хэшем сборки.
   # В detail — только имена, размеры и тип: тела ответов в отчёт не пишутся.
+  # Не проверяется на стенде (были в удалённых Go-тестах): отсутствующий файл не кэшируется
+  # (`g.cache`), частичное тело не уходит при панике обработчика под GzipJSON, большой
+  # не-JSON ответ API не сжимается — внешне эти места не наблюдаются.
   rm -f "$GZ".*
   gs_err=""
   gs_code=$(gz_get idx /)
@@ -450,6 +453,7 @@ if [ "$OBSERVE_ONLY" != 1 ]; then
     gs_list=$({ grep -oE 'assets/[A-Za-z0-9._-]+\.js' "$GZ.idx.b" 2>/dev/null || true; } | awk '!s[$0]++' | head -n 5)
     gs_icon=$({ grep -oE 'icons/[A-Za-z0-9._-]+\.png' "$GZ.idx.b" 2>/dev/null || true; } | head -n 1)
     gs_asset=""
+    gs_small=""
     gs_raw=0
     for gs_a in $gs_list; do
       gs_c=$(gz_get raw "/$gs_a")
@@ -458,6 +462,8 @@ if [ "$OBSERVE_ONLY" != 1 ]; then
         gs_asset=$gs_a
         break
       fi
+      # Ассет не больше порога (если встретился среди кандидатов): сжиматься не должен.
+      if [ "$gs_c" = 200 ] && [ -z "$gs_small" ]; then gs_small=$gs_a; fi
     done
     if [ -z "$gs_asset" ]; then
       gs_err="$gs_err; в index.html нет ассета assets/*.js больше 1024 байт (кандидатов: $(printf '%s\n' "$gs_list" | grep -c . || true))"
@@ -479,6 +485,19 @@ if [ "$OBSERVE_ONLY" != 1 ]; then
       gs_ce=$(gz_hdr q0 content-encoding)
       [ "$gs_c" = 200 ] && [ -z "$gs_ce" ] || gs_err="$gs_err; с gzip;q=0 http $gs_c, Content-Encoding ${gs_ce:--}, ожидалось 200 без сжатия"
     fi
+    # Постоянного маленького ассета у встроенной статики нет (имена с хэшем сборки, все
+    # стабильные файлы больше порога), поэтому проверка идёт по случайно попавшемуся
+    # кандидату из index.html и в отчёт не попадает, если такого нет.
+    gs_smallnote=""
+    if [ -n "$gs_small" ]; then
+      gs_c=$(gz_get small "/$gs_small" -H 'Accept-Encoding: gzip')
+      gs_ce=$(gz_hdr small content-encoding)
+      if [ "$gs_c" = 200 ] && [ -z "$gs_ce" ]; then
+        gs_smallnote=", ассет до 1024 байт"
+      else
+        gs_err="$gs_err; $gs_small (не больше 1024 байт): http $gs_c, Content-Encoding ${gs_ce:--}, ожидалось 200 без сжатия"
+      fi
+    fi
     gs_c=$(gz_get miss /assets/xcp-smoke-missing.js -H 'Accept-Encoding: gzip')
     gs_ce=$(gz_hdr miss content-encoding)
     [ "$gs_c" = 404 ] && [ -z "$gs_ce" ] || gs_err="$gs_err; отсутствующий ассет: http $gs_c, Content-Encoding ${gs_ce:--}, ожидалось 404 без сжатия"
@@ -493,7 +512,7 @@ if [ "$OBSERVE_ONLY" != 1 ]; then
       fi
     fi
     if [ -z "$gs_err" ]; then
-      chk PASS gzip-static "$gs_asset: $gs_raw -> $gs_gz байт, ${gs_raw_ct:--}; gzip;q=0, отсутствующий ассет$gs_png — без сжатия"
+      chk PASS gzip-static "$gs_asset: $gs_raw -> $gs_gz байт, ${gs_raw_ct:--}; gzip;q=0, отсутствующий ассет$gs_png$gs_smallnote — без сжатия"
     else
       chk FAIL gzip-static "${gs_err#; }"
     fi
