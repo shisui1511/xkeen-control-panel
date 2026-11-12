@@ -430,9 +430,14 @@ RT_RTENV_END='# xcp-rt end'
 #   status  строки блока или «absent»
 #   restart только перезапуск панели с тем же ожиданием (блок не трогается), печать «restarted»;
 #           --no-restart с ним — неверный вызов
-# Файл переписывается содержимым временного файла рядом (`cat tmp > файл`: права и владелец остаются;
-# без `sed -i`); awk дописывает перевод строки к последней строке без него. Файла нет: write создаёт
-# его (права 600), clear и status — «absent». Сценарий пригоден и для `set -e`, и для подоболочки.
+# Файл переписывается атомарно: новое содержимое пишется во временный файл в том же каталоге, тот
+# получает права прежнего файла (`stat -c %a`, не прочитаны — 600) и переименовывается поверх (`mv -f`,
+# без `sed -i` и без записи по месту): обрыв ssh или нехватка места не оставляют xcp.env усечённым.
+# Временный файл удаляется при выходе сценария (trap EXIT; HUP, INT и TERM завершают сценарий).
+# awk дописывает перевод строки к последней строке без него. Блок без закрывающего маркера (след
+# прежней неатомарной записи) кончается на первой строке не вида XCP_RT_<ИМЯ>=: строки пользователя
+# после него остаются. Файла нет: write создаёт его (права 600), clear и status — «absent».
+# Сценарий пригоден и для `set -e`, и для подоболочки (deploy.sh и смоук зовут его в `( … )`).
 # Коды: 0 — текст напечатан, 2 — неверный вызов или строка таблицы вне шаблона XCP_RT_<ИМЯ>=<секунды>.
 rt_rtenv_script() {
   _rs_mode=${1:-}
@@ -482,13 +487,20 @@ F=$RT_RTENV_FILE
 B='$RT_RTENV_BEGIN'
 E='$RT_RTENV_END'
 T="\$F.xcp-rt.\$\$"
+trap 'rm -f "\$T"' EXIT
+trap 'exit 1' HUP INT TERM
 want() { printf '%s\n' "\$B"$_rs_want "\$E"; }
 cur() {
   if [ -f "\$F" ]; then
-    awk -v b="\$B" -v e="\$E" '\$0 == b { s = 1 } s { print } s && \$0 == e { exit }' "\$F"
+    awk -v b="\$B" -v e="\$E" '\$0 == b { s = 1; print; next } s && \$0 == e { print; exit } s && !/^XCP_RT_[A-Z0-9_]*=/ { exit } s { print }' "\$F"
   fi
 }
-body() { awk -v b="\$B" -v e="\$E" '\$0 == b { s = 1; next } s && \$0 == e { s = 0; next } !s { print }' "\$F"; }
+body() { awk -v b="\$B" -v e="\$E" '\$0 == b { s = 1; next } \$0 == e { s = 0; next } s && /^XCP_RT_[A-Z0-9_]*=/ { next } { s = 0; print }' "\$F"; }
+keepmode() {
+  m=\$(stat -c %a "\$F" 2>/dev/null) || m=
+  case "\$m" in '' | *[!0-7]*) m=600 ;; esac
+  chmod "\$m" "\$T"
+}
 restart() {
   old=\$(pidof xcp || true)
   /opt/etc/init.d/S99xcp restart >/dev/null 2>&1 || true
@@ -516,12 +528,11 @@ if [ "$(cur)" = "$(want)" ]; then
   echo unchanged
   exit 0
 fi
-if ! { body && want; } >"$T" || ! cat "$T" >"$F"; then
+if ! { body && want; } >"$T" || ! keepmode || ! mv -f "$T" "$F"; then
   rm -f "$T"
   echo "xcp-rt: $F не переписан" >&2
   exit 1
 fi
-rm -f "$T"
 restart || exit 1
 echo written
 EOF
@@ -532,12 +543,11 @@ if [ -z "$(cur)" ]; then
   echo absent
   exit 0
 fi
-if ! body >"$T" || ! cat "$T" >"$F"; then
+if ! body >"$T" || ! keepmode || ! mv -f "$T" "$F"; then
   rm -f "$T"
   echo "xcp-rt: $F не переписан" >&2
   exit 1
 fi
-rm -f "$T"
 EOF
       if [ "$_rs_restart" = 1 ]; then
         echo 'restart || exit 1'
