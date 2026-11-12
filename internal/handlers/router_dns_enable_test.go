@@ -336,7 +336,19 @@ func (e *rtSrc) rtDNSEnsureOff() {
 	if desired, _ := v["desired"].(bool); !desired {
 		return
 	}
-	r := e.rtDNSPost(rtDNSDisable)
+	// Сразу после перезапуска панели (routertest.RealTime) стартовая сверка службы ещё
+	// держит операцию: выключение отвечает 409 busy. Это ожидаемое занятое состояние,
+	// а не сбой — повторяем до конца операции.
+	var r rtSrcResp
+	busyDeadline := time.Now().Add(90 * time.Second)
+	for {
+		r = e.rtDNSPost(rtDNSDisable)
+		if r.Status != http.StatusConflict || r.Code != "busy" || time.Now().After(busyDeadline) {
+			break
+		}
+		time.Sleep(3 * time.Second)
+		e.rtDNSWaitDone()
+	}
 	if r.Status != http.StatusOK {
 		e.t.Errorf("выключение перехвата: %d %s %s", r.Status, r.Code, r.Detail)
 		return
