@@ -1039,7 +1039,7 @@ fi
 RT_KPID=/opt/tmp/xcp-rt-kpid.tsv
 
 # Проверки смоука, которые пропускаются, если цель недоступна или деплой не удался.
-SKIP_CHECKS="kernel-running iptables-rules api-version version xcp-pid api-me api-service-status rt-env log-panic log-error kernel-restart"
+SKIP_CHECKS="kernel-running iptables-rules api-version gzip-static version xcp-pid api-me api-service-status gzip-json rt-env log-panic log-error kernel-restart"
 
 # Состав ветви из файла <ядро>.sel (rerun-plan.mjs, RT_SEL_DIR). Читается без eval: значение —
 # первая строка «КЛЮЧ=значение» (sed по ключу), безопасные символы проверяет rt_sel_ok.

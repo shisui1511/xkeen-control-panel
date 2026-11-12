@@ -24,7 +24,19 @@
 #   version              /opt/sbin/xcp -v равна ожидаемой версии
 #   xcp-pid              у pidof xcp ровно один процесс
 #   api-version          GET <панель>/api/version с ПК отвечает 200
-#   api-me               вход с ПК и GET /api/auth/me = 200, затем выход; в detail время
+#   gzip-static          сжатие статики настоящей панели (порог gzipMinSize 1024 байта): GET / —
+#                        200 text/html; первый ассет assets/*.js из index.html больше порога с
+#                        Accept-Encoding: gzip приходит с Content-Encoding: gzip, проходит gzip -t,
+#                        распакованное тело байт в байт равно ответу без заголовка, тип тот же, без
+#                        заголовка — без сжатия; с gzip;q=0, отсутствующий ассет (404) и картинка PNG
+#                        из index.html (если есть) — без сжатия. В detail — размеры и тип
+#   gzip-json            сжатие JSON API (порог gzipJSONMinSize 1400 байт), в сессии api-me до
+#                        выхода: GET /api/assets/definition (встроенное определение ассетов, около
+#                        22 КБ) с Accept-Encoding: gzip сжат, проходит gzip -t и распаковывается в то
+#                        же тело, что без заголовка; маленький /api/version и поток /api/update/events
+#                        (text/event-stream, curl --max-time 3) с тем же заголовком — без сжатия. Нет
+#                        сессии — SKIP. Тела ответов в отчёт не пишутся, временные файлы удаляются
+#   api-me              вход с ПК и GET /api/auth/me = 200, затем выход; в detail время
 #                        входа, в timings.tsv этап smoke-login. Вход, не ответивший за
 #                        LOGIN_WAIT с (код 000), — FAIL с диагностикой: ответ /api/version,
 #                        Dirty/Writeback носителя и loadavg устройства
@@ -164,7 +176,7 @@ UNREACH=0
 PART_CHECKS=""
 if [ "$NO_OBSERVE" = 1 ]; then
   # reachable общая для обеих частей, метка smoke:reachable оценивается здесь
-  PART_CHECKS="reachable kernel-running iptables-rules version xcp-pid api-version api-me api-service-status rt-env"
+  PART_CHECKS="reachable kernel-running iptables-rules version xcp-pid api-version gzip-static api-me api-service-status gzip-json rt-env"
 elif [ "$OBSERVE_ONLY" = 1 ]; then
   PART_CHECKS="kernel-restart log-panic log-error log-repeat"
 fi
@@ -172,6 +184,31 @@ fi
 # Строка результата в буфер; в results.tsv она попадает через finalize (метки известных падений).
 chk() {
   printf '%s\t%s\t%s\n' "$1" "$2" "$(printf '%s' "${3:-}" | tr '\t\n' '  ')" >>"$BUF"
+}
+
+# Проверки сжатия (gzip-static, gzip-json): ответы панели — во временных файлах $GZ.<имя>.h
+# (заголовки) и $GZ.<имя>.b (тело) в каталоге отчёта цели; после проверки удаляются.
+GZ="$RT_REPORT/$ID/.gz"
+# gz_get <имя> <путь> [опции curl…] — GET <панель><путь> с ПК; печатает код ответа (000 — нет
+# связи). Опции идут после общих: --max-time из них перекрывает общий предел.
+gz_get() {
+  _gn=$1
+  _gp=$2
+  shift 2
+  curl -sk --connect-timeout 10 --max-time 30 "$@" -D "$GZ.$_gn.h" -o "$GZ.$_gn.b" -w '%{http_code}' "$url$_gp" || true
+}
+# gz_hdr <имя> <заголовок> — значение заголовка ответа (последнее вхождение) без CR и краевых пробелов.
+gz_hdr() {
+  { grep -i "^$2:" "$GZ.$1.h" 2>/dev/null || true; } | tail -n 1 | cut -d: -f2- | tr -d '\r' | sed 's/^ *//; s/ *$//'
+}
+# gz_size <имя> — размер тела в байтах (нет файла — 0).
+gz_size() {
+  if [ -f "$GZ.$1.b" ]; then wc -c <"$GZ.$1.b" | tr -d ' '; else echo 0; fi
+}
+# gz_same <сжатое имя> <несжатое имя> — код 0, если сжатое тело — целый gzip и распаковывается
+# байт в байт в несжатое.
+gz_same() {
+  gzip -t "$GZ.$1.b" 2>/dev/null && gzip -dc "$GZ.$1.b" 2>/dev/null | cmp -s - "$GZ.$2.b"
 }
 
 # ssh с учётом потери связи: rc 3 -> FAIL reachable, остальное пропущено.
@@ -194,8 +231,10 @@ finalize() {
     fi
     rm -f "$_jar"
   fi
+  # временные ответы проверок сжатия (gzip-static, gzip-json), если прогон прервали посреди них
+  rm -f "$RT_REPORT/$ID"/.gz.*
   if [ "$UNREACH" = 1 ]; then
-    _unr="kernel-running iptables-rules version xcp-pid api-version api-me api-service-status rt-env kernel-restart log-panic log-error"
+    _unr="kernel-running iptables-rules version xcp-pid api-version gzip-static api-me api-service-status gzip-json rt-env kernel-restart log-panic log-error"
     [ "$OBSERVE_ONLY" != 1 ] || _unr="kernel-restart log-panic log-error"
     for _c in $_unr; do
       grep -q "^[A-Z]*${TAB}${_c}${TAB}" "$BUF" || chk SKIP "$_c" "нет связи"
@@ -394,6 +433,73 @@ if [ "$OBSERVE_ONLY" != 1 ]; then
     chk FAIL api-version "http $code"
   fi
 
+  # --- gzip-static: сжатие встроенной статики (internal/server/static.go) ------
+  # Ассет — первый assets/*.js из index.html больше gzipMinSize (1024 байта); имя с хэшем сборки.
+  # В detail — только имена, размеры и тип: тела ответов в отчёт не пишутся.
+  rm -f "$GZ".*
+  gs_err=""
+  gs_code=$(gz_get idx /)
+  if [ "$gs_code" = 000 ] || [ -z "$gs_code" ]; then
+    chk FAIL gzip-static "нет связи с панелью"
+  else
+    gs_idx_ct=$(gz_hdr idx content-type)
+    case "$gs_code:$gs_idx_ct" in
+      200:text/html*) ;;
+      *) gs_err="$gs_err; GET /: http $gs_code, тип ${gs_idx_ct:--}, ожидалось 200 text/html" ;;
+    esac
+    gs_list=$({ grep -oE 'assets/[A-Za-z0-9._-]+\.js' "$GZ.idx.b" 2>/dev/null || true; } | awk '!s[$0]++' | head -n 5)
+    gs_icon=$({ grep -oE 'icons/[A-Za-z0-9._-]+\.png' "$GZ.idx.b" 2>/dev/null || true; } | head -n 1)
+    gs_asset=""
+    gs_raw=0
+    for gs_a in $gs_list; do
+      gs_c=$(gz_get raw "/$gs_a")
+      gs_raw=$(gz_size raw)
+      if [ "$gs_c" = 200 ] && [ "$gs_raw" -gt 1024 ]; then
+        gs_asset=$gs_a
+        break
+      fi
+    done
+    if [ -z "$gs_asset" ]; then
+      gs_err="$gs_err; в index.html нет ассета assets/*.js больше 1024 байт (кандидатов: $(printf '%s\n' "$gs_list" | grep -c . || true))"
+    else
+      gs_raw_ce=$(gz_hdr raw content-encoding)
+      gs_raw_ct=$(gz_hdr raw content-type)
+      [ -z "$gs_raw_ce" ] || gs_err="$gs_err; без Accept-Encoding пришёл Content-Encoding: $gs_raw_ce"
+      gs_c=$(gz_get gz "/$gs_asset" -H 'Accept-Encoding: gzip')
+      gs_ce=$(gz_hdr gz content-encoding)
+      gs_ct=$(gz_hdr gz content-type)
+      gs_gz=$(gz_size gz)
+      if [ "$gs_c" != 200 ] || [ "$gs_ce" != gzip ]; then
+        gs_err="$gs_err; с Accept-Encoding: gzip http $gs_c, Content-Encoding ${gs_ce:--}, ожидалось 200 gzip"
+      elif ! gz_same gz raw; then
+        gs_err="$gs_err; сжатое тело ($gs_gz байт) не проходит gzip -t или не равно несжатому ($gs_raw байт)"
+      fi
+      [ "$gs_ct" = "$gs_raw_ct" ] || gs_err="$gs_err; тип сжатого ${gs_ct:--}, несжатого ${gs_raw_ct:--}"
+      gs_c=$(gz_get q0 "/$gs_asset" -H 'Accept-Encoding: gzip;q=0')
+      gs_ce=$(gz_hdr q0 content-encoding)
+      [ "$gs_c" = 200 ] && [ -z "$gs_ce" ] || gs_err="$gs_err; с gzip;q=0 http $gs_c, Content-Encoding ${gs_ce:--}, ожидалось 200 без сжатия"
+    fi
+    gs_c=$(gz_get miss /assets/xcp-smoke-missing.js -H 'Accept-Encoding: gzip')
+    gs_ce=$(gz_hdr miss content-encoding)
+    [ "$gs_c" = 404 ] && [ -z "$gs_ce" ] || gs_err="$gs_err; отсутствующий ассет: http $gs_c, Content-Encoding ${gs_ce:--}, ожидалось 404 без сжатия"
+    gs_png=""
+    if [ -n "$gs_icon" ]; then
+      gs_c=$(gz_get png "/$gs_icon" -H 'Accept-Encoding: gzip')
+      gs_ce=$(gz_hdr png content-encoding)
+      if [ "$gs_c" = 200 ] && [ -z "$gs_ce" ]; then
+        gs_png=", PNG"
+      else
+        gs_err="$gs_err; $gs_icon: http $gs_c, Content-Encoding ${gs_ce:--}, ожидалось 200 без сжатия"
+      fi
+    fi
+    if [ -z "$gs_err" ]; then
+      chk PASS gzip-static "$gs_asset: $gs_raw -> $gs_gz байт, ${gs_raw_ct:--}; gzip;q=0, отсутствующий ассет$gs_png — без сжатия"
+    else
+      chk FAIL gzip-static "${gs_err#; }"
+    fi
+  fi
+  rm -f "$GZ".*
+
   # --- api-me, api-service-status ----------------------------------------------
   # Вход с ПК: тело строится через JSON.stringify (пароль идёт через окружение и stdin,
   # в аргументы команд не попадает). Сессия закрывается выходом: лимит 20 сессий.
@@ -426,6 +532,58 @@ if [ "$OBSERVE_ONLY" != 1 ]; then
     else
       chk FAIL api-service-status "GET /api/service/status: http ${sscode:--}"
     fi
+    # --- gzip-json: сжатие JSON API (internal/middleware/gzip.go), в сессии до выхода ----
+    # Большой ответ — /api/assets/definition: встроенное определение ассетов (около 22 КБ),
+    # копия на диске дополняется встроенными провайдерами правил — больше gzipJSONMinSize
+    # (1400 байт) на любом стенде. Маленький — /api/version, поток — /api/update/events.
+    rm -f "$GZ".*
+    gj_err=""
+    gj_c=$(gz_get jraw /api/assets/definition -b "$jar")
+    if [ "$gj_c" = 000 ] || [ -z "$gj_c" ]; then
+      chk FAIL gzip-json "нет связи с панелью"
+    else
+      gj_raw=$(gz_size jraw)
+      gj_raw_ce=$(gz_hdr jraw content-encoding)
+      if [ "$gj_c" != 200 ]; then
+        gj_err="$gj_err; /api/assets/definition без Accept-Encoding: http $gj_c"
+      elif [ "$gj_raw" -le 1400 ]; then
+        gj_err="$gj_err; /api/assets/definition $gj_raw байт — не больше порога 1400, проверка сжатия не годится"
+      fi
+      [ -z "$gj_raw_ce" ] || gj_err="$gj_err; /api/assets/definition без Accept-Encoding пришёл Content-Encoding: $gj_raw_ce"
+      gj_c=$(gz_get jgz /api/assets/definition -b "$jar" -H 'Accept-Encoding: gzip')
+      gj_ce=$(gz_hdr jgz content-encoding)
+      gj_ct=$(gz_hdr jgz content-type)
+      gj_gz=$(gz_size jgz)
+      if [ "$gj_c" != 200 ] || [ "$gj_ce" != gzip ]; then
+        gj_err="$gj_err; /api/assets/definition с Accept-Encoding: gzip http $gj_c, Content-Encoding ${gj_ce:--}, ожидалось 200 gzip"
+      elif ! gz_same jgz jraw; then
+        gj_err="$gj_err; сжатый JSON ($gj_gz байт) не проходит gzip -t или не равен несжатому ($gj_raw байт)"
+      fi
+      case "$gj_ct" in
+        application/json*) ;;
+        *) gj_err="$gj_err; тип сжатого JSON ${gj_ct:--}" ;;
+      esac
+      gj_c=$(gz_get ver /api/version -H 'Accept-Encoding: gzip')
+      gj_ce=$(gz_hdr ver content-encoding)
+      gj_ver=$(gz_size ver)
+      [ "$gj_c" = 200 ] && [ -z "$gj_ce" ] || gj_err="$gj_err; /api/version ($gj_ver байт): http $gj_c, Content-Encoding ${gj_ce:--}, ожидалось 200 без сжатия"
+      # Поток не заканчивается сам: curl обрывает его по --max-time (код 28 — не провал),
+      # заголовки к этому времени уже в файле.
+      gz_get sse /api/update/events -b "$jar" -H 'Accept-Encoding: gzip' --max-time 3 >/dev/null
+      gj_sc=$({ head -n 1 "$GZ.sse.h" 2>/dev/null || true; } | awk '{ print $2 }')
+      gj_st=$(gz_hdr sse content-type)
+      gj_ce=$(gz_hdr sse content-encoding)
+      case "${gj_sc:-000}:$gj_st" in
+        200:text/event-stream*) [ -z "$gj_ce" ] || gj_err="$gj_err; поток /api/update/events сжат: Content-Encoding $gj_ce" ;;
+        *) gj_err="$gj_err; поток /api/update/events: http ${gj_sc:-000}, тип ${gj_st:--}, ожидалось 200 text/event-stream" ;;
+      esac
+      if [ -z "$gj_err" ]; then
+        chk PASS gzip-json "/api/assets/definition: $gj_raw -> $gj_gz байт; /api/version ($gj_ver байт) и text/event-stream — без сжатия"
+      else
+        chk FAIL gzip-json "${gj_err#; }"
+      fi
+    fi
+    rm -f "$GZ".*
     curl -sk --connect-timeout 10 --max-time 20 -b "$jar" -X POST -H "X-CSRF-Token: $csrf" -o /dev/null "$url/api/auth/logout" || true
   else
     if [ "$lcode" = 000 ] || [ -z "$lcode" ]; then
@@ -445,6 +603,7 @@ if [ "$OBSERVE_ONLY" != 1 ]; then
       chk FAIL api-me "вход не удался: http ${lcode:--} за ${ltime:--} с"
     fi
     chk SKIP api-service-status "нет сессии"
+    chk SKIP gzip-json "нет сессии"
   fi
   rm -f "$jar"
   t1=$(date +%s)
