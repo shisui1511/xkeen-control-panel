@@ -1160,7 +1160,8 @@ if (write) {
     const mark = markOf(check);
     let why = "полная матрица";
     if (mode === "debug") why = "отладка RT_CORES";
-    else if (mode === "matrix" && mark === "one-core") why = "одно ядро — ядро из SHA HEAD";
+    // факт, а не режим: в matrix тест с меткой идёт на обоих ядрах (harness, план не получен)
+    else if (mode === "matrix" && mark === "one-core" && perCore.size === 1) why = "одно ядро — ядро из SHA HEAD";
     else if (mode === "hybrid") {
       why = mark === "core" ? "метка ядра" : mark === "known-core" ? "метка падения с ядром" : "ротация — ядро из SHA";
     }
