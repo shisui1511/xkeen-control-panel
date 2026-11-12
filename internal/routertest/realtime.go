@@ -116,7 +116,8 @@ func RealTime(t *testing.T, vars ...rtenv.Var) {
 
 // rtEnvStrip убирает из блока xcp-rt строки NAME=… переменных names. Возвращает
 // новое содержимое, значения убранных строк по имени и признак блока. Блок без
-// закрывающего маркера идёт до конца файла (так его видит awk в lib.sh).
+// закрывающего маркера кончается на первой строке не вида XCP_RT_<ИМЯ>=…
+// (та же граница у awk в lib.sh: cur и body), строка остаётся в файле.
 func rtEnvStrip(content string, names []string) (string, map[string]string, bool) {
 	var b strings.Builder
 	prev := map[string]string{}
@@ -128,6 +129,9 @@ func rtEnvStrip(content string, names []string) (string, map[string]string, bool
 			in, hasBlock = true, true
 		case in && s == rtEnvEnd:
 			in = false
+		case in && !rtEnvLine(s):
+			// незакрытый блок кончился: строка не из блока, остаётся как есть
+			in = false
 		case in:
 			key, val, ok := strings.Cut(strings.TrimSpace(s), "=")
 			if ok && slices.Contains(names, key) {
@@ -138,6 +142,20 @@ func rtEnvStrip(content string, names []string) (string, map[string]string, bool
 		b.WriteString(line)
 	}
 	return b.String(), prev, hasBlock
+}
+
+// rtEnvLine — строка вида XCP_RT_<ИМЯ>=…, как /^XCP_RT_[A-Z0-9_]*=/ у awk в lib.sh.
+func rtEnvLine(s string) bool {
+	name, _, ok := strings.Cut(s, "=")
+	if !ok || !strings.HasPrefix(name, "XCP_RT_") {
+		return false
+	}
+	for _, r := range name[len("XCP_RT_"):] {
+		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 // rtEnvRestart перезапускает панель init-скриптом (предел rtInitLimit) и ждёт
