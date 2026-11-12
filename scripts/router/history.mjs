@@ -78,6 +78,20 @@
 //                                        тестов X мин (было Y, +Z)» и «- Новые тесты: …» (до 5
 //                                        самых долгих проверок, которых не было в прошлом полном
 //                                        прогоне); тесты — верхние go: и pw: с ядром
+//   lastOutcome(rows, check, core, { excludeReport, days, target }?)
+//                                        { status, report, finished_utc } самого позднего исхода
+//                                        проверки на ядре или null — страж метки ядра в
+//                                        branch-report.mjs (D-05: тест «одно ядро» идёт на одном
+//                                        ядре, второе берётся из истории). Окно: finished_utc не
+//                                        старше days (по умолчанию 60) дней от сейчас; без отчёта
+//                                        excludeReport и вложенных в него (<имя>-…, <имя>/…: проходы
+//                                        и этапы сессии, перепрогоны); без статуса SKIP, исходов
+//                                        карантина (QPASS, QFAIL) и классов quarantine, stand, known;
+//                                        target — только эта цель (не задана — любая)
+//   hasPass(rows, check, core, opts)     { report, finished_utc } последнего PASS в том же окне
+//                                        и с теми же отсечениями, что lastOutcome, или null —
+//                                        доказательство «на этом ядре проходил» (F14: SKIP и KNOWN
+//                                        от состояния стенда)
 //
 // Только встроенные модули Node.
 
@@ -527,6 +541,52 @@ export function failFreq(rows, opts = {}) {
   return out;
 }
 
+// Окно сравнения исходов по ядрам (D-05, F14): строки проверки на ядре за days дней без текущего
+// отчёта и вложенных в него, без SKIP, без исходов карантина и без классов, не говорящих об исходе
+// по продукту (quarantine — карантин, stand — связь или смена версии стенда, known — метка падения).
+const OUTCOME_SKIP_CLASSES = new Set(['quarantine', 'stand', 'known']);
+function outcomeRows(rows, check, core, opts = {}) {
+  const { excludeReport = '', days = 60, target } = opts;
+  const now = Date.now();
+  const out = [];
+  for (const r of rows) {
+    if (r.check !== check || r.core !== core) continue;
+    if (target && r.target !== target) continue;
+    if (r.status === 'SKIP' || r.status === 'QPASS' || r.status === 'QFAIL') continue;
+    if (OUTCOME_SKIP_CLASSES.has(r.class)) continue;
+    if (
+      excludeReport &&
+      (r.report === excludeReport ||
+        r.report.startsWith(`${excludeReport}-`) ||
+        r.report.startsWith(`${excludeReport}/`))
+    )
+      continue;
+    if (!inWindow(r, days, now)) continue;
+    out.push(r);
+  }
+  return out;
+}
+
+// самая поздняя строка по finished_utc (при равенстве — по имени отчёта)
+function latest(list) {
+  let best = null;
+  for (const r of list) {
+    if (!best || r.finished_utc > best.finished_utc || (r.finished_utc === best.finished_utc && r.report > best.report))
+      best = r;
+  }
+  return best;
+}
+
+export function lastOutcome(rows, check, core, opts = {}) {
+  const r = latest(outcomeRows(rows, check, core, opts));
+  return r ? { status: r.status, report: r.report, finished_utc: r.finished_utc } : null;
+}
+
+export function hasPass(rows, check, core, opts = {}) {
+  const r = latest(outcomeRows(rows, check, core, opts).filter((x) => x.status === 'PASS'));
+  return r ? { report: r.report, finished_utc: r.finished_utc } : null;
+}
+
 // отчёты истории: Map имя → { report, sha, release, suite, finished, rows }
 function byReport(rows) {
   const out = new Map();
@@ -704,7 +764,10 @@ function main(argv) {
   }
 }
 
+// импорт из `node -e '…' <путь>`: argv[1] — аргумент выражения, а не запущенный файл
+const EVAL_FLAG = /^(-e|-p|--eval|--print)(=|$)/;
 function isMain() {
+  if (process.execArgv.some((a) => EVAL_FLAG.test(a))) return false;
   try {
     return realpathSync(process.argv[1] || '') === realpathSync(SCRIPT);
   } catch {
