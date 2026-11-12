@@ -16,7 +16,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -44,10 +43,9 @@ var (
 	GeodataCatchUp = Var{Name: "XCP_RT_GEODATA_CATCHUP_S", Default: 3 * time.Minute, Min: 30 * time.Second}
 )
 
-var (
-	notesMu sync.Mutex
-	notes   []string
-)
+// notes пишет только Get при инициализации пакетов (последовательной), читает
+// Notes из main после неё: конкурентного доступа нет, блокировка не нужна.
+var notes []string
 
 // Parse разбирает значение raw переменной v: пустое — Default без заметки;
 // не целое число секунд, меньше Min или больше Default — Default и заметка с
@@ -73,13 +71,12 @@ func (v Var) Parse(raw string) (time.Duration, string) {
 }
 
 // Get читает переменную из окружения процесса (Parse) и запоминает непустую
-// заметку для Notes. Вызывается один раз при инициализации пакета-потребителя.
+// заметку для Notes. Вызывается один раз и только при инициализации
+// пакета-потребителя (инициализатор переменной пакета), не из горутин.
 func (v Var) Get() time.Duration {
 	d, note := v.Parse(os.Getenv(v.Name))
 	if note != "" {
-		notesMu.Lock()
 		notes = append(notes, note)
-		notesMu.Unlock()
 	}
 	return d
 }
@@ -87,8 +84,6 @@ func (v Var) Get() time.Duration {
 // Notes — заметки о заданных переменных (принятых и отклонённых) в порядке
 // чтения; без переменных пусто.
 func Notes() []string {
-	notesMu.Lock()
-	defer notesMu.Unlock()
 	return append([]string(nil), notes...)
 }
 
