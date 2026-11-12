@@ -38,9 +38,9 @@ const (
 	// rtDNSGuardChangedWait — сколько ждать возврата DNS прошивке после смены ядра
 	// мимо панели.
 	rtDNSGuardChangedWait = 30 * time.Second
-	// rtDNSGuardQuietAfter — пауза сторожа после перезапуска ядра из панели (окно
-	// штатного перезапуска XKeen, 60 с) с запасом.
-	rtDNSGuardQuietAfter = 65 * time.Second
+	// rtDNSGuardQuietMargin — запас к паузе сторожа после перезапуска ядра из
+	// панели; сама пауза — срок rtenv.DNSGuardBusyGrace у работающей панели.
+	rtDNSGuardQuietMargin = 5 * time.Second
 	// rtDNSGuardRestartAction — запись истории действий: перезапуск ядра сторожем.
 	rtDNSGuardRestartAction = "dns_takeover_guard_restart"
 )
@@ -89,7 +89,8 @@ func (e *rtSrc) rtDNSGuardQuiet() {
 			last = max(last, en.Timestamp)
 		}
 	}
-	if wait := time.Until(time.Unix(last, 0).Add(rtDNSGuardQuietAfter)); wait > 0 {
+	quiet := routertest.Deadline(e.t, rtenv.DNSGuardBusyGrace) + rtDNSGuardQuietMargin
+	if wait := time.Until(time.Unix(last, 0).Add(quiet)); wait > 0 {
 		e.t.Logf("пауза сторожа после перезапуска ядра: ждём %.0f с", wait.Seconds())
 		time.Sleep(wait)
 	}
