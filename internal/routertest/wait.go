@@ -17,13 +17,16 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/shisui1511/xkeen-control-panel/internal/config"
 )
 
 // storageQuietBytes — порог тишины носителя: грязных и записываемых данных в кэше
 // страниц (Dirty + Writeback) меньше 1 МБ.
 const storageQuietBytes = 1 << 20
+
+// storageProbeDir — каталог данных панели на устройстве, где проверяется запись с fsync
+// (значение config.Default().DataDir; пакет config здесь не импортируется: цикл импортов
+// с тестами пакетов, которые подключают routertest).
+const storageProbeDir = "/opt/etc/xcp"
 
 // WaitStorageQuiet ждёт (не дольше limit), пока в кэше страниц почти не останется
 // грязных и записываемых данных (Dirty + Writeback из /proc/meminfo меньше 1 МБ).
@@ -39,7 +42,7 @@ func WaitStorageQuiet(t testing.TB, limit time.Duration) (bool, string) {
 		if quiet || time.Since(start) > limit {
 			return quiet, "носитель: грязных " + strconv.FormatInt(dirty>>10, 10) + " КБ, в записи " +
 				strconv.FormatInt(wb>>10, 10) + " КБ (ожидание " + time.Since(start).Round(100*time.Millisecond).String() +
-				"), запись 4 КБ с fsync " + fsyncProbe(config.Default().DataDir).Round(time.Millisecond).String()
+				"), запись 4 КБ с fsync " + fsyncProbe(storageProbeDir).Round(time.Millisecond).String()
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
