@@ -226,6 +226,9 @@ func TestRouterDNSWindowTimeout(t *testing.T) {
 	routertest.Tier(t, routertest.Full, "реальное время: окно подтверждения перехвата DNS ждёт дедлайн и откат по таймеру")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
+	// Сейчас строки окна в таблице RT_RTENV_VALUES (scripts/router/lib.sh) нет: вызов уходит
+	// в ветку «в блоке нет» без действий. Оставлен на случай, когда таблица получит
+	// XCP_RT_DNS_WINDOW_S: тест ждёт настоящий дедлайн, а не сокращённый.
 	routertest.RealTime(t, rtenv.DNSWindow)
 	e := rtNewSrc(t)
 	rtDNSPrepare(t, e, kernel)
