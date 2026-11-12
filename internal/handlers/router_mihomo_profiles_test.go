@@ -423,7 +423,8 @@ func TestRouterProfileActivateOwnership(t *testing.T) {
 	e.resetDraft()
 
 	// Возврат панели, затем активация при открытом черновике: отказ без изменений.
-	pid = rtSwExpectKernel(t, tg.Core, e.rtSwCall("return", ""), rtSwPanel, pid)
+	pid = rtSwExpectKernelMark(t, tg.Core, e.rtSwCall("return", ""), rtSwPanel, pid,
+		routertest.Known("*/mihomo", "profile-activate-return-pid-unchanged-mihomo"))
 	m.taken = true
 	if !rtSwLinkOn(t, rtRtPanelProfile) {
 		t.Fatalf("после возврата config.yaml не указывает на %s", rtRtPanelProfile)

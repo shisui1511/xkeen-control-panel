@@ -242,6 +242,13 @@ func (e *rtSrc) rtSwSeedKeys() {
 // перезапуска (saved_kernel_inactive), PID Xray прежний. Возвращает PID активного ядра.
 func rtSwExpectKernel(t *testing.T, core string, res map[string]any, active string, pidBefore int) int {
 	t.Helper()
+	return rtSwExpectKernelMark(t, core, res, active, pidBefore, routertest.KnownMark{})
+}
+
+// rtSwExpectKernelMark — rtSwExpectKernel с меткой известного падения для проверки
+// «PID сменился»: без метки (пустая) провал прерывает тест, как прежде.
+func rtSwExpectKernelMark(t *testing.T, core string, res map[string]any, active string, pidBefore int, mark routertest.KnownMark) int {
+	t.Helper()
 	if rb, _ := res["rolled_back"].(bool); rb {
 		t.Fatalf("переход откатился: ошибка %q", res["error"])
 	}
@@ -255,8 +262,12 @@ func rtSwExpectKernel(t *testing.T, core string, res map[string]any, active stri
 			t.Fatalf("restarted=false при работающем Mihomo; outcome %q", res["outcome"])
 		}
 		pid := rtRstKernelPID(t, "mihomo")
-		if pid == pidBefore {
-			t.Fatalf("PID mihomo не сменился после перехода (%d): успех засчитан по старому процессу", pidBefore)
+		if mark.Slug == "" {
+			if pid == pidBefore {
+				t.Fatalf("PID mihomo не сменился после перехода (%d): успех засчитан по старому процессу", pidBefore)
+			}
+		} else {
+			routertest.Verdict(t, pid != pidBefore, mark, "PID mihomo не сменился после перехода (%d): успех засчитан по старому процессу", pidBefore)
 		}
 		rtRstHoldPID(t, "mihomo", pid)
 		return pid

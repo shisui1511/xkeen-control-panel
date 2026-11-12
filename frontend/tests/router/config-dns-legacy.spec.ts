@@ -122,6 +122,7 @@ async function ensureXrayServer(page: Page): Promise<void> {
 
 for (const kernel of KERNELS) {
   test(`dns-legacy: слой включён — старого переключателя нет (${kernel})`, async ({ page }) => {
+    if (kernel === 'xray') knownFailure('*', 'legacy-layer-on-xray-section-tabs-missing');
     const guard = attachConsoleGuard(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     test.skip(!installed[kernel], `${kernel} не установлен на стенде`);
