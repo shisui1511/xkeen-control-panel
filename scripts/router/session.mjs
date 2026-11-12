@@ -253,6 +253,17 @@
 // приходится не больше N переключений, и ещё одно в конце, если стенд не на исходном ядре.
 // Сборка ставится в начале и при смене продукта.
 //
+// Сокращённые сроки (D-22): перед каждым этапом go-suite.sh и pw-suite.sh прохода (не перед
+// переключением ядра и не перед проходом-прогоном — вложенный run.sh пишет блок сам после снимка)
+// сессия вызывает `rtenv.sh <цель> write`: блок xcp-rt в xcp.env цели со значениями
+// RT_RTENV_VALUES из lib.sh. Запись идемпотентна — совпавший блок панель не перезапускает, поэтому
+// блок ставится заново только после деплоя (он блок снимает), прохода product/tree или вложенного
+// прогона. Код 3 — сбой связи, как у соседних этапов; иной сбой — вердикт «rt-env: блок xcp-rt»
+// FAIL, тесты этапа не запускаются (сессия красная). В summary.md — строка «- Сокращённые сроки:».
+// Возврат стенда снимает блок (`rtenv.sh <цель> clear`) при любом исходе со связью, «Стенд в
+// конце» сверяет его отсутствие («блок xcp-rt снят»): смоук тега и ручная проверка после сессии
+// идут на настоящих сроках (D-23).
+//
 // Отчёт — в RT_REPORT: <NN>-<этап>/ — отчёты этапов в формате router-test (meta,
 // <цель>/results.tsv), spec.json, session.log (вывод всех этапов), summary.md и session.json
 // (итог по ожиданиям).
@@ -314,6 +325,10 @@ const SAFE_REF = /^[A-Za-z0-9_.][A-Za-z0-9_./~^-]*$/;
 const RELEASE_TAG = /^v\d+\.\d+\.\d+(-[a-z]+\.\d+)?$/;
 // Снимок незавершённого прогона на цели (RT_SNAP_DIR из lib.sh): с ним preflight отказывает.
 const SNAP_BASE = '/opt/tmp/xcp-rt-snap/baseline';
+// Блок сокращённых сроков (RT_RTENV_FILE и RT_RTENV_BEGIN из lib.sh) и имя вердикта сбоя его записи.
+const RT_ENV_FILE = '/opt/etc/xcp/xcp.env';
+const RT_ENV_BEGIN = '# xcp-rt begin';
+const RT_ENV_TEST = 'rt-env: блок xcp-rt';
 // Служебные строки этапов: всегда расхождение, если их FAIL не ожидался явно.
 const SERVICE = new Set(['pw:run', 'pw:setup']);
 // Окно истории для медиан длительности (дни); проверки без строк в окне берут всю историю.
@@ -1210,6 +1225,11 @@ function planSession(spec, specFile, root) {
     'ядра как в гейте: на первом ядре прохода — все тесты, на остальных — только с меткой ядра; поле cores прохода — все тесты на своих ядрах',
     'дешёвые тесты первыми: неизвестные истории («?») в начале, затем по возрастанию медианы'
   ];
+  if (spec.passes.some((p) => !p.suite && (p.go || p.specs?.length))) {
+    lines.push(
+      'сокращённые сроки: блок xcp-rt перед этапами go и pw сессии (D-22), снимается при возврате стенда'
+    );
+  }
   let n = 0;
   const step = (s, sec = 0) => {
     seconds += sec;
@@ -1310,7 +1330,7 @@ function planSession(spec, specFile, root) {
   if (deployed !== 'HEAD') step('деплой и смоук: HEAD (возврат продукта)', EST.deploy);
   if (cur !== c0) step(`переключение на ${c0} (исходное)`, EST.switch);
   step(
-    'проверка стенда: дерево чистое, сборка HEAD, исходное ядро, xcp запущен, снимка незавершённого прогона нет'
+    'проверка стенда: дерево чистое, сборка HEAD, исходное ядро, xcp запущен, снимка незавершённого прогона нет, блок xcp-rt снят'
   );
   const minutes = Math.ceil(seconds / 60);
   const over = minutes > BUDGET_MIN;
@@ -1379,6 +1399,10 @@ class Session {
     this.sideChild = null;
     // вердикты с этим индексом и дальше ещё не проверены на остановку (checkStop)
     this.checked = 0;
+    // сокращённые сроки (D-22): значения блока xcp-rt после первой удачной записи (строка summary),
+    // rtEnvFailed — хоть одна запись не удалась
+    this.rtEnvValues = null;
+    this.rtEnvFailed = false;
   }
 
   say(msg) {
@@ -1824,6 +1848,82 @@ class Session {
     return rc;
   }
 
+  // --- сокращённые сроки (D-22) ---
+
+  // Блок xcp-rt перед этапом go или pw прохода: rtenv.sh <цель> write (совпавший блок — без
+  // перезапуска панели). dir — каталог этапа. Код: 0 — блок стоит; 3 — нет связи (this.network);
+  // 130 — прерывание; 1 — не записан: вердикт «rt-env: блок xcp-rt» FAIL, тесты этапа не запускаются.
+  async ensureRtEnv(pass, core, dir) {
+    const rc = await this.run('sh', [path.join(SCRIPT_DIR, 'rtenv.sh'), this.t, 'write'], {
+      RT_REPORT: dir
+    });
+    if (this.aborted) return 130;
+    this.record({ kind: 'rt-env', pass, core, dir, rc });
+    if (rc === 0) {
+      if (!this.rtEnvValues) this.rtEnvValues = this.readRtEnvValues();
+      return 0;
+    }
+    if (rc === 3) return 3;
+    this.rtEnvFailed = true;
+    this.say(`проход ${pass} на ${core}: блок сокращённых сроков не записан (код ${rc})`);
+    this.verdicts.push({
+      pass,
+      core,
+      test: RT_ENV_TEST,
+      expected: ['PASS'],
+      actual: 'FAIL',
+      detail: `запись блока сокращённых сроков не удалась (код ${rc})`,
+      ok: false,
+      report: path.relative(this.root, dir)
+    });
+    return 1;
+  }
+
+  // Значения блока — таблица RT_RTENV_VALUES из lib.sh (одна на run.sh, смоук и сессию).
+  readRtEnvValues() {
+    const r = spawnSync('sh', ['-c', '. "$1/lib.sh"; printf %s "$RT_RTENV_VALUES"', 'sh', SCRIPT_DIR], {
+      cwd: this.root,
+      encoding: 'utf8'
+    });
+    const v = (r.stdout || '').trim();
+    return r.status === 0 && v ? v : 'значения не прочитаны из lib.sh';
+  }
+
+  // Блок не записан (не связь): этап и следующие этапы прохода на этом ядре не запускаются. Без
+  // keep_going — остановка на первом несовпадении (вердикт rt-env уже в verdicts). done — каталоги
+  // уже выполненных этапов прохода на ядре, rest — спеки, до которых проход не дошёл.
+  rtEnvHalt(p, core, comp, done, rest, how) {
+    if (!this.spec.keepGoing && !this.aborted && !this.stopped) {
+      this.setStopped({
+        pass: p.name,
+        core,
+        test: RT_ENV_TEST,
+        expected: ['PASS'],
+        actual: 'FAIL',
+        how,
+        live: false
+      });
+      if (rest.length) {
+        this.stopped.todo.push(
+          `проход ${p.name} на ${core}: спеки ${rest.map((s) => path.basename(s.spec)).join(', ')}`
+        );
+      }
+    }
+    this.judge(p, core, done, comp);
+    return 0;
+  }
+
+  // Снятие блока при возврате стенда (при любом исходе со связью): rtenv.sh <цель> clear — блок
+  // был, панель перезапускается на настоящих сроках; блока нет (деплой его снял) — ничего.
+  async clearRtEnv() {
+    const rc = await this.run('sh', [path.join(SCRIPT_DIR, 'rtenv.sh'), this.t, 'clear']);
+    if (rc === 0) return;
+    if (rc === 3) this.network = true;
+    this.notes.push(
+      `блок сокращённых сроков xcp-rt не снят (rtenv.sh clear, код ${rc}): снять вручную или деплоем`
+    );
+  }
+
   // --- смена версии стенда (D-13) ---
 
   // <этап>/<цель>/expect-version перед этапом go, pw или переключения ядра: версия последнего
@@ -1988,6 +2088,10 @@ class Session {
         // только порядок; go-suite.sh проверяет каждую запись по шаблону
         env.RT_GO_RUN_SEQ = comp.go.tests.map((t) => `${t.pkg}:${t.test}`).join(' ');
       }
+      // сокращённые сроки (D-22): блок xcp-rt до этапа
+      const w = await this.ensureRtEnv(p.name, core, dir);
+      if (w === 3) return 3;
+      if (w !== 0) return this.rtEnvHalt(p, core, comp, [], comp.specs, 'перед этапом go');
       const watch = this.spec.keepGoing ? {} : this.goWatch(p, core, dir);
       this.writeExpect(dir);
       const g = await this.run(
@@ -2071,6 +2175,12 @@ class Session {
       if (p.grep) env.RT_PW_GREP = p.grep;
       // только тесты с тегом @core, как во второй ветви changed
       if (comp.coreOnly) env.RT_PW_CORE_ONLY = '1';
+      // сокращённые сроки (D-22): блок xcp-rt до этапа (после Go-тестов и settle — уже стоит)
+      const w = await this.ensureRtEnv(p.name, core, dir);
+      if (w === 3) return 3;
+      if (w !== 0) {
+        return this.rtEnvHalt(p, core, comp, dirs.slice(0, -1), comp.specs.slice(k), 'перед спеком');
+      }
       this.writeExpect(dir);
       const rc = await this.run('sh', [path.join(SCRIPT_DIR, 'pw-suite.sh'), this.t, core], env);
       this.record({ kind: 'pw', pass: p.name, core, dir, rc, version: p.resolved ?? null });
@@ -3190,6 +3300,9 @@ class Session {
       if (rc === 3) return;
     }
     if (this.c0 && this.cur !== this.c0) await this.switchTo(this.c0);
+    // сокращённые сроки сняты при любом исходе со связью (D-23): после сессии — настоящие сроки
+    if (this.network) return;
+    await this.clearRtEnv();
   }
 
   standEnd() {
@@ -3198,15 +3311,23 @@ class Session {
     };
     end.product_head = this.deployed === 'HEAD';
     const r = this.remote(
-      `x=$(pidof xray | cut -d" " -f1); m=$(pidof mihomo | cut -d" " -f1); c=none; [ -n "$x" ] && c=xray; [ -n "$m" ] && c=mihomo; [ -n "$x" ] && [ -n "$m" ] && c=both; echo "$c"; pidof xcp >/dev/null && echo xcp-up || echo xcp-down; [ -d ${SNAP_BASE} ] && echo snap-left || echo snap-none`
+      `x=$(pidof xray | cut -d" " -f1); m=$(pidof mihomo | cut -d" " -f1); c=none; [ -n "$x" ] && c=xray; [ -n "$m" ] && c=mihomo; [ -n "$x" ] && [ -n "$m" ] && c=both; echo "$c"; pidof xcp >/dev/null && echo xcp-up || echo xcp-down; [ -d ${SNAP_BASE} ] && echo snap-left || echo snap-none; grep -qxF '${RT_ENV_BEGIN}' ${RT_ENV_FILE} 2>/dev/null && echo rt-block || echo rt-none`
     );
-    const [core = '-', xcp = '-', snap = '-'] = r.out.split('\n');
+    const [core = '-', xcp = '-', snap = '-', rt = '-'] = r.out.split('\n');
     end.core = r.rc === 0 ? core : '-';
     end.core_initial = this.c0 ?? '-';
     end.core_ok = r.rc === 0 && core === this.c0;
     end.xcp_up = r.rc === 0 && xcp === 'xcp-up';
     end.no_snapshot = r.rc === 0 && snap === 'snap-none';
-    end.ok = end.tree_clean && end.product_head && end.core_ok && end.xcp_up && end.no_snapshot;
+    // блок сокращённых сроков снят (D-23): смоук тега и ручная проверка после сессии — на настоящих сроках
+    end.no_rtenv = r.rc === 0 && rt === 'rt-none';
+    end.ok =
+      end.tree_clean &&
+      end.product_head &&
+      end.core_ok &&
+      end.xcp_up &&
+      end.no_snapshot &&
+      end.no_rtenv;
     return end;
   }
 
@@ -3221,7 +3342,18 @@ class Session {
     L.push(
       `- Цель: ${this.t}; исходное ядро: ${this.c0 ?? '-'}; ядра проходов: ${this.spec.cores.join(', ')}`
     );
-    L.push(`- Отчёт: ${path.relative(this.root, this.dir)}`, '');
+    L.push(`- Отчёт: ${path.relative(this.root, this.dir)}`);
+    // сокращённые сроки этапов go и pw сессии (D-22): значения таблицы lib.sh
+    L.push(
+      `- Сокращённые сроки: ${
+        this.rtEnvValues
+          ? this.rtEnvValues
+          : this.rtEnvFailed
+            ? 'не записаны (вердикт rt-env)'
+            : 'не ставились (своих этапов go и pw не было)'
+      }`,
+      ''
+    );
     const st = this.stopped;
     if (st?.reason === 'version') {
       L.push('## Остановлено: смена версии стенда', '');
@@ -3274,6 +3406,7 @@ class Session {
       );
       L.push(`- xcp запущен: ${end.xcp_up ? 'да' : '**нет**'}`);
       L.push(`- снимка незавершённого прогона нет: ${end.no_snapshot ? 'да' : '**нет**'}`);
+      L.push(`- блок xcp-rt снят: ${end.no_rtenv ? 'да' : '**нет**'}`);
     } else {
       L.push('- не проверялся');
     }
