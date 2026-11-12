@@ -760,44 +760,147 @@ if (suite === "full" && bothBranches) {
   }
 }
 
+// --- классы падений (RTR-05, D-19…D-21) -----------------------------------------------------
+
+// Признаки потери связи в детали строки результата (D-21); тот же список — в run.sh (RT_STAND_RE).
+const STAND_RE =
+  /нет связи|связь потеряна|ERR_NETWORK_CHANGED|net::ERR_INTERNET_DISCONNECTED|net::ERR_NAME_NOT_RESOLVED|ECONNRESET|ETIMEDOUT/;
+// от худшего статуса к лучшему; прочие значения в разбор не берутся
+const WORST = ["FAIL", "XPASS", "QFAIL", "KNOWN", "QPASS", "SKIP", "PASS"];
+const PASSED = new Set(["PASS", "QPASS"]);
+
+function readText(name) {
+  try {
+    return fs.readFileSync(path.join(report, target, name), "utf8");
+  } catch {
+    return null;
+  }
+}
+// строки файла результатов цели: статус, ядро, проверка, деталь (деталь в вывод не идёт)
+function readRows(name) {
+  const text = readText(name);
+  if (!text) return [];
+  const rows = [];
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    const f = line.split("\t");
+    if (f.length < 3 || !WORST.includes(f[0])) continue;
+    rows.push({ st: f[0], core: f[1], check: f[2], detail: f[3] || "" });
+  }
+  return rows;
+}
+// семья проверки: подтест Go сводится к родителю (перепрогон гонит родительский TestRouter*)
+const famOf = (core, check) => `${core}\t${check.startsWith("go:") ? "go:" + check.slice(3).split("/")[0] : check}`;
+const exactOf = (core, check) => `${core}\t${check}`;
+// ключ -> { st: худший статус, detail: деталь первой худшей строки }
+function worstBy(rows, keyOf) {
+  const m = new Map();
+  for (const r of rows) {
+    const k = keyOf(r.core, r.check);
+    const prev = m.get(k);
+    if (!prev || WORST.indexOf(r.st) < WORST.indexOf(prev.st)) m.set(k, { st: r.st, detail: r.detail });
+  }
+  return m;
+}
+
+const confirmRows = readRows("confirm.tsv");
+const confirmWorst = worstBy(
+  confirmRows.filter((r) => /^(go|pw):/.test(r.check)),
+  famOf
+);
+// сверка версии стенда в подтверждающем перепрогоне не выполнилась: прошедший перепрогон без сверки
+// не подтверждает нестабильность (границу никто не проверил)
+const confirmGuardBroken = confirmRows.some((r) => r.st === "FAIL" && r.check === "version-guard-error");
+// «без перепрогона: …» — перепрогон пропущен из-за потолка (run.sh пишет причину в confirm-skip)
+const catchupExists = readText("catchup.tsv") !== null;
+const catchupRows = readRows("catchup.tsv");
+const catchupFam = worstBy(
+  catchupRows.filter((r) => /^(go|pw):/.test(r.check)),
+  famOf
+);
+const notrunLines = (readText("notrun.txt") || "")
+  .split("\n")
+  .map((l) => l.trim())
+  .filter(Boolean);
+const confirmSkipText = readText("confirm-skip");
+const confirmSkipWhy = confirmSkipText === null ? null : confirmSkipText.split("\n")[0].trim() || "без перепрогона";
+
+// Сверка версии стенда (D-13, контракт сверки версии): <цель>/version-stop.tsv — первая строка stop
+// (ядро, граница, ожидалась, на стенде, эпоха ПК), строки suspect (ядро, проверка — падение на
+// сменённой версии) и notrun (ядро, что не выполнено); <цель>/version-guard.tsv — строки ok,
+// transition, skip и unverified (связь пропала на сверке) по границам. Нет файлов (старый отчёт) — сводка прежняя.
+const vStopText = readText("version-stop.tsv");
+const vGuardText = readText("version-guard.tsv");
+const vStopRows = (vStopText || "")
+  .split("\n")
+  .filter(Boolean)
+  .map((l) => l.split("\t"));
+const vStop = vStopRows.find((f) => f[0] === "stop") || null;
+const vSuspect = new Set(vStopRows.filter((f) => f[0] === "suspect" && f.length >= 3).map((f) => famOf(f[1], f[2])));
+const vNotrun = vStopRows
+  .filter((f) => f[0] === "notrun" && f.length >= 3)
+  .map((f) => (f[1] && f[1] !== "-" ? `${f[1]}: ${f.slice(2).join(" ")}` : f.slice(2).join(" ")));
+const vGuardKinds = (vGuardText || "")
+  .split("\n")
+  .filter(Boolean)
+  .map((l) => l.split("\t")[0]);
+// Класс stand смены версии (открытый, не находка): строка version-guard, падение из строк suspect и
+// xcp-after-restore отчёта со строкой stop. В подтверждающий перепрогон такие строки не идут: цикл
+// ветвей при смене версии останавливается раньше него (run.sh).
+function versionClass(core, check) {
+  if (check === "version-guard") return { cls: "stand", why: "смена версии стенда", open: true, version: true };
+  if (vSuspect.has(famOf(core, check)) || (vStop && check === "xcp-after-restore")) {
+    return { cls: "stand", why: "падение на сменённой версии стенда", open: true, version: true };
+  }
+  return null;
+}
+
+// Класс одной проверки. stand — потеря связи; open — связь не вернулась или догона не было
+// (причина начинается со слов «не догнан»: run.sh краснит такие строки).
+function classify(core, check, st, detail) {
+  if (st === "XPASS") return { cls: "xpass", why: "метка известного падения больше не нужна" };
+  if (st === "KNOWN") return { cls: "known", why: "метка известного падения" };
+  if (st === "QFAIL") return { cls: "quarantine", why: "карантин: упал" };
+  if (st === "QPASS") return { cls: "quarantine", why: "карантин: прошёл", quiet: true };
+  if (st !== "FAIL") return null;
+  const v = versionClass(core, check);
+  if (v) return v;
+  if (check === "reachable" || STAND_RE.test(detail)) {
+    if (check === "reachable") {
+      if (catchupExists && notrunLines.length === 0) return { cls: "stand", why: "потеря связи, догон выполнен" };
+    } else {
+      const c = catchupFam.get(famOf(core, check));
+      if (c && (PASSED.has(c.st) || c.st === "KNOWN")) return { cls: "stand", why: "потеря связи, догнан: прошёл" };
+      if (c && c.st === "FAIL" && !STAND_RE.test(c.detail)) return { cls: "new", why: "упал при догоне после потери связи" };
+    }
+    return { cls: "stand", why: "не догнан: потеря связи со стендом", open: true };
+  }
+  if (!/^(go|pw):/.test(check)) return { cls: "new", why: "падение проверки" };
+  if (confirmSkipWhy !== null) return { cls: "new", why: confirmSkipWhy };
+  if (confirmGuardBroken) return { cls: "new", why: "подтверждающий перепрогон без сверки версии стенда" };
+  const c = confirmWorst.get(famOf(core, check));
+  if (c && PASSED.has(c.st)) return { cls: "flaky", why: "прошёл при подтверждающем перепрогоне" };
+  if (c && (c.st === "FAIL" || c.st === "XPASS")) return { cls: "new", why: "упал снова при подтверждающем перепрогоне" };
+  return { cls: "new", why: "без подтверждающего перепрогона" };
+}
+
 // D-05: тест «одно ядро» идёт в прогоне на одном ядре, поэтому его исход сравнивается с последним
 // исходом на другом ядре по истории (60 дней, без этого отчёта, без SKIP и классов quarantine,
 // stand, known, flaky). На одном ядре PASS, на другом FAIL или XPASS — «нужна метка ядра» (красный
-// прогон): метка «одно ядро» снимается, падение — обычная находка. FAIL этого прогона класса flaky
-// (прошёл при подтверждающем перепрогоне) исходом по продукту не считается и не сравнивается.
+// прогон): метка «одно ядро» снимается, падение — обычная находка. FAIL этого прогона не класса new
+// (flaky: прошёл при подтверждающем перепрогоне; stand: потеря связи или смена версии стенда)
+// исходом по продукту не считается и не сравнивается — класс берётся той же classify, что и в
+// разделе классов (WR-01).
 if (suite === "full" || suite === "changed") {
-  // Тот же признак flaky, что у classify ниже (раздел классов ещё не построен): семья проверки
-  // прошла в <цель>/confirm.tsv, перепрогон не пропущен (confirm-skip) и сверка версии в нём
-  // выполнилась (нет FAIL version-guard-error).
-  const confirmPassed = (() => {
-    let text;
-    try {
-      text = fs.readFileSync(path.join(report, target, "confirm.tsv"), "utf8");
-    } catch {
-      return () => false;
-    }
-    if (fs.existsSync(path.join(report, target, "confirm-skip"))) return () => false;
-    const fam = (core, check) => `${core}\t${check.startsWith("go:") ? "go:" + check.slice(3).split("/")[0] : check}`;
-    const worst = new Map();
-    for (const line of text.split("\n")) {
-      const [st, core, check] = line.split("\t");
-      if (!check || !RESULT_ORDER.includes(st)) continue;
-      if (st === "FAIL" && check === "version-guard-error") return () => false;
-      if (!/^(go|pw):/.test(check)) continue;
-      const k = fam(core, check);
-      const prev = worst.get(k);
-      if (!prev || RESULT_ORDER.indexOf(st) < RESULT_ORDER.indexOf(prev)) worst.set(k, st);
-    }
-    return (core, check) => {
-      const st = worst.get(fam(core, check));
-      return st === "PASS" || st === "QPASS";
-    };
-  })();
+  const mainDetailOf = worstBy(readRows("results.tsv"), exactOf);
   const candidates = [];
   for (const [check, perCore] of byCheck) {
     if (perCore.size !== 1 || markOf(check) !== "one-core") continue;
     const [core, st] = [...perCore][0];
-    if (st === "FAIL" && confirmPassed(core, check)) continue;
+    if (st === "FAIL") {
+      const cls = classify(core, check, st, mainDetailOf.get(exactOf(core, check))?.detail ?? "");
+      if (!cls || cls.cls !== "new") continue;
+    }
     if (st === "PASS" || FAILED.has(st)) candidates.push({ check, core, st });
   }
   if (candidates.length > 0) {
@@ -914,135 +1017,12 @@ if (suite === "full") {
   out.push("");
 }
 
-// --- классы падений (RTR-05, D-19…D-21) -----------------------------------------------------
-
-// Признаки потери связи в детали строки результата (D-21); тот же список — в run.sh (RT_STAND_RE).
-const STAND_RE =
-  /нет связи|связь потеряна|ERR_NETWORK_CHANGED|net::ERR_INTERNET_DISCONNECTED|net::ERR_NAME_NOT_RESOLVED|ECONNRESET|ETIMEDOUT/;
-// от худшего статуса к лучшему; прочие значения в разбор не берутся
-const WORST = ["FAIL", "XPASS", "QFAIL", "KNOWN", "QPASS", "SKIP", "PASS"];
-const PASSED = new Set(["PASS", "QPASS"]);
-
-function readText(name) {
-  try {
-    return fs.readFileSync(path.join(report, target, name), "utf8");
-  } catch {
-    return null;
-  }
-}
-// строки файла результатов цели: статус, ядро, проверка, деталь (деталь в вывод не идёт)
-function readRows(name) {
-  const text = readText(name);
-  if (!text) return [];
-  const rows = [];
-  for (const line of text.split("\n")) {
-    if (!line) continue;
-    const f = line.split("\t");
-    if (f.length < 3 || !WORST.includes(f[0])) continue;
-    rows.push({ st: f[0], core: f[1], check: f[2], detail: f[3] || "" });
-  }
-  return rows;
-}
-// семья проверки: подтест Go сводится к родителю (перепрогон гонит родительский TestRouter*)
-const famOf = (core, check) => `${core}\t${check.startsWith("go:") ? "go:" + check.slice(3).split("/")[0] : check}`;
-const exactOf = (core, check) => `${core}\t${check}`;
-// ключ -> { st: худший статус, detail: деталь первой худшей строки }
-function worstBy(rows, keyOf) {
-  const m = new Map();
-  for (const r of rows) {
-    const k = keyOf(r.core, r.check);
-    const prev = m.get(k);
-    if (!prev || WORST.indexOf(r.st) < WORST.indexOf(prev.st)) m.set(k, { st: r.st, detail: r.detail });
-  }
-  return m;
-}
-
 const mainRows = readRows("results.tsv");
 // строки core-mark:… попадают в results.tsv только с --write: в сводке без него они учитываются здесь
 for (const n of needMark) {
   if (!existingMarks.has(n.check)) mainRows.push({ st: "FAIL", core: "-", check: `core-mark:${n.check}`, detail: "" });
 }
 const mainWorst = worstBy(mainRows, exactOf);
-const confirmRows = readRows("confirm.tsv");
-const confirmWorst = worstBy(
-  confirmRows.filter((r) => /^(go|pw):/.test(r.check)),
-  famOf
-);
-// сверка версии стенда в подтверждающем перепрогоне не выполнилась: прошедший перепрогон без сверки
-// не подтверждает нестабильность (границу никто не проверил)
-const confirmGuardBroken = confirmRows.some((r) => r.st === "FAIL" && r.check === "version-guard-error");
-// «без перепрогона: …» — перепрогон пропущен из-за потолка (run.sh пишет причину в confirm-skip)
-const catchupExists = readText("catchup.tsv") !== null;
-const catchupRows = readRows("catchup.tsv");
-const catchupFam = worstBy(
-  catchupRows.filter((r) => /^(go|pw):/.test(r.check)),
-  famOf
-);
-const notrunLines = (readText("notrun.txt") || "")
-  .split("\n")
-  .map((l) => l.trim())
-  .filter(Boolean);
-const confirmSkipText = readText("confirm-skip");
-const confirmSkipWhy = confirmSkipText === null ? null : confirmSkipText.split("\n")[0].trim() || "без перепрогона";
-
-// Сверка версии стенда (D-13, контракт сверки версии): <цель>/version-stop.tsv — первая строка stop
-// (ядро, граница, ожидалась, на стенде, эпоха ПК), строки suspect (ядро, проверка — падение на
-// сменённой версии) и notrun (ядро, что не выполнено); <цель>/version-guard.tsv — строки ok,
-// transition, skip и unverified (связь пропала на сверке) по границам. Нет файлов (старый отчёт) — сводка прежняя.
-const vStopText = readText("version-stop.tsv");
-const vGuardText = readText("version-guard.tsv");
-const vStopRows = (vStopText || "")
-  .split("\n")
-  .filter(Boolean)
-  .map((l) => l.split("\t"));
-const vStop = vStopRows.find((f) => f[0] === "stop") || null;
-const vSuspect = new Set(vStopRows.filter((f) => f[0] === "suspect" && f.length >= 3).map((f) => famOf(f[1], f[2])));
-const vNotrun = vStopRows
-  .filter((f) => f[0] === "notrun" && f.length >= 3)
-  .map((f) => (f[1] && f[1] !== "-" ? `${f[1]}: ${f.slice(2).join(" ")}` : f.slice(2).join(" ")));
-const vGuardKinds = (vGuardText || "")
-  .split("\n")
-  .filter(Boolean)
-  .map((l) => l.split("\t")[0]);
-// Класс stand смены версии (открытый, не находка): строка version-guard, падение из строк suspect и
-// xcp-after-restore отчёта со строкой stop. В подтверждающий перепрогон такие строки не идут: цикл
-// ветвей при смене версии останавливается раньше него (run.sh).
-function versionClass(core, check) {
-  if (check === "version-guard") return { cls: "stand", why: "смена версии стенда", open: true, version: true };
-  if (vSuspect.has(famOf(core, check)) || (vStop && check === "xcp-after-restore")) {
-    return { cls: "stand", why: "падение на сменённой версии стенда", open: true, version: true };
-  }
-  return null;
-}
-
-// Класс одной проверки. stand — потеря связи; open — связь не вернулась или догона не было
-// (причина начинается со слов «не догнан»: run.sh краснит такие строки).
-function classify(core, check, st, detail) {
-  if (st === "XPASS") return { cls: "xpass", why: "метка известного падения больше не нужна" };
-  if (st === "KNOWN") return { cls: "known", why: "метка известного падения" };
-  if (st === "QFAIL") return { cls: "quarantine", why: "карантин: упал" };
-  if (st === "QPASS") return { cls: "quarantine", why: "карантин: прошёл", quiet: true };
-  if (st !== "FAIL") return null;
-  const v = versionClass(core, check);
-  if (v) return v;
-  if (check === "reachable" || STAND_RE.test(detail)) {
-    if (check === "reachable") {
-      if (catchupExists && notrunLines.length === 0) return { cls: "stand", why: "потеря связи, догон выполнен" };
-    } else {
-      const c = catchupFam.get(famOf(core, check));
-      if (c && (PASSED.has(c.st) || c.st === "KNOWN")) return { cls: "stand", why: "потеря связи, догнан: прошёл" };
-      if (c && c.st === "FAIL" && !STAND_RE.test(c.detail)) return { cls: "new", why: "упал при догоне после потери связи" };
-    }
-    return { cls: "stand", why: "не догнан: потеря связи со стендом", open: true };
-  }
-  if (!/^(go|pw):/.test(check)) return { cls: "new", why: "падение проверки" };
-  if (confirmSkipWhy !== null) return { cls: "new", why: confirmSkipWhy };
-  if (confirmGuardBroken) return { cls: "new", why: "подтверждающий перепрогон без сверки версии стенда" };
-  const c = confirmWorst.get(famOf(core, check));
-  if (c && PASSED.has(c.st)) return { cls: "flaky", why: "прошёл при подтверждающем перепрогоне" };
-  if (c && (c.st === "FAIL" || c.st === "XPASS")) return { cls: "new", why: "упал снова при подтверждающем перепрогоне" };
-  return { cls: "new", why: "без подтверждающего перепрогона" };
-}
 
 const classRows = [];
 for (const [key, v] of mainWorst) {
