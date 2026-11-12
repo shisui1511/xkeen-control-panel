@@ -17,6 +17,7 @@ import (
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
+	"github.com/shisui1511/xkeen-control-panel/internal/rtenv"
 )
 
 // Расписание обновления баз панелью на настоящем устройстве, в настоящем времени и
@@ -36,9 +37,6 @@ import (
 const (
 	// rtGeoCronFile — crontab root стенда (путь сервиса менеджера по умолчанию).
 	rtGeoCronFile = "/opt/var/spool/cron/crontabs/root"
-	// rtGeoCatchUpDelay — через сколько после старта панели запускается пропущенный слот
-	// (catchUpDelay сервиса менеджера).
-	rtGeoCatchUpDelay = 3 * time.Minute
 	// rtGeoRunLimit — предел ожидания конца настоящего запуска `xkeen -ug`.
 	rtGeoRunLimit = 20 * time.Minute
 	// rtGeoOwnLine — строка задачи XKeen, если в crontab стенда её нет (время задачи стенда).
@@ -401,6 +399,7 @@ func TestRouterGeodataScheduleWaitsApply(t *testing.T) {
 func TestRouterGeodataCatchUp(t *testing.T) {
 	routertest.Tier(t, routertest.Full, "реальное время: догоняющее обновление geodata ждёт минуты")
 	rtGeoNeedXKeen(t)
+	routertest.RealTime(t, rtenv.GeodataCatchUp)
 	e := rtNewSrc(t)
 	e.enableLayer()
 	e.rtRstIdle()
@@ -443,9 +442,11 @@ func TestRouterGeodataCatchUp(t *testing.T) {
 		t.Fatalf("панель не поднялась за %s: %s", rtPanelUpTimeout, last)
 	}
 
-	// Пропущенный слот запускается через rtGeoCatchUpDelay после старта панели.
+	// Пропущенный слот запускается через задержку догона после старта панели
+	// (catchUpDelay сервиса менеджера; срок — у нового процесса панели).
+	catchUp := routertest.Deadline(t, rtenv.GeodataCatchUp)
 	var waited time.Duration
-	deadline := startedAt.Add(rtGeoCatchUpDelay + 90*time.Second)
+	deadline := startedAt.Add(catchUp + 90*time.Second)
 	for {
 		snap = e.rtGeoSnapshot()
 		if rtGeoRun(snap, "running") || rtGeoLastAt(t, snap).After(lastAt0) {
@@ -454,12 +455,12 @@ func TestRouterGeodataCatchUp(t *testing.T) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("догон не запустился за %v после старта панели (слот %02d:%02d прошёл, пока панель стояла)",
-				rtGeoCatchUpDelay+90*time.Second, slot.Hour(), slot.Minute())
+				catchUp+90*time.Second, slot.Hour(), slot.Minute())
 		}
 		time.Sleep(time.Second)
 	}
-	if waited < rtGeoCatchUpDelay-time.Minute {
-		t.Errorf("догон запустился через %.0f с после старта панели, раньше задержки %v", waited.Seconds(), rtGeoCatchUpDelay)
+	if waited < catchUp-time.Minute {
+		t.Errorf("догон запустился через %.0f с после старта панели, раньше задержки %v", waited.Seconds(), catchUp)
 	}
 
 	// Запуск идёт до конца, итог — новая запись last_run после слота.

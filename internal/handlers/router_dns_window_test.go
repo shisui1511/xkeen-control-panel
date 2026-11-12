@@ -229,6 +229,7 @@ func TestRouterDNSWindowTimeout(t *testing.T) {
 	routertest.Tier(t, routertest.Full, "реальное время: окно подтверждения перехвата DNS ждёт дедлайн и откат по таймеру")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
+	routertest.RealTime(t, rtenv.DNSWindow)
 	e := rtNewSrc(t)
 	rtDNSPrepare(t, e, kernel)
 
