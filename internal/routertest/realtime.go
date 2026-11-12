@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -76,7 +77,7 @@ func RealTime(t *testing.T, vars ...rtenv.Var) {
 	}
 	p := NewPanel(t)
 	t.Cleanup(func() {
-		if err := os.WriteFile(rtEnvFile, orig, 0o600); err != nil {
+		if err := rtEnvWrite(orig); err != nil {
 			t.Errorf("реальное время: прежний %s не записан: %v", rtEnvFile, err)
 			return
 		}
@@ -100,7 +101,7 @@ func RealTime(t *testing.T, vars ...rtenv.Var) {
 		}
 	})
 
-	if err := os.WriteFile(rtEnvFile, []byte(stripped), 0o600); err != nil {
+	if err := rtEnvWrite([]byte(stripped)); err != nil {
 		t.Fatalf("реальное время: %s не переписан: %v", rtEnvFile, err)
 	}
 	if err := rtEnvRestart(p, pids[0]); err != nil {
@@ -142,6 +143,35 @@ func rtEnvStrip(content string, names []string) (string, map[string]string, bool
 		b.WriteString(line)
 	}
 	return b.String(), prev, hasBlock
+}
+
+// rtEnvWrite заменяет файл окружения панели атомарно: пишет временный файл рядом,
+// переносит режим исходного (как keepmode в lib.sh) и переименовывает поверх. Если
+// тестовый бинарник убьют посреди записи, xcp.env остаётся целым.
+func rtEnvWrite(content []byte) error {
+	mode := os.FileMode(0o600)
+	if st, err := os.Stat(rtEnvFile); err == nil {
+		mode = st.Mode().Perm()
+	}
+	f, err := os.CreateTemp(filepath.Dir(rtEnvFile), ".xcp.env.")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	_, err = f.Write(content)
+	if err == nil {
+		err = f.Chmod(mode)
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp, rtEnvFile)
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+	}
+	return err
 }
 
 // rtEnvLine — строка вида XCP_RT_<ИМЯ>=…, как /^XCP_RT_[A-Z0-9_]*=/ у awk в lib.sh.
