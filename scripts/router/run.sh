@@ -589,6 +589,18 @@ echo "router-test: отчёт $RT_REPORT"
 # результат тот же. Подоболочка и || не дают сбою ротации изменить ход и код прогона.
 ( tidy_rotate_reports "$(rt_repo_root)" ) || echo "router-test: предупреждение: ротация отчётов не удалась (прогон продолжается)" >&2
 
+# Сокращённые сроки на время прогона (D-16 фазы 148.1.1, D-22): блок xcp-rt (lib.sh) идёт в наборах
+# changed, full, delta, rerun, bisect и harness, но не в smoke, reboot и session. Полный прогон цели
+# (full_target) пишет блок сам после снимка; шаги поиска виновного коммита (tree-step.sh) пишут его
+# после своего деплоя по RT_RTENV=1; сессия ставит блок перед своими этапами сама. RT_EXPECT_RT_ENV —
+# ожидание блока для проверки rt-env смоука: вне ветвей с записанным блоком блока быть не должно.
+case "$SUITE" in
+  '' | changed | delta | rerun | bisect | harness) RT_RTENV=1 ;;
+  *) RT_RTENV=0 ;;
+esac
+RT_EXPECT_RT_ENV=0
+export RT_RTENV RT_EXPECT_RT_ENV
+
 # Удержание блокировки после прогона для ручной проверки (RT_HOLD_MINUTES).
 hold_lock() {
   if [ -n "${RT_HOLD_MINUTES:-}" ] && [ "$RT_HOLD_MINUTES" -gt 0 ] 2>/dev/null; then
@@ -1012,13 +1024,22 @@ elif [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
   [ "$RT_H_EXTRA" != 1 ] || echo "- Обвязка изменена: набор harness добавлен (в обеих ветвях и самопроверка сессии $RT_H_SESSION)" >>"$RT_REPORT/plan.txt"
   echo "router-test: ветви — $(head -n 1 "$RT_REPORT/plan.txt")"
 fi
+# Строка о сокращённых сроках — в plan.txt прогона с ветвями (через него в report.md и summary.md).
+# Перепрогон plan.txt исходного отчёта не трогает: строка — только в выводе.
+if [ "$RT_RTENV" = 1 ]; then
+  if [ "$SUITE" = rerun ]; then
+    echo "router-test: сокращённые сроки: $RT_RTENV_VALUES"
+  elif [ -z "$SUITE" ] || [ "$SUITE" = harness ] || [ "$SUITE" = delta ] || { [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ]; }; then
+    echo "- Сокращённые сроки: $RT_RTENV_VALUES" >>"$RT_REPORT/plan.txt"
+  fi
+fi
 
 # Файл сэмплера PID ядра на устройстве (full_target, _kpid_start): вне /opt/tmp/xcp-rt, который
 # чистит смоук, и вне каталога снимка.
 RT_KPID=/opt/tmp/xcp-rt-kpid.tsv
 
 # Проверки смоука, которые пропускаются, если цель недоступна или деплой не удался.
-SKIP_CHECKS="kernel-running iptables-rules api-version version xcp-pid api-me api-service-status log-panic log-error kernel-restart"
+SKIP_CHECKS="kernel-running iptables-rules api-version version xcp-pid api-me api-service-status rt-env log-panic log-error kernel-restart"
 
 # Состав ветви из файла <ядро>.sel (rerun-plan.mjs, RT_SEL_DIR). Читается без eval: значение —
 # первая строка «КЛЮЧ=значение» (sed по ключу), безопасные символы проверяет rt_sel_ok.
@@ -1104,6 +1125,14 @@ if [ -n "${RELEASE:-}" ]; then
   DEPLOY_ARGS="--release $RELEASE"
 fi
 EXPECT=""
+# Блок сокращённых сроков, оставшийся после обрыва прошлого прогона (D-23), снимается в начале
+# любого прогона, даже если деплой цели не дойдёт до установки; без перезапуска — деплой перезапустит
+# панель сам и тоже снимает блок. Сбой — строка в лог прогона, итог не меняется.
+for t in $REACHABLE; do
+  rc=0
+  rt_stage "$t" rt-env-clear rt_rtenv_clear "$t" --no-restart >/dev/null || rc=$?
+  [ "$rc" = 0 ] || echo "router-test: цель $t: оставшийся блок сокращённых сроков не снят до деплоя (код $rc), его снимет установка" >&2
+done
 if [ -n "$REACHABLE" ]; then
   rc=0
   # shellcheck disable=SC2086
@@ -1664,6 +1693,22 @@ EOF
   # Исходное ядро — из журнала снимка (строка core=…): к нему вернёт восстановление.
   _orig=$(sed -n 's/^core=//p' "$RT_REPORT/$_t/snapshot.log" | tail -n 1)
 
+  # Сокращённые сроки (D-22): блок xcp-rt пишется только после снимка — восстановление возвращает
+  # xcp.env без него. Сбой — строка FAIL rt-env-write, ветви идут дальше: тесты читают действующий
+  # срок у процесса панели. Записанный блок ждёт смоук каждой ветви (RT_EXPECT_RT_ENV=1).
+  _rtenv_ok=0
+  if [ "${RT_RTENV:-0}" = 1 ]; then
+    _rw=0
+    rt_stage "$_t" rt-env-write rt_rtenv_write "$_t" >"$RT_REPORT/$_t/rtenv.log" 2>&1 || _rw=$?
+    if [ "$_rw" = 0 ]; then
+      _rtenv_ok=1
+    elif [ "$_rw" = 3 ]; then
+      rt_result "$_t" FAIL rt-env-write "нет связи, блок сокращённых сроков не записан"
+    else
+      rt_result "$_t" FAIL rt-env-write "блок сокращённых сроков не записан или панель не поднялась после перезапуска (код $_rw, rtenv.log)"
+    fi
+  fi
+
   _first=1
   # ядро, которое сейчас на стенде (после последнего успешного переключения): с него начинается
   # подтверждающий перепрогон
@@ -1814,8 +1859,9 @@ EOF
     # rt_version_expected всегда возвращает 0: пустой вывод проверяется явно
     _exp=$(rt_version_expected "$_t")
     [ -n "$_exp" ] || _exp=$EXPECT
+    # Проверка rt-env ждёт блок, если он записан после снимка (RT_EXPECT_RT_ENV=1), иначе его отсутствия.
     # shellcheck disable=SC2086
-    rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$_exp" --no-observe $_fargs || true
+    rt_stage "$_t" "smoke-$_c" _bg env "RT_EXPECT_RT_ENV=$_rtenv_ok" sh "$SCRIPT_DIR/smoke.sh" "$_t" "$_exp" --no-observe $_fargs || true
     _smrc=$_brc
     # смоук записывает в core определённое им ядро: ветвь продолжается с ядром ветви
     printf '%s\n' "$_c" >"$RT_REPORT/$_t/core"

@@ -29,7 +29,15 @@
 #                        LOGIN_WAIT с (код 000), — FAIL с диагностикой: ответ /api/version,
 #                        Dirty/Writeback носителя и loadavg устройства
 #   api-service-status   GET /api/service/status = 200
-#   kernel-restart       PID ядра в начале и в конце окна RT_SMOKE_WINDOW (по умолчанию
+#   rt-env               блок сокращённых сроков xcp-rt (lib.sh, D-22, D-23): одна команда ssh читает
+#                        строки блока в /opt/etc/xcp/xcp.env и строки `xcp-rt:` журнала после последнего
+#                        баннера старта (xcp.log.2, .1 и xcp.log подряд). Без RT_EXPECT_RT_ENV=1 — FAIL,
+#                        если блок есть или есть строка `xcp-rt:` (блок остался после прерванного
+#                        прогона); с RT_EXPECT_RT_ENV=1 (смоук ветви после записи блока, run.sh) — FAIL,
+#                        если блока нет или для какой-то его переменной нет строки `xcp-rt:`. Сборка,
+#                        которая строк `xcp-rt:` не печатает вовсе (тег до чтения XCP_RT_*), — PASS с
+#                        пометкой: блок есть, сроки у неё по умолчанию
+#   kernel-restart      PID ядра в начале и в конце окна RT_SMOKE_WINDOW (по умолчанию
 #                        120 с) один и тот же: ни один PID начала окна не дожил до конца —
 #                        перезапуск без команды, падение
 #   log-panic            в xcp.log после последнего баннера запуска нет panic
@@ -156,7 +164,7 @@ UNREACH=0
 PART_CHECKS=""
 if [ "$NO_OBSERVE" = 1 ]; then
   # reachable общая для обеих частей, метка smoke:reachable оценивается здесь
-  PART_CHECKS="reachable kernel-running iptables-rules version xcp-pid api-version api-me api-service-status"
+  PART_CHECKS="reachable kernel-running iptables-rules version xcp-pid api-version api-me api-service-status rt-env"
 elif [ "$OBSERVE_ONLY" = 1 ]; then
   PART_CHECKS="kernel-restart log-panic log-error log-repeat"
 fi
@@ -187,7 +195,7 @@ finalize() {
     rm -f "$_jar"
   fi
   if [ "$UNREACH" = 1 ]; then
-    _unr="kernel-running iptables-rules version xcp-pid api-version api-me api-service-status kernel-restart log-panic log-error"
+    _unr="kernel-running iptables-rules version xcp-pid api-version api-me api-service-status rt-env kernel-restart log-panic log-error"
     [ "$OBSERVE_ONLY" != 1 ] || _unr="kernel-restart log-panic log-error"
     for _c in $_unr; do
       grep -q "^[A-Z]*${TAB}${_c}${TAB}" "$BUF" || chk SKIP "$_c" "нет связи"
@@ -441,6 +449,61 @@ if [ "$OBSERVE_ONLY" != 1 ]; then
   rm -f "$jar"
   t1=$(date +%s)
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$ID" smoke-api-session "$((t1 - t0))" 0 "$t0" "${RT_CORE:--}" >>"$RT_REPORT/timings.tsv"
+
+  # --- rt-env: блок сокращённых сроков и строки xcp-rt: журнала (D-23) ---------------------------
+  # Одна команда ssh: строки блока (сценарий status из lib.sh, префикс blk:), строки xcp-rt: после
+  # последнего баннера старта по xcp.log.2, .1 и xcp.log подряд (префикс log:); если таких строк нет —
+  # печатает ли их эта сборка вообще (bin:1|0, поиск строки формата в бинарнике).
+  rte_status=$(rt_rtenv_script status)
+  RTE_LOG=$(
+    cat <<'EOF'
+L=/opt/var/log/xcp.log
+lg=$(for f in "$L.2" "$L.1" "$L"; do [ ! -f "$f" ] || cat "$f"; done |
+  grep -E 'XKeen Control Panel v.* starting\.\.\.|xcp-rt:' |
+  awk '/XKeen Control Panel v.* starting\.\.\./ { n = 0; next } { n++; a[n] = $0 } END { for (i = 1; i <= n; i++) print "log:" a[i] }')
+[ -z "$lg" ] || printf '%s\n' "$lg"
+if [ -z "$lg" ]; then
+  if grep -q 'xcp-rt: ' /opt/sbin/xcp 2>/dev/null; then echo bin:1; else echo bin:0; fi
+fi
+EOF
+  )
+  rc=0
+  out=$(rt_stage "$ID" smoke-rtenv rt_ssh "$ID" "( $rte_status ) | sed 's/^/blk:/'; $RTE_LOG") || rc=$?
+  [ "$rc" != 3 ] || lost
+  rte_blk=$(printf '%s\n' "$out" | sed -n 's/^blk://p' | grep -vx 'absent' || true)
+  rte_vars=$(printf '%s\n' "$rte_blk" | grep -E '^XCP_RT_[A-Z0-9_]+=' || true)
+  rte_log=$(printf '%s\n' "$out" | sed -n 's/^log://p' | rt_redact)
+  rte_bin=$(printf '%s\n' "$out" | sed -n 's/^bin://p' | head -n 1)
+  rte_vlist=$(printf '%s\n' "$rte_vars" | tr '\n' ' ' | sed 's/ *$//')
+  rte_lines=$(printf '%s\n' "$rte_log" | sed 's/.*xcp-rt: */xcp-rt: /' | cut -c1-120 | tr '\n' '|' | sed 's/|*$//')
+  if [ "$rc" != 0 ]; then
+    chk FAIL rt-env "проверка блока xcp-rt не выполнилась (код ssh $rc)"
+  elif [ "${RT_EXPECT_RT_ENV:-0}" = 1 ]; then
+    rte_miss=""
+    for rte_kv in $rte_vars; do
+      rte_n=${rte_kv%%=*}
+      printf '%s\n' "$rte_log" | grep -qE "xcp-rt: .*${rte_n}([^A-Z0-9_]|\$)" || rte_miss="$rte_miss $rte_n"
+    done
+    if [ -z "$rte_blk" ]; then
+      chk FAIL rt-env "прогон записал блок xcp-rt, а в xcp.env его нет"
+    elif [ -z "$rte_vars" ]; then
+      chk FAIL rt-env "блок xcp-rt в xcp.env без переменных"
+    elif [ -z "$rte_miss" ]; then
+      chk PASS rt-env "блок: $rte_vlist; журнал: $rte_lines"
+    elif [ -z "$rte_log" ] && [ "$rte_bin" = 0 ]; then
+      chk PASS rt-env "блок: $rte_vlist; сборка строк xcp-rt: не печатает (до чтения XCP_RT_*), сроки по умолчанию"
+    else
+      chk FAIL rt-env "блок: $rte_vlist; нет строки xcp-rt: после баннера старта для:$rte_miss"
+    fi
+  else
+    if [ -n "$rte_blk" ]; then
+      chk FAIL rt-env "в xcp.env остался блок xcp-rt (прерванный прогон?): ${rte_vlist:-без переменных}"
+    elif [ -n "$rte_log" ]; then
+      chk FAIL rt-env "блока нет, но в журнале после баннера старта есть строки xcp-rt: $rte_lines"
+    else
+      chk PASS rt-env "блока xcp-rt нет, строк xcp-rt: после баннера старта нет"
+    fi
+  fi
 fi
 
 # Часть без окна на этом заканчивается: kernel-restart и правила логов выносит --observe-only.
