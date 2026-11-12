@@ -8,6 +8,7 @@ package routertest
 // предел берётся из констант продукта или теста.
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -16,7 +17,77 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
 )
+
+// storageQuietBytes — порог тишины носителя: грязных и записываемых данных в кэше
+// страниц (Dirty + Writeback) меньше 1 МБ.
+const storageQuietBytes = 1 << 20
+
+// WaitStorageQuiet ждёт (не дольше limit), пока в кэше страниц почти не останется
+// грязных и записываемых данных (Dirty + Writeback из /proc/meminfo меньше 1 МБ).
+// Возвращает, достигнута ли тишина до предела, и описание состояния носителя для
+// журнала теста: счётчики, время ожидания и задержку записи 4 КБ с fsync в каталоге
+// данных панели. С limit 0 — одно наблюдение без ожидания.
+func WaitStorageQuiet(t testing.TB, limit time.Duration) (bool, string) {
+	t.Helper()
+	start := time.Now()
+	for {
+		dirty, wb := meminfo(t, "Dirty"), meminfo(t, "Writeback")
+		quiet := dirty+wb < storageQuietBytes
+		if quiet || time.Since(start) > limit {
+			return quiet, "носитель: грязных " + strconv.FormatInt(dirty>>10, 10) + " КБ, в записи " +
+				strconv.FormatInt(wb>>10, 10) + " КБ (ожидание " + time.Since(start).Round(100*time.Millisecond).String() +
+				"), запись 4 КБ с fsync " + fsyncProbe(config.Default().DataDir).Round(time.Millisecond).String()
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// meminfo возвращает поле /proc/meminfo в байтах.
+func meminfo(t testing.TB, field string) int64 {
+	t.Helper()
+	f, err := os.Open("/proc/meminfo")
+	if err != nil {
+		t.Fatalf("/proc/meminfo: %v", err)
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		name, rest, ok := strings.Cut(sc.Text(), ":")
+		if !ok || name != field {
+			continue
+		}
+		kb, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimSpace(rest), " kB"), 10, 64)
+		if err != nil {
+			t.Fatalf("/proc/meminfo %s: %v", field, err)
+		}
+		return kb << 10
+	}
+	t.Fatalf("/proc/meminfo: нет поля %s", field)
+	return 0
+}
+
+// fsyncProbe пишет 4 КБ в каталог dir с fsync и возвращает, сколько это заняло: на
+// носителе, где идёт фиксация журнала ext4, мелкая запись с fsync ждёт её конца, поэтому
+// задержка показывает застой, которого нет в счётчиках Dirty и Writeback. Ошибка — -1.
+func fsyncProbe(dir string) time.Duration {
+	f, err := os.CreateTemp(dir, "rt-fsync-*")
+	if err != nil {
+		return -1
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	start := time.Now()
+	if _, err := f.Write(make([]byte, 4096)); err != nil {
+		return -1
+	}
+	if err := f.Sync(); err != nil {
+		return -1
+	}
+	return time.Since(start)
+}
 
 // Poll вызывает check сразу и затем каждые every, пока check не вернёт true или не
 // истечёт limit. Последняя проверка идёт на самом пределе. Возвращает признак
