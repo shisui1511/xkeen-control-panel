@@ -135,12 +135,14 @@ const oneCoreSamples = [
   // спек: семейство — та же router-area, пакета нет
   ['спек: правильное покрытие', { kind: 'pw', pkg: null }, 0, { kind: 'pw', pkg: null }],
   ['спек: покрытие из другой router-area', { kind: 'pw', pkg: null, area: 'routing' }, 1, { kind: 'pw', pkg: null }],
-  ['спек: покрытие — Go-тест', {}, 1, { kind: 'pw', pkg: null }]
+  ['спек: покрытие — Go-тест', {}, 1, { kind: 'pw', pkg: null }],
+  // тег метки известного падения (@core-label) снимается вместе с меткой: покрытием не считается
+  ['спек: покрытие только с тегом метки падения', { kind: 'pw', pkg: null, coreTag: false }, 1, { kind: 'pw', pkg: null }]
 ];
 for (const [what, patch, want, selfPatch = {}] of oneCoreSamples) {
   const facts = [
     { ...oneCoreBase, test: 'TestRouterK', coreMarked: false, oneCore: { reason: 'r', covers: 'TestRouterC' }, ...selfPatch },
-    { ...oneCoreBase, test: 'TestRouterC', coreMarked: true, coreSpecific: true, oneCore: null, ...patch }
+    { ...oneCoreBase, test: 'TestRouterC', coreMarked: true, coreSpecific: true, coreTag: true, oneCore: null, ...patch }
   ];
   // у покрытия «одно ядро» нарушение даёт и оно само (его покрытие K без метки ядра): считаем только K
   const got = oneCoreIssues(facts).filter((i) => i.test === 'TestRouterK').length;
@@ -156,6 +158,24 @@ const ONE_CORE_SPEC =
   const f = specTestFacts(ONE_CORE_SPEC)[0];
   if (!f || !f.oneCore || f.oneCore.reason !== 'перезапуск' || f.oneCore.covers !== 'x' || f.coreMarked !== false) {
     problems.push(`самопроверка сканера спеков: факт «одно ядро» разобран неверно: ${JSON.stringify(f)}`);
+  }
+}
+
+// Факт coreTag у спека: постоянный тег ядра да, тег метки падения нет (coreMarked — оба)
+{
+  const tagged = (tag) => `test('a', { tag: ${tag} }, async () => {});\n`;
+  const pairs = [
+    ['CORE_TAG', true, true],
+    ["'@core'", true, true],
+    ['coreTagsOf(known)', true, false],
+    ['CORE_LABEL_TAG', true, false],
+    ['ONE_CORE_TAG', false, false]
+  ];
+  for (const [tag, wantMarked, wantTag] of pairs) {
+    const f = specTestFacts(tagged(tag))[0];
+    if (!f || f.coreMarked !== wantMarked || f.coreTag !== wantTag) {
+      problems.push(`самопроверка сканера спеков: тег ${tag} дал coreMarked=${f && f.coreMarked}, coreTag=${f && f.coreTag}; ожидалось ${wantMarked}, ${wantTag}`);
+    }
   }
 }
 

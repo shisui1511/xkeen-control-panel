@@ -274,6 +274,9 @@ function goViolations(root) {
 /** TS-часть (Playwright): спеки frontend/tests/router/*.spec.ts. */
 const SPEC_READS_CORE = /\b(?:RT\.core|RT\.wantCore|XCP_CORE|XCP_WANT_CORE|switch_kernel)\b|\bselectorApplies\(/;
 const SPEC_CORE_TAGGED = /\bCORE_TAG\b|\bCORE_LABEL_TAG\b|['"`]@core['"`]|\bcoreTagsOf\(/;
+// Только постоянный тег ядра (@core), без @core-label из метки известного падения: тот снимается вместе с меткой,
+// поэтому покрытие «одного ядра» опирается лишь на этот тег.
+const SPEC_CORE_TAG_ONLY = /\bCORE_TAG\b|['"`]@core['"`]/;
 // Тег «одно ядро» (D-01…D-04): правило 3 выполняет, тегом ядра не является (SPEC_CORE_TAGGED его не совпадает).
 const SPEC_ONE_CORE = /\bONE_CORE_TAG\b|['"`]@one-core['"`]/;
 const SPEC_ONE_CORE_ALL = /\bONE_CORE_TAG\b|['"`]@one-core['"`]/g;
@@ -1076,11 +1079,12 @@ function annotationOf(seg, type) {
 
 /**
  * Факты тестов одного спека (без области):
- * [{test, titleTemplate, tier, tierReason, slowReason, quarantine, coreMarked, oneCore: {reason, covers} | null}].
+ * [{test, titleTemplate, tier, tierReason, slowReason, quarantine, coreMarked, coreTag, oneCore: {reason, covers} | null}].
  */
 function specTestFacts(text) {
   const code = stripTs(text);
   const tagVarCore = /\b(?:const|let)\s+tag\s*=[^;]*?(?:CORE_TAG|CORE_LABEL_TAG|coreTagsOf)/s.test(code);
+  const tagVarCoreOnly = /\b(?:const|let)\s+tag\s*=[^;]*?\bCORE_TAG\b/s.test(code);
   const rows = [];
   for (const m of code.matchAll(/(?<![\w.$])test\(/g)) {
     const open = m.index + m[0].length - 1;
@@ -1102,6 +1106,8 @@ function specTestFacts(text) {
       quarantine: q ? q[2] : null,
       // тег «одно ядро» метку ядра не даёт: тест идёт в одну ветвь, как неразмеченный (D-03)
       coreMarked: SPEC_CORE_TAGGED.test(details) || (tagVarCore && /\{\s*tag\s*[,}]|\btag:\s*tag\b/.test(details)),
+      // постоянный тег ядра (CORE_TAG): на него опирается покрытие «одного ядра», тег метки падения не в счёт
+      coreTag: SPEC_CORE_TAG_ONLY.test(details) || (tagVarCoreOnly && /\{\s*tag\s*[,}]|\btag:\s*tag\b/.test(details)),
       // без аннотации с причиной и покрытием — пустые строки (их отклоняет specIssues)
       oneCore: SPEC_ONE_CORE.test(details) ? parseOneCore(annotationOf(details, 'one-core')) : null
     });
@@ -1199,7 +1205,7 @@ function testFacts(root) {
  * Покрытие тестов с меткой «одно ядро» (правило 7 стража, D-04): по фактам testFacts —
  * [{file, test, reason}]. Покрытие ищется среди тестов того же семейства: Go — тот же вид,
  * пакет и router-area, спек — тот же вид и router-area. Нарушения: покрытия нет; у покрытия
- * нет метки ядра (Go — routertest.CoreSpecific, coreSpecific; спек — тег ядра, coreMarked); покрытие в карантине; покрытие само с меткой «одно ядро».
+ * нет метки ядра (Go — routertest.CoreSpecific, coreSpecific; спек — постоянный тег CORE_TAG, coreTag; тег метки падения не подходит); покрытие в карантине; покрытие само с меткой «одно ядро».
  * Пустое покрытие здесь не разбирается: его отклоняют analyzeGo и specIssues (правило 6).
  */
 function oneCoreIssues(facts) {
@@ -1224,7 +1230,7 @@ function oneCoreIssues(facts) {
     }
     const why = (x) => {
       if (x.oneCore) return `покрытие «${covers}» само с меткой «одно ядро»`;
-      if (f.kind === 'go' ? x.coreSpecific !== true : x.coreMarked !== true) return `покрытие «${covers}» без метки ядра: ему нужен ${f.kind === 'go' ? 'routertest.CoreSpecific' : 'тег CORE_TAG'}`;
+      if (f.kind === 'go' ? x.coreSpecific !== true : x.coreTag !== true) return `покрытие «${covers}» без метки ядра: ему нужен ${f.kind === 'go' ? 'routertest.CoreSpecific' : 'тег CORE_TAG (тег метки известного падения не подходит)'}`;
       if (x.quarantine !== null && x.quarantine !== undefined) return `покрытие «${covers}» в карантине`;
       return null;
     };
