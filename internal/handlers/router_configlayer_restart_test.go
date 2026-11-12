@@ -7,6 +7,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -172,12 +173,31 @@ func (e *rtSrc) rtRstStartApply() map[string]any {
 	before := e.rtRstApplyView()
 	r := e.call(http.MethodPost, "/api/configlayer/apply", nil)
 	if r.Status != http.StatusOK {
-		e.t.Fatalf("POST /api/configlayer/apply: %d %s %.600s", r.Status, r.Code, r.Data)
+		e.t.Fatalf("POST /api/configlayer/apply: %d %s %.600s%s", r.Status, r.Code, r.Data, rtRstApplyIssues(r))
 	}
 	if started, _ := r.object(e.t)["started"].(bool); !started {
 		e.t.Fatalf("POST /api/configlayer/apply: started=false: %.200s", r.Data)
 	}
 	return before
+}
+
+// rtRstApplyIssues — код и issues ответа 409 на «Применить» для сообщения о провале:
+// по ним видно, какая проверка черновика заблокировала применение (apply_blocked).
+// Обрезка до 500 знаков; адреса в issues слоя уже замаскированы продуктом. Не 409 —
+// пустая строка.
+func rtRstApplyIssues(r rtSrcResp) string {
+	if r.Status != http.StatusConflict {
+		return ""
+	}
+	var data struct {
+		Issues json.RawMessage `json:"issues"`
+	}
+	_ = json.Unmarshal(r.Data, &data)
+	issues := string(data.Issues)
+	if issues == "" {
+		issues = "нет"
+	}
+	return fmt.Sprintf("; code %q, issues %.500s", r.Code, issues)
 }
 
 // rtRstResult возвращает result итога применения.

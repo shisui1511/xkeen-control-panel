@@ -477,16 +477,11 @@ func (c *rtMihomoCore) start(t *testing.T, e *rtEnv) {
 	rtWaitCond(t, 30*time.Second, "Clash API отдельного процесса", c.svc.HasController)
 }
 
-// rtWaitCond ждёт, пока условие станет истинным; не дождался — провал теста.
+// rtWaitCond ждёт, пока условие станет истинным; не дождался — провал теста
+// (общий помощник routertest.WaitCond).
 func rtWaitCond(t *testing.T, wait time.Duration, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(wait)
-	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatalf("не дождались: %s (%s)", what, wait)
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
+	routertest.WaitCond(t, wait, what, cond)
 }
 
 // rtTLSPing — проверка узла для Deps.Ping: рукопожатие TLS с сервером узла
