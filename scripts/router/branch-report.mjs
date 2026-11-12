@@ -709,6 +709,8 @@ async function loadHistory() {
 }
 // имя отчёта в истории: каталог build/router/<отчёт>; этап сессии — <сессия>/<NN>-<этап>
 const REPORT_NAME_RE = /^\d{8}-\d{6}-[0-9a-f]{7,40}(-dirty)?(-\d{2}-.+)?$/;
+// давность падения на другом ядре, после которой оно не считается расхождением (WR-03)
+const ONE_CORE_FAIL_DAYS = 14;
 const reportName = (() => {
   const abs = path.resolve(report);
   const base = path.basename(abs);
@@ -806,6 +808,9 @@ if (suite === "full" || suite === "changed") {
         const other = otherCore(c.core);
         const o = h.hist.lastOutcome(h.rows, c.check, other, { excludeReport: reportName, target });
         if (!o) continue;
+        // падение на другом ядре старше ONE_CORE_FAIL_DAYS дней не доказывает расхождение: исправление
+        // могло выйти с тех пор, а тест «одно ядро» на том ядре не шёл (WR-03); PASS живёт все 60 дней
+        if (FAILED.has(o.status) && Date.now() - Date.parse(o.finished_utc) > ONE_CORE_FAIL_DAYS * 864e5) continue;
         const diverge = (c.st === "PASS" && FAILED.has(o.status)) || (FAILED.has(c.st) && o.status === "PASS");
         if (!diverge) continue;
         const sts = { [c.core]: c.st, [other]: o.status };
