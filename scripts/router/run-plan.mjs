@@ -177,14 +177,20 @@ function splitSpecs(root, specs) {
 /**
  * Тесты с меткой «одно ядро» дерева (testFacts): Go-имена (уникальные, по алфавиту) и число
  * спек-тестов. Имя не по шаблону — исключение: в регэксп -test.skip идут только проверенные имена.
+ * Регэксп один на все тестовые бинарники, поэтому имя с меткой не должно совпадать с именем
+ * Go-теста без метки другого пакета — исключение.
  */
 function oneCoreFacts(root) {
   const go = new Set();
+  const plain = new Set(); // имена Go-тестов без метки: -test.skip действует на все пакеты сразу
   let pw = 0;
-  for (const f of coreMarks.testFacts(root)) {
+  const facts = coreMarks.testFacts(root);
+  for (const f of facts) if (f.kind === 'go' && !f.oneCore && typeof f.test === 'string') plain.add(f.test);
+  for (const f of facts) {
     if (!f.oneCore) continue;
     if (f.kind === 'go') {
       if (typeof f.test !== 'string' || !GO_TEST_NAME.test(f.test)) throw new Error(`«одно ядро»: недопустимое имя Go-теста: ${String(f.test).slice(0, 80)}`);
+      if (plain.has(f.test)) throw new Error(`«одно ядро»: имя Go-теста ${f.test} есть и в другом пакете без метки — -test.skip пропустил бы оба`);
       go.add(f.test);
     } else if (f.kind === 'pw') {
       pw++;
