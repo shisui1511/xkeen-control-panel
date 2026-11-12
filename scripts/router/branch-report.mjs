@@ -25,6 +25,21 @@
 //     страховка D-05б: проверка go:/pw: без метки ядра (или «одно ядро», прошедшая обе ветви), чей
 //     исход в ветвях xray и mihomo различается как класс (PASS / SKIP / KNOWN / FAIL и XPASS), либо
 //     «- нет»; проверки с QPASS или QFAIL (карантин) в раздел не входят.
+//     F14 (расхождение от состояния стенда): у неразмеченной проверки SKIP или KNOWN в одной ветви
+//     против PASS в другой — расхождение ядер, только если на ядре со SKIP/KNOWN у неё нет PASS в
+//     истории (history.mjs hasPass: 60 дней без этого отчёта и вложенных); PASS есть — строка
+//       - <проверка>: xray <ст>, mihomo <ст> — на <ядро> проходил (<отчёт PASS>, <дата PASS>),
+//         расхождение от состояния стенда
+//     в подразделе «### Расхождения состояния, не метка ядра» (печатается в каждом полном прогоне,
+//     где такие строки есть; строк core-mark в results.tsv нет). Пары FAIL/XPASS против PASS
+//     остаются в разделе. Граница правила — только неразмеченные проверки: условный пропуск или
+//     known по ядру в их коде запрещён стражем core-mark (Go — правила 1–2: тело, читающее ядро,
+//     зовёт CoreSpecific; спеки — правило 3: тег @core), поэтому новая зависимость от ядра в коде
+//     краснит CI раньше истории. Основание — todo F14: бейдж обновления на dashboard (светлая тема,
+//     1440 px; метка known ставится в самом тесте, пока бейдж на странице) и пустой каталог geosite
+//     у axe presets (test.skip) — состояние стенда, история показывает PASS на тех же ядрах.
+//     История не прочитана — расхождения остаются в разделе и строка «- история не прочитана:
+//     расхождения SKIP и KNOWN против PASS не сверены».
 //     D-05 (метка «одно ядро», --suite full и changed): тест «одно ядро» идёт на одном ядре, поэтому
 //     его исход (PASS, FAIL или XPASS ровно на одном ядре) сравнивается с последним исходом на другом
 //     ядре по истории (history.mjs lastOutcome: 60 дней, без этого отчёта и вложенных, без SKIP и
@@ -703,20 +718,42 @@ const otherCore = (core) => (core === "xray" ? "mihomo" : "xray");
 const FAILED = new Set(["FAIL", "XPASS"]);
 
 const needMark = [];
-// пометка истории не прочитана (строка в разделе вместо молчаливого пропуска)
+// F14: расхождения SKIP/KNOWN против PASS, снятые историей (на том ядре проверка проходила)
+const stateDiff = [];
+// пометки «история не прочитана» (строки в разделе вместо молчаливого пропуска)
 let oneCoreHistoryMissing = false;
+let stateHistoryMissing = false;
+const SKIP_LIKE = new Set(["SKIP", "KNOWN"]);
 const bothBranches = [...byCheck.values()].some((m) => m.has("xray")) && [...byCheck.values()].some((m) => m.has("mihomo"));
 if (suite === "full" && bothBranches) {
   for (const [check, perCore] of byCheck) {
     if (!perCore.has("xray") || !perCore.has("mihomo")) continue;
+    const xs = perCore.get("xray");
+    const ms = perCore.get("mihomo");
     // проверка в карантине хоть в одной ветви метки ядра не требует (D-17)
-    if (classOf(perCore.get("xray")) === "quarantine" || classOf(perCore.get("mihomo")) === "quarantine") continue;
-    if (classOf(perCore.get("xray")) === classOf(perCore.get("mihomo"))) continue;
+    if (classOf(xs) === "quarantine" || classOf(ms) === "quarantine") continue;
+    if (classOf(xs) === classOf(ms)) continue;
     // размечен меткой ядра или Go-разметка не прочитана; тест «одно ядро», прошедший обе ветви,
     // сравнивается как неразмеченный
     const mark = markOf(check);
     if (mark !== "" && mark !== "one-core") continue;
-    needMark.push({ check, xray: perCore.get("xray"), mihomo: perCore.get("mihomo") });
+    // F14: у неразмеченной проверки SKIP или KNOWN на одном ядре против PASS на другом — расхождение
+    // ядер, только если на ядре со SKIP/KNOWN у неё нет PASS в истории (60 дней без этого отчёта);
+    // PASS есть — пропуск от состояния стенда, строка уходит в подраздел с доказательством. Пары
+    // FAIL/XPASS против PASS и тесты «одно ядро» правилом не снимаются.
+    const skipCore = SKIP_LIKE.has(xs) && ms === "PASS" ? "xray" : SKIP_LIKE.has(ms) && xs === "PASS" ? "mihomo" : "";
+    if (mark === "" && skipCore) {
+      const h = await loadHistory();
+      if (!h) stateHistoryMissing = true;
+      else {
+        const p = h.hist.hasPass(h.rows, check, skipCore, { excludeReport: reportName, target });
+        if (p) {
+          stateDiff.push({ check, xray: xs, mihomo: ms, core: skipCore, report: p.report, when: p.finished_utc });
+          continue;
+        }
+      }
+    }
+    needMark.push({ check, xray: xs, mihomo: ms });
   }
 }
 
@@ -763,7 +800,19 @@ if (suite === "full" || (suite === "changed" && (needMark.length > 0 || oneCoreH
     out.push(`- core-mark:${cleanName(n.check)}: ${needText(n)}`);
   }
   if (oneCoreHistoryMissing) out.push("- история не прочитана: сравнение «одно ядро» не выполнено");
+  if (stateHistoryMissing) out.push("- история не прочитана: расхождения SKIP и KNOWN против PASS не сверены");
   out.push("");
+  // F14: снятые историей расхождения печатаются в каждом прогоне с отчётом и датой найденного PASS
+  // (видно, насколько старо доказательство); строк core-mark в results.tsv у них нет
+  if (stateDiff.length > 0) {
+    out.push("### Расхождения состояния, не метка ядра", "");
+    for (const s of stateDiff) {
+      out.push(
+        `- ${cleanName(s.check)}: xray ${s.xray}, mihomo ${s.mihomo} — на ${s.core} проходил (${s.report}, ${String(s.when).slice(0, 10)}), расхождение от состояния стенда`
+      );
+    }
+    out.push("");
+  }
 }
 
 // --- тренд набора против прошлого полного прогона (D-16) ------------------------------------
