@@ -21,7 +21,8 @@
  * (RT.core, XCP_CORE, selectorApplies, переключение, помощник спека, читающий ядро),
  * обязаны нести тег ядра (CORE_TAG) на каждом таком test(...),
  * а метки knownFailure с ядром в селекторе — идти через coreTagsOf. core-switch.spec.ts
- * исключён: он идёт в каждой ветви.
+ * исключён: он идёт в каждой ветви. Тег «одно ядро» (ONE_CORE_TAG с аннотацией one-core
+ * «<причина>; covered-by: <название>») выполняет это правило, но тегом ядра не считается.
  * Области router-area и факты тестов (loadAreas, matchGlob, areaOfText, testFacts — ярус,
  * Slow, карантин, метка ядра, область файла) — в конце файла; их читают
  * scripts/check-router-areas.js, выбор changed, страж ярусов и бюджет.
@@ -273,6 +274,10 @@ function goViolations(root) {
 /** TS-часть (Playwright): спеки frontend/tests/router/*.spec.ts. */
 const SPEC_READS_CORE = /\b(?:RT\.core|RT\.wantCore|XCP_CORE|XCP_WANT_CORE|switch_kernel)\b|\bselectorApplies\(/;
 const SPEC_CORE_TAGGED = /\bCORE_TAG\b|\bCORE_LABEL_TAG\b|['"`]@core['"`]|\bcoreTagsOf\(/;
+// Тег «одно ядро» (D-01…D-04): правило 3 выполняет, тегом ядра не является (SPEC_CORE_TAGGED его не совпадает).
+const SPEC_ONE_CORE = /\bONE_CORE_TAG\b|['"`]@one-core['"`]/;
+const SPEC_ONE_CORE_ALL = /\bONE_CORE_TAG\b|['"`]@one-core['"`]/g;
+const ONE_CORE_COVERED_BY = '; covered-by: ';
 const SPEC_USES_COREOF = /\bcoreTagsOf\(/;
 const KNOWN_CALL = /\bknownFailure\(\s*(['"`])([^'"`\n]*)\1/g;
 const LIB_READS_CORE = /\bRT\.core\b|\bXCP_CORE\b/;
@@ -315,7 +320,8 @@ function stripTs(text) {
 
 /**
  * Факты об одном TS-спеке (после вырезания комментариев и импортов):
- * { readsCore, coreTagged, coreLabelSelectors, usesCoreTagsOf }.
+ * { readsCore, coreTagged, oneCoreTagged, coreLabelSelectors, usesCoreTagsOf }. Тег «одно ядро»
+ * в coreTagged не входит: спек с ним идёт в одну ветвь, как неразмеченный.
  */
 function specFacts(text) {
   const code = stripTs(text);
@@ -326,6 +332,7 @@ function specFacts(text) {
   return {
     readsCore: SPEC_READS_CORE.test(code),
     coreTagged: SPEC_CORE_TAGGED.test(code),
+    oneCoreTagged: SPEC_ONE_CORE.test(code),
     coreLabelSelectors,
     usesCoreTagsOf: SPEC_USES_COREOF.test(code)
   };
@@ -447,7 +454,9 @@ function untaggedCoreTests(text) {
       SPEC_READS_CORE.test(seg) || [...tainted].some((n) => new RegExp('\\b' + n + '\\(').test(seg));
     if (!reads) continue;
     const tagged =
-      SPEC_CORE_TAGGED.test(seg) || (tagVarOk && /\{\s*tag\s*[,}]|\btag:\s*tag\b/.test(seg));
+      SPEC_CORE_TAGGED.test(seg) ||
+      SPEC_ONE_CORE.test(seg) ||
+      (tagVarOk && /\{\s*tag\s*[,}]|\btag:\s*tag\b/.test(seg));
     if (!tagged) bad.push({ unparsed: false, title: seg.slice(1, 70).replace(/\s+/g, ' ') });
   }
   return bad;
@@ -457,7 +466,7 @@ function untaggedCoreTests(text) {
 function specIssues(text) {
   const f = specFacts(text);
   const issues = [];
-  if (f.readsCore && !f.coreTagged) {
+  if (f.readsCore && !f.coreTagged && !f.oneCoreTagged) {
     issues.push('спек читает ядро без тега ядра: объявите такие тесты с { tag: CORE_TAG }');
   } else if (f.readsCore) {
     // тег есть у части тестов файла: остальные тесты, читающие ядро, тоже должны его нести
@@ -473,6 +482,61 @@ function specIssues(text) {
     issues.push(
       `метка knownFailure с ядром в селекторе (${f.coreLabelSelectors.join(', ')}) без coreTagsOf: тег @core-label выводится через test(title, { tag: coreTagsOf(() => …) }, fn)`
     );
+  }
+  if (f.oneCoreTagged || annotationTypeUsed(stripTs(text), 'one-core')) issues.push(...specOneCoreIssues(text));
+  return issues;
+}
+
+/** Описание аннотации one-core «<причина>; covered-by: <название>» → { reason, covers } (пустые строки — нет части). */
+function parseOneCore(desc) {
+  const s = desc || '';
+  const at = s.lastIndexOf(ONE_CORE_COVERED_BY);
+  if (at < 0) return { reason: s.trim(), covers: '' };
+  return { reason: s.slice(0, at).trim(), covers: s.slice(at + ONE_CORE_COVERED_BY.length).trim() };
+}
+
+/** В тексте упомянут тип аннотации (литералом или константой из lib/known.ts). */
+function annotationTypeUsed(code, type) {
+  return new RegExp(`\\btype:\\s*(?:(['"\`])${type}\\1|\\b${ANNOTATION_CONST[type]}\\b)`).test(code);
+}
+
+/**
+ * Нарушения метки «одно ядро» в спеке (правило 6 стража для Playwright): тег ONE_CORE_TAG —
+ * только в деталях test(…), с аннотацией one-core, где причина и покрытие — непустой строковый
+ * литерал «<причина>; covered-by: <название другого теста>»; вместе с тегом ядра тег не ставится;
+ * аннотация one-core без тега — тоже нарушение.
+ */
+function specOneCoreIssues(text) {
+  const code = stripTs(text);
+  const issues = [];
+  let tagsInTests = 0;
+  for (const m of code.matchAll(/(?<![\w.$])test\(/g)) {
+    const args = splitArgs(code, m.index + m[0].length - 1);
+    if (!args || args.length < 3) continue;
+    const details = args[1].text;
+    const title = literalValue(args[0].text);
+    const shown = title || args[0].text.slice(0, 60);
+    const tagged = SPEC_ONE_CORE.test(details);
+    const ann = annotationOf(details, 'one-core');
+    if (!tagged) {
+      if (ann !== null) issues.push(`аннотация one-core без тега ONE_CORE_TAG (${shown})`);
+      continue;
+    }
+    tagsInTests += [...details.matchAll(SPEC_ONE_CORE_ALL)].length;
+    if (SPEC_CORE_TAGGED.test(details)) {
+      issues.push(`метки «одно ядро» и «ядро» взаимоисключают: ONE_CORE_TAG ставится вместо CORE_TAG (${shown})`);
+    }
+    const { reason, covers } = parseOneCore(ann);
+    if (!reason || !covers) {
+      issues.push(
+        `тег @one-core без аннотации { type: ONE_CORE_ANNOTATION, description: '<причина>; covered-by: <название теста>' } (${shown})`
+      );
+    } else if (title !== null && covers === title) {
+      issues.push(`one-core: покрытие — другой тест, а не сам «${title}»`);
+    }
+  }
+  if ([...code.matchAll(SPEC_ONE_CORE_ALL)].length > tagsInTests) {
+    issues.push('тег @one-core вне деталей test(…): метку читают только из деталей теста');
   }
   return issues;
 }
@@ -987,7 +1051,11 @@ function goTestFacts(text) {
 
 const SPEC_FULL_TAG = /\bFULL_TAG\b|['"`]@full['"`]/;
 
-const ANNOTATION_CONST = { 'tier-full': 'TIER_FULL_ANNOTATION', slow: 'SLOW_ANNOTATION' };
+const ANNOTATION_CONST = {
+  'tier-full': 'TIER_FULL_ANNOTATION',
+  slow: 'SLOW_ANNOTATION',
+  'one-core': 'ONE_CORE_ANNOTATION'
+};
 
 /**
  * Описание аннотации заданного типа в тексте деталей test(…): строка, '' (без описания, с
@@ -1004,7 +1072,10 @@ function annotationOf(seg, type) {
   return new RegExp(`\\btype:\\s*${typeRe}`).test(seg) ? '' : null;
 }
 
-/** Факты тестов одного спека (без области): [{test, tier, tierReason, slowReason, quarantine, coreMarked}]. */
+/**
+ * Факты тестов одного спека (без области):
+ * [{test, titleTemplate, tier, tierReason, slowReason, quarantine, coreMarked, oneCore: {reason, covers} | null}].
+ */
 function specTestFacts(text) {
   const code = stripTs(text);
   const tagVarCore = /\b(?:const|let)\s+tag\s*=[^;]*?(?:CORE_TAG|CORE_LABEL_TAG|coreTagsOf)/s.test(code);
@@ -1027,7 +1098,10 @@ function specTestFacts(text) {
       tierReason: SPEC_FULL_TAG.test(details) ? tierReason || null : null,
       slowReason: slow === null ? null : slow || null,
       quarantine: q ? q[2] : null,
-      coreMarked: SPEC_CORE_TAGGED.test(details) || (tagVarCore && /\{\s*tag\s*[,}]|\btag:\s*tag\b/.test(details))
+      // тег «одно ядро» метку ядра не даёт: тест идёт в одну ветвь, как неразмеченный (D-03)
+      coreMarked: SPEC_CORE_TAGGED.test(details) || (tagVarCore && /\{\s*tag\s*[,}]|\btag:\s*tag\b/.test(details)),
+      // без аннотации с причиной и покрытием — пустые строки (их отклоняет specIssues)
+      oneCore: SPEC_ONE_CORE.test(details) ? parseOneCore(annotationOf(details, 'one-core')) : null
     });
   }
   return rows;

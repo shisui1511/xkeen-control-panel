@@ -27,8 +27,13 @@
  *      TestRouter* (не в помощнике и не в объявлении уровня файла), один раз, причина и
  *      покрытие — непустые строковые литералы, покрытие — имя другого TestRouter*;
  *      вместе с routertest.CoreSpecific метка не ставится.
- *   7. Покрытие существует и того же семейства (Go — тот же пакет и router-area), несёт
- *      метку ядра (CoreSpecific), не в карантине и само не «одно ядро».
+ *      Спек: тег ONE_CORE_TAG ('@one-core') — только в деталях test(…), с аннотацией
+ *      { type: ONE_CORE_ANNOTATION, description: '<причина>; covered-by: <название теста>' },
+ *      причина и покрытие непустые, покрытие — другой тест; вместе с CORE_TAG тег не ставится;
+ *      аннотация one-core без тега — нарушение. Тег выполняет правило 3.
+ *   7. Покрытие существует и того же семейства (Go — тот же пакет и router-area, спек — та же
+ *      router-area), несёт метку ядра (CoreSpecific, CORE_TAG), не в карантине и само не
+ *      «одно ядро».
  * Самопроверка сканера на образцах идёт при каждом запуске: расхождение — код 1.
  *
  * Usage: node scripts/check-core-marks.js
@@ -41,6 +46,7 @@ const {
   goViolations,
   oneCoreIssues,
   specIssues,
+  specTestFacts,
   specViolations,
   testFacts
 } = require('./router/core-marks.cjs');
@@ -124,17 +130,31 @@ const oneCoreSamples = [
   ['покрытие без метки ядра', { coreMarked: false }, 1],
   ['покрытие в карантине', { quarantine: 'flaky-x' }, 1],
   ['покрытие само «одно ядро»', { coreMarked: false, oneCore: { reason: 'r', covers: 'TestRouterK' } }, 1],
-  ['покрытия нет', { test: 'TestRouterZ' }, 1]
+  ['покрытия нет', { test: 'TestRouterZ' }, 1],
+  // спек: семейство — та же router-area, пакета нет
+  ['спек: правильное покрытие', { kind: 'pw', pkg: null }, 0, { kind: 'pw', pkg: null }],
+  ['спек: покрытие из другой router-area', { kind: 'pw', pkg: null, area: 'routing' }, 1, { kind: 'pw', pkg: null }],
+  ['спек: покрытие — Go-тест', {}, 1, { kind: 'pw', pkg: null }]
 ];
-for (const [what, patch, want] of oneCoreSamples) {
+for (const [what, patch, want, selfPatch = {}] of oneCoreSamples) {
   const facts = [
-    { ...oneCoreBase, test: 'TestRouterK', coreMarked: false, oneCore: { reason: 'r', covers: 'TestRouterC' } },
+    { ...oneCoreBase, test: 'TestRouterK', coreMarked: false, oneCore: { reason: 'r', covers: 'TestRouterC' }, ...selfPatch },
     { ...oneCoreBase, test: 'TestRouterC', coreMarked: true, oneCore: null, ...patch }
   ];
   // у покрытия «одно ядро» нарушение даёт и оно само (его покрытие K без метки ядра): считаем только K
   const got = oneCoreIssues(facts).filter((i) => i.test === 'TestRouterK').length;
   if (got !== want) {
     problems.push(`самопроверка покрытия «одно ядро»: ${what} дало нарушений ${got}; ожидалось ${want}`);
+  }
+}
+
+// Факт «одно ядро» у спека: причина и покрытие из аннотации, тега ядра нет
+const ONE_CORE_SPEC =
+  "import { ONE_CORE_TAG, ONE_CORE_ANNOTATION } from './lib/known';\ntest('a', { tag: ONE_CORE_TAG, annotation: { type: ONE_CORE_ANNOTATION, description: 'перезапуск; covered-by: x' } }, async () => {\n  if (RT.core === 'xray') return;\n});\n";
+{
+  const f = specTestFacts(ONE_CORE_SPEC)[0];
+  if (!f || !f.oneCore || f.oneCore.reason !== 'перезапуск' || f.oneCore.covers !== 'x' || f.coreMarked !== false) {
+    problems.push(`самопроверка сканера спеков: факт «одно ядро» разобран неверно: ${JSON.stringify(f)}`);
   }
 }
 
@@ -175,6 +195,30 @@ const specSamples = [
   // скобки вызова не сошлись: страж сообщает о неразобранном вызове, а не молчит
   [
     "test('a', { tag: CORE_TAG }, async () => {\n  if (RT.core === 'xray') return;\n});\ntest('b', async () => {\n  const r = a ? /x/ : (1;\n",
+    1
+  ],
+  // метка «одно ядро»: правило 3 выполнено, причина и покрытие — в аннотации
+  [ONE_CORE_SPEC, 0],
+  // тег без аннотации с причиной и покрытием
+  ["test('a', { tag: ONE_CORE_TAG }, async () => {\n  if (RT.core === 'xray') return;\n});\n", 1],
+  // аннотация без покрытия
+  [
+    "test('a', { tag: ONE_CORE_TAG, annotation: { type: ONE_CORE_ANNOTATION, description: 'перезапуск' } }, async () => {\n  if (RT.core === 'xray') return;\n});\n",
+    1
+  ],
+  // тег «одно ядро» вместе с тегом ядра
+  [
+    "test('a', { tag: [CORE_TAG, ONE_CORE_TAG], annotation: { type: ONE_CORE_ANNOTATION, description: 'перезапуск; covered-by: x' } }, async () => {\n  if (RT.core === 'xray') return;\n});\n",
+    1
+  ],
+  // аннотация one-core без тега: тест к тому же читает ядро без метки
+  [
+    "test('a', { annotation: { type: 'one-core', description: 'перезапуск; covered-by: x' } }, async () => {\n  if (RT.core === 'xray') return;\n});\n",
+    2
+  ],
+  // тег вне деталей test(…)
+  [
+    "test.describe('d', { tag: ONE_CORE_TAG }, () => {\n  test('a', async () => {\n    await page.goto('/');\n  });\n});\n",
     1
   ]
 ];
