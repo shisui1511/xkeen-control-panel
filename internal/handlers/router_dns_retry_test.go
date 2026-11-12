@@ -393,6 +393,6 @@ func TestRouterDNSEnablePanelRestart(t *testing.T) {
 	e.rtDNSWaitStep("probe", "running", rtDNSStateWait)
 	res := rtPanelRestart(t, e.p, old, nil)
 	rtPanelRestartVerdict(t, old, res, "перезапуск посреди пробы включения перехвата DNS")
-	off := e.rtDNSWaitState("off", rtDNSWindowS*time.Second)
+	off := e.rtDNSWaitState("off", rtDNSWindowDur(t))
 	e.rtDNSExpectRolledBack(off, kernel, overrideBefore)
 }

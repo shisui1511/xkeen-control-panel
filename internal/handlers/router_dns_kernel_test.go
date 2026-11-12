@@ -231,7 +231,7 @@ func TestRouterDNSKernelSwitch(t *testing.T) {
 
 	e.rtDNSSwitchKernel(kernel)
 	e.rtDNSExpectSwitchWindow(kernel, rtDNSLastCheckAt(kept))
-	off := e.rtDNSWaitState("off", rtDNSTimeoutWait)
+	off := e.rtDNSWaitState("off", rtDNSTimeoutWaitOf(t))
 	if desired, _ := off["desired"].(bool); desired {
 		t.Error("после отката окна переноса desired=true")
 	}
@@ -273,7 +273,7 @@ func TestRouterDNSKernelSwitchWindowPanelRestart(t *testing.T) {
 	res := rtPanelRestart(t, e.p, old, nil)
 	rtPanelRestartVerdict(t, old, res, "перезапуск в окне подтверждения переноса перехвата DNS")
 
-	off := e.rtDNSWaitState("off", rtDNSWindowS*time.Second)
+	off := e.rtDNSWaitState("off", rtDNSWindowDur(t))
 	e.rtDNSExpectRolledBack(off, other, overrideBefore)
 	if rtDNSKernelHasListener(kernel) {
 		t.Errorf("после отката переноса в файлах прежнего ядра %s слушатель :53", kernel)

@@ -33,10 +33,6 @@ const (
 	rtDNSOutcomeSeenPath = rtDNSBase + "/outcome-seen"
 	// rtDNSOutcomeNotice — префикс уведомления слоя об исходе без пользователя.
 	rtDNSOutcomeNotice = "dns_outcome:"
-	// rtDNSWindowS — длительность окна подтверждения (D-05).
-	rtDNSWindowS = 60
-	// rtDNSTimeoutWait — сколько ждать автоотката: окно плюс откат с перезапуском ядра.
-	rtDNSTimeoutWait = rtDNSWindowS*time.Second + rtDNSStateWait
 )
 
 // rtDNSWindowDur — окно подтверждения, которое действует у процесса панели
@@ -241,7 +237,7 @@ func TestRouterDNSWindowTimeout(t *testing.T) {
 	t.Cleanup(func() { e.with(t).rtDNSEnsureOff() })
 	deadline := rtDNSNum(rtDNSWindow(v), "deadline_ms")
 
-	off := e.rtDNSWaitState("off", rtDNSTimeoutWait)
+	off := e.rtDNSWaitState("off", rtDNSTimeoutWaitOf(t))
 	if now := rtDNSNum(off, "server_now_ms"); now < deadline {
 		t.Errorf("откат за %v до дедлайна окна: ожидался откат по таймеру", time.Duration(deadline-now)*time.Millisecond)
 	}
@@ -321,7 +317,7 @@ func TestRouterDNSWindowRollbackNow(t *testing.T) {
 // Трасса: подготовка → включение → state window → перезапуск панели
 // init-скриптом посреди окна (rtPanelRestart: новая панель отвечает по прежней
 // сессии) → старт панели откатывает неподтверждённый перехват сразу, не дожидаясь
-// дедлайна (D-07): state off в пределах 60 с после подъёма, :53 у прошивки,
+// дедлайна (D-07): state off в пределах окна панели после подъёма, :53 у прошивки,
 // override как до включения, файлы ядра без слушателя, исход timeout с
 // toast_pending и уведомление слоя (открытая вкладка после переподключения видит
 // «Откачено: нет подтверждения»). Метка ядра: откат перезапускает активное ядро.
@@ -339,7 +335,7 @@ func TestRouterDNSWindowPanelRestart(t *testing.T) {
 
 	res := rtPanelRestart(t, e.p, old, nil)
 	rtPanelRestartVerdict(t, old, res, "перезапуск посреди окна подтверждения DNS")
-	off := e.rtDNSWaitState("off", rtDNSWindowS*time.Second)
+	off := e.rtDNSWaitState("off", rtDNSWindowDur(t))
 	e.rtDNSExpectRolledBack(off, kernel, overrideBefore)
 	e.rtDNSExpectTimeoutOutcome(off)
 	if !e.rtDNSOutcomeNoticeShown() {
