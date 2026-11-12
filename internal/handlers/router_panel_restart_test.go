@@ -7,14 +7,11 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,7 +48,7 @@ import (
 // запускается секундами (прогон 20261016-115824-f37a028f).
 
 const (
-	rtPanelInit = "/opt/etc/init.d/S99xcp"
+	rtPanelInit = routertest.PanelInitScript
 	// rtPanelRestartLimit — за сколько init-скрипт обязан закончить restart:
 	// остановка ждёт выхода не дольше XCP_STOP_TIMEOUT (60 с), запуск — до 11 с.
 	rtPanelRestartLimit = 75 * time.Second
@@ -61,7 +58,7 @@ const (
 	// rtPanelStopMark — вывод init-скрипта перед killall при stop/restart.
 	rtPanelStopMark = "Shutting down"
 	// rtPanelShellMark — первая строка обёртки команды: оболочка запущена.
-	rtPanelShellMark = "xcp-rt-shell-started"
+	rtPanelShellMark = routertest.PanelShellMark
 	// rtPanelDeadlineMark — строка журнала панели об аварийном выходе по сроку
 	// остановки (cmd/xcp): шаг остановки не уложился и был брошен.
 	rtPanelDeadlineMark = "Shutdown: deadline"
@@ -70,69 +67,25 @@ const (
 	rtPanelUpTimeout = 90 * time.Second
 )
 
-// rtPanelPIDs — PID процессов панели: только запуски с -config (init-скрипт и
-// самообновление), без «xcp -v» и других коротких вызовов бинарника.
-func rtPanelPIDs() (pids []int, out string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	stdout, stderr, code := routertest.Exec(ctx, "pidof", "xcp")
-	out = strings.TrimSpace(stdout + " " + stderr)
-	if code != 0 {
-		return nil, out
-	}
-	for _, f := range strings.Fields(stdout) {
-		n, err := strconv.Atoi(f)
-		if err != nil || n <= 0 {
-			continue
-		}
-		raw, err := os.ReadFile("/proc/" + f + "/cmdline")
-		if err != nil {
-			continue
-		}
-		for _, a := range strings.Split(string(raw), "\x00") {
-			if a == "-config" {
-				pids = append(pids, n)
-				break
-			}
-		}
-	}
-	return pids, out
-}
+// rtPanelPIDs — PID процессов панели (routertest.PanelPIDs).
+func rtPanelPIDs() ([]int, string) { return routertest.PanelPIDs() }
 
-// rtPanelANSI — цветовые коды вывода init-скриптов Entware.
-var rtPanelANSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-
-// rtPanelInitCmd запускает init-скрипт панели с чистым окружением: новая панель не
-// должна унаследовать переменные теста (адрес подписки, сессия, каталоги).
-// Возвращает вывод скрипта одной строкой без цветовых кодов.
+// rtPanelInitCmd запускает init-скрипт панели с чистым окружением
+// (routertest.PanelInit без дополнительного приёмника вывода).
 func rtPanelInitCmd(ctx context.Context, action string) (string, int) {
 	return rtPanelInitRun(ctx, action, nil)
 }
 
 // rtPanelInitRun — rtPanelInitCmd, вывод которого по мере поступления пишется и в
 // marks (может быть nil): по нему видно, когда оболочка запустилась и когда rc.func
-// дошёл до killall.
+// дошёл до killall. nil-указатель marks в io.Writer не передаётся: интерфейс с
+// типизированным nil не равен nil, и PanelInit вызвал бы Write у nil *rtPanelMarks.
 func rtPanelInitRun(ctx context.Context, action string, marks *rtPanelMarks) (string, int) {
-	var out, errOut bytes.Buffer
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", "echo "+rtPanelShellMark+
-		"; exec env -i PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root "+rtPanelInit+" "+action)
-	cmd.Stdout = &out
+	var w io.Writer
 	if marks != nil {
-		cmd.Stdout = io.MultiWriter(&out, marks)
+		w = marks
 	}
-	cmd.Stderr = &errOut
-	code := 0
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		code = -1
-		if errors.As(err, &exitErr) {
-			code = exitErr.ExitCode()
-		} else if errOut.Len() == 0 {
-			errOut.WriteString(err.Error())
-		}
-	}
-	text := strings.ReplaceAll(out.String()+" "+errOut.String(), rtPanelShellMark, "")
-	return strings.Join(strings.Fields(rtPanelANSI.ReplaceAllString(text, "")), " "), code
+	return routertest.PanelInit(ctx, action, w)
 }
 
 // rtPanelMarks отмечает момент первого появления каждой метки в потоке вывода.
@@ -171,30 +124,9 @@ func (m *rtPanelMarks) get(name string) time.Time {
 }
 
 // rtPanelWaitUp ждёт панель с PID, отличным от old, которая отвечает на
-// /api/auth/me по прежней сессии. Возвращает PID или 0 и последнее наблюдение.
+// /api/auth/me по прежней сессии (routertest.PanelWaitUp).
 func rtPanelWaitUp(p *routertest.Panel, old int, limit time.Duration) (int, string) {
-	deadline := time.Now().Add(limit)
-	last := ""
-	for time.Now().Before(deadline) {
-		pids, out := rtPanelPIDs()
-		switch {
-		case len(pids) != 1:
-			last = "процессов панели " + strconv.Itoa(len(pids)) + " (pidof: " + out + ")"
-		case pids[0] == old:
-			last = "работает старый процесс " + strconv.Itoa(old)
-		default:
-			code, err := p.GetJSON("/api/auth/me", nil)
-			if err == nil && code == http.StatusOK {
-				return pids[0], ""
-			}
-			last = "новый процесс " + strconv.Itoa(pids[0]) + ", /api/auth/me: http " + strconv.Itoa(code)
-			if err != nil {
-				last += " (" + err.Error() + ")"
-			}
-		}
-		time.Sleep(time.Second)
-	}
-	return 0, last
+	return routertest.PanelWaitUp(p, old, limit)
 }
 
 // rtPanelOpenStream открывает поток и возвращает два канала: done закрывается, когда
