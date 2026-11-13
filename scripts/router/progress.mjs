@@ -17,6 +17,10 @@
 // запуски считаются отдельно («сейчас»), пока их строки не попали в results.tsv. Вердикт
 // законченного прогона — строки «- Итог:» summary.md.
 //
+// Вне отчёта: очередь на стенд — файлы <git common dir>/router-test.queue.<pid> (rt_lock в lib.sh:
+// набор и начало ожидания), живые по PID; ночной прогон, ждущий старта, — build/router/unattended/
+// state (фаза «ожидание», время at), живой по PID и командной строке «unattended.sh run».
+//
 // Использование (из любого каталога рабочей копии; отчёт по умолчанию — build/router/last
 // основной копии, то есть последний начатый прогон или сессия):
 //   node scripts/router/progress.mjs [<отчёт>]            снимок хода
@@ -35,11 +39,49 @@ const FAILS_SHOWN = 12;
 // без событий и роста сырого потока дольше — пометка «нет событий»
 const IDLE_WARN_S = 300;
 
-function mainRoot() {
-  const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+function commonDir() {
+  return execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
     encoding: 'utf8'
   }).trim();
-  return path.dirname(common);
+}
+
+function mainRoot() {
+  return path.dirname(commonDir());
+}
+
+/** Прогоны, ждущие блокировку стенда: [{ suite, sinceSec }]. */
+function queueOf(now) {
+  const dir = commonDir();
+  const out = [];
+  let names = [];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return out;
+  }
+  for (const n of names) {
+    const m = /^router-test\.queue\.(\d+)$/.exec(n);
+    if (!m || !alive(Number(m[1]))) continue;
+    const [suite = 'full', t = '0'] = readText(path.join(dir, n)).trim().split('\t');
+    out.push({ suite, sinceSec: now - Number(t) });
+  }
+  return out.sort((a, b) => b.sinceSec - a.sinceSec);
+}
+
+/** Ночной прогон, ждущий старта: { at } или null. */
+function unattendedWaiting(root) {
+  const st = readText(path.join(root, 'build', 'router', 'unattended', 'state'));
+  const kv = Object.fromEntries(
+    st
+      .split('\n')
+      .filter((l) => l.includes('='))
+      .map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)])
+  );
+  const pid = Number(kv.pid);
+  if (!pid || !alive(pid)) return null;
+  if (!readText(`/proc/${pid}/cmdline`).split('\0').join(' ').includes('unattended.sh run')) return null;
+  if (kv.phase !== 'ожидание' && kv.phase !== 'запуск') return null;
+  return { at: kv.at && kv.at !== '-' ? kv.at : '' };
 }
 
 function parseArgs(argv) {
@@ -173,6 +215,12 @@ function goRaw(file) {
   return { res, current, mtime: mtimeS(file) };
 }
 
+/** Оставшееся время запуска по среднему темпу; меньше трёх законченных тестов — null. */
+function blockEta(elapsed, done, total) {
+  if (done < 3 || total <= done) return null;
+  return Math.round((elapsed / done) * (total - done));
+}
+
 function fmtDur(sec) {
   if (sec == null || !Number.isFinite(sec)) return '—';
   sec = Math.max(0, Math.round(sec));
@@ -205,10 +253,15 @@ function collect(report) {
     idleSec: 0,
     holdUntil: 0,
     holdLeftSec: 0,
+    overSec: 0,
+    queue: [],
+    unattended: null,
     line: ''
   };
+  state.queue = queueOf(now);
+  state.unattended = unattendedWaiting(mainRoot());
   if (!report || !fs.existsSync(report)) {
-    state.line = 'стенд: прогонов нет';
+    state.line = oneLine(state);
     return state;
   }
   const rootLog = path.join(report, 'progress.tsv');
@@ -249,13 +302,15 @@ function collect(report) {
       : Math.max(lastT, mtimeS(path.join(report, 'summary.md')) || 0);
   state.elapsedSec = state.started ? endT - state.started : 0;
 
-  const est = events.filter((e) => e.kind === 'est').pop();
+  // оценка — только корневого журнала: вложенный прогон сессии пишет свою в свой журнал
+  const est = events.filter((e) => e.kind === 'est' && e.file === rootLog).pop();
   if (est) {
     state.estSec = Number(est.f[0]) || null;
     if (state.estSec) {
       const going = running && !holding;
       state.percent = Math.min(going ? 99 : 100, Math.floor((state.elapsedSec / state.estSec) * 100));
       state.etaSec = going ? Math.max(0, state.estSec - state.elapsedSec) : 0;
+      state.overSec = going ? Math.max(0, state.elapsedSec - state.estSec) : 0;
     }
   }
 
@@ -330,7 +385,8 @@ function collect(report) {
         done: raw.res.length,
         total: Math.max(Number(lastGo.f[3]) || 0, raw.res.length),
         counts,
-        current: raw.current
+        current: raw.current,
+        etaSec: blockEta(now - lastGo.t, raw.res.length, Math.max(Number(lastGo.f[3]) || 0, raw.res.length))
       };
       state.idleSec = now - Math.max(raw.mtime, lastT);
     } else if (lastPw && pwOpen(lastPw)) {
@@ -355,7 +411,8 @@ function collect(report) {
         total: Number(lastPw.f[2]) || 0,
         counts,
         current: started.length ? started[started.length - 1].f[2] : '',
-        currentSec: started.length ? now - started[started.length - 1].t : null
+        currentSec: started.length ? now - started[started.length - 1].t : null,
+        etaSec: blockEta(now - lastPw.t, ended.size, Number(lastPw.f[2]) || 0)
       };
       state.idleSec = now - lastT;
     } else {
@@ -375,6 +432,16 @@ function collect(report) {
 }
 
 function oneLine(s) {
+  const base = oneLineRun(s);
+  const extra = [];
+  if (s.queue.length && s.state !== 'running') {
+    extra.push(`в очереди: ${s.queue.map((q) => q.suite).join(', ')}`);
+  }
+  if (s.unattended) extra.push(`ночной прогон ждёт${s.unattended.at ? ` ${s.unattended.at}` : ''}`);
+  return extra.length ? `${base} · ${extra.join(' · ')}` : base;
+}
+
+function oneLineRun(s) {
   if (s.state === 'none') return 'стенд: прогонов нет';
   const suite = s.suite || 'прогон';
   if (s.state === 'hold') {
@@ -395,7 +462,8 @@ function oneLine(s) {
     parts.push(`${st.core !== '-' ? `${st.core} ` : ''}${st.name}`);
   }
   if (s.counts.FAIL || s.fails.some((f) => f.live)) parts.push(`✗${s.fails.length}`);
-  if (s.etaSec != null) parts.push(`осталось ~${fmtDur(s.etaSec)}`);
+  if (s.overSec > 0) parts.push(`дольше оценки на ${fmtDur(s.overSec)}`);
+  else if (s.etaSec != null) parts.push(`осталось ~${fmtDur(s.etaSec)}`);
   else parts.push(fmtDur(s.elapsedSec));
   return parts.join(' · ');
 }
@@ -415,7 +483,17 @@ function render(s, color) {
   const c = (code, t) => (color ? `\x1b[${code}m${t}\x1b[0m` : t);
   const width = Math.max(20, Math.min(50, (process.stdout.columns || 80) - 30));
   const out = [];
-  if (s.state === 'none') return 'Прогонов на стенде нет (build/router/last не найден).\n';
+  const pre = [];
+  for (const q of s.queue) {
+    pre.push(c('33', `В очереди на стенд: ${q.suite} — ждёт ${fmtDur(q.sinceSec)}`));
+  }
+  if (s.unattended) {
+    pre.push(c('36', `Ночной прогон ждёт старта${s.unattended.at ? ` в ${s.unattended.at}` : ''}`));
+  }
+  if (s.state === 'none') {
+    return [...pre, 'Прогонов на стенде нет (build/router/last не найден).'].join('\n') + '\n';
+  }
+  out.push(...pre);
   const stateRu = {
     running: c('36', 'идёт'),
     hold: 'закончен',
@@ -429,7 +507,8 @@ function render(s, color) {
   }
   const times = [`прошло ${fmtDur(s.elapsedSec)}`];
   if (s.estSec) times.push(`оценка ${fmtDur(s.estSec)}`);
-  if (s.state === 'running' && s.etaSec != null) times.push(`осталось ~${fmtDur(s.etaSec)}`);
+  if (s.state === 'running' && s.overSec > 0) times.push(c('33', `дольше оценки на ${fmtDur(s.overSec)}`));
+  else if (s.state === 'running' && s.etaSec != null) times.push(`осталось ~${fmtDur(s.etaSec)}`);
   out.push(times.join(' · '));
   if (s.percent != null) out.push(`${bar(s.percent / 100, width)} ${s.percent}%  ${c('2', '(по оценке времени)')}`);
   if (s.session) out.push(`Сессия: ${s.session}`);
@@ -449,7 +528,8 @@ function render(s, color) {
         .filter(([, v]) => v)
         .map(([k, v]) => (k === 'FAIL' ? c('31', `${k} ${v}`) : `${k} ${v}`))
         .join(', ');
-      out.push(`${b.core} ${b.name}: ${bar(frac, width)} ${b.done}/${b.total}${cnt ? `  ${cnt}` : ''}`);
+      const beta = b.etaSec != null ? c('2', `  ~${fmtDur(b.etaSec)}`) : '';
+      out.push(`${b.core} ${b.name}: ${bar(frac, width)} ${b.done}/${b.total}${beta}${cnt ? `  ${cnt}` : ''}`);
       if (b.current) {
         out.push(`  сейчас: ${b.current}${b.currentSec != null ? c('2', ` (${fmtDur(b.currentSec)})`) : ''}`);
       }
@@ -467,7 +547,27 @@ function render(s, color) {
     }
     if (s.fails.length > FAILS_SHOWN) out.push(c('2', `  … и ещё ${s.fails.length - FAILS_SHOWN} — ${s.name}/*/results.tsv`));
   }
-  return out.join('\n') + '\n';
+  // в терминале строка не длиннее его ширины: перенос сбивал бы перерисовку --watch
+  const cols = process.stdout.isTTY ? process.stdout.columns || 0 : 0;
+  return out.map((l) => (cols ? fit(l, cols) : l)).join('\n') + '\n';
+}
+
+/** Обрезает строку до cols видимых символов, не разрывая escape-последовательности цвета. */
+function fit(line, cols) {
+  if (line.replace(/\x1b\[[0-9;]*m/g, '').length <= cols) return line;
+  let shown = 0;
+  let res = '';
+  for (let i = 0; i < line.length && shown < cols - 1; i++) {
+    const m = /^\x1b\[[0-9;]*m/.exec(line.slice(i));
+    if (m) {
+      res += m[0];
+      i += m[0].length - 1;
+      continue;
+    }
+    res += line[i];
+    shown++;
+  }
+  return `${res}…\x1b[0m`;
 }
 
 function main() {

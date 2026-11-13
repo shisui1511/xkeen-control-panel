@@ -128,10 +128,15 @@ rt_lock() {
   exec 9>"$_lf"
   if ! flock -n 9; then
     echo "router: очередь на роутеры — занято другим прогоном, жду до ${RT_LOCK_WAIT:-3600} с" >&2
+    # отметка очереди для хода прогона (progress.mjs): набор, начало ожидания; живость — по PID
+    _qf="$(rt_common_dir)/router-test.queue.$$"
+    printf '%s\t%s\n' "${SUITE:-full}" "$(date +%s)" >"$_qf" 2>/dev/null || true
     if ! flock -w "${RT_LOCK_WAIT:-3600}" 9; then
+      rm -f "$_qf"
       echo "router: очередь на роутеры не освободилась за ${RT_LOCK_WAIT:-3600} с" >&2
       return 1
     fi
+    rm -f "$_qf"
   fi
   RT_LOCK_HELD=1
   export RT_LOCK_HELD
