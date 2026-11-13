@@ -1120,7 +1120,11 @@ function annotationOf(seg, type) {
 function specTestFacts(text) {
   const code = stripTs(text);
   const tagVarCore = /\b(?:const|let)\s+tag\s*=[^;]*?(?:CORE_TAG|CORE_LABEL_TAG|coreTagsOf)/s.test(code);
-  const tagVarCoreOnly = /\b(?:const|let)\s+tag\s*=[^;]*?\bCORE_TAG\b/s.test(code);
+  // постоянный CORE_TAG в переменной tag — только безусловный: перед ним в выражении нет тернарника
+  // и логического И/ИЛИ (`cond ? [CORE_TAG] : []`), иначе тег есть не у каждого теста с { tag }
+  const tagVarCoreOnly = [...code.matchAll(/\b(?:const|let)\s+tag\s*=([^;]*?)\bCORE_TAG\b/gs)].some(
+    (m) => !/[?]|&&|\|\|/.test(m[1])
+  );
   const rows = [];
   for (const m of code.matchAll(/(?<![\w.$])test\(/g)) {
     const open = m.index + m[0].length - 1;
