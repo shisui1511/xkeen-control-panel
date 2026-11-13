@@ -84,10 +84,22 @@
 // печатаются. Диагностика селектора очищается: управляющие символы убираются, абсолютные пути
 // рабочих копий и домашнего каталога заменяются, число и длина строк ограничены.
 //
+// --after <отчёт> (повторяемый, только с --snapshot; D-19 фазы 148.1.2) — время гейтов после
+// переделки тестов на том же снимке: медианы снимка для проверок и ядер, найденных в строках
+// history.tsv, чьё имя отчёта начинается с одного из префиксов (отчёты сессий), заменяются
+// медианами этих строк (afterMedians); проверка без медианы в снимке получает её из сессии.
+// В тексте — строка «заменено временем сессий: K», в --json — поле after { prefixes, replaced }.
+//
+// Модуль (ESM): import не запускает повтор (main — только при вызове файла как CLI). Экспорт модели
+// оценки для оценщика полного прогона estimate-full.mjs (D-38): buildModel, planSec, branchSec,
+// goStageSec, pwStageSec, afterMedians и константы UNKNOWN_SEC, HISTORY_DAYS. Этап Go { all, skip }
+// не считает тесты из skip, этап Playwright с '@one-core' в invert — тесты с меткой «одно ядро»
+// (ветвь другого ядра полного прогона, run-plan.mjs); в наборе changed таких этапов нет.
+//
 // Использование (из корня репозитория):
 //   node scripts/router/select-replay.mjs [--since <дата>] [--until <дата>] [--selector-root <каталог>] [--json]
 //   node scripts/router/select-replay.mjs [--since <дата>] [--until <дата>] --capture <файл>
-//   node scripts/router/select-replay.mjs --snapshot <файл> [--selector-root <каталог>] [--json]
+//   node scripts/router/select-replay.mjs --snapshot <файл> [--selector-root <каталог>] [--after <отчёт>]… [--json]
 // Таблица Markdown: первая ячейка строки PR — `#<номер>` (или SHA слияния); затем итоговые строки.
 // Код выхода: 0 — оценка завершена, 1 — ошибка выбора хотя бы одного PR или ошибка входа, 2 — аргументы.
 
@@ -97,6 +109,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFi
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import coreMarks from './core-marks.cjs';
+import { durations as historyDurations, readHistory } from './history.mjs';
 import { runPlan } from './run-plan.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -107,9 +120,9 @@ const SELECTOR = 'scripts/router/select-changed.mjs';
 const SHELL_BASE_SEC = 180;
 const BRANCH_SEC = 40;
 const OBSERVE_SETTLE_SEC = 30;
-const UNKNOWN_SEC = 30;
+export const UNKNOWN_SEC = 30;
 const READ_WORKERS = 3;
-const HISTORY_DAYS = 60;
+export const HISTORY_DAYS = 60;
 const CORES = ['xray', 'mihomo'];
 const DEFAULT_SINCE = '2026-10-15';
 const KINDS = ['полный', 'обвязка', 'зависимости', 'области', 'смоук'];
@@ -121,6 +134,8 @@ const SESSION_DIR_RE = /^[0-9]{8}-[0-9]{6}-[0-9a-f]{8}-[A-Za-z0-9._-]*harness-se
 const SHA_RE = /^[0-9a-f]{40}$/;
 const DAY_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
 const DATE_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}([ T][0-9:]+)?$/;
+// префикс имени отчёта в history.tsv (колонка report): каталог отчёта и, у этапа сессии, /<NN>-<этап>
+const REPORT_PREFIX_RE = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]*)?$/;
 // Поля вывода селектора: все обязательны (значение может быть пустым)
 const RT_FIELDS = [
   'SELECT_ALL',
@@ -149,7 +164,7 @@ const USAGE = [
   'Использование:',
   '  node scripts/router/select-replay.mjs [--since <дата>] [--until <дата>] [--selector-root <каталог>] [--hub-percent <n>] [--json]',
   '  node scripts/router/select-replay.mjs [--since <дата>] [--until <дата>] --capture <файл>',
-  '  node scripts/router/select-replay.mjs --snapshot <файл> [--selector-root <каталог>] [--hub-percent <n>] [--json]'
+  '  node scripts/router/select-replay.mjs --snapshot <файл> [--selector-root <каталог>] [--hub-percent <n>] [--after <отчёт>]… [--json]'
 ].join('\n');
 
 function usage(msg) {
@@ -164,7 +179,7 @@ function fail(msg) {
 }
 
 function parseArgs(argv) {
-  const out = { since: null, until: null, capture: null, snapshot: null, selectorRoot: null, json: false, hubPercent: null };
+  const out = { since: null, until: null, capture: null, snapshot: null, selectorRoot: null, json: false, hubPercent: null, after: [] };
   const value = (i, name) => {
     const v = argv[i];
     if (v === undefined || v === '') usage(`${name}: нужно значение`);
@@ -179,7 +194,12 @@ function parseArgs(argv) {
     else if (a === '--selector-root') out.selectorRoot = value(++i, a);
     else if (a === '--json') out.json = true;
     else if (a === '--hub-percent') out.hubPercent = value(++i, a);
+    else if (a === '--after') out.after.push(value(++i, a));
     else usage(`неизвестный аргумент ${a}`);
+  }
+  if (out.after.length > 0 && !out.snapshot) usage('--after относится к повтору по снимку: нужен --snapshot');
+  for (const p of out.after) {
+    if (!REPORT_PREFIX_RE.test(p)) usage(`--after: недопустимое имя отчёта ${p.slice(0, 80)}`);
   }
   if (out.hubPercent !== null && (!/^\d{1,3}(?:\.\d+)?$/.test(out.hubPercent) || Number(out.hubPercent) > 100)) {
     usage(`--hub-percent: нужно число 0…100, получено ${out.hubPercent}`);
@@ -270,6 +290,40 @@ async function captureMedians(at) {
   }
   const latest = rows.reduce((m, r) => (r.finished_utc > m ? r.finished_utc : m), '');
   return { medians, rows: rows.length, latest: latest || null };
+}
+
+/**
+ * Медианы «после» (D-38, D-39): по строкам истории, чьё имя отчёта начинается с одного из префиксов
+ * (отчёты сессий), — { [проверка]: { [ядро]: медиана секунд } }; ключ — проверка и ядро xray|mihomo,
+ * строки без секунд не считаются. Окна по времени нет: префиксы называют отчёты явно.
+ */
+export function afterMedians(rows, prefixes) {
+  const list = (prefixes || []).filter(Boolean);
+  if (list.length === 0) return {};
+  const picked = rows.filter((r) => typeof r.report === 'string' && list.some((p) => r.report.startsWith(p)));
+  const out = {};
+  for (const [key, { median: m }] of historyDurations(picked)) {
+    const [check, core] = key.split('\t');
+    if (!CORES.includes(core) || typeof m !== 'number' || !Number.isFinite(m)) continue;
+    if (!out[check]) out[check] = {};
+    out[check][core] = m;
+  }
+  return out;
+}
+
+/** Медианы снимка с заменой временем сессий: новая таблица и число замен (пар проверка-ядро). */
+function applyAfter(medians, after) {
+  const merged = {};
+  for (const [check, byCore] of Object.entries(medians)) merged[check] = { ...byCore };
+  let replaced = 0;
+  for (const [check, byCore] of Object.entries(after)) {
+    if (!merged[check]) merged[check] = {};
+    for (const [core, sec] of Object.entries(byCore)) {
+      merged[check][core] = sec;
+      replaced++;
+    }
+  }
+  return { medians: merged, replaced };
 }
 
 /** Корень основной копии: отчёты стенда лежат там, а не в worktree исполнителя. */
@@ -562,15 +616,18 @@ const percentile = (list, p) => {
 
 const fmt = (n) => (n === null || n === undefined ? '-' : n.toFixed(1));
 
-/** Модель оценки: секунды Go-тестов и спеков по медианам снимка. */
-function buildModel(snap) {
+/**
+ * Модель оценки: секунды Go-тестов и спеков по медианам снимка. snap — { medians, unknownSec }
+ * (снимок или медианы истории оценщика полного прогона); root — рабочая копия с фактами тестов.
+ */
+export function buildModel(snap, root = ROOT) {
   const unknown = snap.unknownSec;
   const secs = (check) => {
     const byCore = snap.medians[check];
     const vals = byCore ? CORES.map((c) => byCore[c]).filter((v) => typeof v === 'number') : [];
     return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   };
-  const facts = coreMarks.testFacts(ROOT);
+  const facts = coreMarks.testFacts(root);
   // Go: тесты пакета
   const goByPkg = new Map();
   for (const r of facts) {
@@ -590,7 +647,7 @@ function buildModel(snap) {
     row: r,
     re: new RegExp('^' + r.titleTemplate.replace(/[.*+?^()|[\]\\]/g, '\\$&').replace(/\$\{[^}]*\}/g, '.*') + '$')
   }));
-  const pwBySpec = new Map(); // спек → [{ title, sec, coreMarked, tier }]
+  const pwBySpec = new Map(); // спек → [{ title, sec, coreMarked, tier, oneCore }]
   let pwUnmapped = 0; // секунды проверок истории без спека в фактах (полный выбор их учитывает)
   for (const check of Object.keys(snap.medians).sort()) {
     if (!check.startsWith('pw:')) continue;
@@ -603,11 +660,14 @@ function buildModel(snap) {
       continue;
     }
     if (!pwBySpec.has(row.spec)) pwBySpec.set(row.spec, []);
-    pwBySpec.get(row.spec).push({ title, sec, coreMarked: row.coreMarked, tier: row.tier });
+    pwBySpec.get(row.spec).push({ title, sec, coreMarked: row.coreMarked, tier: row.tier, oneCore: Boolean(row.oneCore) });
   }
-  const goAll = [...new Set(facts.filter((r) => r.kind === 'go').map((r) => r.test))].map((t) => secs(`go:${t}`) ?? unknown);
+  // Go: секунды каждого теста — массивом (сумма этапа { all }) и по имени (вычет skip «одно ядро»)
+  const goNames = [...new Set(facts.filter((r) => r.kind === 'go').map((r) => r.test))];
+  const goAllByName = new Map(goNames.map((t) => [t, secs(`go:${t}`) ?? unknown]));
+  const goAll = [...goAllByName.values()];
   const specsAll = [...new Set(facts.filter((r) => r.kind === 'pw').map((r) => r.spec))].sort();
-  return { secs, unknown, goByPkg, pwBySpec, goAll, pwUnmapped, specsAll };
+  return { secs, unknown, goByPkg, pwBySpec, goAll, goAllByName, pwUnmapped, specsAll };
 }
 
 const words = (s) => (s ? String(s).split(/\s+/).filter(Boolean) : []);
@@ -620,9 +680,13 @@ const safeRe = (src) => {
   }
 };
 
-/** Секунды этапа Go плана run-plan.mjs: { all } | { seq } | { pkgs, run }. */
-function goStageSec(model, st) {
-  if (st.all) return model.goAll.reduce((a, b) => a + b, 0);
+/** Секунды этапа Go плана run-plan.mjs: { all, skip? } | { seq } | { pkgs, run }; skip — имена «одно ядро». */
+export function goStageSec(model, st) {
+  if (st.all) {
+    let sec = model.goAll.reduce((a, b) => a + b, 0);
+    for (const t of new Set(st.skip || [])) sec -= model.goAllByName.get(t) ?? 0;
+    return sec;
+  }
   let sec = 0;
   if (st.seq) {
     for (const e of st.seq) sec += model.secs(`go:${e.slice(e.indexOf(':') + 1)}`) ?? model.unknown;
@@ -640,18 +704,21 @@ function goStageSec(model, st) {
 
 /**
  * Секунды этапа Playwright плана: спеки read делятся на число воркеров, state — подряд. Отбор:
- * grep по названию, invert `@full` — без тестов яруса full, coreOnly — только тесты с меткой ядра.
+ * grep по названию, invert `@full` — без тестов яруса full, invert `@one-core` — без тестов с меткой
+ * «одно ядро» (ветвь другого ядра полного прогона), coreOnly — только тесты с меткой ядра.
  * Полный выбор ({ all }) — все спеки этого вида; проверки без спека в фактах идут в state.
  */
-function pwStageSec(model, root, st, read) {
+export function pwStageSec(model, root, st, read) {
   const grep = safeRe(st.grep);
   const noFull = typeof st.invert === 'string' && st.invert.includes('@full');
+  const noOneCore = typeof st.invert === 'string' && st.invert.includes('@one-core');
   const specSec = (spec) => {
     if (!model.pwBySpec.has(spec)) return model.unknown;
     let s = 0;
     for (const t of model.pwBySpec.get(spec)) {
       if (grep && !grep.test(t.title)) continue;
       if (noFull && t.tier === 'full') continue;
+      if (noOneCore && t.oneCore) continue;
       if (st.coreOnly && !t.coreMarked) continue;
       s += t.sec;
     }
@@ -683,7 +750,7 @@ function specKind(root, spec) {
  * Секунды ветви плана, как её исполняет run.sh (full_target): переключение ядра и смоук, затем
  * окно наблюдения параллельно pw-read и pw-harness-read, затем go, pw, go-harness, pw-harness-state.
  */
-function branchSec(model, root, branch) {
+export function branchSec(model, root, branch) {
   let window = 0;
   let parallel = 0;
   let serial = 0;
@@ -697,7 +764,7 @@ function branchSec(model, root, branch) {
 }
 
 /** Секунды плана без самопроверки: оболочка, ветви; без ветвей — деплой и один смоук с окном. */
-function planSec(model, root, plan) {
+export function planSec(model, root, plan) {
   if (plan.branches.length === 0) return SHELL_BASE_SEC + BRANCH_SEC + OBSERVE_SETTLE_SEC + plan.smokeDefault;
   return SHELL_BASE_SEC + plan.branches.reduce((s, b) => s + branchSec(model, root, b), 0);
 }
@@ -731,6 +798,19 @@ function planEstimate(model, v, selfcheckSec) {
 const label = (m) => (m.pr ? `#${m.pr}` : m.head.slice(0, 12));
 
 function replay(snap, args) {
+  // --after: медианы снимка для проверок и ядер из отчётов сессий заменяются их временем (D-19)
+  let after = null;
+  if (args.after && args.after.length > 0) {
+    let rows;
+    try {
+      rows = readHistory();
+    } catch (e) {
+      fail(`--after: история не прочитана (${e.message})`);
+    }
+    const res = applyAfter(snap.medians, afterMedians(rows, args.after));
+    snap = { ...snap, medians: res.medians };
+    after = { prefixes: [...args.after], replaced: res.replaced };
+  }
   const model = buildModel(snap);
   let sel;
   try {
@@ -860,6 +940,7 @@ function replay(snap, args) {
       errors: errors.length,
       complete
     };
+    if (after) report.after = after;
     console.log(JSON.stringify(report, null, 2));
     if (!complete) process.exitCode = 1;
     return;
@@ -870,6 +951,7 @@ function replay(snap, args) {
   console.log(
     `Снимок ${snap.hash.slice(0, 12)}: origin/main ${snap.originMain.slice(0, 12)}, история на ${snap.history.at} (окно ${snap.history.days} дн., строк ${snap.history.rows}), тест без истории — ${snap.unknownSec} с.`
   );
+  if (after) console.log(`Время сессий (--after ${after.prefixes.join(', ')}): заменено временем сессий: ${after.replaced}.`);
   console.log();
   console.log(
     sc.seconds !== null
@@ -963,4 +1045,17 @@ async function main() {
   replay(snap, args);
 }
 
-await main();
+// Повтор — только при вызове файла как CLI: import (оценщик полного прогона, однострочник node -e)
+// повтор не запускает. import.meta.main есть в Node 24; без него — сравнение argv[1] с путём модуля,
+// кроме режима -e/-p (там argv[1] — первый аргумент однострочника).
+function isMain() {
+  if (typeof import.meta.main === 'boolean') return import.meta.main;
+  if (process.execArgv.some((a) => /^(-e|--eval|-p|--print)(=|$)/.test(a))) return false;
+  try {
+    return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMain()) await main();

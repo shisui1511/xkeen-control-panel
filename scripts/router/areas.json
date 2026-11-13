@@ -463,6 +463,7 @@
         "internal/server/**",
         "internal/utils/**",
         "internal/i18n/**",
+        "internal/rtenv/**",
         "internal/xrayapi/**",
         "internal/cert/**",
         "internal/config/**",
@@ -508,7 +509,6 @@
             "go:TestRouterPanelRestartDuringXKeenStatus",
             "go:TestRouterPanelRestartDuringWatchdogRulesCheck",
             "go:TestRouterPanelRestartWithLateExit",
-            "go:TestRouterStaticGzip",
             "go:TestRouterPanelSession"
           ]
         },
@@ -516,6 +516,7 @@
           "title": "Общие помощники: утилиты, iptables, сертификат, базовые ответы обработчиков, очистка вывода",
           "paths": [
             "internal/utils/**",
+            "internal/rtenv/**",
             "internal/cert/**",
             "internal/config/**",
             "internal/handlers/base.go",
@@ -747,6 +748,7 @@
         "go:TestRouterXrayProbeSeedFromForeign",
         "go:TestRouterXrayRulesTranslate",
         "tests/router/config-cascade.spec.ts",
+        "tests/router/config-cores-mihomo.spec.ts",
         "tests/router/config-dialog-touch.spec.ts",
         "tests/router/config-dns-takeover.spec.ts",
         "tests/router/config-groups.spec.ts",

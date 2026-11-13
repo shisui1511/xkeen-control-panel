@@ -101,7 +101,9 @@ func TestRouterRestartWithKernelHelper(t *testing.T) {
 	if kernel != "xray" && kernel != "mihomo" {
 		t.Fatalf("неизвестное ядро цели %q", kernel)
 	}
-	pid := rtRstKernelPID(t, kernel)
+	// Сосед мог оставить второе ядро или ядро, ещё поднимающееся после своего
+	// перезапуска: тест начинается с одного устойчивого процесса ядра ветви.
+	routertest.WaitKernelReady(t, kernel, rtHelperRestartWait)
 	path, content := rtHelperValidateTarget(t, kernel)
 	p := routertest.NewPanel(t)
 
@@ -179,6 +181,8 @@ func TestRouterRestartWithKernelHelper(t *testing.T) {
 			}
 			wg.Wait()
 		}
+		// Провал помощника посреди круга не оставляет потоки опроса и проверок жить.
+		defer stopHelpers()
 
 		// Перезапуск — только когда проверки уже идут: первая завершилась, следующие
 		// запущены теми же потоками.
@@ -187,12 +191,16 @@ func TestRouterRestartWithKernelHelper(t *testing.T) {
 		for completed.Load() == 0 && time.Since(started) < rtHelperFirstWait {
 			time.Sleep(250 * time.Millisecond)
 		}
-		before := completed.Load()
-		if before == 0 {
+		if completed.Load() == 0 {
 			stopHelpers()
 			t.Fatalf("перезапуск %d: за %v ни одна проверка конфигурации %s не завершилась (ошибка %v)",
 				round, rtHelperFirstWait, path, lastErr.Load())
 		}
+		// Перезапуск — только при одном устойчивом процессе ядра ветви: второе ядро
+		// (409 kernel_conflict) или ядро, ещё не поднявшееся после прошлого круга, —
+		// состояние стенда, а не ответ панели на перезапуск. PID круга — отсюда.
+		pid := routertest.WaitKernelReady(t, kernel, rtHelperRestartWait)
+		before := completed.Load()
 		t.Logf("перезапуск %d: проверки идут %v, завершено %d", round, time.Since(started).Round(time.Millisecond), before)
 		status, raw, err := p.Call(http.MethodPost, "/api/service/control?action=restart", nil)
 		if err != nil || status != http.StatusOK {
@@ -219,6 +227,5 @@ func TestRouterRestartWithKernelHelper(t *testing.T) {
 		// Ядро держится с новым PID уже без проверок: вспомогательные процессы не
 		// мешают подсчёту.
 		rtRstHoldPID(t, kernel, next)
-		pid = next
 	}
 }

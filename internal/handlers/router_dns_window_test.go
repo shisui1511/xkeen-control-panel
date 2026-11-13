@@ -15,6 +15,7 @@ import (
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
+	"github.com/shisui1511/xkeen-control-panel/internal/rtenv"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/dnstakeover"
 )
@@ -32,11 +33,21 @@ const (
 	rtDNSOutcomeSeenPath = rtDNSBase + "/outcome-seen"
 	// rtDNSOutcomeNotice — префикс уведомления слоя об исходе без пользователя.
 	rtDNSOutcomeNotice = "dns_outcome:"
-	// rtDNSWindowS — длительность окна подтверждения (D-05).
-	rtDNSWindowS = 60
-	// rtDNSTimeoutWait — сколько ждать автоотката: окно плюс откат с перезапуском ядра.
-	rtDNSTimeoutWait = rtDNSWindowS*time.Second + rtDNSStateWait
 )
+
+// rtDNSWindowDur — окно подтверждения, которое действует у процесса панели
+// (XCP_RT_DNS_WINDOW_S, по умолчанию 60 с; D-05): тест не держит копию срока.
+func rtDNSWindowDur(t testing.TB) time.Duration {
+	t.Helper()
+	return routertest.Deadline(t, rtenv.DNSWindow)
+}
+
+// rtDNSTimeoutWaitOf — сколько ждать автоотката: окно панели плюс откат с
+// перезапуском ядра. Берётся в момент ожидания (после возможного перезапуска панели).
+func rtDNSTimeoutWaitOf(t testing.TB) time.Duration {
+	t.Helper()
+	return rtDNSWindowDur(t) + rtDNSStateWait
+}
 
 // rtDNSWaitState ждёт состояния want не дольше limit и возвращает вид.
 func (e *rtSrc) rtDNSWaitState(want string, limit time.Duration) map[string]any {
@@ -157,26 +168,28 @@ func (e *rtSrc) rtDNSExpectRolledBack(v map[string]any, kernel string, overrideB
 	}
 }
 
-// Трасса: подготовка → включение → state window, window.kind=enable, total_s=60,
-// до дедлайна 50–60 с по часам сервера, блокировка window, выключение в окне —
+// Трасса: подготовка → включение → state window, window.kind=enable, total_s равен
+// окну у процесса панели, до дедлайна от окна минус 10 с до окна по часам сервера, блокировка window, выключение в окне —
 // 409 window_active → «Оставить» → state on, действующий перехват → повторное
-// «Оставить» (вторая вкладка) → 200, state on. Метка ядра: перехват ведёт активное ядро.
+// «Оставить» (вторая вкладка) → 200, state on. Одно ядро (D-01, D-02): зависимость
+// от ядра проверяет TestRouterDNSEnableDisable на обоих ядрах.
 func TestRouterDNSWindowKeep(t *testing.T) {
 	routertest.Slow(t, "включение перехвата DNS с перезапуском ядра и окном подтверждения")
-	tg := routertest.CoreSpecific(t)
+	tg := routertest.OneCore(t, "окно «Оставить»: ядро влияет только на подготовку, перезапуск при включении и слушатель в файлах ядра", "TestRouterDNSEnableDisable")
 	kernel := tg.Core
 	e := rtNewSrc(t)
 	rtDNSPrepare(t, e, kernel)
 
 	v := e.rtDNSEnableWindow()
 	t.Cleanup(func() { e.with(t).rtDNSEnsureOff() })
+	win := rtDNSWindowDur(t)
 	w := rtDNSWindow(v)
-	if total := rtDNSNum(w, "total_s"); total != rtDNSWindowS {
-		t.Errorf("window.total_s %d, ожидалось %d", total, rtDNSWindowS)
+	if total := rtDNSNum(w, "total_s"); total != int64(win/time.Second) {
+		t.Errorf("window.total_s %d, ожидалось %d", total, int64(win/time.Second))
 	}
 	left := time.Duration(rtDNSNum(w, "deadline_ms")-rtDNSNum(v, "server_now_ms")) * time.Millisecond
-	if left < 50*time.Second || left > rtDNSWindowS*time.Second {
-		t.Errorf("до дедлайна окна %v по часам сервера, ожидалось 50–60 с", left)
+	if left < win-10*time.Second || left > win {
+		t.Errorf("до дедлайна окна %v по часам сервера, ожидалось от %v до %v", left, win-10*time.Second, win)
 	}
 	if !e.rtDNSBlocks()["window"] {
 		t.Error("в окне нет блокировки window")
@@ -213,6 +226,10 @@ func TestRouterDNSWindowTimeout(t *testing.T) {
 	routertest.Tier(t, routertest.Full, "реальное время: окно подтверждения перехвата DNS ждёт дедлайн и откат по таймеру")
 	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
+	// Сейчас строки окна в таблице RT_RTENV_VALUES (scripts/router/lib.sh) нет: вызов уходит
+	// в ветку «в блоке нет» без действий. Оставлен на случай, когда таблица получит
+	// XCP_RT_DNS_WINDOW_S: тест ждёт настоящий дедлайн, а не сокращённый.
+	routertest.RealTime(t, rtenv.DNSWindow)
 	e := rtNewSrc(t)
 	rtDNSPrepare(t, e, kernel)
 
@@ -224,7 +241,7 @@ func TestRouterDNSWindowTimeout(t *testing.T) {
 	t.Cleanup(func() { e.with(t).rtDNSEnsureOff() })
 	deadline := rtDNSNum(rtDNSWindow(v), "deadline_ms")
 
-	off := e.rtDNSWaitState("off", rtDNSTimeoutWait)
+	off := e.rtDNSWaitState("off", rtDNSTimeoutWaitOf(t))
 	if now := rtDNSNum(off, "server_now_ms"); now < deadline {
 		t.Errorf("откат за %v до дедлайна окна: ожидался откат по таймеру", time.Duration(deadline-now)*time.Millisecond)
 	}
@@ -304,7 +321,7 @@ func TestRouterDNSWindowRollbackNow(t *testing.T) {
 // Трасса: подготовка → включение → state window → перезапуск панели
 // init-скриптом посреди окна (rtPanelRestart: новая панель отвечает по прежней
 // сессии) → старт панели откатывает неподтверждённый перехват сразу, не дожидаясь
-// дедлайна (D-07): state off в пределах 60 с после подъёма, :53 у прошивки,
+// дедлайна (D-07): state off в пределах окна панели после подъёма, :53 у прошивки,
 // override как до включения, файлы ядра без слушателя, исход timeout с
 // toast_pending и уведомление слоя (открытая вкладка после переподключения видит
 // «Откачено: нет подтверждения»). Метка ядра: откат перезапускает активное ядро.
@@ -322,7 +339,7 @@ func TestRouterDNSWindowPanelRestart(t *testing.T) {
 
 	res := rtPanelRestart(t, e.p, old, nil)
 	rtPanelRestartVerdict(t, old, res, "перезапуск посреди окна подтверждения DNS")
-	off := e.rtDNSWaitState("off", rtDNSWindowS*time.Second)
+	off := e.rtDNSWaitState("off", rtDNSWindowDur(t))
 	e.rtDNSExpectRolledBack(off, kernel, overrideBefore)
 	e.rtDNSExpectTimeoutOutcome(off)
 	if !e.rtDNSOutcomeNoticeShown() {

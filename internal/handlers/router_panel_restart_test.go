@@ -7,14 +7,11 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,7 +48,6 @@ import (
 // запускается секундами (прогон 20261016-115824-f37a028f).
 
 const (
-	rtPanelInit = "/opt/etc/init.d/S99xcp"
 	// rtPanelRestartLimit — за сколько init-скрипт обязан закончить restart:
 	// остановка ждёт выхода не дольше XCP_STOP_TIMEOUT (60 с), запуск — до 11 с.
 	rtPanelRestartLimit = 75 * time.Second
@@ -61,7 +57,7 @@ const (
 	// rtPanelStopMark — вывод init-скрипта перед killall при stop/restart.
 	rtPanelStopMark = "Shutting down"
 	// rtPanelShellMark — первая строка обёртки команды: оболочка запущена.
-	rtPanelShellMark = "xcp-rt-shell-started"
+	rtPanelShellMark = routertest.PanelShellMark
 	// rtPanelDeadlineMark — строка журнала панели об аварийном выходе по сроку
 	// остановки (cmd/xcp): шаг остановки не уложился и был брошен.
 	rtPanelDeadlineMark = "Shutdown: deadline"
@@ -70,69 +66,25 @@ const (
 	rtPanelUpTimeout = 90 * time.Second
 )
 
-// rtPanelPIDs — PID процессов панели: только запуски с -config (init-скрипт и
-// самообновление), без «xcp -v» и других коротких вызовов бинарника.
-func rtPanelPIDs() (pids []int, out string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	stdout, stderr, code := routertest.Exec(ctx, "pidof", "xcp")
-	out = strings.TrimSpace(stdout + " " + stderr)
-	if code != 0 {
-		return nil, out
-	}
-	for _, f := range strings.Fields(stdout) {
-		n, err := strconv.Atoi(f)
-		if err != nil || n <= 0 {
-			continue
-		}
-		raw, err := os.ReadFile("/proc/" + f + "/cmdline")
-		if err != nil {
-			continue
-		}
-		for _, a := range strings.Split(string(raw), "\x00") {
-			if a == "-config" {
-				pids = append(pids, n)
-				break
-			}
-		}
-	}
-	return pids, out
-}
+// rtPanelPIDs — PID процессов панели (routertest.PanelPIDs).
+func rtPanelPIDs() ([]int, string) { return routertest.PanelPIDs() }
 
-// rtPanelANSI — цветовые коды вывода init-скриптов Entware.
-var rtPanelANSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-
-// rtPanelInitCmd запускает init-скрипт панели с чистым окружением: новая панель не
-// должна унаследовать переменные теста (адрес подписки, сессия, каталоги).
-// Возвращает вывод скрипта одной строкой без цветовых кодов.
+// rtPanelInitCmd запускает init-скрипт панели с чистым окружением
+// (routertest.PanelInit без дополнительного приёмника вывода).
 func rtPanelInitCmd(ctx context.Context, action string) (string, int) {
 	return rtPanelInitRun(ctx, action, nil)
 }
 
 // rtPanelInitRun — rtPanelInitCmd, вывод которого по мере поступления пишется и в
 // marks (может быть nil): по нему видно, когда оболочка запустилась и когда rc.func
-// дошёл до killall.
+// дошёл до killall. nil-указатель marks в io.Writer не передаётся: интерфейс с
+// типизированным nil не равен nil, и PanelInit вызвал бы Write у nil *rtPanelMarks.
 func rtPanelInitRun(ctx context.Context, action string, marks *rtPanelMarks) (string, int) {
-	var out, errOut bytes.Buffer
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", "echo "+rtPanelShellMark+
-		"; exec env -i PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root "+rtPanelInit+" "+action)
-	cmd.Stdout = &out
+	var w io.Writer
 	if marks != nil {
-		cmd.Stdout = io.MultiWriter(&out, marks)
+		w = marks
 	}
-	cmd.Stderr = &errOut
-	code := 0
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		code = -1
-		if errors.As(err, &exitErr) {
-			code = exitErr.ExitCode()
-		} else if errOut.Len() == 0 {
-			errOut.WriteString(err.Error())
-		}
-	}
-	text := strings.ReplaceAll(out.String()+" "+errOut.String(), rtPanelShellMark, "")
-	return strings.Join(strings.Fields(rtPanelANSI.ReplaceAllString(text, "")), " "), code
+	return routertest.PanelInit(ctx, action, w)
 }
 
 // rtPanelMarks отмечает момент первого появления каждой метки в потоке вывода.
@@ -171,30 +123,9 @@ func (m *rtPanelMarks) get(name string) time.Time {
 }
 
 // rtPanelWaitUp ждёт панель с PID, отличным от old, которая отвечает на
-// /api/auth/me по прежней сессии. Возвращает PID или 0 и последнее наблюдение.
+// /api/auth/me по прежней сессии (routertest.PanelWaitUp).
 func rtPanelWaitUp(p *routertest.Panel, old int, limit time.Duration) (int, string) {
-	deadline := time.Now().Add(limit)
-	last := ""
-	for time.Now().Before(deadline) {
-		pids, out := rtPanelPIDs()
-		switch {
-		case len(pids) != 1:
-			last = "процессов панели " + strconv.Itoa(len(pids)) + " (pidof: " + out + ")"
-		case pids[0] == old:
-			last = "работает старый процесс " + strconv.Itoa(old)
-		default:
-			code, err := p.GetJSON("/api/auth/me", nil)
-			if err == nil && code == http.StatusOK {
-				return pids[0], ""
-			}
-			last = "новый процесс " + strconv.Itoa(pids[0]) + ", /api/auth/me: http " + strconv.Itoa(code)
-			if err != nil {
-				last += " (" + err.Error() + ")"
-			}
-		}
-		time.Sleep(time.Second)
-	}
-	return 0, last
+	return routertest.PanelWaitUp(p, old, limit)
 }
 
 // rtPanelOpenStream открывает поток и возвращает два канала: done закрывается, когда
@@ -644,41 +575,12 @@ func rtSampleStuck(pid int, start time.Time, done <-chan struct{}) <-chan []stri
 	return out
 }
 
-// rtFsyncProbe пишет 4 КБ в каталог dir с fsync и возвращает, сколько это заняло: на
-// носителе, где идёт фиксация журнала ext4, мелкая запись с fsync ждёт её конца, поэтому
-// задержка показывает застой, которого нет в счётчиках Dirty и Writeback.
-func rtFsyncProbe(dir string) time.Duration {
-	f, err := os.CreateTemp(dir, "rt-fsync-*")
-	if err != nil {
-		return -1
-	}
-	defer os.Remove(f.Name())
-	defer f.Close()
-	start := time.Now()
-	if _, err := f.Write(make([]byte, 4096)); err != nil {
-		return -1
-	}
-	if err := f.Sync(); err != nil {
-		return -1
-	}
-	return time.Since(start)
-}
-
-// rtWaitStorageQuiet ждёт (не дольше limit), пока в кэше страниц почти не
-// останется грязных и записываемых данных, и возвращает описание состояния
-// носителя для журнала теста.
+// rtWaitStorageQuiet ждёт (не дольше limit) тишины носителя и возвращает описание
+// его состояния для журнала теста (routertest.WaitStorageQuiet без признака тишины).
 func rtWaitStorageQuiet(t *testing.T, limit time.Duration) string {
 	t.Helper()
-	start := time.Now()
-	for {
-		dirty, wb := rtMeminfo(t, "Dirty"), rtMeminfo(t, "Writeback")
-		if dirty+wb < 1<<20 || time.Since(start) > limit {
-			return "носитель: грязных " + strconv.FormatInt(dirty>>10, 10) + " КБ, в записи " +
-				strconv.FormatInt(wb>>10, 10) + " КБ (ожидание " + time.Since(start).Round(100*time.Millisecond).String() +
-				"), запись 4 КБ с fsync " + rtFsyncProbe(config.Default().DataDir).Round(time.Millisecond).String()
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	_, seen := routertest.WaitStorageQuiet(t, limit)
+	return seen
 }
 
 // Перезапуск, пока идёт опрос XKeen панели (`xkeen -status` кэша статуса или
@@ -867,6 +769,17 @@ func (s *rtStoppedProcs) forget(pid int) {
 	delete(s.pids, pid)
 }
 
+// resume продолжает (SIGCONT) все остановленные сценарием процессы и забывает их:
+// новая попытка сценария начинается без процессов прошлой.
+func (s *rtStoppedProcs) resume() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for pid := range s.pids {
+		_ = syscall.Kill(pid, syscall.SIGCONT)
+	}
+	clear(s.pids)
+}
+
 func (s *rtStoppedProcs) snapshot() map[int]string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -954,6 +867,21 @@ func rtWaitStopped(pid int) string {
 	return state
 }
 
+// Окно ожидания проверки правил после сброса watchdog — из сроков продукта, а не «на
+// глаз»: проверка здоровья ждёт опрос кэша статуса (xkeenStatusPollTimeout, 10 с,
+// internal/services/xkeen_status_cache.go) и сама ждёт `xkeen -status`
+// (watchdogStatusTimeout, 15 с, internal/services/watchdog.go). Запас покрывает шаг
+// опроса теста и задержку запуска внеочередной проверки после сброса; застой носителя
+// в окно не закладывается — перед попыткой тест ждёт тишины носителя, а застой,
+// начавшийся внутри окна, даёт повтор попытки (всего не больше rtWdAttempts).
+const (
+	rtWdCachePoll     = 10 * time.Second
+	rtWdStatusTimeout = 15 * time.Second
+	rtWdSlack         = 5 * time.Second
+	rtWdRulesWindow   = rtWdCachePoll + rtWdStatusTimeout + rtWdSlack
+	rtWdAttempts      = 3
+)
+
 // Перезапуск, пока watchdog после провала проверки здоровья читает таблицу mangle
 // (iptables-save): так он решает, стоят ли правила перехвата TPROXY. Под записью на
 // флешку `xkeen -status` не укладывается в свой таймаут 15 с, и проверка правил
@@ -985,7 +913,6 @@ func TestRouterPanelRestartDuringWatchdogRulesCheck(t *testing.T) {
 	}
 	p := routertest.NewPanel(t)
 	old := rtPanelCurrent(t, p)
-	quiet := rtWaitStorageQuiet(t, time.Minute)
 
 	opens := rtWatchOpens(t, saveBin)
 	stopped := newRtStoppedProcs(t)
@@ -1013,30 +940,53 @@ func TestRouterPanelRestartDuringWatchdogRulesCheck(t *testing.T) {
 		return rtPanelChild{}, false
 	}
 
-	code, err := p.PostJSON("/api/service/watchdog/reset", nil, nil)
-	if err != nil || code != http.StatusOK {
-		t.Fatalf("сброс watchdog: http %d (%v): внеочередная проверка не запущена", code, err)
-	}
-	// Проверка ждёт опрос кэша статуса (таймаут 10 с) и сама ждёт `xkeen -status` 15 с.
+	// Попытка: тишина носителя → сброс watchdog → окно rtWdRulesWindow. Не поймана
+	// проверка правил — условие сценария не набралось (состояние носителя, а не
+	// дефект): остановленные попыткой процессы продолжаются, и попытка повторяется.
 	var check rtPanelChild
-	deadline := time.Now().Add(45 * time.Second)
-	for check.pid == 0 && time.Now().Before(deadline) {
-		select {
-		case <-opens:
-			check, _ = catch()
-		case <-time.After(10 * time.Millisecond):
-			for _, c := range rtPanelChildren(old) {
-				if c.xkeenStatus() {
-					stopped.stop(c)
+	var quiet string
+	var seen []string
+	for attempt := 1; attempt <= rtWdAttempts && check.pid == 0; attempt++ {
+		if attempt > 1 {
+			stopped.resume()
+		}
+		calm, before := routertest.WaitStorageQuiet(t, time.Minute)
+		quiet = before
+		code, err := p.PostJSON("/api/service/watchdog/reset", nil, nil)
+		if err != nil || code != http.StatusOK {
+			t.Fatalf("сброс watchdog: http %d (%v): внеочередная проверка не запущена", code, err)
+		}
+		deadline := time.Now().Add(rtWdRulesWindow)
+		for check.pid == 0 && time.Now().Before(deadline) {
+			select {
+			case <-opens:
+				check, _ = catch()
+			case <-time.After(10 * time.Millisecond):
+				for _, c := range rtPanelChildren(old) {
+					if c.xkeenStatus() {
+						stopped.stop(c)
+					}
 				}
 			}
 		}
+		if check.pid == 0 {
+			// Состояние носителя до сброса и после окна: под застоем записи на флешку
+			// скрипт XKeen и утилита правил читаются с носителя, и проверка не успевает
+			// начаться.
+			_, after := routertest.WaitStorageQuiet(t, 0)
+			reached := "не достигнута за минуту"
+			if calm {
+				reached = "достигнута"
+			}
+			obs := fmt.Sprintf("попытка %d: тишина носителя перед сбросом %s, остановлено процессов %d, до сброса — %s, после окна — %s",
+				attempt, reached, len(stopped.snapshot()), before, after)
+			t.Logf("за %s после сброса watchdog проверка правил TPROXY не началась; %s", rtWdRulesWindow, obs)
+			seen = append(seen, obs)
+		}
 	}
 	if check.pid == 0 {
-		// Состояние носителя до сброса и сейчас: под застоем записи на флешку скрипт
-		// XKeen и утилита правил читаются с носителя, и проверка не успевает начаться.
-		t.Fatalf("за 45 с после сброса watchdog не дошёл до проверки правил TPROXY: условие сценария не набралось (остановлено процессов: %d; до сброса — %s; сейчас — %s)",
-			len(stopped.snapshot()), quiet, rtWaitStorageQuiet(t, 0))
+		t.Fatalf("за %d попытки по %s после сброса watchdog не дошёл до проверки правил TPROXY: условие сценария не набралось (%s)",
+			rtWdAttempts, rtWdRulesWindow, strings.Join(seen, "; "))
 	}
 
 	// Пока панель останавливается, утилиты чтения правил (вторая таблица) тоже

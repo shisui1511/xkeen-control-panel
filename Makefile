@@ -1,4 +1,4 @@
-.PHONY: build run clean lint fmt deps hooks router-arm64 router-mipsle router-mips router-test router-test-unattended proto tidy
+.PHONY: build run clean lint fmt deps hooks router-arm64 router-mipsle router-mips router-test router-test-unattended router-watch proto tidy
 
 BINARY_NAME=xcp
 # Single source of truth for the version: scripts/version.sh (git tags +
@@ -70,6 +70,13 @@ router-test:
 # sh scripts/router/unattended.sh status. Это инструмент: правил, когда запускать, и напоминаний нет.
 router-test-unattended:
 	sh scripts/router/unattended.sh start
+
+# Ход прогона на стенде в своём терминале (scripts/router/progress.mjs): этап, тесты запуска,
+# упавшие, оценка оставшегося времени; обновление раз в 2 с, новый прогон подхватывается сам.
+#   make router-watch [RT_WATCH_REPORT=<отчёт>]   (по умолчанию — build/router/last основной копии)
+# Имя переменной не общее (REPORT): make берёт переменные окружения, чужой REPORT подменил бы отчёт.
+router-watch:
+	@node scripts/router/progress.mjs --watch $(if $(RT_WATCH_REPORT),"$(RT_WATCH_REPORT)")
 
 run: build
 	./build/$(BINARY_NAME)

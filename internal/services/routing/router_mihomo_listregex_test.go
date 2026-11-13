@@ -6,6 +6,7 @@ package routing
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/protowire"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
 )
 
@@ -28,6 +30,9 @@ import (
 const (
 	rtlrFile = "geosite_xcprt.dat"
 	rtlrTag  = "XCPRT"
+	// rtlrProviderWait — предел ожидания загрузки провайдера правил отдельным
+	// процессом Mihomo после запуска.
+	rtlrProviderWait = 60 * time.Second
 )
 
 // rtlrWriteDat пишет GeoSiteList с одной категорией: записи — пары (тип Domain,
@@ -111,9 +116,17 @@ func TestRouterMihomoListRegexComma(t *testing.T) {
 
 	e.takeAndApply(t)
 	rtmtStart(t, e, core, nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	n, err := core.svc.ProviderCount(ctx, "rules", ProviderName(rtlrFile, rtlrTag, listPartClassical))
+	// Процесс Mihomo запущен, но провайдер правил он загружает сам и не сразу: на
+	// нагруженном стенде первый ответ — 0 строк. Опрос до полной загрузки с одним
+	// верхним пределом; принятое меньше выгруженного к пределу — вердикт.
+	provider := ProviderName(rtlrFile, rtlrTag, listPartClassical)
+	var n int
+	routertest.Poll(rtlrProviderWait, time.Second, func() (bool, string) {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		n, err = core.svc.ProviderCount(ctx, "rules", provider)
+		return err == nil && n == len(cat.Classical), fmt.Sprintf("строк %d, ошибка %v", n, err)
+	})
 	if err != nil {
 		t.Fatalf("ruleCount провайдера: %v", err)
 	}

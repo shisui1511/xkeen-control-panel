@@ -34,6 +34,11 @@
 #                 каждый собирается и копируется на устройство один раз, подряд идущие записи
 #                 одного пакета — один запуск `-test.run '^(A|B)$'`, запуски идут в порядке списка
 #                 (порядок гейта по частоте падений, дешёвые тесты первыми в сессии)
+#   RT_GO_SKIP    регэксп -test.skip: тесты с меткой «одно ядро» на ветви другого ядра полного
+#                 прогона (RT_OC_GO_SKIP плана run-plan.mjs, вид `^(A|B)$`); действует в обоих
+#                 режимах (пакетом и RT_GO_RUN_SEQ), исключённые тесты не запускаются, строк SKIP не
+#                 дают и в «не выполнено» после смены версии не попадают. Только символы
+#                 [A-Za-z0-9_|^$()], иначе строка FAIL go:setup и выход 1
 #   RT_ART_SUB    подкаталог артефактов ветви ([a-z0-9-]+, иначе FAIL go:setup): артефакты —
 #                 в <отчёт>/<id>/<ядро>/<RT_ART_SUB>/ (перепрогон в тот же отчёт не затирает
 #                 основной проход)
@@ -128,6 +133,23 @@ case "${RT_GO_RUN:-}" in
     exit 1
     ;;
 esac
+
+# RT_GO_SKIP встраивается в скрипт запуска на устройстве в одинарных кавычках (T-148.1.2-16):
+# допустимы только символы регэкспа имён `^(A|B)$` — шаблон безопасных символов, как у
+# RT_GO_CORE_RUN выбора; перевод строки — отказ. Проверка — до всякой работы со стендом.
+SKIPRE=${RT_GO_SKIP:-}
+if [ -n "$SKIPRE" ]; then
+  _skip_bad=0
+  case "$SKIPRE" in *"
+"*) _skip_bad=1 ;; esac
+  printf '%s\n' "$SKIPRE" | grep -qE '^[A-Za-z0-9_|^$()]+$' || _skip_bad=1
+  if [ "$_skip_bad" = 1 ]; then
+    rt_result "$ID" FAIL "go:setup" "RT_GO_SKIP с недопустимыми символами"
+    exit 1
+  fi
+fi
+SKIPARG=""
+[ -z "$SKIPRE" ] || SKIPARG=" -test.skip '$SKIPRE'"
 
 # RT_GO_RUN_SEQ: каждая запись — <каталог пакета>:TestRouter<Имя> из [A-Za-z0-9_./-] и
 # [A-Za-z0-9_] (T-148.1-06): регэксп -test.run собирается только из проверенных имён.
@@ -504,7 +526,7 @@ for _grp in $GROUPS; do
     cat >"$runner" <<EOF
 cd $RWD
 rm -f $RWD/expect-version
-XCP_RT_ARCH=$ARCH XCP_RT_CORE=$CORE XCP_RT_WORKDIR=$RWD $SESSION_ENV $LINKS_ENV $INPUTS_ENV $CONTRACT_ENV $ROUTING_CONTRACT_ENV $SETUP_ENV $SUB_ENV ./$name.test -test.v=test2json -test.run '$runre' -test.timeout 120m &
+XCP_RT_ARCH=$ARCH XCP_RT_CORE=$CORE XCP_RT_WORKDIR=$RWD $SESSION_ENV $LINKS_ENV $INPUTS_ENV $CONTRACT_ENV $ROUTING_CONTRACT_ENV $SETUP_ENV $SUB_ENV ./$name.test -test.v=test2json -test.run '$runre'$SKIPARG -test.timeout 120m &
 T=\$!
 ( while kill -0 \$T 2>/dev/null; do grep VmHWM /proc/\$T/status > $RWD/$tag.hwm 2>/dev/null; sleep 1; done ) &
 W=\$!
@@ -520,6 +542,12 @@ EOF
       LOST=1
       break
     fi
+    # Ход прогона (progress.mjs): число верхнеуровневых тестов запуска по исходникам пакета —
+    # TestRouter* под отбором -test.run и без исключённых -test.skip; сырой поток $raw смотрящий
+    # читает по ходу (строки «--- PASS|FAIL|SKIP» тестов верхнего уровня).
+    _pg_n=$(grep -hoE '^func TestRouter[A-Za-z0-9_]*[(]' "./$pkg"/*_test.go 2>/dev/null |
+      sed 's/^func //; s/[(]$//' | grep -E "$runre" | grep -vE "${SKIPRE:-^$}" | sort -u | wc -l | tr -d ' ') || _pg_n=0
+    rt_progress go "$ID" "$CORE" "$tag" "${_pg_n:-0}" "$raw"
     rc=0
     rt_stage "$ID" "go-run-$tag" rt_ssh "$ID" "sh $RWD/run-$tag.sh" >"$raw" 2>"$errlog" || rc=$?
     if [ "$rc" = 3 ]; then
@@ -592,9 +620,16 @@ EOF
       for _rest in $(printf '%s' "$GROUPS" | sed -n "$((_gi + 1)),\$p"); do
         rpkg=${_rest%%"$TAB"*}
         if [ "$SEQ" = 1 ]; then
-          rexpr="^(${_rest#*"$TAB"})\$"
+          # тесты, исключённые RT_GO_SKIP («одно ядро»), не запускались бы и так — не «не выполнено»
+          _rnames=${_rest#*"$TAB"}
+          if [ -n "$SKIPRE" ]; then
+            _rnames=$(printf '%s\n' "$_rnames" | tr '|' '\n' | grep -vE -e "$SKIPRE" | paste -sd '|' -)
+            [ -n "$_rnames" ] || continue
+          fi
+          rexpr="^($_rnames)\$"
         else
           rexpr=${RT_GO_RUN:-^TestRouter}
+          [ -z "$SKIPRE" ] || rexpr="$rexpr, кроме $SKIPRE"
         fi
         printf 'notrun\t%s\tGo: %s: %s\n' "$vcore" "$rpkg" "$rexpr" >>"$vstop"
       done

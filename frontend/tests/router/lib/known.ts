@@ -79,3 +79,14 @@ export function quarantine(slug: string): void {
 export const FULL_TAG = '@full';
 export const TIER_FULL_ANNOTATION = 'tier-full';
 export const SLOW_ANNOTATION = 'slow';
+
+// Метка «одно ядро» (D-01…D-04): тест зависит от ядра только перезапуском или файлом,
+// которые на обоих ядрах проверяет названный тест того же семейства (та же router-area)
+// с тегом CORE_TAG. Такой тест идёт на одном ядре — ядре из SHA HEAD; во второй ветви
+// полного прогона его отсеивает --grep-invert по тегу. Метка выполняет правило «тест,
+// читающий ядро, размечен», но тегом ядра не является и вместе с CORE_TAG не ставится.
+// Причина и покрытие — строковый литерал в описании аннотации (их читает страж
+// scripts/check-core-marks.js):
+//   test('…', { tag: ONE_CORE_TAG, annotation: { type: ONE_CORE_ANNOTATION, description: '<причина>; covered-by: <название теста>' } }, async …)
+export const ONE_CORE_TAG = '@one-core';
+export const ONE_CORE_ANNOTATION = 'one-core';

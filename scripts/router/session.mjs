@@ -18,7 +18,8 @@
 //                                           true — все проходы до конца (полный список
 //                                           падений), false — остановка на первом
 //                                           несовпадении (см. ниже)
-//     "budget_reason": "…",                 необязательно: почему спека сверх бюджета 20 мин
+//     "budget_reason": "…",                 необязательно: почему спека сверх бюджета 15 мин
+//                                           (действует до предела 30 мин)
 //                                           (непустая строка до 300 символов без перевода
 //                                           строки), см. «Оценка и бюджет»
 //     "passes": [
@@ -238,20 +239,37 @@
 // спеком. Несовпадение после спека останавливает проход до следующего спека.
 //
 // Оценка и бюджет (D-23): оценка длительности сессии — сумма по проходам и ядрам медиан
-// выбранных тестов из истории (тест без медианы на ядре — медиана другого ядра, иначе 30 с) и
-// накладных расходов: деплой и смоук на смену продукта 180 с, переключение ядра 45 с, settle
+// выбранных тестов из истории (медиана последних 5 прогонов теста без SKIP: SKIP — 0 с, а тест,
+// получивший метку known, идёт до таймаута; (тест без медианы на ядре — медиана другого ядра, иначе 30 с) и
+// накладных расходов: деплой и смоук на смену продукта 200 с, переключение ядра 45 с, settle
 // после Go 30 с, запуск pw-suite.sh 15 с на спек; проход-прогон и вложенная сессия — max_minutes
-// или 15 мин. dry-run печатает `Оценка: N мин (бюджет 20 мин)` и при превышении — `сверх
-// бюджета: причина — <budget_reason>` или `сверх бюджета: нет budget_reason`. С --budget (только
-// вместе с --dry-run) спека сверх бюджета без budget_reason — код 4: проверка плана не пускает
-// спеку на часы без причины. Настоящий запуск сверх бюджета не запрещён: строка предупреждения в
-// session.log и stderr, сессия идёт. После возврата стенда отчёты этапов сессии и прогонов
-// наборов записываются в историю (history.mjs append): оценки следующих сессий опираются на
-// них; ошибка записи код сессии не меняет (строка в «Стенд в конце»).
+// или 15 мин. dry-run печатает `Оценка: N мин (бюджет 15 мин, предел 30 мин)` и при превышении
+// бюджета — `сверх бюджета: причина — <budget_reason>` или `сверх бюджета: нет budget_reason`.
+// С --budget (только вместе с --dry-run) спека сверх бюджета без budget_reason — код 4.
+// Предел 30 мин жёсткий: тяжёлые прогоны идут только при закрытии вехи (полный прогон тега),
+// поэтому спека сверх предела — код 4 у --budget и отказ настоящего запуска (код 4, до деплоя)
+// при любом budget_reason; снимает отказ только XCP_RT_HEAVY=1 (просьба владельца). Сверх
+// бюджета, но в пределе — строка предупреждения в session.log и stderr, сессия идёт. После
+// возврата стенда отчёты этапов сессии и прогонов наборов записываются в историю (history.mjs
+// append): оценки следующих сессий опираются на них; ошибка записи код сессии не меняет (строка
+// в «Стенд в конце»). Вместе с оценкой (строка est журнала хода) сессия пишет оценку каждого
+// теста — строки estt <ядро> <проверка> <секунды>: progress.mjs по ним пересчитывает прогноз по
+// ходу прогона (остаток = оценки ещё не закончившихся тестов, текущий — с поправкой на время).
 //
 // Порядок: проходы по очереди; внутри прохода ядра змейкой, первым — активное. На N проходов
 // приходится не больше N переключений, и ещё одно в конце, если стенд не на исходном ядре.
 // Сборка ставится в начале и при смене продукта.
+//
+// Сокращённые сроки (D-22): перед каждым этапом go-suite.sh и pw-suite.sh прохода (не перед
+// переключением ядра и не перед проходом-прогоном — вложенный run.sh пишет блок сам после снимка)
+// сессия вызывает `rtenv.sh <цель> write`: блок xcp-rt в xcp.env цели со значениями
+// RT_RTENV_VALUES из lib.sh. Запись идемпотентна — совпавший блок панель не перезапускает, поэтому
+// блок ставится заново только после деплоя (он блок снимает), прохода product/tree или вложенного
+// прогона. Код 3 — сбой связи, как у соседних этапов; иной сбой — вердикт «rt-env: блок xcp-rt»
+// FAIL, тесты этапа не запускаются (сессия красная). В summary.md — строка «- Сокращённые сроки:».
+// Возврат стенда снимает блок (`rtenv.sh <цель> clear`) при любом исходе со связью, «Стенд в
+// конце» сверяет его отсутствие («блок xcp-rt снят»): смоук тега и ручная проверка после сессии
+// идут на настоящих сроках (D-23).
 //
 // Отчёт — в RT_REPORT: <NN>-<этап>/ — отчёты этапов в формате router-test (meta,
 // <цель>/results.tsv), spec.json, session.log (вывод всех этапов), summary.md и session.json
@@ -267,8 +285,8 @@
 // Код выхода сессии: 0 — все ожидания совпали и стенд вернулся в исходное состояние;
 // 1 — расхождение, или этап сломался, или стенд не вернулся; 2 — неверная спека или запуск
 // не через run.sh; 3 — сбой связи ПК↔стенд (не красный прогон, разбор по AGENTS.md; в том
-// числе FAIL reachable во вложенном прогоне набора); 4 — только --dry-run --budget: оценка
-// сверх бюджета, budget_reason нет; 130 — прерывание.
+// числе FAIL reachable во вложенном прогоне набора); 4 — оценка сверх предела 30 мин (запуск и
+// --dry-run --budget) или, у --dry-run --budget, сверх бюджета без budget_reason; 130 — прерывание.
 // Прерывание во время вложенного прогона: сигнал уходит всей группе процессов текущего этапа
 // (каждый этап и вложенный run.sh идут отдельной группой), сессия ждёт выхода run.sh (стенд по
 // снимку он восстанавливает сам) и опустения группы; повторный сигнал — выход без возврата.
@@ -314,10 +332,16 @@ const SAFE_REF = /^[A-Za-z0-9_.][A-Za-z0-9_./~^-]*$/;
 const RELEASE_TAG = /^v\d+\.\d+\.\d+(-[a-z]+\.\d+)?$/;
 // Снимок незавершённого прогона на цели (RT_SNAP_DIR из lib.sh): с ним preflight отказывает.
 const SNAP_BASE = '/opt/tmp/xcp-rt-snap/baseline';
+// Блок сокращённых сроков (RT_RTENV_FILE и RT_RTENV_BEGIN из lib.sh) и имя вердикта сбоя его записи.
+const RT_ENV_FILE = '/opt/etc/xcp/xcp.env';
+const RT_ENV_BEGIN = '# xcp-rt begin';
+const RT_ENV_TEST = 'rt-env: блок xcp-rt';
 // Служебные строки этапов: всегда расхождение, если их FAIL не ожидался явно.
 const SERVICE = new Set(['pw:run', 'pw:setup']);
 // Окно истории для медиан длительности (дни); проверки без строк в окне берут всю историю.
 const HISTORY_DAYS = 30;
+// Медиана длительности проверки — по последним прогонам, не по всему окну.
+const LAST_RUNS = 5;
 
 // Префикс ошибок разбора вложенной спеки (проход-прогон session).
 let dieCtx = '';
@@ -886,7 +910,10 @@ function loadMedians() {
   } catch {
     rows = [];
   }
-  return { recent: durations(rows, { days: HISTORY_DAYS }), all: durations(rows) };
+  // SKIP — 0 с (тест не шёл), в длительность не входит; последние прогоны: поведение теста
+  // меняется (метка known, новый таймаут), и медиана за месяц тянет оценку к прежнему
+  const opt = { last: LAST_RUNS, noSkip: true };
+  return { recent: durations(rows, { days: HISTORY_DAYS, ...opt }), all: durations(rows, opt) };
 }
 
 // Медиана проверки на ядре (секунды) или null — проверка истории неизвестна.
@@ -1021,13 +1048,19 @@ function composition(p, full, root, core, h) {
 // --- оценка длительности и бюджет спеки (D-23) -------------------------------------
 
 // Бюджет размера спеки, минут: оценка больше — нужен budget_reason (проверка плана --budget).
-const BUDGET_MIN = 20;
+const BUDGET_MIN = 15;
+// Жёсткий предел, минут: оценка больше — тяжёлый прогон, его место — закрытие вехи; budget_reason
+// предел не снимает, только XCP_RT_HEAVY=1 (просьба владельца).
+const HARD_MIN = 30;
+// Наборы, которые по виду идут часами: оценка по max_minutes прохода их не ограничивает (max_minutes
+// у такого прохода не доказывает, что прогон короткий), поэтому сверх предела они по виду набора.
+const HEAVY_SUITES = new Set(['full', 'delta', 'bisect']);
 // Накладные расходы оценки, секунды: деплой и смоук на смену продукта, переключение ядра,
 // settle после Go, запуск pw-suite.sh на спек, тест без медианы; проход-прогон — max_minutes
 // или suiteMinutes минут; подмена версии (foreign_version) — деплой подмены и деплой HEAD после
 // прохода.
 const EST = {
-  deploy: 180,
+  deploy: 200,
   switch: 45,
   settle: 30,
   pwStart: 15,
@@ -1069,6 +1102,21 @@ function passSeconds(comp, core, h, root) {
     }
   }
   return sec;
+}
+
+// Оценки отдельных тестов прохода на ядре: [{ check, sec }] — те же, что в passSeconds (спек без
+// списка Playwright в состав не входит: его время остаётся накладным расходом).
+function passItems(comp, core, h) {
+  const items = [];
+  if (comp.go && !comp.go.legacy) {
+    for (const t of comp.go.tests) {
+      items.push({ check: `go:${t.test}`, sec: testSeconds(h, `go:${t.test}`, core) });
+    }
+  }
+  for (const sp of comp.specs) {
+    for (const t of sp.names ?? []) items.push({ check: t.name, sec: testSeconds(h, t.name, core) });
+  }
+  return items;
 }
 
 // Имена до 10 первых и «… ещё N».
@@ -1210,16 +1258,24 @@ function planSession(spec, specFile, root) {
     'ядра как в гейте: на первом ядре прохода — все тесты, на остальных — только с меткой ядра; поле cores прохода — все тесты на своих ядрах',
     'дешёвые тесты первыми: неизвестные истории («?») в начале, затем по возрастанию медианы'
   ];
+  if (spec.passes.some((p) => !p.suite && (p.go || p.specs?.length))) {
+    lines.push(
+      'сокращённые сроки: блок xcp-rt перед этапами go и pw сессии (D-22), снимается при возврате стенда'
+    );
+  }
+  const heavyKinds = [];
   let n = 0;
   const step = (s, sec = 0) => {
     seconds += sec;
     lines.push(`${++n}. ${s}`);
   };
+  const items = [];
   let deployed = null;
   let cur = c0;
   for (const p of spec.passes) {
     if (p.suite) {
       // прогон набора и вложенная сессия — max_minutes прохода или 15 мин
+      if (HEAVY_SUITES.has(p.suite)) heavyKinds.push(`${p.name}: ${p.suite}`);
       seconds += (p.expect.maxMinutes ?? EST.suiteMinutes) * 60;
       // вложенный прогон ставит сборку HEAD сам и оставляет активным ядро, найденное в начале
       const irq = p.interrupt
@@ -1290,6 +1346,7 @@ function planSession(spec, specFile, root) {
       }
       if (c !== cur) step(`переключение на ${c}`, EST.switch);
       cur = c;
+      for (const it of passItems(comp, c, h)) items.push({ core: c, ...it });
       step(
         `проход ${p.name} на ${c}: ${compositionTitle(comp)} — ${what(comp)}`,
         passSeconds(comp, c, h, root)
@@ -1310,22 +1367,29 @@ function planSession(spec, specFile, root) {
   if (deployed !== 'HEAD') step('деплой и смоук: HEAD (возврат продукта)', EST.deploy);
   if (cur !== c0) step(`переключение на ${c0} (исходное)`, EST.switch);
   step(
-    'проверка стенда: дерево чистое, сборка HEAD, исходное ядро, xcp запущен, снимка незавершённого прогона нет'
+    'проверка стенда: дерево чистое, сборка HEAD, исходное ядро, xcp запущен, снимка незавершённого прогона нет, блок xcp-rt снят'
   );
   const minutes = Math.ceil(seconds / 60);
   const over = minutes > BUDGET_MIN;
-  lines.push(`Оценка: ${minutes} мин (бюджет ${BUDGET_MIN} мин)`);
-  if (over) {
+  const heavy = minutes > HARD_MIN || heavyKinds.length > 0;
+  lines.push(`Оценка: ${minutes} мин (бюджет ${BUDGET_MIN} мин, предел ${HARD_MIN} мин)`);
+  if (heavyKinds.length > 0) {
+    lines.push(
+      `тяжёлый набор по виду (${heavyKinds.join(', ')}): идёт часами, оценка max_minutes не в счёт — на закрытие вехи`
+    );
+  } else if (heavy) {
+    lines.push(`сверх предела ${HARD_MIN} мин: тяжёлый прогон — на закрытие вехи`);
+  } else if (over) {
     lines.push(
       spec.budgetReason
         ? `сверх бюджета: причина — ${spec.budgetReason}`
         : 'сверх бюджета: нет budget_reason'
     );
   }
-  return { lines, minutes, over };
+  return { lines, minutes, seconds, over, heavy, heavyKinds, items };
 }
 
-// План сессии без стенда: печать плана и оценки. Итог — { minutes, over }.
+// План сессии без стенда: печать плана и оценки. Итог — { minutes, over, heavy, heavyKinds }.
 function dryRun(spec, specFile, root) {
   const plan = planSession(spec, specFile, root);
   process.stdout.write(plan.lines.join('\n') + '\n');
@@ -1379,6 +1443,10 @@ class Session {
     this.sideChild = null;
     // вердикты с этим индексом и дальше ещё не проверены на остановку (checkStop)
     this.checked = 0;
+    // сокращённые сроки (D-22): значения блока xcp-rt после первой удачной записи (строка summary),
+    // rtEnvFailed — хоть одна запись не удалась
+    this.rtEnvValues = null;
+    this.rtEnvFailed = false;
   }
 
   say(msg) {
@@ -1824,6 +1892,82 @@ class Session {
     return rc;
   }
 
+  // --- сокращённые сроки (D-22) ---
+
+  // Блок xcp-rt перед этапом go или pw прохода: rtenv.sh <цель> write (совпавший блок — без
+  // перезапуска панели). dir — каталог этапа. Код: 0 — блок стоит; 3 — нет связи (this.network);
+  // 130 — прерывание; 1 — не записан: вердикт «rt-env: блок xcp-rt» FAIL, тесты этапа не запускаются.
+  async ensureRtEnv(pass, core, dir) {
+    const rc = await this.run('sh', [path.join(SCRIPT_DIR, 'rtenv.sh'), this.t, 'write'], {
+      RT_REPORT: dir
+    });
+    if (this.aborted) return 130;
+    this.record({ kind: 'rt-env', pass, core, dir, rc });
+    if (rc === 0) {
+      if (!this.rtEnvValues) this.rtEnvValues = this.readRtEnvValues();
+      return 0;
+    }
+    if (rc === 3) return 3;
+    this.rtEnvFailed = true;
+    this.say(`проход ${pass} на ${core}: блок сокращённых сроков не записан (код ${rc})`);
+    this.verdicts.push({
+      pass,
+      core,
+      test: RT_ENV_TEST,
+      expected: ['PASS'],
+      actual: 'FAIL',
+      detail: `запись блока сокращённых сроков не удалась (код ${rc})`,
+      ok: false,
+      report: path.relative(this.root, dir)
+    });
+    return 1;
+  }
+
+  // Значения блока — таблица RT_RTENV_VALUES из lib.sh (одна на run.sh, смоук и сессию).
+  readRtEnvValues() {
+    const r = spawnSync('sh', ['-c', '. "$1/lib.sh"; printf %s "$RT_RTENV_VALUES"', 'sh', SCRIPT_DIR], {
+      cwd: this.root,
+      encoding: 'utf8'
+    });
+    const v = (r.stdout || '').trim();
+    return r.status === 0 && v ? v : 'значения не прочитаны из lib.sh';
+  }
+
+  // Блок не записан (не связь): этап и следующие этапы прохода на этом ядре не запускаются. Без
+  // keep_going — остановка на первом несовпадении (вердикт rt-env уже в verdicts). done — каталоги
+  // уже выполненных этапов прохода на ядре, rest — спеки, до которых проход не дошёл.
+  rtEnvHalt(p, core, comp, done, rest, how) {
+    if (!this.spec.keepGoing && !this.aborted && !this.stopped) {
+      this.setStopped({
+        pass: p.name,
+        core,
+        test: RT_ENV_TEST,
+        expected: ['PASS'],
+        actual: 'FAIL',
+        how,
+        live: false
+      });
+      if (rest.length) {
+        this.stopped.todo.push(
+          `проход ${p.name} на ${core}: спеки ${rest.map((s) => path.basename(s.spec)).join(', ')}`
+        );
+      }
+    }
+    this.judge(p, core, done, comp);
+    return 0;
+  }
+
+  // Снятие блока при возврате стенда (при любом исходе со связью): rtenv.sh <цель> clear — блок
+  // был, панель перезапускается на настоящих сроках; блока нет (деплой его снял) — ничего.
+  async clearRtEnv() {
+    const rc = await this.run('sh', [path.join(SCRIPT_DIR, 'rtenv.sh'), this.t, 'clear']);
+    if (rc === 0) return;
+    if (rc === 3) this.network = true;
+    this.notes.push(
+      `блок сокращённых сроков xcp-rt не снят (rtenv.sh clear, код ${rc}): снять вручную или деплоем`
+    );
+  }
+
   // --- смена версии стенда (D-13) ---
 
   // <этап>/<цель>/expect-version перед этапом go, pw или переключения ядра: версия последнего
@@ -1988,6 +2132,10 @@ class Session {
         // только порядок; go-suite.sh проверяет каждую запись по шаблону
         env.RT_GO_RUN_SEQ = comp.go.tests.map((t) => `${t.pkg}:${t.test}`).join(' ');
       }
+      // сокращённые сроки (D-22): блок xcp-rt до этапа
+      const w = await this.ensureRtEnv(p.name, core, dir);
+      if (w === 3) return 3;
+      if (w !== 0) return this.rtEnvHalt(p, core, comp, [], comp.specs, 'перед этапом go');
       const watch = this.spec.keepGoing ? {} : this.goWatch(p, core, dir);
       this.writeExpect(dir);
       const g = await this.run(
@@ -2071,6 +2219,12 @@ class Session {
       if (p.grep) env.RT_PW_GREP = p.grep;
       // только тесты с тегом @core, как во второй ветви changed
       if (comp.coreOnly) env.RT_PW_CORE_ONLY = '1';
+      // сокращённые сроки (D-22): блок xcp-rt до этапа (после Go-тестов и settle — уже стоит)
+      const w = await this.ensureRtEnv(p.name, core, dir);
+      if (w === 3) return 3;
+      if (w !== 0) {
+        return this.rtEnvHalt(p, core, comp, dirs.slice(0, -1), comp.specs.slice(k), 'перед спеком');
+      }
       this.writeExpect(dir);
       const rc = await this.run('sh', [path.join(SCRIPT_DIR, 'pw-suite.sh'), this.t, core], env);
       this.record({ kind: 'pw', pass: p.name, core, dir, rc, version: p.resolved ?? null });
@@ -3190,6 +3344,9 @@ class Session {
       if (rc === 3) return;
     }
     if (this.c0 && this.cur !== this.c0) await this.switchTo(this.c0);
+    // сокращённые сроки сняты при любом исходе со связью (D-23): после сессии — настоящие сроки
+    if (this.network) return;
+    await this.clearRtEnv();
   }
 
   standEnd() {
@@ -3198,15 +3355,23 @@ class Session {
     };
     end.product_head = this.deployed === 'HEAD';
     const r = this.remote(
-      `x=$(pidof xray | cut -d" " -f1); m=$(pidof mihomo | cut -d" " -f1); c=none; [ -n "$x" ] && c=xray; [ -n "$m" ] && c=mihomo; [ -n "$x" ] && [ -n "$m" ] && c=both; echo "$c"; pidof xcp >/dev/null && echo xcp-up || echo xcp-down; [ -d ${SNAP_BASE} ] && echo snap-left || echo snap-none`
+      `x=$(pidof xray | cut -d" " -f1); m=$(pidof mihomo | cut -d" " -f1); c=none; [ -n "$x" ] && c=xray; [ -n "$m" ] && c=mihomo; [ -n "$x" ] && [ -n "$m" ] && c=both; echo "$c"; pidof xcp >/dev/null && echo xcp-up || echo xcp-down; [ -d ${SNAP_BASE} ] && echo snap-left || echo snap-none; grep -qxF '${RT_ENV_BEGIN}' ${RT_ENV_FILE} 2>/dev/null && echo rt-block || echo rt-none`
     );
-    const [core = '-', xcp = '-', snap = '-'] = r.out.split('\n');
+    const [core = '-', xcp = '-', snap = '-', rt = '-'] = r.out.split('\n');
     end.core = r.rc === 0 ? core : '-';
     end.core_initial = this.c0 ?? '-';
     end.core_ok = r.rc === 0 && core === this.c0;
     end.xcp_up = r.rc === 0 && xcp === 'xcp-up';
     end.no_snapshot = r.rc === 0 && snap === 'snap-none';
-    end.ok = end.tree_clean && end.product_head && end.core_ok && end.xcp_up && end.no_snapshot;
+    // блок сокращённых сроков снят (D-23): смоук тега и ручная проверка после сессии — на настоящих сроках
+    end.no_rtenv = r.rc === 0 && rt === 'rt-none';
+    end.ok =
+      end.tree_clean &&
+      end.product_head &&
+      end.core_ok &&
+      end.xcp_up &&
+      end.no_snapshot &&
+      end.no_rtenv;
     return end;
   }
 
@@ -3221,7 +3386,18 @@ class Session {
     L.push(
       `- Цель: ${this.t}; исходное ядро: ${this.c0 ?? '-'}; ядра проходов: ${this.spec.cores.join(', ')}`
     );
-    L.push(`- Отчёт: ${path.relative(this.root, this.dir)}`, '');
+    L.push(`- Отчёт: ${path.relative(this.root, this.dir)}`);
+    // сокращённые сроки этапов go и pw сессии (D-22): значения таблицы lib.sh
+    L.push(
+      `- Сокращённые сроки: ${
+        this.rtEnvValues
+          ? this.rtEnvValues
+          : this.rtEnvFailed
+            ? 'не записаны (вердикт rt-env)'
+            : 'не ставились (своих этапов go и pw не было)'
+      }`,
+      ''
+    );
     const st = this.stopped;
     if (st?.reason === 'version') {
       L.push('## Остановлено: смена версии стенда', '');
@@ -3274,6 +3450,7 @@ class Session {
       );
       L.push(`- xcp запущен: ${end.xcp_up ? 'да' : '**нет**'}`);
       L.push(`- снимка незавершённого прогона нет: ${end.no_snapshot ? 'да' : '**нет**'}`);
+      L.push(`- блок xcp-rt снят: ${end.no_rtenv ? 'да' : '**нет**'}`);
     } else {
       L.push('- не проверялся');
     }
@@ -3310,6 +3487,27 @@ class Session {
   }
 }
 
+/**
+ * Отказ настоящего запуска по пределу (код 4, стенд не тронут): причина в stderr и строкой итога
+ * в summary.md отчёта, чтобы ход прогона показал «отказ», а не «оборван».
+ */
+function refuse(why) {
+  process.stderr.write(`session: ${why}\n`);
+  try {
+    appendFileSync(path.join(process.env.RT_REPORT, 'summary.md'), `- Итог: отказ — ${why.split(' — ')[0]}\n`);
+  } catch {
+    // отчёт только для смотрящего: код выхода отказ передаёт и так
+  }
+  process.exit(4);
+}
+
+/** Причина отказа по пределу: вид набора или оценка сверх HARD_MIN. */
+function heavyWhy(plan) {
+  return plan.heavyKinds.length > 0
+    ? `тяжёлый набор по виду (${plan.heavyKinds.join(', ')}), оценка ${plan.minutes} мин`
+    : `оценка ${plan.minutes} мин сверх предела ${HARD_MIN} мин`;
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const args = parseArgs(argv);
@@ -3319,6 +3517,12 @@ async function main() {
   const spec = loadSpec(specFile, root);
   if (args.mode === 'dry-run') {
     const plan = dryRun(spec, path.relative(root, specFile), root);
+    if (args.budget && plan.heavy) {
+      process.stderr.write(
+        `session: ${heavyWhy(plan)} — тяжёлый прогон идёт при закрытии вехи, спеку разделить\n`
+      );
+      process.exit(4);
+    }
     if (args.budget && plan.over && !spec.budgetReason) {
       // проверка плана (D-23): спека сверх бюджета без причины не проходит
       process.stderr.write(
@@ -3339,12 +3543,50 @@ async function main() {
     die('рабочее дерево не чистое: проходы меняют файлы продукта');
   }
 
+  // предел тяжёлого прогона: проверка до деплоя и снимка, стенд не тронут
+  // Без оценки предел не проверен: отказ (код 4), а не пропуск; обход — тот же XCP_RT_HEAVY=1.
+  let plan0 = null;
+  let planErr = null;
+  try {
+    plan0 = planSession(spec, path.relative(root, specFile), root);
+  } catch (e) {
+    planErr = e;
+    if (process.env.XCP_RT_HEAVY !== '1') {
+      refuse(
+        `оценка не посчитана (${e.message}) — предел ${HARD_MIN} мин не проверен; починить оценку или XCP_RT_HEAVY=1 по просьбе владельца`
+      );
+    }
+  }
+  if (plan0 && plan0.heavy && process.env.XCP_RT_HEAVY !== '1') {
+    refuse(
+      `${heavyWhy(plan0)} — тяжёлые прогоны идут при закрытии вехи; разделить спеку или XCP_RT_HEAVY=1 по просьбе владельца`
+    );
+  }
+
   const s = new Session(spec, specFile, root);
   s.say(`отчёт ${path.relative(root, s.dir)}`);
-  // оценка и бюджет (D-23): сверх бюджета — только предупреждение, сессия идёт
+  // оценка и бюджет (D-23): сверх бюджета в пределе — только предупреждение, сессия идёт
   try {
-    const plan = planSession(spec, path.relative(root, specFile), root);
-    s.say(`оценка: ${plan.minutes} мин (бюджет ${BUDGET_MIN} мин)`);
+    if (!plan0) throw planErr;
+    const plan = plan0;
+    s.say(`оценка: ${plan.minutes} мин (бюджет ${BUDGET_MIN} мин, предел ${HARD_MIN} мин)`);
+    // оценка для хода прогона (progress.mjs): строка est журнала отчёта сессии (формат rt_progress)
+    try {
+      const at = Math.floor(Date.now() / 1000);
+      // est — оценка в целых минутах (бюджет и предел), estt — оценки тестов для прогноза хода
+      const estt = plan.items
+        .map(
+          (it) =>
+            `${at}\testt\t${it.core}\t${it.check.replace(/[\t\n]/g, ' ')}\t${Math.round(it.sec)}\n`
+        )
+        .join('');
+      appendFileSync(
+        path.join(s.dir, 'progress.tsv'),
+        `${at}\test\t${Math.round(plan.seconds)}\n${estt}`
+      );
+    } catch {
+      // журнал только для смотрящего
+    }
     if (plan.over) {
       s.warn(
         `предупреждение: оценка ${plan.minutes} мин сверх бюджета ${BUDGET_MIN} мин — ${spec.budgetReason ? `причина: ${spec.budgetReason}` : 'budget_reason в спеке нет'}`

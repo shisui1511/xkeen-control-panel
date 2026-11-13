@@ -13,11 +13,19 @@
  *   - goViolations(root)     — нарушения: тест читает ядро (.Core, XCP_RT_CORE)
  *       или переключает его (switch_kernel), но не размечен; помощник сам берёт
  *       ядро из Current/CoreSpecific/XCP_RT_CORE.
+ * Метка «одно ядро» (D-01…D-04) — вызов routertest.OneCore(t, причина, покрытие) в теле
+ * теста: правило «тест, читающий ядро, размечен» она выполняет, но метку ядра не даёт
+ * (coreMarked остаётся false, тест идёт в одну ветвь); факт oneCore — в goTestFacts и
+ * specTestFacts, покрытие проверяет oneCoreIssues(testFacts(root)).
  * TS-часть (specFacts, specIssues, specViolations): спеки Playwright, читающие ядро
  * (RT.core, XCP_CORE, selectorApplies, переключение, помощник спека, читающий ядро),
  * обязаны нести тег ядра (CORE_TAG) на каждом таком test(...),
  * а метки knownFailure с ядром в селекторе — идти через coreTagsOf. core-switch.spec.ts
- * исключён: он идёт в каждой ветви.
+ * исключён: он идёт в каждой ветви. Тег «одно ядро» (ONE_CORE_TAG с аннотацией one-core
+ * «<причина>; covered-by: <название>») выполняет это правило, но тегом ядра не считается.
+ * Репортёр хода progress-reporter.ts (LIB_REPORTERS) из правила «помощник lib/ не читает ядро»
+ * выведен по точному имени, а его импорт из спека или помощника lib/ — нарушение (libIssues,
+ * reporterImportIssues).
  * Области router-area и факты тестов (loadAreas, matchGlob, areaOfText, testFacts — ярус,
  * Slow, карантин, метка ядра, область файла) — в конце файла; их читают
  * scripts/check-router-areas.js, выбор changed, страж ярусов и бюджет.
@@ -39,6 +47,9 @@ const CORE_READ = /\.Core\b/;
 const ENV_CORE = /XCP_RT_CORE/;
 const SWITCH_KERNEL = /switch_kernel/;
 const CORE_SPECIFIC = /\broutertest\.CoreSpecific\(/;
+// Метка «одно ядро» (D-01…D-04): выполняет правило 1, но метку ядра не ставит.
+const ONE_CORE = /\broutertest\.OneCore\(/;
+const ONE_CORE_ALL = /\broutertest\.OneCore\(/g;
 const CURRENT_CALL = /\broutertest\.Current\(/;
 const TARGET_PARAM = /\broutertest\.Target\b/;
 const KNOWN_WITH_SLASH = /\broutertest\.Known\(\s*"[^"\n]*\/[^"\n]*"/;
@@ -133,24 +144,34 @@ function analyzeGo(text) {
   const marks = [];
   const violations = [];
   for (const d of decls) {
+    const inTestBody = d.kind === 'func' && !d.receiver && TEST_NAME.test(d.name);
+    if (!inTestBody && ONE_CORE.test(d.masked)) {
+      violations.push({
+        name: d.name || '(объявление уровня файла)',
+        reason: 'routertest.OneCore вне тела TestRouter*: метку «одно ядро» читают только из тела теста'
+      });
+    }
     if (d.kind !== 'func' || d.receiver) continue;
     const isTest = /^Test/.test(d.name);
     if (isTest) {
       if (!TEST_NAME.test(d.name)) continue;
       const marked = CORE_SPECIFIC.test(d.masked);
+      const oneCore = ONE_CORE.test(d.masked);
       const known = KNOWN_WITH_SLASH.test(d.code) || fileKnown;
       if (marked) marks.push({ test: d.name, reason: 'core' });
       else if (known) marks.push({ test: d.name, reason: 'known-core' });
       const reads = CORE_READ.test(d.masked) || ENV_CORE.test(d.code) || SWITCH_KERNEL.test(d.code);
-      if (reads && !marked) {
+      if (reads && !marked && !oneCore) {
         violations.push({
           name: d.name,
-          reason: 'тест читает или переключает ядро, но не вызывает routertest.CoreSpecific(t)'
+          reason: 'тест читает или переключает ядро, но не вызывает routertest.CoreSpecific(t) или routertest.OneCore(t, …)'
         });
       }
+      if (oneCore) violations.push(...oneCoreCallIssues(d, marked));
     } else if (
       ENV_CORE.test(d.code) ||
-      (CORE_READ.test(d.masked) && (CURRENT_CALL.test(d.masked) || CORE_SPECIFIC.test(d.masked)))
+      (CORE_READ.test(d.masked) &&
+        (CURRENT_CALL.test(d.masked) || CORE_SPECIFIC.test(d.masked) || ONE_CORE.test(d.masked)))
     ) {
       violations.push({
         name: d.name,
@@ -167,6 +188,44 @@ function analyzeGo(text) {
     }
   }
   return { marks, violations };
+}
+
+/** Аргументы первого вызова routertest.OneCore в объявлении: { args, reason, covers } или null. */
+function oneCoreCall(d) {
+  const m = ONE_CORE.exec(d.masked);
+  if (!m) return null;
+  const open = m.index + m[0].length - 1;
+  return { args: splitArgs(d.code, open), reason: goStringArg(d.code, open, 1), covers: goStringArg(d.code, open, 2) };
+}
+
+/**
+ * Нарушения вызова routertest.OneCore в теле TestRouter* (правило 6 стража): причина и
+ * покрытие — непустые строковые литералы, покрытие — имя другого TestRouter*, вызов один и
+ * не вместе с CoreSpecific (метки «одно ядро» и «ядро» взаимоисключают).
+ */
+function oneCoreCallIssues(d, coreSpecific) {
+  const name = d.name;
+  const issues = [];
+  if (coreSpecific) {
+    issues.push({
+      name,
+      reason: 'метки «одно ядро» и «ядро» взаимоисключают: routertest.OneCore ставится вместо routertest.CoreSpecific'
+    });
+  }
+  if ([...d.masked.matchAll(ONE_CORE_ALL)].length > 1) {
+    issues.push({ name, reason: 'routertest.OneCore вызван больше одного раза' });
+  }
+  const { args, reason, covers } = oneCoreCall(d);
+  const arity = Boolean(args) && args.length === 3;
+  if (!arity || !reason || !reason.trim()) {
+    issues.push({ name, reason: 'routertest.OneCore: причина — непустой строковый литерал' });
+  }
+  if (!arity || !covers || !covers.trim()) {
+    issues.push({ name, reason: 'routertest.OneCore: покрытие — непустой строковый литерал' });
+  } else if (!TEST_NAME.test(covers) || covers === name) {
+    issues.push({ name, reason: `routertest.OneCore: покрытие «${covers}» — имя другого теста TestRouter*` });
+  }
+  return issues;
 }
 
 /** Роутерные тестовые файлы Go из индекса git: [{file, pkg, text}]. */
@@ -218,14 +277,35 @@ function goViolations(root) {
 /** TS-часть (Playwright): спеки frontend/tests/router/*.spec.ts. */
 const SPEC_READS_CORE = /\b(?:RT\.core|RT\.wantCore|XCP_CORE|XCP_WANT_CORE|switch_kernel)\b|\bselectorApplies\(/;
 const SPEC_CORE_TAGGED = /\bCORE_TAG\b|\bCORE_LABEL_TAG\b|['"`]@core['"`]|\bcoreTagsOf\(/;
+// Только постоянный тег ядра (@core), без @core-label из метки известного падения: тот снимается вместе с меткой,
+// поэтому покрытие «одного ядра» опирается лишь на этот тег.
+const SPEC_CORE_TAG_ONLY = /\bCORE_TAG\b|['"`]@core['"`]/;
+// Тег «одно ядро» (D-01…D-04): правило 3 выполняет, тегом ядра не является (SPEC_CORE_TAGGED его не совпадает).
+const SPEC_ONE_CORE = /\bONE_CORE_TAG\b|['"`]@one-core['"`]/;
+const SPEC_ONE_CORE_ALL = /\bONE_CORE_TAG\b|['"`]@one-core['"`]/g;
+const ONE_CORE_COVERED_BY = '; covered-by: ';
 const SPEC_USES_COREOF = /\bcoreTagsOf\(/;
 const KNOWN_CALL = /\bknownFailure\(\s*(['"`])([^'"`\n]*)\1/g;
 const LIB_READS_CORE = /\bRT\.core\b|\bXCP_CORE\b/;
 const SPEC_EXEMPT = new Set(['core-switch.spec.ts']);
 const LIB_EXEMPT = new Set(['env.ts', 'known.ts']);
+// Репортёры Playwright из frontend/tests/router/lib/: их подключает конфиг
+// frontend/playwright.router.config.ts строкой пути, это не спеки и не помощники спека.
+// Ядро ветви репортёр читает только для журнала хода progress.tsv (scripts/router/progress.mjs,
+// make router-watch) и решений о ядре не принимает. Исключение — по точному имени файла;
+// спек и помощник lib/ репортёр не импортируют (REPORTER_IMPORT), иначе ядро прошло бы в
+// спек мимо тега.
+const LIB_REPORTERS = new Set(['progress-reporter.ts']);
+// Импорт репортёра: строка в кавычках, оканчивающаяся на /<имя без расширения> (расширение
+// .ts/.js/.mjs/.cjs необязательно), после from, import (голый и динамический) или require(.
+const REPORTER_IMPORT = new RegExp(
+  String.raw`(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)(['"\x60])[^'"\x60\n]*/(?:` +
+    [...LIB_REPORTERS].map((n) => n.replace(/\.ts$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') +
+    String.raw`)(?:\.(?:ts|js|mjs|cjs))?\1`
+);
 
-/** Вырезает комментарии TS/JS и импорты; строки, шаблоны и литералы регулярных выражений оставляет как есть. */
-function stripTs(text) {
+/** Вырезает комментарии TS/JS; строки, шаблоны и литералы регулярных выражений оставляет как есть. */
+function stripTsComments(text) {
   let out = '';
   const n = text.length;
   let i = 0;
@@ -255,12 +335,35 @@ function stripTs(text) {
       i++;
     }
   }
-  return out.replace(/^import[\s\S]*?\bfrom\s*['"][^'"\n]+['"];?/gm, '');
+  return out;
+}
+
+/** Вырезает комментарии TS/JS и импорты; строки, шаблоны и литералы регулярных выражений оставляет как есть. */
+function stripTs(text) {
+  return stripTsComments(text).replace(/^import[\s\S]*?\bfrom\s*['"][^'"\n]+['"];?/gm, '');
+}
+
+/** Причины нарушения для спека или помощника lib/, импортирующего репортёр Playwright (LIB_REPORTERS). */
+function reporterImportIssues(text) {
+  if (!REPORTER_IMPORT.test(stripTsComments(text))) return [];
+  return ['импортирует репортёр Playwright (progress-reporter.ts): репортёр не помощник спека — ядро он читает только для журнала хода'];
+}
+
+/** Причины нарушения для помощника frontend/tests/router/lib/*.ts (правило 5). */
+function libIssues(file, text) {
+  const name = path.posix.basename(file);
+  const issues = [];
+  if (!LIB_EXEMPT.has(name) && !LIB_REPORTERS.has(name) && LIB_READS_CORE.test(stripTs(text))) {
+    issues.push('помощник читает ядро: решение принимается в спеке с тегом ядра');
+  }
+  if (!LIB_REPORTERS.has(name)) issues.push(...reporterImportIssues(text));
+  return issues;
 }
 
 /**
  * Факты об одном TS-спеке (после вырезания комментариев и импортов):
- * { readsCore, coreTagged, coreLabelSelectors, usesCoreTagsOf }.
+ * { readsCore, coreTagged, oneCoreTagged, coreLabelSelectors, usesCoreTagsOf }. Тег «одно ядро»
+ * в coreTagged не входит: спек с ним идёт в одну ветвь, как неразмеченный.
  */
 function specFacts(text) {
   const code = stripTs(text);
@@ -271,6 +374,7 @@ function specFacts(text) {
   return {
     readsCore: SPEC_READS_CORE.test(code),
     coreTagged: SPEC_CORE_TAGGED.test(code),
+    oneCoreTagged: SPEC_ONE_CORE.test(code),
     coreLabelSelectors,
     usesCoreTagsOf: SPEC_USES_COREOF.test(code)
   };
@@ -392,7 +496,9 @@ function untaggedCoreTests(text) {
       SPEC_READS_CORE.test(seg) || [...tainted].some((n) => new RegExp('\\b' + n + '\\(').test(seg));
     if (!reads) continue;
     const tagged =
-      SPEC_CORE_TAGGED.test(seg) || (tagVarOk && /\{\s*tag\s*[,}]|\btag:\s*tag\b/.test(seg));
+      SPEC_CORE_TAGGED.test(seg) ||
+      SPEC_ONE_CORE.test(seg) ||
+      (tagVarOk && /\{\s*tag\s*[,}]|\btag:\s*tag\b/.test(seg));
     if (!tagged) bad.push({ unparsed: false, title: seg.slice(1, 70).replace(/\s+/g, ' ') });
   }
   return bad;
@@ -402,7 +508,7 @@ function untaggedCoreTests(text) {
 function specIssues(text) {
   const f = specFacts(text);
   const issues = [];
-  if (f.readsCore && !f.coreTagged) {
+  if (f.readsCore && !f.coreTagged && !f.oneCoreTagged) {
     issues.push('спек читает ядро без тега ядра: объявите такие тесты с { tag: CORE_TAG }');
   } else if (f.readsCore) {
     // тег есть у части тестов файла: остальные тесты, читающие ядро, тоже должны его нести
@@ -419,6 +525,61 @@ function specIssues(text) {
       `метка knownFailure с ядром в селекторе (${f.coreLabelSelectors.join(', ')}) без coreTagsOf: тег @core-label выводится через test(title, { tag: coreTagsOf(() => …) }, fn)`
     );
   }
+  if (f.oneCoreTagged || annotationTypeUsed(stripTs(text), 'one-core')) issues.push(...specOneCoreIssues(text));
+  return issues;
+}
+
+/** Описание аннотации one-core «<причина>; covered-by: <название>» → { reason, covers } (пустые строки — нет части). */
+function parseOneCore(desc) {
+  const s = desc || '';
+  const at = s.lastIndexOf(ONE_CORE_COVERED_BY);
+  if (at < 0) return { reason: s.trim(), covers: '' };
+  return { reason: s.slice(0, at).trim(), covers: s.slice(at + ONE_CORE_COVERED_BY.length).trim() };
+}
+
+/** В тексте упомянут тип аннотации (литералом или константой из lib/known.ts). */
+function annotationTypeUsed(code, type) {
+  return new RegExp(`\\btype:\\s*(?:(['"\`])${type}\\1|\\b${ANNOTATION_CONST[type]}\\b)`).test(code);
+}
+
+/**
+ * Нарушения метки «одно ядро» в спеке (правило 6 стража для Playwright): тег ONE_CORE_TAG —
+ * только в деталях test(…), с аннотацией one-core, где причина и покрытие — непустой строковый
+ * литерал «<причина>; covered-by: <название другого теста>»; вместе с тегом ядра тег не ставится;
+ * аннотация one-core без тега — тоже нарушение.
+ */
+function specOneCoreIssues(text) {
+  const code = stripTs(text);
+  const issues = [];
+  let tagsInTests = 0;
+  for (const m of code.matchAll(/(?<![\w.$])test\(/g)) {
+    const args = splitArgs(code, m.index + m[0].length - 1);
+    if (!args || args.length < 3) continue;
+    const details = args[1].text;
+    const title = literalValue(args[0].text);
+    const shown = title || args[0].text.slice(0, 60);
+    const tagged = SPEC_ONE_CORE.test(details);
+    const ann = annotationOf(details, 'one-core');
+    if (!tagged) {
+      if (ann !== null) issues.push(`аннотация one-core без тега ONE_CORE_TAG (${shown})`);
+      continue;
+    }
+    tagsInTests += [...details.matchAll(SPEC_ONE_CORE_ALL)].length;
+    if (SPEC_CORE_TAGGED.test(details)) {
+      issues.push(`метки «одно ядро» и «ядро» взаимоисключают: ONE_CORE_TAG ставится вместо CORE_TAG (${shown})`);
+    }
+    const { reason, covers } = parseOneCore(ann);
+    if (!reason || !covers) {
+      issues.push(
+        `тег @one-core без аннотации { type: ONE_CORE_ANNOTATION, description: '<причина>; covered-by: <название теста>' } (${shown})`
+      );
+    } else if (title !== null && covers === title) {
+      issues.push(`one-core: покрытие — другой тест, а не сам «${title}»`);
+    }
+  }
+  if ([...code.matchAll(SPEC_ONE_CORE_ALL)].length > tagsInTests) {
+    issues.push('тег @one-core вне деталей test(…): метку читают только из деталей теста');
+  }
   return issues;
 }
 
@@ -433,19 +594,16 @@ function trackedFiles(root, glob) {
 function specViolations(root) {
   const rows = [];
   for (const file of trackedFiles(root, 'frontend/tests/router/*.spec.ts')) {
+    const text = fs.readFileSync(path.join(root, file), 'utf8');
+    for (const reason of reporterImportIssues(text)) rows.push({ file, name: '(спек)', reason });
     if (SPEC_EXEMPT.has(path.posix.basename(file))) continue;
-    for (const reason of specIssues(fs.readFileSync(path.join(root, file), 'utf8'))) {
+    for (const reason of specIssues(text)) {
       rows.push({ file, name: '(спек)', reason });
     }
   }
   for (const file of trackedFiles(root, 'frontend/tests/router/lib/*.ts')) {
-    if (LIB_EXEMPT.has(path.posix.basename(file))) continue;
-    if (LIB_READS_CORE.test(stripTs(fs.readFileSync(path.join(root, file), 'utf8')))) {
-      rows.push({
-        file,
-        name: '(помощник)',
-        reason: 'помощник читает ядро: решение принимается в спеке с тегом ядра'
-      });
+    for (const reason of libIssues(file, fs.readFileSync(path.join(root, file), 'utf8'))) {
+      rows.push({ file, name: '(помощник)', reason });
     }
   }
   rows.sort((a, b) => (a.file + a.name).localeCompare(b.file + b.name));
@@ -889,7 +1047,10 @@ function goStringArg(code, open, n) {
   return literalValue(args[n].text);
 }
 
-/** Факты тестов одного роутерного Go-файла (без области): [{test, tier, tierReason, slowReason, quarantine, coreMarked}]. */
+/**
+ * Факты тестов одного роутерного Go-файла (без области):
+ * [{test, tier, tierReason, slowReason, quarantine, coreMarked, coreSpecific, oneCore: {reason, covers} | null}].
+ */
 function goTestFacts(text) {
   const decls = declarations(text);
   const fileKnown = decls.some((d) => d.kind !== 'func' && KNOWN_WITH_SLASH.test(d.code));
@@ -912,13 +1073,18 @@ function goTestFacts(text) {
     }
     const slowAt = call(/\broutertest\.Slow\(/);
     const quarAt = call(/\broutertest\.Quarantine\(/);
+    const one = oneCoreCall(d);
     rows.push({
       test: d.name,
       tier,
       tierReason,
       slowReason: slowAt >= 0 ? goStringArg(d.code, slowAt, 1) || null : null,
       quarantine: quarAt >= 0 ? goStringArg(d.code, quarAt, 1) || '' : null,
-      coreMarked: CORE_SPECIFIC.test(d.masked) || KNOWN_WITH_SLASH.test(d.code) || fileKnown
+      // метка «одно ядро» метку ядра не даёт: тест идёт в одну ветвь, как неразмеченный (D-03)
+      coreMarked: CORE_SPECIFIC.test(d.masked) || KNOWN_WITH_SLASH.test(d.code) || fileKnown,
+      // только routertest.CoreSpecific: метка известного падения с ядром временная (правило 7)
+      coreSpecific: CORE_SPECIFIC.test(d.masked),
+      oneCore: one ? { reason: (one.reason || '').trim(), covers: (one.covers || '').trim() } : null
     });
   }
   return rows;
@@ -926,7 +1092,11 @@ function goTestFacts(text) {
 
 const SPEC_FULL_TAG = /\bFULL_TAG\b|['"`]@full['"`]/;
 
-const ANNOTATION_CONST = { 'tier-full': 'TIER_FULL_ANNOTATION', slow: 'SLOW_ANNOTATION' };
+const ANNOTATION_CONST = {
+  'tier-full': 'TIER_FULL_ANNOTATION',
+  slow: 'SLOW_ANNOTATION',
+  'one-core': 'ONE_CORE_ANNOTATION'
+};
 
 /**
  * Описание аннотации заданного типа в тексте деталей test(…): строка, '' (без описания, с
@@ -943,10 +1113,18 @@ function annotationOf(seg, type) {
   return new RegExp(`\\btype:\\s*${typeRe}`).test(seg) ? '' : null;
 }
 
-/** Факты тестов одного спека (без области): [{test, tier, tierReason, slowReason, quarantine, coreMarked}]. */
+/**
+ * Факты тестов одного спека (без области):
+ * [{test, titleTemplate, tier, tierReason, slowReason, quarantine, coreMarked, coreTag, oneCore: {reason, covers} | null}].
+ */
 function specTestFacts(text) {
   const code = stripTs(text);
   const tagVarCore = /\b(?:const|let)\s+tag\s*=[^;]*?(?:CORE_TAG|CORE_LABEL_TAG|coreTagsOf)/s.test(code);
+  // постоянный CORE_TAG в переменной tag — только безусловный: перед ним в выражении нет тернарника
+  // и логического И/ИЛИ (`cond ? [CORE_TAG] : []`), иначе тег есть не у каждого теста с { tag }
+  const tagVarCoreOnly = [...code.matchAll(/\b(?:const|let)\s+tag\s*=([^;]*?)\bCORE_TAG\b/gs)].some(
+    (m) => !/[?]|&&|\|\|/.test(m[1])
+  );
   const rows = [];
   for (const m of code.matchAll(/(?<![\w.$])test\(/g)) {
     const open = m.index + m[0].length - 1;
@@ -966,7 +1144,12 @@ function specTestFacts(text) {
       tierReason: SPEC_FULL_TAG.test(details) ? tierReason || null : null,
       slowReason: slow === null ? null : slow || null,
       quarantine: q ? q[2] : null,
-      coreMarked: SPEC_CORE_TAGGED.test(details) || (tagVarCore && /\{\s*tag\s*[,}]|\btag:\s*tag\b/.test(details))
+      // тег «одно ядро» метку ядра не даёт: тест идёт в одну ветвь, как неразмеченный (D-03)
+      coreMarked: SPEC_CORE_TAGGED.test(details) || (tagVarCore && /\{\s*tag\s*[,}]|\btag:\s*tag\b/.test(details)),
+      // постоянный тег ядра (CORE_TAG): на него опирается покрытие «одного ядра», тег метки падения не в счёт
+      coreTag: SPEC_CORE_TAG_ONLY.test(details) || (tagVarCoreOnly && /\{\s*tag\s*[,}]|\btag:\s*tag\b/.test(details)),
+      // без аннотации с причиной и покрытием — пустые строки (их отклоняет specIssues)
+      oneCore: SPEC_ONE_CORE.test(details) ? parseOneCore(annotationOf(details, 'one-core')) : null
     });
   }
   return rows;
@@ -1041,7 +1224,7 @@ function specTierIssues(text) {
  * Факты всех роутерных тестов репозитория (по индексу git): массив
  * { kind: 'go'|'pw', file, pkg|null, spec|null, test (имя или null у PW с вычисляемым
  *   названием), area (null — нет строки области), tier: 'gate'|'full', tierReason,
- *   slowReason, quarantine (slug или null), coreMarked }.
+ *   slowReason, quarantine (slug или null), coreMarked, oneCore ({reason, covers} или null) }.
  */
 function testFacts(root) {
   const rows = [];
@@ -1056,6 +1239,45 @@ function testFacts(root) {
     for (const t of specTestFacts(text)) rows.push({ kind: 'pw', file, pkg: null, spec, area, ...t });
   }
   return rows;
+}
+
+/**
+ * Покрытие тестов с меткой «одно ядро» (правило 7 стража, D-04): по фактам testFacts —
+ * [{file, test, reason}]. Покрытие ищется среди тестов того же семейства: Go — тот же вид,
+ * пакет и router-area, спек — тот же вид и router-area. Нарушения: покрытия нет; у покрытия
+ * нет метки ядра (Go — routertest.CoreSpecific, coreSpecific; спек — постоянный тег CORE_TAG, coreTag; тег метки падения не подходит); покрытие в карантине; покрытие само с меткой «одно ядро».
+ * Пустое покрытие здесь не разбирается: его отклоняют analyzeGo и specIssues (правило 6).
+ */
+function oneCoreIssues(facts) {
+  const issues = [];
+  for (const f of facts) {
+    if (!f.oneCore || !f.oneCore.covers) continue;
+    const covers = f.oneCore.covers;
+    const test = f.test || '(название не литерал)';
+    const family = facts.filter(
+      (x) => x !== f && x.kind === f.kind && x.test === covers && x.area === f.area && (f.kind !== 'go' || x.pkg === f.pkg)
+    );
+    if (family.length === 0) {
+      const elsewhere = facts.some((x) => x !== f && x.test === covers);
+      issues.push({
+        file: f.file,
+        test,
+        reason: elsewhere
+          ? `покрытие «${covers}» из другого семейства: нужен тест того же ${f.kind === 'go' ? 'пакета и ' : ''}router-area`
+          : `покрытие «${covers}» не найдено`
+      });
+      continue;
+    }
+    const why = (x) => {
+      if (x.oneCore) return `покрытие «${covers}» само с меткой «одно ядро»`;
+      if (f.kind === 'go' ? x.coreSpecific !== true : x.coreTag !== true) return `покрытие «${covers}» без метки ядра: ему нужен ${f.kind === 'go' ? 'routertest.CoreSpecific' : 'тег CORE_TAG (тег метки известного падения не подходит)'}`;
+      if (x.quarantine !== null && x.quarantine !== undefined) return `покрытие «${covers}» в карантине`;
+      return null;
+    };
+    if (family.some((x) => why(x) === null)) continue;
+    issues.push({ file: f.file, test, reason: why(family[0]) });
+  }
+  return issues;
 }
 
 /*
@@ -1174,6 +1396,8 @@ module.exports = {
   specFacts,
   specIssues,
   specViolations,
+  libIssues,
+  reporterImportIssues,
   routerGoFiles,
   trackedFiles,
   AREAS_FILE,
@@ -1191,7 +1415,8 @@ module.exports = {
   loadHistory,
   median,
   specTierIssues,
-  testFacts
+  testFacts,
+  oneCoreIssues
 };
 
 if (require.main === module) {

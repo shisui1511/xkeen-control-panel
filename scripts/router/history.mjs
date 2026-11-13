@@ -67,8 +67,10 @@
 //   backfill()                           { reports, rows } — добавленные отчёты и строки
 //   listReports(dir)                     имена отчётов каталога по возрастанию
 //   median(numbers)                      медиана
-//   durations(rows, { suite, days, core }?)
-//                                        Map `<check>\t<core>` → { median, runs }
+//   durations(rows, { suite, days, core, last, noSkip }?)
+//                                        Map `<check>\t<core>` → { median, runs }; last N — медиана
+//                                        последних N прогонов проверки (по времени), noSkip — без
+//                                        строк SKIP (0 с — тест не шёл, длительности нет)
 //   failFreq(rows, { days }?)            Map check → { fails, runs } — порядок гейта (RTR-03),
 //                                        отбор для bisect (D-22), нестабильность (D-19)
 //   lastFull(rows, { green, before }?)   { report, sha, release, finished } последнего полного
@@ -78,6 +80,21 @@
 //                                        тестов X мин (было Y, +Z)» и «- Новые тесты: …» (до 5
 //                                        самых долгих проверок, которых не было в прошлом полном
 //                                        прогоне); тесты — верхние go: и pw: с ядром
+//   lastOutcome(rows, check, core, { excludeReport, days, target }?)
+//                                        { status, report, finished_utc } самого позднего исхода
+//                                        проверки на ядре или null — страж метки ядра в
+//                                        branch-report.mjs (D-05: тест «одно ядро» идёт на одном
+//                                        ядре, второе берётся из истории). Окно: finished_utc не
+//                                        старше days (по умолчанию 60) дней от сейчас; без отчёта
+//                                        excludeReport и вложенных в него (<имя>-…, <имя>/…: проходы
+//                                        и этапы сессии, перепрогоны); без статуса SKIP, исходов
+//                                        карантина (QPASS, QFAIL) и классов quarantine, stand, known,
+//                                        flaky;
+//                                        target — только эта цель (не задана — любая)
+//   hasPass(rows, check, core, opts)     { report, finished_utc } последнего PASS в том же окне
+//                                        и с теми же отсечениями, что lastOutcome, или null —
+//                                        доказательство «на этом ядре проходил» (F14: SKIP и KNOWN
+//                                        от состояния стенда)
 //
 // Только встроенные модули Node.
 
@@ -494,19 +511,29 @@ function inWindow(row, days, now = Date.now()) {
 }
 
 export function durations(rows, opts = {}) {
-  const { suite, days, core } = opts;
+  const { suite, days, core, last, noSkip } = opts;
   const acc = new Map();
   for (const r of rows) {
     if (r.seconds === null || r.seconds === undefined) continue;
     if (suite && r.suite !== suite) continue;
     if (core && r.core !== core) continue;
+    if (noSkip && r.status === 'SKIP') continue;
     if (!inWindow(r, days)) continue;
     const key = `${r.check}\t${r.core}`;
     if (!acc.has(key)) acc.set(key, []);
-    acc.get(key).push(r.seconds);
+    acc.get(key).push(last ? { t: Date.parse(r.finished_utc) || 0, sec: r.seconds } : r.seconds);
   }
   const out = new Map();
-  for (const [key, list] of acc) out.set(key, { median: median(list), runs: list.length });
+  for (const [key, list] of acc) {
+    // последние N: поведение теста меняется (метка known, новый таймаут), старые прогоны врут
+    const secs = last
+      ? list
+          .sort((a, b) => a.t - b.t)
+          .slice(-last)
+          .map((x) => x.sec)
+      : list;
+    out.set(key, { median: median(secs), runs: secs.length });
+  }
   return out;
 }
 
@@ -525,6 +552,53 @@ export function failFreq(rows, opts = {}) {
     out.set(r.check, v);
   }
   return out;
+}
+
+// Окно сравнения исходов по ядрам (D-05, F14): строки проверки на ядре за days дней без текущего
+// отчёта и вложенных в него, без SKIP, без исходов карантина и без классов, не говорящих об исходе
+// по продукту (quarantine — карантин, stand — связь или смена версии стенда, known — метка падения,
+// flaky — упал в основном проходе и прошёл при подтверждающем перепрогоне).
+const OUTCOME_SKIP_CLASSES = new Set(['quarantine', 'stand', 'known', 'flaky']);
+function outcomeRows(rows, check, core, opts = {}) {
+  const { excludeReport = '', days = 60, target } = opts;
+  const now = Date.now();
+  const out = [];
+  for (const r of rows) {
+    if (r.check !== check || r.core !== core) continue;
+    if (target && r.target !== target) continue;
+    if (r.status === 'SKIP' || r.status === 'QPASS' || r.status === 'QFAIL') continue;
+    if (OUTCOME_SKIP_CLASSES.has(r.class)) continue;
+    if (
+      excludeReport &&
+      (r.report === excludeReport ||
+        r.report.startsWith(`${excludeReport}-`) ||
+        r.report.startsWith(`${excludeReport}/`))
+    )
+      continue;
+    if (!inWindow(r, days, now)) continue;
+    out.push(r);
+  }
+  return out;
+}
+
+// самая поздняя строка по finished_utc (при равенстве — по имени отчёта)
+function latest(list) {
+  let best = null;
+  for (const r of list) {
+    if (!best || r.finished_utc > best.finished_utc || (r.finished_utc === best.finished_utc && r.report > best.report))
+      best = r;
+  }
+  return best;
+}
+
+export function lastOutcome(rows, check, core, opts = {}) {
+  const r = latest(outcomeRows(rows, check, core, opts));
+  return r ? { status: r.status, report: r.report, finished_utc: r.finished_utc } : null;
+}
+
+export function hasPass(rows, check, core, opts = {}) {
+  const r = latest(outcomeRows(rows, check, core, opts).filter((x) => x.status === 'PASS'));
+  return r ? { report: r.report, finished_utc: r.finished_utc } : null;
 }
 
 // отчёты истории: Map имя → { report, sha, release, suite, finished, rows }
@@ -704,7 +778,10 @@ function main(argv) {
   }
 }
 
+// импорт из `node -e '…' <путь>`: argv[1] — аргумент выражения, а не запущенный файл
+const EVAL_FLAG = /^(-e|-p|--eval|--print)(=|$)/;
 function isMain() {
+  if (process.execArgv.some((a) => EVAL_FLAG.test(a))) return false;
   try {
     return realpathSync(process.argv[1] || '') === realpathSync(SCRIPT);
   } catch {

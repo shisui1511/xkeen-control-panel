@@ -19,13 +19,42 @@
  *      каждом test(...), читающем ядро напрямую или через помощника спека, а не только в файле.
  *   4. Метка knownFailure с ядром в селекторе («арх/ядро», «* / ядро») идёт через coreTagsOf:
  *      тег @core-label выводится автоматически.
- *   5. Помощник frontend/tests/router/lib/*.ts (кроме env.ts и known.ts) не читает RT.core.
+ *   5. Помощник frontend/tests/router/lib/*.ts (кроме env.ts, known.ts и репортёра хода
+ *      progress-reporter.ts) не читает RT.core и XCP_CORE. Репортёр подключает конфиг
+ *      playwright.router.config.ts и пишет ядро ветви только в журнал хода; спек или помощник
+ *      lib/, импортирующий репортёр, — нарушение.
+ * Правила метки «одно ядро» (D-01…D-04): тест идёт на одном ядре (ядро из SHA HEAD), его
+ * зависимость от ядра на обоих ядрах проверяет названный тест-покрытие. Метка выполняет
+ * правило 1, но метку ядра не даёт. Числового потолка на метки нет.
+ *   6. Go: routertest.OneCore(t, "<причина>", "TestRouter<Покрытие>") — прямо в теле
+ *      TestRouter* (не в помощнике и не в объявлении уровня файла), один раз, причина и
+ *      покрытие — непустые строковые литералы, покрытие — имя другого TestRouter*;
+ *      вместе с routertest.CoreSpecific метка не ставится.
+ *      Спек: тег ONE_CORE_TAG ('@one-core') — только в деталях test(…), с аннотацией
+ *      { type: ONE_CORE_ANNOTATION, description: '<причина>; covered-by: <название теста>' },
+ *      причина и покрытие непустые, покрытие — другой тест; вместе с CORE_TAG тег не ставится;
+ *      аннотация one-core без тега — нарушение. Тег выполняет правило 3.
+ *   7. Покрытие существует и того же семейства (Go — тот же пакет и router-area, спек — та же
+ *      router-area), несёт метку ядра (CoreSpecific, CORE_TAG), не в карантине и само не
+ *      «одно ядро».
  * Самопроверка сканера на образцах идёт при каждом запуске: расхождение — код 1.
  *
  * Usage: node scripts/check-core-marks.js
  */
 const path = require('path');
-const { analyzeGo, goMarks, goViolations, specIssues, specViolations } = require('./router/core-marks.cjs');
+const {
+  analyzeGo,
+  goMarks,
+  goTestFacts,
+  goViolations,
+  libIssues,
+  oneCoreIssues,
+  reporterImportIssues,
+  specIssues,
+  specTestFacts,
+  specViolations,
+  testFacts
+} = require('./router/core-marks.cjs');
 
 const root = path.resolve(__dirname, '..');
 
@@ -59,7 +88,25 @@ const samples = [
   [HEAD + 'func TestRouterG(t *testing.T) {\n\t// читает tg.Core и XCP_RT_CORE\n\t/* switch_kernel */\n\troutertest.Current(t)\n}\n', 0, 0, ''],
   [HEAD + 'func TestRouterH(t *testing.T) {\n\ts := "//" + routertest.Current(t).Core\n\t_ = s\n}\n', 1, 0, ''],
   [HEAD + 'func TestRouterI(t *testing.T) {\n\ts := `\nfunc TestRouterJ() {}\n.Core`\n\t_ = s\n}\n', 0, 0, ''],
-  [HEAD + 'func TestRouter_Bad;rm(t *testing.T) {\n\troutertest.CoreSpecific(t)\n}\n', 0, 0, '']
+  [HEAD + 'func TestRouter_Bad;rm(t *testing.T) {\n\troutertest.CoreSpecific(t)\n}\n', 0, 0, ''],
+  // метка «одно ядро»: правило 1 выполнено, метки ядра нет
+  [
+    HEAD +
+      'func TestRouterK(t *testing.T) {\n\ttg := routertest.OneCore(t, "перезапуск ядра", "TestRouterC")\n\t_ = tg.Core\n}\n',
+    0,
+    0,
+    ''
+  ],
+  [HEAD + 'func TestRouterL(t *testing.T) {\n\ttg := routertest.OneCore(t, "", "TestRouterC")\n\t_ = tg.Core\n}\n', 1, 0, ''],
+  [HEAD + 'func TestRouterM(t *testing.T) {\n\ttg := routertest.OneCore(t, "перезапуск ядра", "TestRouterM")\n\t_ = tg.Core\n}\n', 1, 0, ''],
+  [HEAD + 'func rtV(t *testing.T) {\n\troutertest.OneCore(t, "перезапуск ядра", "TestRouterC")\n}\n', 1, 0, ''],
+  [
+    HEAD +
+      'func TestRouterN(t *testing.T) {\n\troutertest.CoreSpecific(t)\n\ttg := routertest.OneCore(t, "перезапуск ядра", "TestRouterC")\n\t_ = tg.Core\n}\n',
+    1,
+    1,
+    'core'
+  ]
 ];
 for (const [text, wantViolations, wantMarks, wantReason] of samples) {
   const got = analyzeGo(text);
@@ -68,6 +115,72 @@ for (const [text, wantViolations, wantMarks, wantReason] of samples) {
     problems.push(
       `самопроверка сканера: образец ${JSON.stringify(text.slice(HEAD.length))} дал нарушений ${got.violations.length}, меток ${got.marks.length} (${reason || '-'}); ожидалось ${wantViolations}, ${wantMarks} (${wantReason || '-'})`
     );
+  }
+}
+
+// Факт «одно ядро» у Go-теста: причина и покрытие есть, метки ядра нет (тест идёт в одну ветвь)
+{
+  const f = goTestFacts(samples.find(([t]) => t.includes('TestRouterK('))[0])[0];
+  if (!f || !f.oneCore || f.oneCore.reason !== 'перезапуск ядра' || f.oneCore.covers !== 'TestRouterC' || f.coreMarked !== false || f.coreSpecific !== false) {
+    problems.push(`самопроверка сканера: факт «одно ядро» у Go-теста разобран неверно: ${JSON.stringify(f)}`);
+  }
+}
+
+// Самопроверка покрытия «одно ядро» на синтетических фактах: [описание, правка покрытия, нарушений]
+const oneCoreBase = { kind: 'go', file: 'a_test.go', pkg: 'internal/x', area: 'dns', tier: 'gate', quarantine: null };
+const oneCoreSamples = [
+  ['правильное покрытие', {}, 0],
+  ['покрытие из другого пакета', { pkg: 'internal/y' }, 1],
+  ['покрытие из другой router-area', { area: 'routing' }, 1],
+  ['покрытие без метки ядра', { coreMarked: false, coreSpecific: false }, 1],
+  ['покрытие с меткой известного падения ядра вместо CoreSpecific', { coreSpecific: false }, 1],
+  ['покрытие в карантине', { quarantine: 'flaky-x' }, 1],
+  ['покрытие само «одно ядро»', { coreMarked: false, coreSpecific: false, oneCore: { reason: 'r', covers: 'TestRouterK' } }, 1],
+  ['покрытия нет', { test: 'TestRouterZ' }, 1],
+  // спек: семейство — та же router-area, пакета нет
+  ['спек: правильное покрытие', { kind: 'pw', pkg: null }, 0, { kind: 'pw', pkg: null }],
+  ['спек: покрытие из другой router-area', { kind: 'pw', pkg: null, area: 'routing' }, 1, { kind: 'pw', pkg: null }],
+  ['спек: покрытие — Go-тест', {}, 1, { kind: 'pw', pkg: null }],
+  // тег метки известного падения (@core-label) снимается вместе с меткой: покрытием не считается
+  ['спек: покрытие только с тегом метки падения', { kind: 'pw', pkg: null, coreTag: false }, 1, { kind: 'pw', pkg: null }]
+];
+for (const [what, patch, want, selfPatch = {}] of oneCoreSamples) {
+  const facts = [
+    { ...oneCoreBase, test: 'TestRouterK', coreMarked: false, oneCore: { reason: 'r', covers: 'TestRouterC' }, ...selfPatch },
+    { ...oneCoreBase, test: 'TestRouterC', coreMarked: true, coreSpecific: true, coreTag: true, oneCore: null, ...patch }
+  ];
+  // у покрытия «одно ядро» нарушение даёт и оно само (его покрытие K без метки ядра): считаем только K
+  const got = oneCoreIssues(facts).filter((i) => i.test === 'TestRouterK').length;
+  if (got !== want) {
+    problems.push(`самопроверка покрытия «одно ядро»: ${what} дало нарушений ${got}; ожидалось ${want}`);
+  }
+}
+
+// Факт «одно ядро» у спека: причина и покрытие из аннотации, тега ядра нет
+const ONE_CORE_SPEC =
+  "import { ONE_CORE_TAG, ONE_CORE_ANNOTATION } from './lib/known';\ntest('a', { tag: ONE_CORE_TAG, annotation: { type: ONE_CORE_ANNOTATION, description: 'перезапуск; covered-by: x' } }, async () => {\n  if (RT.core === 'xray') return;\n});\n";
+{
+  const f = specTestFacts(ONE_CORE_SPEC)[0];
+  if (!f || !f.oneCore || f.oneCore.reason !== 'перезапуск' || f.oneCore.covers !== 'x' || f.coreMarked !== false) {
+    problems.push(`самопроверка сканера спеков: факт «одно ядро» разобран неверно: ${JSON.stringify(f)}`);
+  }
+}
+
+// Факт coreTag у спека: постоянный тег ядра да, тег метки падения нет (coreMarked — оба)
+{
+  const tagged = (tag) => `test('a', { tag: ${tag} }, async () => {});\n`;
+  const pairs = [
+    ['CORE_TAG', true, true],
+    ["'@core'", true, true],
+    ['coreTagsOf(known)', true, false],
+    ['CORE_LABEL_TAG', true, false],
+    ['ONE_CORE_TAG', false, false]
+  ];
+  for (const [tag, wantMarked, wantTag] of pairs) {
+    const f = specTestFacts(tagged(tag))[0];
+    if (!f || f.coreMarked !== wantMarked || f.coreTag !== wantTag) {
+      problems.push(`самопроверка сканера спеков: тег ${tag} дал coreMarked=${f && f.coreMarked}, coreTag=${f && f.coreTag}; ожидалось ${wantMarked}, ${wantTag}`);
+    }
   }
 }
 
@@ -109,6 +222,30 @@ const specSamples = [
   [
     "test('a', { tag: CORE_TAG }, async () => {\n  if (RT.core === 'xray') return;\n});\ntest('b', async () => {\n  const r = a ? /x/ : (1;\n",
     1
+  ],
+  // метка «одно ядро»: правило 3 выполнено, причина и покрытие — в аннотации
+  [ONE_CORE_SPEC, 0],
+  // тег без аннотации с причиной и покрытием
+  ["test('a', { tag: ONE_CORE_TAG }, async () => {\n  if (RT.core === 'xray') return;\n});\n", 1],
+  // аннотация без покрытия
+  [
+    "test('a', { tag: ONE_CORE_TAG, annotation: { type: ONE_CORE_ANNOTATION, description: 'перезапуск' } }, async () => {\n  if (RT.core === 'xray') return;\n});\n",
+    1
+  ],
+  // тег «одно ядро» вместе с тегом ядра
+  [
+    "test('a', { tag: [CORE_TAG, ONE_CORE_TAG], annotation: { type: ONE_CORE_ANNOTATION, description: 'перезапуск; covered-by: x' } }, async () => {\n  if (RT.core === 'xray') return;\n});\n",
+    1
+  ],
+  // аннотация one-core без тега: тест к тому же читает ядро без метки
+  [
+    "test('a', { annotation: { type: 'one-core', description: 'перезапуск; covered-by: x' } }, async () => {\n  if (RT.core === 'xray') return;\n});\n",
+    2
+  ],
+  // тег вне деталей test(…)
+  [
+    "test.describe('d', { tag: ONE_CORE_TAG }, () => {\n  test('a', async () => {\n    await page.goto('/');\n  });\n});\n",
+    1
   ]
 ];
 for (const [text, want] of specSamples) {
@@ -120,10 +257,51 @@ for (const [text, want] of specSamples) {
   }
 }
 
+// Самопроверка правила 5 (помощники lib/): [путь файла, текст, ожидаемое число причин]
+const LIB = 'frontend/tests/router/lib/';
+const REPORTER_TEXT = "export default class R {\n  core = process.env.XCP_CORE || '-';\n}\n";
+const libSamples = [
+  [LIB + 'dns-target.ts', 'export function core() {\n  return process.env.XCP_CORE;\n}\n', 1],
+  [LIB + 'nodes-api.ts', 'export function k() {\n  return RT.core;\n}\n', 1],
+  // репортёр хода выведен из правила по точному имени
+  [LIB + 'progress-reporter.ts', REPORTER_TEXT, 0],
+  // похожее, но другое имя — обычный помощник
+  [LIB + 'my-progress-reporter.ts', REPORTER_TEXT, 1],
+  [LIB + 'env.ts', 'export const RT = {\n  core: process.env.XCP_CORE\n};\n', 0],
+  [LIB + 'pages.ts', '// XCP_CORE и RT.core только в комментарии\nexport const a = 1;\n', 0],
+  // помощник, импортирующий репортёр
+  [LIB + 'dns-target.ts', "import { x } from './progress-reporter';\nexport const y = x;\n", 1]
+];
+for (const [file, text, want] of libSamples) {
+  const got = libIssues(file, text).length;
+  if (got !== want) {
+    problems.push(`самопроверка правила помощников: ${file} с текстом ${JSON.stringify(text)} дал причин ${got}; ожидалось ${want}`);
+  }
+}
+
+// Самопроверка импорта репортёра из спека или помощника: [текст, ожидаемое число причин]
+const reporterImportSamples = [
+  ["import Progress from './lib/progress-reporter';\n", 1],
+  ["export { default } from './lib/progress-reporter.ts';\n", 1],
+  ["import './lib/progress-reporter';\n", 1],
+  ["const m = await import('./lib/progress-reporter');\n", 1],
+  ["// import Progress from './lib/progress-reporter'\n", 0],
+  ["import { T } from './lib/env';\n", 0]
+];
+for (const [text, want] of reporterImportSamples) {
+  const got = reporterImportIssues(text).length;
+  if (got !== want) {
+    problems.push(`самопроверка импорта репортёра: образец ${JSON.stringify(text)} дал причин ${got}; ожидалось ${want}`);
+  }
+}
+
 let violations = [];
 let marks = [];
 try {
-  violations = goViolations(root).concat(specViolations(root));
+  violations = goViolations(root).concat(
+    specViolations(root),
+    oneCoreIssues(testFacts(root)).map((i) => ({ file: i.file, name: i.test, reason: i.reason }))
+  );
   marks = goMarks(root);
 } catch (e) {
   problems.push(`сканер не отработал: ${e.message}`);
@@ -138,7 +316,7 @@ if (violations.length > 0 || problems.length > 0) {
   for (const p of problems) console.error('  ' + p);
   if (violations.length > 0) {
     console.error(
-      'Go: тест, читающий ядро, получает цель через routertest.CoreSpecific(t) прямо в своём теле. Playwright: тест, читающий ядро, объявляется с { tag: CORE_TAG }.'
+      'Go: тест, читающий ядро, получает цель через routertest.CoreSpecific(t) (или routertest.OneCore(t, "<причина>", "<покрытие>")) прямо в своём теле. Playwright: тест, читающий ядро, объявляется с { tag: CORE_TAG }.'
     );
   }
   process.exit(1);

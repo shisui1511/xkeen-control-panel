@@ -95,7 +95,20 @@ async function listsReady(page: Page): Promise<void> {
   await expect(tab.locator('.skeleton')).toHaveCount(0, { timeout: T.page });
 }
 
-// Флаг config_layer на устройстве: от него зависит, что открывает маршрут dat (чтение)
+// При флаге config_layer конструктор Mihomo (маршрут mihomo-gen) — вкладка секций ядер
+// «Xray │ Mihomo» раздела «Конфигурация» (constructorHash в lib/editorRoute.ts)
+const CORES_HASH = '#/config/cores';
+
+async function coresReady(page: Page): Promise<void> {
+  await expect
+    .poll(() => page.evaluate(() => window.location.hash), { timeout: T.page })
+    .toBe(CORES_HASH);
+  const tab = page.getByTestId('cores-tab');
+  await expect(tab).toBeVisible({ timeout: T.page });
+  await expect(tab.locator('.skeleton')).toHaveCount(0, { timeout: T.page });
+}
+
+// Флаг config_layer на устройстве: от него зависит, что открывают маршруты dat и mihomo-gen (чтение)
 async function layerOn(page: Page): Promise<boolean> {
   const res = await page.request.get('/api/settings');
   if (!res.ok()) return false;
@@ -183,7 +196,13 @@ const READY: Record<string, (page: Page) => Promise<void>> = {
 // проверка axe не отключается: помеченный тест обязан падать, иначе XPASS (метка устарела).
 // Селектор: * | <arch> | <arch>/<ядро> | */<ядро>. Вызовы — со строковыми литералами:
 // их читает scripts/router/check-known.sh.
-function markKnown(route: string, theme: string, width: number, lists = false): void {
+function markKnown(
+  route: string,
+  theme: string,
+  width: number,
+  lists = false,
+  cores = false
+): void {
   // Находки старой страницы dat относятся только к ней: при флаге её нет, маршрут ведёт на «Списки»
   const dat = route === 'dat' && !lists;
   const light = theme === 'light';
@@ -221,8 +240,9 @@ function markKnown(route: string, theme: string, width: number, lists = false): 
   // Строки DAT-файлов с вложенными интерактивными элементами (при Xray)
   if (wide && dat) knownFailure('*/xray', 'dat-rows-nested-interactive');
 
-  // Конструктор Mihomo: подписи полей, прокручиваемая область, контраст вкладок и кнопок
-  if (route === 'mihomo-gen') knownFailure('*/mihomo', 'mihomo-constructor-a11y');
+  // Конструктор Mihomo: подписи полей, прокручиваемая область, контраст вкладок и кнопок;
+  // при флаге маршрут ведёт на вкладку секций ядер, старого конструктора там нет
+  if (route === 'mihomo-gen' && !cores) knownFailure('*/mihomo', 'mihomo-constructor-a11y');
 }
 
 // Маршруты, чей тест читает ядро: connectionsReady ждёт сокет Mihomo только на Mihomo
@@ -245,9 +265,11 @@ for (const route of routes()) {
           // сборщики консоли и сети подключаются до перехода, чтобы ранние ошибки не терялись
           const guard = attachConsoleGuard(page);
           const problems: string[] = [];
-          // при включённом флаге маршрут dat ведёт на вкладку «Списки»
-          const toLists = route === 'dat' && (await layerOn(page));
-          markKnown(route, theme, vp.width, toLists);
+          // при включённом флаге маршрут dat ведёт на вкладку «Списки», mihomo-gen — на «Xray │ Mihomo»
+          const layer = (route === 'dat' || route === 'mihomo-gen') && (await layerOn(page));
+          const toLists = route === 'dat' && layer;
+          const toCores = route === 'mihomo-gen' && layer;
+          markKnown(route, theme, vp.width, toLists, toCores);
 
           await page.setViewportSize({ width: vp.width, height: vp.height });
           await page.addInitScript((th) => {
@@ -265,7 +287,7 @@ for (const route of routes()) {
           await page.waitForLoadState('networkidle', { timeout: T.network }).catch(() => {});
           // переход между вкладками идёт с затуханием: axe не должен видеть полупрозрачный кадр
           await page.waitForTimeout(500);
-          await (toLists ? listsReady(page) : READY[route]?.(page));
+          await (toLists ? listsReady(page) : toCores ? coresReady(page) : READY[route]?.(page));
 
           const hash = await page.evaluate(() => window.location.hash);
           // Маршрут #/config панель открывает только при включённом флаге config_layer, иначе
@@ -282,7 +304,12 @@ for (const route of routes()) {
             );
           }
           // маршрут не подменён редиректом
-          if (!hash.startsWith(toLists ? LISTS_HASH : (ALIAS[route] ?? `#/${route}`))) {
+          const expected = toLists
+            ? LISTS_HASH
+            : toCores
+              ? CORES_HASH
+              : (ALIAS[route] ?? `#/${route}`);
+          if (!hash.startsWith(expected)) {
             problems.push(`маршрут: после перехода адрес ${hash}`);
           }
           const applied = await page.evaluate(() =>

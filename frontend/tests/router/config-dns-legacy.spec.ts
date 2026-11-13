@@ -3,8 +3,15 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
 import { ensureDnsTarget, releaseDnsTarget } from './lib/dns-target';
-import { CORE_TAG, knownFailure, SLOW_ANNOTATION } from './lib/known';
-import { api, installedKernels, resetDraft, withPanel, type Installed } from './lib/nodes-api';
+import { CORE_TAG, SLOW_ANNOTATION, knownFailure } from './lib/known';
+import {
+  api,
+  installedKernels,
+  resetDraft,
+  switchLayer,
+  withPanel,
+  type Installed
+} from './lib/nodes-api';
 
 // Стык со старым перенаправлением DNS XKeen (фаза 148, D-34): при включённом слое
 // «Конфигурация» старого переключателя «Перенаправление DNS» нет в DNS-секциях
@@ -50,15 +57,16 @@ test.afterAll(async ({ browser }) => {
   });
 });
 
-/** Включает или выключает слой «Конфигурация» настоящим маршрутом настроек. */
+/**
+ * Включает или выключает слой «Конфигурация» настоящим маршрутом настроек. Переключение —
+ * общим switchLayer: выключение ждёт простоя конвейера, занятый запрос повторяется, включение
+ * ждёт фоновую сборку.
+ */
 async function setLayer(page: Page, on: boolean): Promise<void> {
   const settings = await api(page, 'GET', '/api/settings');
   expect(settings.status, 'GET /api/settings').toBe(200);
   if ((settings.data?.config_layer === true) === on) return;
-  const res = await api(page, 'POST', '/api/settings/config-layer', { enabled: on });
-  expect(res.status, `флаг слоя → ${on ? 'вкл' : 'выкл'} (${String(res.data?.code ?? '')})`).toBe(
-    200
-  );
+  await switchLayer(page, on);
 }
 
 /** Признак xkeen_dns из настоящих capabilities панели. */
@@ -109,6 +117,32 @@ async function openConstructorDns(page: Page, kernel: Kernel): Promise<void> {
   }
 }
 
+/**
+ * При включённом слое старых конструкторов нет: #/constructor ведёт на вкладку секций ядер
+ * «Xray │ Mihomo» (constructorHash в lib/editorRoute.ts). Открывается карточка DNS ядра.
+ */
+async function openCoresDns(page: Page, kernel: Kernel): Promise<void> {
+  await page.goto('/#/constructor', { timeout: T.page, waitUntil: 'domcontentloaded' });
+  await expect
+    .poll(() => page.evaluate(() => window.location.hash), { timeout: T.page })
+    .toBe('#/config/cores');
+  const tab = page.getByTestId('cores-tab');
+  await expect(tab).toBeVisible({ timeout: T.page });
+  await expect(tab.locator('.skeleton')).toHaveCount(0, { timeout: T.page });
+  await page.getByTestId(`kernel-switch-${kernel}`).click();
+  await expect(page.getByTestId(`cores-panel-${kernel}`)).toBeVisible({ timeout: T.action });
+  const toggle = page.getByTestId(`section-toggle-${kernel}-dns`);
+  await expect(toggle).toBeVisible({ timeout: T.action });
+  // Карточка могла быть раскрыта заранее (openDnsForm): клик по раскрытой её свернёт
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true', { timeout: T.action });
+  // Тело рендерится только у раскрытой карточки. Форма DNS ядра — положительная опора: без неё
+  // проверки «нет» ниже проходят мгновенно, даже пока содержимое не отрисовано (WR-06)
+  const body = page.getByTestId(`section-body-${kernel}-dns`);
+  await expect(body).toBeVisible({ timeout: T.action });
+  await expect(body.getByTestId(`section-form-${kernel}-dns`)).toBeVisible({ timeout: T.action });
+}
+
 /** У Xray блок показывается только при серверах DNS: без них в браузер добавляется один. */
 async function ensureXrayServer(page: Page): Promise<void> {
   const section = page.getByTestId('xray-section-dns');
@@ -130,8 +164,7 @@ for (const kernel of KERNELS) {
     // Флаг слоя панель читает при загрузке: страница перечитывается
     await page.reload({ waitUntil: 'domcontentloaded' });
 
-    await openConstructorDns(page, kernel);
-    if (kernel === 'xray') await ensureXrayServer(page);
+    await openCoresDns(page, kernel);
     // Ни блока, ни заглушки вместо него (D-34) — при любом значении xkeen_dns
     await expect(page.getByTestId(LEGACY)).toHaveCount(0);
     await expect(
@@ -144,7 +177,6 @@ for (const kernel of KERNELS) {
   test(`dns-legacy: слой выключен — переключатель по прежнему условию (${kernel})`, async ({
     page
   }) => {
-    if (kernel === 'mihomo') knownFailure('*', 'legacy-flag-off-apply-busy-mihomo');
     const guard = attachConsoleGuard(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     test.skip(!installed[kernel], `${kernel} не установлен на стенде`);
@@ -170,7 +202,7 @@ const FLAG_NOTE = /Перехват DNS будет выключен|DNS intercep
 const ACTIVE_STATES = ['on', 'window', 'waiting'];
 
 /** Что спек сам поменял на стенде ради перехвата (убирается в afterAll). */
-const prep = { enabled: false, groupId: '', routingTaken: false, sectionKernel: '' };
+const prep = { enabled: false, groupId: '', routingTaken: false, sectionKernel: '', nodeName: '' };
 
 interface DnsBrief {
   state: string;
@@ -304,6 +336,7 @@ test(
   },
   async ({ page }) => {
     test.setTimeout(T.save * 12);
+    knownFailure('*', 'dns-legacy-takeover-probe-external-no-working-node');
     const guard = attachConsoleGuard(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     await startPage(page);

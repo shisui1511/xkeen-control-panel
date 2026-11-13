@@ -236,7 +236,8 @@
 #
 # Код выхода: 0 — нет красных классов (new, flaky, xpass, не догнанный stand, stand смены версии
 # стенда), 2 — неизвестный набор, иначе 1. Набор session —
-# код session.mjs: 0 — ожидания совпали и стенд вернулся, 3 — сбой связи ПК↔стенд, иначе 1 или 2.
+# код session.mjs: 0 — ожидания совпали и стенд вернулся, 3 — сбой связи ПК↔стенд, 4 — оценка сверх
+# предела 30 мин (тяжёлый прогон — на закрытие вехи; стенд не тронут), иначе 1 или 2.
 # Набор rerun: 0 — все перегнанные тесты прошли (PASS, KNOWN, QPASS, QFAIL) или упавших нет,
 # 1 — есть FAIL или XPASS, 2 — неверный FROM, 3 — сбой связи ПК↔стенд.
 # 130 — прерван сигналом INT, TERM или HUP: этап остановлен, стенд восстановлен по снимку,
@@ -291,7 +292,7 @@ done
 # (delta-plan.mjs). Имена в цикле фиксированные, eval читает только их значения.
 RT_NARROW=""
 [ -z "$RT_CORES_SET" ] || RT_NARROW=" RT_CORES"
-for _nv in RT_SEL_DIR RT_GO_PKGS RT_GO_RUN RT_GO_RUN_SEQ RT_GO_SEQ RT_SPECS RT_SPECS_FIRST RT_PW_GREP RT_PW_GREP_INVERT RT_PW_INVERT RT_RESULTS_NAME RT_ART_SUB; do
+for _nv in RT_SEL_DIR RT_GO_PKGS RT_GO_RUN RT_GO_RUN_SEQ RT_GO_SKIP RT_GO_SEQ RT_SPECS RT_SPECS_FIRST RT_PW_GREP RT_PW_GREP_INVERT RT_PW_INVERT RT_RESULTS_NAME RT_ART_SUB; do
   eval "_nvv=\${$_nv:-}"
   [ -z "$_nvv" ] || RT_NARROW="$RT_NARROW $_nv"
 done
@@ -582,12 +583,27 @@ else
   echo "narrow=${RT_NARROW:-none}" >>"$RT_REPORT/meta"
 fi
 echo "router-test: отчёт $RT_REPORT"
+# Журнал хода прогона (rt_progress, progress.mjs): начало прогона — набор и PID этого процесса
+# (по нему смотрящий отличает идущий прогон от оборванного).
+rt_progress run "${SUITE:-full}" "$$"
 
 # Ротация отчётов build/router стоит здесь, а не в конце: у run.sh много выходов (130, 1, код
 # сессии, _finish в reboot), а hold_lock перекрывает EXIT-trap. Блокировка уже взята, текущий
 # отчёт (и корень сессии при RT_REPORT_DIR) защищён; возраст считается по времени, поэтому
 # результат тот же. Подоболочка и || не дают сбою ротации изменить ход и код прогона.
 ( tidy_rotate_reports "$(rt_repo_root)" ) || echo "router-test: предупреждение: ротация отчётов не удалась (прогон продолжается)" >&2
+
+# Сокращённые сроки на время прогона (D-16 фазы 148.1.1, D-22): блок xcp-rt (lib.sh) идёт в наборах
+# changed, full, delta, rerun, bisect и harness, но не в smoke, reboot и session. Полный прогон цели
+# (full_target) пишет блок сам после снимка; шаги поиска виновного коммита (tree-step.sh) пишут его
+# после своего деплоя по RT_RTENV=1; сессия ставит блок перед своими этапами сама. RT_EXPECT_RT_ENV —
+# ожидание блока для проверки rt-env смоука: вне ветвей с записанным блоком блока быть не должно.
+case "$SUITE" in
+  '' | changed | delta | rerun | bisect | harness) RT_RTENV=1 ;;
+  *) RT_RTENV=0 ;;
+esac
+RT_EXPECT_RT_ENV=0
+export RT_RTENV RT_EXPECT_RT_ENV
 
 # Удержание блокировки после прогона для ручной проверки (RT_HOLD_MINUTES).
 hold_lock() {
@@ -599,6 +615,8 @@ hold_lock() {
     trap 'exit 130' INT TERM HUP
     echo "router-test: блокировка удерживается $RT_HOLD_MINUTES мин; снять раньше: touch $RELEASE_FILE"
     END=$(($(date +%s) + RT_HOLD_MINUTES * 60))
+    # ход прогона: прогон закончен, дальше — ручная сессия на удержанном стенде (progress.mjs)
+    rt_progress hold "$END"
     while [ "$(date +%s)" -lt "$END" ] && [ ! -e "$RELEASE_FILE" ]; do
       sleep 1
     done
@@ -620,8 +638,12 @@ if [ "$SUITE" = session ]; then
     wait "$SPID" || SRC=$?
   done
   trap - INT TERM HUP
-  # Прерванная сессия (код 130) блокировку не удерживает, как и прерванная матрица
-  [ "$SRC" = 130 ] || hold_lock
+  # Прерванная сессия (код 130) блокировку не удерживает, как и прерванная матрица; отказ по пределу
+  # (код 4) случился до касания стенда: держать нечего
+  case "$SRC" in
+    130 | 4) ;;
+    *) hold_lock ;;
+  esac
   if [ "$SRC" = 0 ]; then
     echo "router-test: зелёный"
   else
@@ -639,8 +661,10 @@ fi
 # порядку имён и шаблону каждой перед eval (T-148.1-28, T-148.1.1-12): значения уходят в окружение
 # этапов и во вложенный run.sh. Не прошёл — код 1, значения прежние (по умолчанию), причина в
 # <отчёт>/harness-load.err; что делать дальше, решает набор (changed — полный выбор, harness —
-# красный до деплоя, delta — delta_abort). Наборы full, rerun, smoke, reboot и bisect модуль не
-# вызывают: самопроверки у них нет (RT_SELFCHECK=0).
+# красный до деплоя, delta — delta_abort, full — оба ядра без исключения «одно ядро»). Полный
+# прогон берёт из плана только строки RT_OC_* (тесты «одно ядро» идут на ядре из SHA HEAD, D-01,
+# D-03); наборы rerun, smoke, reboot и bisect модуль не вызывают: самопроверки у них нет
+# (RT_SELFCHECK=0).
 rt_plan_defaults() {
   RT_H_GO_SEQ=""
   RT_H_GO_PKGS=""
@@ -656,6 +680,11 @@ rt_plan_defaults() {
   RT_SMOKE_DEFAULT=120
   # 1 — после ветвей идёт самопроверка сессии (harness_selfcheck)
   RT_SELFCHECK=0
+  # «одно ядро» полного прогона: ядро, на котором идут тесты с меткой (ядро из SHA HEAD), регэксп
+  # -test.skip их Go-имён и отсев спеков тегом для ветви другого ядра; пусто — исключения нет
+  RT_OC_CORE=""
+  RT_OC_GO_SKIP=""
+  RT_OC_PW_INVERT=""
 }
 rt_plan_defaults
 # итог самопроверки сессии для summary.md: «да», «нет» или пусто (не требовалась)
@@ -672,9 +701,9 @@ rt_harness_load() {
   _hl_out=$(node "$SCRIPT_DIR/run-plan.mjs" "$@" 2>"$RT_REPORT/harness-load.err") || _hl_rc=$?
   _q="'"
   if [ "$_hl_rc" != 0 ] ||
-    [ "$(printf '%s\n' "$_hl_out" | wc -l)" != 10 ] ||
-    [ "$(printf '%s\n' "$_hl_out" | sed 's/=.*//' | tr '\n' ' ')" != "RT_H_EXTRA RT_B2 RT_B2_RUN RT_SMOKE_DEFAULT RT_SELFCHECK RT_H_GO_SEQ RT_H_GO_PKGS RT_H_SPECS RT_H_GREP RT_H_SESSION " ] ||
-    printf '%s\n' "$_hl_out" | grep -qvE "^(RT_H_EXTRA=${_q}[01]${_q}|RT_B2=${_q}(xray|mihomo)?${_q}|RT_B2_RUN=${_q}[01]${_q}|RT_SMOKE_DEFAULT=${_q}(30|120)${_q}|RT_SELFCHECK=${_q}[01]${_q}|RT_H_GO_SEQ=${_q}[A-Za-z0-9_./: -]*${_q}|RT_H_GO_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_H_SPECS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_H_GREP=${_q}[A-Za-z0-9_|()?!^*.: -]*${_q}|RT_H_SESSION=${_q}(scripts/router/[A-Za-z0-9_./-]+)?${_q})\$"; then
+    [ "$(printf '%s\n' "$_hl_out" | wc -l)" != 13 ] ||
+    [ "$(printf '%s\n' "$_hl_out" | sed 's/=.*//' | tr '\n' ' ')" != "RT_H_EXTRA RT_B2 RT_B2_RUN RT_SMOKE_DEFAULT RT_SELFCHECK RT_H_GO_SEQ RT_H_GO_PKGS RT_H_SPECS RT_H_GREP RT_H_SESSION RT_OC_CORE RT_OC_GO_SKIP RT_OC_PW_INVERT " ] ||
+    printf '%s\n' "$_hl_out" | grep -qvE "^(RT_H_EXTRA=${_q}[01]${_q}|RT_B2=${_q}(xray|mihomo)?${_q}|RT_B2_RUN=${_q}[01]${_q}|RT_SMOKE_DEFAULT=${_q}(30|120)${_q}|RT_SELFCHECK=${_q}[01]${_q}|RT_H_GO_SEQ=${_q}[A-Za-z0-9_./: -]*${_q}|RT_H_GO_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_H_SPECS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_H_GREP=${_q}[A-Za-z0-9_|()?!^*.: -]*${_q}|RT_H_SESSION=${_q}(scripts/router/[A-Za-z0-9_./-]+)?${_q}|RT_OC_CORE=${_q}(xray|mihomo)?${_q}|RT_OC_GO_SKIP=${_q}(\^\([A-Za-z0-9_|]+\)\\\$)?${_q}|RT_OC_PW_INVERT=${_q}(@one-core)?${_q})\$"; then
     echo "план состава не получен или не прошёл проверку (run-plan.mjs --suite $_hl_suite, код $_hl_rc)" >>"$RT_REPORT/harness-load.err"
     return 1
   fi
@@ -991,6 +1020,11 @@ elif [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
     echo "- Ветви: нет (затронутого нет — деплой и смоук)" >>"$RT_REPORT/plan.txt"
   else
     echo "- Ветви: $RT_CORES (полная матрица: все тесты под каждым ядром)" >>"$RT_REPORT/plan.txt"
+    # оценка времени для хода прогона: состав полного прогона без сужения (estimate-full.mjs)
+    if [ -z "${RT_NARROW:-}" ] || [ "$RT_NARROW" = none ]; then
+      _pg_est=$(node "$SCRIPT_DIR/estimate-full.mjs" 2>/dev/null | sed -n 's/^Оценка полного прогона: \([0-9]*\).*/\1/p') || _pg_est=""
+      [ -z "$_pg_est" ] || rt_progress est "$((_pg_est * 60))"
+    fi
   fi
   # окно смоука: в changed — по плану состава (120 с при затронутом коде запуска ядра или полном
   # выборе, иначе 30 с); заданный в окружении RT_SMOKE_WINDOW приоритетнее; в полном прогоне —
@@ -1012,13 +1046,41 @@ elif [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
   [ "$RT_H_EXTRA" != 1 ] || echo "- Обвязка изменена: набор harness добавлен (в обеих ветвях и самопроверка сессии $RT_H_SESSION)" >>"$RT_REPORT/plan.txt"
   echo "router-test: ветви — $(head -n 1 "$RT_REPORT/plan.txt")"
 fi
+# Строка о сокращённых сроках — в plan.txt прогона с ветвями (через него в report.md и summary.md).
+# Перепрогон plan.txt исходного отчёта не трогает: строка — только в выводе.
+if [ "$RT_RTENV" = 1 ]; then
+  if [ "$SUITE" = rerun ]; then
+    echo "router-test: сокращённые сроки: $RT_RTENV_VALUES"
+  elif [ -z "$SUITE" ] || [ "$SUITE" = harness ] || [ "$SUITE" = delta ] || { [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ]; }; then
+    echo "- Сокращённые сроки: $RT_RTENV_VALUES" >>"$RT_REPORT/plan.txt"
+  fi
+fi
+# «Одно ядро» полного прогона (D-01, D-03): тесты с меткой идут только на ядре из SHA HEAD, ветвь
+# другого ядра исключает их Go-имена (RT_GO_SKIP → -test.skip) и спеки тегом (--grep-invert
+# @one-core). План не получен — исключения нет: оба ядра, безопасный надмножественный состав, причина
+# в plan.txt. Отладка RT_CORES — все тесты в каждой ветви, исключение не применяется.
+if [ -z "$SUITE" ]; then
+  if [ -n "$RT_CORES_SET" ]; then
+    echo "- Одно ядро: исключение не применяется (отладка RT_CORES: все тесты в каждой ветви)" >>"$RT_REPORT/plan.txt"
+  elif rt_harness_load full "" "$(rt_sha_core "$(git rev-parse HEAD)")"; then
+    # число тестов с меткой — из того же плана (--json): Go-имена и спек-тесты
+    _oc_n=$(node "$SCRIPT_DIR/run-plan.mjs" --json --suite full --b1 "$RT_OC_CORE" 2>/dev/null |
+      node -e 'let s="";process.stdin.on("data",(d)=>(s+=d)).on("end",()=>{try{const o=JSON.parse(s).oneCore;process.stdout.write(String(o.go.length+o.pw))}catch{}})' 2>/dev/null) || _oc_n=""
+    case "$_oc_n" in '' | *[!0-9]*) _oc_n="?" ;; esac
+    echo "- Одно ядро: $_oc_n тестов только на $RT_OC_CORE (ядро из SHA HEAD, D-03)" >>"$RT_REPORT/plan.txt"
+  else
+    rt_plan_defaults
+    _oc_why=$(head -n 1 "$RT_REPORT/harness-load.err" 2>/dev/null | tr -d '\r' | cut -c1-200)
+    echo "- Одно ядро: план не получен — тесты с меткой идут на обоих ядрах (${_oc_why:-причина не названа})" >>"$RT_REPORT/plan.txt"
+  fi
+fi
 
 # Файл сэмплера PID ядра на устройстве (full_target, _kpid_start): вне /opt/tmp/xcp-rt, который
 # чистит смоук, и вне каталога снимка.
 RT_KPID=/opt/tmp/xcp-rt-kpid.tsv
 
 # Проверки смоука, которые пропускаются, если цель недоступна или деплой не удался.
-SKIP_CHECKS="kernel-running iptables-rules api-version version xcp-pid api-me api-service-status log-panic log-error kernel-restart"
+SKIP_CHECKS="kernel-running iptables-rules api-version gzip-static version xcp-pid api-me api-service-status gzip-json rt-env log-panic log-error kernel-restart"
 
 # Состав ветви из файла <ядро>.sel (rerun-plan.mjs, RT_SEL_DIR). Читается без eval: значение —
 # первая строка «КЛЮЧ=значение» (sed по ключу), безопасные символы проверяет rt_sel_ok.
@@ -1104,6 +1166,18 @@ if [ -n "${RELEASE:-}" ]; then
   DEPLOY_ARGS="--release $RELEASE"
 fi
 EXPECT=""
+# Блок сокращённых сроков, оставшийся после обрыва прошлого прогона (D-23), снимается в начале
+# любого прогона, даже если деплой цели не дойдёт до установки; без перезапуска — деплой перезапустит
+# панель сам и тоже снимает блок. Цели, где блок был снят (cleared), запоминаются: если деплой до
+# установки не дошёл (код не 0 и не 3), панель перезапускается после деплоя, иначе работающий процесс
+# остаётся на сокращённых сроках. Сбой — строка в лог прогона, итог не меняется.
+RTENV_CLEARED=""
+for t in $REACHABLE; do
+  rc=0
+  out=$(rt_stage "$t" rt-env-clear rt_rtenv_clear "$t" --no-restart) || rc=$?
+  [ "$rc" = 0 ] || echo "router-test: цель $t: оставшийся блок сокращённых сроков не снят до деплоя (код $rc), его снимет установка" >&2
+  case "$out" in *cleared*) RTENV_CLEARED="$RTENV_CLEARED $t" ;; esac
+done
 if [ -n "$REACHABLE" ]; then
   rc=0
   # shellcheck disable=SC2086
@@ -1124,6 +1198,13 @@ if [ -n "$REACHABLE" ]; then
       for c in $SKIP_CHECKS; do
         rt_result "$t" SKIP "$c" "деплой не выполнен"
       done
+      case " $RTENV_CLEARED " in
+        *" $t "*)
+          rc=0
+          rt_stage "$t" rt-env-clear-restart rt_rtenv_restart "$t" >/dev/null || rc=$?
+          [ "$rc" = 0 ] || echo "router-test: цель $t: блок сокращённых сроков снят, деплой не дошёл до установки, панель не перезапущена (код $rc) — процесс может работать на сокращённых сроках" >&2
+          ;;
+      esac
     fi
   done
 fi
@@ -1284,7 +1365,7 @@ EOF
   # Код 4 — после этапа сменилась версия стенда (_version_stop_check): вызывающий выходит из цикла.
   _harness_go() {
     [ "$RT_H_EXTRA" = 1 ] || return 0
-    rt_stage "$_t" "go-harness-$_c" _bg env "RT_GO_PKGS=" "RT_GO_RUN=" "RT_GO_RUN_SEQ=$RT_H_GO_SEQ" "RT_ART_SUB=harness" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
+    rt_stage "$_t" "go-harness-$_c" _bg env "RT_GO_PKGS=" "RT_GO_RUN=" "RT_GO_RUN_SEQ=$RT_H_GO_SEQ" "RT_GO_SKIP=" "RT_ART_SUB=harness" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
     if _version_stop_check "go-harness-$_c" "$_brc" "$(_vs_rest h-go)"; then
       return 4
     fi
@@ -1549,7 +1630,7 @@ EOF
   }
   # Догон части Playwright: _cu_pw <read|state> — та же часть набора ветви, строки в catchup.tsv.
   _cu_pw() {
-    rt_stage "$_t" "catchup-pw-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_SPECS_FIRST=$2" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" "RT_RESULTS_NAME=catchup.tsv" "RT_ART_SUB=catchup" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part "$1" || true
+    rt_stage "$_t" "catchup-pw-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_SPECS_FIRST=$2" "RT_PW_GREP_INVERT=$_p_inv" "RT_PW_CORE_ONLY=$_p_core" "RT_RESULTS_NAME=catchup.tsv" "RT_ART_SUB=catchup" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part "$1" || true
   }
   # Подтверждающий перепрогон новых падений (RTR-05, D-19). Идёт после цикла ветвей и до
   # восстановления стенда (его делает _finish в EXIT-ловушке), в той же блокировке и в тот же отчёт.
@@ -1635,7 +1716,7 @@ EOF
         printf '%s\n' "$_cf_k" >"$RT_REPORT/$_t/core"
       fi
       if [ -n "$_cf_seq" ]; then
-        rt_stage "$_t" "confirm-go-$_cf_k" _bg env "RT_GO_PKGS=" "RT_GO_RUN=" "RT_GO_RUN_SEQ=$_cf_seq" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_cf_k" || true
+        rt_stage "$_t" "confirm-go-$_cf_k" _bg env "RT_GO_PKGS=" "RT_GO_RUN=" "RT_GO_RUN_SEQ=$_cf_seq" "RT_GO_SKIP=" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_cf_k" || true
         if _version_stop_check "confirm-go-$_cf_k" "$_brc" "подтверждающий перепрогон: спеки ядра $_cf_k и следующие ядра не выполнены" confirm; then
           break
         fi
@@ -1663,6 +1744,26 @@ EOF
   }
   # Исходное ядро — из журнала снимка (строка core=…): к нему вернёт восстановление.
   _orig=$(sed -n 's/^core=//p' "$RT_REPORT/$_t/snapshot.log" | tail -n 1)
+
+  # Сокращённые сроки (D-22): блок xcp-rt пишется только после снимка — восстановление возвращает
+  # xcp.env без него. Сбой — строка FAIL rt-env-write, ветви идут дальше: тесты читают действующий
+  # срок у процесса панели. Записанный блок ждёт смоук каждой ветви (RT_EXPECT_RT_ENV=1).
+  _rtenv_ok=0
+  if [ "${RT_RTENV:-0}" = 1 ]; then
+    _rw=0
+    rt_stage "$_t" rt-env-write rt_rtenv_write "$_t" >"$RT_REPORT/$_t/rtenv.log" 2>&1 || _rw=$?
+    if [ "$_rw" = 0 ]; then
+      _rtenv_ok=1
+    elif [ "$_rw" = 3 ]; then
+      rt_result "$_t" FAIL rt-env-write "нет связи, блок сокращённых сроков не записан"
+    else
+      rt_result "$_t" FAIL rt-env-write "блок сокращённых сроков не записан или панель не поднялась после перезапуска (код $_rw, rtenv.log)"
+      # Сбой мог прийти уже после записи (панель не ответила за 90 с): смоук ветви должен
+      # ждать блок, который реально на месте, а не сообщать об «оставшемся от прерванного прогона».
+      _rw_st=$(rt_rtenv_status "$_t" 2>/dev/null) || _rw_st=""
+      case "$_rw_st" in *XCP_RT_*=*) _rtenv_ok=1 ;; esac
+    fi
+  fi
 
   _first=1
   # ядро, которое сейчас на стенде (после последнего успешного переключения): с него начинается
@@ -1749,6 +1850,17 @@ EOF
       _b_skip_pw="в составе (перепрогон, добор) нет спеков этого ядра"
     fi
 
+    # «Одно ядро» полного прогона (D-01, D-03): ветвь ядра, отличного от RT_OC_CORE (ядро из SHA
+    # HEAD), не запускает тесты с меткой — Go через -test.skip (RT_GO_SKIP), спеки отсевом тега
+    # (RT_PW_GREP_INVERT, к отсеву выбора через «|», пустые части не добавляются). Ветвь RT_OC_CORE и
+    # состав из <ядро>.sel идут без исключения. Этапы go и pw-read/pw/догон получают одни значения.
+    _g_skip=${RT_GO_SKIP:-}
+    _p_inv=${RT_PW_INVERT:-}
+    if [ -n "${RT_OC_CORE:-}" ] && [ "$_c" != "$RT_OC_CORE" ] && [ -z "$_sel_dir" ]; then
+      [ -z "$RT_OC_GO_SKIP" ] || _g_skip=${_g_skip:+$_g_skip|}$RT_OC_GO_SKIP
+      [ -z "$RT_OC_PW_INVERT" ] || _p_inv=${_p_inv:+$_p_inv|}$RT_OC_PW_INVERT
+    fi
+
     # Выбор Go по именам (RT_GO_SEQ, первая ветвь): порядок и состав задаёт список, пакеты и
     # выражение отбора go-suite.sh не нужны. Пустой список — пакеты целиком, как раньше.
     if [ -n "$_g_seq" ]; then
@@ -1814,8 +1926,9 @@ EOF
     # rt_version_expected всегда возвращает 0: пустой вывод проверяется явно
     _exp=$(rt_version_expected "$_t")
     [ -n "$_exp" ] || _exp=$EXPECT
+    # Проверка rt-env ждёт блок, если он записан после снимка (RT_EXPECT_RT_ENV=1), иначе его отсутствия.
     # shellcheck disable=SC2086
-    rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$_exp" --no-observe $_fargs || true
+    rt_stage "$_t" "smoke-$_c" _bg env "RT_EXPECT_RT_ENV=$_rtenv_ok" sh "$SCRIPT_DIR/smoke.sh" "$_t" "$_exp" --no-observe $_fargs || true
     _smrc=$_brc
     # смоук записывает в core определённое им ядро: ветвь продолжается с ядром ветви
     printf '%s\n' "$_c" >"$RT_REPORT/$_t/core"
@@ -1840,7 +1953,7 @@ EOF
       # смена версии в части read (D-13) отмечается сразу (_vstop), а из цикла ветвь выходит после
       # ожидания наблюдателя окна: он идёт фоном и не должен остаться без ожидания
       if [ "$_b_pw" = 1 ]; then
-        rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+        rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_PW_GREP_INVERT=$_p_inv" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
         _pwr_rc=$_brc
         _version_stop_check "pw-read-$_c" "$_pwr_rc" "$(_vs_rest pw-read)" || true
       fi
@@ -1851,7 +1964,7 @@ EOF
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_t" "observe-$_c" "$(($(date +%s) - _ot0))" "$_orc" "$_ot0" "$_c" >>"$RT_REPORT/timings.tsv"
     else
       if [ "$_b_pw" = 1 ]; then
-        rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+        rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_PW_GREP_INVERT=$_p_inv" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
         _pwr_rc=$_brc
         _version_stop_check "pw-read-$_c" "$_pwr_rc" "$(_vs_rest pw-read)" || true
       fi
@@ -1896,7 +2009,7 @@ EOF
 
     # 3. Go-тесты на устройстве с этим ядром
     if [ "$_b_go" = 1 ]; then
-      rt_stage "$_t" "go-$_c" _bg env "RT_GO_PKGS=$_g_pkgs" "RT_GO_RUN=$_g_run" "RT_GO_RUN_SEQ=$_g_seq" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
+      rt_stage "$_t" "go-$_c" _bg env "RT_GO_PKGS=$_g_pkgs" "RT_GO_RUN=$_g_run" "RT_GO_RUN_SEQ=$_g_seq" "RT_GO_SKIP=$_g_skip" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
       # обрыв связи в Go-этапе: ждём связь, один раз догоняем пакеты вне go-done.txt (D-21)
       _gorc=$_brc
       # смена версии стенда (D-13): оставшиеся группы Go go-suite.sh уже записал строками notrun
@@ -1910,7 +2023,7 @@ EOF
         break
       fi
       if [ "$_sg_state" = catchup ] && { [ -n "$_gl_seq" ] || [ -n "$_gl_pkgs" ]; }; then
-        rt_stage "$_t" "catchup-go-$_c" _bg env "RT_GO_PKGS=$_gl_pkgs" "RT_GO_RUN=$_g_run" "RT_GO_RUN_SEQ=$_gl_seq" "RT_RESULTS_NAME=catchup.tsv" "RT_ART_SUB=catchup" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
+        rt_stage "$_t" "catchup-go-$_c" _bg env "RT_GO_PKGS=$_gl_pkgs" "RT_GO_RUN=$_g_run" "RT_GO_RUN_SEQ=$_gl_seq" "RT_GO_SKIP=$_g_skip" "RT_RESULTS_NAME=catchup.tsv" "RT_ART_SUB=catchup" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
         if _version_stop_check "catchup-go-$_c" "$_brc" "$(_vs_rest go)"; then
           break
         fi
@@ -1930,7 +2043,7 @@ EOF
     # 4. Playwright, часть state: спеки, меняющие состояние стенда, один воркер. Часть только
     # чтения прошла в шаге 2а
     if [ "$_b_pw" = 1 ]; then
-      rt_stage "$_t" "pw-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_SPECS_FIRST=$_p_first" "RT_PW_GREP_INVERT=${RT_PW_INVERT:-}" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part state || true
+      rt_stage "$_t" "pw-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_GREP=$_p_grep" "RT_SPECS_FIRST=$_p_first" "RT_PW_GREP_INVERT=$_p_inv" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part state || true
       # смена версии стенда (D-13): оставшиеся спеки pw-suite.sh уже записал строками notrun
       if _version_stop_check "pw-$_c" "$_brc" "$(_vs_rest pw)"; then
         break
@@ -2447,7 +2560,7 @@ harness_selfcheck() {
   _hs_rel=${_hs_dir#"$(rt_repo_root)"/}
   echo "router-test: самопроверка сессии (остановка на первом несовпадении) → $_hs_rel"
   env -u RT_CORES -u RT_HOLD_MINUTES -u RT_BASE -u RT_FILES -u RELEASE -u SUITE \
-    -u RT_SMOKE_WINDOW -u RT_SMOKE_IPT_WAIT -u RT_GO_PKGS -u RT_GO_RUN -u RT_GO_RUN_SEQ \
+    -u RT_SMOKE_WINDOW -u RT_SMOKE_IPT_WAIT -u RT_GO_PKGS -u RT_GO_RUN -u RT_GO_RUN_SEQ -u RT_GO_SKIP \
     -u RT_GO_CORE_PKGS -u RT_GO_CORE_RUN -u RT_SPECS -u RT_SPECS_CORE -u RT_SPECS_FIRST \
     -u RT_PW_GREP -u RT_PW_GREP_INVERT -u RT_PW_CORE_ONLY -u RT_ART_SUB -u RT_KERNEL_TOUCHED \
     -u RT_SEL_DIR -u RT_GO_SEQ -u RT_PW_INVERT -u RT_RESULTS_NAME \

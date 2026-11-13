@@ -11,6 +11,9 @@ import { defineConfig, devices } from '@playwright/test';
 //   XCP_PW_VERSION_GUARD  id цели: подключает tests/router/lib/version-reporter.ts — сверку
 //                  версии стенда после каждого спека и мягкую остановку при её смене (D-13);
 //                  без переменной репортёра нет (ручной запуск, --list)
+//   XCP_PW_PROGRESS  журнал хода прогона (<отчёт>/progress.tsv): подключает
+//                  tests/router/lib/progress-reporter.ts (строки для make router-watch); с ним
+//                  XCP_PW_TARGET — id цели; без переменной репортёра нет
 // Вход в панель делает global-setup, выход — global-teardown (лимит панели — 20 сессий; cookie
 // в трассах после выхода недействительны).
 // Конфиг не падает без переменных (нужно для `--list`): их наличие проверяет global-setup.
@@ -38,6 +41,9 @@ export default defineConfig({
     ['json', { outputFile: process.env.XCP_PW_JSON || 'test-results-router.json' }],
     ...(process.env.XCP_PW_VERSION_GUARD
       ? [['./tests/router/lib/version-reporter.ts'] as [string]]
+      : []),
+    ...(process.env.XCP_PW_PROGRESS
+      ? [['./tests/router/lib/progress-reporter.ts'] as [string]]
       : [])
   ],
   use: {

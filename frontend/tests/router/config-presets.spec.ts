@@ -502,7 +502,9 @@ test(
       expect(drafted.rules.every((r) => r.origin === 'preset')).toBe(true);
       expect((await ownerSnap(page)).taken, 'до «Применить» файлы не тронуты').toBe(false);
 
-      // В режиме перехвата окно изменений открывается сразу после выбора пресета (план 149-16)
+      // «Взять» на плашке владельца (режим take) только пишет черновик: окно изменений
+      // открывает «Применить» полосы черновика (сразу после пресета — только в режиме перехвата)
+      await page.getByTestId('config-apply').click();
       await confirmApply(page);
       await expect(notice).toHaveAttribute('data-owner', 'panel', { timeout: T.save * 3 });
       expect((await ownerSnap(page)).taken).toBe(true);

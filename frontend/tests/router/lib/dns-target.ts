@@ -1,6 +1,6 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { T } from './env';
-import { api, resetDraft } from './nodes-api';
+import { addToDraft, api, nodeLink, randomPort, resetDraft } from './nodes-api';
 
 // Подготовка стенда к перехвату DNS для роутерных сценариев (фаза 148): секция DNS ядра, маршрутизация
 // панели и группа-цель «Прокси». Без неё включение заблокировано (section, routing, group), и
@@ -14,12 +14,15 @@ export interface DnsTargetPrep {
   groupId: string;
   routingTaken: boolean;
   sectionKernel: string;
+  /** Имя узла из testdata, который помощник положил в «Мои узлы», чтобы группы не были пустыми. */
+  nodeName: string;
 }
 
 export const emptyDnsTargetPrep = (): DnsTargetPrep => ({
   groupId: '',
   routingTaken: false,
-  sectionKernel: ''
+  sectionKernel: '',
+  nodeName: ''
 });
 
 async function draftRevision(page: Page): Promise<number> {
@@ -42,6 +45,57 @@ async function applyAndWait(page: Page): Promise<void> {
       { timeout: T.save * 3, intervals: [2000] }
     )
     .toBe(true);
+}
+
+/**
+ * На стенде без узлов дефолтные группы «Авто» и «Прокси» пусты, и «Применить» блокирует
+ * group_empty (D-36). Тогда в «Мои узлы» кладётся узел из testdata; уборка его убирает.
+ */
+async function ensureNodeForGroups(page: Page, prep: DnsTargetPrep): Promise<void> {
+  if (!(await hasGroupEmpty(page))) return;
+  const name = `RtDnsNode${randomPort()}`;
+  await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), name));
+  prep.nodeName = name;
+}
+
+/** Блокирует ли черновик «Применить» проблемой group_empty (пустые группы при взятой маршрутизации). */
+async function hasGroupEmpty(page: Page): Promise<boolean> {
+  const view = await api(page, 'GET', '/api/configlayer/routing');
+  expect(view.status, 'GET /api/configlayer/routing').toBe(200);
+  const issues = Array.isArray(view.data?.issues) ? (view.data.issues as { code?: string }[]) : [];
+  return issues.some((i) => i?.code === 'group_empty');
+}
+
+/**
+ * Убирает узел, положенный ensureNodeForGroups. Если маршрутизацию до помощника уже держала панель,
+ * она остаётся под панелью, и без узла группы «Применить» снова блокирует group_empty (409
+ * apply_blocked): применённое состояние стенда без узлов недостижимо. Тогда узел возвращается и
+ * остаётся на стенде, причина идёт в аннотацию теста, а применение проходит (D-36).
+ */
+async function releaseNode(page: Page, prep: DnsTargetPrep): Promise<void> {
+  if (!prep.nodeName) return;
+  const view = await api(page, 'GET', '/api/configlayer/sources');
+  expect(view.status, 'GET /api/configlayer/sources').toBe(200);
+  const sources = (view.data?.sources ?? []) as {
+    kind?: string;
+    nodes?: { name?: string; entry_id?: string }[];
+  }[];
+  const entry = sources
+    .filter((s) => s.kind === 'my')
+    .flatMap((s) => s.nodes ?? [])
+    .find((n) => n.name === prep.nodeName);
+  if (!entry?.entry_id) return;
+  const del = await api(page, 'POST', '/api/configlayer/sources/nodes/delete', {
+    revision: Number(view.data?.draft_revision ?? 0),
+    entry_id: entry.entry_id
+  });
+  expect(del.status, 'удаление узла помощника').toBe(200);
+  if (prep.routingTaken || !(await hasGroupEmpty(page))) return;
+  await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), prep.nodeName));
+  test.info().annotations.push({
+    type: 'stand',
+    description: `узел ${prep.nodeName} оставлен: маршрутизацию держала панель до прогона, без узла «Применить» блокирует group_empty`
+  });
 }
 
 async function routingInfo(
@@ -128,7 +182,10 @@ export async function ensureDnsTarget(
       changed = true;
     }
   }
-  if (changed) await applyAndWait(page);
+  if (changed) {
+    await ensureNodeForGroups(page, prep);
+    await applyAndWait(page);
+  }
   return prep;
 }
 
@@ -168,6 +225,7 @@ export async function releaseDnsTarget(page: Page, prep: DnsTargetPrep): Promise
     });
     expect(rel.status, 'возврат секции DNS').toBe(200);
   }
+  await releaseNode(page, prep);
   const st = await api(page, 'GET', '/api/configlayer/state');
   if (Number(st.data?.draft_changes ?? 0) > 0) await applyAndWait(page);
   await resetDraft(page);

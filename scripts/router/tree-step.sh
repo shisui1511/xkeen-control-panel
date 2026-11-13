@@ -18,11 +18,15 @@
 # frontend/node_modules — ссылка на node_modules основной копии при совпадающем package-lock.json,
 # иначе npm ci. Worktree переиспользуется, если уже стоит на том же sha.
 #
+# Шаг 4а: при RT_RTENV=1 (run.sh ставит его набору bisect) после деплоя и ожидания панели блок
+# сокращённых сроков xcp-rt пишется заново (rtenv.sh write, журнал rtenv-step.log): код 3 — обрыв
+# связи, иной сбой — ошибка шага (код 1, не по сборке). Без RT_RTENV или не 1 — шаг пропускается.
+#
 # Вывод шага: строки RESULT=PASS|FAIL|SKIP и REASON=<кратко>.
 #   PASS  тест прошёл (PASS, KNOWN, QPASS), FAIL — упал (FAIL, XPASS, QFAIL хоть одной строкой);
 #   SKIP  теста нет в дереве, сборка или установка сборки не удалась, тест не выполнился (D-22:
 #         шаг, который нельзя проверить, поиск пропускает и берёт соседа).
-# Артефакты шага — в <out>: deploy-step.log, test-step.log, <цель>/test.tsv (строки теста),
+# Артефакты шага — в <out>: deploy-step.log, rtenv-step.log (шаг 4а), test-step.log, <цель>/test.tsv (строки теста),
 # <цель>/switch.tsv (переключение ядра), result.txt.
 #
 # Коды выхода: 0 — шаг выполнен (в том числе SKIP), 1 — ошибка шага (worktree, переключение ядра,
@@ -282,6 +286,19 @@ if [ "$_now" != "$CORE" ]; then
       exit 3
     fi
     echo "tree-step: переключение ядра на $CORE не удалось (код $_swrc), см. $STEP_REPORT/switch-step.log" >&2
+    exit 1
+  fi
+fi
+
+# 4а. Сокращённые сроки (D-22): деплой шага снял блок xcp-rt (D-23) — при RT_RTENV=1 (run.sh ставит
+# его набору bisect) блок пишется заново, чтобы коммит судился на тех же сроках, что и гейт.
+# Снимать не нужно: bisect.mjs возвращает стенд по снимку, снятому до первого шага (без блока).
+if [ "${RT_RTENV:-0}" = 1 ]; then
+  _rerc=0
+  sh "$SCRIPT_DIR/rtenv.sh" "$ID" write >"$STEP_REPORT/rtenv-step.log" 2>&1 || _rerc=$?
+  [ "$_rerc" != 3 ] || exit 3
+  if [ "$_rerc" != 0 ]; then
+    echo "tree-step: блок сокращённых сроков не записан (код $_rerc), см. $STEP_REPORT/rtenv-step.log" >&2
     exit 1
   fi
 fi

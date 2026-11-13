@@ -290,6 +290,8 @@ run_pw() {
       XCP_PW_JSON=$_json \
       XCP_PW_WORKERS=$_workers \
       XCP_PW_VERSION_GUARD=$ID \
+      XCP_PW_PROGRESS="$RT_REPORT/progress.tsv" \
+      XCP_PW_TARGET=$ID \
       XCP_PW_GUARD_SCRIPT="$SCRIPT_DIR/version-guard.sh" \
       XCP_PW_OK_SPECS="$PW_DIR/version-ok-specs.txt" \
       XCP_PW_STOPPED="$PW_DIR/version-stopped" \

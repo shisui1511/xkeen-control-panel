@@ -24,12 +24,32 @@
 #   version              /opt/sbin/xcp -v равна ожидаемой версии
 #   xcp-pid              у pidof xcp ровно один процесс
 #   api-version          GET <панель>/api/version с ПК отвечает 200
-#   api-me               вход с ПК и GET /api/auth/me = 200, затем выход; в detail время
+#   gzip-static          сжатие статики настоящей панели (порог gzipMinSize 1024 байта): GET / —
+#                        200 text/html; первый ассет assets/*.js из index.html больше порога с
+#                        Accept-Encoding: gzip приходит с Content-Encoding: gzip, проходит gzip -t,
+#                        распакованное тело байт в байт равно ответу без заголовка, тип тот же, без
+#                        заголовка — без сжатия; с gzip;q=0, отсутствующий ассет (404) и картинка PNG
+#                        из index.html (если есть) — без сжатия. В detail — размеры и тип
+#   gzip-json            сжатие JSON API (порог gzipJSONMinSize 1400 байт), в сессии api-me до
+#                        выхода: GET /api/assets/definition (встроенное определение ассетов, около
+#                        22 КБ) с Accept-Encoding: gzip сжат, проходит gzip -t и распаковывается в то
+#                        же тело, что без заголовка; маленький /api/version и поток /api/update/events
+#                        (text/event-stream, curl --max-time 3) с тем же заголовком — без сжатия. Нет
+#                        сессии — SKIP. Тела ответов в отчёт не пишутся, временные файлы удаляются
+#   api-me              вход с ПК и GET /api/auth/me = 200, затем выход; в detail время
 #                        входа, в timings.tsv этап smoke-login. Вход, не ответивший за
 #                        LOGIN_WAIT с (код 000), — FAIL с диагностикой: ответ /api/version,
 #                        Dirty/Writeback носителя и loadavg устройства
 #   api-service-status   GET /api/service/status = 200
-#   kernel-restart       PID ядра в начале и в конце окна RT_SMOKE_WINDOW (по умолчанию
+#   rt-env               блок сокращённых сроков xcp-rt (lib.sh, D-22, D-23): одна команда ssh читает
+#                        строки блока в /opt/etc/xcp/xcp.env и строки `xcp-rt:` журнала после последнего
+#                        баннера старта (xcp.log.2, .1 и xcp.log подряд). Без RT_EXPECT_RT_ENV=1 — FAIL,
+#                        если блок есть или есть строка `xcp-rt:` (блок остался после прерванного
+#                        прогона); с RT_EXPECT_RT_ENV=1 (смоук ветви после записи блока, run.sh) — FAIL,
+#                        если блока нет или для какой-то его переменной нет строки `xcp-rt:`. Сборка,
+#                        которая строк `xcp-rt:` не печатает вовсе (тег до чтения XCP_RT_*), — PASS с
+#                        пометкой: блок есть, сроки у неё по умолчанию
+#   kernel-restart      PID ядра в начале и в конце окна RT_SMOKE_WINDOW (по умолчанию
 #                        120 с) один и тот же: ни один PID начала окна не дожил до конца —
 #                        перезапуск без команды, падение
 #   log-panic            в xcp.log после последнего баннера запуска нет panic
@@ -156,7 +176,7 @@ UNREACH=0
 PART_CHECKS=""
 if [ "$NO_OBSERVE" = 1 ]; then
   # reachable общая для обеих частей, метка smoke:reachable оценивается здесь
-  PART_CHECKS="reachable kernel-running iptables-rules version xcp-pid api-version api-me api-service-status"
+  PART_CHECKS="reachable kernel-running iptables-rules version xcp-pid api-version gzip-static api-me api-service-status gzip-json rt-env"
 elif [ "$OBSERVE_ONLY" = 1 ]; then
   PART_CHECKS="kernel-restart log-panic log-error log-repeat"
 fi
@@ -164,6 +184,31 @@ fi
 # Строка результата в буфер; в results.tsv она попадает через finalize (метки известных падений).
 chk() {
   printf '%s\t%s\t%s\n' "$1" "$2" "$(printf '%s' "${3:-}" | tr '\t\n' '  ')" >>"$BUF"
+}
+
+# Проверки сжатия (gzip-static, gzip-json): ответы панели — во временных файлах $GZ.<имя>.h
+# (заголовки) и $GZ.<имя>.b (тело) в каталоге отчёта цели; после проверки удаляются.
+GZ="$RT_REPORT/$ID/.gz"
+# gz_get <имя> <путь> [опции curl…] — GET <панель><путь> с ПК; печатает код ответа (000 — нет
+# связи). Опции идут после общих: --max-time из них перекрывает общий предел.
+gz_get() {
+  _gn=$1
+  _gp=$2
+  shift 2
+  curl -sk --connect-timeout 10 --max-time 30 "$@" -D "$GZ.$_gn.h" -o "$GZ.$_gn.b" -w '%{http_code}' "$url$_gp" || true
+}
+# gz_hdr <имя> <заголовок> — значение заголовка ответа (последнее вхождение) без CR и краевых пробелов.
+gz_hdr() {
+  { grep -i "^$2:" "$GZ.$1.h" 2>/dev/null || true; } | tail -n 1 | cut -d: -f2- | tr -d '\r' | sed 's/^ *//; s/ *$//'
+}
+# gz_size <имя> — размер тела в байтах (нет файла — 0).
+gz_size() {
+  if [ -f "$GZ.$1.b" ]; then wc -c <"$GZ.$1.b" | tr -d ' '; else echo 0; fi
+}
+# gz_same <сжатое имя> <несжатое имя> — код 0, если сжатое тело — целый gzip и распаковывается
+# байт в байт в несжатое.
+gz_same() {
+  gzip -t "$GZ.$1.b" 2>/dev/null && gzip -dc "$GZ.$1.b" 2>/dev/null | cmp -s - "$GZ.$2.b"
 }
 
 # ssh с учётом потери связи: rc 3 -> FAIL reachable, остальное пропущено.
@@ -186,8 +231,10 @@ finalize() {
     fi
     rm -f "$_jar"
   fi
+  # временные ответы проверок сжатия (gzip-static, gzip-json), если прогон прервали посреди них
+  rm -f "$RT_REPORT/$ID"/.gz.*
   if [ "$UNREACH" = 1 ]; then
-    _unr="kernel-running iptables-rules version xcp-pid api-version api-me api-service-status kernel-restart log-panic log-error"
+    _unr="kernel-running iptables-rules version xcp-pid api-version gzip-static api-me api-service-status gzip-json rt-env kernel-restart log-panic log-error"
     [ "$OBSERVE_ONLY" != 1 ] || _unr="kernel-restart log-panic log-error"
     for _c in $_unr; do
       grep -q "^[A-Z]*${TAB}${_c}${TAB}" "$BUF" || chk SKIP "$_c" "нет связи"
@@ -386,6 +433,100 @@ if [ "$OBSERVE_ONLY" != 1 ]; then
     chk FAIL api-version "http $code"
   fi
 
+  # --- gzip-static: сжатие встроенной статики (internal/server/static.go) ------
+  # Ассет — первый assets/*.js из index.html больше gzipMinSize (1024 байта); имя с хэшем сборки.
+  # В detail — только имена, размеры и тип: тела ответов в отчёт не пишутся.
+  # Не проверяется на стенде (были в удалённых Go-тестах): отсутствующий файл не кэшируется
+  # (`g.cache`), частичное тело не уходит при панике обработчика под GzipJSON, большой
+  # не-JSON ответ API не сжимается — внешне эти места не наблюдаются.
+  rm -f "$GZ".*
+  gs_err=""
+  gs_code=$(gz_get idx /)
+  if [ "$gs_code" = 000 ] || [ -z "$gs_code" ]; then
+    chk FAIL gzip-static "нет связи с панелью"
+  else
+    gs_idx_ct=$(gz_hdr idx content-type)
+    case "$gs_code:$gs_idx_ct" in
+      200:text/html*) ;;
+      *) gs_err="$gs_err; GET /: http $gs_code, тип ${gs_idx_ct:--}, ожидалось 200 text/html" ;;
+    esac
+    gs_list=$({ grep -oE 'assets/[A-Za-z0-9._-]+\.js' "$GZ.idx.b" 2>/dev/null || true; } | awk '!s[$0]++' | head -n 40)
+    gs_icon=$({ grep -oE 'icons/[A-Za-z0-9._-]+\.png' "$GZ.idx.b" 2>/dev/null || true; } | head -n 1)
+    gs_asset=""
+    gs_small=""
+    gs_raw=0
+    # Первый ассет больше порога идёт в основную проверку, первый не больше порога — в проверку
+    # «малый не сжимается»; порядок в index.html не важен, цикл идёт, пока не найдены оба.
+    for gs_a in $gs_list; do
+      gs_c=$(gz_get raw "/$gs_a")
+      gs_sz=$(gz_size raw)
+      if [ "$gs_c" = 200 ] && [ "$gs_sz" -gt 1024 ]; then
+        [ -n "$gs_asset" ] || gs_asset=$gs_a
+      elif [ "$gs_c" = 200 ]; then
+        [ -n "$gs_small" ] || gs_small=$gs_a
+      fi
+      if [ -n "$gs_asset" ] && [ -n "$gs_small" ]; then break; fi
+    done
+    # слот raw мог занять другой ассет: основной берётся заново
+    if [ -n "$gs_asset" ]; then
+      gs_c=$(gz_get raw "/$gs_asset")
+      gs_raw=$(gz_size raw)
+      [ "$gs_c" = 200 ] || gs_asset=""
+    fi
+    if [ -z "$gs_asset" ]; then
+      gs_err="$gs_err; в index.html нет ассета assets/*.js больше 1024 байт (кандидатов: $(printf '%s\n' "$gs_list" | grep -c . || true))"
+    else
+      gs_raw_ce=$(gz_hdr raw content-encoding)
+      gs_raw_ct=$(gz_hdr raw content-type)
+      [ -z "$gs_raw_ce" ] || gs_err="$gs_err; без Accept-Encoding пришёл Content-Encoding: $gs_raw_ce"
+      gs_c=$(gz_get gz "/$gs_asset" -H 'Accept-Encoding: gzip')
+      gs_ce=$(gz_hdr gz content-encoding)
+      gs_ct=$(gz_hdr gz content-type)
+      gs_gz=$(gz_size gz)
+      if [ "$gs_c" != 200 ] || [ "$gs_ce" != gzip ]; then
+        gs_err="$gs_err; с Accept-Encoding: gzip http $gs_c, Content-Encoding ${gs_ce:--}, ожидалось 200 gzip"
+      elif ! gz_same gz raw; then
+        gs_err="$gs_err; сжатое тело ($gs_gz байт) не проходит gzip -t или не равно несжатому ($gs_raw байт)"
+      fi
+      [ "$gs_ct" = "$gs_raw_ct" ] || gs_err="$gs_err; тип сжатого ${gs_ct:--}, несжатого ${gs_raw_ct:--}"
+      gs_c=$(gz_get q0 "/$gs_asset" -H 'Accept-Encoding: gzip;q=0')
+      gs_ce=$(gz_hdr q0 content-encoding)
+      [ "$gs_c" = 200 ] && [ -z "$gs_ce" ] || gs_err="$gs_err; с gzip;q=0 http $gs_c, Content-Encoding ${gs_ce:--}, ожидалось 200 без сжатия"
+    fi
+    # Постоянного маленького ассета у встроенной статики нет (имена с хэшем сборки, все
+    # стабильные файлы больше порога), поэтому проверка идёт по первому подходящему кандидату
+    # из index.html; если такого нет, деталь PASS прямо говорит, что проверка не выполнялась.
+    gs_smallnote=", малого ассета нет — не проверено"
+    if [ -n "$gs_small" ]; then
+      gs_c=$(gz_get small "/$gs_small" -H 'Accept-Encoding: gzip')
+      gs_ce=$(gz_hdr small content-encoding)
+      if [ "$gs_c" = 200 ] && [ -z "$gs_ce" ]; then
+        gs_smallnote=", ассет до 1024 байт"
+      else
+        gs_err="$gs_err; $gs_small (не больше 1024 байт): http $gs_c, Content-Encoding ${gs_ce:--}, ожидалось 200 без сжатия"
+      fi
+    fi
+    gs_c=$(gz_get miss /assets/xcp-smoke-missing.js -H 'Accept-Encoding: gzip')
+    gs_ce=$(gz_hdr miss content-encoding)
+    [ "$gs_c" = 404 ] && [ -z "$gs_ce" ] || gs_err="$gs_err; отсутствующий ассет: http $gs_c, Content-Encoding ${gs_ce:--}, ожидалось 404 без сжатия"
+    gs_png=""
+    if [ -n "$gs_icon" ]; then
+      gs_c=$(gz_get png "/$gs_icon" -H 'Accept-Encoding: gzip')
+      gs_ce=$(gz_hdr png content-encoding)
+      if [ "$gs_c" = 200 ] && [ -z "$gs_ce" ]; then
+        gs_png=", PNG"
+      else
+        gs_err="$gs_err; $gs_icon: http $gs_c, Content-Encoding ${gs_ce:--}, ожидалось 200 без сжатия"
+      fi
+    fi
+    if [ -z "$gs_err" ]; then
+      chk PASS gzip-static "$gs_asset: $gs_raw -> $gs_gz байт, ${gs_raw_ct:--}; gzip;q=0, отсутствующий ассет$gs_png$gs_smallnote — без сжатия"
+    else
+      chk FAIL gzip-static "${gs_err#; }"
+    fi
+  fi
+  rm -f "$GZ".*
+
   # --- api-me, api-service-status ----------------------------------------------
   # Вход с ПК: тело строится через JSON.stringify (пароль идёт через окружение и stdin,
   # в аргументы команд не попадает). Сессия закрывается выходом: лимит 20 сессий.
@@ -418,6 +559,58 @@ if [ "$OBSERVE_ONLY" != 1 ]; then
     else
       chk FAIL api-service-status "GET /api/service/status: http ${sscode:--}"
     fi
+    # --- gzip-json: сжатие JSON API (internal/middleware/gzip.go), в сессии до выхода ----
+    # Большой ответ — /api/assets/definition: встроенное определение ассетов (около 22 КБ),
+    # копия на диске дополняется встроенными провайдерами правил — больше gzipJSONMinSize
+    # (1400 байт) на любом стенде. Маленький — /api/version, поток — /api/update/events.
+    rm -f "$GZ".*
+    gj_err=""
+    gj_c=$(gz_get jraw /api/assets/definition -b "$jar")
+    if [ "$gj_c" = 000 ] || [ -z "$gj_c" ]; then
+      chk FAIL gzip-json "нет связи с панелью"
+    else
+      gj_raw=$(gz_size jraw)
+      gj_raw_ce=$(gz_hdr jraw content-encoding)
+      if [ "$gj_c" != 200 ]; then
+        gj_err="$gj_err; /api/assets/definition без Accept-Encoding: http $gj_c"
+      elif [ "$gj_raw" -le 1400 ]; then
+        gj_err="$gj_err; /api/assets/definition $gj_raw байт — не больше порога 1400, проверка сжатия не годится"
+      fi
+      [ -z "$gj_raw_ce" ] || gj_err="$gj_err; /api/assets/definition без Accept-Encoding пришёл Content-Encoding: $gj_raw_ce"
+      gj_c=$(gz_get jgz /api/assets/definition -b "$jar" -H 'Accept-Encoding: gzip')
+      gj_ce=$(gz_hdr jgz content-encoding)
+      gj_ct=$(gz_hdr jgz content-type)
+      gj_gz=$(gz_size jgz)
+      if [ "$gj_c" != 200 ] || [ "$gj_ce" != gzip ]; then
+        gj_err="$gj_err; /api/assets/definition с Accept-Encoding: gzip http $gj_c, Content-Encoding ${gj_ce:--}, ожидалось 200 gzip"
+      elif ! gz_same jgz jraw; then
+        gj_err="$gj_err; сжатый JSON ($gj_gz байт) не проходит gzip -t или не равен несжатому ($gj_raw байт)"
+      fi
+      case "$gj_ct" in
+        application/json*) ;;
+        *) gj_err="$gj_err; тип сжатого JSON ${gj_ct:--}" ;;
+      esac
+      gj_c=$(gz_get ver /api/version -H 'Accept-Encoding: gzip')
+      gj_ce=$(gz_hdr ver content-encoding)
+      gj_ver=$(gz_size ver)
+      [ "$gj_c" = 200 ] && [ -z "$gj_ce" ] || gj_err="$gj_err; /api/version ($gj_ver байт): http $gj_c, Content-Encoding ${gj_ce:--}, ожидалось 200 без сжатия"
+      # Поток не заканчивается сам: curl обрывает его по --max-time (код 28 — не провал),
+      # заголовки к этому времени уже в файле.
+      gz_get sse /api/update/events -b "$jar" -H 'Accept-Encoding: gzip' --max-time 3 >/dev/null
+      gj_sc=$({ head -n 1 "$GZ.sse.h" 2>/dev/null || true; } | awk '{ print $2 }')
+      gj_st=$(gz_hdr sse content-type)
+      gj_ce=$(gz_hdr sse content-encoding)
+      case "${gj_sc:-000}:$gj_st" in
+        200:text/event-stream*) [ -z "$gj_ce" ] || gj_err="$gj_err; поток /api/update/events сжат: Content-Encoding $gj_ce" ;;
+        *) gj_err="$gj_err; поток /api/update/events: http ${gj_sc:-000}, тип ${gj_st:--}, ожидалось 200 text/event-stream" ;;
+      esac
+      if [ -z "$gj_err" ]; then
+        chk PASS gzip-json "/api/assets/definition: $gj_raw -> $gj_gz байт; /api/version ($gj_ver байт) и text/event-stream — без сжатия"
+      else
+        chk FAIL gzip-json "${gj_err#; }"
+      fi
+    fi
+    rm -f "$GZ".*
     curl -sk --connect-timeout 10 --max-time 20 -b "$jar" -X POST -H "X-CSRF-Token: $csrf" -o /dev/null "$url/api/auth/logout" || true
   else
     if [ "$lcode" = 000 ] || [ -z "$lcode" ]; then
@@ -437,10 +630,85 @@ if [ "$OBSERVE_ONLY" != 1 ]; then
       chk FAIL api-me "вход не удался: http ${lcode:--} за ${ltime:--} с"
     fi
     chk SKIP api-service-status "нет сессии"
+    chk SKIP gzip-json "нет сессии"
   fi
   rm -f "$jar"
   t1=$(date +%s)
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$ID" smoke-api-session "$((t1 - t0))" 0 "$t0" "${RT_CORE:--}" >>"$RT_REPORT/timings.tsv"
+
+  # --- rt-env: блок сокращённых сроков и строки xcp-rt: журнала (D-23) ---------------------------
+  # Одна команда ssh: строки блока (сценарий status из lib.sh, префикс blk:), строки xcp-rt: после
+  # последнего баннера старта по xcp.log.2, .1 и xcp.log подряд (префикс log:); если таких строк нет —
+  # печатает ли их эта сборка вообще (bin:1|0, поиск строки формата в бинарнике).
+  rte_status=$(rt_rtenv_script status)
+  RTE_LOG=$(
+    cat <<'EOF'
+L=/opt/var/log/xcp.log
+lg=$(for f in "$L.2" "$L.1" "$L"; do [ ! -f "$f" ] || cat "$f"; done |
+  grep -E 'XKeen Control Panel v.* starting\.\.\.|xcp-rt:' |
+  awk '/XKeen Control Panel v.* starting\.\.\./ { n = 0; next } { n++; a[n] = $0 } END { for (i = 1; i <= n; i++) print "log:" a[i] }')
+[ -z "$lg" ] || printf '%s\n' "$lg"
+if [ -z "$lg" ]; then
+  if grep -q 'xcp-rt: ' /opt/sbin/xcp 2>/dev/null; then echo bin:1; else echo bin:0; fi
+fi
+EOF
+  )
+  rc=0
+  out=$(rt_stage "$ID" smoke-rtenv rt_ssh "$ID" "( $rte_status ) | sed 's/^/blk:/'; $RTE_LOG") || rc=$?
+  [ "$rc" != 3 ] || lost
+  rte_blk=$(printf '%s\n' "$out" | sed -n 's/^blk://p' | grep -vx 'absent' || true)
+  rte_vars=$(printf '%s\n' "$rte_blk" | grep -E '^XCP_RT_[A-Z0-9_]+=' || true)
+  rte_log=$(printf '%s\n' "$out" | sed -n 's/^log://p' | rt_redact)
+  rte_bin=$(printf '%s\n' "$out" | sed -n 's/^bin://p' | head -n 1)
+  rte_vlist=$(printf '%s\n' "$rte_vars" | tr '\n' ' ' | sed 's/ *$//')
+  rte_lines=$(printf '%s\n' "$rte_log" | sed 's/.*xcp-rt: */xcp-rt: /' | cut -c1-120 | tr '\n' '|' | sed 's/|*$//')
+  if [ "$rc" != 0 ]; then
+    chk FAIL rt-env "проверка блока xcp-rt не выполнилась (код ssh $rc)"
+  elif [ "${RT_EXPECT_RT_ENV:-0}" = 1 ]; then
+    # Подтверждение — только строка принятого значения с тем же числом, что в блоке
+    # («xcp-rt: <имя>=<секунды> (по умолчанию …)», rtenv.Var.Parse). Строка «… отклонено: …»
+    # значит, что панель работает на сроке по умолчанию: это FAIL с текстом строки, не PASS.
+    rte_miss=""
+    rte_rej=""
+    for rte_kv in $rte_vars; do
+      rte_n=${rte_kv%%=*}
+      rte_v=${rte_kv#*=}
+      if printf '%s\n' "$rte_log" | grep -qE "xcp-rt: ${rte_n}=.* отклонено"; then
+        rte_rej="$rte_rej $rte_n"
+        continue
+      fi
+      case "$rte_v" in
+        '' | *[!0-9]*)
+          rte_miss="$rte_miss $rte_n"
+          continue
+          ;;
+      esac
+      printf '%s\n' "$rte_log" | grep -qE "xcp-rt: ${rte_n}=${rte_v} \\(" || rte_miss="$rte_miss $rte_n"
+    done
+    if [ -z "$rte_blk" ]; then
+      chk FAIL rt-env "прогон записал блок xcp-rt, а в xcp.env его нет"
+    elif [ -z "$rte_vars" ]; then
+      chk FAIL rt-env "блок xcp-rt в xcp.env без переменных"
+    elif [ -n "$rte_rej" ]; then
+      rte_rlines=$(printf '%s\n' "$rte_log" | grep -E "xcp-rt: XCP_RT_[A-Z0-9_]+=.* отклонено" |
+        sed 's/.*xcp-rt: */xcp-rt: /' | cut -c1-160 | tr '\n' '|' | sed 's/|*$//')
+      chk FAIL rt-env "блок: $rte_vlist; панель отклонила значения, сроки по умолчанию:$rte_rej; журнал: $rte_rlines"
+    elif [ -z "$rte_miss" ]; then
+      chk PASS rt-env "блок: $rte_vlist; журнал: $rte_lines"
+    elif [ -z "$rte_log" ] && [ "$rte_bin" = 0 ]; then
+      chk PASS rt-env "блок: $rte_vlist; сборка строк xcp-rt: не печатает (до чтения XCP_RT_*), сроки по умолчанию"
+    else
+      chk FAIL rt-env "блок: $rte_vlist; нет строки xcp-rt: после баннера старта для:$rte_miss"
+    fi
+  else
+    if [ -n "$rte_blk" ]; then
+      chk FAIL rt-env "в xcp.env остался блок xcp-rt (прерванный прогон?): ${rte_vlist:-без переменных}"
+    elif [ -n "$rte_log" ]; then
+      chk FAIL rt-env "блока нет, но в журнале после баннера старта есть строки xcp-rt: $rte_lines"
+    else
+      chk PASS rt-env "блока xcp-rt нет, строк xcp-rt: после баннера старта нет"
+    fi
+  fi
 fi
 
 # Часть без окна на этом заканчивается: kernel-restart и правила логов выносит --observe-only.

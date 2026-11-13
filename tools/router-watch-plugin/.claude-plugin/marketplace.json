@@ -1,0 +1,5 @@
+{
+  "name": "local-router-tools",
+  "owner": { "name": "local" },
+  "plugins": [{ "name": "router-watch", "source": "./" }]
+}

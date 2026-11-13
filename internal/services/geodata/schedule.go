@@ -5,15 +5,19 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/rtenv"
 )
 
 // Schedule — расписание обновления баз панелью (день, час, минута по часам роутера).
 type Schedule = ScheduleState
 
+// catchUpDelay — через сколько после старта панели запускается пропущенный слот
+// (панель или роутер были выключены в плановое время). По умолчанию 3 мин; на
+// стенде сокращается обвязкой (rtenv.GeodataCatchUp).
+var catchUpDelay = rtenv.GeodataCatchUp.Get()
+
 const (
-	// catchUpDelay — через сколько после старта панели запускается пропущенный слот
-	// (панель или роутер были выключены в плановое время).
-	catchUpDelay = 3 * time.Minute
 	// retryDelay — через сколько повторяется запуск, целиком упавший из-за сети.
 	retryDelay = time.Hour
 	// schedMaxWait — планировщик проверяет время не реже этого срока: смена пояса или
