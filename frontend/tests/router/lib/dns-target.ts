@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { T } from './env';
 import { addToDraft, api, nodeLink, randomPort, resetDraft } from './nodes-api';
 
@@ -52,16 +52,26 @@ async function applyAndWait(page: Page): Promise<void> {
  * group_empty (D-36). Тогда в «Мои узлы» кладётся узел из testdata; уборка его убирает.
  */
 async function ensureNodeForGroups(page: Page, prep: DnsTargetPrep): Promise<void> {
-  const view = await api(page, 'GET', '/api/configlayer/routing');
-  expect(view.status, 'GET /api/configlayer/routing').toBe(200);
-  const issues = Array.isArray(view.data?.issues) ? (view.data.issues as { code?: string }[]) : [];
-  if (!issues.some((i) => i?.code === 'group_empty')) return;
+  if (!(await hasGroupEmpty(page))) return;
   const name = `RtDnsNode${randomPort()}`;
   await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), name));
   prep.nodeName = name;
 }
 
-/** Убирает узел, положенный ensureNodeForGroups. */
+/** Блокирует ли черновик «Применить» проблемой group_empty (пустые группы при взятой маршрутизации). */
+async function hasGroupEmpty(page: Page): Promise<boolean> {
+  const view = await api(page, 'GET', '/api/configlayer/routing');
+  expect(view.status, 'GET /api/configlayer/routing').toBe(200);
+  const issues = Array.isArray(view.data?.issues) ? (view.data.issues as { code?: string }[]) : [];
+  return issues.some((i) => i?.code === 'group_empty');
+}
+
+/**
+ * Убирает узел, положенный ensureNodeForGroups. Если маршрутизацию до помощника уже держала панель,
+ * она остаётся под панелью, и без узла группы «Применить» снова блокирует group_empty (409
+ * apply_blocked): применённое состояние стенда без узлов недостижимо. Тогда узел возвращается и
+ * остаётся на стенде, причина идёт в аннотацию теста, а применение проходит (D-36).
+ */
 async function releaseNode(page: Page, prep: DnsTargetPrep): Promise<void> {
   if (!prep.nodeName) return;
   const view = await api(page, 'GET', '/api/configlayer/sources');
@@ -80,6 +90,12 @@ async function releaseNode(page: Page, prep: DnsTargetPrep): Promise<void> {
     entry_id: entry.entry_id
   });
   expect(del.status, 'удаление узла помощника').toBe(200);
+  if (prep.routingTaken || !(await hasGroupEmpty(page))) return;
+  await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), prep.nodeName));
+  test.info().annotations.push({
+    type: 'stand',
+    description: `узел ${prep.nodeName} оставлен: маршрутизацию держала панель до прогона, без узла «Применить» блокирует group_empty`
+  });
 }
 
 async function routingInfo(
