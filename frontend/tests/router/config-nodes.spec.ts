@@ -378,7 +378,8 @@ test('config-tabs: #/config открывает Узлы, вкладки пере
   await page.getByTestId('config-tab-nodes').click();
   await expect(page).toHaveURL(/#\/config\/nodes$/);
   await expect(page.getByTestId('nodes-tab')).toBeVisible({ timeout: T.action });
-  await expect(page.getByTestId('files-tab')).toHaveCount(0);
+  // «Файлы» после первого открытия остаются смонтированными и скрываются (Config.svelte)
+  await expect(page.getByTestId('files-tab')).toBeHidden();
 
   await guard.assertClean();
 });
