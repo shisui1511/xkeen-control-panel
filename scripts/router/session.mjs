@@ -1044,6 +1044,9 @@ const BUDGET_MIN = 15;
 // Жёсткий предел, минут: оценка больше — тяжёлый прогон, его место — закрытие вехи; budget_reason
 // предел не снимает, только XCP_RT_HEAVY=1 (просьба владельца).
 const HARD_MIN = 30;
+// Наборы, которые по виду идут часами: оценка по max_minutes прохода их не ограничивает (max_minutes
+// у такого прохода не доказывает, что прогон короткий), поэтому сверх предела они по виду набора.
+const HEAVY_SUITES = new Set(['full', 'delta', 'bisect']);
 // Накладные расходы оценки, секунды: деплой и смоук на смену продукта, переключение ядра,
 // settle после Go, запуск pw-suite.sh на спек, тест без медианы; проход-прогон — max_minutes
 // или suiteMinutes минут; подмена версии (foreign_version) — деплой подмены и деплой HEAD после
@@ -1237,6 +1240,7 @@ function planSession(spec, specFile, root) {
       'сокращённые сроки: блок xcp-rt перед этапами go и pw сессии (D-22), снимается при возврате стенда'
     );
   }
+  const heavyKinds = [];
   let n = 0;
   const step = (s, sec = 0) => {
     seconds += sec;
@@ -1247,6 +1251,7 @@ function planSession(spec, specFile, root) {
   for (const p of spec.passes) {
     if (p.suite) {
       // прогон набора и вложенная сессия — max_minutes прохода или 15 мин
+      if (HEAVY_SUITES.has(p.suite)) heavyKinds.push(`${p.name}: ${p.suite}`);
       seconds += (p.expect.maxMinutes ?? EST.suiteMinutes) * 60;
       // вложенный прогон ставит сборку HEAD сам и оставляет активным ядро, найденное в начале
       const irq = p.interrupt
@@ -1341,9 +1346,13 @@ function planSession(spec, specFile, root) {
   );
   const minutes = Math.ceil(seconds / 60);
   const over = minutes > BUDGET_MIN;
-  const heavy = minutes > HARD_MIN;
+  const heavy = minutes > HARD_MIN || heavyKinds.length > 0;
   lines.push(`Оценка: ${minutes} мин (бюджет ${BUDGET_MIN} мин, предел ${HARD_MIN} мин)`);
-  if (heavy) {
+  if (heavyKinds.length > 0) {
+    lines.push(
+      `тяжёлый набор по виду (${heavyKinds.join(', ')}): идёт часами, оценка max_minutes не в счёт — на закрытие вехи`
+    );
+  } else if (heavy) {
     lines.push(`сверх предела ${HARD_MIN} мин: тяжёлый прогон — на закрытие вехи`);
   } else if (over) {
     lines.push(
@@ -1352,7 +1361,7 @@ function planSession(spec, specFile, root) {
         : 'сверх бюджета: нет budget_reason'
     );
   }
-  return { lines, minutes, over, heavy };
+  return { lines, minutes, over, heavy, heavyKinds };
 }
 
 // План сессии без стенда: печать плана и оценки. Итог — { minutes, over }.
@@ -3453,6 +3462,13 @@ class Session {
   }
 }
 
+/** Причина отказа по пределу: вид набора или оценка сверх HARD_MIN. */
+function heavyWhy(plan) {
+  return plan.heavyKinds.length > 0
+    ? `тяжёлый набор по виду (${plan.heavyKinds.join(', ')}), оценка ${plan.minutes} мин`
+    : `оценка ${plan.minutes} мин сверх предела ${HARD_MIN} мин`;
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const args = parseArgs(argv);
@@ -3464,7 +3480,7 @@ async function main() {
     const plan = dryRun(spec, path.relative(root, specFile), root);
     if (args.budget && plan.heavy) {
       process.stderr.write(
-        `session: оценка ${plan.minutes} мин сверх предела ${HARD_MIN} мин — тяжёлый прогон идёт при закрытии вехи, спеку разделить\n`
+        `session: ${heavyWhy(plan)} — тяжёлый прогон идёт при закрытии вехи, спеку разделить\n`
       );
       process.exit(4);
     }
@@ -3489,15 +3505,21 @@ async function main() {
   }
 
   // предел тяжёлого прогона: проверка до деплоя и снимка, стенд не тронут
+  // Без оценки предел не проверен: отказ (код 4), а не пропуск; обход — тот же XCP_RT_HEAVY=1.
   let plan0 = null;
   try {
     plan0 = planSession(spec, path.relative(root, specFile), root);
-  } catch {
-    plan0 = null;
+  } catch (e) {
+    if (process.env.XCP_RT_HEAVY !== '1') {
+      process.stderr.write(
+        `session: оценка не посчитана (${e.message}) — предел ${HARD_MIN} мин не проверен; починить оценку или XCP_RT_HEAVY=1 по просьбе владельца\n`
+      );
+      process.exit(4);
+    }
   }
   if (plan0 && plan0.heavy && process.env.XCP_RT_HEAVY !== '1') {
     process.stderr.write(
-      `session: оценка ${plan0.minutes} мин сверх предела ${HARD_MIN} мин — тяжёлые прогоны идут при закрытии вехи; разделить спеку или XCP_RT_HEAVY=1 по просьбе владельца\n`
+      `session: ${heavyWhy(plan0)} — тяжёлые прогоны идут при закрытии вехи; разделить спеку или XCP_RT_HEAVY=1 по просьбе владельца\n`
     );
     process.exit(4);
   }
