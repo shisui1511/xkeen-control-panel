@@ -23,6 +23,9 @@
  * а метки knownFailure с ядром в селекторе — идти через coreTagsOf. core-switch.spec.ts
  * исключён: он идёт в каждой ветви. Тег «одно ядро» (ONE_CORE_TAG с аннотацией one-core
  * «<причина>; covered-by: <название>») выполняет это правило, но тегом ядра не считается.
+ * Репортёр хода progress-reporter.ts (LIB_REPORTERS) из правила «помощник lib/ не читает ядро»
+ * выведен по точному имени, а его импорт из спека или помощника lib/ — нарушение (libIssues,
+ * reporterImportIssues).
  * Области router-area и факты тестов (loadAreas, matchGlob, areaOfText, testFacts — ярус,
  * Slow, карантин, метка ядра, область файла) — в конце файла; их читают
  * scripts/check-router-areas.js, выбор changed, страж ярусов и бюджет.
@@ -286,9 +289,23 @@ const KNOWN_CALL = /\bknownFailure\(\s*(['"`])([^'"`\n]*)\1/g;
 const LIB_READS_CORE = /\bRT\.core\b|\bXCP_CORE\b/;
 const SPEC_EXEMPT = new Set(['core-switch.spec.ts']);
 const LIB_EXEMPT = new Set(['env.ts', 'known.ts']);
+// Репортёры Playwright из frontend/tests/router/lib/: их подключает конфиг
+// frontend/playwright.router.config.ts строкой пути, это не спеки и не помощники спека.
+// Ядро ветви репортёр читает только для журнала хода progress.tsv (scripts/router/progress.mjs,
+// make router-watch) и решений о ядре не принимает. Исключение — по точному имени файла;
+// спек и помощник lib/ репортёр не импортируют (REPORTER_IMPORT), иначе ядро прошло бы в
+// спек мимо тега.
+const LIB_REPORTERS = new Set(['progress-reporter.ts']);
+// Импорт репортёра: строка в кавычках, оканчивающаяся на /<имя без расширения> (расширение
+// .ts/.js/.mjs/.cjs необязательно), после from, import (голый и динамический) или require(.
+const REPORTER_IMPORT = new RegExp(
+  String.raw`(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)(['"\x60])[^'"\x60\n]*/(?:` +
+    [...LIB_REPORTERS].map((n) => n.replace(/\.ts$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') +
+    String.raw`)(?:\.(?:ts|js|mjs|cjs))?\1`
+);
 
-/** Вырезает комментарии TS/JS и импорты; строки, шаблоны и литералы регулярных выражений оставляет как есть. */
-function stripTs(text) {
+/** Вырезает комментарии TS/JS; строки, шаблоны и литералы регулярных выражений оставляет как есть. */
+function stripTsComments(text) {
   let out = '';
   const n = text.length;
   let i = 0;
@@ -318,7 +335,29 @@ function stripTs(text) {
       i++;
     }
   }
-  return out.replace(/^import[\s\S]*?\bfrom\s*['"][^'"\n]+['"];?/gm, '');
+  return out;
+}
+
+/** Вырезает комментарии TS/JS и импорты; строки, шаблоны и литералы регулярных выражений оставляет как есть. */
+function stripTs(text) {
+  return stripTsComments(text).replace(/^import[\s\S]*?\bfrom\s*['"][^'"\n]+['"];?/gm, '');
+}
+
+/** Причины нарушения для спека или помощника lib/, импортирующего репортёр Playwright (LIB_REPORTERS). */
+function reporterImportIssues(text) {
+  if (!REPORTER_IMPORT.test(stripTsComments(text))) return [];
+  return ['импортирует репортёр Playwright (progress-reporter.ts): репортёр не помощник спека — ядро он читает только для журнала хода'];
+}
+
+/** Причины нарушения для помощника frontend/tests/router/lib/*.ts (правило 5). */
+function libIssues(file, text) {
+  const name = path.posix.basename(file);
+  const issues = [];
+  if (!LIB_EXEMPT.has(name) && !LIB_REPORTERS.has(name) && LIB_READS_CORE.test(stripTs(text))) {
+    issues.push('помощник читает ядро: решение принимается в спеке с тегом ядра');
+  }
+  if (!LIB_REPORTERS.has(name)) issues.push(...reporterImportIssues(text));
+  return issues;
 }
 
 /**
@@ -555,19 +594,16 @@ function trackedFiles(root, glob) {
 function specViolations(root) {
   const rows = [];
   for (const file of trackedFiles(root, 'frontend/tests/router/*.spec.ts')) {
+    const text = fs.readFileSync(path.join(root, file), 'utf8');
+    for (const reason of reporterImportIssues(text)) rows.push({ file, name: '(спек)', reason });
     if (SPEC_EXEMPT.has(path.posix.basename(file))) continue;
-    for (const reason of specIssues(fs.readFileSync(path.join(root, file), 'utf8'))) {
+    for (const reason of specIssues(text)) {
       rows.push({ file, name: '(спек)', reason });
     }
   }
   for (const file of trackedFiles(root, 'frontend/tests/router/lib/*.ts')) {
-    if (LIB_EXEMPT.has(path.posix.basename(file))) continue;
-    if (LIB_READS_CORE.test(stripTs(fs.readFileSync(path.join(root, file), 'utf8')))) {
-      rows.push({
-        file,
-        name: '(помощник)',
-        reason: 'помощник читает ядро: решение принимается в спеке с тегом ядра'
-      });
+    for (const reason of libIssues(file, fs.readFileSync(path.join(root, file), 'utf8'))) {
+      rows.push({ file, name: '(помощник)', reason });
     }
   }
   rows.sort((a, b) => (a.file + a.name).localeCompare(b.file + b.name));
@@ -1356,6 +1392,8 @@ module.exports = {
   specFacts,
   specIssues,
   specViolations,
+  libIssues,
+  reporterImportIssues,
   routerGoFiles,
   trackedFiles,
   AREAS_FILE,
