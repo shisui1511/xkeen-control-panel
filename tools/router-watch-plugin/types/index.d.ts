@@ -9,11 +9,12 @@ export type Block = {
   total: number
   counts: Record<string, number>
   current: string
+  currentSec?: number | null
 }
 export type Progress = {
   name: string
   suite: string
-  state: 'none' | 'running' | 'done' | 'stopped'
+  state: 'none' | 'running' | 'hold' | 'done' | 'stopped'
   verdict: string
   elapsedSec: number
   estSec: number | null
@@ -25,6 +26,8 @@ export type Progress = {
   fails: Fail[]
   session: string
   idleSec: number
+  holdUntil: number
+  holdLeftSec: number
   line: string
 }
 export type Snapshot = { progress: Progress | null; error: string; at: number }

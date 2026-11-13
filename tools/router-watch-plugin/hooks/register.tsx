@@ -61,8 +61,16 @@ export const register: Register = on => {
         const progress = JSON.parse(r.stdout) as Progress
         await update($, snapshot, () => ({ progress, error: '', at: Date.now() }))
         const running = progress.state === 'running'
-        $.ui.status(running ? progress.line : undefined)
+        $.ui.status(running || progress.state === 'hold' ? progress.line : undefined)
         if (running && !wasRunning) void $.ui.open({ id: PANE, title: TITLE })
+        // прогон закончился (итог или удержание стенда): тост и уведомление с итогом
+        if (wasRunning && !running && progress.state !== 'none') {
+          const verdict =
+            progress.state === 'stopped' ? 'оборван' : progress.verdict || 'закончен'
+          const text = `Прогон ${progress.suite || ''}: ${verdict}`
+          $.ui.toast(text)
+          void $.ui.notify(text, { title: TITLE })
+        }
         wasRunning = running
       } catch (err) {
         await update($, snapshot, () => ({ progress: null, error: String(err).slice(0, 300), at: Date.now() }))
@@ -103,8 +111,11 @@ export const register: Register = on => {
     }
 
     const running = p.state === 'running'
+    const holding = p.state === 'hold'
     const red = /красный/.test(p.verdict)
     const stateText = running ? 'идёт' : p.state === 'stopped' ? 'оборван' : 'закончен'
+    const until = new Date(p.holdUntil * 1000)
+    const untilText = `${String(until.getHours()).padStart(2, '0')}:${String(until.getMinutes()).padStart(2, '0')}`
     const b = p.block
     const blockCounts = b
       ? Object.entries(b.counts)
@@ -130,9 +141,12 @@ export const register: Register = on => {
           </Text>
           {p.percent != null && <Text mono>{`${bar(p.percent / 100, width)} ${p.percent}%`}</Text>}
           {p.session && <Text dimColor>{`Сессия: ${p.session}`}</Text>}
+          {holding && (
+            <Text color="suggestion">{`Стенд удержан для ручной сессии до ${untilText} (ещё ${dur(p.holdLeftSec)})`}</Text>
+          )}
         </Box>
 
-        {running && (
+        {(running || holding) && (
           <Box flexDirection="column">
             {p.stages.map(st => (
               <Text>{`Этап: ${st.core !== '-' ? `${st.core} · ` : ''}${st.name} (${dur(st.sinceSec)})`}</Text>
@@ -141,12 +155,14 @@ export const register: Register = on => {
               <Text mono>{`${b.core} ${b.name}: ${bar(b.total ? b.done / b.total : 0, width)} ${b.done}/${b.total}`}</Text>
             )}
             {b && blockCounts && <Text dimColor>{blockCounts}</Text>}
-            {b && b.current && <Text dimColor>{`сейчас: ${b.current}`}</Text>}
-            {p.idleSec > 300 && <Text color="warning">{`Нет новых событий ${dur(p.idleSec)}`}</Text>}
+            {b && b.current && (
+              <Text dimColor>{`сейчас: ${b.current}${b.currentSec != null ? ` (${dur(b.currentSec)})` : ''}`}</Text>
+            )}
+            {running && p.idleSec > 300 && <Text color="warning">{`Нет новых событий ${dur(p.idleSec)}`}</Text>}
           </Box>
         )}
 
-        <Text>{`Записано: PASS ${p.counts.PASS} · FAIL ${p.counts.FAIL} · KNOWN ${p.counts.KNOWN} · SKIP ${p.counts.SKIP}`}</Text>
+        <Text>{`${holding ? 'Ручная сессия' : 'Записано'}: PASS ${p.counts.PASS} · FAIL ${p.counts.FAIL} · KNOWN ${p.counts.KNOWN} · SKIP ${p.counts.SKIP}`}</Text>
 
         {fails.length > 0 && (
           <Box flexDirection="column">
