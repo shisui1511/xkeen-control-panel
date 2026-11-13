@@ -615,6 +615,8 @@ hold_lock() {
     trap 'exit 130' INT TERM HUP
     echo "router-test: блокировка удерживается $RT_HOLD_MINUTES мин; снять раньше: touch $RELEASE_FILE"
     END=$(($(date +%s) + RT_HOLD_MINUTES * 60))
+    # ход прогона: прогон закончен, дальше — ручная сессия на удержанном стенде (progress.mjs)
+    rt_progress hold "$END"
     while [ "$(date +%s)" -lt "$END" ] && [ ! -e "$RELEASE_FILE" ]; do
       sleep 1
     done

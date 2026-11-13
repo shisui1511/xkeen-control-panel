@@ -247,6 +247,7 @@ rt_result() {
       ;;
   esac
   printf '%s\t%s\t%s\t%s\n' "$_st" "$_core" "$_chk" "$_det" >>"$RT_REPORT/$_id/$_rf"
+  rt_progress res "$_id" "$_core" "$_st" "$_chk"
 }
 
 # Ожидание связи со стендом после обрыва: rt_wait_link <цель> <секунды>.
@@ -299,7 +300,9 @@ rt_stage() {
 # <отчёт>/progress.tsv. Его читает scripts/router/progress.mjs (make router-watch, панель хода в
 # приложении). Виды: run <набор> <pid run.sh>; est <секунды оценки>; stage+ <цель> <ядро> <этап>;
 # stage- <цель> <ядро> <этап> <код> <секунды>; go <цель> <ядро> <запуск> <тестов> <сырой поток>;
-# pw, pwt+ и pwt пишет репортёр Playwright (frontend/tests/router/lib/progress-reporter.ts).
+# res <цель> <ядро> <статус> <проверка> (каждая строка rt_result); hold <секунды конца удержания>
+# (run.sh, RT_HOLD_MINUTES: прогон закончен, стенд держится для ручной сессии); pw, pwt+ и pwt
+# пишет репортёр Playwright (frontend/tests/router/lib/progress-reporter.ts).
 # Строка уходит одной записью (параллельные этапы не перемешивают строки); табуляция и перевод
 # строки в полях заменяются пробелом. Сбой записи ход прогона не меняет. Свои имена (_pg_*):
 # rt_stage и _bg держат _stage, _t0 и _rc.

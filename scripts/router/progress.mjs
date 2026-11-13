@@ -203,6 +203,8 @@ function collect(report) {
     fails: [],
     session: '',
     idleSec: 0,
+    holdUntil: 0,
+    holdLeftSec: 0,
     line: ''
   };
   if (!report || !fs.existsSync(report)) {
@@ -230,16 +232,30 @@ function collect(report) {
   const running = alive(pid);
   state.state = running ? 'running' : verdicts.length ? 'done' : run ? 'stopped' : 'done';
   state.verdict = verdicts.join('; ');
+  // удержание (RT_HOLD_MINUTES): прогон закончен, стенд держится для ручной сессии; этапы
+  // go-suite.sh и pw-suite.sh, запущенные вручную, идут в тот же отчёт
+  const hold = events.filter((e) => e.kind === 'hold' && e.file === rootLog).pop();
+  const holding = running && hold !== undefined;
+  if (holding) {
+    state.state = 'hold';
+    state.holdUntil = Number(hold.f[0]) || 0;
+    state.holdLeftSec = Math.max(0, state.holdUntil - now);
+  }
   const lastT = events.length ? events[events.length - 1].t : state.started;
-  const endT = running ? now : Math.max(lastT, mtimeS(path.join(report, 'summary.md')) || 0);
+  const endT = holding
+    ? hold.t
+    : running
+      ? now
+      : Math.max(lastT, mtimeS(path.join(report, 'summary.md')) || 0);
   state.elapsedSec = state.started ? endT - state.started : 0;
 
   const est = events.filter((e) => e.kind === 'est').pop();
   if (est) {
     state.estSec = Number(est.f[0]) || null;
     if (state.estSec) {
-      state.percent = Math.min(running ? 99 : 100, Math.floor((state.elapsedSec / state.estSec) * 100));
-      state.etaSec = running ? Math.max(0, state.estSec - state.elapsedSec) : 0;
+      const going = running && !holding;
+      state.percent = Math.min(going ? 99 : 100, Math.floor((state.elapsedSec / state.estSec) * 100));
+      state.etaSec = going ? Math.max(0, state.estSec - state.elapsedSec) : 0;
     }
   }
 
@@ -256,17 +272,28 @@ function collect(report) {
       .map((e) => ({ target: e.f[0], core: e.f[1], name: e.f[2], sinceSec: now - e.t }));
   }
 
-  // записанные итоги
+  // записанные итоги: события res журнала (последний исход каждой проверки; при удержании —
+  // только ручной сессии); отчёты без них — по файлам результатов
   const recorded = new Set();
-  for (const file of resultFiles(report, state.suite)) {
+  const resEvents = events.filter((e) => e.kind === 'res' && (!holding || e.t >= hold.t));
+  const addRecorded = (st, core, check, detail) => {
+    if (st in state.counts) state.counts[st]++;
+    else if (st === 'XPASS') state.counts.FAIL++;
+    else if (st === 'QPASS') state.counts.PASS++;
+    recorded.add(`${core}\t${check}`);
+    if (st === 'FAIL' || st === 'XPASS') state.fails.push({ core, name: check, detail, live: false });
+  };
+  const hasRes = events.some((e) => e.kind === 'res');
+  if (hasRes) {
+    const latest = new Map();
+    for (const e of resEvents) latest.set(`${e.f[0]}\t${e.f[1]}\t${e.f[3]}`, e);
+    for (const e of latest.values()) addRecorded(e.f[2], e.f[1], e.f[3], '');
+  }
+  for (const file of hasRes ? [] : resultFiles(report, state.suite)) {
     for (const line of readText(file).split('\n')) {
       if (!line) continue;
       const [st, core, check, detail = ''] = line.split('\t');
-      if (st in state.counts) state.counts[st]++;
-      else if (st === 'XPASS') state.counts.FAIL++;
-      else if (st === 'QPASS') state.counts.PASS++;
-      recorded.add(`${core}\t${check}`);
-      if (st === 'FAIL' || st === 'XPASS') state.fails.push({ core, name: check, detail: detail.slice(0, 200), live: false });
+      addRecorded(st, core, check, detail.slice(0, 200));
     }
   }
 
@@ -314,7 +341,9 @@ function collect(report) {
         if (e.kind !== 'pwt') continue;
         ended.add(e.f[3]);
         if (e.f[2] in counts) counts[e.f[2]]++;
-        if (e.f[2] === 'FAIL') state.fails.push({ core: e.f[1], name: `pw:${e.f[3]}`, detail: '', live: true });
+        if (e.f[2] === 'FAIL' && !recorded.has(`${e.f[1]}\tpw:${e.f[3]}`)) {
+          state.fails.push({ core: e.f[1], name: `pw:${e.f[3]}`, detail: '', live: true });
+        }
       }
       const started = after.filter((e) => e.kind === 'pwt+' && !ended.has(e.f[2]));
       block = {
@@ -325,7 +354,8 @@ function collect(report) {
         done: ended.size,
         total: Number(lastPw.f[2]) || 0,
         counts,
-        current: started.length ? started[started.length - 1].f[2] : ''
+        current: started.length ? started[started.length - 1].f[2] : '',
+        currentSec: started.length ? now - started[started.length - 1].t : null
       };
       state.idleSec = now - lastT;
     } else {
@@ -347,6 +377,12 @@ function collect(report) {
 function oneLine(s) {
   if (s.state === 'none') return 'стенд: прогонов нет';
   const suite = s.suite || 'прогон';
+  if (s.state === 'hold') {
+    const parts = [`стенд удержан до ${clock(s.holdUntil)}`, `${suite}: ${s.verdict || 'закончен'}`];
+    if (s.block) parts.push(`${s.block.core} ${s.block.kind} ${s.block.done}/${s.block.total}`);
+    if (s.fails.length) parts.push(`✗${s.fails.length}`);
+    return parts.join(' · ');
+  }
   if (s.state !== 'running') {
     const v = s.state === 'stopped' ? 'оборван' : s.verdict || 'закончен';
     return `стенд: ${suite} — ${v}`;
@@ -364,6 +400,12 @@ function oneLine(s) {
   return parts.join(' · ');
 }
 
+/** Местное время ЧЧ:ММ по секундам эпохи. */
+function clock(sec) {
+  const d = new Date(sec * 1000);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 function bar(frac, width) {
   const n = Math.max(0, Math.min(width, Math.round(frac * width)));
   return `[${'█'.repeat(n)}${'░'.repeat(width - n)}]`;
@@ -374,7 +416,12 @@ function render(s, color) {
   const width = Math.max(20, Math.min(50, (process.stdout.columns || 80) - 30));
   const out = [];
   if (s.state === 'none') return 'Прогонов на стенде нет (build/router/last не найден).\n';
-  const stateRu = { running: c('36', 'идёт'), done: 'закончен', stopped: c('33', 'оборван (процесс прогона не найден)') }[s.state];
+  const stateRu = {
+    running: c('36', 'идёт'),
+    hold: 'закончен',
+    done: 'закончен',
+    stopped: c('33', 'оборван (процесс прогона не найден)')
+  }[s.state];
   out.push(`${c('1', `Прогон ${s.suite || ''}`)} — ${stateRu}   ${c('2', s.name)}`);
   if (s.state !== 'running' && s.verdict) {
     const red = /красный/.test(s.verdict);
@@ -386,7 +433,12 @@ function render(s, color) {
   out.push(times.join(' · '));
   if (s.percent != null) out.push(`${bar(s.percent / 100, width)} ${s.percent}%  ${c('2', '(по оценке времени)')}`);
   if (s.session) out.push(`Сессия: ${s.session}`);
-  if (s.state === 'running') {
+  if (s.state === 'hold') {
+    out.push(
+      c('36', `Стенд удержан для ручной сессии до ${clock(s.holdUntil)} (ещё ${fmtDur(s.holdLeftSec)})`)
+    );
+  }
+  if (s.state === 'running' || s.state === 'hold') {
     for (const st of s.stages) {
       out.push(`Этап: ${st.target}${st.core !== '-' ? ` · ${st.core}` : ''} · ${st.name} ${c('2', `(${fmtDur(st.sinceSec)})`)}`);
     }
@@ -398,13 +450,15 @@ function render(s, color) {
         .map(([k, v]) => (k === 'FAIL' ? c('31', `${k} ${v}`) : `${k} ${v}`))
         .join(', ');
       out.push(`${b.core} ${b.name}: ${bar(frac, width)} ${b.done}/${b.total}${cnt ? `  ${cnt}` : ''}`);
-      if (b.current) out.push(`  сейчас: ${b.current}`);
+      if (b.current) {
+        out.push(`  сейчас: ${b.current}${b.currentSec != null ? c('2', ` (${fmtDur(b.currentSec)})`) : ''}`);
+      }
     }
-    if (s.idleSec > IDLE_WARN_S) out.push(c('33', `Нет новых событий ${fmtDur(s.idleSec)} — тест долгий или прогон завис`));
+    if (s.state === 'running' && s.idleSec > IDLE_WARN_S) out.push(c('33', `Нет новых событий ${fmtDur(s.idleSec)} — тест долгий или прогон завис`));
   }
   const k = s.counts;
   out.push(
-    `Записано: PASS ${k.PASS} · ${k.FAIL ? c('31', `FAIL ${k.FAIL}`) : 'FAIL 0'} · KNOWN ${k.KNOWN} · SKIP ${k.SKIP}`
+    `${s.state === 'hold' ? 'Ручная сессия' : 'Записано'}: PASS ${k.PASS} · ${k.FAIL ? c('31', `FAIL ${k.FAIL}`) : 'FAIL 0'} · KNOWN ${k.KNOWN} · SKIP ${k.SKIP}`
   );
   if (s.fails.length) {
     out.push(c('31', `Упало (${s.fails.length}):`));
