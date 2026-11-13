@@ -162,6 +162,10 @@ func rtEnvWrite(content []byte) error {
 	if err == nil {
 		err = f.Chmod(mode)
 	}
+	// Данные на диск до rename: без этого после потери питания возможен пустой xcp.env.
+	if err == nil {
+		err = f.Sync()
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -170,8 +174,15 @@ func rtEnvWrite(content []byte) error {
 	}
 	if err != nil {
 		_ = os.Remove(tmp)
+		return err
 	}
-	return err
+	// Запись каталога с новым именем — тоже на диск; сбой синхронизации каталога файл уже
+	// заменённым оставляет, поэтому не ошибка.
+	if d, derr := os.Open(filepath.Dir(rtEnvFile)); derr == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
 }
 
 // rtEnvLine — строка вида XCP_RT_<ИМЯ>=…, как /^XCP_RT_[A-Z0-9_]*=/ у awk в lib.sh.
