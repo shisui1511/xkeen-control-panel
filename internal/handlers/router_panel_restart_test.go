@@ -48,7 +48,6 @@ import (
 // запускается секундами (прогон 20261016-115824-f37a028f).
 
 const (
-	rtPanelInit = routertest.PanelInitScript
 	// rtPanelRestartLimit — за сколько init-скрипт обязан закончить restart:
 	// остановка ждёт выхода не дольше XCP_STOP_TIMEOUT (60 с), запуск — до 11 с.
 	rtPanelRestartLimit = 75 * time.Second

@@ -103,7 +103,7 @@ func TestRouterRestartWithKernelHelper(t *testing.T) {
 	}
 	// Сосед мог оставить второе ядро или ядро, ещё поднимающееся после своего
 	// перезапуска: тест начинается с одного устойчивого процесса ядра ветви.
-	pid := routertest.WaitKernelReady(t, kernel, rtHelperRestartWait)
+	routertest.WaitKernelReady(t, kernel, rtHelperRestartWait)
 	path, content := rtHelperValidateTarget(t, kernel)
 	p := routertest.NewPanel(t)
 
@@ -199,7 +199,7 @@ func TestRouterRestartWithKernelHelper(t *testing.T) {
 		// Перезапуск — только при одном устойчивом процессе ядра ветви: второе ядро
 		// (409 kernel_conflict) или ядро, ещё не поднявшееся после прошлого круга, —
 		// состояние стенда, а не ответ панели на перезапуск. PID круга — отсюда.
-		pid = routertest.WaitKernelReady(t, kernel, rtHelperRestartWait)
+		pid := routertest.WaitKernelReady(t, kernel, rtHelperRestartWait)
 		before := completed.Load()
 		t.Logf("перезапуск %d: проверки идут %v, завершено %d", round, time.Since(started).Round(time.Millisecond), before)
 		status, raw, err := p.Call(http.MethodPost, "/api/service/control?action=restart", nil)
@@ -227,6 +227,5 @@ func TestRouterRestartWithKernelHelper(t *testing.T) {
 		// Ядро держится с новым PID уже без проверок: вспомогательные процессы не
 		// мешают подсчёту.
 		rtRstHoldPID(t, kernel, next)
-		pid = next
 	}
 }
