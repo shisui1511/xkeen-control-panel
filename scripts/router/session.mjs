@@ -1364,7 +1364,7 @@ function planSession(spec, specFile, root) {
   return { lines, minutes, over, heavy, heavyKinds };
 }
 
-// План сессии без стенда: печать плана и оценки. Итог — { minutes, over }.
+// План сессии без стенда: печать плана и оценки. Итог — { minutes, over, heavy, heavyKinds }.
 function dryRun(spec, specFile, root) {
   const plan = planSession(spec, specFile, root);
   process.stdout.write(plan.lines.join('\n') + '\n');
@@ -3462,6 +3462,20 @@ class Session {
   }
 }
 
+/**
+ * Отказ настоящего запуска по пределу (код 4, стенд не тронут): причина в stderr и строкой итога
+ * в summary.md отчёта, чтобы ход прогона показал «отказ», а не «оборван».
+ */
+function refuse(why) {
+  process.stderr.write(`session: ${why}\n`);
+  try {
+    appendFileSync(path.join(process.env.RT_REPORT, 'summary.md'), `- Итог: отказ — ${why.split(' — ')[0]}\n`);
+  } catch {
+    // отчёт только для смотрящего: код выхода отказ передаёт и так
+  }
+  process.exit(4);
+}
+
 /** Причина отказа по пределу: вид набора или оценка сверх HARD_MIN. */
 function heavyWhy(plan) {
   return plan.heavyKinds.length > 0
@@ -3507,28 +3521,29 @@ async function main() {
   // предел тяжёлого прогона: проверка до деплоя и снимка, стенд не тронут
   // Без оценки предел не проверен: отказ (код 4), а не пропуск; обход — тот же XCP_RT_HEAVY=1.
   let plan0 = null;
+  let planErr = null;
   try {
     plan0 = planSession(spec, path.relative(root, specFile), root);
   } catch (e) {
+    planErr = e;
     if (process.env.XCP_RT_HEAVY !== '1') {
-      process.stderr.write(
-        `session: оценка не посчитана (${e.message}) — предел ${HARD_MIN} мин не проверен; починить оценку или XCP_RT_HEAVY=1 по просьбе владельца\n`
+      refuse(
+        `оценка не посчитана (${e.message}) — предел ${HARD_MIN} мин не проверен; починить оценку или XCP_RT_HEAVY=1 по просьбе владельца`
       );
-      process.exit(4);
     }
   }
   if (plan0 && plan0.heavy && process.env.XCP_RT_HEAVY !== '1') {
-    process.stderr.write(
-      `session: ${heavyWhy(plan0)} — тяжёлые прогоны идут при закрытии вехи; разделить спеку или XCP_RT_HEAVY=1 по просьбе владельца\n`
+    refuse(
+      `${heavyWhy(plan0)} — тяжёлые прогоны идут при закрытии вехи; разделить спеку или XCP_RT_HEAVY=1 по просьбе владельца`
     );
-    process.exit(4);
   }
 
   const s = new Session(spec, specFile, root);
   s.say(`отчёт ${path.relative(root, s.dir)}`);
   // оценка и бюджет (D-23): сверх бюджета в пределе — только предупреждение, сессия идёт
   try {
-    const plan = planSession(spec, path.relative(root, specFile), root);
+    if (!plan0) throw planErr;
+    const plan = plan0;
     s.say(`оценка: ${plan.minutes} мин (бюджет ${BUDGET_MIN} мин, предел ${HARD_MIN} мин)`);
     // оценка для хода прогона (progress.mjs): строка est журнала отчёта сессии (формат rt_progress)
     try {
