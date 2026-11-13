@@ -73,9 +73,10 @@ router-test-unattended:
 
 # Ход прогона на стенде в своём терминале (scripts/router/progress.mjs): этап, тесты запуска,
 # упавшие, оценка оставшегося времени; обновление раз в 2 с, новый прогон подхватывается сам.
-#   make router-watch [REPORT=<отчёт>]   (по умолчанию — build/router/last основной копии)
+#   make router-watch [RT_WATCH_REPORT=<отчёт>]   (по умолчанию — build/router/last основной копии)
+# Имя переменной не общее (REPORT): make берёт переменные окружения, чужой REPORT подменил бы отчёт.
 router-watch:
-	@node scripts/router/progress.mjs --watch $(REPORT)
+	@node scripts/router/progress.mjs --watch $(if $(RT_WATCH_REPORT),"$(RT_WATCH_REPORT)")
 
 run: build
 	./build/$(BINARY_NAME)

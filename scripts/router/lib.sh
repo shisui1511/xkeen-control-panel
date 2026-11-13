@@ -317,7 +317,8 @@ rt_progress() {
   for _pg_a in "$@"; do
     _pg_l="$_pg_l	$(printf '%s' "$_pg_a" | tr '\t\n' '  ')"
   done
-  printf '%s\n' "$_pg_l" >>"$RT_REPORT/progress.tsv" 2>/dev/null || true
+  # 2>/dev/null раньше >>: ошибка открытия файла печатается оболочкой, пока stderr ещё не закрыт
+  printf '%s\n' "$_pg_l" 2>/dev/null >>"$RT_REPORT/progress.tsv" || true
 }
 
 # Фильтр stdin: убирает из текста адреса, значения ip=, cookie и csrf-токены.
