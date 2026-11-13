@@ -36,12 +36,40 @@ function bar(frac: number, width: number): string {
   return '█'.repeat(n) + '░'.repeat(width - n)
 }
 
+// часы для чисел, что меняются на глазах: 3:28, 1:05:12
+function clock(sec: number | null | undefined): string {
+  if (sec == null || !Number.isFinite(sec)) return '—'
+  const s = Math.max(0, Math.round(sec))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const ss = String(s % 60).padStart(2, '0')
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
+}
+
+// полоса для графических поверхностей: ширина разметки с запасом — Svg сожмётся до ширины панели,
+// высота задаётся явно, поэтому полоса остаётся тонкой при любой ширине
+const BAR_W = 1000
+const FILL = { run: '#4c8df6', warn: '#d29922' } as const
+function barSvg(frac: number, fill: string): string {
+  const f = Math.max(0, Math.min(1, frac))
+  const w = Math.round(f * BAR_W)
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${BAR_W}" height="8" viewBox="0 0 ${BAR_W} 8" preserveAspectRatio="none">` +
+    `<rect width="${BAR_W}" height="8" rx="4" fill="#8b949e" fill-opacity="0.22"/>` +
+    (w > 0 ? `<rect width="${Math.max(w, 8)}" height="8" rx="4" fill="${fill}"/>` : '') +
+    `</svg>`
+  )
+}
+
 let pollNow: () => void = () => {}
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    await $.command.register({ name: 'router-watch', description: 'Ход прогона роутерных тестов в панели' })
+    await $.command.register({
+      name: 'router-watch',
+      description: 'Ход прогона роутерных тестов в панели',
+    })
     // скрипт — от корня рабочей копии: сессия может начаться в подкаталоге
     const top = await $.process.run(['git', 'rev-parse', '--show-toplevel']).then(
       r => (r.exitCode === 0 ? r.stdout.trim() : ''),
@@ -53,7 +81,11 @@ export const register: Register = on => {
       () => false
     )
     if (!hasScript) {
-      await update($, snapshot, () => ({ progress: null, error: `в этой рабочей копии нет ${SCRIPT}`, at: Date.now() }))
+      await update($, snapshot, () => ({
+        progress: null,
+        error: `в этой рабочей копии нет ${SCRIPT}`,
+        at: Date.now(),
+      }))
       return started
     }
 
@@ -67,28 +99,41 @@ export const register: Register = on => {
       if (busy) return
       busy = true
       try {
-        const r = await $.process.run(['node', script, '--json'], { timeoutMs: 20_000 })
+        const r = await $.process.run(['node', script, '--json'], {
+          timeoutMs: 20_000,
+        })
         if (r.exitCode !== 0) {
-          await update($, snapshot, () => ({ progress: null, error: r.stderr.trim().slice(0, 300) || `код ${r.exitCode}`, at: Date.now() }))
+          await update($, snapshot, () => ({
+            progress: null,
+            error: r.stderr.trim().slice(0, 300) || `код ${r.exitCode}`,
+            at: Date.now(),
+          }))
           return
         }
         const progress = JSON.parse(r.stdout) as Progress
-        await update($, snapshot, () => ({ progress, error: '', at: Date.now() }))
+        await update($, snapshot, () => ({
+          progress,
+          error: '',
+          at: Date.now(),
+        }))
         const running = progress.state === 'running'
         active = running || progress.state === 'hold' || progress.queue.length > 0
         $.ui.status(running || progress.state === 'hold' ? progress.line : undefined)
         if (running && !wasRunning) void $.ui.open({ id: PANE, title: TITLE })
         // прогон закончился (итог или удержание стенда): тост и уведомление с итогом
         if (wasRunning && !running && progress.state !== 'none') {
-          const verdict =
-            progress.state === 'stopped' ? 'оборван' : progress.verdict || 'закончен'
+          const verdict = progress.state === 'stopped' ? 'оборван' : progress.verdict || 'закончен'
           const text = `Прогон ${progress.suite || ''}: ${verdict}`
           $.ui.toast(text)
           void $.ui.notify(text, { title: TITLE })
         }
         wasRunning = running
       } catch (err) {
-        await update($, snapshot, () => ({ progress: null, error: String(err).slice(0, 300), at: Date.now() }))
+        await update($, snapshot, () => ({
+          progress: null,
+          error: String(err).slice(0, 300),
+          at: Date.now(),
+        }))
       } finally {
         busy = false
       }
@@ -110,11 +155,28 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
+    const els = $.ui.resolve(e)
+    const { Box, Text } = els
+    const Svg = 'Svg' in els ? els.Svg : null
     const snap = await read($, snapshot)
     const cols = (e.props as { bodyColumns?: number }).bodyColumns ?? e.viewport?.columns ?? 60
     const width = Math.max(10, Math.min(40, cols - 14))
     const p = snap.progress
+
+    // полоса прогресса: на desktop/vscode/mobile — Svg, в терминале — символы
+    const Bar = (frac: number, fill: string, alt: string) =>
+      Svg ? <Svg source={barSvg(frac, fill)} alt={alt} height={8} /> : <Text>{bar(frac, width)}</Text>
+    // плашка счётчика: нулевые приглушены
+    const Pill = (label: string, n: number, color: string) => (
+      <Box borderStyle="round" borderColor={n ? color : 'inactive'} paddingX={1} flexDirection="row" gap={1}>
+        <Text size="caption" color={n ? color : 'inactive'} bold>
+          {label}
+        </Text>
+        <Text tabular bold color={n ? undefined : 'inactive'}>
+          {String(n)}
+        </Text>
+      </Box>
+    )
 
     if (!p) {
       return (
@@ -128,9 +190,9 @@ export const register: Register = on => {
       ...(p.unattended ? [`Ночной прогон ждёт старта${p.unattended.at ? ` в ${p.unattended.at}` : ''}`] : []),
     ]
     const waitingBox = waiting.length > 0 && (
-      <Box flexDirection="column">
+      <Box flexDirection="column" borderStyle="round" borderColor="warning" paddingX={1}>
         {waiting.map(w => (
-          <Text color="warning">{w}</Text>
+          <Text color="warning">{`⏳ ${w}`}</Text>
         ))}
       </Box>
     )
@@ -146,7 +208,18 @@ export const register: Register = on => {
     const running = p.state === 'running'
     const holding = p.state === 'hold'
     const red = /красный/.test(p.verdict)
-    const stateText = running ? 'идёт' : p.state === 'stopped' ? 'оборван' : 'закончен'
+    const failed = p.counts.FAIL > 0 || p.fails.length > 0
+    const stateText = running ? 'идёт' : holding ? 'стенд удержан' : p.state === 'stopped' ? 'оборван' : 'закончен'
+    const stateColor = running
+      ? 'suggestion'
+      : holding
+        ? 'warning'
+        : p.state === 'stopped'
+          ? 'warning'
+          : red
+            ? 'error'
+            : 'success'
+    const fill = p.overSec > 0 ? FILL.warn : FILL.run
     const until = new Date(p.holdUntil * 1000)
     const untilText = `${String(until.getHours()).padStart(2, '0')}:${String(until.getMinutes()).padStart(2, '0')}`
     const b = p.block
@@ -158,57 +231,146 @@ export const register: Register = on => {
       : ''
     const fails = p.fails.slice(-FAILS_SHOWN)
 
+    // «проход X на ядре, спек путь → build/router/<отчёт>/<папка>»: отчёт уже в заголовке, оставить папку
+    const [sessWhat = '', sessDir = ''] = p.session.split(' → ')
+    const sessFolder = sessDir.replace(`build/router/${p.name}/`, '')
+    const [sessPass, sessSpec = ''] = sessWhat.split(', спек ')
+
+    // пока прогон идёт — доля от оценки и оставшееся; после — длительность
+    const showPct = (running || holding) && p.percent != null
+    const sideLine = [
+      showPct ? `прошло ${clock(p.elapsedSec)}` : '',
+      running && p.overSec > 0
+        ? `дольше оценки на ${clock(p.overSec)}`
+        : running && p.etaSec != null
+          ? `осталось ~${clock(p.etaSec)}`
+          : '',
+      p.estSec ? `оценка ${clock(p.estSec)}` : '',
+    ]
+      .filter(Boolean)
+      .join('  ·  ')
+
     return (
       <Box flexDirection="column" gap={1}>
         {waitingBox}
+
         <Box flexDirection="column">
-          <Text bold>
-            {`${p.suite || 'прогон'} — ${stateText}`}
+          <Box flexDirection="row" gap={1} alignItems="center">
+            <Text size="heading" bold>
+              {p.suite || 'прогон'}
+            </Text>
+            <Text color={stateColor} bold>{`● ${stateText}`}</Text>
+          </Box>
+          <Text size="caption" dimColor mono wrap="truncate-end">
+            {p.name}
           </Text>
-          <Text dimColor>{p.name}</Text>
-          {!running && p.verdict && <Text color={red ? 'error' : 'success'}>{`Итог: ${p.verdict}`}</Text>}
+          {!running && p.verdict && <Text color={red ? 'error' : 'success'} bold>{`Итог: ${p.verdict}`}</Text>}
         </Box>
 
         <Box flexDirection="column">
-          <Text>
-            {`прошло ${dur(p.elapsedSec)}${p.estSec ? ` · оценка ${dur(p.estSec)}` : ''}${
-              running && p.overSec > 0
-                ? ` · дольше оценки на ${dur(p.overSec)}`
-                : running && p.etaSec != null
-                  ? ` · осталось ~${dur(p.etaSec)}`
-                  : ''
-            }`}
-          </Text>
-          {p.percent != null && <Text mono>{`${bar(p.percent / 100, width)} ${p.percent}%`}</Text>}
-          {p.session && <Text dimColor>{`Сессия: ${p.session}`}</Text>}
-          {holding && (
-            <Text color="suggestion">{`Стенд удержан для ручной сессии до ${untilText} (ещё ${dur(p.holdLeftSec)})`}</Text>
-          )}
+          <Box flexDirection="row" justifyContent="space-between" alignItems="flex-end" gap={1}>
+            <Text size="title" bold tabular>
+              {showPct ? `${p.percent}%` : clock(p.elapsedSec)}
+            </Text>
+            <Text
+              size="caption"
+              color={running && p.overSec > 0 ? 'warning' : undefined}
+              dimColor={!(running && p.overSec > 0)}
+              tabular
+              wrap="truncate-start"
+            >
+              {sideLine}
+            </Text>
+          </Box>
+          {showPct && Bar((p.percent ?? 0) / 100, fill, `Прогон: ${p.percent}%`)}
+          {running && p.idleSec > 300 && <Text size="caption" color="warning">{`Нет новых событий ${dur(p.idleSec)}`}</Text>}
         </Box>
 
-        {(running || holding) && (
+        {holding && <Text color="warning">{`Стенд удержан для ручной сессии до ${untilText} (ещё ${dur(p.holdLeftSec)})`}</Text>}
+
+        {p.session && (
           <Box flexDirection="column">
-            {p.stages.map(st => (
-              <Text>{`Этап: ${st.core !== '-' ? `${st.core} · ` : ''}${st.name} (${dur(st.sinceSec)})`}</Text>
-            ))}
-            {b && (
-              <Text mono>{`${b.core} ${b.name}: ${bar(b.total ? b.done / b.total : 0, width)} ${b.done}/${b.total}${b.etaSec != null ? ` ~${dur(b.etaSec)}` : ''}`}</Text>
+            <Text size="footnote">
+              <Text dimColor>{'Сессия: '}</Text>
+              {sessPass}
+            </Text>
+            {sessSpec && (
+              <Text size="caption" dimColor mono wrap="truncate-start">
+                {sessSpec}
+              </Text>
             )}
-            {b && blockCounts && <Text dimColor>{blockCounts}</Text>}
-            {b && b.current && (
-              <Text dimColor>{`сейчас: ${b.current}${b.currentSec != null ? ` (${dur(b.currentSec)})` : ''}`}</Text>
+            {sessFolder && (
+              <Text size="caption" dimColor mono wrap="truncate-start">
+                {`→ ${sessFolder}`}
+              </Text>
             )}
-            {running && p.idleSec > 300 && <Text color="warning">{`Нет новых событий ${dur(p.idleSec)}`}</Text>}
           </Box>
         )}
 
-        <Text>{`${holding ? 'Ручная сессия' : 'Записано'}: PASS ${p.counts.PASS} · FAIL ${p.counts.FAIL} · KNOWN ${p.counts.KNOWN} · SKIP ${p.counts.SKIP}`}</Text>
+        {(running || holding) && (p.stages.length > 0 || b) && (
+          <Box flexDirection="column" borderStyle="round" borderColor="inactive" paddingX={1}>
+            {p.stages.map(st => (
+              <Box flexDirection="row" justifyContent="space-between" gap={1}>
+                <Text size="footnote">{`${st.core !== '-' ? `${st.core} · ` : ''}${st.name}`}</Text>
+                <Text size="caption" dimColor tabular>
+                  {clock(st.sinceSec)}
+                </Text>
+              </Box>
+            ))}
+            {b && (
+              <Box flexDirection="row" justifyContent="space-between" gap={1}>
+                <Text bold>{b.core !== '-' ? `${b.core} · ${b.name}` : b.name}</Text>
+                <Text tabular dimColor>
+                  {`${b.done}/${b.total}${b.etaSec != null ? `  ·  ~${clock(b.etaSec)}` : ''}`}
+                </Text>
+              </Box>
+            )}
+            {b && Bar(b.total ? b.done / b.total : 0, FILL.run, `${b.name}: ${b.done} из ${b.total}`)}
+            {b && blockCounts && (
+              <Text size="caption" dimColor>
+                {blockCounts}
+              </Text>
+            )}
+            {b && b.current && (
+              <Text size="caption" dimColor wrap="truncate-end">
+                {`▸ ${b.current}${b.currentSec != null ? `  ·  ${dur(b.currentSec)}` : ''}`}
+              </Text>
+            )}
+          </Box>
+        )}
+
+        <Box flexDirection="column">
+          <Text size="caption" dimColor>
+            {holding ? 'Ручная сессия' : 'Записано'}
+          </Text>
+          <Box flexDirection="row" flexWrap="wrap" gap={1}>
+            {Pill('PASS', p.counts.PASS, 'success')}
+            {Pill('FAIL', p.counts.FAIL, 'error')}
+            {Pill('KNOWN', p.counts.KNOWN, 'warning')}
+            {Pill('SKIP', p.counts.SKIP, 'subtle')}
+          </Box>
+        </Box>
 
         {fails.length > 0 && (
-          <Box flexDirection="column">
-            <Text color="error" bold>{`Упало (${p.fails.length})`}</Text>
+          <Box flexDirection="column" borderStyle="round" borderColor={failed ? 'error' : 'inactive'} paddingX={1}>
+            <Text color="error" bold>{`Упало · ${p.fails.length}`}</Text>
             {fails.map(f => (
-              <Text color={f.live ? 'warning' : 'error'}>{`✗ ${f.core !== '-' ? `[${f.core}] ` : ''}${f.name}`}</Text>
+              <Box flexDirection="row" gap={1}>
+                <Text color={f.live ? 'warning' : 'error'}>✗</Text>
+                {f.core !== '-' && (
+                  <Text size="caption" mono dimColor>
+                    {f.core}
+                  </Text>
+                )}
+                <Box flexDirection="column" flexShrink={1}>
+                  <Text size="footnote">{f.name}</Text>
+                  {f.detail && (
+                    <Text size="caption" dimColor wrap="truncate-end">
+                      {f.detail}
+                    </Text>
+                  )}
+                </Box>
+              </Box>
             ))}
             {p.fails.length > FAILS_SHOWN && <Text dimColor>{`… и ещё ${p.fails.length - FAILS_SHOWN}`}</Text>}
           </Box>
