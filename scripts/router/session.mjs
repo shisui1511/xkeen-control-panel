@@ -239,8 +239,9 @@
 // спеком. Несовпадение после спека останавливает проход до следующего спека.
 //
 // Оценка и бюджет (D-23): оценка длительности сессии — сумма по проходам и ядрам медиан
-// выбранных тестов из истории (тест без медианы на ядре — медиана другого ядра, иначе 30 с) и
-// накладных расходов: деплой и смоук на смену продукта 180 с, переключение ядра 45 с, settle
+// выбранных тестов из истории (медиана последних 5 прогонов теста без SKIP: SKIP — 0 с, а тест,
+// получивший метку known, идёт до таймаута; (тест без медианы на ядре — медиана другого ядра, иначе 30 с) и
+// накладных расходов: деплой и смоук на смену продукта 200 с, переключение ядра 45 с, settle
 // после Go 30 с, запуск pw-suite.sh 15 с на спек; проход-прогон и вложенная сессия — max_minutes
 // или 15 мин. dry-run печатает `Оценка: N мин (бюджет 15 мин, предел 30 мин)` и при превышении
 // бюджета — `сверх бюджета: причина — <budget_reason>` или `сверх бюджета: нет budget_reason`.
@@ -251,7 +252,9 @@
 // бюджета, но в пределе — строка предупреждения в session.log и stderr, сессия идёт. После
 // возврата стенда отчёты этапов сессии и прогонов наборов записываются в историю (history.mjs
 // append): оценки следующих сессий опираются на них; ошибка записи код сессии не меняет (строка
-// в «Стенд в конце»).
+// в «Стенд в конце»). Вместе с оценкой (строка est журнала хода) сессия пишет оценку каждого
+// теста — строки estt <ядро> <проверка> <секунды>: progress.mjs по ним пересчитывает прогноз по
+// ходу прогона (остаток = оценки ещё не закончившихся тестов, текущий — с поправкой на время).
 //
 // Порядок: проходы по очереди; внутри прохода ядра змейкой, первым — активное. На N проходов
 // приходится не больше N переключений, и ещё одно в конце, если стенд не на исходном ядре.
@@ -337,6 +340,8 @@ const RT_ENV_TEST = 'rt-env: блок xcp-rt';
 const SERVICE = new Set(['pw:run', 'pw:setup']);
 // Окно истории для медиан длительности (дни); проверки без строк в окне берут всю историю.
 const HISTORY_DAYS = 30;
+// Медиана длительности проверки — по последним прогонам, не по всему окну.
+const LAST_RUNS = 5;
 
 // Префикс ошибок разбора вложенной спеки (проход-прогон session).
 let dieCtx = '';
@@ -905,7 +910,10 @@ function loadMedians() {
   } catch {
     rows = [];
   }
-  return { recent: durations(rows, { days: HISTORY_DAYS }), all: durations(rows) };
+  // SKIP — 0 с (тест не шёл), в длительность не входит; последние прогоны: поведение теста
+  // меняется (метка known, новый таймаут), и медиана за месяц тянет оценку к прежнему
+  const opt = { last: LAST_RUNS, noSkip: true };
+  return { recent: durations(rows, { days: HISTORY_DAYS, ...opt }), all: durations(rows, opt) };
 }
 
 // Медиана проверки на ядре (секунды) или null — проверка истории неизвестна.
@@ -1052,7 +1060,7 @@ const HEAVY_SUITES = new Set(['full', 'delta', 'bisect']);
 // или suiteMinutes минут; подмена версии (foreign_version) — деплой подмены и деплой HEAD после
 // прохода.
 const EST = {
-  deploy: 180,
+  deploy: 200,
   switch: 45,
   settle: 30,
   pwStart: 15,
@@ -1094,6 +1102,21 @@ function passSeconds(comp, core, h, root) {
     }
   }
   return sec;
+}
+
+// Оценки отдельных тестов прохода на ядре: [{ check, sec }] — те же, что в passSeconds (спек без
+// списка Playwright в состав не входит: его время остаётся накладным расходом).
+function passItems(comp, core, h) {
+  const items = [];
+  if (comp.go && !comp.go.legacy) {
+    for (const t of comp.go.tests) {
+      items.push({ check: `go:${t.test}`, sec: testSeconds(h, `go:${t.test}`, core) });
+    }
+  }
+  for (const sp of comp.specs) {
+    for (const t of sp.names ?? []) items.push({ check: t.name, sec: testSeconds(h, t.name, core) });
+  }
+  return items;
 }
 
 // Имена до 10 первых и «… ещё N».
@@ -1246,6 +1269,7 @@ function planSession(spec, specFile, root) {
     seconds += sec;
     lines.push(`${++n}. ${s}`);
   };
+  const items = [];
   let deployed = null;
   let cur = c0;
   for (const p of spec.passes) {
@@ -1322,6 +1346,7 @@ function planSession(spec, specFile, root) {
       }
       if (c !== cur) step(`переключение на ${c}`, EST.switch);
       cur = c;
+      for (const it of passItems(comp, c, h)) items.push({ core: c, ...it });
       step(
         `проход ${p.name} на ${c}: ${compositionTitle(comp)} — ${what(comp)}`,
         passSeconds(comp, c, h, root)
@@ -1361,7 +1386,7 @@ function planSession(spec, specFile, root) {
         : 'сверх бюджета: нет budget_reason'
     );
   }
-  return { lines, minutes, over, heavy, heavyKinds };
+  return { lines, minutes, seconds, over, heavy, heavyKinds, items };
 }
 
 // План сессии без стенда: печать плана и оценки. Итог — { minutes, over, heavy, heavyKinds }.
@@ -3547,9 +3572,17 @@ async function main() {
     s.say(`оценка: ${plan.minutes} мин (бюджет ${BUDGET_MIN} мин, предел ${HARD_MIN} мин)`);
     // оценка для хода прогона (progress.mjs): строка est журнала отчёта сессии (формат rt_progress)
     try {
+      const at = Math.floor(Date.now() / 1000);
+      // est — оценка в целых минутах (бюджет и предел), estt — оценки тестов для прогноза хода
+      const estt = plan.items
+        .map(
+          (it) =>
+            `${at}\testt\t${it.core}\t${it.check.replace(/[\t\n]/g, ' ')}\t${Math.round(it.sec)}\n`
+        )
+        .join('');
       appendFileSync(
         path.join(s.dir, 'progress.tsv'),
-        `${Math.floor(Date.now() / 1000)}\test\t${plan.minutes * 60}\n`
+        `${at}\test\t${Math.round(plan.seconds)}\n${estt}`
       );
     } catch {
       // журнал только для смотрящего

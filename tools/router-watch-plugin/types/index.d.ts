@@ -21,6 +21,8 @@ export type Progress = {
   estSec: number | null
   etaSec: number | null
   percent: number | null
+  /** Живой прогноз полной длительности (сессия с оценками тестов); null — только оценка. */
+  forecastSec?: number | null
   stages: Stage[]
   /** Идущие запуски: по одному на цель (цели идут параллельно). */
   blocks: Block[]

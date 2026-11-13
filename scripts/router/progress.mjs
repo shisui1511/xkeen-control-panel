@@ -6,6 +6,7 @@
 // frontend/tests/router/lib/progress-reporter.ts), строки «секунды<TAB>вид<TAB>поля»:
 //   run <набор> <pid>                     начало прогона (run.sh); pid — признак, что он ещё идёт
 //   est <секунды>                         оценка длительности (полный прогон, сессия)
+//   estt <ядро> <проверка> <секунды>      оценка одного теста (сессия): по ним ход пересчитывает прогноз
 //   stage+ <цель> <ядро> <этап>           этап начался (rt_stage)
 //   stage- <цель> <ядро> <этап> <код> <с> этап закончился
 //   go <цель> <ядро> <запуск> <n> <поток> Go-запуск: n тестов верхнего уровня, сырой поток test2json
@@ -243,6 +244,36 @@ function blockEta(elapsed, done, total) {
   return Math.round((elapsed / done) * (total - done));
 }
 
+/**
+ * Живой прогноз сессии по оценкам тестов. T — оценка всего (est), items — Map «ядро\tпроверка» →
+ * оценка теста, finished — Set закончившихся, actual — Map ключ → фактические секунды, currents —
+ * Map ключ → секунды идущего теста (null — неизвестно), elapsed — прошло. Остаток = оценки ещё
+ * не закончившихся тестов (идущий — оценка минус прошедшее, но не меньше 15 % оценки и 10 с)
+ * плюс остаток накладных расходов (T минус сумма оценок; потрачено — прошло минус время тестов).
+ * Итог: { etaSec, forecastSec }.
+ */
+function liveForecast(T, items, finished, actual, currents, elapsed) {
+  let P = 0;
+  let R = 0;
+  let spent = 0;
+  for (const [key, sec] of items) {
+    P += sec;
+    if (finished.has(key)) {
+      spent += actual.get(key) ?? sec;
+    } else if (currents.has(key)) {
+      const cur = currents.get(key);
+      spent += cur ?? 0;
+      R += cur == null ? sec : Math.max(sec - cur, Math.max(sec * 0.15, 10));
+    } else {
+      R += sec;
+    }
+  }
+  const overhead = Math.max(0, T - P);
+  const overheadLeft = Math.max(0, overhead - Math.max(0, elapsed - spent));
+  const etaSec = Math.round(R + overheadLeft);
+  return { etaSec, forecastSec: elapsed + etaSec };
+}
+
 function fmtDur(sec) {
   if (sec == null || !Number.isFinite(sec)) return '—';
   sec = Math.max(0, Math.round(sec));
@@ -267,6 +298,7 @@ function collect(report) {
     estSec: null,
     etaSec: null,
     percent: null,
+    forecastSec: null,
     stages: [],
     blocks: [],
     counts: { PASS: 0, FAIL: 0, KNOWN: 0, SKIP: 0 },
@@ -489,6 +521,41 @@ function collect(report) {
     state.idleSec = idles.length ? Math.min(...idles) : now - lastT;
   }
 
+  // живой прогноз: сессия пишет оценки тестов (estt) — остаток считается по ним, а не по часам
+  if (state.estSec && running && !holding) {
+    const items = new Map();
+    for (const e of events) {
+      if (e.kind === 'estt' && e.file === rootLog && Number(e.f[2]) >= 0) {
+        items.set(`${e.f[0]}\t${e.f[1]}`, Number(e.f[2]));
+      }
+    }
+    if (items.size) {
+      const finished = new Set();
+      const actual = new Map();
+      const startedAt = new Map();
+      for (const e of events) {
+        if (e.kind === 'res') finished.add(`${e.f[1]}\t${e.f[3]}`);
+        else if (e.kind === 'pwt+') startedAt.set(`${e.f[1]}\tpw:${e.f[2]}`, e.t);
+        else if (e.kind === 'pwt') {
+          const key = `${e.f[1]}\tpw:${e.f[3]}`;
+          finished.add(key);
+          if (startedAt.has(key)) actual.set(key, e.t - startedAt.get(key));
+        }
+      }
+      const currents = new Map();
+      for (const b of state.blocks) {
+        if (!b.current) continue;
+        const key = `${b.core}\t${b.kind === 'go' ? 'go:' : 'pw:'}${b.current}`;
+        if (!finished.has(key)) currents.set(key, b.currentSec ?? null);
+      }
+      const f = liveForecast(state.estSec, items, finished, actual, currents, state.elapsedSec);
+      state.etaSec = f.etaSec;
+      state.forecastSec = f.forecastSec;
+      state.overSec = 0;
+      state.percent = Math.min(99, Math.floor((state.elapsedSec / f.forecastSec) * 100));
+    }
+  }
+
   // сессия: последняя строка журнала сессии
   const slog = readText(path.join(report, 'session.log')).split('\n');
   const sline = slog.filter((l) => l.startsWith('session: ')).pop() || '';
@@ -582,10 +649,13 @@ function render(s, color) {
   }
   const times = [`прошло ${fmtDur(s.elapsedSec)}`];
   if (s.estSec) times.push(`оценка ${fmtDur(s.estSec)}`);
+  if (s.state === 'running' && s.forecastSec && Math.abs(s.forecastSec - s.estSec) >= 30) {
+    times.push(`прогноз ${fmtDur(s.forecastSec)}`);
+  }
   if (s.state === 'running' && s.overSec > 0) times.push(c('33', `дольше оценки на ${fmtDur(s.overSec)}`));
   else if (s.state === 'running' && s.etaSec != null) times.push(`осталось ~${fmtDur(s.etaSec)}`);
   out.push(times.join(' · '));
-  if (s.percent != null) out.push(`${bar(s.percent / 100, width)} ${s.percent}%  ${c('2', '(по оценке времени)')}`);
+  if (s.percent != null) out.push(`${bar(s.percent / 100, width)} ${s.percent}%  ${c('2', s.forecastSec ? '(по прогнозу)' : '(по оценке времени)')}`);
   if (s.session) out.push(`Сессия: ${s.session}`);
   if (s.state === 'hold') {
     out.push(

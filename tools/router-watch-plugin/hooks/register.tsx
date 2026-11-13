@@ -266,6 +266,9 @@ export const register: Register = on => {
           ? `осталось ~${clock(p.etaSec)}`
           : '',
       p.estSec ? `оценка ${clock(p.estSec)}` : '',
+      running && p.forecastSec && p.estSec && Math.abs(p.forecastSec - p.estSec) >= 30
+        ? `прогноз ${clock(p.forecastSec)}`
+        : '',
     ]
       .filter(Boolean)
       .join('  ·  ')

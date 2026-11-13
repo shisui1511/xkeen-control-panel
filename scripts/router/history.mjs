@@ -67,8 +67,10 @@
 //   backfill()                           { reports, rows } — добавленные отчёты и строки
 //   listReports(dir)                     имена отчётов каталога по возрастанию
 //   median(numbers)                      медиана
-//   durations(rows, { suite, days, core }?)
-//                                        Map `<check>\t<core>` → { median, runs }
+//   durations(rows, { suite, days, core, last, noSkip }?)
+//                                        Map `<check>\t<core>` → { median, runs }; last N — медиана
+//                                        последних N прогонов проверки (по времени), noSkip — без
+//                                        строк SKIP (0 с — тест не шёл, длительности нет)
 //   failFreq(rows, { days }?)            Map check → { fails, runs } — порядок гейта (RTR-03),
 //                                        отбор для bisect (D-22), нестабильность (D-19)
 //   lastFull(rows, { green, before }?)   { report, sha, release, finished } последнего полного
@@ -509,19 +511,29 @@ function inWindow(row, days, now = Date.now()) {
 }
 
 export function durations(rows, opts = {}) {
-  const { suite, days, core } = opts;
+  const { suite, days, core, last, noSkip } = opts;
   const acc = new Map();
   for (const r of rows) {
     if (r.seconds === null || r.seconds === undefined) continue;
     if (suite && r.suite !== suite) continue;
     if (core && r.core !== core) continue;
+    if (noSkip && r.status === 'SKIP') continue;
     if (!inWindow(r, days)) continue;
     const key = `${r.check}\t${r.core}`;
     if (!acc.has(key)) acc.set(key, []);
-    acc.get(key).push(r.seconds);
+    acc.get(key).push(last ? { t: Date.parse(r.finished_utc) || 0, sec: r.seconds } : r.seconds);
   }
   const out = new Map();
-  for (const [key, list] of acc) out.set(key, { median: median(list), runs: list.length });
+  for (const [key, list] of acc) {
+    // последние N: поведение теста меняется (метка known, новый таймаут), старые прогоны врут
+    const secs = last
+      ? list
+          .sort((a, b) => a.t - b.t)
+          .slice(-last)
+          .map((x) => x.sec)
+      : list;
+    out.set(key, { median: median(secs), runs: secs.length });
+  }
   return out;
 }
 
