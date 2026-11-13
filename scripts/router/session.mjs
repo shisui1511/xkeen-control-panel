@@ -3508,6 +3508,15 @@ async function main() {
   try {
     const plan = planSession(spec, path.relative(root, specFile), root);
     s.say(`оценка: ${plan.minutes} мин (бюджет ${BUDGET_MIN} мин, предел ${HARD_MIN} мин)`);
+    // оценка для хода прогона (progress.mjs): строка est журнала отчёта сессии (формат rt_progress)
+    try {
+      appendFileSync(
+        path.join(s.dir, 'progress.tsv'),
+        `${Math.floor(Date.now() / 1000)}\test\t${plan.minutes * 60}\n`
+      );
+    } catch {
+      // журнал только для смотрящего
+    }
     if (plan.over) {
       s.warn(
         `предупреждение: оценка ${plan.minutes} мин сверх бюджета ${BUDGET_MIN} мин — ${spec.budgetReason ? `причина: ${spec.budgetReason}` : 'budget_reason в спеке нет'}`

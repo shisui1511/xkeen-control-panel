@@ -287,10 +287,29 @@ rt_stage() {
   shift 2
   _t0=$(date +%s)
   _rc=0
+  rt_progress stage+ "$_id" "${RT_CORE:--}" "$_stage"
   "$@" || _rc=$?
   _t1=$(date +%s)
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_id" "$_stage" "$((_t1 - _t0))" "$_rc" "$_t0" "${RT_CORE:--}" >>"$RT_REPORT/timings.tsv"
+  rt_progress stage- "$_id" "${RT_CORE:--}" "$_stage" "$_rc" "$((_t1 - _t0))"
   return "$_rc"
+}
+
+# Журнал хода прогона: rt_progress <вид> [поля...] — строка «секунды<TAB>вид<TAB>поля» в
+# <отчёт>/progress.tsv. Его читает scripts/router/progress.mjs (make router-watch, панель хода в
+# приложении). Виды: run <набор> <pid run.sh>; est <секунды оценки>; stage+ <цель> <ядро> <этап>;
+# stage- <цель> <ядро> <этап> <код> <секунды>; go <цель> <ядро> <запуск> <тестов> <сырой поток>;
+# pw, pwt+ и pwt пишет репортёр Playwright (frontend/tests/router/lib/progress-reporter.ts).
+# Строка уходит одной записью (параллельные этапы не перемешивают строки); табуляция и перевод
+# строки в полях заменяются пробелом. Сбой записи ход прогона не меняет. Свои имена (_pg_*):
+# rt_stage и _bg держат _stage, _t0 и _rc.
+rt_progress() {
+  [ -n "${RT_REPORT:-}" ] || return 0
+  _pg_l="$(date +%s)"
+  for _pg_a in "$@"; do
+    _pg_l="$_pg_l	$(printf '%s' "$_pg_a" | tr '\t\n' '  ')"
+  done
+  printf '%s\n' "$_pg_l" >>"$RT_REPORT/progress.tsv" 2>/dev/null || true
 }
 
 # Фильтр stdin: убирает из текста адреса, значения ip=, cookie и csrf-токены.

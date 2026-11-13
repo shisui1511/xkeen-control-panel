@@ -583,6 +583,9 @@ else
   echo "narrow=${RT_NARROW:-none}" >>"$RT_REPORT/meta"
 fi
 echo "router-test: отчёт $RT_REPORT"
+# Журнал хода прогона (rt_progress, progress.mjs): начало прогона — набор и PID этого процесса
+# (по нему смотрящий отличает идущий прогон от оборванного).
+rt_progress run "${SUITE:-full}" "$$"
 
 # Ротация отчётов build/router стоит здесь, а не в конце: у run.sh много выходов (130, 1, код
 # сессии, _finish в reboot), а hold_lock перекрывает EXIT-trap. Блокировка уже взята, текущий
@@ -1011,6 +1014,11 @@ elif [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
     echo "- Ветви: нет (затронутого нет — деплой и смоук)" >>"$RT_REPORT/plan.txt"
   else
     echo "- Ветви: $RT_CORES (полная матрица: все тесты под каждым ядром)" >>"$RT_REPORT/plan.txt"
+    # оценка времени для хода прогона: состав полного прогона без сужения (estimate-full.mjs)
+    if [ -z "${RT_NARROW:-}" ] || [ "$RT_NARROW" = none ]; then
+      _pg_est=$(node "$SCRIPT_DIR/estimate-full.mjs" 2>/dev/null | sed -n 's/^Оценка полного прогона: \([0-9]*\).*/\1/p') || _pg_est=""
+      [ -z "$_pg_est" ] || rt_progress est "$((_pg_est * 60))"
+    fi
   fi
   # окно смоука: в changed — по плану состава (120 с при затронутом коде запуска ядра или полном
   # выборе, иначе 30 с); заданный в окружении RT_SMOKE_WINDOW приоритетнее; в полном прогоне —

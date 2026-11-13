@@ -542,6 +542,12 @@ EOF
       LOST=1
       break
     fi
+    # Ход прогона (progress.mjs): число верхнеуровневых тестов запуска по исходникам пакета —
+    # TestRouter* под отбором -test.run и без исключённых -test.skip; сырой поток $raw смотрящий
+    # читает по ходу (строки «--- PASS|FAIL|SKIP» тестов верхнего уровня).
+    _pg_n=$(grep -hoE '^func TestRouter[A-Za-z0-9_]*[(]' "./$pkg"/*_test.go 2>/dev/null |
+      sed 's/^func //; s/[(]$//' | grep -E "$runre" | grep -vE "${SKIPRE:-^$}" | sort -u | wc -l | tr -d ' ') || _pg_n=0
+    rt_progress go "$ID" "$CORE" "$tag" "${_pg_n:-0}" "$raw"
     rc=0
     rt_stage "$ID" "go-run-$tag" rt_ssh "$ID" "sh $RWD/run-$tag.sh" >"$raw" 2>"$errlog" || rc=$?
     if [ "$rc" = 3 ]; then
