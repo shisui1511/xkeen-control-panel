@@ -748,6 +748,7 @@
         "go:TestRouterXrayProbeSeedFromForeign",
         "go:TestRouterXrayRulesTranslate",
         "tests/router/config-cascade.spec.ts",
+        "tests/router/config-cores-mihomo.spec.ts",
         "tests/router/config-dialog-touch.spec.ts",
         "tests/router/config-dns-takeover.spec.ts",
         "tests/router/config-groups.spec.ts",
