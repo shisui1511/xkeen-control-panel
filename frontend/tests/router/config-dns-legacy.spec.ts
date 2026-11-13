@@ -133,7 +133,14 @@ async function openCoresDns(page: Page, kernel: Kernel): Promise<void> {
   await expect(page.getByTestId(`cores-panel-${kernel}`)).toBeVisible({ timeout: T.action });
   const toggle = page.getByTestId(`section-toggle-${kernel}-dns`);
   await expect(toggle).toBeVisible({ timeout: T.action });
-  await toggle.click();
+  // Карточка могла быть раскрыта заранее (openDnsForm): клик по раскрытой её свернёт
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true', { timeout: T.action });
+  // Тело рендерится только у раскрытой карточки. Форма DNS ядра — положительная опора: без неё
+  // проверки «нет» ниже проходят мгновенно, даже пока содержимое не отрисовано (WR-06)
+  const body = page.getByTestId(`section-body-${kernel}-dns`);
+  await expect(body).toBeVisible({ timeout: T.action });
+  await expect(body.getByTestId(`section-form-${kernel}-dns`)).toBeVisible({ timeout: T.action });
 }
 
 /** У Xray блок показывается только при серверах DNS: без них в браузер добавляется один. */
