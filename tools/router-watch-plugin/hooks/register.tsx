@@ -1,13 +1,15 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import type { Progress, Snapshot } from '../types'
+import type { Block, Progress, Snapshot } from '../types'
 
 // Панель хода прогона на стенде: раз в POLL_MS вызывает scripts/router/progress.mjs --json
 // рабочей копии сессии и рисует этап, тесты идущего запуска, упавшие и оставшееся время.
 // Строка состояния — progress.mjs --line, пока прогон идёт. Панель открывается сама, когда
-// прогон начинается; вручную — /router-watch. В рабочей копии без progress.mjs (другой проект)
-// опроса нет: панель говорит, что хода прогона здесь нет.
+// прогон начинается; вручную — /router-watch. Плагин ставится на пользователя и работает в любом
+// каталоге, а progress.mjs он исполняет: поэтому опрос идёт только в рабочей копии этого
+// репозитория (корневой коммит истории совпадает с ROOT_COMMIT), в остальных каталогах код
+// репозитория не запускается, панель говорит, что хода прогона здесь нет.
 
 const PANE = 'router-watch'
 const TITLE = 'Прогон стенда'
@@ -15,6 +17,9 @@ const POLL_MS = 3000
 // без идущего прогона опрос реже: раз в IDLE_TICKS тиков (15 с)
 const IDLE_TICKS = 5
 const SCRIPT = 'scripts/router/progress.mjs'
+// корневой коммит xkeen-control-panel: признак «это наш репозиторий» (содержимое по хэшу, имя
+// каталога и путь подделать проще)
+const ROOT_COMMIT = 'ad34d2f7f1d2d155d2d624a3c304e39c9bf900df'
 const FAILS_SHOWN = 15
 
 const snapshot = atom({ plugin: 'router-watch', key: 'snapshot' } as const, { progress: null, error: '', at: 0 } as Snapshot, {
@@ -76,14 +81,22 @@ export const register: Register = on => {
       () => ''
     )
     const script = top ? `${top}/${SCRIPT}` : SCRIPT
-    const hasScript = await $.fs.stat(script).then(
-      () => true,
-      () => false
-    )
+    const ours = top
+      ? await $.process.run(['git', '-C', top, 'rev-list', '--max-parents=0', 'HEAD']).then(
+          r => r.exitCode === 0 && r.stdout.split('\n').some(l => l.trim() === ROOT_COMMIT),
+          () => false
+        )
+      : false
+    const hasScript =
+      ours &&
+      (await $.fs.stat(script).then(
+        () => true,
+        () => false
+      ))
     if (!hasScript) {
       await update($, snapshot, () => ({
         progress: null,
-        error: `в этой рабочей копии нет ${SCRIPT}`,
+        error: ours ? `в этой рабочей копии нет ${SCRIPT}` : 'это не рабочая копия xkeen-control-panel: ход прогона не опрашивается',
         at: Date.now(),
       }))
       return started
@@ -103,6 +116,10 @@ export const register: Register = on => {
           timeoutMs: 20_000,
         })
         if (r.exitCode !== 0) {
+          // сбой опроса: строка состояния и признак «шёл» не остаются от прошлого снимка
+          $.ui.status(undefined)
+          wasRunning = false
+          active = false
           await update($, snapshot, () => ({
             progress: null,
             error: r.stderr.trim().slice(0, 300) || `код ${r.exitCode}`,
@@ -129,6 +146,9 @@ export const register: Register = on => {
         }
         wasRunning = running
       } catch (err) {
+        $.ui.status(undefined)
+        wasRunning = false
+        active = false
         await update($, snapshot, () => ({
           progress: null,
           error: String(err).slice(0, 300),
@@ -207,7 +227,7 @@ export const register: Register = on => {
 
     const running = p.state === 'running'
     const holding = p.state === 'hold'
-    const red = /красный/.test(p.verdict)
+    const red = /красный|отказ/.test(p.verdict)
     const failed = p.counts.FAIL > 0 || p.fails.length > 0
     const stateText = running ? 'идёт' : holding ? 'стенд удержан' : p.state === 'stopped' ? 'оборван' : 'закончен'
     const stateColor = running
@@ -222,13 +242,13 @@ export const register: Register = on => {
     const fill = p.overSec > 0 ? FILL.warn : FILL.run
     const until = new Date(p.holdUntil * 1000)
     const untilText = `${String(until.getHours()).padStart(2, '0')}:${String(until.getMinutes()).padStart(2, '0')}`
-    const b = p.block
-    const blockCounts = b
-      ? Object.entries(b.counts)
-          .filter(([, v]) => v)
-          .map(([k, v]) => `${k} ${v}`)
-          .join(' · ')
-      : ''
+    const blocks = p.blocks
+    const several = blocks.length > 1
+    const countsOf = (b: Block) =>
+      Object.entries(b.counts)
+        .filter(([, v]) => v)
+        .map(([k, v]) => `${k} ${v}`)
+        .join(' · ')
     const fails = p.fails.slice(-FAILS_SHOWN)
 
     // «проход X на ядре, спек путь → build/router/<отчёт>/<папка>»: отчёт уже в заголовке, оставить папку
@@ -307,35 +327,37 @@ export const register: Register = on => {
           </Box>
         )}
 
-        {(running || holding) && (p.stages.length > 0 || b) && (
+        {(running || holding) && (p.stages.length > 0 || blocks.length > 0) && (
           <Box flexDirection="column" borderStyle="round" borderColor="inactive" paddingX={1}>
             {p.stages.map(st => (
               <Box flexDirection="row" justifyContent="space-between" gap={1}>
-                <Text size="footnote">{`${st.core !== '-' ? `${st.core} · ` : ''}${st.name}`}</Text>
+                <Text size="footnote">{`${several ? `${st.target} · ` : ''}${st.core !== '-' ? `${st.core} · ` : ''}${st.name}`}</Text>
                 <Text size="caption" dimColor tabular>
                   {clock(st.sinceSec)}
                 </Text>
               </Box>
             ))}
-            {b && (
-              <Box flexDirection="row" justifyContent="space-between" gap={1}>
-                <Text bold>{b.core !== '-' ? `${b.core} · ${b.name}` : b.name}</Text>
-                <Text tabular dimColor>
-                  {`${b.done}/${b.total}${b.etaSec != null ? `  ·  ~${clock(b.etaSec)}` : ''}`}
-                </Text>
+            {blocks.map(b => (
+              <Box flexDirection="column">
+                <Box flexDirection="row" justifyContent="space-between" gap={1}>
+                  <Text bold>{`${several ? `${b.target} · ` : ''}${b.core !== '-' ? `${b.core} · ${b.name}` : b.name}`}</Text>
+                  <Text tabular dimColor>
+                    {`${b.done}/${b.total}${b.etaSec != null ? `  ·  ~${clock(b.etaSec)}` : ''}`}
+                  </Text>
+                </Box>
+                {Bar(b.total ? b.done / b.total : 0, FILL.run, `${b.name}: ${b.done} из ${b.total}`)}
+                {countsOf(b) && (
+                  <Text size="caption" dimColor>
+                    {countsOf(b)}
+                  </Text>
+                )}
+                {b.current && (
+                  <Text size="caption" dimColor wrap="truncate-end">
+                    {`▸ ${b.current}${b.currentSec != null ? `  ·  ${dur(b.currentSec)}` : ''}`}
+                  </Text>
+                )}
               </Box>
-            )}
-            {b && Bar(b.total ? b.done / b.total : 0, FILL.run, `${b.name}: ${b.done} из ${b.total}`)}
-            {b && blockCounts && (
-              <Text size="caption" dimColor>
-                {blockCounts}
-              </Text>
-            )}
-            {b && b.current && (
-              <Text size="caption" dimColor wrap="truncate-end">
-                {`▸ ${b.current}${b.currentSec != null ? `  ·  ${dur(b.currentSec)}` : ''}`}
-              </Text>
-            )}
+            ))}
           </Box>
         )}
 
@@ -359,7 +381,7 @@ export const register: Register = on => {
                 <Text color={f.live ? 'warning' : 'error'}>✗</Text>
                 {f.core !== '-' && (
                   <Text size="caption" mono dimColor>
-                    {f.core}
+                    {f.target ? `${f.target} · ${f.core}` : f.core}
                   </Text>
                 )}
                 <Box flexDirection="column" flexShrink={1}>

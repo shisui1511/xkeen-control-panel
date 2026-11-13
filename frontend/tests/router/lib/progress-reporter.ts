@@ -10,6 +10,7 @@ import type { FullConfig, Reporter, Suite, TestCase, TestResult } from '@playwri
 //   pw   <цель> <ядро> <тестов в запуске>          начало запуска Playwright
 //   pwt+ <цель> <ядро> <тест>                      тест начался
 //   pwt  <цель> <ядро> <статус> <тест>             тест закончился
+//   pw-  <цель> <ядро>                             запуск закончился (в том числе прерванный)
 // <тест> — имя проверки без «pw:», как его строит scripts/router/pw-parse.js: названия
 // describe и теста через « > » (без файла спека), чтобы живая строка совпала с записанной.
 // Статус: PASS, FAIL, KNOWN (ожидаемое падение по метке knownFailure), SKIP. Итоговые строки
@@ -74,5 +75,9 @@ export default class ProgressReporter implements Reporter {
 
   onTestEnd(test: TestCase, result: TestResult): void {
     this.write('pwt', statusOf(test, result), titleOf(test));
+  }
+
+  onEnd(): void {
+    this.write('pw-');
   }
 }

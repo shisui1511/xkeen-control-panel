@@ -1,4 +1,4 @@
-export type Fail = { core: string; name: string; detail: string; live: boolean }
+export type Fail = { target?: string; core: string; name: string; detail: string; live: boolean }
 export type Stage = { target: string; core: string; name: string; sinceSec: number }
 export type Block = {
   kind: 'go' | 'pw'
@@ -22,7 +22,8 @@ export type Progress = {
   etaSec: number | null
   percent: number | null
   stages: Stage[]
-  block: Block | null
+  /** Идущие запуски: по одному на цель (цели идут параллельно). */
+  blocks: Block[]
   counts: { PASS: number; FAIL: number; KNOWN: number; SKIP: number }
   fails: Fail[]
   session: string

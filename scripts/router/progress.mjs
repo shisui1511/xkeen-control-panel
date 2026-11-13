@@ -12,6 +12,9 @@
 //   pw <цель> <ядро> <n>                  запуск Playwright на n тестов
 //   pwt+ <цель> <ядро> <тест>             тест начался
 //   pwt <цель> <ядро> <статус> <тест>     тест закончился (PASS, FAIL, KNOWN, SKIP)
+//   pw- <цель> <ядро>                     запуск Playwright закончился (onEnd репортёра)
+// Цели идут параллельно и пишут в один журнал: счётчики, «сейчас» и записанные итоги ведутся по
+// цели, идущих запусков по одному на цель (blocks).
 // Журналы вложенных отчётов (этапы сессии <NN>-<этап>/) читаются вместе с корневым. Записанные
 // итоги — строки results.tsv всех целей отчёта и вложенных отчётов; идущие Go- и Playwright-
 // запуски считаются отдельно («сейчас»), пока их строки не попали в results.tsv. Вердикт
@@ -61,7 +64,16 @@ function queueOf(now) {
   }
   for (const n of names) {
     const m = /^router-test\.queue\.(\d+)$/.exec(n);
-    if (!m || !alive(Number(m[1]))) continue;
+    if (!m) continue;
+    if (!aliveRun(Number(m[1]))) {
+      // файл очереди оборванного прогона (SIGKILL) — убрать, он копился бы в git common dir
+      try {
+        fs.unlinkSync(path.join(dir, n));
+      } catch {
+        // не убрался — просто не в счёт
+      }
+      continue;
+    }
     const [suite = 'full', t = '0'] = readText(path.join(dir, n)).trim().split('\t');
     out.push({ suite, sinceSec: now - Number(t) });
   }
@@ -181,6 +193,16 @@ function alive(pid) {
   }
 }
 
+/**
+ * Жив ли прогон: процесс есть и это run.sh. PID переиспользуется системой: чужой процесс с тем же
+ * номером не должен держать старый отчёт «идущим». Нет /proc (или cmdline не читается) — по PID.
+ */
+function aliveRun(pid) {
+  if (!alive(pid)) return false;
+  const cmd = readText(`/proc/${pid}/cmdline`).split('\0').join(' ');
+  return !cmd || /run\.sh|router-test/.test(cmd);
+}
+
 /** События журнала: { t, kind, f: [...], file }. */
 function readEvents(file) {
   const ev = [];
@@ -246,7 +268,7 @@ function collect(report) {
     etaSec: null,
     percent: null,
     stages: [],
-    block: null,
+    blocks: [],
     counts: { PASS: 0, FAIL: 0, KNOWN: 0, SKIP: 0 },
     fails: [],
     session: '',
@@ -282,7 +304,7 @@ function collect(report) {
   const pid = run ? Number(run.f[1]) : 0;
   const summary = readText(path.join(report, 'summary.md'));
   const verdicts = [...summary.matchAll(/^- Итог: (.+)$/gm)].map((m) => m[1].trim());
-  const running = alive(pid);
+  const running = aliveRun(pid);
   state.state = running ? 'running' : verdicts.length ? 'done' : run ? 'stopped' : 'done';
   state.verdict = verdicts.join('; ');
   // удержание (RT_HOLD_MINUTES): прогон закончен, стенд держится для ручной сессии; этапы
@@ -331,95 +353,140 @@ function collect(report) {
   // только ручной сессии); отчёты без них — по файлам результатов
   const recorded = new Set();
   const resEvents = events.filter((e) => e.kind === 'res' && (!holding || e.t >= hold.t));
-  const addRecorded = (st, core, check, detail) => {
+  const addRecorded = (st, target, core, check, detail) => {
     if (st in state.counts) state.counts[st]++;
     else if (st === 'XPASS') state.counts.FAIL++;
     else if (st === 'QPASS') state.counts.PASS++;
-    recorded.add(`${core}\t${check}`);
-    if (st === 'FAIL' || st === 'XPASS') state.fails.push({ core, name: check, detail, live: false });
+    recorded.add(`${target}\t${core}\t${check}`);
+    if (st === 'FAIL' || st === 'XPASS') {
+      state.fails.push({ target, core, name: check, detail, live: false });
+    }
   };
   const hasRes = events.some((e) => e.kind === 'res');
   if (hasRes) {
     const latest = new Map();
     for (const e of resEvents) latest.set(`${e.f[0]}\t${e.f[1]}\t${e.f[3]}`, e);
-    for (const e of latest.values()) addRecorded(e.f[2], e.f[1], e.f[3], '');
+    for (const e of latest.values()) addRecorded(e.f[2], e.f[0], e.f[1], e.f[3], '');
   }
   for (const file of hasRes ? [] : resultFiles(report, state.suite)) {
     for (const line of readText(file).split('\n')) {
       if (!line) continue;
       const [st, core, check, detail = ''] = line.split('\t');
-      addRecorded(st, core, check, detail.slice(0, 200));
+      // results.tsv лежит в каталоге цели: <отчёт>/<цель>/results.tsv
+      addRecorded(st, path.basename(path.dirname(file)), core, check, detail.slice(0, 200));
     }
   }
 
-  // запуск Playwright идёт, пока закончились не все его тесты и после него не было stage- этапа pw
+  // Запуск Playwright закончился: репортёр записал pw- (цель и ядро запуска), либо закрылся этап цели,
+  // открытый к началу запуска, под которым он шёл (pw-suite.sh вызывается под pw-*, catchup-pw-*, confirm-pw-*, switch-*;
+  // оборванный запуск конца не пишет, но его этап закрывается), либо закончились все его тесты.
+  const sameRun = (e, pw) => e.file === pw.file && e.f[0] === pw.f[0] && e.f[1] === pw.f[1];
   const pwOpen = (pw) => {
-    const ends = events.filter((e) => e.file === pw.file && e.t >= pw.t && e.kind === 'pwt').length;
-    const closed = events.some(
-      (e) => e.file === pw.file && e.t > pw.t && e.kind === 'stage-' && /^pw/.test(e.f[2])
+    const mine = (e) => sameRun(e, pw);
+    const ends = events.filter((e) => mine(e) && e.t >= pw.t && e.kind === 'pwt').length;
+    if (ends >= (Number(pw.f[2]) || 0)) return false;
+    if (events.some((e) => mine(e) && e.t >= pw.t && e.kind === 'pw-')) return false;
+    // этапы той же цели и ядра, открытые на момент начала запуска: их закрытие — конец запуска
+    const wrap = new Map();
+    for (const e of events) {
+      if (e.t > pw.t || e.file !== pw.file || e.f[0] !== pw.f[0]) continue;
+      if (e.kind === 'stage+') wrap.set(e.f[2], e);
+      else if (e.kind === 'stage-') wrap.delete(e.f[2]);
+    }
+    return ![...wrap.keys()].some((name) =>
+      events.some(
+        (e) =>
+          e.kind === 'stage-' &&
+          e.file === pw.file &&
+          e.f[0] === pw.f[0] &&
+          e.f[2] === name &&
+          e.t >= pw.t
+      )
     );
-    return ends < (Number(pw.f[2]) || 0) && !closed;
   };
 
-  // идущий запуск: последний go или pw, если его этап открыт
+  // идущие запуски: по одному на цель — последний go или pw цели, если его этап открыт
   if (running) {
-    const lastGo = events.filter((e) => e.kind === 'go').pop();
-    const lastPw = events.filter((e) => e.kind === 'pw').pop();
-    const goOpen =
-      lastGo && [...open.values()].some((s) => s.file === lastGo.file && s.f[2] === `go-run-${lastGo.f[2]}`);
-    let block = null;
-    if (goOpen && (!lastPw || lastGo.t >= lastPw.t || !pwOpen(lastPw))) {
-      const raw = goRaw(lastGo.f[4]);
-      const counts = { PASS: 0, FAIL: 0, SKIP: 0 };
-      for (const r of raw.res) {
-        counts[r.status]++;
-        if (r.status === 'FAIL' && !recorded.has(`${lastGo.f[1]}\tgo:${r.name}`)) {
-          state.fails.push({ core: lastGo.f[1], name: `go:${r.name}`, detail: '', live: true });
+    const targets = [
+      ...new Set(events.filter((e) => e.kind === 'go' || e.kind === 'pw').map((e) => e.f[0]))
+    ];
+    const idles = [];
+    for (const target of targets) {
+      const lastGo = events.filter((e) => e.kind === 'go' && e.f[0] === target).pop();
+      const lastPw = events.filter((e) => e.kind === 'pw' && e.f[0] === target).pop();
+      const goOpen =
+        lastGo &&
+        [...open.values()].some(
+          (s) =>
+            s.file === lastGo.file &&
+            s.f[0] === lastGo.f[0] &&
+            s.f[1] === lastGo.f[1] &&
+            s.f[2] === `go-run-${lastGo.f[2]}`
+        );
+      let block = null;
+      if (goOpen && (!lastPw || lastGo.t >= lastPw.t || !pwOpen(lastPw))) {
+        const raw = goRaw(lastGo.f[4]);
+        const counts = { PASS: 0, FAIL: 0, SKIP: 0 };
+        const total = Math.max(Number(lastGo.f[3]) || 0, raw.res.length);
+        for (const r of raw.res) {
+          counts[r.status]++;
+          if (r.status === 'FAIL' && !recorded.has(`${target}\t${lastGo.f[1]}\tgo:${r.name}`)) {
+            state.fails.push({
+              target,
+              core: lastGo.f[1],
+              name: `go:${r.name}`,
+              detail: '',
+              live: true
+            });
+          }
         }
-      }
-      block = {
-        kind: 'go',
-        target: lastGo.f[0],
-        core: lastGo.f[1],
-        name: `go ${lastGo.f[2]}`,
-        done: raw.res.length,
-        total: Math.max(Number(lastGo.f[3]) || 0, raw.res.length),
-        counts,
-        current: raw.current,
-        etaSec: blockEta(now - lastGo.t, raw.res.length, Math.max(Number(lastGo.f[3]) || 0, raw.res.length))
-      };
-      state.idleSec = now - Math.max(raw.mtime, lastT);
-    } else if (lastPw && pwOpen(lastPw)) {
-      const after = events.filter((e) => e.file === lastPw.file && e.t >= lastPw.t && (e.kind === 'pwt' || e.kind === 'pwt+'));
-      const ended = new Set();
-      const counts = { PASS: 0, FAIL: 0, KNOWN: 0, SKIP: 0 };
-      for (const e of after) {
-        if (e.kind !== 'pwt') continue;
-        ended.add(e.f[3]);
-        if (e.f[2] in counts) counts[e.f[2]]++;
-        if (e.f[2] === 'FAIL' && !recorded.has(`${e.f[1]}\tpw:${e.f[3]}`)) {
-          state.fails.push({ core: e.f[1], name: `pw:${e.f[3]}`, detail: '', live: true });
+        block = {
+          kind: 'go',
+          target,
+          core: lastGo.f[1],
+          name: `go ${lastGo.f[2]}`,
+          done: raw.res.length,
+          total,
+          counts,
+          current: raw.current,
+          etaSec: blockEta(now - lastGo.t, raw.res.length, total)
+        };
+        idles.push(now - Math.max(raw.mtime, lastT));
+      } else if (lastPw && pwOpen(lastPw)) {
+        // тесты этого запуска: той же цели и ядра, после его начала
+        const after = events.filter(
+          (e) => sameRun(e, lastPw) && e.t >= lastPw.t && (e.kind === 'pwt' || e.kind === 'pwt+')
+        );
+        const ended = new Set();
+        const counts = { PASS: 0, FAIL: 0, KNOWN: 0, SKIP: 0 };
+        const total = Number(lastPw.f[2]) || 0;
+        for (const e of after) {
+          if (e.kind !== 'pwt') continue;
+          ended.add(e.f[3]);
+          if (e.f[2] in counts) counts[e.f[2]]++;
+          if (e.f[2] === 'FAIL' && !recorded.has(`${target}\t${e.f[1]}\tpw:${e.f[3]}`)) {
+            state.fails.push({ target, core: e.f[1], name: `pw:${e.f[3]}`, detail: '', live: true });
+          }
         }
+        const started = after.filter((e) => e.kind === 'pwt+' && !ended.has(e.f[2]));
+        block = {
+          kind: 'pw',
+          target,
+          core: lastPw.f[1],
+          name: 'Playwright',
+          done: ended.size,
+          total,
+          counts,
+          current: started.length ? started[started.length - 1].f[2] : '',
+          currentSec: started.length ? now - started[started.length - 1].t : null,
+          etaSec: blockEta(now - lastPw.t, ended.size, total)
+        };
+        idles.push(now - lastT);
       }
-      const started = after.filter((e) => e.kind === 'pwt+' && !ended.has(e.f[2]));
-      block = {
-        kind: 'pw',
-        target: lastPw.f[0],
-        core: lastPw.f[1],
-        name: 'Playwright',
-        done: ended.size,
-        total: Number(lastPw.f[2]) || 0,
-        counts,
-        current: started.length ? started[started.length - 1].f[2] : '',
-        currentSec: started.length ? now - started[started.length - 1].t : null,
-        etaSec: blockEta(now - lastPw.t, ended.size, Number(lastPw.f[2]) || 0)
-      };
-      state.idleSec = now - lastT;
-    } else {
-      state.idleSec = now - lastT;
+      if (block) state.blocks.push(block);
     }
-    state.block = block;
-
+    // без идущих запусков и пока хоть один идёт — давность последнего события
+    state.idleSec = idles.length ? Math.min(...idles) : now - lastT;
   }
 
   // сессия: последняя строка журнала сессии
@@ -441,12 +508,20 @@ function oneLine(s) {
   return extra.length ? `${base} · ${extra.join(' · ')}` : base;
 }
 
+/** Идущие запуски одной строкой; при нескольких целях — с именем цели. */
+function blocksLine(s) {
+  const several = s.blocks.length > 1;
+  return s.blocks
+    .map((b) => `${several ? `${b.target} ` : ''}${b.core} ${b.kind} ${b.done}/${b.total}`)
+    .join(' · ');
+}
+
 function oneLineRun(s) {
   if (s.state === 'none') return 'стенд: прогонов нет';
   const suite = s.suite || 'прогон';
   if (s.state === 'hold') {
     const parts = [`стенд удержан до ${clock(s.holdUntil)}`, `${suite}: ${s.verdict || 'закончен'}`];
-    if (s.block) parts.push(`${s.block.core} ${s.block.kind} ${s.block.done}/${s.block.total}`);
+    if (s.blocks.length) parts.push(blocksLine(s));
     if (s.fails.length) parts.push(`✗${s.fails.length}`);
     return parts.join(' · ');
   }
@@ -456,8 +531,8 @@ function oneLineRun(s) {
   }
   const parts = [`стенд: ${suite}`];
   const st = s.stages[s.stages.length - 1];
-  if (s.block) {
-    parts.push(`${s.block.core} ${s.block.kind} ${s.block.done}/${s.block.total}`);
+  if (s.blocks.length) {
+    parts.push(blocksLine(s));
   } else if (st) {
     parts.push(`${st.core !== '-' ? `${st.core} ` : ''}${st.name}`);
   }
@@ -502,7 +577,7 @@ function render(s, color) {
   }[s.state];
   out.push(`${c('1', `Прогон ${s.suite || ''}`)} — ${stateRu}   ${c('2', s.name)}`);
   if (s.state !== 'running' && s.verdict) {
-    const red = /красный/.test(s.verdict);
+    const red = /красный|отказ/.test(s.verdict);
     out.push(`Итог: ${c(red ? '31' : '32', s.verdict)}`);
   }
   const times = [`прошло ${fmtDur(s.elapsedSec)}`];
@@ -521,15 +596,15 @@ function render(s, color) {
     for (const st of s.stages) {
       out.push(`Этап: ${st.target}${st.core !== '-' ? ` · ${st.core}` : ''} · ${st.name} ${c('2', `(${fmtDur(st.sinceSec)})`)}`);
     }
-    if (s.block) {
-      const b = s.block;
+    for (const b of s.blocks) {
       const frac = b.total ? b.done / b.total : 0;
       const cnt = Object.entries(b.counts)
         .filter(([, v]) => v)
         .map(([k, v]) => (k === 'FAIL' ? c('31', `${k} ${v}`) : `${k} ${v}`))
         .join(', ');
       const beta = b.etaSec != null ? c('2', `  ~${fmtDur(b.etaSec)}`) : '';
-      out.push(`${b.core} ${b.name}: ${bar(frac, width)} ${b.done}/${b.total}${beta}${cnt ? `  ${cnt}` : ''}`);
+      const who = s.blocks.length > 1 ? `${b.target} · ${b.core}` : b.core;
+      out.push(`${who} ${b.name}: ${bar(frac, width)} ${b.done}/${b.total}${beta}${cnt ? `  ${cnt}` : ''}`);
       if (b.current) {
         out.push(`  сейчас: ${b.current}${b.currentSec != null ? c('2', ` (${fmtDur(b.currentSec)})`) : ''}`);
       }
@@ -543,7 +618,8 @@ function render(s, color) {
   if (s.fails.length) {
     out.push(c('31', `Упало (${s.fails.length}):`));
     for (const f of s.fails.slice(-FAILS_SHOWN)) {
-      out.push(`  ✗ ${f.core !== '-' ? `[${f.core}] ` : ''}${f.name}${f.live ? c('2', ' (сейчас)') : ''}`);
+      const who = f.target ? `${f.target}/${f.core}` : f.core;
+      out.push(`  ✗ ${f.core !== '-' ? `[${who}] ` : ''}${f.name}${f.live ? c('2', ' (сейчас)') : ''}`);
     }
     if (s.fails.length > FAILS_SHOWN) out.push(c('2', `  … и ещё ${s.fails.length - FAILS_SHOWN} — ${s.name}/*/results.tsv`));
   }
