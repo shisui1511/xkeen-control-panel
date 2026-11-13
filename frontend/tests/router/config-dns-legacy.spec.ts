@@ -3,7 +3,7 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
 import { ensureDnsTarget, releaseDnsTarget } from './lib/dns-target';
-import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
+import { CORE_TAG, SLOW_ANNOTATION, knownFailure } from './lib/known';
 import {
   api,
   installedKernels,
@@ -329,6 +329,7 @@ test(
   },
   async ({ page }) => {
     test.setTimeout(T.save * 12);
+    knownFailure('*', 'dns-legacy-takeover-probe-external-no-working-node');
     const guard = attachConsoleGuard(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     await startPage(page);
