@@ -19,7 +19,10 @@
  *      каждом test(...), читающем ядро напрямую или через помощника спека, а не только в файле.
  *   4. Метка knownFailure с ядром в селекторе («арх/ядро», «* / ядро») идёт через coreTagsOf:
  *      тег @core-label выводится автоматически.
- *   5. Помощник frontend/tests/router/lib/*.ts (кроме env.ts и known.ts) не читает RT.core.
+ *   5. Помощник frontend/tests/router/lib/*.ts (кроме env.ts, known.ts и репортёра хода
+ *      progress-reporter.ts) не читает RT.core и XCP_CORE. Репортёр подключает конфиг
+ *      playwright.router.config.ts и пишет ядро ветви только в журнал хода; спек или помощник
+ *      lib/, импортирующий репортёр, — нарушение.
  * Правила метки «одно ядро» (D-01…D-04): тест идёт на одном ядре (ядро из SHA HEAD), его
  * зависимость от ядра на обоих ядрах проверяет названный тест-покрытие. Метка выполняет
  * правило 1, но метку ядра не даёт. Числового потолка на метки нет.
@@ -44,7 +47,9 @@ const {
   goMarks,
   goTestFacts,
   goViolations,
+  libIssues,
   oneCoreIssues,
+  reporterImportIssues,
   specIssues,
   specTestFacts,
   specViolations,
@@ -249,6 +254,44 @@ for (const [text, want] of specSamples) {
     problems.push(
       `самопроверка сканера спеков: образец ${JSON.stringify(text)} дал нарушений ${got}; ожидалось ${want}`
     );
+  }
+}
+
+// Самопроверка правила 5 (помощники lib/): [путь файла, текст, ожидаемое число причин]
+const LIB = 'frontend/tests/router/lib/';
+const REPORTER_TEXT = "export default class R {\n  core = process.env.XCP_CORE || '-';\n}\n";
+const libSamples = [
+  [LIB + 'dns-target.ts', 'export function core() {\n  return process.env.XCP_CORE;\n}\n', 1],
+  [LIB + 'nodes-api.ts', 'export function k() {\n  return RT.core;\n}\n', 1],
+  // репортёр хода выведен из правила по точному имени
+  [LIB + 'progress-reporter.ts', REPORTER_TEXT, 0],
+  // похожее, но другое имя — обычный помощник
+  [LIB + 'my-progress-reporter.ts', REPORTER_TEXT, 1],
+  [LIB + 'env.ts', 'export const RT = {\n  core: process.env.XCP_CORE\n};\n', 0],
+  [LIB + 'pages.ts', '// XCP_CORE и RT.core только в комментарии\nexport const a = 1;\n', 0],
+  // помощник, импортирующий репортёр
+  [LIB + 'dns-target.ts', "import { x } from './progress-reporter';\nexport const y = x;\n", 1]
+];
+for (const [file, text, want] of libSamples) {
+  const got = libIssues(file, text).length;
+  if (got !== want) {
+    problems.push(`самопроверка правила помощников: ${file} с текстом ${JSON.stringify(text)} дал причин ${got}; ожидалось ${want}`);
+  }
+}
+
+// Самопроверка импорта репортёра из спека или помощника: [текст, ожидаемое число причин]
+const reporterImportSamples = [
+  ["import Progress from './lib/progress-reporter';\n", 1],
+  ["export { default } from './lib/progress-reporter.ts';\n", 1],
+  ["import './lib/progress-reporter';\n", 1],
+  ["const m = await import('./lib/progress-reporter');\n", 1],
+  ["// import Progress from './lib/progress-reporter'\n", 0],
+  ["import { T } from './lib/env';\n", 0]
+];
+for (const [text, want] of reporterImportSamples) {
+  const got = reporterImportIssues(text).length;
+  if (got !== want) {
+    problems.push(`самопроверка импорта репортёра: образец ${JSON.stringify(text)} дал причин ${got}; ожидалось ${want}`);
   }
 }
 
