@@ -4,7 +4,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { api, layerFlag, randomPort, resetDraft } from './lib/nodes-api';
+import { addToDraft, api, layerFlag, nodeLink, randomPort, resetDraft } from './lib/nodes-api';
 
 // Формы секций Mihomo на настоящей панели (фаза 147, план 23): «Основное», DNS,
 // «Входящие/TUN» и Sniffer правят профиль панели через общие блоки форм, ключи вне формы
@@ -289,6 +289,9 @@ test('cores: Mihomo — listener force-proxy переживает правку �
   await resetDraft(page);
 
   try {
+    // узел теста в черновике: без узлов группы по умолчанию пусты и «Применить» недоступно
+    // (group_empty) — проверка окна изменений не зависит от источников стенда
+    await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), 'RtListenerA'));
     await ensureProfileInDraft(page);
     await openSection(page, 'inbounds');
 
