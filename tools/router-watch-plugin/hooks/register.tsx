@@ -1,0 +1,163 @@
+import { atom, read, update } from 'claude-code'
+import type { Register } from 'claude-code'
+
+import type { Progress, Snapshot } from '../types'
+
+// Панель хода прогона на стенде: раз в POLL_MS вызывает scripts/router/progress.mjs --json
+// рабочей копии сессии и рисует этап, тесты идущего запуска, упавшие и оставшееся время.
+// Строка состояния — progress.mjs --line, пока прогон идёт. Панель открывается сама, когда
+// прогон начинается; вручную — /router-watch. В рабочей копии без progress.mjs (другой проект)
+// опроса нет: панель говорит, что хода прогона здесь нет.
+
+const PANE = 'router-watch'
+const TITLE = 'Прогон стенда'
+const POLL_MS = 3000
+const SCRIPT = 'scripts/router/progress.mjs'
+const FAILS_SHOWN = 15
+
+const snapshot = atom({ plugin: 'router-watch', key: 'snapshot' } as const, { progress: null, error: '', at: 0 } as Snapshot, {
+  shape: 'snapshot-1',
+})
+
+function dur(sec: number | null | undefined): string {
+  if (sec == null || !Number.isFinite(sec)) return '—'
+  const s = Math.max(0, Math.round(sec))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  if (h) return `${h} ч ${String(m).padStart(2, '0')} мин`
+  if (m) return `${m} мин ${String(s % 60).padStart(2, '0')} с`
+  return `${s} с`
+}
+
+function bar(frac: number, width: number): string {
+  const n = Math.max(0, Math.min(width, Math.round(frac * width)))
+  return '█'.repeat(n) + '░'.repeat(width - n)
+}
+
+export const register: Register = on => {
+  on('session.start', async ($, e, next) => {
+    const started = await next(e)
+    await $.command.register({ name: 'router-watch', description: 'Ход прогона роутерных тестов в панели' })
+    const hasScript = await $.fs.stat(SCRIPT).then(
+      () => true,
+      () => false
+    )
+    if (!hasScript) {
+      await update($, snapshot, () => ({ progress: null, error: `в этой рабочей копии нет ${SCRIPT}`, at: Date.now() }))
+      return started
+    }
+
+    let wasRunning = false
+    let busy = false
+    const poll = async () => {
+      if (busy) return
+      busy = true
+      try {
+        const r = await $.process.run(['node', SCRIPT, '--json'], { timeoutMs: 20_000 })
+        if (r.exitCode !== 0) {
+          await update($, snapshot, () => ({ progress: null, error: r.stderr.trim().slice(0, 300) || `код ${r.exitCode}`, at: Date.now() }))
+          return
+        }
+        const progress = JSON.parse(r.stdout) as Progress
+        await update($, snapshot, () => ({ progress, error: '', at: Date.now() }))
+        const running = progress.state === 'running'
+        $.ui.status(running ? progress.line : undefined)
+        if (running && !wasRunning) void $.ui.open({ id: PANE, title: TITLE })
+        wasRunning = running
+      } catch (err) {
+        await update($, snapshot, () => ({ progress: null, error: String(err).slice(0, 300), at: Date.now() }))
+      } finally {
+        busy = false
+      }
+    }
+    void poll()
+    $.clock.every(POLL_MS, () => void poll())
+    return started
+  })
+
+  on('command.run', { command: 'router-watch' }, async $ => {
+    await $.ui.open({ id: PANE, title: TITLE })
+    return { text: 'Панель хода прогона открыта.' }
+  })
+
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const { Box, Text } = $.ui.resolve(e)
+    const snap = await read($, snapshot)
+    const cols = (e.props as { bodyColumns?: number }).bodyColumns ?? e.viewport?.columns ?? 60
+    const width = Math.max(10, Math.min(40, cols - 14))
+    const p = snap.progress
+
+    if (!p) {
+      return (
+        <Box flexDirection="column">
+          <Text dimColor>{snap.error ? `Ход прогона недоступен: ${snap.error}` : 'Читаю ход прогона…'}</Text>
+        </Box>
+      )
+    }
+    if (p.state === 'none') {
+      return (
+        <Box flexDirection="column">
+          <Text dimColor>Прогонов на стенде нет.</Text>
+        </Box>
+      )
+    }
+
+    const running = p.state === 'running'
+    const red = /красный/.test(p.verdict)
+    const stateText = running ? 'идёт' : p.state === 'stopped' ? 'оборван' : 'закончен'
+    const b = p.block
+    const blockCounts = b
+      ? Object.entries(b.counts)
+          .filter(([, v]) => v)
+          .map(([k, v]) => `${k} ${v}`)
+          .join(' · ')
+      : ''
+    const fails = p.fails.slice(-FAILS_SHOWN)
+
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Box flexDirection="column">
+          <Text bold>
+            {`${p.suite || 'прогон'} — ${stateText}`}
+          </Text>
+          <Text dimColor>{p.name}</Text>
+          {!running && p.verdict && <Text color={red ? 'error' : 'success'}>{`Итог: ${p.verdict}`}</Text>}
+        </Box>
+
+        <Box flexDirection="column">
+          <Text>
+            {`прошло ${dur(p.elapsedSec)}${p.estSec ? ` · оценка ${dur(p.estSec)}` : ''}${running && p.etaSec != null ? ` · осталось ~${dur(p.etaSec)}` : ''}`}
+          </Text>
+          {p.percent != null && <Text mono>{`${bar(p.percent / 100, width)} ${p.percent}%`}</Text>}
+          {p.session && <Text dimColor>{`Сессия: ${p.session}`}</Text>}
+        </Box>
+
+        {running && (
+          <Box flexDirection="column">
+            {p.stages.map(st => (
+              <Text>{`Этап: ${st.core !== '-' ? `${st.core} · ` : ''}${st.name} (${dur(st.sinceSec)})`}</Text>
+            ))}
+            {b && (
+              <Text mono>{`${b.core} ${b.name}: ${bar(b.total ? b.done / b.total : 0, width)} ${b.done}/${b.total}`}</Text>
+            )}
+            {b && blockCounts && <Text dimColor>{blockCounts}</Text>}
+            {b && b.current && <Text dimColor>{`сейчас: ${b.current}`}</Text>}
+            {p.idleSec > 300 && <Text color="warning">{`Нет новых событий ${dur(p.idleSec)}`}</Text>}
+          </Box>
+        )}
+
+        <Text>{`Записано: PASS ${p.counts.PASS} · FAIL ${p.counts.FAIL} · KNOWN ${p.counts.KNOWN} · SKIP ${p.counts.SKIP}`}</Text>
+
+        {fails.length > 0 && (
+          <Box flexDirection="column">
+            <Text color="error" bold>{`Упало (${p.fails.length})`}</Text>
+            {fails.map(f => (
+              <Text color={f.live ? 'warning' : 'error'}>{`✗ ${f.core !== '-' ? `[${f.core}] ` : ''}${f.name}`}</Text>
+            ))}
+            {p.fails.length > FAILS_SHOWN && <Text dimColor>{`… и ещё ${p.fails.length - FAILS_SHOWN}`}</Text>}
+          </Box>
+        )}
+      </Box>
+    )
+  })
+}
