@@ -109,6 +109,26 @@ function findFiles(dir, name, depth = 3) {
   return out;
 }
 
+/**
+ * Файлы итогов прогона: results.tsv целей и вложенных отчётов; у перепрогона (rerun дописывает
+ * отчёт FROM) — только rerun-<N>.tsv последнего перепрогона, итоги исходного прогона не в счёт.
+ */
+function resultFiles(report, suite) {
+  if (suite !== 'rerun') return findFiles(report, 'results.tsv');
+  let n = 0;
+  for (const f of fs.readdirSync(report)) {
+    const m = /^rerun-(\d+)\.meta$/.exec(f);
+    if (m) n = Math.max(n, Number(m[1]));
+  }
+  if (!n) return [];
+  const out = [];
+  for (const e of fs.readdirSync(report, { withFileTypes: true })) {
+    const f = path.join(report, e.name, `rerun-${n}.tsv`);
+    if (e.isDirectory() && fs.existsSync(f)) out.push(f);
+  }
+  return out;
+}
+
 function alive(pid) {
   if (!pid) return false;
   try {
@@ -238,7 +258,7 @@ function collect(report) {
 
   // записанные итоги
   const recorded = new Set();
-  for (const file of findFiles(report, 'results.tsv')) {
+  for (const file of resultFiles(report, state.suite)) {
     for (const line of readText(file).split('\n')) {
       if (!line) continue;
       const [st, core, check, detail = ''] = line.split('\t');
