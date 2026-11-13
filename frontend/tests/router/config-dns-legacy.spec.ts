@@ -195,7 +195,7 @@ const FLAG_NOTE = /Перехват DNS будет выключен|DNS intercep
 const ACTIVE_STATES = ['on', 'window', 'waiting'];
 
 /** Что спек сам поменял на стенде ради перехвата (убирается в afterAll). */
-const prep = { enabled: false, groupId: '', routingTaken: false, sectionKernel: '' };
+const prep = { enabled: false, groupId: '', routingTaken: false, sectionKernel: '', nodeName: '' };
 
 interface DnsBrief {
   state: string;
