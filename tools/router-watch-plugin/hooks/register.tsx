@@ -12,6 +12,8 @@ import type { Progress, Snapshot } from '../types'
 const PANE = 'router-watch'
 const TITLE = 'Прогон стенда'
 const POLL_MS = 3000
+// без идущего прогона опрос реже: раз в IDLE_TICKS тиков (15 с)
+const IDLE_TICKS = 5
 const SCRIPT = 'scripts/router/progress.mjs'
 const FAILS_SHOWN = 15
 
@@ -34,11 +36,19 @@ function bar(frac: number, width: number): string {
   return '█'.repeat(n) + '░'.repeat(width - n)
 }
 
+let pollNow: () => void = () => {}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await $.command.register({ name: 'router-watch', description: 'Ход прогона роутерных тестов в панели' })
-    const hasScript = await $.fs.stat(SCRIPT).then(
+    // скрипт — от корня рабочей копии: сессия может начаться в подкаталоге
+    const top = await $.process.run(['git', 'rev-parse', '--show-toplevel']).then(
+      r => (r.exitCode === 0 ? r.stdout.trim() : ''),
+      () => ''
+    )
+    const script = top ? `${top}/${SCRIPT}` : SCRIPT
+    const hasScript = await $.fs.stat(script).then(
       () => true,
       () => false
     )
@@ -48,12 +58,16 @@ export const register: Register = on => {
     }
 
     let wasRunning = false
+    let active = false
+    let tick = 0
     let busy = false
     const poll = async () => {
+      tick++
+      if (!active && tick % IDLE_TICKS !== 1) return
       if (busy) return
       busy = true
       try {
-        const r = await $.process.run(['node', SCRIPT, '--json'], { timeoutMs: 20_000 })
+        const r = await $.process.run(['node', script, '--json'], { timeoutMs: 20_000 })
         if (r.exitCode !== 0) {
           await update($, snapshot, () => ({ progress: null, error: r.stderr.trim().slice(0, 300) || `код ${r.exitCode}`, at: Date.now() }))
           return
@@ -61,6 +75,7 @@ export const register: Register = on => {
         const progress = JSON.parse(r.stdout) as Progress
         await update($, snapshot, () => ({ progress, error: '', at: Date.now() }))
         const running = progress.state === 'running'
+        active = running || progress.state === 'hold' || progress.queue.length > 0
         $.ui.status(running || progress.state === 'hold' ? progress.line : undefined)
         if (running && !wasRunning) void $.ui.open({ id: PANE, title: TITLE })
         // прогон закончился (итог или удержание стенда): тост и уведомление с итогом
@@ -80,10 +95,16 @@ export const register: Register = on => {
     }
     void poll()
     $.clock.every(POLL_MS, () => void poll())
+    // открыть панель вручную — свежий снимок сразу, не дожидаясь редкого опроса
+    pollNow = () => {
+      tick = 0
+      void poll()
+    }
     return started
   })
 
   on('command.run', { command: 'router-watch' }, async $ => {
+    pollNow()
     await $.ui.open({ id: PANE, title: TITLE })
     return { text: 'Панель хода прогона открыта.' }
   })
@@ -102,9 +123,21 @@ export const register: Register = on => {
         </Box>
       )
     }
+    const waiting = [
+      ...p.queue.map(q => `В очереди на стенд: ${q.suite} — ждёт ${dur(q.sinceSec)}`),
+      ...(p.unattended ? [`Ночной прогон ждёт старта${p.unattended.at ? ` в ${p.unattended.at}` : ''}`] : []),
+    ]
+    const waitingBox = waiting.length > 0 && (
+      <Box flexDirection="column">
+        {waiting.map(w => (
+          <Text color="warning">{w}</Text>
+        ))}
+      </Box>
+    )
     if (p.state === 'none') {
       return (
-        <Box flexDirection="column">
+        <Box flexDirection="column" gap={1}>
+          {waitingBox}
           <Text dimColor>Прогонов на стенде нет.</Text>
         </Box>
       )
@@ -127,6 +160,7 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column" gap={1}>
+        {waitingBox}
         <Box flexDirection="column">
           <Text bold>
             {`${p.suite || 'прогон'} — ${stateText}`}
@@ -137,7 +171,13 @@ export const register: Register = on => {
 
         <Box flexDirection="column">
           <Text>
-            {`прошло ${dur(p.elapsedSec)}${p.estSec ? ` · оценка ${dur(p.estSec)}` : ''}${running && p.etaSec != null ? ` · осталось ~${dur(p.etaSec)}` : ''}`}
+            {`прошло ${dur(p.elapsedSec)}${p.estSec ? ` · оценка ${dur(p.estSec)}` : ''}${
+              running && p.overSec > 0
+                ? ` · дольше оценки на ${dur(p.overSec)}`
+                : running && p.etaSec != null
+                  ? ` · осталось ~${dur(p.etaSec)}`
+                  : ''
+            }`}
           </Text>
           {p.percent != null && <Text mono>{`${bar(p.percent / 100, width)} ${p.percent}%`}</Text>}
           {p.session && <Text dimColor>{`Сессия: ${p.session}`}</Text>}
@@ -152,7 +192,7 @@ export const register: Register = on => {
               <Text>{`Этап: ${st.core !== '-' ? `${st.core} · ` : ''}${st.name} (${dur(st.sinceSec)})`}</Text>
             ))}
             {b && (
-              <Text mono>{`${b.core} ${b.name}: ${bar(b.total ? b.done / b.total : 0, width)} ${b.done}/${b.total}`}</Text>
+              <Text mono>{`${b.core} ${b.name}: ${bar(b.total ? b.done / b.total : 0, width)} ${b.done}/${b.total}${b.etaSec != null ? ` ~${dur(b.etaSec)}` : ''}`}</Text>
             )}
             {b && blockCounts && <Text dimColor>{blockCounts}</Text>}
             {b && b.current && (

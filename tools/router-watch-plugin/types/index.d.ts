@@ -10,6 +10,7 @@ export type Block = {
   counts: Record<string, number>
   current: string
   currentSec?: number | null
+  etaSec?: number | null
 }
 export type Progress = {
   name: string
@@ -28,6 +29,9 @@ export type Progress = {
   idleSec: number
   holdUntil: number
   holdLeftSec: number
+  overSec: number
+  queue: { suite: string; sinceSec: number }[]
+  unattended: { at: string } | null
   line: string
 }
 export type Snapshot = { progress: Progress | null; error: string; at: number }
