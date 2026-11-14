@@ -9,6 +9,7 @@
   import Icon from '../../../lib/components/Icon.svelte';
   import SetupStep, { type SetupStepStatus } from './SetupStep.svelte';
   import StepNodes from './StepNodes.svelte';
+  import StepRouting, { type RoutingPhase } from './StepRouting.svelte';
   import StepSections, { takeRest, type SectionsPhase } from './StepSections.svelte';
   import StepApply from './StepApply.svelte';
   import StepStart, { type StartPhase } from './StepStart.svelte';
@@ -206,6 +207,13 @@
   let sectionsPhase = $state<SectionsPhase>('idle');
   let sectionsBox = $state<StepSections | undefined>();
 
+  // Тела, которые держатся смонтированными и в свёрнутом шаге: диалоги шагов 2 и 4 не
+  // снимаются автопереходом посреди выбора, ход и итоги шагов 5–7 не теряются
+  const KEEP_MOUNTED = ['sections', 'routing', 'apply', 'start', 'ip'];
+
+  // Ход шага 4 (StepRouting): открыт диалог пресета
+  let routingPhase = $state<RoutingPhase>('idle');
+
   // Ход запуска ядра в шаге 6 (StepStart) и ядро, запущенное кнопкой мастера
   let startPhase = $state<StartPhase>('idle');
   let startedKernel: KernelName | '' = '';
@@ -221,6 +229,7 @@
   const rows = $derived(
     baseRows.map((r): Row => {
       if (r.id === 'sections' && sectionsPhase === 'running') return { ...r, status: 'running' };
+      if (r.id === 'routing' && routingPhase === 'running') return { ...r, status: 'running' };
       if (r.id === 'apply') {
         if ($applyRunning) return { ...r, status: 'running' };
         if ($conflictVisible) return { ...r, status: 'blocked' };
@@ -328,7 +337,7 @@
           status={r.status}
           title={$t(`cfg.setup.step.${r.id}.title`)}
           statusText={statusText(r)}
-          keepMounted={r.id === 'sections' || r.id === 'apply' || r.id === 'start' || r.id === 'ip'}
+          keepMounted={KEEP_MOUNTED.includes(r.id)}
           bind:expanded={() => openN === r.n, (v) => setOpen(r.n, v)}
         >
           {#snippet aside()}
@@ -356,6 +365,8 @@
             />
           {:else if r.id === 'nodes'}
             <StepNodes step={stepOf('nodes')} />
+          {:else if r.id === 'routing'}
+            <StepRouting step={stepOf('routing')} bind:phase={routingPhase} />
           {:else if r.id === 'apply'}
             <StepApply step={stepOf('apply')} {onapply} />
           {:else if r.id === 'start' && $wizardView}
