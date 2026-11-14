@@ -82,13 +82,29 @@
   // запущено); позже, по переходу, — после паузы на старт ядра, у Mihomo — на прогрев API
   // (как окно прогрева после переключения ядра). Если до срабатывания шаги снова не
   // выполнены (сбой ядра), ожидание снимается и флаг возвращается. Дальше — только
-  // «Проверить снова»
+  // «Проверить снова». Тела шага 7 к сроку может не быть (список шагов ещё не отрисован):
+  // тогда проверка откладывается до его монтирования
   const IP_CHECK_DELAY_MS = 3000;
   const IP_CHECK_DELAY_MIHOMO_MS = 6000;
   let ipAutoDone = false;
   let ipTimer: ReturnType<typeof setTimeout> | null = null;
   let ipBox = $state<IpCheckResult | undefined>();
   let ipPhase = $state<IpPhase>('idle');
+  // Автопроверка назначена, но тела шага 7 ещё нет: её запускает монтирование тела
+  let ipPending = false;
+
+  function runIpCheck() {
+    if (ipBox) ipBox.check();
+    else ipPending = true;
+  }
+
+  function bindIpBox(box: IpCheckResult | undefined) {
+    ipBox = box;
+    if (!box || !ipPending) return;
+    ipPending = false;
+    // Проверка — после монтирования: тело уже получило ready
+    queueMicrotask(() => box.check());
+  }
 
   function ipReadyOf(steps: WizardStep[]): boolean {
     const done = (id: WizardStepId) => steps.find((s) => s.id === id)?.done === true;
@@ -110,21 +126,23 @@
       const first = firstView;
       firstView = false;
       if (!ipReadyOf(v.steps)) {
-        if (cancelIpTimer()) ipAutoDone = false;
+        if (cancelIpTimer() || ipPending) ipAutoDone = false;
+        ipPending = false;
         return;
       }
       if (ipAutoDone) return;
       ipAutoDone = true;
       if (first) {
-        // Тело шага 7 ещё может монтироваться: проверка — после обновления разметки
-        void tick().then(() => ipBox?.check());
+        // Тело шага 7 ещё может монтироваться: проверка — после обновления разметки, а
+        // если тела нет и тогда — при его монтировании
+        void tick().then(runIpCheck);
         return;
       }
       const kernel = startedKernel || $activeKernelName;
       const delay = kernel === 'mihomo' ? IP_CHECK_DELAY_MIHOMO_MS : IP_CHECK_DELAY_MS;
       ipTimer = setTimeout(() => {
         ipTimer = null;
-        ipBox?.check();
+        runIpCheck();
       }, delay);
     });
     let wasRunning = false;
@@ -168,9 +186,11 @@
     };
   });
 
-  const failed = $derived(
-    $layerStatus === 'error' || $layerConnection === 'lost' || $wizardLoadError
-  );
+  // Экран ошибки — только когда показать нечего: снимка слоя нет или вид мастера не
+  // прочитан. Обрыв SSE шаги не снимает (открытые диалоги и итоги шагов остаются):
+  // предупреждение над списком, «Применить» запирает applyGate
+  const failed = $derived($layerStatus === 'error' || ($wizardLoadError && $wizardView === null));
+  const lost = $derived($layerConnection === 'lost');
 
   // Шаг мастера из ответа сервера по id
   function stepOf(id: WizardStepId): WizardStep | undefined {
@@ -350,6 +370,11 @@
       {/each}
     </div>
   {:else}
+    {#if lost}
+      <p class="alert alert-warning setup-lost" role="status" data-testid="setup-lost">
+        {$t('cfg.sse_lost')}
+      </p>
+    {/if}
     <ol class="setup-steps" data-testid="setup-steps" aria-label={$t('cfg.setup.steps_aria')}>
       {#each rows as r (r.n)}
         <SetupStep
@@ -405,7 +430,7 @@
             />
           {:else if r.id === 'ip'}
             <IpCheckResult
-              bind:this={ipBox}
+              bind:this={() => ipBox, bindIpBox}
               bind:phase={ipPhase}
               ready={r.status !== 'locked'}
               presetId={stepOf('routing')?.preset ?? ''}
@@ -452,6 +477,10 @@
     list-style: none;
     margin: 0;
     padding: 0;
+  }
+
+  .setup-lost {
+    margin: 0;
   }
 
   .setup-step-hint {
