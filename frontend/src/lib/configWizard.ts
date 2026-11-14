@@ -8,7 +8,7 @@
 import { writable, get } from 'svelte/store';
 import { apiFetchJSON } from './api';
 import { onLayerEvent, post, layerSnapshot } from './configLayer';
-import { configLayerEnabled, activeKernelState } from '../stores';
+import { configLayerEnabled, activeKernelState, runningKernels } from '../stores';
 
 // --- Типы контракта (поля как в JSON сервера) ---
 
@@ -151,7 +151,8 @@ export async function hideWizard(): Promise<WizardView> {
 // --- Перечитывание вида ---
 
 // Вид устаревает по событию wizard службы (смена признака или вектора шагов), по правке
-// черновика, источников и маршрутизации, по ходу «Применить» и по смене состояния ядер.
+// черновика, источников и маршрутизации, по ходу «Применить», по смене активного ядра и
+// набора запущенных ядер.
 // Одна общая отложенная перезагрузка на все причины; configLayer этот модуль не
 // импортирует — цикла нет.
 export const WIZARD_DEBOUNCE_MS = 300;
@@ -195,6 +196,17 @@ function subscribeAll(): void {
     activeKernelState.subscribe((k) => {
       if (k === lastKernel) return;
       lastKernel = k;
+      loadSoon();
+    })
+  );
+  // Остановка или падение активного ядра не меняет activeKernelState, а шаг 6 от неё
+  // зависит: перечитывание и по смене набора запущенных ядер.
+  let lastRunning = get(runningKernels).join(',');
+  unsubs.push(
+    runningKernels.subscribe((r) => {
+      const next = r.join(',');
+      if (next === lastRunning) return;
+      lastRunning = next;
       loadSoon();
     })
   );

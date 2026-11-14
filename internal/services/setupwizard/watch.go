@@ -8,7 +8,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
 
-// defaultInterval — тик наблюдателя, пока мастер не пройден и не скрыт.
+// defaultInterval — тик наблюдателя.
 const defaultInterval = 10 * time.Second
 
 // «Пройдено» ставит сервер сам (D-06): хук после успешного применения и
@@ -72,8 +72,9 @@ func (s *Service) afterApply(_ context.Context, _ configlayer.AfterApplyInfo) {
 
 // tick — одна проверка: смена вектора шагов публикует событие wizard (клиенты
 // перечитывают GET), все шаги 1–6 выполнены — признак done. После done или
-// hidden ничего не делает. Читает только факты слоя: вид секций ядра и копии
-// состояния здесь не нужны.
+// hidden расчёт и событие остаются (мастер открыт по ссылке раздела, шаги на
+// странице должны обновляться), не пишется только признак. Читает только факты
+// слоя: вид секций ядра и копии состояния здесь не нужны.
 func (s *Service) tick() {
 	s.tickMu.Lock()
 	defer s.tickMu.Unlock()
@@ -82,10 +83,6 @@ func (s *Service) tick() {
 	}
 	layer := s.d.Layer
 	if !layer.Enabled() {
-		return
-	}
-	switch layer.WizardStatus() {
-	case configlayer.WizardDone, configlayer.WizardHidden:
 		return
 	}
 
@@ -102,7 +99,7 @@ func (s *Service) tick() {
 	}
 	s.lastSig = sig
 
-	if !ev.allDone() {
+	if f.Status == configlayer.WizardDone || f.Status == configlayer.WizardHidden || !ev.allDone() {
 		return
 	}
 	// Между чтением фактов и записью признака черновик могли поправить: done —
