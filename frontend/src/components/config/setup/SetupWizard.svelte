@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { t } from '../../../i18n';
   import PageHeader from '../../../PageHeader.svelte';
   import Button from '../../Button.svelte';
@@ -11,8 +11,9 @@
   import StepNodes from './StepNodes.svelte';
   import StepApply from './StepApply.svelte';
   import StepStart, { type StartPhase } from './StepStart.svelte';
+  import IpCheckResult, { type IpPhase } from './IpCheckResult.svelte';
   import type { KernelName } from '../../../lib/kernelState';
-  import { conflictVisible, showToast } from '../../../stores';
+  import { activeKernelName, conflictVisible, showToast } from '../../../stores';
   import {
     applyRunning,
     layerStatus,
@@ -73,8 +74,56 @@
     manual = { n: APPLY_N, at: currentN };
   }
 
+  // Проверка IP сама — один раз за жизнь страницы мастера (D-09): в первый момент, когда
+  // по ответу сервера выполнены шаги 5 и 6. Уже на первом ответе — сразу (ядро давно
+  // запущено); позже, по переходу, — после паузы на старт ядра, у Mihomo — на прогрев API
+  // (как окно прогрева после переключения ядра). Если до срабатывания шаги снова не
+  // выполнены (сбой ядра), ожидание снимается и флаг возвращается. Дальше — только
+  // «Проверить снова»
+  const IP_CHECK_DELAY_MS = 3000;
+  const IP_CHECK_DELAY_MIHOMO_MS = 6000;
+  let ipAutoDone = false;
+  let ipTimer: ReturnType<typeof setTimeout> | null = null;
+  let ipBox = $state<IpCheckResult | undefined>();
+  let ipPhase = $state<IpPhase>('idle');
+
+  function ipReadyOf(steps: WizardStep[]): boolean {
+    const done = (id: WizardStepId) => steps.find((s) => s.id === id)?.done === true;
+    return done('apply') && done('start');
+  }
+
+  function cancelIpTimer(): boolean {
+    if (ipTimer === null) return false;
+    clearTimeout(ipTimer);
+    ipTimer = null;
+    return true;
+  }
+
   onMount(() => {
     startWizard();
+    let firstView = true;
+    const offIp = wizardView.subscribe((v) => {
+      if (!v) return;
+      const first = firstView;
+      firstView = false;
+      if (!ipReadyOf(v.steps)) {
+        if (cancelIpTimer()) ipAutoDone = false;
+        return;
+      }
+      if (ipAutoDone) return;
+      ipAutoDone = true;
+      if (first) {
+        // Тело шага 7 ещё может монтироваться: проверка — после обновления разметки
+        void tick().then(() => ipBox?.check());
+        return;
+      }
+      const kernel = startedKernel || $activeKernelName;
+      const delay = kernel === 'mihomo' ? IP_CHECK_DELAY_MIHOMO_MS : IP_CHECK_DELAY_MS;
+      ipTimer = setTimeout(() => {
+        ipTimer = null;
+        ipBox?.check();
+      }, delay);
+    });
     let wasRunning = false;
     const offRun = applyRunning.subscribe((r) => {
       if (r && !wasRunning) forceOpenApply();
@@ -108,6 +157,8 @@
     });
     return () => {
       off();
+      offIp();
+      cancelIpTimer();
       offRun();
       offConflict();
       stopWizard();
@@ -172,6 +223,12 @@
         if ($wizardView?.kernels.conflict) return { ...r, status: 'blocked' };
         if (startPhase === 'error' && r.status !== 'done') return { ...r, status: 'error' };
       }
+      // Шаг 7: заперт до выполнения шагов 5 и 6, «Идёт…» во время проверки, выполнен после
+      // любого итога (итог на сервер не уходит и в прогресс не входит, D-05)
+      if (r.id === 'ip' && r.status !== 'locked') {
+        if (ipPhase === 'loading') return { ...r, status: 'running' };
+        if (ipPhase !== 'idle') return { ...r, status: 'done' };
+      }
       return r;
     })
   );
@@ -201,8 +258,8 @@
     return $t('cfg.setup.status.pending');
   }
 
+  // Пояснение шага; у запертого шага 7 причину ожидания показывает его тело (IpCheckResult)
   function bodyText(r: Row): string {
-    if (r.id === 'ip' && r.status === 'locked') return $t('cfg.setup.ip.locked');
     return $t(`cfg.setup.step.${r.id}.hint`);
   }
 
@@ -264,7 +321,7 @@
           status={r.status}
           title={$t(`cfg.setup.step.${r.id}.title`)}
           statusText={statusText(r)}
-          keepMounted={r.id === 'apply' || r.id === 'start'}
+          keepMounted={r.id === 'apply' || r.id === 'start' || r.id === 'ip'}
           bind:expanded={() => openN === r.n, (v) => setOpen(r.n, v)}
         >
           {#snippet aside()}
@@ -288,6 +345,13 @@
               kernels={$wizardView.kernels}
               onstarted={onKernelStarted}
               bind:phase={startPhase}
+            />
+          {:else if r.id === 'ip'}
+            <IpCheckResult
+              bind:this={ipBox}
+              bind:phase={ipPhase}
+              ready={r.status !== 'locked'}
+              presetId={stepOf('routing')?.preset ?? ''}
             />
           {/if}
         </SetupStep>
