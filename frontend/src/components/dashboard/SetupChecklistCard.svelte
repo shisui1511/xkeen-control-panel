@@ -4,7 +4,13 @@
   import Badge from '../Badge.svelte';
   import Button from '../Button.svelte';
   import Icon from '../../lib/components/Icon.svelte';
-  import { wizardView, WIZARD_STEP_IDS, type WizardStepId } from '../../lib/configWizard';
+  import { showConfirm, showToast } from '../../stores';
+  import {
+    hideWizard,
+    wizardView,
+    WIZARD_STEP_IDS,
+    type WizardStepId
+  } from '../../lib/configWizard';
 
   // Карточка «Настроить VPN» (фаза 149.1, CFG-04): те же шесть шагов и тот же прогресс, что в
   // мастере, — из общего ответа GET /api/configlayer/wizard (149 D-27, D-01). Пропсов нет:
@@ -42,6 +48,30 @@
   // Мастер сам раскроет первый невыполненный шаг того же ответа
   function openWizard() {
     window.location.hash = '#/config/setup';
+  }
+
+  // «Скрыть» навсегда (D-11): только после подтверждения. Признак ставит сервер, карточка
+  // исчезает по его ответу и по событию wizard во всех открытых вкладках и браузерах
+  let hiding = $state(false);
+
+  async function hideCard() {
+    const ok = await showConfirm({
+      variant: 'warning',
+      title: $t('dash.setup.hide_title'),
+      message: $t('dash.setup.hide_message'),
+      confirmLabel: $t('dash.setup.hide_confirm'),
+      cancelLabel: $t('app.cancel')
+    });
+    if (!ok) return;
+    hiding = true;
+    try {
+      await hideWizard();
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      showToast('error', $t('dash.setup.hide_failed', { reason }));
+    } finally {
+      hiding = false;
+    }
   }
 </script>
 
@@ -91,6 +121,15 @@
       <div class="sc-footer">
         <Button variant="primary" testid="setup-card-continue" onclick={openWizard}>
           {doneCount > 0 ? $t('dash.setup.continue') : $t('dash.setup.begin')}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          testid="setup-card-hide"
+          loading={hiding}
+          onclick={hideCard}
+        >
+          {$t('dash.setup.hide')}
         </Button>
       </div>
     </Card>
@@ -170,5 +209,14 @@
     justify-content: space-between;
     gap: var(--spacing-2);
     margin-top: var(--spacing-4);
+  }
+
+  /* Телефон: кнопки подвала друг под другом на всю ширину (растягивает колонка),
+     счётчик остаётся в заголовке */
+  @media (max-width: 480px) {
+    .sc-footer {
+      flex-direction: column;
+      align-items: stretch;
+    }
   }
 </style>
