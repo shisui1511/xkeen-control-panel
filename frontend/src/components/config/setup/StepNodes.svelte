@@ -57,7 +57,9 @@
     overflow-wrap: anywhere;
   }
 
-  .step-nodes-errors:empty {
+  /* ConfigNotices всегда рисует свою секцию, поэтому обёртка не бывает :empty: без
+     уведомлений она скрыта, чтобы не давать лишний отступ между полем и счётчиком */
+  .step-nodes-errors:not(:has(:global(.alert))) {
     display: none;
   }
 
