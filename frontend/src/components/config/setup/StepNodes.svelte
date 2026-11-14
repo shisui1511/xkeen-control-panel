@@ -3,6 +3,7 @@
   import AddSourceField from '../nodes/AddSourceField.svelte';
   import ConfigNotices from '../ConfigNotices.svelte';
   import type { WizardStep } from '../../../lib/configWizard';
+  import { VALUE_MARK, valueParts } from './valueParts';
 
   // Тело шага 3 «Узлы» (D-02, D-04.3): поле «Добавить» встроено прямо в шаг, под ним —
   // уведомления источников (не скачался, отклонён, пуст): ошибка видна в самом шаге, и
@@ -17,6 +18,9 @@
 
   const nodes = $derived(step?.nodes ?? 0);
   const sources = $derived(step?.sources ?? 0);
+
+  // «Узлов в черновике: N» — число моноширинным
+  const countParts = $derived(valueParts($t('cfg.setup.nodes.count', { n: VALUE_MARK })));
 
   let field = $state<AddSourceField | undefined>();
 
@@ -35,7 +39,7 @@
 
   {#if nodes > 0}
     <p class="step-nodes-count" data-testid="setup-nodes-count">
-      {$t('cfg.setup.nodes.count', { n: String(nodes) })}
+      {countParts[0]}<span class="setup-mono">{nodes}</span>{countParts[1]}
     </p>
   {:else if sources > 0}
     <p class="step-nodes-note" data-testid="setup-nodes-no-usable">

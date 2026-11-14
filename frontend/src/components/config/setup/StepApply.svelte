@@ -15,16 +15,24 @@
   } from '../../../lib/configLayer';
   import { confirmKernelStop, stopKernelAndReport } from '../../../lib/serviceControl';
   import { kernelLabel, type KernelName } from '../../../lib/kernelState';
-  import { loadWizard, type WizardStep } from '../../../lib/configWizard';
+  import {
+    WIZARD_STEP_IDS,
+    loadWizard,
+    wizardView,
+    type WizardStep
+  } from '../../../lib/configWizard';
+  import { VALUE_MARK, valueParts } from './valueParts';
 
   // Тело шага 5 «Применение» (D-02, D-03, D-15, D-16, 149 D-23): счётчик изменений и
-  // единственная на экране кнопка «Применить». Нажатие идёт только через onapply —
+  // единственная на экране кнопка «Применить» — главная (primary), только пока шаг текущий.
+  // Нажатие идёт только через onapply —
   // apply() голой полосы черновика: тот же перехват и то же окно изменений, что в разделе;
   // своего пути применения здесь нет. Причины блокировки — общий стор applyGate (как у
   // полосы). Конфликт ядер показывается по стору conflictVisible при любом состоянии
   // черновика: рядом с причиной — «Остановить Xray» и «Остановить Mihomo», ядро выбирает
-  // пользователь (FND-05). Ход применения — ApplyProgress прямо в теле шага; сбой — блок
-  // ошибки с «Повторить», черновик не сбрасывается (144 D-07).
+  // пользователь (FND-05). Ход применения — ApplyProgress прямо в теле шага; сбой — общий
+  // блок ошибки с «Повторить применение»: пока он виден, это единственная главная кнопка
+  // шага, а «Применить» скрыта; черновик не сбрасывается (144 D-07).
 
   interface Props {
     step: WizardStep | undefined;
@@ -34,6 +42,9 @@
   let { step, onapply }: Props = $props();
 
   const KERNELS: KernelName[] = ['xray', 'mihomo'];
+  const APPLY_N = WIZARD_STEP_IDS.indexOf('apply') + 1;
+
+  const isCurrent = $derived($wizardView?.current === APPLY_N);
 
   // Итог применения показывается как сбой шага, только если применение шло при открытой
   // странице: свежая загрузка со старым неудачным итогом блока ошибки не рисует
@@ -68,6 +79,14 @@
     // Текст ошибки сам ставит точку после причины
     return text.trim().replace(/[.。]+$/, '');
   });
+
+  // «Применить» и «Повторить применение» описывает одна и та же причина блокировки
+  const describedBy = $derived(
+    conflict ? 'setup-apply-conflict-hint' : blockedHint ? 'setup-apply-blocked-hint' : undefined
+  );
+
+  // «Изменений в черновике: N» — число моноширинным
+  const countParts = $derived(valueParts($t('cfg.setup.apply.count', { n: VALUE_MARK })));
 
   let stopping = $state<KernelName | null>(null);
 
@@ -119,24 +138,24 @@
     <p class="step-apply-note">{$t('cfg.setup.apply.need_changes')}</p>
   {:else}
     <p class="step-apply-count" data-testid="setup-apply-count">
-      {$t('cfg.setup.apply.count', { n: String($draftChanges) })}
+      {countParts[0]}<span class="setup-mono">{$draftChanges}</span>{countParts[1]}
     </p>
-    <div class="step-apply-actions">
-      <Button
-        variant="primary"
-        data-testid="setup-apply"
-        disabled={conflict || !$applyGate.canApply}
-        loading={$applyGate.applyingHere}
-        ariaDescribedby={conflict
-          ? 'setup-apply-conflict-hint'
-          : blockedHint
-            ? 'setup-apply-blocked-hint'
-            : undefined}
-        onclick={() => onapply()}
-      >
-        {$t('cfg.apply')}
-      </Button>
-    </div>
+    <!-- При сбое единственный вход в применение — «Повторить применение» в блоке ошибки -->
+    {#if !failure}
+      <div class="step-apply-actions">
+        <Button
+          variant={isCurrent ? 'primary' : 'secondary'}
+          size="sm"
+          data-testid="setup-apply"
+          disabled={conflict || !$applyGate.canApply}
+          loading={$applyGate.applyingHere}
+          ariaDescribedby={describedBy}
+          onclick={() => onapply()}
+        >
+          {$t('cfg.apply')}
+        </Button>
+      </div>
+    {/if}
     {#if blockedHint}
       <p class="step-apply-blocked" id="setup-apply-blocked-hint" data-testid="setup-apply-blocked">
         <span class="step-apply-icon" aria-hidden="true"><Icon name="warning" size={16} /></span>
@@ -154,10 +173,12 @@
         <span>{$t('cfg.setup.apply.failed', { reason: failureReason })}</span>
         <div class="step-apply-actions">
           <Button
-            variant="secondary"
+            variant="primary"
             size="sm"
             data-testid="setup-apply-retry"
             disabled={conflict || !$applyGate.canApply}
+            loading={$applyGate.applyingHere}
+            ariaDescribedby={describedBy}
             onclick={() => onapply()}
           >
             {$t('cfg.setup.apply.retry')}
@@ -226,8 +247,6 @@
 
   .step-apply-error {
     margin-bottom: 0;
-    border-color: var(--danger);
-    background: var(--danger-soft);
   }
 
   .step-apply-error-body {
@@ -244,7 +263,6 @@
   @media (max-width: 480px) {
     .step-apply-actions :global(.btn) {
       width: 100%;
-      min-height: 44px;
     }
   }
 </style>

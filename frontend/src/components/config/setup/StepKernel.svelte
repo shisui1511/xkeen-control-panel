@@ -16,6 +16,7 @@
   import { KERNEL_NAMES, kernelLabel, type KernelName } from '../../../lib/kernelState';
   import { failureMessage } from '../../../lib/kernelView';
   import { loadWizard, type WizardKernels, type WizardStep } from '../../../lib/configWizard';
+  import { VALUE_MARK, valueParts } from './valueParts';
 
   // Тело шага 1 «Ядро и XKeen» (D-14, 149 D-23 шаг 1, B2, B4): XKeen ставится встроенной
   // карточкой установки (терминал — в её окне), ядро — выбором из двух карточек тем же
@@ -52,6 +53,13 @@
   let installing = $state<KernelName | ''>('');
   let failKernel = $state<KernelName | ''>('');
   let failReason = $state('');
+  // Текст ошибки сам ставит точку после причины
+  const failText = $derived(failReason.trim().replace(/[.。]+$/, ''));
+
+  // «Установлено: …» — имена ядер моноширинным
+  const installedParts = $derived(
+    valueParts($t('cfg.setup.kernel.installed', { kernels: VALUE_MARK }))
+  );
 
   // Уход со страницы мастера снимает опрос установки и замок меню; установка на сервере
   // продолжается, её итог покажут «Службы» и следующий вид мастера
@@ -136,7 +144,8 @@
             </Button>
           </div>
           {#if installing === k}
-            <p class="step-kernel-status" aria-live="polite">
+            <!-- Начало установки объявляет живая область страницы мастера -->
+            <p class="step-kernel-status">
               <Spinner size={16} />
               {$t('cfg.setup.kernel.installing', { kernel: kernelLabel(k) })}
             </p>
@@ -147,7 +156,7 @@
               <span>
                 {$t('cfg.setup.kernel.install_failed', {
                   kernel: kernelLabel(k),
-                  reason: failReason
+                  reason: failText
                 })}
               </span>
             </div>
@@ -157,7 +166,8 @@
     </div>
   {:else}
     <p class="step-kernel-note">
-      {$t('cfg.setup.kernel.installed', { kernels: installed.map(kernelLabel).join(', ') })}
+      {installedParts[0]}<span class="setup-mono">{installed.map(kernelLabel).join(', ')}</span
+      >{installedParts[1]}
     </p>
     {#if installed.length === 1}
       <a class="step-kernel-link" href="#/services" data-testid="setup-kernel-services-link">
@@ -277,18 +287,19 @@
   }
 
   @media (max-width: 768px) {
-    .step-kernel-choices {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
     .step-kernel-link {
       min-height: 44px;
     }
   }
 
+  /* На 481–768 px выбор ядра остаётся в две колонки, на телефоне — в одну */
   @media (max-width: 480px) {
     .step-kernel-actions :global(.btn) {
       width: 100%;
+    }
+
+    .step-kernel-choices {
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 </style>

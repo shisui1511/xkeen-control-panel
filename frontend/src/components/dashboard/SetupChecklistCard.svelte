@@ -119,7 +119,7 @@
         {/each}
       </ol>
       <div class="sc-footer">
-        <Button variant="primary" testid="setup-card-continue" onclick={openWizard}>
+        <Button variant="primary" size="sm" testid="setup-card-continue" onclick={openWizard}>
           {doneCount > 0 ? $t('dash.setup.continue') : $t('dash.setup.begin')}
         </Button>
         <Button
@@ -139,6 +139,13 @@
 <style>
   .setup-card {
     margin-bottom: var(--spacing-4);
+  }
+
+  /* Цель касания 44 px: обе кнопки карточки в любой плотности (токен --btn-h) */
+  @media (max-width: 768px) {
+    .setup-card {
+      --btn-h: 44px;
+    }
   }
 
   .sc-progress {
@@ -176,10 +183,11 @@
     flex-shrink: 0;
   }
 
-  /* Невыполненный шаг — пустое кольцо; текущий — кольцо акцента */
+  /* Невыполненный шаг — пустое кольцо того же размера, что в мастере; текущий — кольцо
+     акцента */
   .sc-pending {
-    width: 13px;
-    height: 13px;
+    width: 16px;
+    height: 16px;
     border: 1.5px solid var(--fg-dim);
     border-radius: var(--radius-full);
   }
