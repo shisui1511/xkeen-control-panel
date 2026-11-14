@@ -10,6 +10,8 @@
   import SetupStep, { type SetupStepStatus } from './SetupStep.svelte';
   import StepNodes from './StepNodes.svelte';
   import StepApply from './StepApply.svelte';
+  import StepStart, { type StartPhase } from './StepStart.svelte';
+  import type { KernelName } from '../../../lib/kernelState';
   import { conflictVisible, showToast } from '../../../stores';
   import {
     applyRunning,
@@ -147,13 +149,28 @@
     return out;
   });
 
+  // Ход запуска ядра в шаге 6 (StepStart) и ядро, запущенное кнопкой мастера
+  let startPhase = $state<StartPhase>('idle');
+  let startedKernel: KernelName | '' = '';
+
+  function onKernelStarted(kernel: KernelName) {
+    startedKernel = kernel;
+  }
+
   // Ход действий поверх статуса сервера: шаг 5 — «Идёт…», пока идёт применение, и
-  // «Заблокирован» при конфликте ядер при любом состоянии черновика (D-15)
+  // «Заблокирован» при конфликте ядер при любом состоянии черновика (D-15); шаг 6 —
+  // «Идёт…» на время запроса запуска, «Ошибка» при сбое запуска и «Заблокирован» при
+  // конфликте по ответу сервера (отказ kernel_conflict сбоем не считается)
   const rows = $derived(
     baseRows.map((r): Row => {
       if (r.id === 'apply') {
         if ($applyRunning) return { ...r, status: 'running' };
         if ($conflictVisible) return { ...r, status: 'blocked' };
+      }
+      if (r.id === 'start') {
+        if (startPhase === 'running') return { ...r, status: 'running' };
+        if ($wizardView?.kernels.conflict) return { ...r, status: 'blocked' };
+        if (startPhase === 'error' && r.status !== 'done') return { ...r, status: 'error' };
       }
       return r;
     })
@@ -247,7 +264,7 @@
           status={r.status}
           title={$t(`cfg.setup.step.${r.id}.title`)}
           statusText={statusText(r)}
-          keepMounted={r.id === 'apply'}
+          keepMounted={r.id === 'apply' || r.id === 'start'}
           bind:expanded={() => openN === r.n, (v) => setOpen(r.n, v)}
         >
           {#snippet aside()}
@@ -265,6 +282,13 @@
             <StepNodes step={stepOf('nodes')} />
           {:else if r.id === 'apply'}
             <StepApply step={stepOf('apply')} {onapply} />
+          {:else if r.id === 'start' && $wizardView}
+            <StepStart
+              step={stepOf('start')}
+              kernels={$wizardView.kernels}
+              onstarted={onKernelStarted}
+              bind:phase={startPhase}
+            />
           {/if}
         </SetupStep>
       {/each}
