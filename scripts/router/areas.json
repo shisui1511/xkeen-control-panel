@@ -312,6 +312,17 @@
             "go:TestRouterLegacyEntriesBlocked",
             "tests/router/config-cascade.spec.ts"
           ]
+        },
+        "config-wizard": {
+          "title": "Мастер первого запуска: признак в состоянии, факты шагов, служба и маршруты",
+          "paths": [
+            "internal/services/configlayer/wizard.go",
+            "internal/services/configlayer/types.go",
+            "internal/services/configlayer/events.go"
+          ],
+          "tests": [
+            "go:TestRouterWizardState"
+          ]
         }
       }
     },

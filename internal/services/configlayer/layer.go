@@ -165,6 +165,8 @@ type Layer struct {
 	beforeApply []func(st StateView)
 	// dnsSeq — счётчик событий dns (PublishDNS).
 	dnsSeq atomic.Uint64
+	// wizardSeq — счётчик событий wizard (PublishWizard).
+	wizardSeq atomic.Uint64
 	// applySeq — номер запуска, который получают хуки BeforeApply и AfterApply
 	// одного «Применить».
 	applySeq atomic.Int64
