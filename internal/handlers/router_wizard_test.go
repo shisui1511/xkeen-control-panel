@@ -218,6 +218,9 @@ func TestRouterWizardFlagOff404(t *testing.T) {
 func TestRouterWizardAPI(t *testing.T) {
 	// Шаг «запуск» и отметка «пройдено» зависят от запущенного ядра стенда.
 	routertest.CoreSpecific(t)
+	// Подтест done_stamped_by_server один раз не уложился в 25 с на медленной панели
+	// при Xray и прошёл на перепрогоне: карантин до разбора причины.
+	routertest.Quarantine(t, "wizard-done-stamp-flaky-xray")
 	e := rtNewSrc(t)
 	e.enableLayer()
 
