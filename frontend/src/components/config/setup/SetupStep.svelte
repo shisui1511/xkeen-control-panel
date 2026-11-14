@@ -14,7 +14,7 @@
   // Строка шага мастера (D-01, UI-SPEC «Строка шага»): маркер с номером или значком,
   // заголовок со строкой статуса и шеврон — одна кнопка-заголовок с aria-expanded; тело —
   // область с aria-labelledby. Статус не передаётся одним цветом: у маркера значок и
-  // aria-label, рядом — слово статуса. keepMounted держит тело смонтированным и при
+  // aria-label из слова статуса (statusText), рядом — то же слово. keepMounted держит тело смонтированным и при
   // свёрнутом шаге (скрыто атрибутом hidden): так ход применения шага 5 не теряется.
 
   interface Props {
@@ -83,11 +83,7 @@
       data-testid="setup-step-{n}-toggle"
       onclick={() => (expanded = !expanded)}
     >
-      <span
-        class="setup-marker setup-marker--{status}"
-        role="img"
-        aria-label={isDone ? $t('dash.quickstart.step_done') : $t('dash.quickstart.step_pending')}
-      >
+      <span class="setup-marker setup-marker--{status}" role="img" aria-label={statusText}>
         {#if status === 'done'}
           <Icon name="check" size={16} color="var(--success)" />
         {:else if status === 'partial'}

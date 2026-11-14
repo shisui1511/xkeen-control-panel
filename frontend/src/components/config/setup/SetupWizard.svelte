@@ -312,6 +312,7 @@
     if (r.status === 'running') return $t('cfg.setup.status.running');
     if (r.status === 'error') return $t('cfg.setup.status.error');
     if (r.status === 'blocked') return $t('cfg.setup.status.blocked');
+    if (r.status === 'locked') return $t('cfg.setup.status.locked');
     return $t('cfg.setup.status.pending');
   }
 

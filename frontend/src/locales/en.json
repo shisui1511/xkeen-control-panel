@@ -2773,6 +2773,7 @@
   "cfg.setup.status.partial": "Partly, {done} of {total}",
   "cfg.setup.status.blocked": "Blocked",
   "cfg.setup.status.error": "Error",
+  "cfg.setup.status.locked": "Not available yet",
   "cfg.setup.kernel.choose": "Choose a kernel",
   "cfg.setup.kernel.xray_hint": "Xray is a fast kernel with flexible routing rules",
   "cfg.setup.kernel.mihomo_hint": "Mihomo is a kernel with proxy groups and a latency check panel",

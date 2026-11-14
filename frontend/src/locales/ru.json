@@ -2773,6 +2773,7 @@
   "cfg.setup.status.partial": "Частично, {done} из {total}",
   "cfg.setup.status.blocked": "Заблокирован",
   "cfg.setup.status.error": "Ошибка",
+  "cfg.setup.status.locked": "Пока недоступен",
   "cfg.setup.kernel.choose": "Выберите ядро",
   "cfg.setup.kernel.xray_hint": "Xray — быстрое ядро с гибкими правилами маршрутизации",
   "cfg.setup.kernel.mihomo_hint": "Mihomo — ядро с группами прокси и панелью проверки задержки",
