@@ -14,6 +14,7 @@
   import { apiFetchJSON } from '../../../lib/api';
   import { runKernelInstall } from '../../../lib/kernelInstall';
   import { KERNEL_NAMES, kernelLabel, type KernelName } from '../../../lib/kernelState';
+  import { failureMessage } from '../../../lib/kernelView';
   import { loadWizard, type WizardKernels, type WizardStep } from '../../../lib/configWizard';
 
   // Тело шага 1 «Ядро и XKeen» (D-14, 149 D-23 шаг 1, B2, B4): XKeen ставится встроенной
@@ -67,7 +68,9 @@
       const st = await runKernelInstall(kernel, { onUpdate: () => {} });
       if (st.status === 'failed') {
         failKernel = kernel;
-        failReason = typeof st.error === 'string' && st.error !== '' ? st.error : kernel;
+        // Причина — как на «Службах»: перевод по error_kind, иначе текст message
+        const f = failureMessage(st);
+        failReason = f ? $t(f.key, f.params) : st.message || kernel;
       }
     } catch (e: unknown) {
       failKernel = kernel;

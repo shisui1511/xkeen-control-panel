@@ -6,13 +6,17 @@ import { apiFetch } from './api';
 import type { KernelName } from './kernelState';
 import { lockNav } from '../stores';
 
-/** Статус установки ядра: поля ответа `GET /api/kernels/{name}/status`. */
+/**
+ * Статус установки ядра: поля ответа `GET /api/kernels/{name}/status` (services.KernelInfo).
+ * Причина сбоя — `message`, её вид — `error_kind` (перевод — failureMessage в kernelView).
+ */
 export interface KernelInstallStatus extends Record<string, unknown> {
   status: string;
   stage?: string;
   result_kind?: string;
   result_version?: string;
-  error?: string;
+  message?: string;
+  error_kind?: string;
 }
 
 /** Шаг опроса статуса установки. */
