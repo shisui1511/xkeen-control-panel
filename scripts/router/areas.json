@@ -122,7 +122,9 @@
         "internal/services/config.go",
         "internal/services/snapshots.go",
         "internal/services/preflight_content.go",
-        "internal/services/mihomo.go"
+        "internal/services/mihomo.go",
+        "internal/services/setupwizard/**",
+        "internal/handlers/setup_wizard.go"
       ],
       "canary": {
         "go": "TestRouterTakeoverApplyAndRelease",
@@ -318,7 +320,9 @@
           "paths": [
             "internal/services/configlayer/wizard.go",
             "internal/services/configlayer/types.go",
-            "internal/services/configlayer/events.go"
+            "internal/services/configlayer/events.go",
+            "internal/services/setupwizard/**",
+            "internal/handlers/setup_wizard.go"
           ],
           "tests": [
             "go:TestRouterWizardState"
