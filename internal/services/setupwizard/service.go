@@ -277,7 +277,12 @@ func (s *Service) View() View {
 	// «Взять остальные» не возьмёт, в M их нет).
 	if inst.Xray && f.XrayTaken >= 1 && s.d.XrayTakeable != nil {
 		if n, ok := s.d.XrayTakeable(); ok && n > 0 {
-			ev.steps[1].Partial = &Partial{Done: f.XrayTaken, Total: f.XrayTaken + n}
+			for i := range ev.steps {
+				if ev.steps[i].ID == StepSections {
+					ev.steps[i].Partial = &Partial{Done: f.XrayTaken, Total: f.XrayTaken + n}
+					break
+				}
+			}
 		}
 	}
 
