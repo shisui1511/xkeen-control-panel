@@ -33,6 +33,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services/geodata"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/setupwizard"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
@@ -901,6 +902,40 @@ func main() {
 			}
 			dnsSvc = nil
 		}
+		// Служба мастера первого запуска (фаза 149.1) создаётся только здесь, после
+		// служб источников и секций ядер: один серверный расчёт шагов для мастера и
+		// карточки дашборда. Не создалась — маршруты /api/configlayer/wizard*
+		// отвечают 404.
+		wizSvc, wizErr := setupwizard.New(setupwizard.Deps{
+			Layer:     configLayer,
+			Installed: installedKernels,
+			XKeenInstalled: func() bool {
+				cfg.RLock()
+				xkeenBin := resolveBinaryPath(cfg.XKeenBinary)
+				cfg.RUnlock()
+				if xkeenBin == "" {
+					return false
+				}
+				_, statErr := os.Stat(xkeenBin)
+				return statErr == nil
+			},
+			Kernels: func() setupwizard.KernelState {
+				st := kernelSvc.ActiveState()
+				return setupwizard.KernelState{Kernel: st.Kernel, Running: st.Running, Conflict: st.Conflict}
+			},
+			XrayTakeable: func() (int, bool) { return wizardXrayTakeable(configLayer, coresSvc) },
+		})
+		if wizErr == nil {
+			// Хук после применения — до Start слоя: после него слой хуков не принимает.
+			wizErr = configLayer.Register(wizSvc.Hooks())
+		}
+		if wizErr != nil {
+			log.Printf("Служба мастера не создана, маршруты /api/configlayer/wizard* отвечают 404: %v", wizErr)
+			if wizSvc != nil {
+				wizSvc.Stop()
+			}
+			wizSvc = nil
+		}
 		configLayer.Start()
 		api.SetConfigLayer(configLayer)
 		defer stops.run("config-layer", configLayer.Stop)
@@ -948,6 +983,13 @@ func main() {
 			dnsSvc.Start()
 			api.SetDNSTakeoverService(dnsSvc)
 			defer stops.run("dns-takeover", dnsSvc.Stop)
+		}
+		if wizSvc != nil {
+			// Последней: наблюдатель стартует после слоя и служб, defer идёт после
+			// остальных, поэтому служба мастера останавливается первой.
+			wizSvc.Start()
+			api.SetSetupWizardService(wizSvc)
+			defer stops.run("setup-wizard", wizSvc.Stop)
 		}
 	}
 	srv.HandleProtected("/api/configlayer/state", api.ConfigLayerState)
@@ -1008,6 +1050,10 @@ func main() {
 	srv.HandleProtected("/api/configlayer/cores/fill", api.ConfigCoresFill)
 	srv.HandleProtected("/api/configlayer/dns", api.ConfigDNS)
 	srv.HandleProtected("/api/configlayer/dns/", api.ConfigDNSAction)
+	srv.HandleProtected("/api/configlayer/wizard", api.ConfigLayerWizard)
+	srv.HandleProtected("/api/configlayer/wizard/close", api.ConfigLayerWizardClose)
+	srv.HandleProtected("/api/configlayer/wizard/hide", api.ConfigLayerWizardHide)
+	srv.HandleProtected("/api/configlayer/wizard/reset", api.ConfigLayerWizardReset)
 	srv.HandleProtected("/api/configlayer/geodata", api.ConfigGeodata)
 	srv.HandleProtected("/api/configlayer/geodata/output", api.ConfigGeodataOutput)
 	srv.HandleProtected("/api/configlayer/geodata/run", api.ConfigGeodataRun)
@@ -1142,4 +1188,39 @@ func installedKernelBinary(kernelSvc *services.KernelService, name string) strin
 		return ""
 	}
 	return path
+}
+
+// wizardXrayTakeable — сколько секций Xray мастер ещё может взять в черновик
+// (знаменатель «частично, N из M»: M = N + результат). Признак — «секция в
+// черновике» (DesiredCores черновика), тот же, что у счётчика взятых секций слоя
+// и у поля cores.xray[id].desired снимка; по нему же диалог шага 2 отбирает
+// секции. Владелец секции не годится: дрейф ставит владельца drift и взятой в
+// черновик секции, и отпущенной, их по нему не различить. Взятая в черновик
+// секция в результат не входит при любом владельце, отпущенная в черновике
+// входит — диалог берёт её снова. Заблокированные секции не входят: их взять
+// нельзя. false — вид секций или состояние прочитать не удалось.
+func wizardXrayTakeable(layer *configlayer.Layer, svc *cores.Service) (int, bool) {
+	if layer == nil || svc == nil {
+		return 0, false
+	}
+	view, err := svc.View(configlayer.KernelXray)
+	if err != nil {
+		return 0, false
+	}
+	st, err := layer.ReadState()
+	if err != nil {
+		return 0, false
+	}
+	desired := configlayer.DesiredCores(st.Draft)
+	n := 0
+	for _, sec := range view.Sections {
+		if sec.Blocked != "" {
+			continue
+		}
+		if desired[configlayer.CoreSectionName(configlayer.KernelXray, sec.ID)].Managed {
+			continue
+		}
+		n++
+	}
+	return n, true
 }
