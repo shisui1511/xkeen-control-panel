@@ -325,7 +325,10 @@
             "internal/handlers/setup_wizard.go"
           ],
           "tests": [
-            "go:TestRouterWizardState"
+            "go:TestRouterWizardState",
+            "go:TestRouterWizardFlagOff404",
+            "go:TestRouterWizardAPI",
+            "go:TestRouterWizardConflict"
           ]
         }
       }
@@ -757,6 +760,7 @@
         "go:TestRouterViewOrderAndEmpty",
         "go:TestRouterViewSkippedNotSummedAcrossKernels",
         "go:TestRouterViewTracer",
+        "go:TestRouterWizardAPI",
         "go:TestRouterXrayAPIBlock",
         "go:TestRouterXrayGroupsMaterialize",
         "go:TestRouterXrayProbeBurstFields",
