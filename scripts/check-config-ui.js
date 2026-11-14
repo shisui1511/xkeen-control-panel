@@ -65,7 +65,10 @@
  * 12. Немедленные действия (план 149-15, D-14): константа IMMEDIATE_CALLS клиентских
  *    функций немедленных действий; в components/config/**, ManagedFileBanner и
  *    AccessLogControl каждый файл с вызовом содержит <ImmediateMark (или внесён в
- *    IMMEDIATE_ALLOW с непустой причиной).
+ *    IMMEDIATE_ALLOW с непустой причиной). То же для тегов IMMEDIATE_TAGS — компонентов,
+ *    которые сами делают немедленное действие (встроенная установка XKeen в мастере,
+ *    фаза 149.1, 149 D-14). Мастер добавляет вызовы switchKernel, stopKernelAndReport и
+ *    runKernelInstall.
  *
  * 13. Применение только через окно (план 149-15, D-08): вызов applyNow( в
  *    components/** допустим только в DraftBar.svelte; applyFromUi и releaseAndApply
@@ -1752,7 +1755,15 @@ const IMMEDIATE_CALLS = [
   "confirmMihomoReturn",
   "activateOwnProfile",
   "mihomoOwnerAction",
+  // Мастер первого запуска (фаза 149.1, 149 D-14): запуск и остановка ядра, установка ядра
+  "switchKernel",
+  "stopKernelAndReport",
+  "runKernelInstall",
 ];
+
+// Компоненты, которые сами выполняют немедленное действие: файл со встроенным тегом
+// обязан содержать <ImmediateMark так же, как файл с вызовом из IMMEDIATE_CALLS
+const IMMEDIATE_TAGS = ["XKeenInstallCard"];
 
 const IMMEDIATE_ALLOW = {
   // файл -> непустая причина исключения
@@ -1798,6 +1809,13 @@ for (const rel of IMMEDIATE_FILES) {
     expect(
       clean.includes("<ImmediateMark"),
       `${rel}: содержит вызов немедленного действия (${matched.join(", ")}), но не содержит <ImmediateMark (D-14)`,
+    );
+  }
+  const tags = IMMEDIATE_TAGS.filter((tag) => new RegExp(`<${tag}\\b`).test(clean));
+  if (tags.length > 0 && !IMMEDIATE_ALLOW[rel]) {
+    expect(
+      clean.includes("<ImmediateMark"),
+      `${rel}: содержит тег немедленного действия (${tags.map((tag) => `<${tag}`).join(", ")}), но не содержит <ImmediateMark (D-14)`,
     );
   }
 }

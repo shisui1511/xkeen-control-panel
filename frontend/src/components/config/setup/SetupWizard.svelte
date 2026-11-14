@@ -8,6 +8,7 @@
   import Skeleton from '../../Skeleton.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
   import SetupStep, { type SetupStepStatus } from './SetupStep.svelte';
+  import StepKernel, { type KernelPhase } from './StepKernel.svelte';
   import StepNodes from './StepNodes.svelte';
   import StepRouting, { type RoutingPhase } from './StepRouting.svelte';
   import StepSections, { takeRest, type SectionsPhase } from './StepSections.svelte';
@@ -214,6 +215,23 @@
   // Ход шага 4 (StepRouting): открыт диалог пресета
   let routingPhase = $state<RoutingPhase>('idle');
 
+  // Ход шага 1 (StepKernel): идёт установка ядра или открыто окно установки XKeen
+  let kernelPhase = $state<KernelPhase>('idle');
+
+  // Шаг, в теле которого идёт действие (установка, открытый диалог взятия или пресета),
+  // держится раскрытым: окна диалогов живут в теле шага, и автопереход по ответу сервера
+  // не должен их прятать. «Взять остальные» в свёрнутой строке шага 2 раскрывает шаг тем же
+  // правилом
+  const busyN = $derived(
+    kernelPhase === 'running'
+      ? WIZARD_STEP_IDS.indexOf('kernel') + 1
+      : sectionsPhase === 'running'
+        ? WIZARD_STEP_IDS.indexOf('sections') + 1
+        : routingPhase === 'running'
+          ? WIZARD_STEP_IDS.indexOf('routing') + 1
+          : null
+  );
+
   // Ход запуска ядра в шаге 6 (StepStart) и ядро, запущенное кнопкой мастера
   let startPhase = $state<StartPhase>('idle');
   let startedKernel: KernelName | '' = '';
@@ -228,6 +246,7 @@
   // конфликте по ответу сервера (отказ kernel_conflict сбоем не считается)
   const rows = $derived(
     baseRows.map((r): Row => {
+      if (r.id === 'kernel' && kernelPhase === 'running') return { ...r, status: 'running' };
       if (r.id === 'sections' && sectionsPhase === 'running') return { ...r, status: 'running' };
       if (r.id === 'routing' && routingPhase === 'running') return { ...r, status: 'running' };
       if (r.id === 'apply') {
@@ -260,7 +279,9 @@
   // момент выбора. Раскрыт текущий — выбор следует за ним (автопереход); раскрыт другой
   // шаг или всё свёрнуто — выбор держится
   let manual = $state<{ n: number | null; at: number | null } | null>(null);
-  const openN = $derived(manual !== null && manual.n !== manual.at ? manual.n : currentN);
+  const openN = $derived(
+    busyN ?? (manual !== null && manual.n !== manual.at ? manual.n : currentN)
+  );
 
   function setOpen(n: number, open: boolean) {
     manual = { n: open ? n : null, at: currentN };
@@ -356,7 +377,13 @@
             {/if}
           {/snippet}
           <p class="setup-step-hint">{bodyText(r)}</p>
-          {#if r.id === 'sections' && $wizardView}
+          {#if r.id === 'kernel' && $wizardView}
+            <StepKernel
+              bind:phase={kernelPhase}
+              step={stepOf('kernel')}
+              kernels={$wizardView.kernels}
+            />
+          {:else if r.id === 'sections' && $wizardView}
             <StepSections
               bind:this={sectionsBox}
               bind:phase={sectionsPhase}
