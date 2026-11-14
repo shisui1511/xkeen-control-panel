@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,6 +20,12 @@ import (
 )
 
 var snapshotIDRx = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
+
+// maxSnapshotFileSize — предел размера одного файла в снимке. Restore отвергает
+// архив с файлом крупнее предела, поэтому Create такие файлы в снимок не кладёт:
+// иначе снимок создаётся, а восстановить его нельзя (например, из-за бэкапов
+// бинарника панели в каталоге данных после обновления).
+const maxSnapshotFileSize = 10 * 1024 * 1024
 
 // SnapshotMeta describes a stored config snapshot.
 type SnapshotMeta struct {
@@ -127,6 +134,10 @@ func (s *SnapshotService) Create(label string) (SnapshotMeta, error) {
 
 			fi, err := d.Info()
 			if err != nil {
+				return nil
+			}
+			if !d.IsDir() && fi.Size() > maxSnapshotFileSize {
+				log.Printf("snapshots: файл %s пропущен: %d байт больше предела %d", arcName, fi.Size(), int64(maxSnapshotFileSize))
 				return nil
 			}
 
@@ -337,7 +348,7 @@ func (s *SnapshotService) Restore(id string) (skipped []string, err error) {
 			return nil, fmt.Errorf("create temp subdir: %w", err)
 		}
 
-		if hdr.Size > 10*1024*1024 {
+		if hdr.Size > maxSnapshotFileSize {
 			return nil, fmt.Errorf("file %s exceeds maximum allowed size of 10 MB", hdr.Name)
 		}
 
@@ -346,7 +357,7 @@ func (s *SnapshotService) Restore(id string) (skipped []string, err error) {
 			return nil, fmt.Errorf("create temp file: %w", err)
 		}
 		// Write with size limit: 10 MB per file
-		if _, err := io.Copy(out, io.LimitReader(tr, 10*1024*1024)); err != nil {
+		if _, err := io.Copy(out, io.LimitReader(tr, maxSnapshotFileSize)); err != nil {
 			_ = out.Close()
 			return nil, fmt.Errorf("write temp file: %w", err)
 		}
