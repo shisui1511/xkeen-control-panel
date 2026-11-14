@@ -210,7 +210,7 @@
 
   // Тела, которые держатся смонтированными и в свёрнутом шаге: диалоги шагов 2 и 4 не
   // снимаются автопереходом посреди выбора, ход и итоги шагов 5–7 не теряются
-  const KEEP_MOUNTED = ['sections', 'routing', 'apply', 'start', 'ip'];
+  const KEEP_MOUNTED = ['nodes', 'sections', 'routing', 'apply', 'start', 'ip'];
 
   // Ход шага 4 (StepRouting): открыт диалог пресета
   let routingPhase = $state<RoutingPhase>('idle');

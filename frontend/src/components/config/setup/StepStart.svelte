@@ -74,7 +74,9 @@
   // Хвост лога ядра из истории панели: последние 8 записей, поле message каждой
   async function loadLog(kernel: KernelName): Promise<string[]> {
     try {
-      const data = await apiFetchJSON<LogHistory>('/api/logs/history?source=' + kernel);
+      // у Xray в буферах панели есть только xray-error и xray-access: хвост сбоя — в первом
+      const source = kernel === 'xray' ? 'xray-error' : kernel;
+      const data = await apiFetchJSON<LogHistory>('/api/logs/history?source=' + source);
       const entries = Array.isArray(data?.entries) ? data.entries : [];
       return entries
         .slice(-8)
