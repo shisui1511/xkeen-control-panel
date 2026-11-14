@@ -320,15 +320,23 @@ func (s *Service) Hide() (View, error) {
 
 // Reset снимает признак мастера — только в режиме разработчика
 // (configlayer.ErrDevModeRequired), ручка проверок карточки и автооткрытия.
+// Идёт под tickMu: тик, прочитавший факты до сброса, допишет done раньше
+// сброса, а не после него. Вид собирается под тем же замком — в ответе статус
+// сразу после сброса, без отметки следующего тика.
 func (s *Service) Reset() (View, error) {
+	s.tickMu.Lock()
+	defer s.tickMu.Unlock()
 	if err := s.d.Layer.ResetWizard(); err != nil {
 		return View{}, err
 	}
 	return s.View(), nil
 }
 
-// mark ставит признак мастера; «не изменилось» — не ошибка.
+// mark ставит признак мастера; «не изменилось» — не ошибка. Под tickMu, как и
+// отметка done наблюдателем: признак пишут по очереди.
 func (s *Service) mark(status configlayer.WizardStatus) (View, error) {
+	s.tickMu.Lock()
+	defer s.tickMu.Unlock()
 	if _, err := s.d.Layer.MarkWizard(status); err != nil {
 		return View{}, err
 	}

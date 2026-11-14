@@ -105,6 +105,14 @@ func (s *Service) tick() {
 	if !ev.allDone() {
 		return
 	}
+	// Между чтением фактов и записью признака черновик могли поправить: done —
+	// только если свежая проверка шагов 1–6 его подтверждает. Сброс и «Закрыть»
+	// или «Скрыть» берут tickMu и сюда не вклиниваются.
+	inst = s.d.Installed()
+	if f = layer.WizardFacts(probe(inst)); !f.Enabled ||
+		!evaluate(f, inst, s.d.XKeenInstalled(), s.d.Kernels()).allDone() {
+		return
+	}
 	if _, err := layer.MarkWizard(configlayer.WizardDone); err != nil {
 		// Повтор — на следующем тике. В тексте ошибки записи нет данных источников.
 		log.Printf("setupwizard: отметка «пройдено» не записана: %v", err)

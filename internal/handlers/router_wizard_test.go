@@ -146,23 +146,16 @@ func rtWizardHold(e *rtSrc) (release func()) {
 	return func() { e.resetDraft() }
 }
 
-// rtWizardReset снимает признак мастера (нужен режим разработчика). Тик
-// наблюдателя, прочитавший факты до правки черновика, мог успеть записать done —
-// тогда сброс повторяется один раз; после него статус обязан быть пустым.
+// rtWizardReset снимает признак мастера (нужен режим разработчика). Сброс и
+// отметка done наблюдателем идут по очереди, а вид в ответе сброса собран до
+// следующего тика: статус в нём обязан быть пустым с первого сброса.
 func rtWizardReset(e *rtSrc) map[string]any {
 	e.t.Helper()
-	for attempt := 0; ; attempt++ {
-		r := e.call(http.MethodPost, rtWizardBase+"/reset", nil)
-		if r.Status != http.StatusOK {
-			e.t.Fatalf("POST %s/reset: %d %s", rtWizardBase, r.Status, r.Code)
-		}
-		v := rtWizardView(e)
-		if st := rtWizardStatus(v); st == "" {
-			return v
-		} else if attempt >= 1 {
-			e.t.Fatalf("после сброса статус мастера %q, ожидался пустой", st)
-		}
+	v := rtWizardPost(e, "reset")
+	if st := rtWizardStatus(v); st != "" {
+		e.t.Fatalf("после сброса статус мастера %q, ожидался пустой", st)
 	}
+	return v
 }
 
 // rtWizardRestore возвращает признак мастера prev при удержанном черновике:

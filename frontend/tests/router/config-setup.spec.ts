@@ -64,7 +64,12 @@ interface WizardView {
 async function wizard(page: Page): Promise<WizardView> {
   const res = await api(page, 'GET', WIZARD);
   expect(res.status, `GET ${WIZARD}`).toBe(200);
-  const d = res.data ?? {};
+  return toWizardView(res.data);
+}
+
+/** Вид мастера из тела ответа: GET и POST-действия мастера отвечают одним видом. */
+function toWizardView(data: Record<string, unknown> | null | undefined): WizardView {
+  const d = data ?? {};
   const kernels = (d.kernels ?? {}) as Partial<WizardView['kernels']>;
   return {
     status: String(d.status ?? ''),
@@ -109,20 +114,16 @@ async function holdDraft(page: Page): Promise<void> {
 }
 
 /**
- * Снимает признак мастера (нужен dev_mode). Тик наблюдателя, прочитавший факты до правки
- * черновика, мог успеть записать done — тогда сброс повторяется один раз; после него статус
- * обязан быть пустым.
+ * Снимает признак мастера (нужен dev_mode). Сброс и отметка done наблюдателем идут по
+ * очереди, а вид в ответе сброса собран до следующего тика: статус в нём обязан быть пустым
+ * с первого сброса.
  */
 async function wizardReset(page: Page): Promise<WizardView> {
-  for (let attempt = 0; ; attempt++) {
-    const res = await api(page, 'POST', `${WIZARD}/reset`);
-    expect(res.status, `POST ${WIZARD}/reset (${String(res.data?.code ?? '')})`).toBe(200);
-    const view = await wizard(page);
-    if (view.status === '' || attempt >= 1) {
-      expect(view.status, 'статус мастера после сброса').toBe('');
-      return view;
-    }
-  }
+  const res = await api(page, 'POST', `${WIZARD}/reset`);
+  expect(res.status, `POST ${WIZARD}/reset (${String(res.data?.code ?? '')})`).toBe(200);
+  const view = toWizardView(res.data);
+  expect(view.status, 'статус мастера после сброса').toBe('');
+  return view;
 }
 
 /**
