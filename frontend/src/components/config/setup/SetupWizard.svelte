@@ -1,0 +1,268 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { t } from '../../../i18n';
+  import PageHeader from '../../../PageHeader.svelte';
+  import Button from '../../Button.svelte';
+  import Badge from '../../Badge.svelte';
+  import EmptyState from '../../EmptyState.svelte';
+  import Skeleton from '../../Skeleton.svelte';
+  import Icon from '../../../lib/components/Icon.svelte';
+  import SetupStep, { type SetupStepStatus } from './SetupStep.svelte';
+  import { showToast } from '../../../stores';
+  import { layerStatus, layerConnection, refetchLayerState } from '../../../lib/configLayer';
+  import {
+    WIZARD_STEP_IDS,
+    closeWizard,
+    loadWizard,
+    startWizard,
+    stopWizard,
+    wizardLoadError,
+    wizardView,
+    type WizardPartial
+  } from '../../../lib/configWizard';
+
+  // Страница мастера первого запуска (#/config/setup, D-01…D-03, D-10): шапка с «Закрыть»,
+  // семь шагов списком и «Готово». Статусы шагов 1–6 считает сервер (GET
+  // /api/configlayer/wizard), седьмой шаг (проверка IP) клиентский: он заперт, пока не
+  // выполнены «Применение» и «Запуск ядра» (D-09). Вкладок раздела, полосы черновика и
+  // общих уведомлений здесь нет (D-03). Шаги — аккордеон: раскрыт один шаг; при загрузке —
+  // первый невыполненный, а когда он выполнен — следующий, если пользователь не раскрыл
+  // другой шаг сам.
+
+  interface Row {
+    n: number;
+    id: string;
+    status: SetupStepStatus;
+    partial?: WizardPartial;
+  }
+
+  // Живая область: «Шаг N выполнен», когда шаг стал выполненным при открытой странице.
+  // Фокус при этом не уводится
+  let liveText = $state('');
+
+  interface Props {
+    /**
+     * «Применить» шага 5: Config.svelte передаёт apply() голой полосы DraftBar — тот же путь
+     * через перехват и окно изменений, что в разделе (149 D-23, D-03). Тело шага 5 встраивает
+     * план 149.1-05.
+     */
+    onapply?: () => void;
+  }
+
+  let { onapply = () => {} }: Props = $props();
+
+  onMount(() => {
+    startWizard();
+    let prevDone: Set<string> | null = null;
+    const off = wizardView.subscribe((v) => {
+      if (!v) {
+        prevDone = null;
+        return;
+      }
+      const done = v.steps.filter((s) => s.done).map((s) => s.id as string);
+      const before = prevDone;
+      prevDone = new Set(done);
+      if (before === null) return;
+      const fresh = done.find((id) => !before.has(id));
+      if (fresh === undefined) return;
+      const n = WIZARD_STEP_IDS.indexOf(fresh as (typeof WIZARD_STEP_IDS)[number]) + 1;
+      liveText = $t('cfg.setup.step_done_live', { n: String(n) });
+    });
+    return () => {
+      off();
+      stopWizard();
+    };
+  });
+
+  const failed = $derived(
+    $layerStatus === 'error' || $layerConnection === 'lost' || $wizardLoadError
+  );
+
+  const rows = $derived.by((): Row[] => {
+    const v = $wizardView;
+    if (!v) return [];
+    const byId = new Map(v.steps.map((s) => [s.id, s]));
+    const out: Row[] = WIZARD_STEP_IDS.map((id, i) => {
+      const n = i + 1;
+      const step = byId.get(id);
+      // Шаг 2 при частичном взятии: выполнен, но с пометкой «частично, N из M» (D-04.2)
+      const partial =
+        step?.partial && step.partial.done < step.partial.total ? step.partial : undefined;
+      let status: SetupStepStatus = 'pending';
+      if (step?.done) status = partial ? 'partial' : 'done';
+      else if (v.current === n) status = 'current';
+      return { n, id, status, partial };
+    });
+    // Шаг 7 открывается, когда применение завершено и ядро запущено (D-09)
+    const ipOpen = byId.get('apply')?.done === true && byId.get('start')?.done === true;
+    out.push({
+      n: 7,
+      id: 'ip',
+      status: !ipOpen ? 'locked' : v.current === 0 ? 'current' : 'pending'
+    });
+    return out;
+  });
+
+  // Шаги 1–6 выполнены: «Готово» — главная кнопка
+  const allDone = $derived($wizardView !== null && $wizardView.current === 0);
+
+  // Номер раскрытого по умолчанию шага: текущий (первый невыполненный), а когда шаги 1–6
+  // выполнены — проверка IP
+  const currentN = $derived(rows.find((r) => r.status === 'current')?.n ?? null);
+
+  // Выбор пользователя: какой шаг раскрыт (null — все свёрнуты) и какой шаг был текущим в
+  // момент выбора. Раскрыт текущий — выбор следует за ним (автопереход); раскрыт другой
+  // шаг или всё свёрнуто — выбор держится
+  let manual = $state<{ n: number | null; at: number | null } | null>(null);
+  const openN = $derived(manual !== null && manual.n !== manual.at ? manual.n : currentN);
+
+  function setOpen(n: number, open: boolean) {
+    manual = { n: open ? n : null, at: currentN };
+  }
+
+  function statusText(r: Row): string {
+    if (r.status === 'done' || r.status === 'partial') return $t('cfg.setup.status.done');
+    if (r.status === 'running') return $t('cfg.setup.status.running');
+    if (r.status === 'error') return $t('cfg.setup.status.error');
+    if (r.status === 'blocked') return $t('cfg.setup.status.blocked');
+    return $t('cfg.setup.status.pending');
+  }
+
+  function bodyText(r: Row): string {
+    if (r.id === 'ip' && r.status === 'locked') return $t('cfg.setup.ip.locked');
+    return $t(`cfg.setup.step.${r.id}.hint`);
+  }
+
+  let closing = $state(false);
+
+  // «Закрыть» отменяет автооткрытие (D-10) и уводит в «Узлы» даже при сбое запроса;
+  // черновик не трогается
+  async function close() {
+    closing = true;
+    try {
+      await closeWizard();
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      showToast('warning', $t('cfg.setup.close_failed', { reason }));
+    } finally {
+      closing = false;
+    }
+    window.location.hash = '#/config/nodes';
+  }
+
+  function retry() {
+    void refetchLayerState();
+    void loadWizard();
+  }
+</script>
+
+<div class="setup-page" data-testid="config-setup">
+  <PageHeader title={$t('cfg.setup.title')} subtitle={$t('cfg.setup.subtitle')}>
+    {#snippet actions()}
+      <Button variant="ghost" loading={closing} data-testid="setup-close" onclick={close}>
+        <Icon name="cross" size={16} />
+        {$t('cfg.setup.close')}
+      </Button>
+    {/snippet}
+  </PageHeader>
+
+  <p class="sr-only" aria-live="polite" data-testid="setup-live">{liveText}</p>
+
+  {#if failed}
+    <EmptyState
+      title={$t('cfg.load_error_title')}
+      description={$t('cfg.load_error_body')}
+      ctaText={$t('cfg.load_error_retry')}
+      plain
+      oncta={retry}
+    />
+  {:else if $wizardView === null}
+    <div class="setup-skeleton" aria-busy="true">
+      {#each [1, 2, 3, 4, 5, 6, 7] as n (n)}
+        <Skeleton type="rect" height="56px" />
+      {/each}
+    </div>
+  {:else}
+    <ol class="setup-steps" data-testid="setup-steps" aria-label={$t('cfg.setup.steps_aria')}>
+      {#each rows as r (r.n)}
+        <SetupStep
+          n={r.n}
+          id={r.id}
+          status={r.status}
+          title={$t(`cfg.setup.step.${r.id}.title`)}
+          statusText={statusText(r)}
+          bind:expanded={() => openN === r.n, (v) => setOpen(r.n, v)}
+        >
+          {#snippet aside()}
+            {#if r.partial}
+              <Badge tone="warning">
+                {$t('cfg.setup.status.partial', {
+                  done: String(r.partial.done),
+                  total: String(r.partial.total)
+                })}
+              </Badge>
+            {/if}
+          {/snippet}
+          <p class="setup-step-hint">{bodyText(r)}</p>
+        </SetupStep>
+      {/each}
+    </ol>
+
+    <div class="setup-footer">
+      <Button
+        variant={allDone ? 'primary' : 'secondary'}
+        data-testid="setup-finish"
+        onclick={() => (window.location.hash = '#/dashboard')}
+      >
+        {$t('cfg.setup.finish')}
+      </Button>
+    </div>
+  {/if}
+</div>
+
+<style>
+  .setup-page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-4);
+    min-width: 0;
+  }
+
+  @media (min-width: 1024px) {
+    .setup-page {
+      max-width: 720px;
+    }
+  }
+
+  .setup-skeleton,
+  .setup-steps {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+  }
+
+  .setup-steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .setup-step-hint {
+    margin: 0;
+    color: var(--fg-secondary);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .setup-footer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-2);
+  }
+
+  @media (max-width: 480px) {
+    .setup-footer :global(.btn) {
+      width: 100%;
+    }
+  }
+</style>

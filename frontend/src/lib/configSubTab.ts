@@ -29,6 +29,19 @@ export function configSubTab(hash: string): ConfigSubTab {
   return DEFAULT_CONFIG_SUBTAB;
 }
 
+/**
+ * Адрес страницы мастера первого запуска (`#/config/setup`, фаза 149.1). Мастер — не
+ * вкладка: его нет в CONFIG_SUBTABS, а configSubTab для него по-прежнему даёт «Узлы».
+ * Разбор тот же: запрос после `?` отбрасывается.
+ */
+export function isConfigSetupHash(hash: string): boolean {
+  if (!hash || !hash.startsWith('#/')) return false;
+  const path = hash.slice(2);
+  const queryIdx = path.indexOf('?');
+  const base = queryIdx !== -1 ? path.slice(0, queryIdx) : path;
+  return base === 'config/setup';
+}
+
 /** Хэш адреса вкладки. */
 export function configSubTabHash(tab: ConfigSubTab): string {
   return `#/config/${tab}`;
