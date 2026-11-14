@@ -8,8 +8,15 @@
   import Skeleton from '../../Skeleton.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
   import SetupStep, { type SetupStepStatus } from './SetupStep.svelte';
-  import { showToast } from '../../../stores';
-  import { layerStatus, layerConnection, refetchLayerState } from '../../../lib/configLayer';
+  import StepNodes from './StepNodes.svelte';
+  import StepApply from './StepApply.svelte';
+  import { conflictVisible, showToast } from '../../../stores';
+  import {
+    applyRunning,
+    layerStatus,
+    layerConnection,
+    refetchLayerState
+  } from '../../../lib/configLayer';
   import {
     WIZARD_STEP_IDS,
     closeWizard,
@@ -18,7 +25,9 @@
     stopWizard,
     wizardLoadError,
     wizardView,
-    type WizardPartial
+    type WizardPartial,
+    type WizardStep,
+    type WizardStepId
   } from '../../../lib/configWizard';
 
   // Страница мастера первого запуска (#/config/setup, D-01…D-03, D-10): шапка с «Закрыть»,
@@ -43,16 +52,43 @@
   interface Props {
     /**
      * «Применить» шага 5: Config.svelte передаёт apply() голой полосы DraftBar — тот же путь
-     * через перехват и окно изменений, что в разделе (149 D-23, D-03). Тело шага 5 встраивает
-     * план 149.1-05.
+     * через перехват и окно изменений, что в разделе (149 D-23, D-03). Его нажимает только
+     * кнопка тела шага 5 (StepApply).
      */
     onapply?: () => void;
   }
 
   let { onapply = () => {} }: Props = $props();
 
+  // Шаг 5 раскрывается сам с началом применения (ход виден в его теле, B5) и при конфликте
+  // ядер (там причина и кнопки остановки, D-15) — даже если текущим по серверу стал шаг 6.
+  // Раскрытие по конфликту снимается вместе с конфликтом: дальше — прежнее правило
+  // (раскрыт текущий шаг)
+  const APPLY_N = WIZARD_STEP_IDS.indexOf('apply') + 1;
+  let openedByConflict = false;
+
+  function forceOpenApply() {
+    manual = { n: APPLY_N, at: currentN };
+  }
+
   onMount(() => {
     startWizard();
+    let wasRunning = false;
+    const offRun = applyRunning.subscribe((r) => {
+      if (r && !wasRunning) forceOpenApply();
+      wasRunning = r;
+    });
+    let wasConflict = false;
+    const offConflict = conflictVisible.subscribe((c) => {
+      if (c && !wasConflict) {
+        openedByConflict = true;
+        forceOpenApply();
+      } else if (!c && wasConflict && openedByConflict) {
+        openedByConflict = false;
+        if (manual?.n === APPLY_N) manual = null;
+      }
+      wasConflict = c;
+    });
     let prevDone: Set<string> | null = null;
     const off = wizardView.subscribe((v) => {
       if (!v) {
@@ -70,6 +106,8 @@
     });
     return () => {
       off();
+      offRun();
+      offConflict();
       stopWizard();
     };
   });
@@ -78,7 +116,13 @@
     $layerStatus === 'error' || $layerConnection === 'lost' || $wizardLoadError
   );
 
-  const rows = $derived.by((): Row[] => {
+  // Шаг мастера из ответа сервера по id
+  function stepOf(id: WizardStepId): WizardStep | undefined {
+    return $wizardView?.steps.find((s) => s.id === id);
+  }
+
+  // Статусы шагов по серверу (до наложения хода действий в телах шагов)
+  const baseRows = $derived.by((): Row[] => {
     const v = $wizardView;
     if (!v) return [];
     const byId = new Map(v.steps.map((s) => [s.id, s]));
@@ -103,12 +147,24 @@
     return out;
   });
 
+  // Ход действий поверх статуса сервера: шаг 5 — «Идёт…», пока идёт применение, и
+  // «Заблокирован» при конфликте ядер при любом состоянии черновика (D-15)
+  const rows = $derived(
+    baseRows.map((r): Row => {
+      if (r.id === 'apply') {
+        if ($applyRunning) return { ...r, status: 'running' };
+        if ($conflictVisible) return { ...r, status: 'blocked' };
+      }
+      return r;
+    })
+  );
+
   // Шаги 1–6 выполнены: «Готово» — главная кнопка
   const allDone = $derived($wizardView !== null && $wizardView.current === 0);
 
   // Номер раскрытого по умолчанию шага: текущий (первый невыполненный), а когда шаги 1–6
-  // выполнены — проверка IP
-  const currentN = $derived(rows.find((r) => r.status === 'current')?.n ?? null);
+  // выполнены — проверка IP. Считается по статусу сервера: ход действий его не сдвигает
+  const currentN = $derived(baseRows.find((r) => r.status === 'current')?.n ?? null);
 
   // Выбор пользователя: какой шаг раскрыт (null — все свёрнуты) и какой шаг был текущим в
   // момент выбора. Раскрыт текущий — выбор следует за ним (автопереход); раскрыт другой
@@ -191,6 +247,7 @@
           status={r.status}
           title={$t(`cfg.setup.step.${r.id}.title`)}
           statusText={statusText(r)}
+          keepMounted={r.id === 'apply'}
           bind:expanded={() => openN === r.n, (v) => setOpen(r.n, v)}
         >
           {#snippet aside()}
@@ -204,6 +261,11 @@
             {/if}
           {/snippet}
           <p class="setup-step-hint">{bodyText(r)}</p>
+          {#if r.id === 'nodes'}
+            <StepNodes step={stepOf('nodes')} />
+          {:else if r.id === 'apply'}
+            <StepApply step={stepOf('apply')} {onapply} />
+          {/if}
         </SetupStep>
       {/each}
     </ol>
