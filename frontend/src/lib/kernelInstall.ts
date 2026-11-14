@@ -119,9 +119,9 @@ function isAbort(e: unknown): boolean {
  */
 export async function runKernelInstall(
   name: KernelName,
-  opts: { onUpdate?: (s: KernelInstallStatus) => void; signal?: AbortSignal } = {}
+  opts: { signal?: AbortSignal } = {}
 ): Promise<KernelInstallStatus> {
-  const { onUpdate, signal } = opts;
+  const { signal } = opts;
   const unlock = lockNav();
   try {
     if (signal?.aborted) throw abortError(signal);
@@ -145,7 +145,6 @@ export async function runKernelInstall(
         await wait(KERNEL_INSTALL_POLL_MS, signal);
         continue;
       }
-      onUpdate?.(st);
       if (isTerminalInstallStatus(st.status)) return st;
       await wait(KERNEL_INSTALL_POLL_MS, signal);
     }

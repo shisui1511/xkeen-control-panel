@@ -4,7 +4,7 @@
 </script>
 
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { t } from '../../../i18n';
   import Button from '../../Button.svelte';
   import Spinner from '../../Spinner.svelte';
@@ -53,6 +53,11 @@
   let failKernel = $state<KernelName | ''>('');
   let failReason = $state('');
 
+  // Уход со страницы мастера снимает опрос установки и замок меню; установка на сервере
+  // продолжается, её итог покажут «Службы» и следующий вид мастера
+  let installAbort: AbortController | null = null;
+  onDestroy(() => installAbort?.abort());
+
   function syncPhase() {
     phase = installing !== '' || xkeenOpen ? 'running' : 'idle';
   }
@@ -64,8 +69,10 @@
     failKernel = '';
     failReason = '';
     syncPhase();
+    const ctrl = new AbortController();
+    installAbort = ctrl;
     try {
-      const st = await runKernelInstall(kernel, { onUpdate: () => {} });
+      const st = await runKernelInstall(kernel, { signal: ctrl.signal });
       if (st.status === 'failed') {
         failKernel = kernel;
         // Причина — как на «Службах»: перевод по error_kind, иначе текст message
@@ -73,9 +80,13 @@
         failReason = f ? $t(f.key, f.params) : st.message || kernel;
       }
     } catch (e: unknown) {
-      failKernel = kernel;
-      failReason = e instanceof Error && e.message !== '' ? e.message : String(e);
+      // Отмена при размонтировании — не сбой установки
+      if (!ctrl.signal.aborted) {
+        failKernel = kernel;
+        failReason = e instanceof Error && e.message !== '' ? e.message : String(e);
+      }
     } finally {
+      if (installAbort === ctrl) installAbort = null;
       installing = '';
       syncPhase();
       void loadWizard();
