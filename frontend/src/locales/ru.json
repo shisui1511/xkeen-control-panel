@@ -2824,6 +2824,7 @@
   "cfg.setup.ip.diag_link": "Открыть журнал для диагностики",
   "cfg.setup.ip.failed_title": "Не удалось проверить",
   "cfg.setup.ip.failed_body": "Сервис определения IP не ответил (возможно, его блокирует расширение браузера). Шаги 1–6 выполнены, настройку можно завершить",
+  "cfg.setup.ip.failed_body_later": "Сервис определения IP не ответил (возможно, его блокирует расширение браузера). Повторите проверку позже",
   "cfg.setup.ip.your_ip": "Ваш IP: {ip}",
   "cfg.setup.ip.country": "Страна: {country}",
   "cfg.setup.ip.router_ip": "IP роутера: {ip}",

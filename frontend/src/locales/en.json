@@ -2824,6 +2824,7 @@
   "cfg.setup.ip.diag_link": "Open the log for diagnostics",
   "cfg.setup.ip.failed_title": "Could not check",
   "cfg.setup.ip.failed_body": "The IP lookup service did not respond (a browser extension may be blocking it). Steps 1–6 are done, you can finish the setup",
+  "cfg.setup.ip.failed_body_later": "The IP lookup service did not respond (a browser extension may be blocking it). Check again later",
   "cfg.setup.ip.your_ip": "Your IP: {ip}",
   "cfg.setup.ip.country": "Country: {country}",
   "cfg.setup.ip.router_ip": "Router IP: {ip}",

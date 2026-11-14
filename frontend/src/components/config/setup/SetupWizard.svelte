@@ -434,6 +434,7 @@
               bind:phase={ipPhase}
               ready={r.status !== 'locked'}
               presetId={stepOf('routing')?.preset ?? ''}
+              {allDone}
             />
           {/if}
         </SetupStep>

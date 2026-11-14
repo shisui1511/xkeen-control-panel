@@ -23,11 +23,13 @@
     ready: boolean;
     /** Пресет маршрутизации шага 4 (пусто — свои правила или не выбран). */
     presetId: string;
+    /** Выполнены все шаги 1–6: при сбое проверки можно предложить завершить настройку. */
+    allDone?: boolean;
     /** Ход и итог проверки для статуса строки шага. */
     phase?: IpPhase;
   }
 
-  let { ready, presetId, phase = $bindable('idle') }: Props = $props();
+  let { ready, presetId, allDone = false, phase = $bindable('idle') }: Props = $props();
 
   // Пресеты, при которых весь трафик устройства должен идти через прокси
   const PROXY_ALL_PRESETS = ['all_proxy', 'except_country'];
@@ -130,7 +132,11 @@
       <span class="ip-icon" aria-hidden="true"><Icon name="warning" size={16} /></span>
       <div class="ip-alert-body">
         <strong>{$t('cfg.setup.ip.failed_title')}</strong>
-        <span>{$t('cfg.setup.ip.failed_body')}</span>
+        <!-- Шаг 7 открыт уже при выполненных шагах 5 и 6: «шаги 1–6 выполнены» — только когда
+             это так -->
+        <span>
+          {allDone ? $t('cfg.setup.ip.failed_body') : $t('cfg.setup.ip.failed_body_later')}
+        </span>
       </div>
     </div>
   {/if}
