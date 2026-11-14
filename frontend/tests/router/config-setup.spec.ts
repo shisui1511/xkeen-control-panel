@@ -3,7 +3,7 @@
 import { test, expect, type Browser, type Page } from '@playwright/test';
 import { attachConsoleGuard, type ConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { SLOW_ANNOTATION } from './lib/known';
+import { SLOW_ANNOTATION, quarantine } from './lib/known';
 import {
   addToDraft,
   api,
@@ -901,6 +901,9 @@ test(
     }
   },
   async ({ page, browser }) => {
+    // Три прогона в сессии 149.1-09: поток прошёл целиком, затем 10-секундные ожидания
+    // упёрлись в медленную панель на разных шагах («Закрыть», отпускание секции).
+    quarantine('wizard-clean-install-slow-panel-timeouts');
     test.setTimeout(T.save * 8);
     await page.setViewportSize({ width: 1280, height: 900 });
     await startPage(page);
