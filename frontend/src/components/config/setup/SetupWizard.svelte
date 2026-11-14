@@ -9,6 +9,7 @@
   import Icon from '../../../lib/components/Icon.svelte';
   import SetupStep, { type SetupStepStatus } from './SetupStep.svelte';
   import StepNodes from './StepNodes.svelte';
+  import StepSections, { takeRest, type SectionsPhase } from './StepSections.svelte';
   import StepApply from './StepApply.svelte';
   import StepStart, { type StartPhase } from './StepStart.svelte';
   import IpCheckResult, { type IpPhase } from './IpCheckResult.svelte';
@@ -200,6 +201,11 @@
     return out;
   });
 
+  // Ход шага 2 (StepSections): грузится вид секций или открыт диалог взятия. Экземпляр
+  // нужен «Взять остальные» в строке шага — она открывает тот же диалог, что тело шага
+  let sectionsPhase = $state<SectionsPhase>('idle');
+  let sectionsBox = $state<StepSections | undefined>();
+
   // Ход запуска ядра в шаге 6 (StepStart) и ядро, запущенное кнопкой мастера
   let startPhase = $state<StartPhase>('idle');
   let startedKernel: KernelName | '' = '';
@@ -214,6 +220,7 @@
   // конфликте по ответу сервера (отказ kernel_conflict сбоем не считается)
   const rows = $derived(
     baseRows.map((r): Row => {
+      if (r.id === 'sections' && sectionsPhase === 'running') return { ...r, status: 'running' };
       if (r.id === 'apply') {
         if ($applyRunning) return { ...r, status: 'running' };
         if ($conflictVisible) return { ...r, status: 'blocked' };
@@ -321,7 +328,7 @@
           status={r.status}
           title={$t(`cfg.setup.step.${r.id}.title`)}
           statusText={statusText(r)}
-          keepMounted={r.id === 'apply' || r.id === 'start' || r.id === 'ip'}
+          keepMounted={r.id === 'sections' || r.id === 'apply' || r.id === 'start' || r.id === 'ip'}
           bind:expanded={() => openN === r.n, (v) => setOpen(r.n, v)}
         >
           {#snippet aside()}
@@ -332,10 +339,22 @@
                   total: String(r.partial.total)
                 })}
               </Badge>
+              {@render takeRest(
+                () => void sectionsBox?.openXray(),
+                sectionsPhase === 'running' || $applyRunning,
+                $t('cfg.setup.sections.take_rest')
+              )}
             {/if}
           {/snippet}
           <p class="setup-step-hint">{bodyText(r)}</p>
-          {#if r.id === 'nodes'}
+          {#if r.id === 'sections' && $wizardView}
+            <StepSections
+              bind:this={sectionsBox}
+              bind:phase={sectionsPhase}
+              step={stepOf('sections')}
+              kernels={$wizardView.kernels}
+            />
+          {:else if r.id === 'nodes'}
             <StepNodes step={stepOf('nodes')} />
           {:else if r.id === 'apply'}
             <StepApply step={stepOf('apply')} {onapply} />
