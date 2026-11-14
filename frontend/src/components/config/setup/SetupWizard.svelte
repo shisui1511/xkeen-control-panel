@@ -3,9 +3,11 @@
   import { t } from '../../../i18n';
   import PageHeader from '../../../PageHeader.svelte';
   import Button from '../../Button.svelte';
+  import Badge from '../../Badge.svelte';
   import EmptyState from '../../EmptyState.svelte';
   import Skeleton from '../../Skeleton.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
+  import SetupStep, { type SetupStepStatus } from './SetupStep.svelte';
   import { showToast } from '../../../stores';
   import { layerStatus, layerConnection, refetchLayerState } from '../../../lib/configLayer';
   import {
@@ -15,29 +17,50 @@
     startWizard,
     stopWizard,
     wizardLoadError,
-    wizardView
+    wizardView,
+    type WizardPartial
   } from '../../../lib/configWizard';
 
   // Страница мастера первого запуска (#/config/setup, D-01…D-03, D-10): шапка с «Закрыть»,
   // семь шагов списком и «Готово». Статусы шагов 1–6 считает сервер (GET
   // /api/configlayer/wizard), седьмой шаг (проверка IP) клиентский: он заперт, пока не
   // выполнены «Применение» и «Запуск ядра» (D-09). Вкладок раздела, полосы черновика и
-  // общих уведомлений здесь нет (D-03).
-
-  type StepStatus =
-    'pending' | 'current' | 'done' | 'partial' | 'running' | 'error' | 'blocked' | 'locked';
+  // общих уведомлений здесь нет (D-03). Шаги — аккордеон: раскрыт один шаг; при загрузке —
+  // первый невыполненный, а когда он выполнен — следующий, если пользователь не раскрыл
+  // другой шаг сам.
 
   interface Row {
     n: number;
     id: string;
-    status: StepStatus;
+    status: SetupStepStatus;
+    partial?: WizardPartial;
   }
 
-  const uid = $props.id();
+  // Живая область: «Шаг N выполнен», когда шаг стал выполненным при открытой странице.
+  // Фокус при этом не уводится
+  let liveText = $state('');
 
   onMount(() => {
     startWizard();
-    return () => stopWizard();
+    let prevDone: Set<string> | null = null;
+    const off = wizardView.subscribe((v) => {
+      if (!v) {
+        prevDone = null;
+        return;
+      }
+      const done = v.steps.filter((s) => s.done).map((s) => s.id as string);
+      const before = prevDone;
+      prevDone = new Set(done);
+      if (before === null) return;
+      const fresh = done.find((id) => !before.has(id));
+      if (fresh === undefined) return;
+      const n = WIZARD_STEP_IDS.indexOf(fresh as (typeof WIZARD_STEP_IDS)[number]) + 1;
+      liveText = $t('cfg.setup.step_done_live', { n: String(n) });
+    });
+    return () => {
+      off();
+      stopWizard();
+    };
   });
 
   const failed = $derived(
@@ -51,10 +74,13 @@
     const out: Row[] = WIZARD_STEP_IDS.map((id, i) => {
       const n = i + 1;
       const step = byId.get(id);
-      let status: StepStatus = 'pending';
-      if (step?.done) status = 'done';
+      // Шаг 2 при частичном взятии: выполнен, но с пометкой «частично, N из M» (D-04.2)
+      const partial =
+        step?.partial && step.partial.done < step.partial.total ? step.partial : undefined;
+      let status: SetupStepStatus = 'pending';
+      if (step?.done) status = partial ? 'partial' : 'done';
       else if (v.current === n) status = 'current';
-      return { n, id, status };
+      return { n, id, status, partial };
     });
     // Шаг 7 открывается, когда применение завершено и ядро запущено (D-09)
     const ipOpen = byId.get('apply')?.done === true && byId.get('start')?.done === true;
@@ -73,17 +99,21 @@
   // выполнены — проверка IP
   const currentN = $derived(rows.find((r) => r.status === 'current')?.n ?? null);
 
-  // Выбор пользователя: какой шаг раскрыт (null — все свёрнуты) и какой шаг был текущим
-  // в момент выбора
+  // Выбор пользователя: какой шаг раскрыт (null — все свёрнуты) и какой шаг был текущим в
+  // момент выбора. Раскрыт текущий — выбор следует за ним (автопереход); раскрыт другой
+  // шаг или всё свёрнуто — выбор держится
   let manual = $state<{ n: number | null; at: number | null } | null>(null);
   const openN = $derived(manual !== null && manual.n !== manual.at ? manual.n : currentN);
 
-  function toggle(n: number) {
-    manual = { n: openN === n ? null : n, at: currentN };
+  function setOpen(n: number, open: boolean) {
+    manual = { n: open ? n : null, at: currentN };
   }
 
   function statusText(r: Row): string {
-    if (r.status === 'done') return $t('cfg.setup.status.done');
+    if (r.status === 'done' || r.status === 'partial') return $t('cfg.setup.status.done');
+    if (r.status === 'running') return $t('cfg.setup.status.running');
+    if (r.status === 'error') return $t('cfg.setup.status.error');
+    if (r.status === 'blocked') return $t('cfg.setup.status.blocked');
     return $t('cfg.setup.status.pending');
   }
 
@@ -125,6 +155,8 @@
     {/snippet}
   </PageHeader>
 
+  <p class="sr-only" aria-live="polite" data-testid="setup-live">{liveText}</p>
+
   {#if failed}
     <EmptyState
       title={$t('cfg.load_error_title')}
@@ -136,47 +168,32 @@
   {:else if $wizardView === null}
     <div class="setup-skeleton" aria-busy="true">
       {#each [1, 2, 3, 4, 5, 6, 7] as n (n)}
-        <Skeleton type="rect" height="48px" />
+        <Skeleton type="rect" height="56px" />
       {/each}
     </div>
   {:else}
     <ol class="setup-steps" data-testid="setup-steps" aria-label={$t('cfg.setup.steps_aria')}>
       {#each rows as r (r.n)}
-        <li
-          class="setup-step"
-          data-testid="setup-step-{r.n}"
-          data-step-id={r.id}
-          data-status={r.status}
+        <SetupStep
+          n={r.n}
+          id={r.id}
+          status={r.status}
+          title={$t(`cfg.setup.step.${r.id}.title`)}
+          statusText={statusText(r)}
+          bind:expanded={() => openN === r.n, (v) => setOpen(r.n, v)}
         >
-          <h3 class="setup-step-heading">
-            <button
-              type="button"
-              class="setup-step-toggle"
-              aria-expanded={openN === r.n}
-              aria-controls="{uid}-body-{r.n}"
-              data-testid="setup-step-{r.n}-toggle"
-              onclick={() => toggle(r.n)}
-            >
-              <span class="setup-step-num">{r.n}</span>
-              <span class="setup-step-head">
-                <span class="setup-step-title" id="{uid}-title-{r.n}">
-                  {$t(`cfg.setup.step.${r.id}.title`)}
-                </span>
-                <span class="setup-step-status">{statusText(r)}</span>
-              </span>
-            </button>
-          </h3>
-          <div
-            id="{uid}-body-{r.n}"
-            class="setup-step-body"
-            role="region"
-            aria-labelledby="{uid}-title-{r.n}"
-            hidden={openN !== r.n}
-            data-testid="setup-step-{r.n}-body"
-          >
-            <p class="setup-step-hint">{bodyText(r)}</p>
-          </div>
-        </li>
+          {#snippet aside()}
+            {#if r.partial}
+              <Badge tone="warning">
+                {$t('cfg.setup.status.partial', {
+                  done: String(r.partial.done),
+                  total: String(r.partial.total)
+                })}
+              </Badge>
+            {/if}
+          {/snippet}
+          <p class="setup-step-hint">{bodyText(r)}</p>
+        </SetupStep>
       {/each}
     </ol>
 
@@ -219,60 +236,10 @@
     padding: 0;
   }
 
-  .setup-step {
-    min-width: 0;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-  }
-
-  .setup-step-heading {
-    margin: 0;
-    font-size: var(--font-size-base);
-  }
-
-  .setup-step-toggle {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-4);
-    width: 100%;
-    padding: var(--spacing-4);
-    background: none;
-    border: 0;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .setup-step-head {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-1);
-    min-width: 0;
-  }
-
-  .setup-step-title {
-    font-weight: 600;
-    overflow-wrap: anywhere;
-  }
-
-  .setup-step-status {
-    font-size: var(--font-size-xs);
-    color: var(--fg-dim);
-  }
-
-  .setup-step-body {
-    padding: 0 var(--spacing-4) var(--spacing-4);
-  }
-
-  .setup-step-body[hidden] {
-    display: none;
-  }
-
   .setup-step-hint {
     margin: 0;
     color: var(--fg-secondary);
+    line-height: 1.5;
     overflow-wrap: anywhere;
   }
 
@@ -280,5 +247,11 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--spacing-2);
+  }
+
+  @media (max-width: 480px) {
+    .setup-footer :global(.btn) {
+      width: 100%;
+    }
   }
 </style>
