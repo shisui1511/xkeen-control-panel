@@ -17,10 +17,17 @@
 
   const nodes = $derived(step?.nodes ?? 0);
   const sources = $derived(step?.sources ?? 0);
+
+  let field = $state<AddSourceField | undefined>();
+
+  /** Ход шага 3: в поле «Добавить» есть ввод или идёт добавление (реактивно в $derived). */
+  export function isBusy(): boolean {
+    return field?.isBusy() ?? false;
+  }
 </script>
 
 <div class="step-nodes">
-  <AddSourceField />
+  <AddSourceField bind:this={field} />
 
   <div class="step-nodes-errors" data-testid="setup-nodes-errors">
     <ConfigNotices prefixes={['source_']} />

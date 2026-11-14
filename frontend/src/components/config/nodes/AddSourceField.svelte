@@ -67,6 +67,11 @@
     !loading && !adding && preview !== null && preview.addable > 0 && !$applyRunning
   );
 
+  /** В поле есть ввод или идёт добавление: мастер не сворачивает шаг под пользователем. */
+  export function isBusy(): boolean {
+    return hasInput || adding;
+  }
+
   function cancel() {
     seq++;
     if (timer !== null) clearTimeout(timer);

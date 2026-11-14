@@ -232,6 +232,14 @@
   // снимаются автопереходом посреди выбора, ход и итоги шагов 5–7 не теряются
   const KEEP_MOUNTED = ['nodes', 'sections', 'routing', 'apply', 'start', 'ip'];
 
+  // Ход шага 3 (StepNodes): в поле «Добавить» есть ввод или идёт добавление. Без него
+  // автопереход по готовому первому узлу свернул бы поле посреди вставки второй ссылки.
+  // В отличие от диалогов шагов 1, 2 и 4 ввод может висеть долго, поэтому он держит только
+  // автопереход: свернуть шаг или раскрыть другой пользователь может сам
+  const NODES_N = WIZARD_STEP_IDS.indexOf('nodes') + 1;
+  let nodesBox = $state<StepNodes | undefined>();
+  const nodesBusy = $derived(nodesBox?.isBusy() ?? false);
+
   // Ход шага 4 (StepRouting): открыт диалог пресета
   let routingPhase = $state<RoutingPhase>('idle');
 
@@ -299,12 +307,21 @@
   // момент выбора. Раскрыт текущий — выбор следует за ним (автопереход); раскрыт другой
   // шаг или всё свёрнуто — выбор держится
   let manual = $state<{ n: number | null; at: number | null } | null>(null);
+  // Ввод в шаге 3 держит его раскрытым, пока пользователь сам не выбрал другой шаг и пока
+  // шаг 5 не раскрыт сам (началось применение или конфликт ядер)
+  const holdNodes = $derived(
+    nodesBusy &&
+      (manual === null || manual.n === NODES_N || (manual.n === manual.at && manual.n !== APPLY_N))
+  );
   const openN = $derived(
-    busyN ?? (manual !== null && manual.n !== manual.at ? manual.n : currentN)
+    busyN ?? (holdNodes ? NODES_N : manual !== null && manual.n !== manual.at ? manual.n : currentN)
   );
 
   function setOpen(n: number, open: boolean) {
-    manual = { n: open ? n : null, at: currentN };
+    // При вводе в шаге 3 раскрытый другой шаг держится явно (at: null): «следовать за
+    // текущим» иначе вернуло бы шаг 3
+    const explicit = open && nodesBusy && n !== NODES_N;
+    manual = { n: open ? n : null, at: explicit ? null : currentN };
   }
 
   function statusText(r: Row): string {
@@ -417,7 +434,7 @@
               kernels={$wizardView.kernels}
             />
           {:else if r.id === 'nodes'}
-            <StepNodes step={stepOf('nodes')} />
+            <StepNodes bind:this={nodesBox} step={stepOf('nodes')} />
           {:else if r.id === 'routing'}
             <StepRouting step={stepOf('routing')} bind:phase={routingPhase} />
           {:else if r.id === 'apply'}
