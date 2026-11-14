@@ -2809,7 +2809,6 @@
   "cfg.setup.start.logs": "Журнал",
   "cfg.setup.start.files": "Файлы",
   "cfg.setup.start.log_aria": "Последние строки лога ядра",
-  "cfg.setup.ip.locked": "Станет доступен после запуска ядра",
   "cfg.setup.ip.waiting": "Проверка начнётся, когда ядро запустится",
   "cfg.setup.ip.check": "Проверить IP",
   "cfg.setup.ip.again": "Проверить снова",
