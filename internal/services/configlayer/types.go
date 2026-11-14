@@ -154,6 +154,11 @@ type State struct {
 	// применением (желаемое — секции xray_* черновика). Поле необязательное,
 	// схема прежняя (U-07: миграций нет).
 	Cores CoresState `json:"cores"`
+	// Wizard — признак мастера первого запуска (149.1): закрыт, пройден или
+	// скрыт. Поле необязательное, схема прежняя (149 D-26: формат файла —
+	// публичный контракт до 1.0.0). Указатель и omitempty оставляют файл тех,
+	// кто мастер не трогал, прежним; сброс схемы даёт nil — мастер снова виден.
+	Wizard *WizardState `json:"wizard,omitempty"`
 }
 
 // emptyState — чистое состояние текущей схемы.
@@ -184,6 +189,10 @@ func (st State) clone() State {
 		j.Routing = st.Journal.Routing.clone()
 		out.Journal = &j
 	}
+	if st.Wizard != nil {
+		w := *st.Wizard
+		out.Wizard = &w
+	}
 	return out
 }
 
@@ -200,5 +209,10 @@ func (st *State) normalize() {
 	}
 	if st.Manifest == nil {
 		st.Manifest = map[string]ManifestEntry{}
+	}
+	// Неизвестный статус мастера (подмена файла, запись более новой сборки)
+	// отбрасывается: мастер считается непройденным.
+	if st.Wizard != nil && !validWizardStatus(st.Wizard.Status) {
+		st.Wizard = nil
 	}
 }

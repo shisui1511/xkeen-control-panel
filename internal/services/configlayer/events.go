@@ -22,6 +22,8 @@ const (
 	EventGeodata = "geodata"
 	// EventDNS — состояние перехвата DNS изменилось: счётчик событий службы.
 	EventDNS = "dns"
+	// EventWizard — признак мастера первого запуска изменился: счётчик событий.
+	EventWizard = "wizard"
 )
 
 const (
@@ -73,6 +75,12 @@ type GeodataEvent struct {
 // DNSEvent — данные события dns: счётчик событий службы перехвата. Само состояние
 // перехвата через шину слоя не идёт: клиент по счётчику перечитывает его.
 type DNSEvent struct {
+	Seq uint64 `json:"seq"`
+}
+
+// WizardEvent — данные события wizard: счётчик событий мастера. Само состояние
+// через шину не идёт: клиент по счётчику перечитывает GET /api/configlayer/wizard.
+type WizardEvent struct {
 	Seq uint64 `json:"seq"`
 }
 

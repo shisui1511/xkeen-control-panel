@@ -294,6 +294,7 @@
             "internal/services/configlayer/ordered.go",
             "internal/services/configlayer/describe.go",
             "internal/services/configlayer/versions.go",
+            "internal/services/configlayer/wizard.go",
             "internal/handlers/configlayer.go"
           ],
           "tests": [
