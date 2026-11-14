@@ -8,7 +8,10 @@
   import Skeleton from '../../Skeleton.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
   import SetupStep, { type SetupStepStatus } from './SetupStep.svelte';
+  import StepKernel, { type KernelPhase } from './StepKernel.svelte';
   import StepNodes from './StepNodes.svelte';
+  import StepRouting, { type RoutingPhase } from './StepRouting.svelte';
+  import StepSections, { takeRest, type SectionsPhase } from './StepSections.svelte';
   import StepApply from './StepApply.svelte';
   import StepStart, { type StartPhase } from './StepStart.svelte';
   import IpCheckResult, { type IpPhase } from './IpCheckResult.svelte';
@@ -200,6 +203,35 @@
     return out;
   });
 
+  // Ход шага 2 (StepSections): грузится вид секций или открыт диалог взятия. Экземпляр
+  // нужен «Взять остальные» в строке шага — она открывает тот же диалог, что тело шага
+  let sectionsPhase = $state<SectionsPhase>('idle');
+  let sectionsBox = $state<StepSections | undefined>();
+
+  // Тела, которые держатся смонтированными и в свёрнутом шаге: диалоги шагов 2 и 4 не
+  // снимаются автопереходом посреди выбора, ход и итоги шагов 5–7 не теряются
+  const KEEP_MOUNTED = ['sections', 'routing', 'apply', 'start', 'ip'];
+
+  // Ход шага 4 (StepRouting): открыт диалог пресета
+  let routingPhase = $state<RoutingPhase>('idle');
+
+  // Ход шага 1 (StepKernel): идёт установка ядра или открыто окно установки XKeen
+  let kernelPhase = $state<KernelPhase>('idle');
+
+  // Шаг, в теле которого идёт действие (установка, открытый диалог взятия или пресета),
+  // держится раскрытым: окна диалогов живут в теле шага, и автопереход по ответу сервера
+  // не должен их прятать. «Взять остальные» в свёрнутой строке шага 2 раскрывает шаг тем же
+  // правилом
+  const busyN = $derived(
+    kernelPhase === 'running'
+      ? WIZARD_STEP_IDS.indexOf('kernel') + 1
+      : sectionsPhase === 'running'
+        ? WIZARD_STEP_IDS.indexOf('sections') + 1
+        : routingPhase === 'running'
+          ? WIZARD_STEP_IDS.indexOf('routing') + 1
+          : null
+  );
+
   // Ход запуска ядра в шаге 6 (StepStart) и ядро, запущенное кнопкой мастера
   let startPhase = $state<StartPhase>('idle');
   let startedKernel: KernelName | '' = '';
@@ -214,6 +246,9 @@
   // конфликте по ответу сервера (отказ kernel_conflict сбоем не считается)
   const rows = $derived(
     baseRows.map((r): Row => {
+      if (r.id === 'kernel' && kernelPhase === 'running') return { ...r, status: 'running' };
+      if (r.id === 'sections' && sectionsPhase === 'running') return { ...r, status: 'running' };
+      if (r.id === 'routing' && routingPhase === 'running') return { ...r, status: 'running' };
       if (r.id === 'apply') {
         if ($applyRunning) return { ...r, status: 'running' };
         if ($conflictVisible) return { ...r, status: 'blocked' };
@@ -244,7 +279,9 @@
   // момент выбора. Раскрыт текущий — выбор следует за ним (автопереход); раскрыт другой
   // шаг или всё свёрнуто — выбор держится
   let manual = $state<{ n: number | null; at: number | null } | null>(null);
-  const openN = $derived(manual !== null && manual.n !== manual.at ? manual.n : currentN);
+  const openN = $derived(
+    busyN ?? (manual !== null && manual.n !== manual.at ? manual.n : currentN)
+  );
 
   function setOpen(n: number, open: boolean) {
     manual = { n: open ? n : null, at: currentN };
@@ -321,7 +358,7 @@
           status={r.status}
           title={$t(`cfg.setup.step.${r.id}.title`)}
           statusText={statusText(r)}
-          keepMounted={r.id === 'apply' || r.id === 'start' || r.id === 'ip'}
+          keepMounted={KEEP_MOUNTED.includes(r.id)}
           bind:expanded={() => openN === r.n, (v) => setOpen(r.n, v)}
         >
           {#snippet aside()}
@@ -332,11 +369,31 @@
                   total: String(r.partial.total)
                 })}
               </Badge>
+              {@render takeRest(
+                () => void sectionsBox?.openXray(),
+                sectionsPhase === 'running' || $applyRunning,
+                $t('cfg.setup.sections.take_rest')
+              )}
             {/if}
           {/snippet}
           <p class="setup-step-hint">{bodyText(r)}</p>
-          {#if r.id === 'nodes'}
+          {#if r.id === 'kernel' && $wizardView}
+            <StepKernel
+              bind:phase={kernelPhase}
+              step={stepOf('kernel')}
+              kernels={$wizardView.kernels}
+            />
+          {:else if r.id === 'sections' && $wizardView}
+            <StepSections
+              bind:this={sectionsBox}
+              bind:phase={sectionsPhase}
+              step={stepOf('sections')}
+              kernels={$wizardView.kernels}
+            />
+          {:else if r.id === 'nodes'}
             <StepNodes step={stepOf('nodes')} />
+          {:else if r.id === 'routing'}
+            <StepRouting step={stepOf('routing')} bind:phase={routingPhase} />
           {:else if r.id === 'apply'}
             <StepApply step={stepOf('apply')} {onapply} />
           {:else if r.id === 'start' && $wizardView}
