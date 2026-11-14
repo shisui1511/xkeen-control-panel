@@ -259,6 +259,94 @@ async function expectIpOutcome(page: Page, ready: boolean, timeout: number): Pro
   return 'locked';
 }
 
+// Статус строки шага 7 по итогу проверки IP: выполнен только через VPN или при ожидаемом
+// прямом трафике; прямой трафик при пресете «всё через прокси» и сбой — предупреждение (P1)
+const IP_STEP_STATUS: Record<string, string> = {
+  proxied: 'done',
+  direct_ok: 'done',
+  direct_warn: 'warning',
+  failed: 'warning'
+};
+
+/** Строка шага 7 показывает статус, соответствующий итогу проверки IP (data-state). */
+async function expectIpStepStatus(page: Page): Promise<void> {
+  const state = (await page.getByTestId('setup-ip-result').getAttribute('data-state')) ?? '';
+  const want = IP_STEP_STATUS[state];
+  expect(want, `setup-ip-result: итог ${state}`).toBeDefined();
+  await expect(
+    page.getByTestId('setup-step-7'),
+    `setup-step-7 при итоге ${state}: ${want}`
+  ).toHaveAttribute('data-status', want, { timeout: T.action });
+}
+
+/** На экране мастера не больше одной видимой главной кнопки. */
+async function expectSinglePrimary(page: Page, where: string): Promise<void> {
+  const n = await page.getByTestId('config-setup').locator('.btn-primary:visible').count();
+  expect(n, `видимых .btn-primary в мастере (${where})`).toBeLessThanOrEqual(1);
+}
+
+/** Кнопка testId — главная (.btn-primary) ровно тогда, когда current ответа мастера равен n. */
+async function expectPrimaryWhen(page: Page, testId: string, n: number): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const current = (await wizard(page)).current;
+        const cls = (await page.getByTestId(testId).getAttribute('class')) ?? '';
+        const primary = /\bbtn-primary\b/.test(cls);
+        return primary === (current === n)
+          ? 'ok'
+          : `${testId}: primary ${primary}, current ${current}`;
+      },
+      { message: `${testId}: primary только при current ${n}`, timeout: T.action }
+    )
+    .toBe('ok');
+}
+
+/** Все видимые кнопки .btn внутри testId — не ниже 44 px (цель касания на ≤768 px). */
+async function expectTouchTargets(page: Page, testId: string, where: string): Promise<void> {
+  const low = await page
+    .getByTestId(testId)
+    .locator('.btn')
+    .evaluateAll((els) =>
+      els
+        .filter((el) => (el as HTMLElement).offsetParent !== null)
+        .map((el, i) => ({
+          id: el.getAttribute('data-testid') ?? `btn#${i}`,
+          h: Math.round(el.getBoundingClientRect().height)
+        }))
+        .filter((b) => b.h < 43.5)
+    );
+  expect(low, `${testId}: кнопки ниже 44 px (${where})`).toEqual([]);
+}
+
+/** Каркас страницы мастера: h2 шагов, скрытые маркеры, живые области, зазор шапки. */
+async function expectWizardShell(page: Page): Promise<void> {
+  const steps = page.getByTestId('setup-steps');
+  await expect(steps.getByRole('heading', { level: 2 }), 'заголовки шагов h2').toHaveCount(7);
+  await expect(
+    steps.locator('.setup-marker:not([aria-hidden="true"])'),
+    'маркеры шагов без aria-hidden'
+  ).toHaveCount(0);
+  await expect(page.getByTestId('setup-live-running')).toHaveAttribute('aria-live', 'polite');
+  const ip = page.getByTestId('setup-ip-result');
+  expect(await ip.getAttribute('aria-live'), 'setup-ip-result без aria-live').toBeNull();
+  const status = page.getByTestId('setup-ip-status');
+  await expect(status).toHaveAttribute('role', 'status');
+  await expect(status).toHaveAttribute('aria-live', 'polite');
+  await expect(
+    status.getByTestId('setup-ip-check'),
+    'setup-ip-check вне живой области'
+  ).toHaveCount(0);
+  const gap = await page.evaluate(() => {
+    const header = document.querySelector('[data-testid="config-setup"] > .page-header');
+    const list = document.querySelector('[data-testid="setup-steps"]');
+    if (!header || !list) return -1;
+    return list.getBoundingClientRect().top - header.getBoundingClientRect().bottom;
+  });
+  expect(gap, 'зазор шапка → setup-steps, px').toBeGreaterThanOrEqual(15);
+  expect(gap, 'зазор шапка → setup-steps, px').toBeLessThanOrEqual(17);
+}
+
 /** Ждёт, пока шаг 6 станет выполнен (ядро после перезапуска), не дольше срока; итог — ответ мастера. */
 async function startSettles(page: Page): Promise<WizardView> {
   let view = await wizard(page);
@@ -682,6 +770,18 @@ test('config-setup dashboard-card vp:1280', async ({ page, browser }) => {
     expect(counter.height, 'setup-card-progress в одну строку на 390 px').toBeLessThanOrEqual(
       counter.line * 1.5
     );
+    // Кнопки карточки — цель касания 44 px; кольцо невыполненного шага 16 px, как в мастере
+    await expectTouchTargets(page, 'setup-checklist-card', 'карточка 390');
+    if ((await card.locator('.sc-pending').count()) > 0) {
+      const box = (await card.locator('.sc-pending').first().boundingBox()) ?? {
+        width: 0,
+        height: 0
+      };
+      for (const side of [box.width, box.height]) {
+        expect(side, '.sc-pending: сторона кольца, px').toBeGreaterThanOrEqual(15.5);
+        expect(side, '.sc-pending: сторона кольца, px').toBeLessThanOrEqual(16.5);
+      }
+    }
 
     // «Скрыть»: подтверждение, карточки нет ни здесь, ни во второй вкладке, статус hidden
     await page.getByTestId('setup-card-hide').click();
@@ -739,6 +839,28 @@ test('config-setup close-no-auto-open vp:1280', async ({ page, browser }) => {
     await expect(page.getByTestId('setup-step-7')).toHaveAttribute('data-status', 'locked', {
       timeout: T.page
     });
+    await expectWizardShell(page);
+    // запертый шаг 7 называет причину: черновик удержан — шаг 5 не выполнен
+    await expect(page.getByTestId('setup-ip-result')).toHaveAttribute('data-lock', 'apply');
+    // шаги 1–6 не выполнены — «Продолжить позже» не главная
+    await expect(page.getByTestId('setup-finish')).not.toHaveClass(/\bbtn-primary\b/);
+    await expandStep(page, 5);
+    // «Применить» — главная только у текущего шага (current ответа мастера равен 5)
+    if ((await page.getByTestId('setup-apply').count()) > 0) {
+      await expectPrimaryWhen(page, 'setup-apply', 5);
+    }
+    await expectSinglePrimary(page, 'шаг 5 раскрыт');
+
+    // Цели касания 44 px на 768 и 390 px, без горизонтальной прокрутки на телефоне
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await expectTouchTargets(page, 'config-setup', '768');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expectTouchTargets(page, 'config-setup', '390');
+    const setupScroll = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+    );
+    expect(setupScroll, 'горизонтальная прокрутка мастера на 390 px').toBeLessThanOrEqual(0);
+    await page.setViewportSize({ width: 1280, height: 900 });
 
     // «Закрыть» уводит в «Узлы» и ставит closed на сервере (D-10)
     await page.getByTestId('setup-close').click();
@@ -790,7 +912,9 @@ test(
       await expectStepsMatchServer(page);
 
       // Шаг 7 при открытии (D-09): при выполненных шагах 5 и 6 итог без нажатия, иначе заперт
-      branch(`ip-open: ${await expectIpOutcome(page, readyAtOpen, 20_000)}`);
+      const ipOpen = await expectIpOutcome(page, readyAtOpen, 20_000);
+      branch(`ip-open: ${ipOpen}`);
+      if (ipOpen === 'result') await expectIpStepStatus(page);
 
       // Шаг 2: диалоги взятия открываются из шага и закрываются без изменений черновика
       await expandStep(page, 2);
@@ -839,6 +963,16 @@ test(
         .toBe(true);
       await expandStep(page, 3);
       await expect(page.getByTestId('setup-nodes-count')).toBeVisible({ timeout: T.action });
+      // число узлов — моноширинным, отдельно от подписи
+      const nodesMono = page.getByTestId('setup-nodes-count').locator('.setup-mono');
+      await expect(nodesMono, 'setup-nodes-count: .setup-mono').toHaveCount(1);
+      const fonts = await page.getByTestId('setup-nodes-count').evaluate((el) => ({
+        text: getComputedStyle(el).fontFamily,
+        value: getComputedStyle(el.querySelector('.setup-mono') as Element).fontFamily
+      }));
+      expect(fonts.value, 'setup-nodes-count: шрифт числа отличается от подписи').not.toBe(
+        fonts.text
+      );
       await expect(page.getByTestId('setup-step-5')).not.toHaveAttribute('data-status', 'done', {
         timeout: T.action
       });
@@ -861,6 +995,7 @@ test(
       await expect(page.getByTestId('setup-ip-result')).toHaveAttribute('data-state', 'locked', {
         timeout: T.action
       });
+      await expect(page.getByTestId('setup-ip-result')).toHaveAttribute('data-lock', 'apply');
 
       // Шаг 5: то же окно изменений, что в разделе
       await applyFromStep(page);
@@ -881,7 +1016,16 @@ test(
       await expectStepsMatchServer(page);
 
       // Шаг 7 после применения: переход, пауза 3–6 с и опрос до трёх сервисов — до 45 с
-      branch(`ip-apply: ${await expectIpOutcome(page, ipReady(after), 45_000)}`);
+      const ipApply = await expectIpOutcome(page, ipReady(after), 45_000);
+      branch(`ip-apply: ${ipApply}`);
+      if (ipApply === 'result') await expectIpStepStatus(page);
+      await expectSinglePrimary(page, 'после применения');
+      // «Готово» — главная только при выполненных шагах 1–6 (current 0) и свёрнутом шаге 3
+      if (
+        (await page.getByTestId('setup-step-3-toggle').getAttribute('aria-expanded')) !== 'true'
+      ) {
+        await expectPrimaryWhen(page, 'setup-finish', 0);
+      }
 
       await expect(page.getByTestId('setup-finish')).toBeVisible();
       await expect(page.getByTestId('setup-finish')).toBeEnabled();
