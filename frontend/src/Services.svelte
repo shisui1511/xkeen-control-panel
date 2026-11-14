@@ -25,6 +25,7 @@
   import EmptyState from './components/EmptyState.svelte';
   import Section from './components/Section.svelte';
   import { apiFetch } from './lib/api';
+  import { requestKernelInstall, fetchKernelInstallStatus } from './lib/kernelInstall';
   import {
     isTransitionalStatus,
     failureMessage,
@@ -594,12 +595,8 @@
     installStarting[name] = true;
     holdNavLock(name);
     try {
-      const res = await apiFetch(`/api/kernels/${name}/install`, {
-        method: 'POST'
-      });
-      if (!res.ok) {
-        throw new Error(await res.text());
-      }
+      // Имена ядер приходят из списка /api/kernels: только xray и mihomo
+      await requestKernelInstall(name as KernelName);
       delete installStarting[name];
       startPolling(name);
     } catch (e: any) {
@@ -793,10 +790,8 @@
 
   async function fetchKernelStatus(name: string) {
     try {
-      const res = await apiFetch(`/api/kernels/${name}/status`);
-      if (res.ok) {
-        const envelope = await res.json();
-        const data = envelope.data ?? envelope;
+      const data = await fetchKernelInstallStatus(name as KernelName);
+      if (data !== null) {
         const idx = kernels.findIndex((k) => k.name === name);
         const wasTransitional = idx >= 0 && isTransitionalStatus(kernels[idx].status);
         if (idx >= 0) {
