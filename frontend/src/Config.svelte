@@ -14,6 +14,7 @@
   import SectionsTab from './components/config/sections/SectionsTab.svelte';
   import FilesTab from './components/config/files/FilesTab.svelte';
   import RoutingOwnerNotice from './components/config/routing/RoutingOwnerNotice.svelte';
+  import SetupWizard from './components/config/setup/SetupWizard.svelte';
   import { watchOwnerToasts } from './components/config/routing/routingOwner';
   import { layerStatus, refetchLayerState } from './lib/configLayer';
   import { capabilities } from './stores';
@@ -21,6 +22,7 @@
     asConfigSubTab,
     configSubTab,
     configSubTabHash,
+    isConfigSetupHash,
     type ConfigSubTab
   } from './lib/configSubTab';
 
@@ -35,7 +37,13 @@
   // между вкладками раздела (T-149-22)
   let filesVisited = $state(configSubTab(window.location.hash) === 'files');
 
+  // Мастер первого запуска (#/config/setup) — отдельная страница раздела, не вкладка: на
+  // ней нет вкладок, уведомлений, полосы черновика и внешнего хода применения (D-03).
+  // Хэш мастера не переписывается в хэш вкладки
+  let setup = $state(isConfigSetupHash(window.location.hash));
+
   function syncSubTab() {
+    setup = isConfigSetupHash(window.location.hash);
     subTab = configSubTab(window.location.hash);
     if (subTab === 'files') filesVisited = true;
   }
@@ -82,24 +90,30 @@
   в «Настройки → для разработчиков».
 -->
 <div class="container config-page" data-testid="config-page">
-  <PageHeader title={$t('cfg.title')} subtitle={$t('cfg.subtitle')} />
+  {#if !setup}
+    <PageHeader title={$t('cfg.title')} subtitle={$t('cfg.subtitle')} />
+  {/if}
 
   <div class="config-stack">
-    <ConfigNotices />
-    <DraftBar />
-    <ApplyProgress />
+    {#if !setup}
+      <ConfigNotices />
+      <DraftBar />
+      <ApplyProgress />
 
-    <div class="config-tabs" data-testid="config-tabs">
-      <Tabs
-        items={tabItems}
-        bind:value={subTab}
-        variant="line"
-        ariaLabel={$t('cfg.tabs_aria')}
-        onchange={selectTab}
-      />
-    </div>
+      <div class="config-tabs" data-testid="config-tabs">
+        <Tabs
+          items={tabItems}
+          bind:value={subTab}
+          variant="line"
+          ariaLabel={$t('cfg.tabs_aria')}
+          onchange={selectTab}
+        />
+      </div>
+    {/if}
 
-    {#if $layerStatus === 'error'}
+    {#if setup}
+      <SetupWizard />
+    {:else if $layerStatus === 'error'}
       <EmptyState
         title={$t('cfg.load_error_title')}
         description={$t('cfg.load_error_body')}
@@ -122,7 +136,7 @@
     {/if}
 
     {#if filesVisited}
-      <FilesTab active={subTab === 'files' && $layerStatus !== 'error'} />
+      <FilesTab active={subTab === 'files' && !setup && $layerStatus !== 'error'} />
     {/if}
   </div>
 </div>
