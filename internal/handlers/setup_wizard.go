@@ -37,3 +37,40 @@ func (a *API) ConfigLayerWizard(w http.ResponseWriter, r *http.Request) {
 	}
 	JSONSuccess(w, a.wizard.View())
 }
+
+// ConfigLayerWizardClose — POST /api/configlayer/wizard/close: «Закрыть» мастер
+// (признак closed, D-10). Идемпотентно, признак не понижается.
+func (a *API) ConfigLayerWizardClose(w http.ResponseWriter, r *http.Request) {
+	a.wizardAction(w, r, a.wizardClose)
+}
+
+// ConfigLayerWizardHide — POST /api/configlayer/wizard/hide: «Скрыть» карточку
+// (признак hidden, D-11). Идемпотентно.
+func (a *API) ConfigLayerWizardHide(w http.ResponseWriter, r *http.Request) {
+	a.wizardAction(w, r, a.wizardHide)
+}
+
+// ConfigLayerWizardReset — POST /api/configlayer/wizard/reset: снять признак
+// мастера. Только в режиме разработчика (403 dev_mode_required), для проверок.
+func (a *API) ConfigLayerWizardReset(w http.ResponseWriter, r *http.Request) {
+	a.wizardAction(w, r, a.wizardReset)
+}
+
+func (a *API) wizardClose() (setupwizard.View, error) { return a.wizard.Close() }
+func (a *API) wizardHide() (setupwizard.View, error)  { return a.wizard.Hide() }
+func (a *API) wizardReset() (setupwizard.View, error) { return a.wizard.Reset() }
+
+// wizardAction — общий путь POST-действий мастера: действие задаёт путь, тело
+// запроса не читается (свободных строк нет); успех — свежий вид, ошибка — по
+// таблице слоя (ErrDisabled → 404, ErrDevModeRequired → 403).
+func (a *API) wizardAction(w http.ResponseWriter, r *http.Request, act func() (setupwizard.View, error)) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireWizard(w, r) {
+		return
+	}
+	view, err := act()
+	if err != nil {
+		a.writeLayerError(w, r, err)
+		return
+	}
+	JSONSuccess(w, view)
+}

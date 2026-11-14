@@ -13,6 +13,7 @@ import (
 	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
@@ -138,6 +139,13 @@ type Service struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	stopOnce sync.Once
+	started  atomic.Bool
+	done     chan struct{}
+
+	// tickMu — одна проверка за раз (тик наблюдателя и хук после применения);
+	// под ним же подпись вектора шагов прошлой проверки.
+	tickMu  sync.Mutex
+	lastSig string
 }
 
 // New проверяет обязательные зависимости и создаёт службу. Фоновой работы New
@@ -154,7 +162,7 @@ func New(d Deps) (*Service, error) {
 		return nil, errors.New("setupwizard: не задано состояние ядер")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Service{d: d, ctx: ctx, cancel: cancel}, nil
+	return &Service{d: d, ctx: ctx, cancel: cancel, done: make(chan struct{})}, nil
 }
 
 // evaluation — итог расчёта шагов 1–6.
@@ -298,7 +306,31 @@ func (s *Service) View() View {
 	}
 }
 
-// Stop останавливает службу. Повторный вызов безопасен.
-func (s *Service) Stop() {
-	s.stopOnce.Do(s.cancel)
+// Close — «Закрыть» мастер (D-10): признак closed отменяет автооткрытие,
+// карточка остаётся. Идемпотентно и не понижает done или hidden.
+func (s *Service) Close() (View, error) {
+	return s.mark(configlayer.WizardClosed)
+}
+
+// Hide — «Скрыть» карточку (D-11): признак hidden действует как «пройдено».
+// Идемпотентно.
+func (s *Service) Hide() (View, error) {
+	return s.mark(configlayer.WizardHidden)
+}
+
+// Reset снимает признак мастера — только в режиме разработчика
+// (configlayer.ErrDevModeRequired), ручка проверок карточки и автооткрытия.
+func (s *Service) Reset() (View, error) {
+	if err := s.d.Layer.ResetWizard(); err != nil {
+		return View{}, err
+	}
+	return s.View(), nil
+}
+
+// mark ставит признак мастера; «не изменилось» — не ошибка.
+func (s *Service) mark(status configlayer.WizardStatus) (View, error) {
+	if _, err := s.d.Layer.MarkWizard(status); err != nil {
+		return View{}, err
+	}
+	return s.View(), nil
 }

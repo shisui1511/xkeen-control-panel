@@ -925,8 +925,15 @@ func main() {
 			},
 			XrayTakeable: func() (int, bool) { return wizardXrayTakeable(configLayer, coresSvc) },
 		})
+		if wizErr == nil {
+			// Хук после применения — до Start слоя: после него слой хуков не принимает.
+			wizErr = configLayer.Register(wizSvc.Hooks())
+		}
 		if wizErr != nil {
 			log.Printf("Служба мастера не создана, маршруты /api/configlayer/wizard* отвечают 404: %v", wizErr)
+			if wizSvc != nil {
+				wizSvc.Stop()
+			}
 			wizSvc = nil
 		}
 		configLayer.Start()
@@ -978,8 +985,9 @@ func main() {
 			defer stops.run("dns-takeover", dnsSvc.Stop)
 		}
 		if wizSvc != nil {
-			// Последней: defer идёт после остальных, поэтому служба мастера
-			// останавливается первой.
+			// Последней: наблюдатель стартует после слоя и служб, defer идёт после
+			// остальных, поэтому служба мастера останавливается первой.
+			wizSvc.Start()
 			api.SetSetupWizardService(wizSvc)
 			defer stops.run("setup-wizard", wizSvc.Stop)
 		}
@@ -1043,6 +1051,9 @@ func main() {
 	srv.HandleProtected("/api/configlayer/dns", api.ConfigDNS)
 	srv.HandleProtected("/api/configlayer/dns/", api.ConfigDNSAction)
 	srv.HandleProtected("/api/configlayer/wizard", api.ConfigLayerWizard)
+	srv.HandleProtected("/api/configlayer/wizard/close", api.ConfigLayerWizardClose)
+	srv.HandleProtected("/api/configlayer/wizard/hide", api.ConfigLayerWizardHide)
+	srv.HandleProtected("/api/configlayer/wizard/reset", api.ConfigLayerWizardReset)
 	srv.HandleProtected("/api/configlayer/geodata", api.ConfigGeodata)
 	srv.HandleProtected("/api/configlayer/geodata/output", api.ConfigGeodataOutput)
 	srv.HandleProtected("/api/configlayer/geodata/run", api.ConfigGeodataRun)
