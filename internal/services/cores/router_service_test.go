@@ -378,15 +378,19 @@ func TestRouterCoresServiceFlow(t *testing.T) {
 		// взятой секции даёт владельца drift, а секция остаётся в черновике —
 		// мастер не предлагает её взять снова (149.1).
 		const driftFile = "06_dns_drift.json"
+		driftPath := filepath.Join(e.xray, driftFile)
+		// Чужой файл убирается и при провале подтеста (Fatal между записью и
+		// removeDrift): иначе следующие подтесты видели бы дрейф dns.
+		t.Cleanup(func() { _ = os.Remove(driftPath) })
 		writeDrift := func() {
 			t.Helper()
-			if err := os.WriteFile(filepath.Join(e.xray, driftFile), []byte(`{"dns": {"servers": ["localhost"]}}`+"\n"), 0o644); err != nil {
+			if err := os.WriteFile(driftPath, []byte(`{"dns": {"servers": ["localhost"]}}`+"\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 		}
 		removeDrift := func() {
 			t.Helper()
-			if err := os.Remove(filepath.Join(e.xray, driftFile)); err != nil {
+			if err := os.Remove(driftPath); err != nil {
 				t.Fatal(err)
 			}
 		}
