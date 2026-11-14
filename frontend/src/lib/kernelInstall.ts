@@ -32,11 +32,24 @@ export class KernelInstallError extends Error {
   }
 }
 
-/** Запускает установку ядра; отказ сервера — KernelInstallError с текстом ответа. */
+/** HTTP-статус «установка уже идёт» (со «Служб» или из другой вкладки). */
+export const KERNEL_INSTALL_BUSY = 409;
+
+/**
+ * Запускает установку ядра; отказ сервера — KernelInstallError с полем `error` конверта
+ * ответа (тело не JSON или без поля — «HTTP <код>»).
+ */
 export async function requestKernelInstall(name: KernelName): Promise<void> {
   const res = await apiFetch(`/api/kernels/${name}/install`, { method: 'POST' });
   if (!res.ok) {
-    throw new KernelInstallError(await res.text(), res.status);
+    let msg = '';
+    try {
+      const body = await res.json();
+      if (typeof body?.error === 'string') msg = body.error;
+    } catch {
+      // тело не JSON — остаётся код ответа
+    }
+    throw new KernelInstallError(msg || `HTTP ${res.status}`, res.status);
   }
 }
 
@@ -83,11 +96,22 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/** Подряд неудачных чтений статуса (сетевой сбой), после которых опрос сдаётся. */
+export const KERNEL_INSTALL_POLL_RETRIES = 3;
+
+/** Ошибка отмены запроса: не сбой сети, повторять её не нужно. */
+function isAbort(e: unknown): boolean {
+  return e instanceof DOMException && e.name === 'AbortError';
+}
+
 /**
  * Ставит ядро целиком: запрос установки, затем опрос статуса раз в KERNEL_INSTALL_POLL_MS до
- * терминального статуса. Меню заморожено замком на всё время и размораживается в finally.
- * Возвращает последний статус; ответ статуса не ok — статус `failed`. Отмена через `signal`
- * прекращает опрос (установка на сервере продолжается) и отклоняет промис ошибкой отмены.
+ * терминального статуса. Установка уже идёт (409) — сразу опрос её статуса. Меню заморожено
+ * замком на всё время и размораживается в finally. Возвращает последний статус; ответ
+ * статуса не ok — статус `failed`. Сетевой сбой чтения статуса повторяется, пока не
+ * наберётся KERNEL_INSTALL_POLL_RETRIES подряд; 401 и отмена не повторяются. Отмена через
+ * `signal` прекращает опрос (установка на сервере продолжается) и отклоняет промис ошибкой
+ * отмены.
  */
 export async function runKernelInstall(
   name: KernelName,
@@ -97,10 +121,26 @@ export async function runKernelInstall(
   const unlock = lockNav();
   try {
     if (signal?.aborted) throw abortError(signal);
-    await requestKernelInstall(name);
+    try {
+      await requestKernelInstall(name);
+    } catch (e: unknown) {
+      if (!(e instanceof KernelInstallError && e.status === KERNEL_INSTALL_BUSY)) throw e;
+    }
+    let failures = 0;
     for (;;) {
       if (signal?.aborted) throw abortError(signal);
-      const st = (await fetchKernelInstallStatus(name, signal)) ?? { status: 'failed' };
+      let st: KernelInstallStatus;
+      try {
+        st = (await fetchKernelInstallStatus(name, signal)) ?? { status: 'failed' };
+        failures = 0;
+      } catch (e: unknown) {
+        const status = (e as { status?: unknown } | null)?.status;
+        if (signal?.aborted || isAbort(e) || status === 401) throw e;
+        failures++;
+        if (failures >= KERNEL_INSTALL_POLL_RETRIES) throw e;
+        await wait(KERNEL_INSTALL_POLL_MS, signal);
+        continue;
+      }
       onUpdate?.(st);
       if (isTerminalInstallStatus(st.status)) return st;
       await wait(KERNEL_INSTALL_POLL_MS, signal);
