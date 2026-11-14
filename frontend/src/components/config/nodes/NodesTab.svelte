@@ -57,6 +57,9 @@
     <EmptyState
       title={$t('cfg.nodes.empty_title')}
       description={$t('cfg.nodes.empty_body')}
+      ctaText={$t('cfg.setup.open_from_empty')}
+      ctaVariant="secondary"
+      oncta={() => (window.location.hash = '#/config/setup')}
       plain
     />
   {:else if showList && $sourcesView}

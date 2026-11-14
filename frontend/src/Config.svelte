@@ -1,8 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import { t } from './i18n';
   import PageHeader from './PageHeader.svelte';
   import EmptyState from './components/EmptyState.svelte';
+  import Skeleton from './components/Skeleton.svelte';
+  import Icon from './lib/components/Icon.svelte';
   import Tabs from './components/Tabs.svelte';
   import DraftBar from './components/config/DraftBar.svelte';
   import ConfigNotices from './components/config/ConfigNotices.svelte';
@@ -17,6 +20,7 @@
   import SetupWizard from './components/config/setup/SetupWizard.svelte';
   import { watchOwnerToasts } from './components/config/routing/routingOwner';
   import { layerStatus, refetchLayerState } from './lib/configLayer';
+  import { startWizard, stopWizard, wizardLoadError, wizardView } from './lib/configWizard';
   import { capabilities } from './stores';
   import {
     asConfigSubTab,
@@ -42,7 +46,17 @@
   // Хэш мастера не переписывается в хэш вкладки
   let setup = $state(isConfigSetupHash(window.location.hash));
 
+  // Автооткрытие мастера (149 D-22, D-12): только при входе из меню на адрес ровно
+  // #/config, один раз за монтирование раздела. Пока ответа сервера нет, вместо вкладки —
+  // скелетон («Узлы» не мигают); явные адреса вкладок и другие страницы не перехватываются
+  let autoPending = $state(window.location.hash === '#/config');
+
+  // DraftBar смонтирован всегда: на странице мастера он «голый» (без полосы), а шаг 5 зовёт
+  // его apply() — тот же путь через перехват и окно изменений, что у кнопки полосы
+  let draftBar = $state<ReturnType<typeof DraftBar>>();
+
   function syncSubTab() {
+    if (window.location.hash !== '#/config') autoPending = false;
     setup = isConfigSetupHash(window.location.hash);
     subTab = configSubTab(window.location.hash);
     if (subTab === 'files') filesVisited = true;
@@ -71,6 +85,38 @@
   // не зависят от открытой вкладки
   onMount(() => watchOwnerToasts());
 
+  // Решение об автооткрытии: состояние слоя загружено и пришёл статус мастера. Признак
+  // auto_open сервер даёт только при пустом состоянии и незакрытом, непройденном мастере;
+  // переход без записи в историю — «Назад» не возвращает в петлю
+  function decideAutoOpen() {
+    if (!autoPending) return;
+    if (window.location.hash !== '#/config') {
+      autoPending = false;
+      return;
+    }
+    if (get(layerStatus) === 'error' || get(wizardLoadError)) {
+      autoPending = false;
+      return;
+    }
+    const view = get(wizardView);
+    if (get(layerStatus) !== 'ready' || view === null) return;
+    autoPending = false;
+    if (view.auto_open) window.location.replace('#/config/setup');
+  }
+
+  onMount(() => {
+    startWizard();
+    const offs = [
+      layerStatus.subscribe(decideAutoOpen),
+      wizardView.subscribe(decideAutoOpen),
+      wizardLoadError.subscribe(decideAutoOpen)
+    ];
+    return () => {
+      for (const off of offs) off();
+      stopWizard();
+    };
+  });
+
   function selectTab(value: string) {
     const next = asConfigSubTab(value);
     if (next === 'files') filesVisited = true;
@@ -91,13 +137,26 @@
 -->
 <div class="container config-page" data-testid="config-page">
   {#if !setup}
-    <PageHeader title={$t('cfg.title')} subtitle={$t('cfg.subtitle')} />
+    <PageHeader title={$t('cfg.title')} subtitle={$t('cfg.subtitle')}>
+      {#snippet actions()}
+        <!-- Постоянный вход в мастер (D-13): неприметная ссылка, не кнопка -->
+        <a
+          href="#/config/setup"
+          class="setup-link"
+          data-testid="config-setup-link"
+          aria-label={$t('cfg.setup.link')}
+        >
+          {$t('cfg.setup.link')}
+          <Icon name="chevron-right" size={12} />
+        </a>
+      {/snippet}
+    </PageHeader>
   {/if}
 
   <div class="config-stack">
+    <DraftBar bind:this={draftBar} bare={setup} />
     {#if !setup}
       <ConfigNotices />
-      <DraftBar />
       <ApplyProgress />
 
       <div class="config-tabs" data-testid="config-tabs">
@@ -112,7 +171,7 @@
     {/if}
 
     {#if setup}
-      <SetupWizard />
+      <SetupWizard onapply={() => draftBar?.apply()} />
     {:else if $layerStatus === 'error'}
       <EmptyState
         title={$t('cfg.load_error_title')}
@@ -121,6 +180,8 @@
         plain
         oncta={() => void refetchLayerState()}
       />
+    {:else if autoPending}
+      <Skeleton type="card" height="40vh" />
     {:else if subTab === 'nodes'}
       <NodesTab />
     {:else if subTab === 'groups'}
@@ -159,5 +220,32 @@
 
   .config-tabs::-webkit-scrollbar {
     display: none;
+  }
+
+  .setup-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--fg-secondary);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+  }
+
+  .setup-link:hover {
+    text-decoration: underline;
+  }
+
+  .setup-link:focus-visible {
+    outline: none;
+    border-radius: var(--radius-sm);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  @media (max-width: 768px) {
+    .setup-link {
+      min-height: 44px;
+    }
   }
 </style>

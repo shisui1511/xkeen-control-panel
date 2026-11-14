@@ -40,6 +40,17 @@
   // Фокус при этом не уводится
   let liveText = $state('');
 
+  interface Props {
+    /**
+     * «Применить» шага 5: Config.svelte передаёт apply() голой полосы DraftBar — тот же путь
+     * через перехват и окно изменений, что в разделе (149 D-23, D-03). Тело шага 5 встраивает
+     * план 149.1-05.
+     */
+    onapply?: () => void;
+  }
+
+  let { onapply = () => {} }: Props = $props();
+
   onMount(() => {
     startWizard();
     let prevDone: Set<string> | null = null;
