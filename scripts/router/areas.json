@@ -294,7 +294,6 @@
             "internal/services/configlayer/ordered.go",
             "internal/services/configlayer/describe.go",
             "internal/services/configlayer/versions.go",
-            "internal/services/configlayer/wizard.go",
             "internal/handlers/configlayer.go"
           ],
           "tests": [
@@ -312,6 +311,17 @@
             "go:TestRouterDraftEditWithDirtyDisk",
             "go:TestRouterLegacyEntriesBlocked",
             "tests/router/config-cascade.spec.ts"
+          ]
+        },
+        "config-wizard": {
+          "title": "Мастер первого запуска: признак в состоянии, факты шагов, служба и маршруты",
+          "paths": [
+            "internal/services/configlayer/wizard.go",
+            "internal/services/configlayer/types.go",
+            "internal/services/configlayer/events.go"
+          ],
+          "tests": [
+            "go:TestRouterWizardState"
           ]
         }
       }
