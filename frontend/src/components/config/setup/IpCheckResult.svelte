@@ -10,13 +10,15 @@
   import Spinner from '../../Spinner.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
   import { fetchClientExitIP, type ClientExitIPInfo } from '../../../lib/clientIp';
+  import { VALUE_MARK, valueParts } from './valueParts';
 
   // Итог шага 7 «Проверка IP» (149 D-24, D-05, D-07, D-08): адрес выхода этого устройства
   // определяется из браузера и сравнивается с WAN роутера. Итог — замер в моменте: на
   // сервер панели он не отправляется и в прогресс не входит. Пока применение не завершено
   // и ядро не запущено (ready), во внешние сервисы браузер не обращается. При пресете
   // «выборочно» «напрямую» — пояснение, а не ошибка; при «всё через прокси» и «всё кроме
-  // страны» — предупреждение с частыми причинами.
+  // страны» — предупреждение с частыми причинами. Объявляет скринридер только блок итога
+  // (setup-ip-status), кнопки проверки и ссылка — вне живой области.
 
   interface Props {
     /** Шаги 5 и 6 выполнены: применение завершено, ядро запущено. */
@@ -27,9 +29,20 @@
     allDone?: boolean;
     /** Ход и итог проверки для статуса строки шага. */
     phase?: IpPhase;
+    /**
+     * Почему шаг заперт: apply — настройки ещё не применены (шаг 5), start — ядро ещё не
+     * запущено (шаг 6). Текст ожидания называет эту причину.
+     */
+    lockReason?: 'apply' | 'start';
   }
 
-  let { ready, presetId, allDone = false, phase = $bindable('idle') }: Props = $props();
+  let {
+    ready,
+    presetId,
+    allDone = false,
+    phase = $bindable('idle'),
+    lockReason = 'start'
+  }: Props = $props();
 
   // Пресеты, при которых весь трафик устройства должен идти через прокси
   const PROXY_ALL_PRESETS = ['all_proxy', 'except_country'];
@@ -62,14 +75,9 @@
     void run();
   }
 
-  // Строка «Подпись: значение» с моноширинным значением: перевод с меткой на месте
-  // значения делится на текст до и после неё
-  const MARK = '\u0000';
-
+  // Строка «Подпись: значение» с моноширинным значением (valueParts)
   function split(key: string, name: string): [string, string] {
-    const text = $t(key, { [name]: MARK });
-    const i = text.indexOf(MARK);
-    return i < 0 ? [text, ''] : [text.slice(0, i), text.slice(i + MARK.length)];
+    return valueParts($t(key, { [name]: VALUE_MARK }));
   }
 
   const rows = $derived.by(() => {
@@ -100,54 +108,57 @@
   class="ip-result"
   data-testid="setup-ip-result"
   data-state={dataState}
-  role="status"
-  aria-live="polite"
+  data-lock={dataState === 'locked' ? lockReason : undefined}
 >
-  {#if dataState === 'locked'}
-    <p class="ip-note">{$t('cfg.setup.ip.waiting')}</p>
-  {:else if phase === 'loading'}
-    <p class="ip-loading">
-      <Spinner size={16} />
-      <span>{$t('cfg.setup.ip.loading')}</span>
-    </p>
-  {:else if phase === 'proxied'}
-    <div class="ip-verdict"><Badge tone="success">{$t('cfg.setup.ip.proxied')}</Badge></div>
-  {:else if phase === 'direct_ok'}
-    <div class="ip-verdict"><Badge tone="neutral">{$t('cfg.setup.ip.direct')}</Badge></div>
-    <p class="ip-note">{$t('cfg.setup.ip.direct_ok')}</p>
-  {:else if phase === 'direct_warn'}
-    <div class="alert alert-warning ip-alert">
-      <span class="ip-icon" aria-hidden="true"><Icon name="warning" size={16} /></span>
-      <div class="ip-alert-body">
-        <strong>{$t('cfg.setup.ip.direct_warn_title')}</strong>
-        <ul class="ip-reasons">
-          <li>{$t('cfg.setup.ip.reason_device')}</li>
-          <li>{$t('cfg.setup.ip.reason_starting')}</li>
-          <li>{$t('cfg.setup.ip.reason_cache')}</li>
-        </ul>
+  <div class="ip-status" role="status" aria-live="polite" data-testid="setup-ip-status">
+    {#if dataState === 'locked'}
+      <p class="ip-note">
+        {lockReason === 'apply' ? $t('cfg.setup.ip.waiting_apply') : $t('cfg.setup.ip.waiting')}
+      </p>
+    {:else if phase === 'loading'}
+      <p class="ip-loading">
+        <Spinner size={16} />
+        <span>{$t('cfg.setup.ip.loading')}</span>
+      </p>
+    {:else if phase === 'proxied'}
+      <div class="ip-verdict"><Badge tone="success">{$t('cfg.setup.ip.proxied')}</Badge></div>
+    {:else if phase === 'direct_ok'}
+      <div class="ip-verdict"><Badge tone="neutral">{$t('cfg.setup.ip.direct')}</Badge></div>
+      <p class="ip-note">{$t('cfg.setup.ip.direct_ok')}</p>
+    {:else if phase === 'direct_warn'}
+      <div class="alert alert-warning ip-alert">
+        <span class="ip-icon" aria-hidden="true"><Icon name="warning" size={16} /></span>
+        <div class="ip-alert-body">
+          <strong>{$t('cfg.setup.ip.direct_warn_title')}</strong>
+          <ul class="ip-reasons">
+            <li>{$t('cfg.setup.ip.reason_device')}</li>
+            <li>{$t('cfg.setup.ip.reason_starting')}</li>
+            <li>{$t('cfg.setup.ip.reason_cache')}</li>
+          </ul>
+        </div>
       </div>
-    </div>
-  {:else if phase === 'failed'}
-    <div class="alert alert-warning ip-alert">
-      <span class="ip-icon" aria-hidden="true"><Icon name="warning" size={16} /></span>
-      <div class="ip-alert-body">
-        <strong>{$t('cfg.setup.ip.failed_title')}</strong>
-        <!-- Шаг 7 открыт уже при выполненных шагах 5 и 6: «шаги 1–6 выполнены» — только когда
+    {:else if phase === 'failed'}
+      <div class="alert alert-warning ip-alert">
+        <span class="ip-icon" aria-hidden="true"><Icon name="warning" size={16} /></span>
+        <div class="ip-alert-body">
+          <strong>{$t('cfg.setup.ip.failed_title')}</strong>
+          <!-- Шаг 7 открыт уже при выполненных шагах 5 и 6: «шаги 1–6 выполнены» — только когда
              это так -->
-        <span>
-          {allDone ? $t('cfg.setup.ip.failed_body') : $t('cfg.setup.ip.failed_body_later')}
-        </span>
+          <span>
+            {allDone ? $t('cfg.setup.ip.failed_body') : $t('cfg.setup.ip.failed_body_later')}
+          </span>
+        </div>
       </div>
-    </div>
-  {/if}
+    {/if}
 
-  {#if dataState !== 'locked' && (phase === 'proxied' || phase === 'direct_ok' || phase === 'direct_warn') && rows.length > 0}
-    <ul class="ip-rows">
-      {#each rows as row (row.key)}
-        <li>{row.parts[0]}<span class="ip-value">{row.value}</span>{row.parts[1]}</li>
-      {/each}
-    </ul>
-  {/if}
+    {#if dataState !== 'locked' && (phase === 'proxied' || phase === 'direct_ok' || phase === 'direct_warn') && rows.length > 0}
+      <ul class="ip-rows">
+        {#each rows as row (row.key)}
+          <li>{row.parts[0]}<span class="ip-value">{row.value}</span>{row.parts[1]}</li>
+        {/each}
+      </ul>
+    {/if}
+  </div>
 
   <div class="ip-actions">
     <Button
@@ -172,8 +183,19 @@
   .ip-result {
     display: flex;
     flex-direction: column;
+    min-width: 0;
+  }
+
+  .ip-status {
+    display: flex;
+    flex-direction: column;
     gap: var(--spacing-4);
     min-width: 0;
+  }
+
+  /* Пустой блок итога (до первой проверки) лишнего отступа над кнопками не даёт */
+  .ip-status:has(*) + .ip-actions {
+    margin-top: var(--spacing-4);
   }
 
   .ip-note {
@@ -259,7 +281,6 @@
   @media (max-width: 480px) {
     .ip-actions :global(.btn) {
       width: 100%;
-      min-height: 44px;
     }
   }
 </style>

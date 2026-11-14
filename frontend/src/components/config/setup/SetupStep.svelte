@@ -1,21 +1,29 @@
 <script lang="ts" module>
   /** Статус строки шага (data-status): цвет маркера, значок и слово статуса. */
   export type SetupStepStatus =
-    'pending' | 'current' | 'done' | 'partial' | 'running' | 'error' | 'blocked' | 'locked';
+    | 'pending'
+    | 'current'
+    | 'done'
+    | 'partial'
+    | 'running'
+    | 'warning'
+    | 'error'
+    | 'blocked'
+    | 'locked';
 </script>
 
 <script lang="ts">
-  import type { Snippet } from 'svelte';
-  import type { Attachment } from 'svelte/attachments';
+  import { tick, type Snippet } from 'svelte';
   import { t } from '../../../i18n';
   import Icon from '../../../lib/components/Icon.svelte';
   import Spinner from '../../Spinner.svelte';
 
   // Строка шага мастера (D-01, UI-SPEC «Строка шага»): маркер с номером или значком,
-  // заголовок со строкой статуса и шеврон — одна кнопка-заголовок с aria-expanded; тело —
-  // область с aria-labelledby. Статус не передаётся одним цветом: у маркера значок и
-  // aria-label из слова статуса (statusText), рядом — то же слово. keepMounted держит тело смонтированным и при
-  // свёрнутом шаге (скрыто атрибутом hidden): так ход применения шага 5 не теряется.
+  // заголовок со строкой статуса и шеврон — одна кнопка-заголовок h2 с aria-expanded; тело —
+  // область с aria-labelledby. Статус не передаётся одним цветом: у маркера значок, а слово
+  // статуса (statusText) видно рядом с заголовком и звучит в имени кнопки; сам маркер скрыт
+  // от скринридера. keepMounted держит тело смонтированным и при свёрнутом шаге (скрыто
+  // атрибутом hidden): так ход применения шага 5 не теряется.
 
   interface Props {
     n: number;
@@ -48,25 +56,24 @@
 
   const isDone = $derived(status === 'done' || status === 'partial');
 
-  // Раскрытый шаг прокручивается в видимую область; раскрытие при загрузке страницы её не
-  // двигает. При reduced motion — без плавной прокрутки
-  let firstRun = true;
+  // Шаг, раскрытый пользователем (клик, Enter или Space на заголовке), прокручивается в
+  // видимую область. Раскрытие снаружи — при загрузке, автопереходом или самораскрытием шага
+  // 5 — страницу не двигает: пользователь читает ход в текущем шаге. При reduced motion —
+  // без плавной прокрутки
+  let item: HTMLLIElement | undefined;
 
-  function keepInView(open: boolean): Attachment<HTMLLIElement> {
-    return (el) => {
-      if (firstRun) {
-        firstRun = false;
-        return;
-      }
-      if (!open) return;
-      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      el.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
-    };
+  async function toggle() {
+    expanded = !expanded;
+    if (!expanded) return;
+    await tick();
+    if (!expanded || !item) return;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    item.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
   }
 </script>
 
 <li
-  {@attach keepInView(expanded)}
+  bind:this={item}
   class="setup-step"
   class:setup-step--current={status === 'current'}
   class:setup-step--done={isDone}
@@ -74,22 +81,24 @@
   data-step-id={id}
   data-status={status}
 >
-  <h3 class="setup-step-heading">
+  <h2 class="setup-step-heading">
     <button
       type="button"
       class="setup-step-toggle"
       aria-expanded={expanded}
       aria-controls={bodyId}
       data-testid="setup-step-{n}-toggle"
-      onclick={() => (expanded = !expanded)}
+      onclick={toggle}
     >
-      <span class="setup-marker setup-marker--{status}" role="img" aria-label={statusText}>
+      <span class="setup-marker setup-marker--{status}" aria-hidden="true">
         {#if status === 'done'}
           <Icon name="check" size={16} color="var(--success)" />
         {:else if status === 'partial'}
           <Icon name="check" size={16} color="var(--warning)" />
         {:else if status === 'running'}
           <Spinner size={16} />
+        {:else if status === 'warning'}
+          <Icon name="warning" size={16} color="var(--warning)" />
         {:else if status === 'error'}
           <Icon name="warning" size={16} color="var(--danger)" />
         {:else if status === 'blocked'}
@@ -110,7 +119,7 @@
         <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={16} />
       </span>
     </button>
-  </h3>
+  </h2>
 
   {#if aside}
     <div class="setup-step-aside">{@render aside()}</div>
@@ -132,6 +141,9 @@
 
 <style>
   .setup-step {
+    /* Диаметр маркера и ширина линии-связки: от них считаются смещения линии и тела шага */
+    --setup-marker-size: 24px;
+    --setup-line: 2px;
     position: relative;
     min-width: 0;
     background: var(--bg-card);
@@ -139,15 +151,17 @@
     border-radius: var(--radius-lg);
   }
 
-  /* Линия-связка между маркерами — только на широком экране; на телефоне лента без неё (D-01) */
+  /* Линия-связка между маркерами — только на широком экране; на телефоне лента без неё (D-01).
+     Идёт по оси маркера от-под него (маркер непрозрачный и лежит выше) до внешнего верхнего
+     края следующей строки: своя нижняя рамка 1 px и зазор списка, внутрь строки не заходит */
   @media (min-width: 769px) {
     .setup-step:not(:last-child)::after {
       content: '';
       position: absolute;
-      left: calc(var(--spacing-4) + 11px);
-      top: calc(var(--spacing-4) + var(--spacing-6));
-      bottom: calc(-1 * (var(--spacing-2) + var(--spacing-4)));
-      width: 2px;
+      left: calc(var(--spacing-4) + (var(--setup-marker-size) - var(--setup-line)) / 2);
+      top: calc(var(--spacing-4) + var(--setup-marker-size));
+      bottom: calc(-1 * (var(--spacing-2) + 1px));
+      width: var(--setup-line);
       background: var(--border);
       pointer-events: none;
     }
@@ -186,29 +200,33 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    width: 24px;
-    height: 24px;
+    width: var(--setup-marker-size);
+    height: var(--setup-marker-size);
     border-radius: var(--radius-full);
+    /* Непрозрачная подложка: линия-связка под маркером не просвечивает сквозь мягкий тон */
+    background-color: var(--bg-card);
     position: relative;
     z-index: 1;
   }
 
+  /* Мягкий тон статуса — слоем поверх подложки */
   .setup-marker--current {
-    background: var(--accent-soft);
+    background-image: linear-gradient(var(--accent-soft), var(--accent-soft));
     border: 1px solid var(--accent-line);
     color: var(--accent-text);
   }
 
   .setup-marker--done {
-    background: var(--success-soft);
+    background-image: linear-gradient(var(--success-soft), var(--success-soft));
   }
 
-  .setup-marker--partial {
-    background: var(--warning-soft);
+  .setup-marker--partial,
+  .setup-marker--warning {
+    background-image: linear-gradient(var(--warning-soft), var(--warning-soft));
   }
 
   .setup-marker--error {
-    background: var(--danger-soft);
+    background-image: linear-gradient(var(--danger-soft), var(--danger-soft));
   }
 
   .setup-marker--pending,
@@ -269,7 +287,9 @@
     align-items: center;
     gap: var(--spacing-2);
     min-width: 0;
-    padding: 0 var(--spacing-4) var(--spacing-4) calc(var(--spacing-8) + var(--spacing-6));
+    /* Поле заголовка, маркер и зазор до заголовка — тело выровнено по тексту заголовка */
+    padding: 0 var(--spacing-4) var(--spacing-4)
+      calc(2 * var(--spacing-4) + var(--setup-marker-size));
   }
 
   .setup-step-body {
@@ -277,7 +297,8 @@
     flex-direction: column;
     gap: var(--spacing-4);
     min-width: 0;
-    padding: 0 var(--spacing-4) var(--spacing-4) calc(var(--spacing-8) + var(--spacing-6));
+    padding: 0 var(--spacing-4) var(--spacing-4)
+      calc(2 * var(--spacing-4) + var(--setup-marker-size));
     font-size: var(--font-size-base);
     color: var(--fg-secondary);
     overflow-wrap: anywhere;
@@ -286,6 +307,11 @@
 
   .setup-step-body[hidden] {
     display: none;
+  }
+
+  /* Значение конфигурации в теле шага (имя ядра, число): моноширинное, размер текста тела */
+  .setup-step-body :global(.setup-mono) {
+    font-family: var(--font-family-mono);
   }
 
   @media (max-width: 480px) {

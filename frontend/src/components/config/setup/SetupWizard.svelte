@@ -272,10 +272,10 @@
     startedKernel = kernel;
   }
 
-  // Ход действий поверх статуса сервера: шаг 5 — «Идёт…», пока идёт применение, и
-  // «Заблокирован» при конфликте ядер при любом состоянии черновика (D-15); шаг 6 —
-  // «Идёт…» на время запроса запуска, «Ошибка» при сбое запуска и «Заблокирован» при
-  // конфликте по ответу сервера (отказ kernel_conflict сбоем не считается)
+  // Ход действий поверх статуса сервера: шаг 5 — «Идёт: применение», пока идёт применение,
+  // и «Заблокирован» при конфликте ядер при любом состоянии черновика (D-15); шаг 6 —
+  // «Идёт: запуск ядра» на время запроса запуска, «Ошибка» при сбое запуска и «Заблокирован»
+  // при конфликте по ответу сервера (отказ kernel_conflict сбоем не считается)
   const rows = $derived(
     baseRows.map((r): Row => {
       if (r.id === 'kernel' && kernelPhase === 'running') return { ...r, status: 'running' };
@@ -290,18 +290,33 @@
         if ($wizardView?.kernels.conflict) return { ...r, status: 'blocked' };
         if (startPhase === 'error' && r.status !== 'done') return { ...r, status: 'error' };
       }
-      // Шаг 7: заперт до выполнения шагов 5 и 6, «Идёт…» во время проверки, выполнен после
-      // любого итога (итог на сервер не уходит и в прогресс не входит, D-05)
+      // Шаг 7: заперт до выполнения шагов 5 и 6, «Идёт: проверка IP» во время проверки.
+      // Выполнен только при итоге через VPN или ожидаемом прямом трафике (выборочная
+      // маршрутизация); прямой трафик при пресете «всё через прокси» и сбой сервиса IP —
+      // маркер предупреждения со словом (D-07, D-08). Итог на сервер не уходит и в прогресс
+      // не входит (D-05)
       if (r.id === 'ip' && r.status !== 'locked') {
         if (ipPhase === 'loading') return { ...r, status: 'running' };
-        if (ipPhase !== 'idle') return { ...r, status: 'done' };
+        if (ipPhase === 'proxied' || ipPhase === 'direct_ok') return { ...r, status: 'done' };
+        if (ipPhase === 'direct_warn' || ipPhase === 'failed') return { ...r, status: 'warning' };
       }
       return r;
     })
   );
 
-  // Шаги 1–6 выполнены: «Готово» — главная кнопка
+  // Шаги 1–6 выполнены: «Готово» — главная кнопка; до этого — «Продолжить позже»
   const allDone = $derived($wizardView !== null && $wizardView.current === 0);
+
+  // Объявление начала действий в шагах 1, 5 и 6: «Идёт: установка / применение / запуск
+  // ядра». Шаги 2 и 4 открывают модаль, она объявляет себя сама; у шага 7 своя живая
+  // область (IpCheckResult)
+  const LIVE_RUNNING = ['kernel', 'apply', 'start'];
+  const runningLive = $derived(
+    rows
+      .filter((r) => r.status === 'running' && LIVE_RUNNING.includes(r.id))
+      .map((r) => statusText(r))
+      .join('. ')
+  );
 
   // Номер раскрытого по умолчанию шага: текущий (первый невыполненный), а когда шаги 1–6
   // выполнены — проверка IP. Считается по статусу сервера: ход действий его не сдвигает
@@ -330,7 +345,12 @@
 
   function statusText(r: Row): string {
     if (r.status === 'done' || r.status === 'partial') return $t('cfg.setup.status.done');
-    if (r.status === 'running') return $t('cfg.setup.status.running');
+    if (r.status === 'running') return $t(`cfg.setup.status.running_${r.id}`);
+    if (r.status === 'warning') {
+      return ipPhase === 'failed'
+        ? $t('cfg.setup.status.check_failed')
+        : $t('cfg.setup.status.warning');
+    }
     if (r.status === 'error') return $t('cfg.setup.status.error');
     if (r.status === 'blocked') return $t('cfg.setup.status.blocked');
     if (r.status === 'locked') return $t('cfg.setup.status.locked');
@@ -363,12 +383,17 @@
     void refetchLayerState();
     void loadWizard();
   }
+
+  // Высота строки скелетона — высота свёрнутой строки шага, без скачка при загрузке: поля
+  // строки, заголовок 14×1.3, зазор, статус 12×1.5 и рамка 2×1 px
+  const SKELETON_ROW_H =
+    'calc(2 * var(--spacing-4) + var(--spacing-1) + 1.3 * var(--font-size-base) + 1.5 * var(--font-size-xs) + 2px)';
 </script>
 
 <div class="setup-page" data-testid="config-setup">
   <PageHeader title={$t('cfg.setup.title')} subtitle={$t('cfg.setup.subtitle')}>
     {#snippet actions()}
-      <Button variant="ghost" loading={closing} data-testid="setup-close" onclick={close}>
+      <Button variant="ghost" size="sm" loading={closing} data-testid="setup-close" onclick={close}>
         <Icon name="cross" size={16} />
         {$t('cfg.setup.close')}
       </Button>
@@ -376,6 +401,7 @@
   </PageHeader>
 
   <p class="sr-only" aria-live="polite" data-testid="setup-live">{liveText}</p>
+  <p class="sr-only" aria-live="polite" data-testid="setup-live-running">{runningLive}</p>
 
   {#if failed}
     <EmptyState
@@ -388,7 +414,7 @@
   {:else if $wizardView === null}
     <div class="setup-skeleton" aria-busy="true">
       {#each [1, 2, 3, 4, 5, 6, 7] as n (n)}
-        <Skeleton type="rect" height="56px" />
+        <Skeleton type="rect" height={SKELETON_ROW_H} />
       {/each}
     </div>
   {:else}
@@ -456,6 +482,7 @@
               bind:phase={ipPhase}
               ready={r.status !== 'locked'}
               presetId={stepOf('routing')?.preset ?? ''}
+              lockReason={stepOf('apply')?.done === true ? 'start' : 'apply'}
               {allDone}
             />
           {/if}
@@ -464,12 +491,14 @@
     </ol>
 
     <div class="setup-footer">
+      <!-- Одна главная кнопка на экране: раскрытый шаг 3 несёт свою «Добавить» -->
       <Button
-        variant={allDone ? 'primary' : 'secondary'}
+        variant={allDone && openN !== NODES_N ? 'primary' : 'secondary'}
+        size="sm"
         data-testid="setup-finish"
         onclick={() => (window.location.hash = '#/dashboard')}
       >
-        {$t('cfg.setup.finish')}
+        {allDone ? $t('cfg.setup.finish') : $t('cfg.setup.finish_later')}
       </Button>
     </div>
   {/if}
@@ -481,6 +510,20 @@
     flex-direction: column;
     gap: var(--spacing-4);
     min-width: 0;
+  }
+
+  /* Шапку, список шагов и «Готово» разделяет только зазор страницы */
+  .setup-page :global(.page-header) {
+    margin-bottom: 0;
+  }
+
+  /* Цель касания 44 px: все кнопки .btn мастера — тела шагов, «Взять остальные» в строке,
+     «Закрыть», «Готово», встроенные компоненты и ссылки с классом .btn — в любой плотности.
+     Высоту даёт токен --btn-h, как в ConfirmDialog; селекторов .btn здесь нет */
+  @media (max-width: 768px) {
+    .setup-page {
+      --btn-h: 44px;
+    }
   }
 
   @media (min-width: 1024px) {
