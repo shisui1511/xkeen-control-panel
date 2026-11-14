@@ -154,9 +154,13 @@
   {/if}
 
   <div class="config-stack">
-    <DraftBar bind:this={draftBar} bare={setup} />
+    <!-- Порядок как до мастера: уведомления, полоса черновика, ход применения. DraftBar
+         смонтирован всегда — мастеру нужен его apply() -->
     {#if !setup}
       <ConfigNotices />
+    {/if}
+    <DraftBar bind:this={draftBar} bare={setup} />
+    {#if !setup}
       <ApplyProgress />
 
       <div class="config-tabs" data-testid="config-tabs">
