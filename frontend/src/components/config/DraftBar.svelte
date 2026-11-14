@@ -1,7 +1,7 @@
 <script lang="ts">
   import { get } from 'svelte/store';
   import { t, tp } from '../../i18n';
-  import { showConfirm, conflictVisible } from '../../stores';
+  import { showConfirm } from '../../stores';
   import Button from '../Button.svelte';
   import Skeleton from '../Skeleton.svelte';
   import Spinner from '../Spinner.svelte';
@@ -9,12 +9,7 @@
   import {
     draftChanges,
     driftCount,
-    applyRunning,
-    applyStartedHere,
-    layerSnapshot,
     layerStatus,
-    layerConnection,
-    geodataHolder,
     applyNow,
     resetDraft,
     handleLayerError
@@ -22,71 +17,55 @@
   import { routingView, loadRouting } from '../../lib/configRouting';
   import { geodataView, loadGeodata } from '../../lib/configGeodata';
   import TakeRoutingModal from './routing/TakeRoutingModal.svelte';
-  import { ownerState, routingBusy } from './routing/routingOwner';
+  import { ownerState } from './routing/routingOwner';
   import ApplyPreviewModal from './ApplyPreviewModal.svelte';
   import { applyPreviewOpen, openApplyPreview } from '../../lib/configPreview';
+  import { applyGate, applyGateHint, applyHolderHint } from './applyGate';
+
+  interface Props {
+    /** Без полосы: остаются только перехват взятия и окно изменений (страница мастера, 149 D-23 шаг 5). */
+    bare?: boolean;
+  }
+
+  let { bare = false }: Props = $props();
 
   let resetting = $state(false);
 
-  const ready = $derived($layerStatus === 'ready');
-  const hasSnapshot = $derived($layerSnapshot !== null);
+  // Причины блокировки считает общий стор applyGate: полоса и шаг 5 мастера читают один
+  // источник, а не свои копии (149 D-08, D-15)
+  const ready = $derived($applyGate.ready);
+  const hasSnapshot = $derived($applyGate.hasSnapshot);
   // Первая загрузка: снимка ещё нет — скелетон строки статуса с резервом высоты. Обновление
   // поверх снимка: счётчик и кнопки из снимка, рядом спиннер, полоса не пустеет
-  const firstLoad = $derived(!hasSnapshot && $layerStatus !== 'error');
-  const refreshing = $derived(hasSnapshot && $layerStatus === 'loading');
+  const firstLoad = $derived($applyGate.firstLoad);
+  const refreshing = $derived($applyGate.refreshing);
   const shown = $derived(ready || refreshing);
-  const dirty = $derived($draftChanges > 0);
-  const hasDrift = $derived($driftCount > 0);
-  const lost = $derived($layerConnection === 'lost');
+  const dirty = $derived($applyGate.dirty);
+  const lost = $derived($applyGate.lost);
   // Применение идёт из этой вкладки (флаг ставится до ответа сервера) или из другой (D-16)
-  const applyingHere = $derived($applyStartedHere);
-  const applyingOther = $derived($applyRunning && !$applyStartedHere);
-  // Менеджер geodata держит общий замок (D-11): -ug, установка jq или уборка записи. Пока
-  // замок занят, «Применить» неактивна и рядом видна причина
-  const ugBusy = $derived($geodataHolder === 'geodata_update');
-  const removeBusy = $derived($geodataHolder === 'geodata_remove');
-  // Запись xkeen.json по кнопке и уборка временной записи тоже идут под замком
-  const writeBusy = $derived($geodataHolder === 'geodata_write');
-  const holderHint = $derived(
-    ugBusy
-      ? $t('cfg.geo.ug_busy')
-      : removeBusy
-        ? $t('cfg.routing.apply_busy_hint')
-        : writeBusy
-          ? $t('cfg.geo.write_busy')
-          : ''
-  );
-  const busy = $derived(applyingHere || applyingOther || resetting || $routingBusy);
+  const applyingHere = $derived($applyGate.applyingHere);
+  const applyingOther = $derived($applyGate.applyingOther);
+  // Менеджер geodata держит общий замок (D-11): -ug, установка jq, уборка записи или запись
+  // xkeen.json по кнопке. Пока замок занят, «Применить» неактивна и рядом видна причина
+  const holderHint = $derived(applyHolderHint($applyGate, $t));
+  // Локальный «идёт сброс» складывается только в занятость полосы, не в общий стор
+  const busy = $derived($applyGate.busy || resetting);
   // Пустой черновик: две неактивные кнопки ничего не предлагают, а на телефоне занимают
   // две строки по 44 px. Кнопки появляются вместе с первой правкой или идущим применением
   const showActions = $derived(!firstLoad && (dirty || busy));
-  const blockedByDrift = $derived(dirty && hasDrift);
-  // Конфликт ядер (D-18): правки в черновик принимаются, а «Применить» неактивна, окно
-  // изменений не открывается
-  const blockedByConflict = $derived(dirty && $conflictVisible);
+  const blockedByDrift = $derived($applyGate.blockedByDrift);
   // Проблемы проверки черновика (пустая группа, нет списка, цикл): «Применить» отказывает,
   // пока их не исправят (GRP-05, SRC-07)
-  const checkCount = $derived($layerSnapshot?.checks.length ?? 0);
-  const blockedByChecks = $derived(dirty && checkCount > 0);
+  const checkCount = $derived($applyGate.checkCount);
   const conflictText = $derived($t('cfg.apply_blocked_conflict'));
   const driftText = $derived($t('cfg.apply_blocked_drift', { k: $driftCount }));
   // Связь со слоем потеряна: состояние черновика на сервере неизвестно, поэтому обе кнопки
   // неактивны, а «Применить» в title называет ту же причину, что и строка статуса
-  const applyHint = $derived(
-    lost
-      ? $t('cfg.sse_lost')
-      : blockedByConflict
-        ? conflictText
-        : holderHint !== ''
-          ? holderHint
-          : blockedByChecks
-            ? $t('cfg.routing.apply_blocked_hint')
-            : blockedByDrift
-              ? driftText
-              : $t('cfg.apply_aria')
-  );
+  const applyHint = $derived(applyGateHint($applyGate, $t));
   const showReasons = $derived(
-    shown && dirty && (blockedByConflict || blockedByDrift || checkCount > 0 || holderHint !== '')
+    shown &&
+      dirty &&
+      ($applyGate.blockedByConflict || blockedByDrift || checkCount > 0 || holderHint !== '')
   );
 
   // «Применить» при группах или правилах в черновике, пока маршрутизацией управляет XKeen:
@@ -103,12 +82,22 @@
   // «Применить» открывает окно изменений, а не конвейер (D-08): конвейер запускает только
   // «Применить изменения» в окне, с ревизией черновика, которую окно показало
   async function onApply() {
-    if (blockedByConflict) return;
+    // Конфликт ядер (D-18): правки в черновик принимаются, а окно изменений не открывается
+    if ($applyGate.blockedByConflict) return;
     if (await shouldIntercept()) {
       interceptOpen = true;
       return;
     }
     openApplyPreview();
+  }
+
+  /**
+   * Единственный вход шага 5 мастера в «Применить»: тот же путь, что у кнопки полосы —
+   * перехват взятия маршрутизации, затем окно изменений. Конвейер запускает только
+   * «Применить изменения» в окне, с ревизией черновика, которую окно показало (149 D-08).
+   */
+  export function apply(): void {
+    void onApply();
   }
 
   async function onReset() {
@@ -133,7 +122,7 @@
   }
 </script>
 
-{#if hasSnapshot || $layerStatus !== 'error'}
+{#if !bare && (hasSnapshot || $layerStatus !== 'error')}
   <section
     class="draft-bar card"
     class:draft-bar-idle={!showActions}
@@ -193,14 +182,7 @@
           class="draft-bar-btn"
           data-testid="config-apply"
           ariaLabel={$t('cfg.apply_aria')}
-          disabled={!ready ||
-            !dirty ||
-            busy ||
-            lost ||
-            holderHint !== '' ||
-            blockedByDrift ||
-            blockedByChecks ||
-            blockedByConflict}
+          disabled={!$applyGate.canApply || resetting}
           loading={applyingHere}
           title={applyHint}
           onclick={onApply}>{$t('cfg.apply')}</Button
@@ -209,7 +191,7 @@
     {/if}
     {#if showReasons || holderHint !== ''}
       <div class="draft-bar-reasons">
-        {#if blockedByConflict}
+        {#if $applyGate.blockedByConflict}
           <span class="status-sub" data-testid="config-apply-blocked-conflict">{conflictText}</span>
         {/if}
         {#if shown && dirty && blockedByDrift}
