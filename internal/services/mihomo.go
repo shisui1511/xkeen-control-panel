@@ -678,8 +678,11 @@ type ClashProxyState struct {
 	History []ClashDelay `json:"history"`
 }
 
-// ProxiesState читает все прокси одним запросом вместо ProxyNow на группу.
-// Снимок даёт «Сейчас» авто-групп и историю задержек ядра странице «Прокси».
+// ProxiesState читает состояние всех прокси вместо ProxyNow на группу: группы и
+// узлы профиля — GET /proxies, узлы провайдеров — GET /providers/proxies (в
+// /proxies Mihomo их не перечисляет). Снимок даёт «Сейчас» авто-групп и историю
+// задержек ядра странице «Прокси»; имя из /proxies главнее одноимённого узла
+// провайдера.
 func (s *MihomoService) ProxiesState(ctx context.Context) (map[string]ClashProxyState, error) {
 	status, body, err := s.clashDo(ctx, http.MethodGet, "/proxies", nil)
 	if err != nil {
@@ -693,6 +696,34 @@ func (s *MihomoService) ProxiesState(ctx context.Context) (map[string]ClashProxy
 	}
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return nil, fmt.Errorf("mihomo clash api: разбор ответа: %w", err)
+	}
+	if doc.Proxies == nil {
+		doc.Proxies = map[string]ClashProxyState{}
+	}
+	status, body, err = s.clashDo(ctx, http.MethodGet, "/providers/proxies", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, newClashStatusError(status, body)
+	}
+	var pdoc struct {
+		Providers map[string]struct {
+			Proxies []struct {
+				Name string `json:"name"`
+				ClashProxyState
+			} `json:"proxies"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(body, &pdoc); err != nil {
+		return nil, fmt.Errorf("mihomo clash api: разбор ответа провайдеров: %w", err)
+	}
+	for _, p := range pdoc.Providers {
+		for _, px := range p.Proxies {
+			if _, ok := doc.Proxies[px.Name]; px.Name != "" && !ok {
+				doc.Proxies[px.Name] = px.ClashProxyState
+			}
+		}
 	}
 	return doc.Proxies, nil
 }
