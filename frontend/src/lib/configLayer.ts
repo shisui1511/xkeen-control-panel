@@ -450,31 +450,34 @@ const EVENT_NAMES = [
   'routing',
   'geodata',
   'dns',
-  'wizard'
+  'wizard',
+  'proxies'
 ] as const;
 const RETRY_MIN_MS = 3000;
 const RETRY_MAX_MS = 30000;
 
-// Обработчики событий sources, routing, geodata, dns, wizard и draft: представления
+// Обработчики событий sources, routing, geodata, dns, wizard, proxies и draft: представления
 // перечитывают клиенты источников, маршрутизации, менеджера geodata, перехвата DNS и мастера
 // первого запуска (обработчики регистрируются при загрузке модулей клиентов; configLayer их
 // не импортирует — цикла нет). У каждого имени свой набор.
-type HandlerEvent = 'sources' | 'routing' | 'geodata' | 'dns' | 'wizard' | 'draft';
-const layerHandlers: Record<HandlerEvent, Set<() => void>> = {
+type HandlerEvent = 'sources' | 'routing' | 'geodata' | 'dns' | 'wizard' | 'draft' | 'proxies';
+const layerHandlers: Record<HandlerEvent, Set<(data?: unknown) => void>> = {
   sources: new Set(),
   routing: new Set(),
   geodata: new Set(),
   dns: new Set(),
   wizard: new Set(),
-  draft: new Set()
+  draft: new Set(),
+  proxies: new Set()
 };
 
 /**
- * Подписка на событие SSE `sources`, `routing`, `geodata`, `dns`, `wizard` или `draft`;
- * возвращает функцию отписки. После восстановления связи подписчики geodata, dns и wizard
+ * Подписка на событие SSE `sources`, `routing`, `geodata`, `dns`, `wizard`, `proxies` или `draft`;
+ * возвращает функцию отписки. Данные proxies передаются обработчику без изменения снимка.
+ * После восстановления связи подписчики geodata, dns, wizard и proxies
  * получают вызов без события: за время обрыва их события могли пройти мимо.
  */
-export function onLayerEvent(name: HandlerEvent, fn: () => void): () => void {
+export function onLayerEvent(name: HandlerEvent, fn: (data?: unknown) => void): () => void {
   const set = layerHandlers[name];
   if (!set) return () => {};
   set.add(fn);
@@ -483,8 +486,8 @@ export function onLayerEvent(name: HandlerEvent, fn: () => void): () => void {
   };
 }
 
-function notifyHandlers(name: HandlerEvent): void {
-  for (const fn of [...layerHandlers[name]]) fn();
+function notifyHandlers(name: HandlerEvent, data?: unknown): void {
+  for (const fn of [...layerHandlers[name]]) fn(data);
 }
 
 /** Сообщает подписчикам, что представление источников устарело и его нужно перечитать. */
@@ -520,6 +523,12 @@ function syncStartedHere(): void {
 }
 
 function applyEvent(name: string, data: unknown): void {
+  if (name === 'proxies') {
+    // Событие несёт только счётчик и вид (select, structure, ping, batch); снимок слоя
+    // не меняется, данные перечитывает клиент «Прокси».
+    notifyHandlers('proxies', isObject(data) ? data : undefined);
+    return;
+  }
   if (name === 'sources') {
     // Состояния слоя событие не меняет: оно только сообщает, что источники обновились
     notifySourcesChanged();
@@ -627,10 +636,11 @@ function connect(): void {
     // Пока связи не было, события могли пройти мимо — читаем состояние целиком (D-06)
     if (wasLost) {
       void refetchLayerState();
-      // События менеджера баз, перехвата DNS и мастера за время обрыва тоже могли пройти мимо
+      // События менеджера баз, перехвата DNS, мастера и прокси тоже могли пройти мимо
       notifyHandlers('geodata');
       notifyHandlers('dns');
       notifyHandlers('wizard');
+      notifyHandlers('proxies');
     }
   };
   es.onerror = () => {
