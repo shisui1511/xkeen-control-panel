@@ -231,3 +231,34 @@ func (p *tempXray) stop() {
 		}
 	})
 }
+
+// SweepStale вызывается в main до приёма запросов. Сигнал получает только
+// процесс, чей cmdline содержит точный каталог пачки; чужой PID не трогается.
+// Каталоги удаляются и без PID, чтобы не оставлять учётные данные на носителе.
+func (r *Runner) SweepStale() error {
+	entries, err := os.ReadDir(r.d.TmpRoot)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return errors.New("ping_sweep_read")
+	}
+	var errs []error
+	for _, entry := range entries {
+		dir := filepath.Join(r.d.TmpRoot, entry.Name())
+		if entry.IsDir() {
+			data, e := os.ReadFile(filepath.Join(dir, "pid"))
+			if e == nil {
+				pid, e := strconv.Atoi(strings.TrimSpace(string(data)))
+				if e == nil && ownsProcess(pid, dir) {
+					_ = syscall.Kill(-pid, syscall.SIGKILL)
+					_ = syscall.Kill(pid, syscall.SIGKILL)
+				}
+			}
+		}
+		if e := os.RemoveAll(dir); e != nil {
+			errs = append(errs, errors.New("ping_sweep_remove"))
+		}
+	}
+	return errors.Join(errs...)
+}
