@@ -90,7 +90,8 @@
   );
 
   // Фокус потерян — на «Повторить применение» (новый сбой), иначе на «Применить», если она
-  // видна и активна; иначе не трогается
+  // видна и активна; ни одной — на заголовок шага (успех убирает кнопку повтора, а
+  // «Применить» без изменений неактивна), чтобы клавиатура не начинала с начала страницы
   function restoreFocus() {
     const active = document.activeElement;
     const lost = active === null || active === document.body || !active.isConnected;
@@ -102,6 +103,7 @@
         return;
       }
     }
+    root.closest('.setup-step')?.querySelector<HTMLButtonElement>('.setup-step-toggle')?.focus();
   }
 
   function retry() {
