@@ -25,15 +25,26 @@ import (
 // панели и процессы ядер устройства. Флаг слоя, режим разработчика, признак
 // мастера и черновик возвращаются прежними. Проверки статуса после сброса идут
 // при удержанном открытом черновике: шаг «применение» тогда не выполнен, и
-// наблюдатель службы (тик 10 с) не ставит done между сбросом и проверкой, какими
-// бы ни были шаги 1–6 стенда. В сообщениях провалов — только коды, статусы и
-// счётчики, без адресов и имён узлов.
+// наблюдатель службы (период tick_s ответа) не ставит done между сбросом и
+// проверкой, какими бы ни были шаги 1–6 стенда. Сроки ожидания отметки и
+// обновления вида берутся у панели (tick_s), а не константой. В сообщениях
+// провалов — только коды, статусы и счётчики, без адресов и имён узлов.
 
 const (
 	rtWizardBase = "/api/configlayer/wizard"
 	// rtWizardDeadSub — подписка на loopback без сервера: защита от SSRF не даёт
 	// скачать набор узлов, источник есть, узлов нет.
 	rtWizardDeadSub = "http://127.0.0.1:9/xcp-wizard-check"
+	// rtWizardPostMax — предел ответа POST close|hide|reset: панель ждёт записи
+	// признака не дольше 1 с (wizardWriteWait службы мастера), дальше отвечает
+	// статусом с учётом этой записи; плюс запас на сеть и процессор стенда. Предел
+	// общий для всех POST: и POST без смены признака идёт через очередь записей и
+	// при занятом замке хранилища отвечает по истечении того же ожидания.
+	rtWizardPostMax = 2 * time.Second
+	// rtWizardGetMax — предел ответа GET мастера: панель ждёт наблюдения (факты
+	// слоя, ядра, секции Xray) не дольше 1 с (viewWait службы мастера), дальше
+	// отдаёт последнее наблюдение; плюс запас.
+	rtWizardGetMax = 2 * time.Second
 )
 
 // rtWizardStepIDs — шаги мастера в порядке ответа.
@@ -55,6 +66,41 @@ func rtWizardView(e *rtSrc) map[string]any {
 		e.t.Fatalf("GET %s: %d %s", rtWizardBase, r.Status, r.Code)
 	}
 	return r.object(e.t)
+}
+
+// rtWizardTick — период проверки наблюдателем из поля tick_s вида; нет поля или
+// оно не больше нуля — провал.
+func rtWizardTick(t *testing.T, v map[string]any) time.Duration {
+	t.Helper()
+	tick := rtWizardNum(v, "tick_s")
+	if tick <= 0 {
+		t.Fatalf("ответ мастера без tick_s (%v)", v["tick_s"])
+	}
+	return time.Duration(tick) * time.Second
+}
+
+// rtWizardViewUntil опрашивает GET мастера, пока cond не выполнится, не дольше
+// tick_s + 10 с (tick_s — из первого прочитанного вида), шаг 500 мс. GET, не
+// дождавшийся наблюдения за секунду, отдаёт прежнее наблюдение; наблюдатель
+// публикует отличие не позже tick_s, поэтому вид после правки черновика
+// опрашивается, а не читается один раз. Не дождался — провал с what и последним
+// наблюдением cond. Возвращает вид, на котором cond выполнилось.
+func rtWizardViewUntil(e *rtSrc, what string, cond func(v map[string]any) (bool, string)) map[string]any {
+	e.t.Helper()
+	v := rtWizardView(e)
+	limit := rtWizardTick(e.t, v) + 10*time.Second
+	ok, seen := cond(v)
+	if ok {
+		return v
+	}
+	ok, seen = routertest.Poll(limit, 500*time.Millisecond, func() (bool, string) {
+		v = rtWizardView(e)
+		return cond(v)
+	})
+	if !ok {
+		e.t.Fatalf("%s: за %v не дождались вида мастера: %s", what, limit, seen)
+	}
+	return v
 }
 
 // rtWizardStep — шаг ответа по id; нет шага — провал.
@@ -139,16 +185,19 @@ func rtWizardHold(e *rtSrc) (release func()) {
 	if add.Status != http.StatusOK {
 		e.t.Fatalf("удержание черновика, add: %d %s", add.Status, add.Code)
 	}
-	apply := rtWizardStep(e.t, rtWizardView(e), "apply")
-	if done, _ := apply["done"].(bool); done || rtWizardNum(apply, "draft_changes") <= 0 {
-		e.t.Fatalf("черновик не удержан: apply.done %v, draft_changes %d", apply["done"], rtWizardNum(apply, "draft_changes"))
-	}
+	rtWizardViewUntil(e, "черновик не удержан", func(v map[string]any) (bool, string) {
+		apply := rtWizardStep(e.t, v, "apply")
+		done, _ := apply["done"].(bool)
+		changes := rtWizardNum(apply, "draft_changes")
+		return !done && changes > 0, fmt.Sprintf("apply.done %v, draft_changes %d", apply["done"], changes)
+	})
 	return func() { e.resetDraft() }
 }
 
 // rtWizardReset снимает признак мастера (нужен режим разработчика). Сброс и
-// отметка done наблюдателем идут по очереди, а вид в ответе сброса собран до
-// следующего тика: статус в нём обязан быть пустым с первого сброса.
+// отметка done наблюдателем пишутся по очереди под одним замком, а статус ответа
+// сброса — результат этой записи, без отметки следующей проверки наблюдателя:
+// он обязан быть пустым с первого сброса.
 func rtWizardReset(e *rtSrc) map[string]any {
 	e.t.Helper()
 	v := rtWizardPost(e, "reset")
@@ -192,6 +241,103 @@ func rtWizardPost(e *rtSrc, action string) map[string]any {
 	return r.object(e.t)
 }
 
+// rtWizardPostTimed — rtWizardPost с замером времени ответа.
+func rtWizardPostTimed(e *rtSrc, action string) (map[string]any, time.Duration) {
+	e.t.Helper()
+	start := time.Now()
+	r := e.call(http.MethodPost, rtWizardBase+"/"+action, nil)
+	took := time.Since(start)
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("POST %s/%s: %d %s", rtWizardBase, action, r.Status, r.Code)
+	}
+	return r.object(e.t), took
+}
+
+// rtWizardCheckPost — провал, если POST мастера ответил дольше rtWizardPostMax.
+func rtWizardCheckPost(t *testing.T, action string, took time.Duration) {
+	t.Helper()
+	if took > rtWizardPostMax {
+		t.Errorf("POST %s ответил за %v (предел %v): ответ POST мастера ждёт записи признака на носитель или замка хранилища (G-149.1-6)",
+			action, took.Round(time.Millisecond), rtWizardPostMax)
+	}
+}
+
+// rtWizardContractIssues сверяет вид мастера v с состоянием слоя
+// (steps[apply].draft_changes) и, при установленном Xray, пометку «частично» с
+// видом секций Xray; возвращает расхождения (пусто — сошлось). sectionsLog
+// получает строку счётчиков секций Xray последней сверки.
+//
+// Частичное взятие Xray — по признаку «секция в черновике» (desired снимка) и
+// блокировке вида, без владельца секции: ожидание верно при любом владении на
+// стенде, в том числе при drift у взятой секции.
+func rtWizardContractIssues(e *rtSrc, v map[string]any, sectionsLog *string) []string {
+	e.t.Helper()
+	var issues []string
+	st := e.call(http.MethodGet, "/api/configlayer/state", nil)
+	if st.Status != http.StatusOK {
+		e.t.Fatalf("GET /api/configlayer/state: %d %s", st.Status, st.Code)
+	}
+	state := st.object(e.t)
+	if got, want := rtWizardNum(rtWizardStep(e.t, v, "apply"), "draft_changes"), rtWizardNum(state, "draft_changes"); got != want {
+		issues = append(issues, fmt.Sprintf("steps[apply].draft_changes %d, в состоянии слоя %d", got, want))
+	}
+
+	kernels, _ := v["kernels"].(map[string]any)
+	if xray, _ := kernels["xray"].(bool); !xray {
+		return issues
+	}
+	coresSnap, _ := state["cores"].(map[string]any)
+	desired := map[string]bool{}
+	if xs, ok := coresSnap["xray"].(map[string]any); ok {
+		for id, raw := range xs {
+			sec, _ := raw.(map[string]any)
+			d, _ := sec["desired"].(bool)
+			desired[id] = d
+		}
+	}
+	cv := e.call(http.MethodGet, "/api/configlayer/cores?kernel=xray", nil)
+	if cv.Status != http.StatusOK {
+		e.t.Fatalf("GET /api/configlayer/cores?kernel=xray: %d %s", cv.Status, cv.Code)
+	}
+	inDraft, takeable, drift, releasing := 0, 0, 0, 0
+	for _, d := range desired {
+		if d {
+			inDraft++
+		}
+	}
+	secs, _ := cv.object(e.t)["sections"].([]any)
+	for _, s := range secs {
+		sec, _ := s.(map[string]any)
+		id, _ := sec["id"].(string)
+		switch sec["owner"] {
+		case "drift":
+			drift++
+		case "releasing":
+			releasing++
+		}
+		if blocked, _ := sec["blocked"].(string); blocked == "" && !desired[id] {
+			takeable++
+		}
+	}
+	*sectionsLog = fmt.Sprintf("xray-sections: в черновике %d, можно взять %d, drift %d, releasing %d", inDraft, takeable, drift, releasing)
+	sections := rtWizardStep(e.t, v, "sections")
+	takes, _ := sections["kernels"].(map[string]any)
+	xt, _ := takes["xray"].(map[string]any)
+	if got, _ := xt["done"].(bool); got != (inDraft >= 1) {
+		issues = append(issues, fmt.Sprintf("sections.kernels.xray.done %v, секций в черновике %d", got, inDraft))
+	}
+	partial, has := sections["partial"].(map[string]any)
+	switch {
+	case inDraft >= 1 && takeable > 0:
+		if !has || rtWizardNum(partial, "done") != inDraft || rtWizardNum(partial, "total") != inDraft+takeable {
+			issues = append(issues, fmt.Sprintf("partial %v, ожидалось {done: %d, total: %d}", sections["partial"], inDraft, inDraft+takeable))
+		}
+	case has:
+		issues = append(issues, fmt.Sprintf("partial %v при %d в черновике и %d доступных", partial, inDraft, takeable))
+	}
+	return issues
+}
+
 // Флаг слоя выключен: четыре маршрута мастера отвечают 404 config_layer_disabled.
 // Отдельный тест: переключение флага дорогое, остальные проверки идут при
 // включённом слое.
@@ -211,9 +357,6 @@ func TestRouterWizardFlagOff404(t *testing.T) {
 func TestRouterWizardAPI(t *testing.T) {
 	// Шаг «запуск» и отметка «пройдено» зависят от запущенного ядра стенда.
 	routertest.CoreSpecific(t)
-	// Подтест done_stamped_by_server один раз не уложился в 25 с на медленной панели
-	// при Xray и прошёл на перепрогоне: карантин до разбора причины.
-	routertest.Quarantine(t, "wizard-done-stamp-flaky-xray")
 	e := rtNewSrc(t)
 	e.enableLayer()
 
@@ -303,74 +446,22 @@ func TestRouterWizardAPI(t *testing.T) {
 		if got := rtWizardNum(v, "current"); got != current {
 			t.Errorf("current %d, первый невыполненный %d", got, current)
 		}
-		st := e.call(http.MethodGet, "/api/configlayer/state", nil)
-		if st.Status != http.StatusOK {
-			t.Fatalf("GET /api/configlayer/state: %d %s", st.Status, st.Code)
-		}
-		state := st.object(t)
-		if got, want := rtWizardNum(rtWizardStep(t, v, "apply"), "draft_changes"), rtWizardNum(state, "draft_changes"); got != want {
-			t.Errorf("steps[apply].draft_changes %d, в состоянии слоя %d", got, want)
-		}
 		status := rtWizardStatus(v)
 		if card, _ := v["card_visible"].(bool); card && (status == "done" || status == "hidden") {
 			t.Errorf("card_visible при статусе %q", status)
 		}
 
-		// Частичное взятие Xray — по признаку «секция в черновике» (desired снимка)
-		// и блокировке вида, без владельца секции: ожидание верно при любом
-		// владении на стенде, в том числе при drift у взятой секции.
-		kernels, _ := v["kernels"].(map[string]any)
-		if xray, _ := kernels["xray"].(bool); !xray {
-			return
-		}
-		coresSnap, _ := state["cores"].(map[string]any)
-		desired := map[string]bool{}
-		if xs, ok := coresSnap["xray"].(map[string]any); ok {
-			for id, raw := range xs {
-				sec, _ := raw.(map[string]any)
-				d, _ := sec["desired"].(bool)
-				desired[id] = d
-			}
-		}
-		cv := e.call(http.MethodGet, "/api/configlayer/cores?kernel=xray", nil)
-		if cv.Status != http.StatusOK {
-			t.Fatalf("GET /api/configlayer/cores?kernel=xray: %d %s", cv.Status, cv.Code)
-		}
-		inDraft, takeable, drift, releasing := 0, 0, 0, 0
-		for _, d := range desired {
-			if d {
-				inDraft++
-			}
-		}
-		secs, _ := cv.object(t)["sections"].([]any)
-		for _, s := range secs {
-			sec, _ := s.(map[string]any)
-			id, _ := sec["id"].(string)
-			switch sec["owner"] {
-			case "drift":
-				drift++
-			case "releasing":
-				releasing++
-			}
-			if blocked, _ := sec["blocked"].(string); blocked == "" && !desired[id] {
-				takeable++
-			}
-		}
-		t.Logf("xray-sections: в черновике %d, можно взять %d, drift %d, releasing %d", inDraft, takeable, drift, releasing)
-		sections := rtWizardStep(t, v, "sections")
-		takes, _ := sections["kernels"].(map[string]any)
-		xt, _ := takes["xray"].(map[string]any)
-		if got, _ := xt["done"].(bool); got != (inDraft >= 1) {
-			t.Errorf("sections.kernels.xray.done %v, секций в черновике %d", got, inDraft)
-		}
-		partial, has := sections["partial"].(map[string]any)
-		switch {
-		case inDraft >= 1 && takeable > 0:
-			if !has || rtWizardNum(partial, "done") != inDraft || rtWizardNum(partial, "total") != inDraft+takeable {
-				t.Errorf("partial %v, ожидалось {done: %d, total: %d}", sections["partial"], inDraft, inDraft+takeable)
-			}
-		case has:
-			t.Errorf("partial %v при %d в черновике и %d доступных", partial, inDraft, takeable)
+		// Сверки со состоянием слоя и видом секций Xray — в опросе: GET, не
+		// дождавшийся наблюдения за секунду, отдаёт прежнее, и каждая попытка
+		// перечитывает вид мастера, состояние слоя и вид секций. Провал — по
+		// последнему наблюдению.
+		var sectionsLog string
+		rtWizardViewUntil(e, "вид мастера не сошёлся с состоянием слоя и видом секций Xray", func(v map[string]any) (bool, string) {
+			issues := rtWizardContractIssues(e, v, &sectionsLog)
+			return len(issues) == 0, strings.Join(issues, "; ")
+		})
+		if sectionsLog != "" {
+			t.Log(sectionsLog)
 		}
 	})
 
@@ -390,10 +481,12 @@ func TestRouterWizardAPI(t *testing.T) {
 		if add.Status != http.StatusOK {
 			t.Fatalf("add подписки на loopback: %d %s", add.Status, add.Code)
 		}
-		after := rtWizardStep(t, rtWizardView(e), "nodes")
-		if got, want := rtWizardNum(after, "sources"), rtWizardNum(before, "sources")+1; got != want {
-			t.Errorf("источников %d, ожидалось %d", got, want)
-		}
+		wantSources := rtWizardNum(before, "sources") + 1
+		v := rtWizardViewUntil(e, "источник не появился в шаге «узлы»", func(v map[string]any) (bool, string) {
+			got := rtWizardNum(rtWizardStep(t, v, "nodes"), "sources")
+			return got == wantSources, fmt.Sprintf("источников %d, ожидалось %d", got, wantSources)
+		})
+		after := rtWizardStep(t, v, "nodes")
 		if got, want := rtWizardNum(after, "nodes"), rtWizardNum(before, "nodes"); got != want {
 			t.Errorf("узлов %d, ожидалось %d: источник без скачанного набора дал узлы", got, want)
 		}
@@ -430,23 +523,57 @@ func TestRouterWizardAPI(t *testing.T) {
 		// сам); затем отпускается удержание подтеста.
 		t.Cleanup(func() { rtWizardRestore(e, prev) })
 
-		rtWizardReset(e)
-		if st := rtWizardStatus(rtWizardPost(e, "close")); st != "closed" {
+		// Три GET вида с замером: панель ждёт наблюдения не дольше секунды.
+		var gets [3]time.Duration
+		for i := range gets {
+			start := time.Now()
+			r := e.call(http.MethodGet, rtWizardBase, nil)
+			gets[i] = time.Since(start)
+			if r.Status != http.StatusOK {
+				t.Fatalf("GET %s: %d %s", rtWizardBase, r.Status, r.Code)
+			}
+		}
+
+		// Длительности трёх GET и пяти POST — в строке wizard-timing: (план-сессия
+		// сверяет их с журналом панели).
+		v, resetTook := rtWizardPostTimed(e, "reset")
+		if st := rtWizardStatus(v); st != "" {
+			t.Fatalf("после сброса статус мастера %q, ожидался пустой", st)
+		}
+		v, closeTook := rtWizardPostTimed(e, "close")
+		if st := rtWizardStatus(v); st != "closed" {
 			t.Errorf("после close статус %q", st)
 		}
-		if st := rtWizardStatus(rtWizardPost(e, "close")); st != "closed" {
+		v, repeatTook := rtWizardPostTimed(e, "close")
+		if st := rtWizardStatus(v); st != "closed" {
 			t.Errorf("после повторного close статус %q", st)
 		}
-		if st := rtWizardStatus(rtWizardPost(e, "hide")); st != "hidden" {
+		v, hideTook := rtWizardPostTimed(e, "hide")
+		if st := rtWizardStatus(v); st != "hidden" {
 			t.Errorf("после hide статус %q", st)
 		}
-		v := rtWizardPost(e, "close")
+		v, afterHideTook := rtWizardPostTimed(e, "close")
 		if st := rtWizardStatus(v); st != "hidden" {
 			t.Errorf("close после hide понизил статус до %q", st)
 		}
 		if card, _ := v["card_visible"].(bool); card {
 			t.Error("card_visible при статусе hidden")
 		}
+		t.Logf("wizard-timing: get=%dms,%dms,%dms reset=%dms close=%dms close-repeat=%dms hide=%dms close-after-hide=%dms",
+			gets[0].Milliseconds(), gets[1].Milliseconds(), gets[2].Milliseconds(),
+			resetTook.Milliseconds(), closeTook.Milliseconds(), repeatTook.Milliseconds(),
+			hideTook.Milliseconds(), afterHideTook.Milliseconds())
+		for i, d := range gets {
+			if d > rtWizardGetMax {
+				t.Errorf("GET %d ответил за %v (предел %v): GET мастера ждёт хранилища или чтения ядер дольше предела (G-149.1-6)",
+					i+1, d.Round(time.Millisecond), rtWizardGetMax)
+			}
+		}
+		rtWizardCheckPost(t, "reset", resetTook)
+		rtWizardCheckPost(t, "close", closeTook)
+		rtWizardCheckPost(t, "close (повтор)", repeatTook)
+		rtWizardCheckPost(t, "hide", hideTook)
+		rtWizardCheckPost(t, "close после hide", afterHideTook)
 		rtSetDevMode(e, false)
 		r := e.call(http.MethodPost, rtWizardBase+"/reset", nil)
 		rtSetDevMode(e, true)
@@ -460,22 +587,32 @@ func TestRouterWizardAPI(t *testing.T) {
 		rtDevMode(e, true)
 		v := rtWizardView(e)
 		prev, doneCount := rtWizardStatus(v), rtWizardNum(v, "done_count")
+		// Период наблюдателя — у процесса панели (tick_s), а не константой.
+		tick := rtWizardTick(t, v)
 		t.Cleanup(func() { rtWizardRestore(e, prev) })
 		rtWizardReset(e)
+		resetAt := time.Now()
 		if doneCount == 6 {
-			t.Logf("ветка: шаги 1–6 выполнены — ждём отметку сервера")
-			ok, seen := routertest.Poll(25*time.Second, time.Second, func() (bool, string) {
+			// Отметку ставит ближайший тик (не позже периода), ещё период — запас на
+			// тик, начатый до сброса, и 10 с — на медленную панель.
+			limit := 2*tick + 10*time.Second
+			t.Logf("ветка: шаги 1–6 выполнены — ждём отметку сервера (до %v)", limit)
+			ok, seen := routertest.Poll(limit, time.Second, func() (bool, string) {
 				v := rtWizardView(e)
 				card, _ := v["card_visible"].(bool)
 				return rtWizardStatus(v) == "done" && !card, fmt.Sprintf("статус %q, card_visible %v", rtWizardStatus(v), card)
 			})
 			if !ok {
-				t.Errorf("за 25 с сервер не отметил «пройдено»: %s", seen)
+				t.Errorf("за %v сервер не отметил «пройдено»: %s", limit, seen)
+				return
 			}
+			t.Logf("wizard-timing: done=%.1fs tick=%ds", time.Since(resetAt).Seconds(), int(tick/time.Second))
 			return
 		}
-		t.Logf("ветка: выполнено шагов %d из 6 — отметки быть не должно", doneCount)
-		ok, seen := routertest.Poll(12*time.Second, time.Second, func() (bool, string) {
+		// Ближайший тик после сброса — не позже периода, плюс запас.
+		limit := tick + 2*time.Second
+		t.Logf("ветка: выполнено шагов %d из 6 — отметки быть не должно (наблюдение %v)", doneCount, limit)
+		ok, seen := routertest.Poll(limit, time.Second, func() (bool, string) {
 			v := rtWizardView(e)
 			card, _ := v["card_visible"].(bool)
 			if rtWizardStatus(v) != "" || !card {

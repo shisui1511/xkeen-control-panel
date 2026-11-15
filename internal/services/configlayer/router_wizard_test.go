@@ -129,6 +129,8 @@ func TestRouterWizardState(t *testing.T) {
 			t.Errorf("неизвестный статус: %v, ожидалась ErrWizardStatus", err)
 		}
 
+		// Признак пишется в файл в фоне, как правки черновика: дождаться записи.
+		layer.store.Flush()
 		var onDisk WizardState
 		raw, ok := rtWizardFile(t, dir)["wizard"]
 		if !ok {
@@ -187,6 +189,7 @@ func TestRouterWizardState(t *testing.T) {
 			t.Errorf("признак мастера изменил черновик: ревизия %d -> %d, секций %d -> %d",
 				prev.DraftRevision, cur.DraftRevision, len(prev.Draft), len(cur.Draft))
 		}
+		again.store.Flush() // признак пишется в файл в фоне
 		file := rtWizardFile(t, dir)
 		if string(file["schema_version"]) != "1" {
 			t.Errorf("schema_version в файле %s, ожидалась 1", file["schema_version"])
@@ -259,6 +262,7 @@ func TestRouterWizardState(t *testing.T) {
 		if _, ok := rtNextEvent(events, EventWizard, 2*time.Second); !ok {
 			t.Error("нет события wizard после сброса")
 		}
+		dev.store.Flush() // снятие признака пишется в файл в фоне
 		if _, ok := rtWizardFile(t, dir)["wizard"]; ok {
 			t.Error("после сброса в файле остался признак мастера")
 		}

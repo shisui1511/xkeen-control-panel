@@ -56,12 +56,19 @@ func wizardRank(w *WizardState) int {
 	return 0
 }
 
-// MarkWizard ставит признак мастера, если его ранг выше текущего, и сохраняет
-// состояние (fsync). Ранг не выше текущего — ничего не меняется и файл не пишется
-// (false). Под замком хранилища: две вкладки и наблюдатель службы мастера не
-// понизят признак друг другу.
+// MarkWizard ставит признак мастера, если его ранг выше текущего. Ранг не выше
+// текущего — ничего не меняется (false). Под замком хранилища: две вкладки и
+// наблюдатель службы мастера не понизят признак друг другу.
+//
+// Признак пишется по схеме правок черновика (EditDraft): состояние меняется в
+// памяти, файл пишет фоновая запись без fsync (flushLoop) с досинхронизацией
+// (scheduleSync), остаток при остановке слоя и перед самообновлением — FlushSync.
+// Ответ на «Закрыть» и «Скрыть» и отметка «пройдено» не ждут носителя: fsync и
+// подмена переименованием на флешке роутера под чужой записью стоят секунды —
+// десятки секунд (G-149.1-6). Окно риска при обрыве питания то же, что у правок
+// черновика: последний признак может не дойти до файла — closed означает ещё одно
+// автооткрытие, done наблюдатель поставит снова.
 func (s *Store) MarkWizard(status WizardStatus, now time.Time) (bool, error) {
-	s.Flush() // без mu: см. Update
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.loadLocked(); err != nil {
@@ -73,10 +80,8 @@ func (s *Store) MarkWizard(status WizardStatus, now time.Time) (bool, error) {
 
 	next := s.st.clone()
 	next.Wizard = &WizardState{Status: status, At: now.UTC()}
-	if err := s.persist(next); err != nil {
-		return false, err
-	}
 	s.commitLocked(next)
+	s.scheduleFlushLocked()
 	return true, nil
 }
 
@@ -125,10 +130,11 @@ func (l *Layer) PublishWizard() {
 	l.broker.Publish(Event{Type: EventWizard, Data: WizardEvent{Seq: l.wizardSeq.Add(1)}})
 }
 
-// ResetWizard снимает признак мастера и сохраняет состояние. Признака нет —
-// ничего не пишется (false).
+// ResetWizard снимает признак мастера. Признака нет — ничего не меняется (false).
+// Запись — как у MarkWizard: в памяти и фоновой записью файла, ответ на сброс не
+// ждёт носителя (G-149.1-6); окно риска при обрыве питания — как у правок
+// черновика.
 func (s *Store) ResetWizard() (bool, error) {
-	s.Flush() // без mu: см. Update
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.loadLocked(); err != nil {
@@ -140,22 +146,31 @@ func (s *Store) ResetWizard() (bool, error) {
 
 	next := s.st.clone()
 	next.Wizard = nil
-	if err := s.persist(next); err != nil {
-		return false, err
-	}
 	s.commitLocked(next)
+	s.scheduleFlushLocked()
 	return true, nil
+}
+
+// CheckWizardReset — проверки сброса признака мастера без обращения к
+// хранилищу: слой включён (ErrDisabled) и включён режим разработчика
+// (ErrDevModeRequired). Служба мастера зовёт её до очереди записей, чтобы коды
+// 404 и 403 не ждали чужих записей признака.
+func (l *Layer) CheckWizardReset() error {
+	if !l.Enabled() {
+		return ErrDisabled
+	}
+	if !l.devMode() {
+		return ErrDevModeRequired
+	}
+	return nil
 }
 
 // ResetWizard снимает признак мастера: мастер снова считается непройденным.
 // Только в режиме разработчика — ручка проверок карточки и автооткрытия на одном
 // стенде; иначе признак стирает лишь сброс схемы состояния (149 D-26).
 func (l *Layer) ResetWizard() error {
-	if !l.Enabled() {
-		return ErrDisabled
-	}
-	if !l.devMode() {
-		return ErrDevModeRequired
+	if err := l.CheckWizardReset(); err != nil {
+		return err
 	}
 	changed, err := l.store.ResetWizard()
 	if err != nil {

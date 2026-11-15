@@ -44,11 +44,7 @@ func (s *Service) Stop() {
 // run — цикл наблюдателя: первая проверка сразу, затем по тикеру.
 func (s *Service) run() {
 	defer close(s.done)
-	interval := s.d.Interval
-	if interval <= 0 {
-		interval = defaultInterval
-	}
-	t := time.NewTicker(interval)
+	t := time.NewTicker(s.interval())
 	defer t.Stop()
 	for {
 		if s.ctx.Err() != nil {
@@ -74,10 +70,17 @@ func (s *Service) afterApply(_ context.Context, _ configlayer.AfterApplyInfo) {
 // перечитывают GET), все шаги 1–6 выполнены — признак done. После done или
 // hidden расчёт и событие остаются (мастер открыт по ссылке раздела, шаги на
 // странице должны обновляться), не пишется только признак. Читает только факты
-// слоя: вид секций ядра и копии состояния здесь не нужны.
+// слоя и состояние ядер: вид секций ядра и копии состояния здесь не нужны.
+//
+// Проверки идут по одной под checkMu. Установленность, факты слоя и состояние
+// ядер (один вызов) читаются вне tickMu и без предела — это фон; итог кладётся в
+// кэш наблюдения (счёт секций Xray тик не читает, кэшированный остаётся). Замок
+// записи tickMu берётся только для done: под ним факты слоя перечитываются и
+// done ставится, только если шаги 1–6 по ним выполнены (WR-03); ядра под ним не
+// перечитываются — сброс и «Закрыть» ядро не меняют.
 func (s *Service) tick() {
-	s.tickMu.Lock()
-	defer s.tickMu.Unlock()
+	s.checkMu.Lock()
+	defer s.checkMu.Unlock()
 	if s.ctx.Err() != nil {
 		return
 	}
@@ -86,12 +89,21 @@ func (s *Service) tick() {
 		return
 	}
 
+	start := time.Now()
+	seq := s.startSeq()
 	inst := s.d.Installed()
+	xkeen := s.d.XKeenInstalled()
+	t := time.Now()
 	f := layer.WizardFacts(probe(inst))
+	factsTook := time.Since(t)
+	t = time.Now()
+	ks := s.d.Kernels()
+	kernelsTook := time.Since(t)
 	if !f.Enabled {
 		return
 	}
-	ev := evaluate(f, inst, s.d.XKeenInstalled(), s.d.Kernels())
+	s.storeObservation(observation{seq: seq, inst: inst, xkeen: xkeen, facts: f, ks: ks})
+	ev := evaluate(f, inst, xkeen, ks)
 
 	sig := ev.signature()
 	if s.lastSig != "" && sig != s.lastSig {
@@ -99,20 +111,38 @@ func (s *Service) tick() {
 	}
 	s.lastSig = sig
 
-	if f.Status == configlayer.WizardDone || f.Status == configlayer.WizardHidden || !ev.allDone() {
-		return
+	var writeTook time.Duration
+	if f.Status != configlayer.WizardDone && f.Status != configlayer.WizardHidden && ev.allDone() {
+		t = time.Now()
+		// Между чтением фактов и записью признака черновик могли поправить, а
+		// признак — сбросить или поставить: done — только если факты, перечитанные
+		// под замком записи, его подтверждают. Сброс, «Закрыть» и «Скрыть» пишут
+		// под тем же замком и сюда не вклиниваются.
+		s.tickMu.Lock()
+		inst = s.d.Installed()
+		fresh := layer.WizardFacts(probe(inst))
+		if fresh.Enabled && fresh.Status != configlayer.WizardDone && fresh.Status != configlayer.WizardHidden &&
+			evaluate(fresh, inst, s.d.XKeenInstalled(), ks).allDone() {
+			if changed, err := layer.MarkWizard(configlayer.WizardDone); err != nil {
+				// Повтор — на следующем тике. В тексте ошибки записи нет данных источников.
+				log.Printf("setupwizard: отметка «пройдено» не записана: %v", err)
+			} else if changed {
+				// Статус службы — done; номер записи растёт: наблюдение, начатое до
+				// этой записи, базу не перезапишет.
+				s.cacheMu.Lock()
+				s.clock++
+				s.lastWriteAt = s.clock
+				s.base, s.baseSet = configlayer.WizardDone, true
+				s.cacheMu.Unlock()
+			}
+		}
+		s.tickMu.Unlock()
+		writeTook = time.Since(t)
 	}
-	// Между чтением фактов и записью признака черновик могли поправить: done —
-	// только если свежая проверка шагов 1–6 его подтверждает. Сброс и «Закрыть»
-	// или «Скрыть» берут tickMu и сюда не вклиниваются.
-	inst = s.d.Installed()
-	if f = layer.WizardFacts(probe(inst)); !f.Enabled ||
-		!evaluate(f, inst, s.d.XKeenInstalled(), s.d.Kernels()).allDone() {
-		return
-	}
-	if _, err := layer.MarkWizard(configlayer.WizardDone); err != nil {
-		// Повтор — на следующем тике. В тексте ошибки записи нет данных источников.
-		log.Printf("setupwizard: отметка «пройдено» не записана: %v", err)
+
+	if took := time.Since(start); took > s.interval() {
+		log.Printf("setupwizard: проверка шагов заняла %v (факты %v, ядра %v, запись %v)",
+			took, factsTook, kernelsTook, writeTook)
 	}
 }
 
