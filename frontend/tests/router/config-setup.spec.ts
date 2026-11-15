@@ -302,21 +302,83 @@ async function expectPrimaryWhen(page: Page, testId: string, n: number): Promise
     .toBe('ok');
 }
 
-/** Все видимые кнопки .btn внутри testId — не ниже 44 px (цель касания на ≤768 px). */
+/**
+ * Все видимые кнопки (button, a.btn) внутри testId — цель касания не меньше 44 px на ≤768 px.
+ * Цель — большее из рамки кнопки и зоны касания ::after общего списка зон global.css
+ * («Сенсорный ввод: зоны нажатия»); у кнопок без .btn (значки, ×) меряется и ширина.
+ */
 async function expectTouchTargets(page: Page, testId: string, where: string): Promise<void> {
   const low = await page
     .getByTestId(testId)
-    .locator('.btn')
+    .locator('button, a.btn')
     .evaluateAll((els) =>
       els
         .filter((el) => (el as HTMLElement).offsetParent !== null)
-        .map((el, i) => ({
-          id: el.getAttribute('data-testid') ?? `btn#${i}`,
-          h: Math.round(el.getBoundingClientRect().height)
-        }))
-        .filter((b) => b.h < 43.5)
+        .map((el, i) => {
+          const rect = el.getBoundingClientRect();
+          let h = rect.height;
+          let w = rect.width;
+          const zone = getComputedStyle(el, '::after');
+          if (zone.content !== 'none' && zone.position === 'absolute') {
+            const zh = parseFloat(zone.height);
+            const zw = parseFloat(zone.width);
+            if (Number.isFinite(zh)) h = Math.max(h, zh);
+            if (Number.isFinite(zw)) w = Math.max(w, zw);
+          }
+          const cls = el.classList.item(0);
+          return {
+            id:
+              el.getAttribute('data-testid') ??
+              (cls ? `.${cls}` : `${el.tagName.toLowerCase()}#${i}`),
+            h: Math.round(h),
+            w: Math.round(w),
+            low: h < 43.5 || (!el.classList.contains('btn') && w < 43.5)
+          };
+        })
+        .filter((b) => b.low)
+        .map(({ id, h, w }) => ({ id, h, w }))
     );
-  expect(low, `${testId}: кнопки ниже 44 px (${where})`).toEqual([]);
+  expect(low, `${testId}: цели касания меньше 44 px (${where})`).toEqual([]);
+}
+
+// Блоки ошибок и предупреждений мастера и их тела: рамка, фон и значок — в тоне блока,
+// текст тела — 14 px основным цветом
+const ALERT_BODIES: [string, string][] = [
+  ['[data-testid="setup-start-error"]', '.step-start-error-body'],
+  ['[data-testid="setup-apply-error"]', '.step-apply-error-body'],
+  ['[data-testid^="setup-kernel-error-"]', '.step-kernel-error-body'],
+  ['[data-testid="setup-lost"]', '.setup-lost-body']
+];
+
+/**
+ * Каждый видимый блок ошибки или предупреждения мастера: тело есть, размер шрифта тела равен
+ * размеру первой видимой .setup-step-hint, цвет тела не совпадает с цветом блока (текст не
+ * окрашен тоном блока). Блоков нет — проверок нет.
+ */
+async function expectAlertBodies(page: Page): Promise<void> {
+  const bad = await page.evaluate((pairs) => {
+    const visible = (el: Element) => (el as HTMLElement).offsetParent !== null;
+    const hint = Array.from(document.querySelectorAll('.setup-step-hint')).find(visible);
+    const want = hint ? getComputedStyle(hint).fontSize : null;
+    const out: string[] = [];
+    for (const [block, body] of pairs) {
+      for (const el of Array.from(document.querySelectorAll(block)).filter(visible)) {
+        const id = el.getAttribute('data-testid') ?? block;
+        const b = el.querySelector(body);
+        if (!b) {
+          out.push(`${id}: нет ${body}`);
+          continue;
+        }
+        const cs = getComputedStyle(b);
+        if (want !== null && cs.fontSize !== want)
+          out.push(`${id}: font-size ${cs.fontSize}, у .setup-step-hint ${want}`);
+        if (cs.color === getComputedStyle(el).color)
+          out.push(`${id}: цвет ${body} совпадает с цветом блока`);
+      }
+    }
+    return out;
+  }, ALERT_BODIES);
+  expect(bad, 'тела блоков ошибок и предупреждений мастера').toEqual([]);
 }
 
 /** Каркас страницы мастера: h2 шагов, скрытые маркеры, живые области, зазор шапки. */
@@ -345,6 +407,12 @@ async function expectWizardShell(page: Page): Promise<void> {
   });
   expect(gap, 'зазор шапка → setup-steps, px').toBeGreaterThanOrEqual(15);
   expect(gap, 'зазор шапка → setup-steps, px').toBeLessThanOrEqual(17);
+  // Шаг 1: установка XKeen встроена без вложенной карточки и второго заголовка (при
+  // установленном XKeen блока нет и проверка проходит тривиально)
+  const step1 = page.getByTestId('setup-step-1-body');
+  await expect(step1.locator('.card'), 'setup-step-1-body: .card').toHaveCount(0);
+  await expect(step1.locator('h2'), 'setup-step-1-body: h2').toHaveCount(0);
+  await expectAlertBodies(page);
 }
 
 /** Ждёт, пока шаг 6 станет выполнен (ядро после перезапуска), не дольше срока; итог — ответ мастера. */
@@ -408,6 +476,54 @@ async function applyFromStep(page: Page): Promise<void> {
   await confirm.click();
   await expect(modal).toHaveCount(0, { timeout: T.save * 2 });
   await waitApplyIdle(page, 'применение из шага 5 мастера');
+}
+
+/**
+ * Сбой применения в шаге 5: «Повторить применение» с клавиатуры не уводит фокус из мастера —
+ * блок ошибки держит кнопку на время хода, после исхода фокус на действии шага. Сбоя нет —
+ * только ветка.
+ */
+async function expectRetryKeepsFocus(page: Page): Promise<void> {
+  const error = page.getByTestId('setup-apply-error');
+  if (!(await error.isVisible())) {
+    branch('apply-error: none');
+    return;
+  }
+  const retry = page.getByTestId('setup-apply-retry');
+  if (!(await retry.isEnabled())) {
+    branch('apply-error: retry-disabled');
+    return;
+  }
+  branch('apply-error: retry-focus');
+  await expectAlertBodies(page);
+  await retry.focus();
+  await page.keyboard.press('Enter');
+  const modal = page.getByTestId('apply-preview-modal');
+  const nodesOnly = page.getByTestId('take-routing-nodes-only');
+  await expect(modal.or(nodesOnly)).toBeVisible({ timeout: T.action });
+  if (await nodesOnly.isVisible()) await nodesOnly.click();
+  await expect(modal).toBeVisible({ timeout: T.action });
+  const confirm = modal.getByTestId('apply-preview-confirm');
+  await expect(confirm, 'apply-preview-confirm активна (повтор)').toBeEnabled({
+    timeout: T.action
+  });
+  await confirm.focus();
+  await page.keyboard.press('Enter');
+  await expect(modal).toHaveCount(0, { timeout: T.save * 2 });
+  await waitApplyIdle(page, 'повтор применения из шага 5 мастера');
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const a = document.activeElement;
+          const id = a ? (a.getAttribute('data-testid') ?? a.tagName.toLowerCase()) : 'null';
+          if (!a || a === document.body || !a.isConnected) return `фокус потерян: ${id}`;
+          const root = document.querySelector('[data-testid="config-setup"]');
+          return root && root.contains(a) ? 'ok' : `фокус вне мастера: ${id}`;
+        }),
+      { message: 'фокус после «Повторить применение»', timeout: T.action }
+    )
+    .toBe('ok');
 }
 
 interface MyNode {
@@ -772,6 +888,22 @@ test('config-setup dashboard-card vp:1280', async ({ page, browser }) => {
     );
     // Кнопки карточки — цель касания 44 px; кольцо невыполненного шага 16 px, как в мастере
     await expectTouchTargets(page, 'setup-checklist-card', 'карточка 390');
+    // Частичный шаг: значок ✓ цветом предупреждения, как маркер мастера (D-01)
+    if ((await card.getByTestId('setup-card-partial').count()) > 0) {
+      branch('card-partial: yes');
+      const icon = await card.getByTestId('setup-card-partial').evaluate((el) => {
+        const svg = el.closest('li')?.querySelector('svg');
+        const probe = document.createElement('span');
+        probe.style.color = 'var(--warning)';
+        document.body.appendChild(probe);
+        const want = getComputedStyle(probe).color;
+        probe.remove();
+        return { stroke: svg ? getComputedStyle(svg).stroke : 'нет svg', want };
+      });
+      expect(icon.stroke, 'setup-card-partial: stroke значка строки').toBe(icon.want);
+    } else {
+      branch('card-partial: no');
+    }
     if ((await card.locator('.sc-pending').count()) > 0) {
       const box = (await card.locator('.sc-pending').first().boundingBox()) ?? {
         width: 0,
@@ -856,6 +988,14 @@ test('config-setup close-no-auto-open vp:1280', async ({ page, browser }) => {
     await expectTouchTargets(page, 'config-setup', '768');
     await page.setViewportSize({ width: 390, height: 844 });
     await expectTouchTargets(page, 'config-setup', '390');
+    // Шаг 3: поле «Добавить», предпросмотр и × уведомлений источников (если они есть)
+    await expandStep(page, 3);
+    const closes = await page
+      .getByTestId('setup-step-3-body')
+      .locator('.alert-close-btn:visible')
+      .count();
+    branch(`notices-close: ${closes}`);
+    await expectTouchTargets(page, 'config-setup', '390, шаг 3');
     const setupScroll = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth
     );
@@ -999,6 +1139,8 @@ test(
 
       // Шаг 5: то же окно изменений, что в разделе
       await applyFromStep(page);
+      // Сбой применения — повтор с клавиатуры не уводит фокус (до проверки «шаг 5 выполнен»)
+      await expectRetryKeepsFocus(page);
       await expect
         .poll(
           async () => {
