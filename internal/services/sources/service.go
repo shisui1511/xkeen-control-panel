@@ -356,7 +356,7 @@ func (s *Service) parseRaw(raw string) (nodes.Node, *nodes.SourceError) {
 
 // parseSingle распознаёт текст и требует ровно один узел (D-13).
 func parseSingle(text string) (nodes.Node, *nodes.SourceError) {
-	rec := nodes.Recognize(nodes.Input{Text: text})
+	rec := nodes.RecognizeNode(text)
 	if len(rec.Nodes) != 1 || len(rec.URLs) != 0 {
 		// Ошибки строк в ответ не подмешиваются: они могут нести фрагмент ввода.
 		return nodes.Node{}, nodes.NewError(nodes.CodeEditSingleNode)

@@ -66,7 +66,7 @@ func (s *Service) PreviewNode(ctx context.Context, text, entryID string) (Previe
 	if entryID != "" && findEntry(cfg, entryID) < 0 {
 		return PreviewView{}, ErrNodeNotFound
 	}
-	rec := nodes.Recognize(nodes.Input{Text: text})
+	rec := nodes.RecognizeNode(text)
 	view, addable := s.buildView(rec, s.dupIndex(cfg, entryID))
 	view.Addable = addable
 	if _, serr := singleNode(rec); serr != nil {
@@ -80,7 +80,7 @@ func (s *Service) PreviewNode(ctx context.Context, text, entryID string) (Previe
 // xcp-my-<id> и место в группах не меняются при смене ключа узла). Пустое имя —
 // имя узла из текста.
 func (s *Service) SaveNode(rev int64, entryID, name, text string) (configlayer.DraftEvent, error) {
-	n, serr := singleNode(nodes.Recognize(nodes.Input{Text: text}))
+	n, serr := singleNode(nodes.RecognizeNode(text))
 	if serr != nil {
 		return configlayer.DraftEvent{}, serr
 	}
