@@ -22,6 +22,14 @@ import (
 // xrayHot меняет узел ручной группы без рестарта (143 Q5, 146 D-38).
 // Сравнение итоговых тел охватывает также внешние вложенные группы (146 D-08).
 func (s *Service) xrayHot(ctx context.Context, files []configlayer.HotFile) error {
+	return s.xrayHotApply(ctx, files, false)
+}
+
+func (s *Service) xrayHotConfirm(ctx context.Context, files []configlayer.HotFile) error {
+	return s.xrayHotApply(ctx, files, true)
+}
+
+func (s *Service) xrayHotApply(ctx context.Context, files []configlayer.HotFile, confirm bool) error {
 	fail := func(reason string, partial bool) error {
 		return &configlayer.XrayHotError{Reason: reason, Partial: partial}
 	}
@@ -52,6 +60,20 @@ func (s *Service) xrayHot(ctx context.Context, files []configlayer.HotFile) erro
 	tags, next, prev, err := hotTags(files[0].Old, files[0].New)
 	if err != nil {
 		return fail(configlayer.HotReasonNotApplicable, false)
+	}
+	if confirm {
+		// После прерывания тело на диске не доказывает состояние процесса.
+		pending := readUnconfirmed(st.Live)
+		seen := make(map[string]bool, len(tags))
+		for _, tag := range tags {
+			seen[tag] = true
+		}
+		for tag := range next {
+			if len(tag) == len(GroupTag("12345678")) && pending[tag[len(groupTagPrefix):]] == configlayer.KernelXray && !seen[tag] {
+				tags = append(tags, tag)
+			}
+		}
+		sort.Strings(tags)
 	}
 	started := time.Now()
 	defer func() {

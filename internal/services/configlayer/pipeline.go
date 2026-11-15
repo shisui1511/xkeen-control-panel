@@ -61,9 +61,11 @@ const (
 
 // ApplyRequest — параметры одного запуска.
 type ApplyRequest struct {
-	Trigger Trigger
-	Source  SourceKind
-	Only    []string
+	// ReapplyKeys — повторная запись даже неизменившихся файлов для сверки рантайма.
+	ReapplyKeys []string
+	Trigger     Trigger
+	Source      SourceKind
+	Only        []string
 	// ApplySeq — номер запуска «Применить» из хуков BeforeApply (0 — хуки не
 	// вызывались); возвращается хукам AfterApply в AfterApplyInfo.
 	ApplySeq int64
@@ -762,7 +764,21 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 		if err == nil && !skipPlan {
 			// Записи манифеста неустановленного ядра не участвуют в плане: иначе при
 			// пустой генерации его файлы ушли бы в удаление. Они остаются нетронутыми.
-			plan, err = ComputePlan(p.d.Roots, files, manifest, only, p.d.ForeignOwned)
+			planManifest := manifest
+			if len(req.ReapplyKeys) > 0 {
+				planManifest = make(map[string]ManifestEntry, len(manifest))
+				for key, entry := range manifest {
+					planManifest[key] = entry
+				}
+				for _, key := range req.ReapplyKeys {
+					if entry, ok := planManifest[key]; ok && entry.Status == StatusManaged {
+						// Только расчёт плана: реальный манифест не меняется до commitState.
+						entry.Hash = ""
+						planManifest[key] = entry
+					}
+				}
+			}
+			plan, err = ComputePlan(p.d.Roots, files, planManifest, only, p.d.ForeignOwned)
 			// Каталог неустановленного ядра (и ядра вне области запуска) так же не
 			// трогается: его сирот не убираем.
 			plan.Orphans = orphansOfScope(plan.Orphans, installed, req.Kernel)

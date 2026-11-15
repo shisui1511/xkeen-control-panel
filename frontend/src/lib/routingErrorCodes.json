@@ -18,5 +18,7 @@
   "preset_unknown",
   "profile_unknown",
   "rule_not_found",
-  "scope_invalid"
+  "scope_invalid",
+  "select_busy",
+  "selection_unconfirmed"
 ]

@@ -117,6 +117,8 @@ type Service struct {
 	// забирает SelectionWatcher через Swap(false). repickMu — один проход замены
 	// пропавшего узла за раз; repick — уведомления routing_repick по группам.
 	selMu            sync.Mutex
+	inflightMu       sync.Mutex
+	inflight         map[string]bool
 	reconcilePending atomic.Bool
 	repickMu         sync.Mutex
 	repick           repickNotes
@@ -173,7 +175,10 @@ func (s *Service) Generators() []configlayer.Generator {
 // ничего не делает. SelectionWatcher (146-14) создаётся и останавливается в
 // cmd/xcp/main.go.
 func (s *Service) Start() {
-	s.startOnce.Do(s.startDatWatcher)
+	s.startOnce.Do(func() {
+		s.startDatWatcher()
+		s.Go(func() { s.reconcileXray(s.ctx) })
+	})
 }
 
 // Stop останавливает фоновые задачи и ждёт их завершения. Идемпотентен.

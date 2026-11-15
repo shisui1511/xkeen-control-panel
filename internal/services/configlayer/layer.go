@@ -1589,6 +1589,8 @@ type LiveRun struct {
 	Kernel string
 	// XrayHot — горячая замена исходящих при выборе узла (TriggerSelect).
 	XrayHot XrayHotFunc
+	// ReapplyKeys повторно записывает файлы для сверки неизвестного рантайма.
+	ReapplyKeys []string
 }
 
 // RunLive — запуск конвейера из применённого состояния с оверлеем живых данных
@@ -1620,7 +1622,7 @@ func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 		return ApplyView{}, err
 	}
 	defer release()
-	req := ApplyRequest{Trigger: run.Trigger, Source: SourceApplied, LiveOverlay: run.Overlay, Kernel: run.Kernel, XrayHot: run.XrayHot}
+	req := ApplyRequest{Trigger: run.Trigger, Source: SourceApplied, LiveOverlay: run.Overlay, Kernel: run.Kernel, XrayHot: run.XrayHot, ReapplyKeys: run.ReapplyKeys}
 	view := l.runPipeline(req)
 	release()
 	l.afterRun()

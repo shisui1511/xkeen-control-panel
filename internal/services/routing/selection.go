@@ -23,6 +23,10 @@ import (
 // пропал: после применения панель заменяет его первым живым по пингу (D-36).
 const LiveKeyRepick = "selection_repick"
 
+// LiveKeyUnconfirmed хранит ID группы → ядро с неизвестным выбором (D-16).
+// Аддитивный ключ Live переживает остановку панели, миграции не требует.
+const LiveKeyUnconfirmed = "selection_unconfirmed"
+
 // Исходы выбора по ядру (SelectResult.Kernels).
 const (
 	selApplied        = "applied"
@@ -69,7 +73,10 @@ var (
 	// ErrMemberInvalid — участника нет среди вариантов группы.
 	ErrMemberInvalid = errors.New("routing: участник вне состава группы")
 	// ErrApplyBusy — идёт применение: выбор Xray дождался бы его конца.
-	ErrApplyBusy = configlayer.ErrApplyBusy
+	ErrApplyBusy            = configlayer.ErrApplyBusy
+	ErrSelectBusy           = errors.New("routing: идёт переключение связанной группы")
+	ErrSelectionUnconfirmed = errors.New("routing: активный узел группы не подтверждён")
+	ErrConfirmFailed        = errors.New("routing: сверка выбора не удалась")
 	// errReconcileRetry — Clash API не ответил: сверку надо повторить позже.
 	errReconcileRetry = errors.New("routing: Clash API Mihomo не ответил")
 )
@@ -197,6 +204,105 @@ func (m appliedModel) candidates(g Group) []string {
 
 // --- запись выбора в Live ---
 
+func readUnconfirmed(live configlayer.Sections) map[string]string {
+	m := map[string]string{}
+	if err := json.Unmarshal(live[LiveKeyUnconfirmed], &m); err != nil || m == nil {
+		return map[string]string{}
+	}
+	return m
+}
+
+func writeUnconfirmed(live configlayer.Sections, m map[string]string) error {
+	if len(m) == 0 {
+		delete(live, LiveKeyUnconfirmed)
+		return nil
+	}
+	raw, err := json.Marshal(m)
+	if err == nil {
+		live[LiveKeyUnconfirmed] = raw
+	}
+	return err
+}
+
+// linkedGroups возвращает связную компоненту участников group: в обе стороны.
+func linkedGroups(items []Group, gid string) []string {
+	seen := map[string]bool{gid: true}
+	for changed := true; changed; {
+		changed = false
+		for _, g := range items {
+			for _, m := range g.Members {
+				if m.Kind != KindGroup || (!seen[g.ID] && !seen[m.ID]) {
+					continue
+				}
+				if !seen[g.ID] || !seen[m.ID] {
+					changed = true
+				}
+				seen[g.ID], seen[m.ID] = true, true
+			}
+		}
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func (s *Service) beginSelection(comp []string) (func(), error) {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	for _, id := range comp {
+		if s.inflight[id] {
+			return nil, ErrSelectBusy
+		}
+	}
+	if s.inflight == nil {
+		s.inflight = map[string]bool{}
+	}
+	for _, id := range comp {
+		s.inflight[id] = true
+	}
+	return func() {
+		s.inflightMu.Lock()
+		defer s.inflightMu.Unlock()
+		for _, id := range comp {
+			delete(s.inflight, id)
+		}
+	}, nil
+}
+
+func (s *Service) clearUnconfirmed(comp []string, kernel string) error {
+	err := s.d.Layer.UpdateLive(func(live configlayer.Sections) error {
+		m := readUnconfirmed(live)
+		for _, id := range comp {
+			if m[id] == kernel {
+				delete(m, id)
+			}
+		}
+		return writeUnconfirmed(live, m)
+	})
+	if err == nil {
+		s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
+	}
+	return err
+}
+
+func selectionOK(out string) bool {
+	return out == selApplied || out == selRestarted || out == selPendingStopped
+}
+
+func xraySelectionReverted(outcome string) bool {
+	switch outcome {
+	case configlayer.RestartOutcomeFailedRolledBack, configlayer.ResultWriteFailed,
+		configlayer.ResultBuildFailed, configlayer.ResultBeforeWriteFailed,
+		configlayer.ResultStateWriteFailed, configlayer.ResultDraftConflict,
+		configlayer.CodeValidationFailed, configlayer.CodeValidationTimeout, configlayer.CodeValidationNotRun:
+		return true
+	}
+	return false
+}
+
 // readRepick читает список групп с пропавшим выбранным узлом.
 func readRepick(live configlayer.Sections) []string {
 	raw, ok := live[LiveKeyRepick]
@@ -252,11 +358,21 @@ func without(ids []string, id string) []string {
 
 // setSelection записывает выбор группы и снимает с неё маркер повторного выбора:
 // ручной выбор пользователя не должен быть перекрыт заменой пропавшего узла.
-func (s *Service) setSelection(gid, member string) error {
+func (s *Service) setSelection(gid, member string, pending []string) error {
 	return s.d.Layer.UpdateLive(func(live configlayer.Sections) error {
+		unconfirmed := readUnconfirmed(live)
+		if unconfirmed[gid] != "" {
+			return ErrSelectionUnconfirmed
+		}
 		sel := liveSelection(live)
 		sel[gid] = member
 		if err := writeSelection(live, sel); err != nil {
+			return err
+		}
+		for _, id := range pending {
+			unconfirmed[id] = configlayer.KernelXray
+		}
+		if err := writeUnconfirmed(live, unconfirmed); err != nil {
 			return err
 		}
 		if ids := readRepick(live); len(ids) > 0 {
@@ -268,7 +384,7 @@ func (s *Service) setSelection(gid, member string) error {
 
 // restoreSelection возвращает прежнее значение выбора, если никто не успел его
 // сменить.
-func (s *Service) restoreSelection(gid, member, prev string, had bool) {
+func (s *Service) restoreSelection(gid, member, prev string, had bool, comp []string) error {
 	err := s.d.Layer.UpdateLive(func(live configlayer.Sections) error {
 		sel := liveSelection(live)
 		if sel[gid] != member {
@@ -279,11 +395,21 @@ func (s *Service) restoreSelection(gid, member, prev string, had bool) {
 		} else {
 			delete(sel, gid)
 		}
-		return writeSelection(live, sel)
+		if err := writeSelection(live, sel); err != nil {
+			return err
+		}
+		m := readUnconfirmed(live)
+		for _, id := range comp {
+			if m[id] == configlayer.KernelXray {
+				delete(m, id)
+			}
+		}
+		return writeUnconfirmed(live, m)
 	})
 	if err != nil {
 		log.Printf("[routing] выбор участника не возвращён: %v", err)
 	}
+	return err
 }
 
 // clearRepick снимает маркер повторного выбора с группы.
@@ -308,7 +434,7 @@ func (s *Service) markReconcile() { s.reconcilePending.Store(true) }
 
 // Select выбирает участника ручной группы без черновика (U-05): выбор пишется в
 // Live, Mihomo получает его сразу (PUT /proxies), Xray — через запись xcp-groups и
-// перезапуск, если ядро запущено. Остановленное ядро не запускается: Xray
+// горячую замену с резервным перезапуском. Остановленное ядро не запускается: Xray
 // прочитает файл при старте, Mihomo получит выбор сверкой при запуске процесса.
 // Ревизия черновика не меняется.
 func (s *Service) Select(ctx context.Context, groupID, member string) (SelectResult, error) {
@@ -332,26 +458,89 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 		return SelectResult{}, ErrMemberInvalid
 	}
 
-	prev, had := liveSelection(st.Live)[groupID]
-	if err := s.setSelection(groupID, member); err != nil {
+	comp := linkedGroups(am.groups.Items, groupID)
+	release, err := s.beginSelection(comp)
+	if err != nil {
 		return SelectResult{}, err
 	}
-	res := SelectResult{Member: member, Kernels: map[string]string{
-		configlayer.KernelXray:   selNotInstalled,
-		configlayer.KernelMihomo: selNotInstalled,
-	}}
-	// Выбор идёт только в ядро, которым управляет панель (D-06).
-	if am.installed.Xray && desired.ManagedFor(configlayer.KernelXray) {
-		out, reason, _, err := s.selectXray(ctx)
-		if err != nil {
-			s.restoreSelection(groupID, member, prev, had)
-			return SelectResult{}, err
+	defer release()
+	// Повторное чтение после захвата компоненты исключает устаревший prev/маркер.
+	st, err = s.d.Layer.ReadState()
+	if err != nil {
+		return SelectResult{}, err
+	}
+	for _, id := range comp {
+		if readUnconfirmed(st.Live)[id] != "" {
+			return SelectResult{}, ErrSelectionUnconfirmed
 		}
-		res.Kernels[configlayer.KernelXray] = out
-		res.RestartReason = reason
+	}
+	prev, had := liveSelection(st.Live)[groupID]
+	var pending []string
+	if am.installed.Xray && desired.ManagedFor(configlayer.KernelXray) && s.d.Running(configlayer.KernelXray) {
+		pending = comp
+	}
+	if err := s.setSelection(groupID, member, pending); err != nil {
+		return SelectResult{}, err
+	}
+	defer s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
+	res := SelectResult{Member: member, Kernels: map[string]string{
+		configlayer.KernelXray: selNotInstalled, configlayer.KernelMihomo: selNotInstalled,
+	}}
+	if am.installed.Xray && desired.ManagedFor(configlayer.KernelXray) {
+		out, reason, outcome, runErr := s.selectXray(ctx)
+		res.Kernels[configlayer.KernelXray], res.RestartReason = out, reason
+		switch {
+		case selectionOK(out) && runErr == nil:
+			if err := s.clearUnconfirmed(comp, configlayer.KernelXray); err != nil {
+				return res, err
+			}
+		case runErr != nil || xraySelectionReverted(outcome):
+			if err := s.restoreSelection(groupID, member, prev, had, comp); err != nil {
+				res.Unconfirmed = comp
+				return res, err
+			}
+			res.Reverted = true
+			if desired.ManagedFor(configlayer.KernelMihomo) && am.installed.Mihomo {
+				res.Kernels[configlayer.KernelMihomo] = selFailed
+			}
+			return res, runErr
+		default:
+			// Неизвестный исход никогда не выдаётся за успешный возврат.
+			res.Unconfirmed = comp
+			if desired.ManagedFor(configlayer.KernelMihomo) && am.installed.Mihomo {
+				res.Kernels[configlayer.KernelMihomo] = selFailed
+			}
+			if len(pending) == 0 {
+				if err := s.d.Layer.UpdateLive(func(live configlayer.Sections) error {
+					m := readUnconfirmed(live)
+					for _, id := range comp {
+						m[id] = configlayer.KernelXray
+					}
+					return writeUnconfirmed(live, m)
+				}); err != nil {
+					return res, err
+				}
+			}
+			return res, nil
+		}
 	}
 	if am.installed.Mihomo && desired.ManagedFor(configlayer.KernelMihomo) {
-		res.Kernels[configlayer.KernelMihomo] = s.selectMihomo(ctx, groupID)
+		// Маркер и ответ фиксируются под тем же замком, что фоновая сверка.
+		s.selMu.Lock()
+		out := s.selectMihomoLocked(ctx, groupID)
+		res.Kernels[configlayer.KernelMihomo] = out
+		if out == selFailed {
+			err = s.d.Layer.UpdateLive(func(live configlayer.Sections) error {
+				m := readUnconfirmed(live)
+				m[groupID] = configlayer.KernelMihomo
+				return writeUnconfirmed(live, m)
+			})
+			res.Unconfirmed = []string{groupID}
+		}
+		s.selMu.Unlock()
+		if err != nil {
+			return res, err
+		}
 	}
 	return res, nil
 }
@@ -386,9 +575,18 @@ func memberAllowed(g Group, member string, am appliedModel) bool {
 // selectXray запускает конвейер для одного Xray: файл xcp-groups меняется,
 // запущенный Xray перезапускается. Идущее применение — ErrApplyBusy.
 func (s *Service) selectXray(ctx context.Context) (string, string, string, error) {
+	return s.runSelectXray(ctx, false)
+}
+
+func (s *Service) runSelectXray(ctx context.Context, confirm bool) (string, string, string, error) {
 	rctx, cancel := context.WithTimeout(ctx, selectBusyWait)
 	defer cancel()
-	view, err := s.d.Layer.RunLive(rctx, configlayer.LiveRun{Trigger: configlayer.TriggerSelect, Kernel: configlayer.KernelXray, XrayHot: s.xrayHot})
+	run := configlayer.LiveRun{Trigger: configlayer.TriggerSelect, Kernel: configlayer.KernelXray, XrayHot: s.xrayHot}
+	if confirm {
+		run.ReapplyKeys = []string{configlayer.ManifestKey(configlayer.KernelXray, xrayGroupsFile)}
+		run.XrayHot = s.xrayHotConfirm
+	}
+	view, err := s.d.Layer.RunLive(rctx, run)
 	if err != nil {
 		if errors.Is(err, ErrApplyBusy) || (rctx.Err() != nil && ctx.Err() == nil) {
 			return "", "", "", ErrApplyBusy
@@ -401,6 +599,17 @@ func (s *Service) selectXray(ctx context.Context) (string, string, string, error
 
 // xrayOutcome переводит итог запуска конвейера в исход выбора для Xray.
 func (s *Service) xrayOutcome(view configlayer.ApplyView) (string, string, string) {
+	// Общий итог приоритетнее строки рестарта: commitState мог вызвать откат
+	// уже после успешного горячего пути.
+	if view.Result == nil {
+		return selFailed, "", configlayer.ResultInterrupted
+	}
+	if !view.Result.OK {
+		if view.Result.Code == configlayer.ResultRestartFailed && view.Result.RolledBack {
+			return selFailed, "", configlayer.RestartOutcomeFailedRolledBack
+		}
+		return selFailed, "", view.Result.Code
+	}
 	for _, r := range view.Restart {
 		if r.Kernel != configlayer.KernelXray {
 			continue
@@ -427,9 +636,6 @@ func (s *Service) xrayOutcome(view configlayer.ApplyView) (string, string, strin
 			return selFailed, reason, r.Outcome
 		}
 	}
-	if view.Result == nil || !view.Result.OK {
-		return selFailed, "", ""
-	}
 	if s.d.Running(configlayer.KernelXray) {
 		return selApplied, "", ""
 	}
@@ -444,6 +650,13 @@ func (s *Service) selectMihomo(ctx context.Context, gid string) string {
 	}
 	s.selMu.Lock()
 	defer s.selMu.Unlock()
+	return s.selectMihomoLocked(ctx, gid)
+}
+
+func (s *Service) selectMihomoLocked(ctx context.Context, gid string) string {
+	if !s.d.Running(configlayer.KernelMihomo) {
+		return selPendingStopped
+	}
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
 		s.markReconcile()
@@ -478,6 +691,106 @@ func (s *Service) selectMihomo(ctx context.Context, gid string) string {
 }
 
 // --- выбор в профиле Mihomo ---
+
+// ConfirmResult — подтверждение текущего намерения без нового выбора.
+type ConfirmResult struct {
+	Group     string `json:"group"`
+	Confirmed bool   `json:"confirmed"`
+}
+
+func (s *Service) Confirm(ctx context.Context, groupID string) (ConfirmResult, error) {
+	res := ConfirmResult{Group: groupID}
+	st, err := s.d.Layer.ReadState()
+	if err != nil {
+		return res, err
+	}
+	groups, err := parseGroups(st.Applied[GroupsSection])
+	if err != nil {
+		return res, err
+	}
+	comp := linkedGroups(groups.Items, groupID)
+	release, err := s.beginSelection(comp)
+	if err != nil {
+		return res, err
+	}
+	defer release()
+	st, err = s.d.Layer.ReadState()
+	if err != nil {
+		return res, err
+	}
+	kernel := readUnconfirmed(st.Live)[groupID]
+	if kernel == "" {
+		res.Confirmed = true
+		return res, nil
+	}
+	defer s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
+	if kernel == configlayer.KernelXray {
+		out, _, _, runErr := s.runSelectXray(ctx, true)
+		if runErr != nil || !selectionOK(out) {
+			return res, ErrConfirmFailed
+		}
+		if err := s.clearUnconfirmed(comp, kernel); err != nil {
+			return res, err
+		}
+	} else if kernel == configlayer.KernelMihomo {
+		s.selMu.Lock()
+		out := s.selectMihomoLocked(ctx, groupID)
+		if !selectionOK(out) {
+			s.selMu.Unlock()
+			return res, ErrConfirmFailed
+		}
+		err := s.clearUnconfirmed([]string{groupID}, kernel)
+		s.selMu.Unlock()
+		if err != nil {
+			return res, err
+		}
+	} else {
+		return res, ErrConfirmFailed
+	}
+	res.Confirmed = true
+	return res, nil
+}
+
+// reconcileXray повторно применяет сохранённое намерение после остановки панели.
+func (s *Service) reconcileXray(ctx context.Context) {
+	st, err := s.d.Layer.ReadState()
+	if err != nil {
+		return
+	}
+	groups, err := parseGroups(st.Applied[GroupsSection])
+	if err != nil {
+		return
+	}
+	var ids []string
+	for id, kernel := range readUnconfirmed(st.Live) {
+		if kernel == configlayer.KernelXray {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	sort.Strings(ids)
+	locked := map[string]bool{}
+	for _, id := range ids {
+		for _, linked := range linkedGroups(groups.Items, id) {
+			locked[linked] = true
+		}
+	}
+	comp := make([]string, 0, len(locked))
+	for id := range locked {
+		comp = append(comp, id)
+	}
+	release, err := s.beginSelection(comp)
+	if err != nil {
+		return
+	}
+	defer release()
+	out, _, _, err := s.runSelectXray(ctx, true)
+	if err == nil && selectionOK(out) {
+		_ = s.clearUnconfirmed(ids, configlayer.KernelXray)
+	}
+}
 
 // mihomoSelEntry — ожидаемый выбор ручной группы в профиле Mihomo.
 type mihomoSelEntry struct {
@@ -630,6 +943,9 @@ func (s *Service) reconcileMihomo(ctx context.Context) error {
 		}
 		cancel()
 		if err == nil {
+			if err := s.clearUnconfirmed([]string{e.gid}, configlayer.KernelMihomo); err != nil {
+				return err
+			}
 			continue
 		}
 		var status *services.ClashStatusError
@@ -784,6 +1100,7 @@ func containsString(list []string, v string) bool {
 // (кроме запусков самого выбора: Select уже поставил его) и заменяет пропавшие
 // узлы первыми живыми по пингу (D-36).
 func (s *Service) AfterApply(ctx context.Context, info configlayer.AfterApplyInfo) {
+	defer s.d.Layer.PublishProxies(configlayer.ProxiesKindStructure)
 	if info.Trigger != configlayer.TriggerSelect {
 		if err := s.reconcileMihomo(ctx); errors.Is(err, errReconcileRetry) {
 			s.markReconcile()

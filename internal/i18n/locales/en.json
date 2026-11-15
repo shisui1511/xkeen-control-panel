@@ -147,6 +147,8 @@
   "configlayer.routing.apply_busy": "An apply is already in progress",
   "configlayer.routing.group_not_applied": "The group has not been applied yet: pick a member after “Apply”",
   "configlayer.routing.member_invalid": "This member is not among the group options",
+  "configlayer.routing.select_busy": "A linked group is switching. Wait for it to finish.",
+  "configlayer.routing.selection_unconfirmed": "The active group member is not confirmed. Click Retry.",
   "configlayer.routing.preset_unknown": "Unknown preset",
   "configlayer.routing.country_unavailable": "No lists for the selected country on this router",
   "configlayer.routing.catalog_unavailable": "List files are unavailable: the XKeen dat files could not be read",
