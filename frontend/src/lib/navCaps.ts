@@ -86,6 +86,12 @@ export function showMihomoNavFor(nav: NavCaps | null): boolean | null {
   return nav.active_kernel !== 'xray';
 }
 
+/** При слое «Прокси» — страница обоих ядер; без слоя сохраняется прежнее меню. */
+export function showProxiesNavFor(nav: NavCaps | null, layerOn: boolean): boolean | null {
+  if (!nav) return null;
+  return layerOn ? true : showMihomoNavFor(nav);
+}
+
 /**
  * Установлено ли хоть одно ядро. null — capabilities неизвестны (или kernels
  * пуст): пока так, действия не блокируются.

@@ -9,11 +9,12 @@
     isConflict,
     isMihomo,
     activeKernelName,
-    configLayerEnabled
+    configLayerEnabled,
+    configLayerFlagKnown
   } from '../stores';
   import { editorHref } from '../lib/editorRoute';
   import { navBadgeCount, badgeTotal } from '../lib/configLayer';
-  import { showMihomoNavFor } from '../lib/navCaps';
+  import { showMihomoNavFor, showProxiesNavFor } from '../lib/navCaps';
   import Skeleton from './Skeleton.svelte';
   import BrandMark from './BrandMark.svelte';
   import { capsuleConfigStore } from '../lib/capsuleSettings';
@@ -146,6 +147,9 @@
   // null — срез неизвестен (холодный первый вход), вместо групп рисуется скелетон.
   // В конфликте ядер группы Mihomo скрыты (нейтральные пункты и «Сервисы» остаются).
   const showMihomoNav = $derived($isConflict ? false : showMihomoNavFor($navCaps));
+  const showProxiesNav = $derived(
+    $isConflict ? false : showProxiesNavFor($navCaps, $configLayerFlagKnown && $configLayerEnabled)
+  );
 
   // Same hoist for the "Mihomo API unreachable" nav-item badge (72-REVIEW WR-05)
   // — was copy-pasted verbatim at 3 call sites, risking condition drift.
@@ -301,7 +305,7 @@
       <Skeleton type="text-line" width="62%" />
     </div>
   {/if}
-  {#if showMihomoNav === true}
+  {#if showMihomoNav === true || showProxiesNav === true}
     <details class="nav-group" bind:open={groupOpen.proxy_subs}>
       <summary>
         <span class="group-ttl">
@@ -323,35 +327,39 @@
           ><Icon name="chevron-right" size={14} /></span
         >
       </summary>
-      <a
-        href="#/proxies"
-        class="nav-item"
-        aria-current={currentTab === 'proxies' ? 'page' : undefined}
-        data-label={$t('nav.proxies')}
-        onclick={() => isSidebarOpen.set(false)}
-        title={$isSidebarCollapsed ? undefined : $t('nav.proxies')}
-      >
-        <Icon name="proxies" size={16} />
-        <span class="lbl">{$t('nav.proxies')}</span>
-        {#if showMihomoApiBadge}
-          <span
-            class="nav-badge-warn"
-            role="img"
-            aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span
-          >
-        {/if}
-      </a>
-      <a
-        href="#/smartproxy"
-        class="nav-item"
-        aria-current={currentTab === 'smartproxy' ? 'page' : undefined}
-        data-label={$t('nav.smartproxy')}
-        onclick={() => isSidebarOpen.set(false)}
-        title={$isSidebarCollapsed ? undefined : $t('nav.smartproxy')}
-      >
-        <Icon name="smartproxy" size={16} />
-        <span class="lbl">{$t('nav.smartproxy')}</span>
-      </a>
+      {#if showProxiesNav === true}
+        <a
+          href="#/proxies"
+          class="nav-item"
+          aria-current={currentTab === 'proxies' ? 'page' : undefined}
+          data-label={$t('nav.proxies')}
+          onclick={() => isSidebarOpen.set(false)}
+          title={$isSidebarCollapsed ? undefined : $t('nav.proxies')}
+        >
+          <Icon name="proxies" size={16} />
+          <span class="lbl">{$t('nav.proxies')}</span>
+          {#if showMihomoApiBadge}
+            <span
+              class="nav-badge-warn"
+              role="img"
+              aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span
+            >
+          {/if}
+        </a>
+      {/if}
+      {#if showMihomoNav === true}
+        <a
+          href="#/smartproxy"
+          class="nav-item"
+          aria-current={currentTab === 'smartproxy' ? 'page' : undefined}
+          data-label={$t('nav.smartproxy')}
+          onclick={() => isSidebarOpen.set(false)}
+          title={$isSidebarCollapsed ? undefined : $t('nav.smartproxy')}
+        >
+          <Icon name="smartproxy" size={16} />
+          <span class="lbl">{$t('nav.smartproxy')}</span>
+        </a>
+      {/if}
     </details>
   {/if}
 
