@@ -671,9 +671,11 @@ func rtRtNodeOptions(group map[string]any) (members []string, labels map[string]
 }
 
 // Выбор участника ручной группы: флаг → два узла → ручная группа → take → «Применить»
-// → POST select → «Сейчас» в представлении, now группы в Mihomo или исходящий группы
-// в Xray (с перезапуском запущенного Xray) → правка правила и «Применить» не
-// сбрасывают выбор. Метка ядра: тест читает активное ядро и ставит выбор в нём.
+// → вид работающих прокси → POST select → «Сейчас» в представлении, now группы в
+// Mihomo или исходящий группы в Xray (горячая замена без смены PID Xray) → вид и
+// «Сейчас» страницы «Прокси» → пачка пинга с присоединением и отменой →
+// подтверждение выбора → правка правила и «Применить» не сбрасывают выбор. Метка
+// ядра: тест читает активное ядро и ставит выбор в нём.
 func TestRouterRoutingSelectLive(t *testing.T) {
 	routertest.Slow(t, "серия «Применить» и переключение группы на живом ядре")
 	tg := routertest.CoreSpecific(t)
@@ -756,6 +758,42 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	if target == "" {
 		t.Fatal("среди вариантов нет узла, отличного от текущего")
 	}
+	runtimeView := func() map[string]any {
+		r := e.call(http.MethodGet, "/api/configlayer/proxies", nil)
+		if r.Status != http.StatusOK {
+			t.Fatalf("proxies: %d %s", r.Status, r.Code)
+		}
+		v := r.object(t)
+		rtAssertContractKeys(t, contract, v, "RuntimeView", "proxies")
+		return v
+	}
+	runtimeBefore := runtimeView()
+	modes, _ := runtimeBefore["modes"].(map[string]any)
+	if runtimeBefore["state"] != "panel" || modes[tg.Core] != "panel" {
+		t.Errorf("proxies: состояние panel=%t, управление panel=%t", runtimeBefore["state"] == "panel", modes[tg.Core] == "panel")
+	}
+	runtimeGroup := rtRtFindGroup(runtimeBefore, "Выбор")
+	if runtimeGroup == nil {
+		t.Fatal("proxies: нет ручной группы")
+	}
+	if runtimeGroup["mode"] != "manual" || runtimeGroup["selectable"] != true || runtimeGroup["current"] != startMember {
+		t.Errorf("proxies: manual=%t selectable=%t current=%t", runtimeGroup["mode"] == "manual", runtimeGroup["selectable"] == true, runtimeGroup["current"] == startMember)
+	}
+	runtimeMembers, _ := runtimeGroup["members"].([]any)
+	nodeCount := 0
+	for _, member := range runtimeMembers {
+		m, _ := member.(map[string]any)
+		if m["kind"] == "node" {
+			nodeCount++
+			if m[tg.Core] != true {
+				t.Error("proxies: узел несовместим с активным ядром")
+			}
+		}
+	}
+	if nodeCount < 2 {
+		t.Errorf("proxies: узлов %d, ожидалось не меньше 2", nodeCount)
+	}
+	draftBefore := e.rtRtDraftChanges()
 
 	// Коды отказа выбора.
 	e.rtRtExpect("select: неизвестный участник", e.call(http.MethodPost, rtRoutingBase+"/select",
@@ -771,6 +809,9 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 			t.Fatal("Xray: в файлах нет исходящего группы после «Применить»")
 		}
 		pidsBefore, _ = rtRstKernelPIDs("xray")
+		if len(pidsBefore) != 1 {
+			t.Fatalf("Xray: до выбора PID %d, ожидался один", len(pidsBefore))
+		}
 	}
 
 	// Выбор участника через API.
@@ -783,6 +824,14 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	outcome, _ := kernels[tg.Core].(string)
 	if outcome != "applied" && outcome != "restarted" {
 		t.Errorf("select: исход для активного ядра %q, ожидалось applied или restarted", outcome)
+	}
+	if tg.Core == "xray" {
+		if outcome != "applied" {
+			t.Errorf("Xray: горячая смена applied=%t", outcome == "applied")
+		}
+		if reason, present := sel.object(t)["restart_reason"]; present {
+			t.Errorf("Xray: горячая смена потребовала перезапуск: restart_reason=%v", reason)
+		}
 	}
 
 	// «Сейчас» в представлении.
@@ -812,12 +861,137 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 		case !rtRtMatchesNode(t, after):
 			t.Error("Xray: исходящий группы не совпадает ни с одним узлом «Моих узлов»")
 		}
-		if len(pidsBefore) > 0 {
-			pidsAfter, out := rtRstKernelPIDs("xray")
-			if len(pidsAfter) != 1 || (len(pidsBefore) == 1 && pidsAfter[0] == pidsBefore[0]) {
-				t.Errorf("Xray: после выбора PID %v (до %v): ядро не перезапущено: %s", pidsAfter, pidsBefore, out)
-			}
+		pidsAfter, _ := rtRstKernelPIDs("xray")
+		if len(pidsAfter) != 1 || pidsAfter[0] != pidsBefore[0] {
+			t.Errorf("Xray: горячая смена сохранила PID=%t, процессов %d", reflect.DeepEqual(pidsAfter, pidsBefore), len(pidsAfter))
 		}
+	}
+	runtimeGroup = rtRtFindGroup(runtimeView(), "Выбор")
+	if runtimeGroup == nil || runtimeGroup["current"] != target {
+		t.Error("proxies: current после выбора не равен выбранному участнику")
+	}
+	now := e.call(http.MethodGet, "/api/configlayer/proxies/now", nil)
+	if now.Status == http.StatusConflict && now.Code == "kernel_restarting" {
+		t.Logf("proxies/now: %d %s", now.Status, now.Code)
+	} else if now.Status != http.StatusOK {
+		t.Errorf("proxies/now: %d %s", now.Status, now.Code)
+	} else {
+		rtAssertContractKeys(t, contract, now.object(t), "RuntimeNow", "proxies/now")
+	}
+
+	// Очистка пинга регистрируется после очистки маршрутизации и выполняется раньше
+	// неё даже при Fatal. Отмена отвечает только после уборки пачки (раннер ждёт
+	// завершения), поэтому идущей пачки и временного процесса после сценария нет.
+	t.Cleanup(func() {
+		c := e.with(t)
+		r := c.callSlow(http.MethodPost, "/api/configlayer/proxies/ping/cancel", nil)
+		if r.Status != http.StatusOK {
+			t.Errorf("очистка пинга: %d %s", r.Status, r.Code)
+			return
+		}
+		if state, _ := r.object(t)["state"].(string); state == "running" {
+			t.Error("очистка пинга: пачка осталась в работе после отмены")
+		}
+	})
+	readResults := func(path string) map[string]any {
+		r := e.call(http.MethodGet, "/api/configlayer/proxies/results", nil)
+		if r.Status != http.StatusOK {
+			t.Fatalf("%s: %d %s", path, r.Status, r.Code)
+		}
+		v := r.object(t)
+		rtAssertContractKeys(t, contract, v, "PingSnapshot", path)
+		return v
+	}
+	// Результаты прежних пачек (в том числе другого ядра) хранятся в раннере;
+	// проверки ниже касаются только записей, появившихся или сменившихся в этой пачке.
+	prior, _ := readResults("proxies/results/prior")["results"].(map[string]any)
+	pingBody := map[string]string{"scope": "group", "group": gid}
+	launch := func(path string) map[string]any {
+		r := e.call(http.MethodPost, "/api/configlayer/proxies/ping", pingBody)
+		if r.Status != http.StatusOK {
+			t.Fatalf("%s: %d %s", path, r.Status, r.Code)
+		}
+		v := r.object(t)
+		rtAssertContractKeys(t, contract, v, "PingStart", path)
+		return v
+	}
+	// Повтор во время пачки присоединяется к ней. Повтор без joined означает, что
+	// прежняя пачка уже закончилась и он сам запустил новую: к ней присоединяется
+	// следующий повтор. Три подряд новые пачки — присоединение не работает.
+	startData := launch("proxies/ping")
+	var joinedData map[string]any
+	for attempt := 0; attempt < 3; attempt++ {
+		joinedData = launch("proxies/ping/join")
+		if joinedData["joined"] == true {
+			break
+		}
+		startData = joinedData
+	}
+	batchID, _ := startData["batch_id"].(string)
+	if batchID == "" || joinedData["joined"] != true || joinedData["batch_id"] != batchID {
+		t.Errorf("proxies/ping: id непустой=%t joined=%t id совпал=%t", batchID != "", joinedData["joined"] == true, joinedData["batch_id"] == batchID)
+	}
+	readyBefore, _ := readResults("proxies/results")["results"].(map[string]any)
+	cancelled := e.callSlow(http.MethodPost, "/api/configlayer/proxies/ping/cancel", nil)
+	if cancelled.Status != http.StatusOK {
+		t.Fatalf("proxies/ping/cancel: %d %s", cancelled.Status, cancelled.Code)
+	}
+	rtAssertContractKeys(t, contract, cancelled.object(t), "PingBatch", "proxies/ping/cancel")
+	var finished map[string]any
+	ok, seen := routertest.Poll(15*time.Second, 100*time.Millisecond, func() (bool, string) {
+		r := e.call(http.MethodGet, "/api/configlayer/proxies/results", nil)
+		if r.Status != http.StatusOK {
+			return false, strconv.Itoa(r.Status) + " " + r.Code
+		}
+		finished = r.object(t)
+		batch, _ := finished["batch"].(map[string]any)
+		state, _ := batch["state"].(string)
+		return batch["id"] == batchID && state != "" && state != "running", state
+	})
+	if !ok {
+		t.Fatalf("proxies/ping/cancel: пачка не завершилась: %s", seen)
+	}
+	rtAssertContractKeys(t, contract, finished, "PingSnapshot", "proxies/results/finished")
+	finishedBatch, _ := finished["batch"].(map[string]any)
+	if state, _ := finishedBatch["state"].(string); state != "cancelled" && state != "done" {
+		t.Errorf("proxies/ping/cancel: состояние пачки %q, ожидалось cancelled или done", state)
+	}
+	readyAfter, _ := finished["results"].(map[string]any)
+	for ref, result := range readyBefore {
+		if reflect.DeepEqual(prior[ref], result) {
+			continue
+		}
+		if !reflect.DeepEqual(readyAfter[ref], result) {
+			t.Error("proxies/ping/cancel: готовый результат пачки потерян или изменён")
+		}
+	}
+	for ref, value := range readyAfter {
+		if reflect.DeepEqual(prior[ref], value) {
+			continue
+		}
+		result, _ := value.(map[string]any)
+		if result["kernel"] != tg.Core {
+			t.Error("proxies/results: замер пачки не активным ядром")
+		}
+		if result["method"] != "xray" && result["method"] != "mihomo" && result["method"] != "tls" {
+			t.Error("proxies/results: неизвестный способ замера")
+		}
+	}
+	e.rtRtExpect("proxies/ping: неверный охват", e.call(http.MethodPost, "/api/configlayer/proxies/ping",
+		map[string]string{"scope": "bad"}), http.StatusBadRequest, "invalid_input")
+	e.rtRtExpect("proxies/ping: неизвестная группа", e.call(http.MethodPost, "/api/configlayer/proxies/ping",
+		map[string]string{"scope": "group", "group": "ffffffff"}), http.StatusNotFound, "group_not_found")
+	confirm := e.callSlow(http.MethodPost, "/api/configlayer/proxies/confirm", map[string]string{"group": gid})
+	if confirm.Status != http.StatusOK {
+		t.Fatalf("proxies/confirm: %d %s", confirm.Status, confirm.Code)
+	}
+	confirmed := confirm.object(t)
+	rtAssertContractKeys(t, contract, confirmed, "ConfirmResult", "proxies/confirm")
+	if confirmed["confirmed"] != true || confirmed["group"] != gid {
+		t.Errorf("proxies/confirm: confirmed=%t group=%t", confirmed["confirmed"] == true, confirmed["group"] == gid)
+	}
+	if e.rtRtDraftChanges() != draftBefore {
+		t.Error("выбор, пинг или подтверждение изменили черновик")
 	}
 
 	// Правка правила и «Применить»: выбор остаётся.
@@ -991,6 +1165,12 @@ var rtRoutingRoutes = []struct{ method, path string }{
 	{http.MethodGet, rtRoutingBase + "/presets"},
 	{http.MethodPost, rtRoutingBase + "/presets/plan"},
 	{http.MethodPost, rtRoutingBase + "/presets/apply"},
+	{http.MethodGet, "/api/configlayer/proxies"},
+	{http.MethodGet, "/api/configlayer/proxies/now"},
+	{http.MethodGet, "/api/configlayer/proxies/results"},
+	{http.MethodPost, "/api/configlayer/proxies/ping"},
+	{http.MethodPost, "/api/configlayer/proxies/ping/cancel"},
+	{http.MethodPost, "/api/configlayer/proxies/confirm"},
 }
 
 // Флаг слоя выключен: каждый маршрут маршрутизации отвечает 404 config_layer_disabled.
@@ -1056,4 +1236,14 @@ func TestRouterRoutingProtected(t *testing.T) {
 		t.Fatalf("GET %s/takeover: %d %s", rtRoutingBase, tp.Status, tp.Code)
 	}
 	rtAssertContractKeys(t, contract, tp.object(t), "TakeoverPreview", "takeover")
+	proxies := e.call(http.MethodGet, "/api/configlayer/proxies", nil)
+	if proxies.Status != http.StatusOK {
+		t.Fatalf("GET /api/configlayer/proxies: %d %s", proxies.Status, proxies.Code)
+	}
+	rtAssertContractKeys(t, contract, proxies.object(t), "RuntimeView", "proxies")
+	results := e.call(http.MethodGet, "/api/configlayer/proxies/results", nil)
+	if results.Status != http.StatusOK {
+		t.Fatalf("GET /api/configlayer/proxies/results: %d %s", results.Status, results.Code)
+	}
+	rtAssertContractKeys(t, contract, results.object(t), "PingSnapshot", "proxies/results")
 }
