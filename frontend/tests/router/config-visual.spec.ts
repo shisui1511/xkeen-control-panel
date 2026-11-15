@@ -1,4 +1,4 @@
-// e2e-pages: config/nodes config/groups config/rules config/lists config/cores config/files
+// e2e-pages: config/nodes config/groups config/rules config/lists config/cores config/files config/setup
 // e2e-kind: read
 // router-area: ui-shell
 import { test, expect, type Page } from '@playwright/test';
@@ -6,8 +6,15 @@ import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
 import { FULL_TAG, TIER_FULL_ANNOTATION } from './lib/known';
 
-// Визуальная проверка вкладок раздела «Конфигурация» (CFG-05, D-20).
-// Read-спек обходит шесть вкладок: узлы, группы, правила, списки, ядра, файлы.
+// Визуальная проверка вкладок раздела «Конфигурация» (CFG-05, D-20) и страницы мастера
+// первого запуска #/config/setup (149 D-28, фаза 149.1).
+// Read-спек обходит шесть вкладок: узлы, группы, правила, списки, ядра, файлы — и мастер.
+// У мастера нет полосы вкладок: ждётся корень config-setup, пункт 4 пропускается. Перед
+// проверками мастера шаг 7 приводится к устойчивому виду (D-09: страница сама проверяет IP при
+// открытии, если шаги 5 и 6 выполнены): итог проверки или «заперт» — по ответу сервера. Затем
+// каждый шаг раскрывается по очереди (нажатие заголовка — не изменяющее действие), и пункты 2
+// и 3 повторяются; сообщение провала называет номер шага. Внешние запросы автопроверки IP идут
+// под сборщиком консоли, как у бейджа IP на «Прокси» (pages.spec.ts).
 // Проверяет:
 // 1. Консоль и сеть: нет console.error, pageerror, ответов 5xx или оборванных запросов.
 // 2. Горизонтальная прокрутка страницы: document.scrollingElement.scrollWidth <= innerWidth.
@@ -24,7 +31,13 @@ import { FULL_TAG, TIER_FULL_ANNOTATION } from './lib/known';
 
 const TABS = ['nodes', 'groups', 'rules', 'lists', 'cores', 'files'] as const;
 
-type TabName = (typeof TABS)[number];
+// Страница мастера — не вкладка раздела: свой корень и без полосы вкладок
+const SETUP = 'setup';
+
+type TabName = (typeof TABS)[number] | typeof SETUP;
+
+// Итог проверки IP шага 7 мастера (IpCheckResult data-state)
+const IP_RESULT = /^(proxied|direct_ok|direct_warn|failed)$/;
 
 const VIEWPORTS: Record<number, { width: number; height: number }> = {
   390: { width: 390, height: 844 },
@@ -37,6 +50,32 @@ async function layerOn(page: Page): Promise<boolean> {
   if (!res.ok()) return false;
   const body = (await res.json()) as { data?: { config_layer?: boolean } };
   return body.data?.config_layer === true;
+}
+
+/**
+ * Шаг 7 мастера в устойчивом виде (D-09): шаги 5 и 6 выполнены по ответу сервера — страница
+ * сама проверяет IP при открытии, ждём итог; иначе шаг заперт. Только чтение состояния.
+ */
+async function settleIpStep(page: Page): Promise<void> {
+  const res = await page.request.get('/api/configlayer/wizard');
+  expect(res.ok(), 'GET /api/configlayer/wizard').toBe(true);
+  const body = (await res.json()) as { data?: { steps?: { id: string; done: boolean }[] } };
+  const steps = body.data?.steps ?? [];
+  const done = (id: string) => steps.find((s) => s.id === id)?.done === true;
+  const box = page.getByTestId('setup-ip-result');
+  if (done('apply') && done('start')) {
+    await expect(box, 'setup-ip-result: итог автопроверки').toHaveAttribute(
+      'data-state',
+      IP_RESULT,
+      {
+        timeout: 20_000
+      }
+    );
+  } else {
+    await expect(box, 'setup-ip-result: шаг 7 заперт').toHaveAttribute('data-state', 'locked', {
+      timeout: T.action
+    });
+  }
 }
 
 async function checkTab(
@@ -63,11 +102,54 @@ async function checkTab(
     document.documentElement.setAttribute('data-scheme', th === 'light' ? 'light' : 'dark');
   }, theme);
 
-  await expect(page.getByTestId('config-tabs')).toBeVisible({ timeout: T.page });
-  await expect(page.getByTestId(`${tab}-tab`)).toBeVisible({ timeout: T.page });
+  if (tab === SETUP) {
+    await expect(page.getByTestId('config-setup')).toBeVisible({ timeout: T.page });
+    await expect(page.getByTestId('setup-steps')).toBeVisible({ timeout: T.page });
+  } else {
+    await expect(page.getByTestId('config-tabs')).toBeVisible({ timeout: T.page });
+    await expect(page.getByTestId(`${tab}-tab`)).toBeVisible({ timeout: T.page });
+  }
   await page.waitForLoadState('networkidle', { timeout: T.network }).catch(() => {});
+  if (tab === SETUP) await settleIpStep(page);
   await page.waitForTimeout(300);
 
+  const problems = await layoutProblems(page);
+
+  // Мастер: каждый шаг раскрывается по очереди, пункты 2 и 3 повторяются на раскрытом шаге
+  if (tab === SETUP) {
+    for (let n = 1; n <= 7; n++) {
+      const toggle = page.getByTestId(`setup-step-${n}-toggle`);
+      if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+      await expect(page.getByTestId(`setup-step-${n}-body`)).toBeVisible({ timeout: T.action });
+      await page.waitForTimeout(300);
+      for (const p of await layoutProblems(page)) problems.push(`шаг ${n}: ${p}`);
+    }
+  }
+
+  // 4. Полоса вкладок на узком экране не шире окна (у мастера полосы нет)
+  if (width <= 768 && tab !== SETUP) {
+    const tabsWidth = await page.evaluate(() => {
+      const tabs = document.querySelector('[data-testid="config-tabs"]');
+      if (!tabs) return null;
+      return {
+        width: tabs.getBoundingClientRect().width,
+        inner: window.innerWidth
+      };
+    });
+    if (tabsWidth && tabsWidth.width > tabsWidth.inner + 1) {
+      problems.push(`config-tabs: ширина ${tabsWidth.width} шире окна ${tabsWidth.inner}`);
+    }
+  }
+
+  await guard.assertClean().catch((e: Error) => problems.push(e.message));
+
+  if (problems.length > 0) {
+    throw new Error(`[tab:${tab} theme:${theme} vp:${width}]\n` + problems.join('\n'));
+  }
+}
+
+/** Пункты 2 и 3: горизонтальная прокрутка страницы и обрезанные подписи без многоточия. */
+async function layoutProblems(page: Page): Promise<string[]> {
   const problems: string[] = [];
 
   // 1. Горизонтальная прокрутка страницы
@@ -127,27 +209,7 @@ async function checkTab(
       `обрезанный текст без ellipsis (${truncated.length}):\n- ${truncated.join('\n- ')}`
     );
   }
-
-  // 3. Полоса вкладок на узком экране не шире окна
-  if (width <= 768) {
-    const tabsWidth = await page.evaluate(() => {
-      const tabs = document.querySelector('[data-testid="config-tabs"]');
-      if (!tabs) return null;
-      return {
-        width: tabs.getBoundingClientRect().width,
-        inner: window.innerWidth
-      };
-    });
-    if (tabsWidth && tabsWidth.width > tabsWidth.inner + 1) {
-      problems.push(`config-tabs: ширина ${tabsWidth.width} шире окна ${tabsWidth.inner}`);
-    }
-  }
-
-  await guard.assertClean().catch((e: Error) => problems.push(e.message));
-
-  if (problems.length > 0) {
-    throw new Error(`[tab:${tab} theme:${theme} vp:${width}]\n` + problems.join('\n'));
-  }
+  return problems;
 }
 
 // ── Ярус gate: два среза (390 светлая и 1280 тёмная) ──
@@ -189,3 +251,35 @@ for (const tab of TABS) {
     }
   );
 }
+
+// ── Страница мастера #/config/setup (149 D-28): те же срезы gate и матрица full ──
+test('config-visual tab:setup slices:gate', async ({ page }) => {
+  if (!(await layerOn(page))) {
+    test.skip(true, 'флаг config_layer выключен на этом устройстве: панель не открывает #/config');
+  }
+  await checkTab(page, SETUP, 'light', 390);
+  await checkTab(page, SETUP, 'dark', 1280);
+});
+
+test(
+  'config-visual tab:setup matrix:full',
+  {
+    tag: FULL_TAG,
+    annotation: {
+      type: TIER_FULL_ANNOTATION,
+      description: 'визуальная матрица: 390/768/1280 × две темы, кроме срезов gate (149.1 D-28)'
+    }
+  },
+  async ({ page }) => {
+    if (!(await layerOn(page))) {
+      test.skip(
+        true,
+        'флаг config_layer выключен на этом устройстве: панель не открывает #/config'
+      );
+    }
+    await checkTab(page, SETUP, 'dark', 390);
+    await checkTab(page, SETUP, 'light', 768);
+    await checkTab(page, SETUP, 'dark', 768);
+    await checkTab(page, SETUP, 'light', 1280);
+  }
+);

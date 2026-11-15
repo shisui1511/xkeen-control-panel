@@ -67,6 +67,22 @@ func TestRouterDraftEditWithDirtyDisk(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, configlayer.StateFileName)); err != nil {
 		t.Fatalf("файл состояния слоя в %s: %v", dir, err)
 	}
+
+	// Признак мастера под той же нагрузкой (G-149.1-6). До исправления пишущий
+	// POST close ждал fsync файла состояния под замком хранилища (время записи
+	// нагрузки, на флешке стенда около 20 с — как правка черновика до фоновой
+	// записи), а GET мастера ждал этот замок в фактах слоя; без нагрузки тот же код
+	// укладывался в 0,6 с, поэтому гейт стоит здесь. Подготовка — до нагрузки:
+	// черновик удержан (наблюдатель не поставит done между сбросом и close), признак
+	// сброшен, так что первая запись признака под нагрузкой — close. Очистки
+	// зарегистрированы раньше rtStartDirtyLoad и идут после ожидания fsync нагрузки.
+	rtDevMode(e, true)
+	prevWizard := rtWizardStatus(rtWizardView(e))
+	release := rtWizardHold(e)
+	t.Cleanup(release)
+	t.Cleanup(func() { rtWizardRestore(e, prevWizard) })
+	rtWizardReset(e)
+
 	rev := e.revision()
 
 	load := rtStartDirtyLoad(t, dir)
@@ -78,6 +94,35 @@ func TestRouterDraftEditWithDirtyDisk(t *testing.T) {
 	if r := e.call(http.MethodGet, "/api/auth/me", nil); r.Status != http.StatusOK {
 		t.Fatalf("GET /api/auth/me: %d %s", r.Status, r.Code)
 	}
+
+	// Пишущий close — в горутине: в ней только запрос и время, итог уходит в канал
+	// и разбирается в основной горутине. Через 200 мс — GET мастера, пока запись
+	// признака может ещё идти. Затем hide. Всё до правок черновика: сброс черновика
+	// отпустил бы удержание.
+	type wizardCall struct {
+		status int
+		raw    []byte
+		err    error
+		took   time.Duration
+	}
+	closeCh := make(chan wizardCall, 1)
+	go func() {
+		start := time.Now()
+		status, raw, err := e.p.Call(http.MethodPost, rtWizardBase+"/close", nil)
+		closeCh <- wizardCall{status: status, raw: raw, err: err, took: time.Since(start)}
+	}()
+	time.Sleep(200 * time.Millisecond)
+	getStart := time.Now()
+	getResp := e.call(http.MethodGet, rtWizardBase, nil)
+	getTook := time.Since(getStart)
+	closeRes := <-closeCh
+	if closeRes.err != nil {
+		t.Fatalf("POST %s/close под нагрузкой: %v", rtWizardBase, closeRes.err)
+	}
+	closeResp := e.decode(closeRes.status, closeRes.raw)
+	hideStart := time.Now()
+	hideResp := e.call(http.MethodPost, rtWizardBase+"/hide", nil)
+	hideTook := time.Since(hideStart)
 
 	var took [rtDraftEdits]time.Duration
 	for i := range took {
@@ -104,6 +149,36 @@ func TestRouterDraftEditWithDirtyDisk(t *testing.T) {
 			t.Errorf("правка %d: сброс черновика ответил за %v — ждал записи чужих данных на носитель (%v, предел %v)",
 				i+1, d.Round(time.Millisecond), syncTook.Round(time.Millisecond), limit.Round(time.Millisecond))
 		}
+	}
+
+	t.Logf("wizard-timing: dirty close=%dms get=%dms hide=%dms sync=%dms",
+		closeRes.took.Milliseconds(), getTook.Milliseconds(), hideTook.Milliseconds(), syncTook.Milliseconds())
+	if closeResp.Status != http.StatusOK {
+		t.Errorf("POST %s/close под нагрузкой: %d %s", rtWizardBase, closeResp.Status, closeResp.Code)
+	} else if st := rtWizardStatus(closeResp.object(t)); st != "closed" {
+		t.Errorf("POST close под нагрузкой: статус %q, ожидался closed", st)
+	}
+	if getResp.Status != http.StatusOK {
+		t.Errorf("GET %s под нагрузкой: %d %s", rtWizardBase, getResp.Status, getResp.Code)
+	} else if st := rtWizardStatus(getResp.object(t)); st != "closed" {
+		t.Errorf("GET мастера под нагрузкой: статус %q, ожидался closed", st)
+	}
+	if hideResp.Status != http.StatusOK {
+		t.Errorf("POST %s/hide под нагрузкой: %d %s", rtWizardBase, hideResp.Status, hideResp.Code)
+	} else if st := rtWizardStatus(hideResp.object(t)); st != "hidden" {
+		t.Errorf("POST hide под нагрузкой: статус %q, ожидался hidden", st)
+	}
+	if closeRes.took > rtWizardPostMax {
+		t.Errorf("POST close под нагрузкой ответил за %v (предел %v, чужие данные записаны за %v): ответ ждал записи признака на носитель или замка хранилища (G-149.1-6)",
+			closeRes.took.Round(time.Millisecond), rtWizardPostMax, syncTook.Round(time.Millisecond))
+	}
+	if getTook > rtWizardGetMax {
+		t.Errorf("GET мастера под нагрузкой ответил за %v (предел %v, чужие данные записаны за %v): чтение вида ждало замка хранилища или носителя (G-149.1-6)",
+			getTook.Round(time.Millisecond), rtWizardGetMax, syncTook.Round(time.Millisecond))
+	}
+	if hideTook > rtWizardPostMax {
+		t.Errorf("POST hide под нагрузкой ответил за %v (предел %v, чужие данные записаны за %v): ответ ждал записи признака на носитель или замка хранилища (G-149.1-6)",
+			hideTook.Round(time.Millisecond), rtWizardPostMax, syncTook.Round(time.Millisecond))
 	}
 }
 

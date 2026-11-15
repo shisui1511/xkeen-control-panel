@@ -1,0 +1,84 @@
+<script lang="ts">
+  import { t } from '../../../i18n';
+  import AddSourceField from '../nodes/AddSourceField.svelte';
+  import ConfigNotices from '../ConfigNotices.svelte';
+  import type { WizardStep } from '../../../lib/configWizard';
+  import { VALUE_MARK, valueParts } from './valueParts';
+
+  // Тело шага 3 «Узлы» (D-02, D-04.3): поле «Добавить» встроено прямо в шаг, под ним —
+  // уведомления источников (не скачался, отклонён, пуст): ошибка видна в самом шаге, и
+  // шаг остаётся невыполненным, пока в черновике нет рабочего узла. Счёт узлов и
+  // источников даёт сервер (GET /api/configlayer/wizard).
+
+  interface Props {
+    step: WizardStep | undefined;
+  }
+
+  let { step }: Props = $props();
+
+  const nodes = $derived(step?.nodes ?? 0);
+  const sources = $derived(step?.sources ?? 0);
+
+  // «Узлов в черновике: N» — число моноширинным
+  const countParts = $derived(valueParts($t('cfg.setup.nodes.count', { n: VALUE_MARK })));
+
+  let field = $state<AddSourceField | undefined>();
+
+  /** Ход шага 3: в поле «Добавить» есть ввод или идёт добавление (реактивно в $derived). */
+  export function isBusy(): boolean {
+    return field?.isBusy() ?? false;
+  }
+</script>
+
+<div class="step-nodes">
+  <AddSourceField bind:this={field} />
+
+  <div class="step-nodes-errors" data-testid="setup-nodes-errors">
+    <ConfigNotices prefixes={['source_']} />
+  </div>
+
+  {#if nodes > 0}
+    <p class="step-nodes-count" data-testid="setup-nodes-count">
+      {countParts[0]}<span class="setup-mono">{nodes}</span>{countParts[1]}
+    </p>
+  {:else if sources > 0}
+    <p class="step-nodes-note" data-testid="setup-nodes-no-usable">
+      {$t('cfg.setup.nodes.no_usable')}
+    </p>
+  {/if}
+</div>
+
+<style>
+  .step-nodes {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-4);
+    min-width: 0;
+  }
+
+  .step-nodes-errors {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  /* ConfigNotices всегда рисует свою секцию, поэтому обёртка не бывает :empty: без
+     уведомлений она скрыта, чтобы не давать лишний отступ между полем и счётчиком */
+  .step-nodes-errors:not(:has(:global(.alert))) {
+    display: none;
+  }
+
+  .step-nodes-count,
+  .step-nodes-note {
+    margin: 0;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .step-nodes-count {
+    color: var(--fg-primary);
+  }
+
+  .step-nodes-note {
+    color: var(--fg-secondary);
+  }
+</style>

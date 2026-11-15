@@ -113,6 +113,13 @@
   const blockedRows = $derived(rows.filter((r) => !!r.blocked));
   const moveRows = $derived(takeable.filter((r) => r.move.length > 0));
   const noFileRows = $derived(takeable.filter((r) => r.preset && r.move.length === 0));
+  // Секция, отпущенная в черновике и взятая в применённом состоянии: Preview пакета cores
+  // отдаёт ей строку без пресета и без файлов — Take вернёт прежнее значение панели. Признак
+  // однозначен: у прочих секций файлы сканера целиком делятся на переносимые и оставляемые,
+  // а секция без файлов получает preset
+  const releasingRows = $derived(
+    takeable.filter((r) => !r.preset && r.move.length === 0 && r.left.length === 0)
+  );
   const leftFiles = $derived([...new Set(takeable.flatMap((r) => r.left))]);
   const commentFiles = $derived([...new Set(takeable.flatMap((r) => r.comments))]);
   const needAck = $derived(commentFiles.length > 0);
@@ -328,6 +335,14 @@
               <span class="ts-label">{sectionName(r.id)}</span>
             {/if}
             {$t('cfg.sec.take_no_file')}
+          </p>
+        {/each}
+        {#each releasingRows as r (r.id)}
+          <p class="ts-text" data-testid="take-section-releasing" data-section={r.id}>
+            {#if mode === 'all'}
+              <span class="ts-label">{sectionName(r.id)}</span>
+            {/if}
+            {$t('cfg.sec.take_releasing')}
           </p>
         {/each}
         {#each blockedRows as r (r.id)}

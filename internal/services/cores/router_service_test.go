@@ -374,9 +374,76 @@ func TestRouterCoresServiceFlow(t *testing.T) {
 	})
 
 	t.Run("отпускание одной секции", func(t *testing.T) {
+		// Признак «в черновике» не зависит от владельца: чужой файл с ключом
+		// взятой секции даёт владельца drift, а секция остаётся в черновике —
+		// мастер не предлагает её взять снова (149.1).
+		const driftFile = "06_dns_drift.json"
+		driftPath := filepath.Join(e.xray, driftFile)
+		// Чужой файл убирается и при провале подтеста (Fatal между записью и
+		// removeDrift): иначе следующие подтесты видели бы дрейф dns.
+		t.Cleanup(func() { _ = os.Remove(driftPath) })
+		writeDrift := func() {
+			t.Helper()
+			if err := os.WriteFile(driftPath, []byte(`{"dns": {"servers": ["localhost"]}}`+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		removeDrift := func() {
+			t.Helper()
+			if err := os.Remove(driftPath); err != nil {
+				t.Fatal(err)
+			}
+		}
+		dnsSnap := func() configlayer.CoreSectionSnap {
+			return e.layer.Snapshot().Cores.Xray["dns"]
+		}
+		writeDrift()
+		if sec, sn := e.section(t, "xray", "dns"), dnsSnap(); sec.Owner != "drift" || !sn.Desired || !sn.Taken {
+			t.Errorf("dns в черновике с чужим файлом: владелец %q, desired=%v taken=%v", sec.Owner, sn.Desired, sn.Taken)
+		}
+		removeDrift()
+		if sec := e.section(t, "xray", "dns"); sec.Owner != "panel" {
+			t.Errorf("dns без чужого файла: владелец %q", sec.Owner)
+		}
+
 		if _, err := e.svc.Release(e.rev(t), "xray", "dns"); err != nil {
 			t.Fatalf("Release dns: %v", err)
 		}
+
+		// Отпущенная в черновике секция у панели в применённом состоянии:
+		// предпросмотр не обещает пресет и переносы — Take вернёт прежнее
+		// значение панели. Ветка зависит от признаков, не от владельца.
+		checkReleasingPreview := func(what string, pv TakePreview, err error) {
+			t.Helper()
+			if err != nil {
+				t.Fatalf("Preview отпущенной dns (%s): %v", what, err)
+			}
+			if len(pv.Sections) != 1 || pv.Sections[0].ID != "dns" {
+				t.Fatalf("предпросмотр отпущенной dns (%s): %d строк", what, len(pv.Sections))
+			}
+			sp := pv.Sections[0]
+			if sp.Preset || sp.Move == nil || len(sp.Move) != 0 || sp.Left == nil || len(sp.Left) != 0 ||
+				sp.Comments == nil || len(sp.Comments) != 0 || sp.Blocked != "" || sp.BlockedFile != "" {
+				t.Errorf("предпросмотр отпущенной dns (%s): preset=%v move=%d left=%d comments=%d blocked=%q",
+					what, sp.Preset, len(sp.Move), len(sp.Left), len(sp.Comments), sp.Blocked)
+			}
+		}
+		if sec, sn := e.section(t, "xray", "dns"), dnsSnap(); sec.Owner != "releasing" || sn.Desired || !sn.Taken {
+			t.Errorf("отпущенная dns: владелец %q, desired=%v taken=%v", sec.Owner, sn.Desired, sn.Taken)
+		}
+		pv, err := e.svc.Preview("xray", []string{"dns"})
+		checkReleasingPreview("releasing", pv, err)
+		writeDrift()
+		if sec, sn := e.section(t, "xray", "dns"), dnsSnap(); sec.Owner != "drift" || sn.Desired {
+			t.Errorf("отпущенная dns с чужим файлом: владелец %q, desired=%v", sec.Owner, sn.Desired)
+		}
+		pv, err = e.svc.Preview("xray", []string{"dns"})
+		checkReleasingPreview("drift", pv, err)
+		removeDrift()
+		if sec := e.section(t, "xray", "dns"); sec.Owner != "releasing" {
+			t.Errorf("отпущенная dns без чужого файла: владелец %q", sec.Owner)
+		}
+
 		for _, id := range []string{"other", "policy"} {
 			if sec := e.section(t, "xray", id); sec.Owner != "pending" {
 				t.Errorf("отпускание dns изменило секцию %s: %q", id, sec.Owner)

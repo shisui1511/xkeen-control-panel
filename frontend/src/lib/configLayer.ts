@@ -449,25 +449,31 @@ const EVENT_NAMES = [
   'sources',
   'routing',
   'geodata',
-  'dns'
+  'dns',
+  'wizard'
 ] as const;
 const RETRY_MIN_MS = 3000;
 const RETRY_MAX_MS = 30000;
 
-// Обработчики событий sources, routing, geodata, dns и draft: представления перечитывают
-// клиенты источников, маршрутизации, менеджера geodata и перехвата DNS (обработчики
-// регистрируются при загрузке модулей клиентов; configLayer их не импортирует — цикла нет).
-// У каждого имени свой набор.
-type HandlerEvent = 'sources' | 'routing' | 'geodata' | 'dns' | 'draft';
+// Обработчики событий sources, routing, geodata, dns, wizard и draft: представления
+// перечитывают клиенты источников, маршрутизации, менеджера geodata, перехвата DNS и мастера
+// первого запуска (обработчики регистрируются при загрузке модулей клиентов; configLayer их
+// не импортирует — цикла нет). У каждого имени свой набор.
+type HandlerEvent = 'sources' | 'routing' | 'geodata' | 'dns' | 'wizard' | 'draft';
 const layerHandlers: Record<HandlerEvent, Set<() => void>> = {
   sources: new Set(),
   routing: new Set(),
   geodata: new Set(),
   dns: new Set(),
+  wizard: new Set(),
   draft: new Set()
 };
 
-/** Подписка на событие SSE `sources`, `routing`, `geodata`, `dns` или `draft`; возвращает функцию отписки. */
+/**
+ * Подписка на событие SSE `sources`, `routing`, `geodata`, `dns`, `wizard` или `draft`;
+ * возвращает функцию отписки. После восстановления связи подписчики geodata, dns и wizard
+ * получают вызов без события: за время обрыва их события могли пройти мимо.
+ */
 export function onLayerEvent(name: HandlerEvent, fn: () => void): () => void {
   const set = layerHandlers[name];
   if (!set) return () => {};
@@ -537,6 +543,12 @@ function applyEvent(name: string, data: unknown): void {
     // Событие несёт только счётчик службы перехвата: снимок слоя не меняется, состояние
     // перехвата перечитывает его клиент по подписке
     notifyHandlers('dns');
+    return;
+  }
+  if (name === 'wizard') {
+    // Событие несёт только счётчик службы мастера: снимок слоя не меняется, статус шагов
+    // перечитывает клиент мастера по подписке
+    notifyHandlers('wizard');
     return;
   }
   eventSeq++;
@@ -615,9 +627,10 @@ function connect(): void {
     // Пока связи не было, события могли пройти мимо — читаем состояние целиком (D-06)
     if (wasLost) {
       void refetchLayerState();
-      // События менеджера баз и перехвата DNS за время обрыва тоже могли пройти мимо
+      // События менеджера баз, перехвата DNS и мастера за время обрыва тоже могли пройти мимо
       notifyHandlers('geodata');
       notifyHandlers('dns');
+      notifyHandlers('wizard');
     }
   };
   es.onerror = () => {

@@ -20,6 +20,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services/geodata"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/setupwizard"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
@@ -96,6 +97,9 @@ type API struct {
 	// dns — служба перехвата DNS роутера; nil, пока main.go её не подключил:
 	// маршруты /api/configlayer/dns* отвечают 404.
 	dns *dnstakeover.Service
+	// wizard — служба мастера первого запуска; nil, пока main.go её не подключил:
+	// маршруты /api/configlayer/wizard* отвечают 404.
+	wizard *setupwizard.Service
 	// geodata — менеджер geodata XKeen (источники, обновление баз, расписание); nil,
 	// пока main.go его не подключил: маршруты /api/configlayer/geodata* отвечают 404.
 	geodata *geodata.Service

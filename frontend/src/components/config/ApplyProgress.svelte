@@ -1,3 +1,53 @@
+<script lang="ts" module>
+  import type { LayerResult } from '../../lib/configLayer';
+
+  const KERNEL_LABELS: Record<string, string> = { xray: 'Xray', mihomo: 'Mihomo' };
+
+  /** Функция перевода в форме стора `t`. */
+  type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+  /**
+   * Пояснение итога применения по коду (ветки cfg.result.*): одна и та же строка в ходе
+   * применения раздела и в блоке ошибки шага 5 мастера. Пусто — у кода нет пояснения
+   * (вывод ядра показывается отдельно).
+   */
+  export function applyResultText(result: LayerResult, tr: Translate): string {
+    const kernel = KERNEL_LABELS[result.kernel ?? ''] ?? result.kernel ?? '';
+    // «Файлы возвращены» — только по флагу бэкенда, а не по имени кода: при неудачном откате
+    // и при ядре, не поднявшемся после отката, говорить об этом нельзя
+    const rolledBack = result.rolled_back === true;
+    switch (result.code) {
+      case 'validation_failed':
+        return tr('cfg.result.validation', { kernel });
+      case 'validation_timeout':
+        return tr('cfg.result.timeout', { kernel });
+      case 'validation_not_run':
+        return tr('cfg.result.not_run', { kernel });
+      case 'build_failed':
+        return tr('cfg.result.build_failed');
+      case 'state_write_failed':
+        return tr('cfg.result.state_write_failed');
+      case 'write_failed':
+      case 'restart_failed':
+        return rolledBack ? tr('cfg.result.rolled_back') : tr('cfg.result.rollback_failed');
+      case 'kernel_not_recovered':
+        return tr('cfg.result.kernel_not_recovered', { kernel });
+      case 'rollback_failed':
+        return tr('cfg.result.rollback_failed');
+      case 'journal_recovery_failed':
+        return tr('cfg.result.journal_recovery_failed');
+      case 'interrupted':
+        return tr('cfg.result.interrupted');
+      case 'drift_blocked':
+        return tr('cfg.result.drift_blocked');
+      case 'draft_conflict':
+        return tr('cfg.result.draft_conflict');
+      default:
+        return rolledBack ? tr('cfg.result.rolled_back') : '';
+    }
+  }
+</script>
+
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
@@ -16,7 +66,6 @@
 
   // Порядок шагов фиксирован (D-16): недостающие в состоянии показываются ожидающими
   const STEP_ORDER: StepId[] = ['build', 'validate_xray', 'validate_mihomo', 'write', 'restart'];
-  const KERNEL_LABELS: Record<string, string> = { xray: 'Xray', mihomo: 'Mihomo' };
 
   // Ход виден, пока идёт применение, и после него — до «Скрыть» или следующего запуска.
   // Свежая загрузка страницы с уже завершённым применением его не показывает.
@@ -143,9 +192,6 @@
 
   const otherTab = $derived(running && !$applyStartedHere);
   const failure = $derived(result && !result.ok ? result : null);
-  // «Файлы возвращены» — только по флагу бэкенда, а не по имени кода: при неудачном откате
-  // и при ядре, не поднявшемся после отката, говорить об этом нельзя
-  const rolledBack = $derived(failure !== null && failure.rolled_back === true);
   // Отказ до записи: файлы на диске не менялись
   const FILES_UNTOUCHED = [
     'validation_failed',
@@ -159,39 +205,7 @@
   const filesUntouched = $derived(failure !== null && FILES_UNTOUCHED.includes(failure.code));
 
   // Пояснение причины отказа по коду итога; вывод ядра идёт отдельным блоком
-  const failureHeadline = $derived.by(() => {
-    if (!failure) return '';
-    const kernel = kernelLabel(failure.kernel ?? '');
-    switch (failure.code) {
-      case 'validation_failed':
-        return $t('cfg.result.validation', { kernel });
-      case 'validation_timeout':
-        return $t('cfg.result.timeout', { kernel });
-      case 'validation_not_run':
-        return $t('cfg.result.not_run', { kernel });
-      case 'build_failed':
-        return $t('cfg.result.build_failed');
-      case 'state_write_failed':
-        return $t('cfg.result.state_write_failed');
-      case 'write_failed':
-      case 'restart_failed':
-        return rolledBack ? $t('cfg.result.rolled_back') : $t('cfg.result.rollback_failed');
-      case 'kernel_not_recovered':
-        return $t('cfg.result.kernel_not_recovered', { kernel });
-      case 'rollback_failed':
-        return $t('cfg.result.rollback_failed');
-      case 'journal_recovery_failed':
-        return $t('cfg.result.journal_recovery_failed');
-      case 'interrupted':
-        return $t('cfg.result.interrupted');
-      case 'drift_blocked':
-        return $t('cfg.result.drift_blocked');
-      case 'draft_conflict':
-        return $t('cfg.result.draft_conflict');
-      default:
-        return rolledBack ? $t('cfg.result.rolled_back') : '';
-    }
-  });
+  const failureHeadline = $derived(failure ? applyResultText(failure, $t) : '');
 
   const orphans = $derived(result?.orphans_removed ?? []);
 </script>

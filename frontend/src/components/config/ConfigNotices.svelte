@@ -23,6 +23,19 @@
     ids: string[];
   };
 
+  interface Props {
+    /**
+     * Показывать только уведомления, чей id начинается с одного из префиксов (шаг 3 мастера —
+     * `['source_']`, 149.1 D-04.3). Сводка расхождения файлов — не уведомление слоя и при
+     * фильтре не показывается. Без пропа или с пустым списком — все видимые уведомления.
+     */
+    prefixes?: string[];
+  }
+
+  let { prefixes }: Props = $props();
+
+  const filtered = $derived(prefixes !== undefined && prefixes.length > 0);
+
   const KERNEL_LABELS: Record<string, string> = { xray: 'Xray', mihomo: 'Mihomo' };
 
   // Провайдер освобождает слот устройства только в кабинете: для этих кодов отказ — «устройство отклонено»
@@ -287,6 +300,7 @@
   const shown = $derived.by(() => {
     const out: Shown[] = [];
     for (const n of $visibleNotices) {
+      if (filtered && !prefixes?.some((p) => n.id.startsWith(p))) continue;
       const d = describe(n);
       if (d === null) continue;
       const prefix = TWIN_PREFIXES.find((p) => n.id.startsWith(p));
@@ -334,7 +348,7 @@
      других вкладках (D-08). Системные уведомления слоя закрываются навсегда, а
      build_failed и source_* — до перезапуска панели или пока не исчезнет их условие -->
 <section class="config-notices" data-testid="config-notices">
-  {#if $driftCount > 0}
+  {#if !filtered && $driftCount > 0}
     <div class="alert alert-warning" role="alert" data-testid="config-drift-notice">
       <Icon name="warning" size={16} />
       <span class="notice-text"

@@ -65,11 +65,25 @@
  * 12. Немедленные действия (план 149-15, D-14): константа IMMEDIATE_CALLS клиентских
  *    функций немедленных действий; в components/config/**, ManagedFileBanner и
  *    AccessLogControl каждый файл с вызовом содержит <ImmediateMark (или внесён в
- *    IMMEDIATE_ALLOW с непустой причиной).
+ *    IMMEDIATE_ALLOW с непустой причиной). То же для тегов IMMEDIATE_TAGS — компонентов,
+ *    которые сами делают немедленное действие (встроенная установка XKeen в мастере,
+ *    фаза 149.1, 149 D-14). Мастер добавляет вызовы switchKernel, stopKernelAndReport и
+ *    runKernelInstall.
  *
  * 13. Применение только через окно (план 149-15, D-08): вызов applyNow( в
  *    components/** допустим только в DraftBar.svelte; applyFromUi и releaseAndApply
  *    нигде в frontend/src не встречаются.
+ *
+ * 14. Мастер первого запуска (план 149.1-06, 149 D-27, B9): клиент configWizard.ts
+ *    (не-type импорт) подключают только Config.svelte, Dashboard.svelte,
+ *    components/dashboard/SetupChecklistCard.svelte и components/config/**
+ *    (константа WIZARD_CLIENT_EXTRA); в Dashboard.svelte ближайшее условие
+ *    {#if …}/{:else if …} перед <QuickstartCard содержит $configLayerFlagKnown и
+ *    !$configLayerEnabled (при включённом слое старая карточка не рисуется ни при каком
+ *    card_visible, D-06, D-11), а перед <SetupChecklistCard — $configLayerFlagKnown,
+ *    $configLayerEnabled и card_visible; в SetupChecklistCard и components/config/setup/
+ *    нет {@html}; configSubTab.ts экспортирует isConfigSetupHash, а CONFIG_SUBTABS не
+ *    содержит setup; ключи входа в мастер и карточки есть в ru и en.
  *
  * Usage: node scripts/check-config-ui.js [--root <каталог>]
  */
@@ -1741,7 +1755,15 @@ const IMMEDIATE_CALLS = [
   "confirmMihomoReturn",
   "activateOwnProfile",
   "mihomoOwnerAction",
+  // Мастер первого запуска (фаза 149.1, 149 D-14): запуск и остановка ядра, установка ядра
+  "switchKernel",
+  "stopKernelAndReport",
+  "runKernelInstall",
 ];
+
+// Компоненты, которые сами выполняют немедленное действие: файл со встроенным тегом
+// обязан содержать <ImmediateMark так же, как файл с вызовом из IMMEDIATE_CALLS
+const IMMEDIATE_TAGS = ["XKeenInstallCard"];
 
 const IMMEDIATE_ALLOW = {
   // файл -> непустая причина исключения
@@ -1789,6 +1811,13 @@ for (const rel of IMMEDIATE_FILES) {
       `${rel}: содержит вызов немедленного действия (${matched.join(", ")}), но не содержит <ImmediateMark (D-14)`,
     );
   }
+  const tags = IMMEDIATE_TAGS.filter((tag) => new RegExp(`<${tag}\\b`).test(clean));
+  if (tags.length > 0 && !IMMEDIATE_ALLOW[rel]) {
+    expect(
+      clean.includes("<ImmediateMark"),
+      `${rel}: содержит тег немедленного действия (${tags.map((tag) => `<${tag}`).join(", ")}), но не содержит <ImmediateMark (D-14)`,
+    );
+  }
 }
 
 // --- 13. Применение только через окно (план 149-15, D-08) -------------------
@@ -1818,6 +1847,144 @@ for (const file of walk(SRC, [])) {
     !/\breleaseAndApply\b/.test(clean),
     `${file}: устаревший идентификатор releaseAndApply (удалён планом 149-16, D-08)`,
   );
+}
+
+// --- 14. Мастер первого запуска (план 149.1-06, D-27, B9) -------------------
+
+const WIZARD_TS = `${SRC}/lib/configWizard.ts`;
+const DASHBOARD = `${SRC}/Dashboard.svelte`;
+const SETUP_CARD = `${SRC}/components/dashboard/SetupChecklistCard.svelte`;
+const SETUP_DIR = `${SRC}/components/config/setup`;
+const SUBTAB_TS = `${SRC}/lib/configSubTab.ts`;
+
+// (1) Клиент мастера подключают только раздел, страница мастера, дашборд и карточка: на
+// дашборде нет клиентов источников и секций, а при выключенном флаге запросов нет
+// (T-149.1-23)
+const WIZARD_CLIENT_EXTRA = new Set([
+  `${SRC}/Config.svelte`,
+  DASHBOARD,
+  SETUP_CARD,
+]);
+for (const file of walk(SRC, [])) {
+  if (file === WIZARD_TS || WIZARD_CLIENT_EXTRA.has(file)) continue;
+  if (file.startsWith(`${SRC}/components/config/`)) continue;
+  if (
+    /^\s*import(?!\s+type\b)[^;]*?from '[^']*\/configWizard'/m.test(read(file))
+  ) {
+    errors.push(
+      `${file}: импортирует configWizard вне Config.svelte, Dashboard.svelte, SetupChecklistCard и components/config/ (149 D-27)`,
+    );
+  }
+}
+
+// (2) Ветки карточек дашборда: обе под известным флагом слоя (без мигания, B9); старая
+// карточка исключает включённый слой — иначе при card_visible=false (пройдено, скрыто,
+// загрузка) вернулась бы карточка Mihomo (149 D-27, D-06, D-11)
+function conditionBefore(text, tag) {
+  const at = text.indexOf(tag);
+  if (at < 0) return null;
+  let cond = null;
+  for (const m of text
+    .slice(0, at)
+    .matchAll(/\{(?:#if|:else if)\s([^}]*)\}/g)) {
+    cond = m[1];
+  }
+  return cond;
+}
+const dashText = stripCommentsForCalls(read(DASHBOARD));
+const quickCond = conditionBefore(dashText, "<QuickstartCard");
+if (quickCond === null) {
+  errors.push(
+    `${DASHBOARD}: нет условия {#if}/{:else if} перед <QuickstartCard (B9)`,
+  );
+} else {
+  expect(
+    /\$configLayerFlagKnown\b/.test(quickCond),
+    `${DASHBOARD}: ветка <QuickstartCard не ждёт $configLayerFlagKnown — старая карточка мигнёт до карточки слоя (B9)`,
+  );
+  expect(
+    /!\s*\$configLayerEnabled\b/.test(quickCond),
+    `${DASHBOARD}: ветка <QuickstartCard не исключает включённый слой (!$configLayerEnabled) — при флаге старая карточка вернётся (149 D-27, D-06, D-11)`,
+  );
+}
+const setupCond = conditionBefore(dashText, "<SetupChecklistCard");
+if (setupCond === null) {
+  errors.push(
+    `${DASHBOARD}: нет условия {#if}/{:else if} перед <SetupChecklistCard (149 D-27)`,
+  );
+} else {
+  expect(
+    /\$configLayerFlagKnown\b/.test(setupCond),
+    `${DASHBOARD}: ветка <SetupChecklistCard не ждёт $configLayerFlagKnown (B9)`,
+  );
+  expect(
+    /(^|[^!\s])\s*\$configLayerEnabled\b/.test(setupCond) &&
+      !/!\s*\$configLayerEnabled\b/.test(setupCond),
+    `${DASHBOARD}: ветка <SetupChecklistCard не требует включённого слоя $configLayerEnabled (149 D-27)`,
+  );
+  expect(
+    /\bcard_visible\b/.test(setupCond),
+    `${DASHBOARD}: ветка <SetupChecklistCard не ждёт card_visible ответа сервера (D-06, D-11, защита от мигания)`,
+  );
+}
+
+// (3) Карточка и страница мастера — только текстовые узлы (T-149.1-22)
+const setupFiles = [SETUP_CARD];
+if (fs.existsSync(path.join(root, SETUP_DIR))) {
+  for (const file of walk(SETUP_DIR, [])) {
+    if (file.endsWith(".svelte")) setupFiles.push(file);
+  }
+} else {
+  errors.push(`${SETUP_DIR}: нет каталога компонентов мастера`);
+}
+for (const file of setupFiles) {
+  if (!fs.existsSync(path.join(root, file))) {
+    errors.push(`${file}: нет файла компонента мастера`);
+    continue;
+  }
+  expect(
+    !/\{@html/.test(read(file)),
+    `${file}: {@html} запрещён в карточке и компонентах мастера (XSS, T-149.1-22)`,
+  );
+}
+
+// (4) Маршрут мастера — не вкладка: свой разбор хэша, CONFIG_SUBTABS без setup
+const subTabTs = read(SUBTAB_TS);
+expect(
+  /export function isConfigSetupHash\(/.test(subTabTs),
+  `${SUBTAB_TS}: нет export function isConfigSetupHash( — #/config/setup упадёт в «Узлы»`,
+);
+const subTabsList = /export const CONFIG_SUBTABS\b[^=]*=\s*\[([^\]]*)\]/.exec(
+  subTabTs,
+);
+if (!subTabsList) {
+  errors.push(`${SUBTAB_TS}: не найден массив CONFIG_SUBTABS`);
+} else {
+  expect(
+    !/['"]setup['"]/.test(subTabsList[1]),
+    `${SUBTAB_TS}: CONFIG_SUBTABS содержит setup — мастер не вкладка раздела (D-03)`,
+  );
+}
+
+// (5) Тексты входа в мастер и карточки в обоих словарях
+const WIZARD_KEYS = [
+  "cfg.setup.title",
+  "cfg.setup.link",
+  "cfg.setup.close",
+  "cfg.setup.finish",
+  "cfg.setup.open_from_empty",
+  "dash.setup.title",
+  "dash.setup.hide_message",
+];
+for (const lang of ["ru", "en"]) {
+  const file = `${SRC}/locales/${lang}.json`;
+  const dict = JSON.parse(read(file));
+  for (const key of WIZARD_KEYS) {
+    expect(
+      typeof dict[key] === "string" && dict[key].trim() !== "",
+      `${file}: нет текста ${key} (мастер первого запуска, 149.1)`,
+    );
+  }
 }
 
 if (errors.length > 0) {

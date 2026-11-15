@@ -223,11 +223,13 @@ scan_calls() {
     # нарушение. Определение function quarantine( в lib/known.ts вызовом не считается.
     _q_all=$(printf '%s\n' "$_flat" | sed -E 's/function[[:space:]]+quarantine\(//g' |
       grep -oE 'routertest\.Quarantine\(|[^A-Za-z0-9_$.]quarantine\(' | wc -l)
+    # «|| true»: под set -e пустой результат первого grep (в TS-файле нет routertest.Quarantine)
+    # обрывал бы группу, и второй grep не выполнялся — литеральный карантин считался бы нелитеральным.
     _q_lit=$({
       printf '%s\n' "$_flat" |
-        grep -oE "routertest\.Quarantine\([[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*,[[:space:]]*\"[a-z0-9][a-z0-9-]*\""
+        grep -oE "routertest\.Quarantine\([[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*,[[:space:]]*\"[a-z0-9][a-z0-9-]*\"" || true
       printf '%s\n' "$_flat" |
-        grep -oE "[^A-Za-z0-9_\$.]quarantine\([[:space:]]*[\"'][a-z0-9][a-z0-9-]*[\"']"
+        grep -oE "[^A-Za-z0-9_\$.]quarantine\([[:space:]]*[\"'][a-z0-9][a-z0-9-]*[\"']" || true
     } | wc -l)
     [ "$_q_all" -le "$_q_lit" ] || printf '%s\n' "${_file#"$ROOT"/}" >>"$NONLIT"
   done

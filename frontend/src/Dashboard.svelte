@@ -71,6 +71,8 @@
   import DashboardPulse from './components/dashboard/DashboardPulse.svelte';
   import DashboardProblems from './components/dashboard/DashboardProblems.svelte';
   import QuickstartCard from './components/dashboard/QuickstartCard.svelte';
+  import SetupChecklistCard from './components/dashboard/SetupChecklistCard.svelte';
+  import { startWizard, stopWizard, wizardView } from './lib/configWizard';
   import { currentTheme, schemeOf, toggleThemeScheme } from './lib/theme';
   import {
     isAnySourceDirty,
@@ -918,6 +920,14 @@
     return () => stopConfigLayer();
   });
 
+  // Мастер первого запуска (фаза 149.1): статус шагов для карточки «Настроить VPN». Клиент
+  // мастера сам следит за флагом слоя: запросы идут только при включённом флаге, выключение
+  // сбрасывает вид в null (как в Config.svelte, без записи состояния в $effect)
+  onMount(() => {
+    startWizard();
+    return () => stopWizard();
+  });
+
   // Флаг выключен — маршрута #/config нет, как до включения слоя
   $effect(() => {
     if ($configLayerFlagKnown && !$configLayerEnabled && currentTab === 'config') {
@@ -1201,9 +1211,15 @@
             onSwitchTab={switchTab}
           />
 
-          <!-- Чек-лист первого запуска: виден при активном Mihomo, пока не пройден. Ждёт первого
-               опроса статуса и подписок, иначе мигнул бы «не сделано» на значениях по умолчанию -->
-          {#if $isMihomo && !statusLoading && subsSummaryLoaded && !allQuickstartComplete}
+          <!-- Чек-лист первого запуска. Обе ветки ждут известного флага слоя (иначе одна карточка
+               мигнула бы до другой). Флаг включён — карточка «Настроить VPN» для любого ядра по
+               ответу сервера: до первого ответа, при сбое запроса, после «пройдено» и «Скрыть»
+               card_visible нет, и не рисуется ничего. Прежняя карточка Mihomo — только при
+               выключенном флаге (до 151); она ждёт первого опроса статуса и подписок, иначе
+               мигнул бы «не сделано» на значениях по умолчанию -->
+          {#if $configLayerFlagKnown && $configLayerEnabled && $wizardView?.card_visible}
+            <SetupChecklistCard />
+          {:else if $configLayerFlagKnown && !$configLayerEnabled && $isMihomo && !statusLoading && subsSummaryLoaded && !allQuickstartComplete}
             <QuickstartCard
               {hasSubscription}
               mihomoRunning={serviceStatus.mihomo === 'running'}

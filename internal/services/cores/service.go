@@ -789,7 +789,11 @@ func directDNSRuleCount(sections configlayer.Sections) int {
 // которые уйдут в копии, остающиеся на месте, файлы с комментариями среди
 // переносимых, заполнение из пресета и причина блокировки. Берутся ровно
 // запрошенные секции (D-03); пустой список — все. Секции Mihomo —
-// mihomo_with_profile.
+// mihomo_with_profile. Секция, взятая в применённом состоянии и отпущенная в
+// черновике, получает строку без пресета, переносов и блокировки — как её
+// берёт Take: возврат прежнего значения панели без файлов и без проверки
+// блокировки (признак — Taken снимка и черновик, не владелец: так же и при
+// дрейфе).
 func (s *Service) Preview(kernel string, ids []string) (TakePreview, error) {
 	if err := s.needXray(kernel); err != nil {
 		return TakePreview{}, err
@@ -798,16 +802,28 @@ func (s *Service) Preview(kernel string, ids []string) (TakePreview, error) {
 	if err != nil {
 		return TakePreview{}, err
 	}
-	if _, err := s.d.Layer.ReadState(); err != nil {
+	st, err := s.d.Layer.ReadState()
+	if err != nil {
 		return TakePreview{}, err
 	}
 	scans, files, err := s.d.Layer.ScanXraySections()
 	if err != nil {
 		return TakePreview{}, err
 	}
+	desired := configlayer.DesiredCores(st.Draft)
+	snap := s.d.Layer.Snapshot()
 	tooOld := s.xkeenTooOld()
 	out := TakePreview{Kernel: kernel, Sections: []SectionPreview{}}
 	for _, id := range list {
+		if spec, ok := xraySpecByID(id); ok && !desired[spec.Section].Managed && snap.Cores.Xray[id].Taken {
+			out.Sections = append(out.Sections, SectionPreview{
+				ID:       id,
+				Move:     []string{},
+				Left:     []string{},
+				Comments: []string{},
+			})
+			continue
+		}
 		sc := scans[id]
 		sp := SectionPreview{
 			ID:       id,
