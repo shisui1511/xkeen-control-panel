@@ -688,90 +688,11 @@ async function routingView(page: Page): Promise<Record<string, unknown>> {
  * (поведение продукта).
  */
 async function prepareClean(page: Page): Promise<void> {
-  const base = '/api/configlayer/routing';
-  // (1) правила и «Остальное»
-  let view = await routingView(page);
-  for (const rule of (view.rules ?? []) as { id: string }[]) {
-    await prepCall(page, 'routing/rules/delete', `${base}/rules/delete`, {
-      revision: await draftRevision(page),
-      id: rule.id
-    });
-  }
-  view = await routingView(page);
-  if ((view.final as { kind?: string } | undefined)?.kind !== 'direct') {
-    await prepCall(page, 'routing/final', `${base}/final`, {
-      revision: await draftRevision(page),
-      target: { kind: 'direct' }
-    });
-  }
-  // (2) группы
-  for (const group of (view.groups ?? []) as { id: string }[]) {
-    await prepCall(page, 'routing/groups/delete', `${base}/groups/delete`, {
-      revision: await draftRevision(page),
-      id: group.id,
-      cascade: { mode: 'drop' }
-    });
-  }
-  // (3) источники: подписки удаляются целиком, «Мои узлы» — по узлу
-  for (const source of await listSources(page)) {
-    if (source.id !== 'my') {
-      await prepCall(page, 'sources/delete', '/api/configlayer/sources/delete', {
-        revision: await draftRevision(page),
-        id: source.id
-      });
-    }
-  }
-  const sources = await api(page, 'GET', '/api/configlayer/sources');
-  const my = ((sources.data?.sources ?? []) as { id: string; nodes?: MyNode[] }[]).find(
-    (s) => s.id === 'my'
-  );
-  const entries = new Set((my?.nodes ?? []).map((n) => n.entry_id).filter((e): e is string => !!e));
-  for (const entry of entries) {
-    await prepCall(page, 'sources/nodes/delete', '/api/configlayer/sources/nodes/delete', {
-      revision: await draftRevision(page),
-      entry_id: entry
-    });
-  }
-  // (4) секции Xray в черновике — по признаку desired, не по владельцу (drift тоже)
-  for (const [id, s] of Object.entries(await xrayCores(page))) {
-    if (!s.desired) continue;
-    await prepCall(page, `cores/release ${id}`, '/api/configlayer/cores/release', {
-      revision: await draftRevision(page),
-      kernel: 'xray',
-      section: id
-    });
-  }
-  const stillDesired = Object.entries(await xrayCores(page))
-    .filter(([, s]) => s.desired)
-    .map(([id]) => id);
-  if (stillDesired.length > 0) {
-    throw new Error(`${PREP} секции Xray остались в черновике: ${stillDesired.join(', ')}`);
-  }
-  // (5) маршрутизация у панели хотя бы для одного ядра
-  const st = await api(page, 'GET', '/api/configlayer/state');
-  if ((st.data?.routing as { desired?: boolean } | undefined)?.desired === true) {
-    await prepCall(page, 'routing/release', `${base}/release`, {
-      revision: await draftRevision(page)
-    });
-  }
-  // (6) применение очищенного черновика
-  const start = await api(page, 'POST', '/api/configlayer/apply', {});
-  if (start.status !== 200) {
-    const issues = ((start.data?.issues ?? []) as { code?: string }[]).map((i) => i.code ?? '?');
-    throw new Error(
-      `${PREP} apply: HTTP ${start.status} ${String(start.data?.code ?? '')}` +
-        (issues.length > 0 ? ` [${issues.join(', ')}]` : '')
-    );
-  }
-  await waitApplyIdle(page, 'применение очищенного черновика');
-  const after = await api(page, 'GET', '/api/configlayer/state');
-  const result = ((after.data?.apply ?? {}) as { result?: { ok?: boolean; code?: string } }).result;
-  const changes = Number(after.data?.draft_changes ?? -1);
-  if (changes !== 0 || result?.ok !== true) {
-    throw new Error(
-      `${PREP} применение очищенного черновика: draft_changes ${changes}, result.code ${result?.code ?? ''}`
-    );
-  }
+  await clearWizardRouting(page);
+  await clearWizardSources(page);
+  await releaseWizardXraySections(page);
+  await releaseWizardRouting(page);
+  await applyCleanWizardDraft(page);
 }
 
 /**
@@ -946,50 +867,8 @@ test.afterAll(async ({ browser }) => {
       errors.push(err);
     }
   };
-  let snapLeft: Error | null = null;
-  if (cleanSnap !== null) {
-    // тест упал по тайм-ауту: фикстура page снята, восстановление — свежим контекстом
-    const id = cleanSnap;
-    await attempt(() =>
-      withPanel(browser, async (page) => {
-        await restoreSnapshot(page, id);
-        cleanSnap = null;
-        console.log('clean-snapshot: restored-in-hook');
-      })
-    );
-    if (cleanSnap !== null) {
-      console.log(`clean-snapshot: left id=${id}`);
-      snapLeft = new Error(
-        `clean-snapshot: left id=${id} — снимок не восстановлен, восстановить вручную`
-      );
-    }
-  } else if (!cleanRestored) {
-    console.log('clean-snapshot: none');
-  }
-  // Тест start-failure не вернул стенд (тайм-аут, сбой уборки): файл сбоя, затем ядро
-  let standLeft: Error | null = null;
-  if (startFailFile !== null || startFailKernel !== null) {
-    const file = startFailFile;
-    if (file !== null) await attempt(() => removeStartFailFile(file));
-    const kernel = startFailKernel;
-    if (kernel !== null) {
-      await attempt(() =>
-        withPanel(browser, async (page) => {
-          await returnKernel(page, kernel);
-          startFailKernel = null;
-        })
-      );
-    }
-    if (startFailFile === null && startFailKernel === null) {
-      console.log('start-fail-cleanup: restored-in-hook');
-    } else {
-      const left = [startFailFile !== null ? 'file' : '', startFailKernel !== null ? 'kernel' : '']
-        .filter((x) => x !== '')
-        .join('|');
-      console.log(`start-fail-cleanup: left ${left}`);
-      standLeft = new Error(`start-fail-cleanup: left ${left} — вернуть стенд вручную`);
-    }
-  }
+  const snapLeft = await restoreCleanSnapshot(browser, attempt);
+  const standLeft = await restoreFailedStart(browser, attempt);
   await attempt(() =>
     withPanel(browser, async (page) => {
       await waitApplyIdle(page, 'перед возвратом статуса мастера');
@@ -1465,25 +1344,7 @@ async function waitCleanReady(page: Page): Promise<WizardView> {
  * «пройдено») и «Взять остальные» для отпущенной в черновике секции Xray.
  */
 async function cleanInstallPass(page: Page, browser: Browser): Promise<void> {
-  // --- подготовка: стенд доводится до чистой установки ---
-  await prepareClean(page);
-  // Ответ сброса проверяет только статус; готовность — по свежему GET
-  await wizardReset(page);
-  const w = await waitCleanReady(page);
-  const held = Object.entries(await xrayCores(page))
-    .filter(([, s]) => s.desired || s.taken)
-    .map(([sid]) => sid);
-  if (held.length > 0) {
-    throw new Error(`${PREP} секции Xray под панелью или в черновике: ${held.join(', ')}`);
-  }
-  if (w.kernels.xray) {
-    const cores = await api(page, 'GET', '/api/configlayer/cores?kernel=xray');
-    if (cores.status !== 200 || cores.data?.take_all !== true) {
-      throw new Error(
-        `${PREP} у Xray нет секции, которую можно взять: HTTP ${cores.status}, take_all ${String(cores.data?.take_all)}`
-      );
-    }
-  }
+  const w = await prepareCleanWizard(page);
 
   // --- проход мастера с нуля ---
   let guard = attachConsoleGuard(page);
@@ -1500,79 +1361,9 @@ async function cleanInstallPass(page: Page, browser: Browser): Promise<void> {
   await expect(page.getByTestId('setup-step-7')).toHaveAttribute('data-status', 'locked');
   await expect(page.getByTestId('setup-ip-result')).toHaveAttribute('data-state', 'locked');
 
-  // «Закрыть» отменяет автооткрытие на том же пустом черновике (D-10); пишущий ответ панели
-  // мерится и не дольше WIZARD_POST_MAX, переход после ответа — действие клиента (T.action)
-  const closeResp = page.waitForResponse(
-    (r) => r.request().method() === 'POST' && new URL(r.url()).pathname === `${WIZARD}/close`,
-    { timeout: T.action }
-  );
-  const closeStart = Date.now();
-  await page.getByTestId('setup-close').click();
-  const closeRes = await closeResp;
-  const closeMs = Date.now() - closeStart;
-  branch(`close: ${closeMs}ms`);
-  expect(closeRes.status(), `POST ${WIZARD}/close`).toBe(200);
-  expect(closeMs, 'clean-install: ответ «Закрыть» не дольше WIZARD_POST_MAX').toBeLessThanOrEqual(
-    WIZARD_POST_MAX
-  );
-  await expect(page).toHaveURL(/#\/config\/nodes$/, { timeout: T.action });
-  const closed = await wizard(page);
-  expect(
-    { status: closed.status, empty: closed.empty, auto_open: closed.auto_open },
-    'мастер после «Закрыть»'
-  ).toEqual({ status: 'closed', empty: true, auto_open: false });
-  await withPanel(browser, async (second) => {
-    await gotoHash(second, '#/config');
-    await expect(second.getByTestId('nodes-tab')).toBeVisible({ timeout: T.page });
-    await second.waitForTimeout(3000);
-    await expect(second.getByTestId('config-setup')).toHaveCount(0);
-    expect(hashOf(second), 'вторая вкладка остаётся в «Узлах»').not.toBe('#/config/setup');
-  });
-  // возврат ссылкой раздела (D-13)
-  await page.getByTestId('config-setup-link').click();
-  await expect(page).toHaveURL(/#\/config\/setup$/, { timeout: T.action });
-  await expect(page.getByTestId('config-setup')).toBeVisible({ timeout: T.page });
+  await closeAndReopenCleanWizard(page, browser);
 
-  // Шаг 2: те же диалоги взятия, что в разделе (147 D-01)
-  if (w.kernels.xray) {
-    await expandStep(page, 2);
-    await page.getByTestId('setup-take-xray').click();
-    const content = page.getByTestId('take-section-content');
-    await expect(content).toBeVisible({ timeout: T.action });
-    await expect(page.getByTestId('take-section-loading')).toHaveCount(0, { timeout: T.page });
-    const ack = page.getByTestId('take-section-comments-ack');
-    if (await ack.isVisible()) await ack.check();
-    await expect(page.getByTestId('take-section-confirm')).toBeEnabled({ timeout: T.action });
-    await page.getByTestId('take-section-confirm').click();
-    await expect(content).toHaveCount(0, { timeout: T.action });
-  }
-  if (w.kernels.mihomo) {
-    await expandStep(page, 2);
-    await page.getByTestId('setup-take-mihomo').click();
-    const content = page.getByTestId('take-routing-content');
-    await expect(content).toBeVisible({ timeout: T.action });
-    await expect(page.getByTestId('take-routing-confirm')).toBeEnabled({ timeout: T.action });
-    await page.getByTestId('take-routing-confirm').click();
-    // правил после подготовки нет: диалог сам переходит в пресет (B3)
-    const preset = page.getByTestId('preset-modal');
-    await expect
-      .poll(
-        async () => {
-          if (await preset.isVisible()) return 'preset';
-          return (await content.count()) === 0 ? 'closed' : 'wait';
-        },
-        { message: 'take-routing-confirm: пресет или закрытие', timeout: T.action }
-      )
-      .not.toBe('wait');
-    if (await preset.isVisible()) branch(`mihomo-preset: ${await pickPreset(page)}`);
-    await expect(content).toHaveCount(0, { timeout: T.action });
-  }
-  await expect
-    .poll(async () => stepOf(await wizard(page), 'sections').done, {
-      message: 'шаг sections выполнен',
-      timeout: viewDeadline(await wizard(page))
-    })
-    .toBe(true);
+  await takeCleanWizardSections(page, w);
 
   // Шаг 3: узел одним полем
   await addNodeInStep(page, nodeLink('vless_ws.txt', randomPort(), `RtWizClean${randomPort()}`));
@@ -1750,103 +1541,16 @@ test(
     let primary: unknown;
     let created = false;
     try {
-      startFailKernel = orig;
-      // тот же маршрут, что у «Остановить» в интерфейсе
-      const stop = await api(
-        page,
-        'POST',
-        `/api/service/control?action=stop&kernel=${encodeURIComponent(orig)}`
-      );
-      const stopOutcome = String(stop.data?.outcome ?? stop.data?.code ?? '');
-      // still_running — ядро не вышло к дедлайну панели (SIGTERM без принудительного завершения);
-      // на загруженном носителе оно выходит позже, поэтому ниже ждём выхода процесса, а не падаем
-      if (
-        stop.status !== 200 ||
-        !['stopped', 'not_running', 'still_running'].includes(stopOutcome)
-      ) {
-        throw new Error(`${START_PREP} остановка ${orig}: HTTP ${stop.status} ${stopOutcome}`);
-      }
-      // GET мастера может отдать прежнее наблюдение: срок — по виду мастера
-      const v = await wizard(page);
-      await expect
-        .poll(async () => (await wizard(page)).kernels.running.length, {
-          message: `${START_PREP} ядро ${orig} остановлено`,
-          timeout:
-            stopOutcome === 'still_running'
-              ? Math.max(viewDeadline(v), T.switchKernel)
-              : viewDeadline(v)
-        })
-        .toBe(0);
-      // Вид мастера мог отдать прежнее наблюдение: выход процесса проверяется на самом стенде, иначе
-      // переключение пришло бы к ещё живому ядру и сбой не был бы внесён
-      await expect
-        .poll(() => standSh(`test -z "$(pidof ${orig})"`), {
-          message: `${START_PREP} процесс ${orig} не вышел`,
-          timeout: T.switchKernel
-        })
-        .toBe(0);
-      const code = await standSh(
-        `test -d ${XRAY_CONFIGS} || exit 11; test ! -e ${path} || exit 10; ` +
-          `printf '%s\\n' '${START_FAIL_BODY}' > ${path} || exit 12`
-      );
-      // 10 и 11 — до записи: путь чужой или каталога нет, удалять нечего
-      if (code !== 10 && code !== 11) {
-        startFailFile = name;
+      await prepareStartFailure(page, orig, name, path, () => {
         created = true;
-      }
-      if (code !== 0) throw new Error(`${START_PREP} файл сбоя не записан (код ${code})`);
-      // Внесённый файл должен ломать конфигурацию: иначе запуск пройдёт и сбоя не будет
-      const rejected = await standSh(
-        `/opt/sbin/xray -test -confdir ${XRAY_CONFIGS} >/dev/null 2>&1; test $? -ne 0`
-      );
-      if (rejected !== 0) {
-        throw new Error(`${START_PREP} внесённый файл не ломает проверку конфигурации Xray`);
-      }
+      });
       await startFailureScenario(page, name);
     } catch (err) {
       primary = err;
     }
 
     // --- уборка при любом исходе: файл, затем ядро; ошибка уборки — после ошибки сценария ---
-    const cleanupErrors: unknown[] = [];
-    const file = startFailFile;
-    if (file !== null) {
-      try {
-        await removeStartFailFile(file);
-      } catch (err) {
-        cleanupErrors.push(err);
-      }
-    }
-    const kernel = startFailKernel;
-    if (kernel !== null) {
-      try {
-        await returnKernel(page, kernel);
-        startFailKernel = null;
-      } catch (err) {
-        cleanupErrors.push(err);
-      }
-    }
-    if (created && startFailFile === null) {
-      try {
-        await expect
-          .poll(
-            async () => {
-              const st = await api(page, 'GET', '/api/configlayer/state');
-              const files = Array.isArray(st.data?.files)
-                ? (st.data.files as { key?: unknown }[])
-                : [];
-              return files.some((f) => f?.key === `xray:${name}`);
-            },
-            { message: 'start-fail-cleanup: ключа файла сбоя нет в манифесте', timeout: T.page }
-          )
-          .toBe(false);
-      } catch (err) {
-        cleanupErrors.push(err);
-      }
-    }
-    if (startFailFile === null && startFailKernel === null) {
-      console.log('start-fail-cleanup: restored-in-test');
-    }
+    const cleanupErrors = await cleanupStartFailure(page, name, created);
     if (primary !== undefined) throw primary;
     if (cleanupErrors.length > 0) throw cleanupErrors[0];
   }
@@ -1880,31 +1584,7 @@ async function startFailureScenario(page: Page, name: string): Promise<void> {
   );
   await startBtn.click();
   const resp = await switched;
-  const http = resp.status();
-  let body: Record<string, unknown> | null = null;
-  try {
-    body = (await resp.json()) as Record<string, unknown>;
-  } catch {
-    body = null;
-  }
-  let output = '';
-  let check = '';
-  if (http === 200) {
-    const data = (body?.data ?? {}) as Record<string, unknown>;
-    const outcome = String(data.outcome ?? '');
-    if (outcome !== 'new_not_started') {
-      throw new Error(`${START_PREP} исход переключения ${outcome}: сбой не внесён`);
-    }
-    output = typeof data.output === 'string' ? data.output : '';
-    check = typeof data.check === 'string' ? data.check : '';
-  } else if (http === 500) {
-    // Ошибка скрипта: в тексте ошибки вывод XKeen и строки проверки конфигурации. Ответ 500
-    // здесь — внесённый сбой, а не находка: сборщик консоли меняется после блока ошибки
-    output = typeof body?.error === 'string' ? body.error : '';
-    guard.detach();
-  } else {
-    throw new Error(`${START_PREP} switch_kernel: HTTP ${http}`);
-  }
+  const { http, output, check } = await failedStartOutput(resp, guard);
   const banner = output.split('\n').some((l) => BANNER.test(l));
   const inOutput = output.includes(name);
   const inCheck = check.includes(name);
@@ -1948,6 +1628,346 @@ async function startFailureScenario(page: Page, name: string): Promise<void> {
   await expect(page.getByTestId('setup-start-logs-link')).toBeVisible();
   await expect(page.getByTestId('setup-start-files-link')).toBeVisible();
 
+  await expectStartFailureGeometry(page);
+  await guard.assertClean();
+}
+
+async function clearWizardSources(page: Page): Promise<void> {
+  // (3) источники: подписки удаляются целиком, «Мои узлы» — по узлу
+  for (const source of await listSources(page)) {
+    if (source.id !== 'my') {
+      await prepCall(page, 'sources/delete', '/api/configlayer/sources/delete', {
+        revision: await draftRevision(page),
+        id: source.id
+      });
+    }
+  }
+  const sources = await api(page, 'GET', '/api/configlayer/sources');
+  const my = ((sources.data?.sources ?? []) as { id: string; nodes?: MyNode[] }[]).find(
+    (s) => s.id === 'my'
+  );
+  const entries = new Set((my?.nodes ?? []).map((n) => n.entry_id).filter((e): e is string => !!e));
+  for (const entry of entries) {
+    await prepCall(page, 'sources/nodes/delete', '/api/configlayer/sources/nodes/delete', {
+      revision: await draftRevision(page),
+      entry_id: entry
+    });
+  }
+}
+
+async function releaseWizardXraySections(page: Page): Promise<void> {
+  // (4) секции Xray в черновике — по признаку desired, не по владельцу (drift тоже)
+  for (const [id, s] of Object.entries(await xrayCores(page))) {
+    if (!s.desired) continue;
+    await prepCall(page, `cores/release ${id}`, '/api/configlayer/cores/release', {
+      revision: await draftRevision(page),
+      kernel: 'xray',
+      section: id
+    });
+  }
+  const stillDesired = Object.entries(await xrayCores(page))
+    .filter(([, s]) => s.desired)
+    .map(([id]) => id);
+  if (stillDesired.length > 0) {
+    throw new Error(`${PREP} секции Xray остались в черновике: ${stillDesired.join(', ')}`);
+  }
+}
+
+async function restoreCleanSnapshot(
+  browser: Browser,
+  attempt: (fn: () => Promise<void>) => Promise<void>
+): Promise<Error | null> {
+  let snapLeft: Error | null = null;
+  if (cleanSnap !== null) {
+    // тест упал по тайм-ауту: фикстура page снята, восстановление — свежим контекстом
+    const id = cleanSnap;
+    await attempt(() =>
+      withPanel(browser, async (page) => {
+        await restoreSnapshot(page, id);
+        cleanSnap = null;
+        console.log('clean-snapshot: restored-in-hook');
+      })
+    );
+    if (cleanSnap !== null) {
+      console.log(`clean-snapshot: left id=${id}`);
+      snapLeft = new Error(
+        `clean-snapshot: left id=${id} — снимок не восстановлен, восстановить вручную`
+      );
+    }
+  } else if (!cleanRestored) {
+    console.log('clean-snapshot: none');
+  }
+  return snapLeft;
+}
+
+async function restoreFailedStart(
+  browser: Browser,
+  attempt: (fn: () => Promise<void>) => Promise<void>
+): Promise<Error | null> {
+  // Тест start-failure не вернул стенд (тайм-аут, сбой уборки): файл сбоя, затем ядро
+  let standLeft: Error | null = null;
+  if (startFailFile !== null || startFailKernel !== null) {
+    const file = startFailFile;
+    if (file !== null) await attempt(() => removeStartFailFile(file));
+    const kernel = startFailKernel;
+    if (kernel !== null) {
+      await attempt(() =>
+        withPanel(browser, async (page) => {
+          await returnKernel(page, kernel);
+          startFailKernel = null;
+        })
+      );
+    }
+    if (startFailFile === null && startFailKernel === null) {
+      console.log('start-fail-cleanup: restored-in-hook');
+    } else {
+      const left = [startFailFile !== null ? 'file' : '', startFailKernel !== null ? 'kernel' : '']
+        .filter((x) => x !== '')
+        .join('|');
+      console.log(`start-fail-cleanup: left ${left}`);
+      standLeft = new Error(`start-fail-cleanup: left ${left} — вернуть стенд вручную`);
+    }
+  }
+  return standLeft;
+}
+
+async function prepareCleanWizard(page: Page): Promise<WizardView> {
+  // --- подготовка: стенд доводится до чистой установки ---
+  await prepareClean(page);
+  // Ответ сброса проверяет только статус; готовность — по свежему GET
+  await wizardReset(page);
+  const w = await waitCleanReady(page);
+  const held = Object.entries(await xrayCores(page))
+    .filter(([, s]) => s.desired || s.taken)
+    .map(([sid]) => sid);
+  if (held.length > 0) {
+    throw new Error(`${PREP} секции Xray под панелью или в черновике: ${held.join(', ')}`);
+  }
+  if (w.kernels.xray) {
+    const cores = await api(page, 'GET', '/api/configlayer/cores?kernel=xray');
+    if (cores.status !== 200 || cores.data?.take_all !== true) {
+      throw new Error(
+        `${PREP} у Xray нет секции, которую можно взять: HTTP ${cores.status}, take_all ${String(cores.data?.take_all)}`
+      );
+    }
+  }
+
+  return w;
+}
+
+async function closeAndReopenCleanWizard(page: Page, browser: Browser): Promise<void> {
+  // «Закрыть» отменяет автооткрытие на том же пустом черновике (D-10); пишущий ответ панели
+  // мерится и не дольше WIZARD_POST_MAX, переход после ответа — действие клиента (T.action)
+  const closeResp = page.waitForResponse(
+    (r) => r.request().method() === 'POST' && new URL(r.url()).pathname === `${WIZARD}/close`,
+    { timeout: T.action }
+  );
+  const closeStart = Date.now();
+  await page.getByTestId('setup-close').click();
+  const closeRes = await closeResp;
+  const closeMs = Date.now() - closeStart;
+  branch(`close: ${closeMs}ms`);
+  expect(closeRes.status(), `POST ${WIZARD}/close`).toBe(200);
+  expect(closeMs, 'clean-install: ответ «Закрыть» не дольше WIZARD_POST_MAX').toBeLessThanOrEqual(
+    WIZARD_POST_MAX
+  );
+  await expect(page).toHaveURL(/#\/config\/nodes$/, { timeout: T.action });
+  const closed = await wizard(page);
+  expect(
+    { status: closed.status, empty: closed.empty, auto_open: closed.auto_open },
+    'мастер после «Закрыть»'
+  ).toEqual({ status: 'closed', empty: true, auto_open: false });
+  await withPanel(browser, async (second) => {
+    await gotoHash(second, '#/config');
+    await expect(second.getByTestId('nodes-tab')).toBeVisible({ timeout: T.page });
+    await second.waitForTimeout(3000);
+    await expect(second.getByTestId('config-setup')).toHaveCount(0);
+    expect(hashOf(second), 'вторая вкладка остаётся в «Узлах»').not.toBe('#/config/setup');
+  });
+  // возврат ссылкой раздела (D-13)
+  await page.getByTestId('config-setup-link').click();
+  await expect(page).toHaveURL(/#\/config\/setup$/, { timeout: T.action });
+  await expect(page.getByTestId('config-setup')).toBeVisible({ timeout: T.page });
+}
+
+async function takeCleanWizardSections(page: Page, w: WizardView): Promise<void> {
+  // Шаг 2: те же диалоги взятия, что в разделе (147 D-01)
+  if (w.kernels.xray) {
+    await expandStep(page, 2);
+    await page.getByTestId('setup-take-xray').click();
+    const content = page.getByTestId('take-section-content');
+    await expect(content).toBeVisible({ timeout: T.action });
+    await expect(page.getByTestId('take-section-loading')).toHaveCount(0, { timeout: T.page });
+    const ack = page.getByTestId('take-section-comments-ack');
+    if (await ack.isVisible()) await ack.check();
+    await expect(page.getByTestId('take-section-confirm')).toBeEnabled({ timeout: T.action });
+    await page.getByTestId('take-section-confirm').click();
+    await expect(content).toHaveCount(0, { timeout: T.action });
+  }
+  if (w.kernels.mihomo) {
+    await expandStep(page, 2);
+    await page.getByTestId('setup-take-mihomo').click();
+    const content = page.getByTestId('take-routing-content');
+    await expect(content).toBeVisible({ timeout: T.action });
+    await expect(page.getByTestId('take-routing-confirm')).toBeEnabled({ timeout: T.action });
+    await page.getByTestId('take-routing-confirm').click();
+    // правил после подготовки нет: диалог сам переходит в пресет (B3)
+    const preset = page.getByTestId('preset-modal');
+    await expect
+      .poll(
+        async () => {
+          if (await preset.isVisible()) return 'preset';
+          return (await content.count()) === 0 ? 'closed' : 'wait';
+        },
+        { message: 'take-routing-confirm: пресет или закрытие', timeout: T.action }
+      )
+      .not.toBe('wait');
+    if (await preset.isVisible()) branch(`mihomo-preset: ${await pickPreset(page)}`);
+    await expect(content).toHaveCount(0, { timeout: T.action });
+  }
+  await expect
+    .poll(async () => stepOf(await wizard(page), 'sections').done, {
+      message: 'шаг sections выполнен',
+      timeout: viewDeadline(await wizard(page))
+    })
+    .toBe(true);
+}
+
+async function prepareStartFailure(
+  page: Page,
+  orig: string,
+  name: string,
+  path: string,
+  onCreated: () => void
+): Promise<void> {
+  startFailKernel = orig;
+  // тот же маршрут, что у «Остановить» в интерфейсе
+  const stop = await api(
+    page,
+    'POST',
+    `/api/service/control?action=stop&kernel=${encodeURIComponent(orig)}`
+  );
+  const stopOutcome = String(stop.data?.outcome ?? stop.data?.code ?? '');
+  // still_running — ядро не вышло к дедлайну панели (SIGTERM без принудительного завершения);
+  // на загруженном носителе оно выходит позже, поэтому ниже ждём выхода процесса, а не падаем
+  if (stop.status !== 200 || !['stopped', 'not_running', 'still_running'].includes(stopOutcome)) {
+    throw new Error(`${START_PREP} остановка ${orig}: HTTP ${stop.status} ${stopOutcome}`);
+  }
+  // GET мастера может отдать прежнее наблюдение: срок — по виду мастера
+  const v = await wizard(page);
+  await expect
+    .poll(async () => (await wizard(page)).kernels.running.length, {
+      message: `${START_PREP} ядро ${orig} остановлено`,
+      timeout:
+        stopOutcome === 'still_running'
+          ? Math.max(viewDeadline(v), T.switchKernel)
+          : viewDeadline(v)
+    })
+    .toBe(0);
+  // Вид мастера мог отдать прежнее наблюдение: выход процесса проверяется на самом стенде, иначе
+  // переключение пришло бы к ещё живому ядру и сбой не был бы внесён
+  await expect
+    .poll(() => standSh(`test -z "$(pidof ${orig})"`), {
+      message: `${START_PREP} процесс ${orig} не вышел`,
+      timeout: T.switchKernel
+    })
+    .toBe(0);
+  const code = await standSh(
+    `test -d ${XRAY_CONFIGS} || exit 11; test ! -e ${path} || exit 10; ` +
+      `printf '%s\\n' '${START_FAIL_BODY}' > ${path} || exit 12`
+  );
+  // 10 и 11 — до записи: путь чужой или каталога нет, удалять нечего
+  if (code !== 10 && code !== 11) {
+    startFailFile = name;
+    onCreated();
+  }
+  if (code !== 0) throw new Error(`${START_PREP} файл сбоя не записан (код ${code})`);
+  // Внесённый файл должен ломать конфигурацию: иначе запуск пройдёт и сбоя не будет
+  const rejected = await standSh(
+    `/opt/sbin/xray -test -confdir ${XRAY_CONFIGS} >/dev/null 2>&1; test $? -ne 0`
+  );
+  if (rejected !== 0) {
+    throw new Error(`${START_PREP} внесённый файл не ломает проверку конфигурации Xray`);
+  }
+}
+
+async function cleanupStartFailure(page: Page, name: string, created: boolean): Promise<unknown[]> {
+  const cleanupErrors: unknown[] = [];
+  const file = startFailFile;
+  if (file !== null) {
+    try {
+      await removeStartFailFile(file);
+    } catch (err) {
+      cleanupErrors.push(err);
+    }
+  }
+  const kernel = startFailKernel;
+  if (kernel !== null) {
+    try {
+      await returnKernel(page, kernel);
+      startFailKernel = null;
+    } catch (err) {
+      cleanupErrors.push(err);
+    }
+  }
+  if (created && startFailFile === null) {
+    try {
+      await expect
+        .poll(
+          async () => {
+            const st = await api(page, 'GET', '/api/configlayer/state');
+            const files = Array.isArray(st.data?.files)
+              ? (st.data.files as { key?: unknown }[])
+              : [];
+            return files.some((f) => f?.key === `xray:${name}`);
+          },
+          { message: 'start-fail-cleanup: ключа файла сбоя нет в манифесте', timeout: T.page }
+        )
+        .toBe(false);
+    } catch (err) {
+      cleanupErrors.push(err);
+    }
+  }
+  if (startFailFile === null && startFailKernel === null) {
+    console.log('start-fail-cleanup: restored-in-test');
+  }
+  return cleanupErrors;
+}
+
+async function failedStartOutput(
+  resp: import('@playwright/test').Response,
+  guard: ReturnType<typeof attachConsoleGuard>
+): Promise<{ http: number; output: string; check: string }> {
+  const http = resp.status();
+  let body: Record<string, unknown> | null = null;
+  try {
+    body = (await resp.json()) as Record<string, unknown>;
+  } catch {
+    body = null;
+  }
+  let output = '';
+  let check = '';
+  if (http === 200) {
+    const data = (body?.data ?? {}) as Record<string, unknown>;
+    const outcome = String(data.outcome ?? '');
+    if (outcome !== 'new_not_started') {
+      throw new Error(`${START_PREP} исход переключения ${outcome}: сбой не внесён`);
+    }
+    output = typeof data.output === 'string' ? data.output : '';
+    check = typeof data.check === 'string' ? data.check : '';
+  } else if (http === 500) {
+    // Ошибка скрипта: в тексте ошибки вывод XKeen и строки проверки конфигурации. Ответ 500
+    // здесь — внесённый сбой, а не находка: сборщик консоли меняется после блока ошибки
+    output = typeof body?.error === 'string' ? body.error : '';
+    guard.detach();
+  } else {
+    throw new Error(`${START_PREP} switch_kernel: HTTP ${http}`);
+  }
+  return { http, output, check };
+}
+
+async function expectStartFailureGeometry(page: Page): Promise<void> {
+  const box = page.getByTestId('setup-start-error');
   // Блок ошибки в обеих темах на 390, 768 и 1280 px: без горизонтальной прокрутки, хвост
   // внутри блока, кнопки не меньше 44 px на узком экране
   for (const width of [390, 768, 1280]) {
@@ -1992,5 +2012,66 @@ async function startFailureScenario(page: Page, name: string): Promise<void> {
       }
     }
   }
-  await guard.assertClean();
+}
+
+async function clearWizardRouting(page: Page): Promise<void> {
+  const base = '/api/configlayer/routing';
+  // (1) правила и «Остальное»
+  let view = await routingView(page);
+  for (const rule of (view.rules ?? []) as { id: string }[]) {
+    await prepCall(page, 'routing/rules/delete', `${base}/rules/delete`, {
+      revision: await draftRevision(page),
+      id: rule.id
+    });
+  }
+  view = await routingView(page);
+  if ((view.final as { kind?: string } | undefined)?.kind !== 'direct') {
+    await prepCall(page, 'routing/final', `${base}/final`, {
+      revision: await draftRevision(page),
+      target: { kind: 'direct' }
+    });
+  }
+  // (2) группы
+  for (const group of (view.groups ?? []) as { id: string }[]) {
+    await prepCall(page, 'routing/groups/delete', `${base}/groups/delete`, {
+      revision: await draftRevision(page),
+      id: group.id,
+      cascade: { mode: 'drop' }
+    });
+  }
+}
+
+async function releaseWizardRouting(page: Page): Promise<void> {
+  // (5) маршрутизация у панели хотя бы для одного ядра
+  const st = await api(page, 'GET', '/api/configlayer/state');
+  if ((st.data?.routing as { desired?: boolean } | undefined)?.desired === true) {
+    await prepCall(page, 'routing/release', '/api/configlayer/routing/release', {
+      revision: await draftRevision(page)
+    });
+  }
+}
+
+async function applyCleanWizardDraft(page: Page): Promise<void> {
+  // (6) применение очищенного черновика
+  const start = await api(page, 'POST', '/api/configlayer/apply', {});
+  if (start.status !== 200) {
+    const issues = ((start.data?.issues ?? []) as { code?: string }[]).map((i) => i.code ?? '?');
+    throw new Error(
+      `${PREP} apply: HTTP ${start.status} ${String(start.data?.code ?? '')}` +
+        (issues.length > 0 ? ` [${issues.join(', ')}]` : '')
+    );
+  }
+  await waitApplyIdle(page, 'применение очищенного черновика');
+  await expectCleanWizardApplied(page);
+}
+
+async function expectCleanWizardApplied(page: Page): Promise<void> {
+  const after = await api(page, 'GET', '/api/configlayer/state');
+  const result = ((after.data?.apply ?? {}) as { result?: { ok?: boolean; code?: string } }).result;
+  const changes = Number(after.data?.draft_changes ?? -1);
+  if (changes !== 0 || result?.ok !== true) {
+    throw new Error(
+      `${PREP} применение очищенного черновика: draft_changes ${changes}, result.code ${result?.code ?? ''}`
+    );
+  }
 }
