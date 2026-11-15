@@ -360,6 +360,98 @@
     "optional": [],
     "children": {}
   },
+  "RuntimeView": {
+    "required": ["kernel", "running", "state", "modes", "probe", "groups"],
+    "optional": [],
+    "children": { "modes": "RuntimeModes", "probe": "ProbeConfig", "groups": "RuntimeGroup[]" }
+  },
+  "RuntimeModes": {
+    "required": ["xray", "mihomo"],
+    "optional": [],
+    "children": {}
+  },
+  "RuntimeGroup": {
+    "required": [
+      "id",
+      "name",
+      "mode",
+      "current",
+      "current_label",
+      "chain",
+      "selectable",
+      "unconfirmed",
+      "locked_with",
+      "counts",
+      "members"
+    ],
+    "optional": ["fallback"],
+    "children": { "chain": "RuntimeLink[]", "counts": "KernelCounts", "members": "RuntimeMember[]" }
+  },
+  "RuntimeLink": {
+    "required": ["kind", "name"],
+    "optional": ["id", "ref"],
+    "children": {}
+  },
+  "RuntimeMember": {
+    "required": ["member", "kind", "name", "xray", "mihomo"],
+    "optional": ["ref", "group", "proto", "source"],
+    "children": {}
+  },
+  "RuntimeNow": {
+    "required": ["kernel", "groups", "history"],
+    "optional": [],
+    "children": { "groups": "GroupNow{}", "history": "NowDelay{}" }
+  },
+  "GroupNow": {
+    "required": ["known"],
+    "optional": ["ref", "fastest"],
+    "children": {}
+  },
+  "NowDelay": {
+    "required": ["ms", "at"],
+    "optional": [],
+    "children": {}
+  },
+  "PingSnapshot": {
+    "required": ["results"],
+    "optional": ["batch"],
+    "children": { "batch": "PingBatch", "results": "PingResult{}" }
+  },
+  "PingBatch": {
+    "required": [
+      "id",
+      "state",
+      "scope",
+      "kernel",
+      "method",
+      "total",
+      "done",
+      "excluded",
+      "started_at"
+    ],
+    "optional": ["group", "fallback_reason", "reason_code", "finished_at"],
+    "children": {}
+  },
+  "PingResult": {
+    "required": ["ms", "status", "at", "kernel", "method", "history"],
+    "optional": ["reason"],
+    "children": { "history": "PingPoint[]" }
+  },
+  "PingPoint": {
+    "required": ["ms", "status", "at"],
+    "optional": [],
+    "children": {}
+  },
+  "PingStart": {
+    "required": ["batch_id", "joined", "batch"],
+    "optional": [],
+    "children": { "batch": "PingBatch" }
+  },
+  "ConfirmResult": {
+    "required": ["group", "confirmed"],
+    "optional": [],
+    "children": {}
+  },
   "Target": {
     "required": ["kind"],
     "optional": ["id"],

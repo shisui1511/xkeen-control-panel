@@ -30,7 +30,7 @@
  *    карточки и строки узла; удаление через showConfirm; полнота словарей.
  *
  * 8. Маршрутизация (план 146-17): вкладки «Группы» и «Правила» и их testId; интерфейсы
- *    configRouting.ts совпадают по ключам с routingContract.json; событие routing,
+ *    configRouting.ts, configLayer.ts и configProxies.ts совпадают по ключам с routingContract.json; событие routing,
  *    подписки клиента (дебаунс 300 мс), нет обратного импорта в configLayer.ts и импорта
  *    клиента вне config-раздела; {@html} в компонентах config запрещён; у каждого кода
  *    из routingErrorCodes.json и каждой причины invalid_input есть текст в ru и en;
@@ -996,10 +996,12 @@ for (const [file, id] of [
 }
 
 // Типы ответов против routingContract.json; интерфейс может наследовать другой
-// (`extends`), RoutingSnapshot и RoutingKernelView объявлены в configLayer.ts
+// (`extends`), типы страницы «Прокси» объявлены в configProxies.ts,
+// RoutingSnapshot и RoutingKernelView объявлены в configLayer.ts
 // (configLayer не импортирует configRouting)
 const routingTs = read(ROUTING_TS);
-const routingSources = [routingTs, layerTs];
+const proxiesTs = read(`${SRC}/lib/configProxies.ts`);
+const routingSources = [routingTs, layerTs, proxiesTs];
 function routingInterfaceKeys(name, seen = new Set()) {
   if (seen.has(name)) return null;
   seen.add(name);

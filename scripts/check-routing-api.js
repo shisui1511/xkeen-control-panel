@@ -64,6 +64,8 @@ const GO_FILES = [
   "internal/services/routing/validate.go",
   "internal/services/routing/presets.go",
   "internal/services/routing/selection.go",
+  "internal/services/routing/runtime.go",
+  "internal/services/proxyping/types.go",
   "internal/services/routing/lists_api.go",
   "internal/services/routing/lists/catalog.go",
   "internal/services/routing/lists/geodata.go",
@@ -103,6 +105,9 @@ for (const file of GO_FILES) {
       const e = line.match(/^\s*\*?(\w+)\s*(\/\/.*)?$/);
       if (e) embedded.push(e[1]);
     }
+    // Внутренние типы без JSON-полей (например, proxyping.Target) не являются
+    // DTO и не должны затенять одноимённые структуры контракта маршрутизации.
+    if (fields.length === 0 && embedded.length === 0) continue;
     structs.set(m[1], { fields, embedded });
   }
 }
