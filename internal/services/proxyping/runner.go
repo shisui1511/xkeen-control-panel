@@ -591,6 +591,15 @@ func (r *Runner) Probe(ctx context.Context, req Request) map[string]PingResult {
 	wait := time.NewTimer(30 * time.Second)
 	defer wait.Stop()
 	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-r.ctx.Done():
+			return nil
+		case <-wait.C:
+			return r.probeTLS(ctx, req)
+		default:
+		}
 		var own *batchRun
 		_, err := r.launch(req, func(b *batchRun) { own = b })
 		if err != nil {
@@ -606,6 +615,7 @@ func (r *Runner) Probe(ctx context.Context, req Request) map[string]PingResult {
 				r.mu.Lock()
 				out := make(map[string]PingResult, len(own.results))
 				for ref, result := range own.results {
+					result.History = append([]PingPoint(nil), result.History[max(0, len(result.History)-10):]...)
 					out[ref] = result
 				}
 				r.mu.Unlock()
