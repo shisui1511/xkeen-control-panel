@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { test, expect, type Browser, type Page } from '@playwright/test';
 import { attachConsoleGuard, type ConsoleGuard } from './lib/console';
-import { T } from './lib/env';
-import { CORE_TAG, FULL_TAG, SLOW_ANNOTATION, TIER_FULL_ANNOTATION, quarantine } from './lib/known';
+import { RT, T } from './lib/env';
+import { CORE_TAG, FULL_TAG, SLOW_ANNOTATION, TIER_FULL_ANNOTATION } from './lib/known';
 import {
   addToDraft,
   api,
@@ -26,8 +26,9 @@ import {
 //
 // Детерминизм при любом состоянии шагов 1–6 стенда: любая проверка, которой нужен статус
 // мастера не done, идёт при удержанном черновике (holdDraft) после сброса признака
-// (wizardReset) — пока черновик открыт, шаг 5 не выполнен, и наблюдатель сервера (тик 10 с)
-// не может поставить «пройдено». Статус мастера, dev_mode, черновик и флаг слоя спек
+// (wizardReset) — пока черновик открыт, шаг 5 не выполнен, и наблюдатель сервера (период
+// tick_s ответа мастера) не может поставить «пройдено». Сроки ожиданий вида мастера — из
+// tick_s ответа панели (viewDeadline, doneDeadline), а не постоянные. Статус мастера, dev_mode, черновик и флаг слоя спек
 // возвращает в afterAll; фактический статус после прогона — строка вывода wizard-status:.
 // В сообщения проверок попадают только testId, статусы и счётчики.
 
@@ -120,6 +121,16 @@ function viewDeadline(v: WizardView): number {
   return tickMs(v) + T.action;
 }
 
+/** Срок отметки «пройдено»: наблюдатель ставит её на одной из двух ближайших проверок. */
+function doneDeadline(v: WizardView): number {
+  return 2 * tickMs(v) + T.action;
+}
+
+// Предел ответа пишущего POST мастера: панель ждёт записи признака не дольше 1 с
+// (wizardWriteWait, план 149.1-10), плюс запас. До исправления ответ ждал запись файла с
+// fsync — 11 с в прогоне 2 сессии 149.1-09.
+const WIZARD_POST_MAX = 2_000 * RT.slow;
+
 /** Шаг ответа мастера по id; нет шага — провал с id. */
 function stepOf(view: WizardView, id: string): WizardStepView {
   const step = view.steps.find((s) => s.id === id);
@@ -139,7 +150,10 @@ async function holdDraft(page: Page): Promise<void> {
         const apply = stepOf(await wizard(page), 'apply');
         return apply.done === false && Number(apply.draft_changes ?? 0) > 0;
       },
-      { message: 'удержание черновика: apply.done ложно, draft_changes > 0', timeout: T.action }
+      {
+        message: 'удержание черновика: apply.done ложно, draft_changes > 0',
+        timeout: viewDeadline(await wizard(page))
+      }
     )
     .toBe(true);
 }
@@ -147,7 +161,8 @@ async function holdDraft(page: Page): Promise<void> {
 /**
  * Снимает признак мастера (нужен dev_mode). Сброс и отметка done наблюдателем идут по
  * очереди, а вид в ответе сброса собран до следующего тика: статус в нём обязан быть пустым
- * с первого сброса.
+ * с первого сброса. Статус ответа — результат сброса, прочие поля — последнее наблюдение
+ * панели (план 149.1-10): свежие факты — только из GET.
  */
 async function wizardReset(page: Page): Promise<WizardView> {
   const res = await api(page, 'POST', `${WIZARD}/reset`);
@@ -237,7 +252,10 @@ async function expectStepsMatchServer(page: Page): Promise<WizardView> {
         }
         return diffs.length === 0 ? 'ok' : diffs.join('; ');
       },
-      { message: 'статусы шагов 1–6 против ответа мастера', timeout: T.action }
+      {
+        message: 'статусы шагов 1–6 против ответа мастера',
+        timeout: viewDeadline(await wizard(page))
+      }
     )
     .toBe('ok');
   return last as unknown as WizardView;
@@ -328,7 +346,10 @@ async function expectPrimaryWhen(page: Page, testId: string, n: number): Promise
           ? 'ok'
           : `${testId}: primary ${primary}, current ${current}`;
       },
-      { message: `${testId}: primary только при current ${n}`, timeout: T.action }
+      {
+        message: `${testId}: primary только при current ${n}`,
+        timeout: viewDeadline(await wizard(page))
+      }
     )
     .toBe('ok');
 }
@@ -449,7 +470,7 @@ async function expectWizardShell(page: Page): Promise<void> {
 /** Ждёт, пока шаг 6 станет выполнен (ядро после перезапуска), не дольше срока; итог — ответ мастера. */
 async function startSettles(page: Page): Promise<WizardView> {
   let view = await wizard(page);
-  const until = Date.now() + T.action;
+  const until = Date.now() + viewDeadline(view);
   while (stepOf(view, 'apply').done && !stepOf(view, 'start').done && Date.now() < until) {
     await page.waitForTimeout(1000);
     view = await wizard(page);
@@ -1344,9 +1365,6 @@ test(
     }
   },
   async ({ page, browser }) => {
-    // Три прогона в сессии 149.1-09: поток прошёл целиком, затем 10-секундные ожидания
-    // упёрлись в медленную панель на разных шагах («Закрыть», отпускание секции).
-    quarantine('wizard-clean-install-slow-panel-timeouts');
     test.setTimeout(T.save * 8);
     await page.setViewportSize({ width: 1280, height: 900 });
     await startPage(page);
@@ -1392,7 +1410,10 @@ test(
                 v.status === prev || (prev === '' && v.done_count === 6 && v.status === 'done');
               return ok ? 'ok' : `статус ${v.status}, было ${prev}, выполнено ${v.done_count}`;
             },
-            { message: 'статус мастера после восстановления снимка', timeout: T.action }
+            {
+              message: 'статус мастера после восстановления снимка',
+              timeout: doneDeadline(await wizard(page))
+            }
           )
           .toBe('ok');
       } catch (err) {
@@ -1406,6 +1427,29 @@ test(
 );
 
 /**
+ * Готовность стенда к clean-install по свежему GET мастера: ответ POST reset несёт статус
+ * записи, а прочие поля — последнее наблюдение панели (план 149.1-10). Опрос до пустого
+ * состояния с автооткрытием и пустым применённым состоянием не дольше viewDeadline; не
+ * сошлось — ошибка подготовки с последними наблюдёнными значениями.
+ */
+async function waitCleanReady(page: Page): Promise<WizardView> {
+  const ready = (v: WizardView): boolean =>
+    v.empty && v.auto_open && stepOf(v, 'apply').applied_empty === true;
+  let last = await wizard(page);
+  const until = Date.now() + viewDeadline(last);
+  while (!ready(last) && Date.now() < until) {
+    await page.waitForTimeout(1000);
+    last = await wizard(page);
+  }
+  if (!ready(last)) {
+    throw new Error(
+      `${PREP} состояние не пустое: empty ${last.empty}, auto_open ${last.auto_open}, applied_empty ${String(stepOf(last, 'apply').applied_empty)}, выполнено шагов ${last.done_count}`
+    );
+  }
+  return last;
+}
+
+/**
  * Тело clean-install под снимком: подготовка до чистой установки, затем проход мастера с нуля
  * (автооткрытие, «Закрыть», возврат ссылкой, взятие, «Добавить», пресет, «Применить», итог IP,
  * «пройдено») и «Взять остальные» для отпущенной в черновике секции Xray.
@@ -1413,13 +1457,9 @@ test(
 async function cleanInstallPass(page: Page, browser: Browser): Promise<void> {
   // --- подготовка: стенд доводится до чистой установки ---
   await prepareClean(page);
-  const w = await wizardReset(page);
-  const applyStep = stepOf(w, 'apply');
-  if (!w.empty || !w.auto_open || applyStep.applied_empty !== true) {
-    throw new Error(
-      `${PREP} состояние не пустое: empty ${w.empty}, auto_open ${w.auto_open}, applied_empty ${String(applyStep.applied_empty)}, выполнено шагов ${w.done_count}`
-    );
-  }
+  // Ответ сброса проверяет только статус; готовность — по свежему GET
+  await wizardReset(page);
+  const w = await waitCleanReady(page);
   const held = Object.entries(await xrayCores(page))
     .filter(([, s]) => s.desired || s.taken)
     .map(([sid]) => sid);
@@ -1450,8 +1490,21 @@ async function cleanInstallPass(page: Page, browser: Browser): Promise<void> {
   await expect(page.getByTestId('setup-step-7')).toHaveAttribute('data-status', 'locked');
   await expect(page.getByTestId('setup-ip-result')).toHaveAttribute('data-state', 'locked');
 
-  // «Закрыть» отменяет автооткрытие на том же пустом черновике (D-10)
+  // «Закрыть» отменяет автооткрытие на том же пустом черновике (D-10); пишущий ответ панели
+  // мерится и не дольше WIZARD_POST_MAX, переход после ответа — действие клиента (T.action)
+  const closeResp = page.waitForResponse(
+    (r) => r.request().method() === 'POST' && new URL(r.url()).pathname === `${WIZARD}/close`,
+    { timeout: T.action }
+  );
+  const closeStart = Date.now();
   await page.getByTestId('setup-close').click();
+  const closeRes = await closeResp;
+  const closeMs = Date.now() - closeStart;
+  branch(`close: ${closeMs}ms`);
+  expect(closeRes.status(), `POST ${WIZARD}/close`).toBe(200);
+  expect(closeMs, 'clean-install: ответ «Закрыть» не дольше WIZARD_POST_MAX').toBeLessThanOrEqual(
+    WIZARD_POST_MAX
+  );
   await expect(page).toHaveURL(/#\/config\/nodes$/, { timeout: T.action });
   const closed = await wizard(page);
   expect(
@@ -1507,7 +1560,7 @@ async function cleanInstallPass(page: Page, browser: Browser): Promise<void> {
   await expect
     .poll(async () => stepOf(await wizard(page), 'sections').done, {
       message: 'шаг sections выполнен',
-      timeout: T.action
+      timeout: viewDeadline(await wizard(page))
     })
     .toBe(true);
 
@@ -1516,7 +1569,7 @@ async function cleanInstallPass(page: Page, browser: Browser): Promise<void> {
   await expect
     .poll(async () => stepOf(await wizard(page), 'nodes').done, {
       message: 'шаг nodes выполнен',
-      timeout: T.action
+      timeout: viewDeadline(await wizard(page))
     })
     .toBe(true);
 
@@ -1528,7 +1581,7 @@ async function cleanInstallPass(page: Page, browser: Browser): Promise<void> {
     await expect
       .poll(async () => stepOf(await wizard(page), 'routing').done, {
         message: 'шаг routing выполнен',
-        timeout: T.action
+        timeout: viewDeadline(await wizard(page))
       })
       .toBe(true);
   }
@@ -1547,16 +1600,17 @@ async function cleanInstallPass(page: Page, browser: Browser): Promise<void> {
 
   // Шаги 6 и 7 — как в wizard-flow после применения
   const after = await startSettles(page);
-  await expectStepsMatchServer(page);
+  const seen = await expectStepsMatchServer(page);
   branch(`ip-apply: ${await expectIpOutcome(page, ipReady(after), 45_000)}`);
 
-  // «Пройдено» ставит сервер при выполненных 1–6 (D-06): карточка исчезает
-  const doneCount = (await wizard(page)).done_count;
+  // «Пройдено» ставит сервер при выполненных 1–6 (D-06): карточка исчезает. Число шагов —
+  // из вида, против которого сверены строки шагов
+  const doneCount = seen.done_count;
   if (doneCount === 6) {
     await expect
       .poll(async () => (await wizard(page)).status, {
         message: 'статус мастера при выполненных шагах 1–6',
-        timeout: 25_000
+        timeout: doneDeadline(seen)
       })
       .toBe('done');
     guard = await reloadAt(page, guard, '#/dashboard');
@@ -1602,7 +1656,10 @@ async function takeRestReleasing(page: Page): Promise<void> {
         const p = stepOf(await wizard(page), 'sections').partial;
         return `desired ${String(c?.desired)}, taken ${String(c?.taken)}, не взято ${p ? p.total - p.done : 0}`;
       },
-      { message: `секция ${sid} отпущена в черновике`, timeout: T.action }
+      {
+        message: `секция ${sid} отпущена в черновике`,
+        timeout: viewDeadline(await wizard(page))
+      }
     )
     .toBe('desired false, taken true, не взято 1');
 
@@ -1635,7 +1692,10 @@ async function takeRestReleasing(page: Page): Promise<void> {
         const p = stepOf(await wizard(page), 'sections').partial;
         return `desired ${String(c?.desired)}, не взято ${p ? p.total - p.done : 0}`;
       },
-      { message: `секция ${sid} снова в черновике`, timeout: T.action }
+      {
+        message: `секция ${sid} снова в черновике`,
+        timeout: viewDeadline(await wizard(page))
+      }
     )
     .toBe('desired true, не взято 0');
   await resetDraft(page);
