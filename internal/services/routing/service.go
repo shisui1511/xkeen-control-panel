@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
@@ -61,6 +62,8 @@ type Deps struct {
 	KernelVersion func(kernel string) string
 	// Running сообщает, запущено ли ядро.
 	Running func(kernel string) bool
+	// KernelState подключает main.go; nil — ядра остановлены, активное неизвестно.
+	KernelState func() services.ActiveKernelState
 	// XrayAPIPort — порт API Xray из настроек панели: блок api панели слушает
 	// 127.0.0.1:<порт>. nil или значение не больше нуля — 10085.
 	XrayAPIPort func() int
