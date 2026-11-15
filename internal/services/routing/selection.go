@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/proxyping"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 )
 
@@ -43,8 +45,6 @@ const (
 	selectBusyWait = 2 * time.Second
 	// reconcileCallTimeout — предел одного обращения к Clash API при сверке.
 	reconcileCallTimeout = 10 * time.Second
-	// repickParallel — сколько узлов пингуется одновременно (слабый роутер).
-	repickParallel = 4
 	// repickMaxProbe — сколько узлов группы пингуется за один проход.
 	repickMaxProbe = 48
 	// repickBusyRetries и repickBusyDelay — повторы выбора при идущем применении.
@@ -61,8 +61,9 @@ const (
 
 // Способ проверки в уведомлении routing_repick.
 const (
-	repickMethodDelay = "delay"
-	repickMethodTLS   = "tls"
+	repickMethodDelay  = "delay"
+	repickMethodTunnel = "tunnel"
+	repickMethodTLS    = "tls"
 )
 
 // Ошибки выбора участника (коды group_not_applied, member_invalid, apply_busy).
@@ -1322,7 +1323,8 @@ func (s *Service) probeNode(ctx context.Context, n sources.CatalogNode, p repick
 
 // pickAlive выбирает первого живого участника по порядку: DIRECT и REJECT только
 // если стоят первыми (D-36), вложенная группа — если не пуста, узел — если
-// ответил на проверку. Узлы проверяются пачками не больше repickParallel.
+// ответил на проверку. Общий раннер проверяет узлы одной пачкой; прежний путь
+// использует лимиты параллелизма proxyping.
 // Никто не ответил — остаётся первый по порядку (answered=false); method —
 // способ проверки ответившего узла, иначе способ по умолчанию.
 func (s *Service) pickAlive(ctx context.Context, g Group, am appliedModel, p repickProbe) (picked string, answered bool, method string) {
@@ -1338,6 +1340,76 @@ func (s *Service) pickAlive(ctx context.Context, g Group, am appliedModel, p rep
 			break
 		}
 	}
+	if s.d.Probe != nil {
+		req := proxyping.Request{
+			Scope: proxyping.ScopeRepick, Group: g.ID, Method: proxyping.MethodXray,
+			URL: p.cfg.URL, Timeout: time.Duration(p.cfg.TimeoutS) * time.Second,
+		}
+		if req.Timeout <= 0 {
+			req.Timeout = 5 * time.Second
+		}
+		if s.d.KernelState != nil {
+			req.Kernel = s.d.KernelState().Kernel
+		}
+		if p.up {
+			req.Method = proxyping.MethodMihomo
+		}
+		xray := runtimeRefs(am.cat.Xray)
+		for _, c := range cands {
+			if !strings.HasPrefix(c, memberNode) || !am.avail(c) {
+				continue
+			}
+			n := am.byRef[strings.TrimPrefix(c, memberNode)]
+			req.Targets = append(req.Targets, proxyping.Target{
+				Ref: n.Ref, Node: n.Node, MihomoName: p.names[n.Ref], Xray: xray[n.Ref],
+				Fingerprint: proxyping.Fingerprint(n.Node),
+			})
+			if len(req.Targets) == repickMaxProbe {
+				break
+			}
+		}
+		if results := s.d.Probe(ctx, req); results != nil {
+			method = repickMethodTunnel
+			if p.up {
+				method = repickMethodDelay
+			}
+			for i, c := range cands {
+				if ctx.Err() != nil {
+					break
+				}
+				if (c == memberDirect || c == memberReject) && i != 0 {
+					continue
+				}
+				if !am.avail(c) {
+					continue
+				}
+				if !strings.HasPrefix(c, memberNode) {
+					return c, true, method
+				}
+				r, ok := results[strings.TrimPrefix(c, memberNode)]
+				if !ok {
+					continue
+				}
+				switch r.Method {
+				case proxyping.MethodTLS:
+					method = repickMethodTLS
+				case proxyping.MethodMihomo:
+					method = repickMethodDelay
+				case proxyping.MethodXray:
+					method = repickMethodTunnel
+				}
+				if r.Status == proxyping.StatusOK {
+					return c, true, method
+				}
+			}
+			return first, false, method
+		}
+	}
+	goarch := s.d.GOARCH
+	if goarch == "" {
+		goarch = runtime.GOARCH
+	}
+	parallel := proxyping.DefaultLimits(goarch, runtime.NumCPU()).Parallel
 
 	var batch []string
 	probed := 0
@@ -1396,7 +1468,7 @@ func (s *Service) pickAlive(ctx context.Context, g Group, am appliedModel, p rep
 			}
 			batch = append(batch, c)
 			probed++
-			if len(batch) >= repickParallel {
+			if len(batch) >= parallel {
 				if m, mm, ok := flush(); ok {
 					return m, true, mm
 				}

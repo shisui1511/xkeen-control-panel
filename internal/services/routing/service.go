@@ -15,6 +15,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/proxyping"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 )
@@ -41,6 +42,8 @@ type MihomoAPI interface {
 	SelectProxy(ctx context.Context, group, name string) error
 	// ProxyDelay измеряет задержку узла.
 	ProxyDelay(ctx context.Context, name, testURL string, timeout time.Duration) (int, error)
+	// ProxiesState читает текущий выбор и историю всех узлов одним запросом.
+	ProxiesState(ctx context.Context) (map[string]services.ClashProxyState, error)
 }
 
 // Deps — зависимости сервиса. Создаются в cmd/xcp/main.go.
@@ -64,6 +67,12 @@ type Deps struct {
 	Running func(kernel string) bool
 	// KernelState подключает main.go; nil — ядра остановлены, активное неизвестно.
 	KernelState func() services.ActiveKernelState
+	// XrayBalancer подключает main.go; nil — API текущей цели недоступен.
+	XrayBalancer func(ctx context.Context, tag string) (target string, known bool, err error)
+	// InRestart подключает main.go; nil — перезапуск не известен.
+	InRestart func() bool
+	// Probe подключает main.go к общему раннеру; nil — прежняя проверка узлов.
+	Probe func(ctx context.Context, req proxyping.Request) map[string]proxyping.PingResult
 	// XrayAPIPort — порт API Xray из настроек панели: блок api панели слушает
 	// 127.0.0.1:<порт>. nil или значение не больше нуля — 10085.
 	XrayAPIPort func() int

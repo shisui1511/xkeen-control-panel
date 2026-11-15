@@ -4,10 +4,14 @@ package routing
 // Наружу уходят только ссылки, подписи и признаки совместимости узлов.
 
 import (
+	"context"
+	"errors"
 	"strings"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/proxyping"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 )
 
@@ -242,4 +246,178 @@ func runtimeChain(g Group, am appliedModel, live map[string]string) []RuntimeLin
 func (s *Service) RuntimeView() (RuntimeView, error) {
 	v, _, err := s.runtimeSnapshot()
 	return v, err
+}
+
+var (
+	ErrKernelRestarting = errors.New("routing: ядро перезапускается")
+	ErrPingUnavailable  = errors.New("routing: пинг на этой странице недоступен: свой профиль Mihomo или конфликт ядер")
+	ErrGroupNoNodes     = errors.New("routing: в группе нет узлов для активного ядра")
+)
+
+type RuntimeNow struct {
+	Kernel  string              `json:"kernel"`
+	Groups  map[string]GroupNow `json:"groups"`
+	History map[string]NowDelay `json:"history"`
+}
+
+type GroupNow struct {
+	Ref     string `json:"ref,omitempty"`
+	Known   bool   `json:"known"`
+	Fastest bool   `json:"fastest,omitempty"`
+}
+
+type NowDelay struct {
+	MS int       `json:"ms"`
+	At time.Time `json:"at"`
+}
+
+// RuntimeNow читает факты работающего ядра; пустая цель не заменяется догадкой.
+func (s *Service) RuntimeNow(ctx context.Context) (RuntimeNow, error) {
+	if s.d.InRestart != nil && s.d.InRestart() {
+		return RuntimeNow{}, ErrKernelRestarting
+	}
+	v, am, err := s.runtimeSnapshot()
+	if err != nil {
+		return RuntimeNow{}, err
+	}
+	out := RuntimeNow{Kernel: v.Kernel, Groups: map[string]GroupNow{}, History: map[string]NowDelay{}}
+	if v.State != RuntimeStatePanel || !runtimeRunning(v, v.Kernel) {
+		return out, nil
+	}
+	var states map[string]services.ClashProxyState
+	if v.Kernel == configlayer.KernelMihomo && v.Modes.Mihomo == RuntimeModePanel && s.d.Mihomo != nil {
+		states, err = s.d.Mihomo.ProxiesState(ctx)
+		if err != nil {
+			return out, err
+		}
+	}
+	for _, g := range am.groups.Items {
+		if g.Mode != ModeAuto && g.Mode != ModeFallback {
+			continue
+		}
+		now := GroupNow{}
+		switch v.Kernel {
+		case configlayer.KernelMihomo:
+			if v.Modes.Mihomo != RuntimeModePanel {
+				continue
+			}
+			for _, n := range am.cat.Mihomo {
+				if name := states[g.Name].Now; name != "" && n.MihomoName == name {
+					now.Ref, now.Known = n.Ref, true
+				}
+			}
+			nodes := Resolve(g, am.cat.Mihomo, am.groups.Items).Nodes
+			if n, ok := am.byRef[g.Reserve]; g.Mode == ModeFallback && ok {
+				// В объединённом каталоге имя может быть пустым: берём вариант Mihomo.
+				for _, mn := range am.cat.Mihomo {
+					if mn.Ref == n.Ref {
+						nodes = append(nodes, mn)
+						break
+					}
+				}
+			}
+			for _, n := range nodes {
+				if h := states[n.MihomoName].History; len(h) > 0 {
+					last := h[len(h)-1]
+					out.History[n.Ref] = NowDelay{MS: last.Delay, At: last.Time}
+				}
+			}
+		case configlayer.KernelXray:
+			if v.Modes.Xray != RuntimeModePanel {
+				continue
+			}
+			if s.d.XrayBalancer == nil {
+				now.Fastest = true
+			} else {
+				target, known, err := s.d.XrayBalancer(ctx, GroupTag(g.ID))
+				if err != nil {
+					now.Fastest = true
+				} else if known && target != "" {
+					for _, n := range am.cat.Xray {
+						if n.XrayTag == target {
+							now.Ref, now.Known = n.Ref, true
+							break
+						}
+					}
+				}
+			}
+		default:
+			continue
+		}
+		out.Groups[g.ID] = now
+	}
+	return out, nil
+}
+
+// PingRequest собирает одну пачку по совместимости и пробе применённого состояния.
+func (s *Service) PingRequest(scope, groupID string) (proxyping.Request, error) {
+	if scope != proxyping.ScopeAll && scope != proxyping.ScopeGroup {
+		return proxyping.Request{}, &InvalidInputError{Field: "scope", Reason: "ожидалось all или group"}
+	}
+	v, am, err := s.runtimeSnapshot()
+	if err != nil {
+		return proxyping.Request{}, err
+	}
+	if v.State == RuntimeStateConflict || v.State == RuntimeStateUserProfile {
+		return proxyping.Request{}, ErrPingUnavailable
+	}
+	req := proxyping.Request{
+		Scope: scope, Group: groupID, Kernel: v.Kernel, Method: proxyping.MethodXray,
+		URL: v.Probe.URL, Timeout: time.Duration(v.Probe.TimeoutS) * time.Second,
+		Targets: []proxyping.Target{},
+	}
+	if runtimeRunning(v, configlayer.KernelMihomo) && v.Modes.Mihomo == RuntimeModePanel {
+		req.Method = proxyping.MethodMihomo
+	}
+	xray := runtimeRefs(am.cat.Xray)
+	mihomo := make(map[string]sources.CatalogNode, len(am.cat.Mihomo))
+	for _, n := range am.cat.Mihomo {
+		mihomo[n.Ref] = n
+	}
+	seen, found := map[string]bool{}, false
+	for _, g := range v.Groups {
+		if scope == proxyping.ScopeGroup && g.ID != groupID {
+			continue
+		}
+		found = true
+		for _, m := range g.Members {
+			if m.Kind != "node" || seen[m.Ref] ||
+				(v.Kernel == configlayer.KernelXray && !m.Xray) ||
+				(v.Kernel == configlayer.KernelMihomo && !m.Mihomo) {
+				continue
+			}
+			n := am.byRef[m.Ref]
+			seen[m.Ref] = true
+			req.Targets = append(req.Targets, proxyping.Target{
+				Ref: n.Ref, Node: n.Node, MihomoName: mihomo[n.Ref].MihomoName,
+				Xray: xray[n.Ref], Fingerprint: proxyping.Fingerprint(n.Node),
+			})
+		}
+	}
+	if scope == proxyping.ScopeGroup {
+		if !found {
+			return proxyping.Request{}, ErrGroupNotFound
+		}
+		if len(req.Targets) == 0 {
+			return proxyping.Request{}, ErrGroupNoNodes
+		}
+	}
+	return req, nil
+}
+
+// NodeFingerprints позволяет раннеру отбрасывать результаты прежних параметров.
+func (s *Service) NodeFingerprints() (map[string]string, error) {
+	st, err := s.d.Layer.ReadState()
+	if err != nil {
+		return nil, err
+	}
+	am, err := s.appliedModelOf(st)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(am.union))
+	for _, n := range am.union {
+		out[n.Ref] = proxyping.Fingerprint(n.Node)
+	}
+	return out, nil
 }
