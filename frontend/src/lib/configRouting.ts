@@ -245,6 +245,9 @@ export interface TakeoverPreview {
 export interface SelectResult {
   member: string;
   kernels: Record<string, string>;
+  restart_reason?: 'no_api' | 'version' | 'hot_failed';
+  reverted?: boolean;
+  unconfirmed?: string[];
 }
 
 export interface ServiceView {

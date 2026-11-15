@@ -1001,6 +1001,8 @@ type StateView struct {
 	Draft         Sections
 	Applied       Sections
 	Live          Sections
+	// Routing — факты файлов маршрутизации, включая чужой api Xray.
+	Routing RoutingFacts
 }
 
 // ReadState возвращает глубокие копии черновика, применённого состояния и
@@ -1015,6 +1017,7 @@ func (l *Layer) ReadState() (StateView, error) {
 		Draft:         st.Draft,
 		Applied:       st.Applied,
 		Live:          st.Live,
+		Routing:       routingFacts(l.opts.Roots, st.Routing),
 	}, nil
 }
 

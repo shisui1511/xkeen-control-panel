@@ -81,7 +81,10 @@ type SelectResult struct {
 	// Kernels — исход по ядрам: applied, restarted, pending_stopped,
 	// not_installed или failed. Mihomo установлен, но не запущен —
 	// pending_stopped (выбор поставит сверка при запуске процесса).
-	Kernels map[string]string `json:"kernels"`
+	Kernels       map[string]string `json:"kernels"`
+	RestartReason string            `json:"restart_reason,omitempty"`
+	Reverted      bool              `json:"reverted,omitempty"`
+	Unconfirmed   []string          `json:"unconfirmed,omitempty"`
 }
 
 // --- применённое состояние ---
@@ -339,12 +342,13 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 	}}
 	// Выбор идёт только в ядро, которым управляет панель (D-06).
 	if am.installed.Xray && desired.ManagedFor(configlayer.KernelXray) {
-		out, err := s.selectXray(ctx)
+		out, reason, _, err := s.selectXray(ctx)
 		if err != nil {
 			s.restoreSelection(groupID, member, prev, had)
 			return SelectResult{}, err
 		}
 		res.Kernels[configlayer.KernelXray] = out
+		res.RestartReason = reason
 	}
 	if am.installed.Mihomo && desired.ManagedFor(configlayer.KernelMihomo) {
 		res.Kernels[configlayer.KernelMihomo] = s.selectMihomo(ctx, groupID)
@@ -381,43 +385,55 @@ func memberAllowed(g Group, member string, am appliedModel) bool {
 
 // selectXray запускает конвейер для одного Xray: файл xcp-groups меняется,
 // запущенный Xray перезапускается. Идущее применение — ErrApplyBusy.
-func (s *Service) selectXray(ctx context.Context) (string, error) {
+func (s *Service) selectXray(ctx context.Context) (string, string, string, error) {
 	rctx, cancel := context.WithTimeout(ctx, selectBusyWait)
 	defer cancel()
-	view, err := s.d.Layer.RunLive(rctx, configlayer.LiveRun{Trigger: configlayer.TriggerSelect, Kernel: configlayer.KernelXray})
+	view, err := s.d.Layer.RunLive(rctx, configlayer.LiveRun{Trigger: configlayer.TriggerSelect, Kernel: configlayer.KernelXray, XrayHot: s.xrayHot})
 	if err != nil {
 		if errors.Is(err, ErrApplyBusy) || (rctx.Err() != nil && ctx.Err() == nil) {
-			return "", ErrApplyBusy
+			return "", "", "", ErrApplyBusy
 		}
-		return selFailed, nil
+		return selFailed, "", "", err
 	}
-	return s.xrayOutcome(view), nil
+	out, reason, outcome := s.xrayOutcome(view)
+	return out, reason, outcome, nil
 }
 
 // xrayOutcome переводит итог запуска конвейера в исход выбора для Xray.
-func (s *Service) xrayOutcome(view configlayer.ApplyView) string {
-	if view.Result == nil || !view.Result.OK {
-		return selFailed
-	}
+func (s *Service) xrayOutcome(view configlayer.ApplyView) (string, string, string) {
 	for _, r := range view.Restart {
 		if r.Kernel != configlayer.KernelXray {
 			continue
 		}
+		reason := ""
+		switch r.NoteCode {
+		case configlayer.HotReasonNoAPI:
+			reason = "no_api"
+		case configlayer.HotReasonVersion:
+			reason = "version"
+		case configlayer.HotReasonFailed:
+			reason = "hot_failed"
+		}
 		switch r.Outcome {
-		case configlayer.RestartOutcomeRestarted, configlayer.RestartOutcomeHotReloaded, configlayer.RestartOutcomeRestartedReload:
-			return selRestarted
+		case configlayer.RestartOutcomeHotReloaded:
+			return selApplied, "", r.Outcome
+		case configlayer.RestartOutcomeRestarted, configlayer.RestartOutcomeRestartedReload:
+			return selRestarted, reason, r.Outcome
 		case configlayer.RestartOutcomeDeferred, configlayer.RestartOutcomeUntouchedIdle, configlayer.RestartOutcomeUntouchedClash:
-			return selPendingStopped
+			return selPendingStopped, "", r.Outcome
 		case configlayer.RestartOutcomeNoRuntimeEffect:
-			return selApplied
+			return selApplied, "", r.Outcome
 		default:
-			return selFailed
+			return selFailed, reason, r.Outcome
 		}
 	}
-	if s.d.Running(configlayer.KernelXray) {
-		return selApplied
+	if view.Result == nil || !view.Result.OK {
+		return selFailed, "", ""
 	}
-	return selPendingStopped
+	if s.d.Running(configlayer.KernelXray) {
+		return selApplied, "", ""
+	}
+	return selPendingStopped, "", ""
 }
 
 // selectMihomo ставит выбор в запущенном Mihomo. Сбой связи или ответа не

@@ -330,7 +330,7 @@
   },
   "SelectResult": {
     "required": ["member", "kernels"],
-    "optional": [],
+    "optional": ["restart_reason", "reverted", "unconfirmed"],
     "children": {}
   },
   "ServiceView": {
