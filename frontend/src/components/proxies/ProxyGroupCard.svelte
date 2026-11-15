@@ -8,11 +8,20 @@
   import { isProxyAlive, computeGroupHealthStats } from '../../lib/proxyStats';
   import type { ProxiesViewMode } from '../../lib/proxyViewPrefs';
   import Button from '../Button.svelte';
+  import Icon from '../../lib/components/Icon.svelte';
+  import ProxyNodeStatus from './ProxyNodeStatus.svelte';
   import {
     splitMembers,
     nowLine,
+    resultView,
+    historyView,
+    proxyLike,
+    sortByPing,
+    kernelLabel,
+    otherKernel,
     type PanelCard,
-    type NowLine
+    type NowLine,
+    type ResultView
   } from '../../lib/proxyRuntimeAdapter';
   import type { RuntimeGroup, RuntimeMember } from '../../lib/configProxies';
 
@@ -225,6 +234,55 @@
   const pIndex = $derived(new Map((panel?.group.members ?? []).map((m, i) => [m.member, i])));
   const pNow: NowLine = $derived(panel ? nowLine(panel.group, panel.now) : { kind: 'none' });
 
+  /** Замер узла: пинг панели, для авто и резерва без него — история ядра Mihomo (D-05). */
+  function pResult(p: PanelCard, m: RuntimeMember): ResultView {
+    const v = resultView(p.results, m.ref, p.kernel);
+    if (v.state !== 'none' || p.group.mode === 'manual' || !m.ref) return v;
+    return historyView(p.history[m.ref]);
+  }
+
+  // Узлы сетки: порядок состава или по задержке, затем фильтр карточки
+  const pOrdered = $derived.by(() => {
+    if (!panel) return [];
+    const list = panel.sorted
+      ? sortByPing(pSplit.visible, panel.results, panel.kernel)
+      : pSplit.visible;
+    if (groupFilter !== 'working' && groupFilter !== 'timeouts') return list;
+    const p = panel;
+    return list.filter((m) => {
+      const v = pResult(p, m);
+      if (m.kind !== 'node' || v.otherKernel !== undefined) return false;
+      return groupFilter === 'working'
+        ? v.state === 'ok'
+        : v.state === 'timeout' || v.state === 'error';
+    });
+  });
+  const pRendered = $derived(pOrdered.slice(0, renderLimit));
+
+  // Полоса здоровья — только по узлам, которые умеет активное ядро
+  const pHealth = $derived.by(() => {
+    const snaps: Record<string, ReturnType<typeof proxyLike>> = {};
+    if (panel) {
+      for (const m of pSplit.visible) {
+        if (m.kind === 'node') snaps[m.member] = proxyLike(m.name, pResult(panel, m));
+      }
+    }
+    return computeGroupHealthStats(Object.keys(snaps), (name) => {
+      const s = snaps[name];
+      return s && s.delay !== undefined ? s : undefined;
+    });
+  });
+
+  /** Идёт пачка, охватившая группу, а свежего замера узла ещё нет. */
+  function pPending(p: PanelCard, m: RuntimeMember, v: ResultView): boolean {
+    if (!p.pinging || m.kind !== 'node') return false;
+    const since = p.pingSince ? Date.parse(p.pingSince) : NaN;
+    if (Number.isNaN(since)) return v.state === 'none';
+    return v.at === undefined || v.at < since || v.otherKernel !== undefined;
+  }
+
+  let hiddenOpen = $state(false);
+
   /** Выбор в группе доступен: ручная группа панели, выбор разрешён сервером. */
   function pCanSelect(p: PanelCard): boolean {
     return p.group.mode === 'manual' && p.group.selectable;
@@ -367,13 +425,57 @@
       {/if}
     </div>
 
-    {#if !isCollapsed}
+    {#if isCollapsed}
+      <HealthBar stats={pHealth} />
+    {:else}
       <div class="gc-body">
         <div class="gc-body-inner">
+          <div class="group-filters">
+            <button
+              type="button"
+              class="filter-chip"
+              class:active={groupFilter !== 'working' && groupFilter !== 'timeouts'}
+              onclick={() => onSetGroupFilter?.(g.id, 'all')}
+            >
+              {$t('proxies.filter_all')}
+              <span class="filter-count">{pSplit.visible.length}</span>
+            </button>
+            <button
+              type="button"
+              class="filter-chip"
+              class:active={groupFilter === 'working'}
+              onclick={() => onSetGroupFilter?.(g.id, 'working')}
+            >
+              {$t('proxies.filter_working')}
+            </button>
+            <button
+              type="button"
+              class="filter-chip"
+              class:active={groupFilter === 'timeouts'}
+              onclick={() => onSetGroupFilter?.(g.id, 'timeouts')}
+            >
+              {$t('proxies.filter_timeouts')}
+            </button>
+
+            <div class="group-actions-spacer"></div>
+
+            <button
+              type="button"
+              class="filter-chip"
+              class:active={p.sorted}
+              aria-pressed={p.sorted}
+              data-testid="proxy-group-sort-{g.id}"
+              onclick={() => p.onToggleSort()}
+            >
+              {$t('proxies.rt.sort_by_ping')}
+            </button>
+          </div>
+
           <div class="proxy-grid pc-grid">
-            {#each pSplit.visible as m (m.member)}
+            {#each pRendered as m (m.member)}
               {@const idx = pIndex.get(m.member) ?? 0}
               {@const current = pIsCurrent(p, m)}
+              {@const v = pResult(p, m)}
               {@const flag = m.kind === 'node' ? getMissingCountryFlag(m.name) : null}
               <div class="proxy-card pc-tile" class:now={current && g.mode === 'manual'}>
                 <button
@@ -398,7 +500,19 @@
                 </button>
 
                 <div class="p-footer">
-                  <span></span>
+                  {#if pPending(p, m, v)}
+                    <span class="lat dim"><span class="lat-spinner"></span></span>
+                  {:else if m.kind === 'node'}
+                    <ProxyNodeStatus
+                      result={v}
+                      groupId={g.id}
+                      index={idx}
+                      onDiagnostics={() => p.onDiagnostics(m)}
+                      onHistory={(e) => p.onHistory(e, m.ref ?? '')}
+                    />
+                  {:else}
+                    <span></span>
+                  {/if}
                   {#if g.mode === 'manual'}
                     <span class="selector-dot" class:active={current} aria-hidden="true"
                       >{current ? '●' : '○'}</span
@@ -408,6 +522,49 @@
               </div>
             {/each}
           </div>
+
+          {#if pOrdered.length > renderLimit}
+            {@const remaining = pOrdered.length - renderLimit}
+            <div class="proxy-grid-footer">
+              <button
+                type="button"
+                class="proxy-grid-more"
+                onclick={() => onIncreaseRenderLimit?.(g.id, pOrdered.length)}
+              >
+                {$t('proxies.show_more_nodes')}
+                {remaining}
+                {$tp('proxies.nodes', remaining)}
+              </button>
+              <span class="rendered-nodes-hint">
+                {$t('proxies.rendered_nodes_hint', { shown: renderLimit, total: pOrdered.length })}
+              </span>
+            </div>
+          {/if}
+
+          {#if pSplit.hidden.length > 0}
+            <div class="pc-hidden">
+              <button
+                type="button"
+                class="pc-hidden-toggle"
+                aria-expanded={hiddenOpen}
+                data-testid="proxy-group-hidden-{g.id}"
+                onclick={() => (hiddenOpen = !hiddenOpen)}
+              >
+                <Icon name={hiddenOpen ? 'chevron-down' : 'chevron-right'} size={12} />
+                {$tp('proxies.rt.hidden', pSplit.hidden.length, {
+                  kernel: kernelLabel(otherKernel(p.kernel))
+                })}
+              </button>
+              {#if hiddenOpen}
+                <p class="pc-hidden-hint">{$t('proxies.rt.hidden_hint')}</p>
+                <ul class="pc-hidden-list">
+                  {#each pSplit.hidden as m (m.member)}
+                    <li>{m.name}</li>
+                  {/each}
+                </ul>
+              {/if}
+            </div>
+          {/if}
         </div>
       </div>
     {/if}
@@ -1617,6 +1774,60 @@
   }
   .pc-tile .p-footer > :global(*) {
     pointer-events: auto;
+  }
+  /* Узлы, которые активное ядро не умеет (D-06): свёрнутая строка и серый список */
+  .pc-hidden {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1);
+    padding: var(--spacing-2) var(--spacing-4);
+    border-top: 1px solid var(--border);
+  }
+  .pc-hidden-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    align-self: flex-start;
+    background: none;
+    border: 0;
+    padding: var(--spacing-1) 0;
+    font: inherit;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--fg-dim);
+    cursor: pointer;
+    text-align: left;
+  }
+  .pc-hidden-toggle:hover {
+    color: var(--fg-secondary);
+  }
+  .pc-hidden-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    border-radius: var(--radius-sm);
+  }
+  .pc-hidden-hint {
+    margin: 0;
+    font-size: var(--font-size-xs);
+    color: var(--fg-dim);
+  }
+  .pc-hidden-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1);
+    max-height: 40dvh;
+    overflow-y: auto;
+    font-size: var(--font-size-xs);
+    color: var(--fg-dim);
+    overflow-wrap: anywhere;
+  }
+  @media (pointer: coarse), (max-width: 768px) {
+    .pc-hidden-toggle {
+      min-height: 44px;
+    }
   }
 
   /* Group List View (D-18, D-19) */

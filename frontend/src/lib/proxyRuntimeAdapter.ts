@@ -32,6 +32,8 @@ export interface PanelCard {
   locked: boolean;
   /** Идущая пачка пинга охватывает эту группу. */
   pinging: boolean;
+  /** Начало этой пачки (started_at): узлы без замера новее показывают спиннер. */
+  pingSince?: string;
   /** На роутере идёт пачка пинга (любая): кнопка «Проверить» недоступна. */
   batchRunning: boolean;
   /** Узлы отсортированы по задержке. */
@@ -114,4 +116,113 @@ export function nowLine(group: RuntimeGroup, now: GroupNow | null): NowLine {
   }
   if (now?.fastest) return { kind: 'fastest' };
   return { kind: 'unknown' };
+}
+
+// --- Результаты пинга ---
+
+/** Результат замера для плитки. */
+export interface ResultView {
+  state: 'none' | 'ok' | 'timeout' | 'error';
+  ms?: number;
+  /** Замер запасным путём по TLS (D-07). */
+  tls: boolean;
+  /** Подпись ядра, через которое получен замер, если оно не активное (D-20). */
+  otherKernel?: string;
+  /** Подпись активного ядра — для подсказки к замеру другим ядром. */
+  active?: string;
+  /** Время замера, мс от эпохи. */
+  at?: number;
+  /** Код причины неудачного замера. */
+  reason?: string;
+}
+
+const NONE: ResultView = { state: 'none', tls: false };
+
+function timeOf(at: string | undefined): number | undefined {
+  if (!at) return undefined;
+  const ms = Date.parse(at);
+  return Number.isNaN(ms) ? undefined : ms;
+}
+
+/**
+ * Замер узла по ссылке. Замер другим ядром помечается его подписью и не выдаётся за
+ * замер активного ядра (D-20); замер без ядра (оба остановлены) другим не считается.
+ */
+export function resultView(
+  results: Record<string, PingResult> | undefined,
+  ref: string | undefined,
+  activeKernel: ActiveKernel
+): ResultView {
+  if (!ref) return NONE;
+  const r = results?.[ref];
+  if (!r) return NONE;
+  const view: ResultView = {
+    state: r.status,
+    tls: r.method === 'tls',
+    at: timeOf(r.at)
+  };
+  if (r.status === 'ok') view.ms = r.ms;
+  else if (r.reason) view.reason = r.reason;
+  const via = r.kernel === 'xray' || r.kernel === 'mihomo' ? r.kernel : '';
+  if (activeKernel !== '' && via !== '' && via !== activeKernel) {
+    view.otherKernel = kernelLabel(via);
+    view.active = kernelLabel(activeKernel);
+  }
+  return view;
+}
+
+/** Задержка из истории ядра Mihomo (авто- и резервные группы, D-05): 0 — нет ответа. */
+export function historyView(delay: NowDelay | undefined): ResultView {
+  if (!delay) return NONE;
+  const at = timeOf(delay.at);
+  return delay.ms > 0
+    ? { state: 'ok', ms: delay.ms, tls: false, at }
+    : { state: 'timeout', tls: false, at };
+}
+
+/** Замер активного ядра: есть и получен не другим ядром. */
+function measured(v: ResultView): boolean {
+  return v.state !== 'none' && v.otherKernel === undefined;
+}
+
+/**
+ * Узел в формах proxyStats (ProxyLike и NodeSnapshot): HealthBar и фильтры карточки
+ * считают его так же, как узел Clash. Замер другим ядром — «не проверен» (D-20).
+ */
+export function proxyLike(
+  name: string,
+  view: ResultView
+): { name: string; alive: boolean; delay?: number; history: { time: string; delay: number }[] } {
+  if (!measured(view)) return { name, alive: false, history: [] };
+  const delay = view.state === 'ok' ? (view.ms ?? 0) : 0;
+  const time = view.at !== undefined ? new Date(view.at).toISOString() : '';
+  return { name, alive: delay > 0, delay, history: [{ time, delay }] };
+}
+
+/** История замеров узла в форме LatencyHistoryPopover ({ time, delay }; 0 — нет ответа). */
+export function pingHistory(r: PingResult | undefined): { time: string; delay: number }[] {
+  return (r?.history ?? []).map((h) => ({ time: h.at, delay: h.status === 'ok' ? h.ms : 0 }));
+}
+
+/**
+ * Сортировка по задержке (D-13, UI-SPEC §4): ответившие по возрастанию, затем
+ * неудачные, затем не измеренные (и замеры другим ядром), затем участники без замера
+ * (группы, DIRECT, REJECT) и несовместимые. Внутри ступени — порядок состава.
+ */
+export function sortByPing(
+  members: RuntimeMember[],
+  results: Record<string, PingResult> | undefined,
+  kernel: ActiveKernel
+): RuntimeMember[] {
+  const rank = (m: RuntimeMember): [number, number] => {
+    if (m.kind !== 'node' || unsupported(m, kernel)) return [3, 0];
+    const v = resultView(results, m.ref, kernel);
+    if (!measured(v)) return [2, 0];
+    if (v.state === 'ok') return [0, v.ms ?? 0];
+    return [1, 0];
+  };
+  return members
+    .map((m, i) => ({ m, i, r: rank(m) }))
+    .sort((a, b) => a.r[0] - b.r[0] || a.r[1] - b.r[1] || a.i - b.i)
+    .map((x) => x.m);
 }
