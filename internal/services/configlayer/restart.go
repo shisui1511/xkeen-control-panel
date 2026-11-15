@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -38,6 +39,44 @@ type LifecycleLocker interface {
 	Lock()
 	Unlock()
 }
+
+// HotFile — файл Xray в плане запуска и его прежняя версия (143 Q5).
+// Содержимое содержит учётные данные узлов и не должно попадать в журнал.
+type HotFile struct {
+	RelPath    string
+	Action     PlanAction
+	New        []byte
+	Old        []byte
+	OldExisted bool
+}
+
+// XrayHotFunc заменяет исходящие Xray под замком жизненного цикла (143 Q5).
+type XrayHotFunc func(ctx context.Context, files []HotFile) error
+
+// XrayHotError описывает отказ горячего пути. Partial означает, что состояние
+// ядра могло измениться: новое намерение доводится полным перезапуском (D-15).
+type XrayHotError struct {
+	Reason  string
+	Partial bool
+	Err     error
+}
+
+func (e *XrayHotError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("%s: %v", e.Reason, e.Err)
+	}
+	return e.Reason
+}
+
+func (e *XrayHotError) Unwrap() error { return e.Err }
+
+// Причины перехода от горячей замены Xray к обычному перезапуску.
+const (
+	HotReasonNoAPI         = "xray_hot_no_api"
+	HotReasonVersion       = "xray_hot_version"
+	HotReasonNotApplicable = "xray_hot_not_applicable"
+	HotReasonFailed        = "xray_hot_failed"
+)
 
 // Тайминги подтверждения перезапуска по процессу ядра (A2): xkeen -start может
 // идти больше минуты, а окно устойчивости ловит ядро, упавшее сразу после старта.
@@ -116,6 +155,10 @@ const (
 	// NoteFullRestartFirmwareDNS — ядро перезапущено целиком: перехват DNS снял
 	// старое перенаправление XKeen (proxy_dns), горячая перезагрузка правил не пересобирает.
 	NoteFullRestartFirmwareDNS = "full_restart_firmware_dns"
+	// NoteXrayHotSwapped — исходящие Xray заменены без смены процесса.
+	NoteXrayHotSwapped = "xray_hot_swapped"
+	// NoteXrayHotFailed — после частичной замены Xray нужен перезапуск (D-15).
+	NoteXrayHotFailed = "xray_hot_failed_restarting"
 )
 
 // errInterrupted — запуск прерван отменой контекста (остановка панели). Откат и
@@ -276,7 +319,56 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 	// Признак плана читается после Preview: остановленное ядро не запускается
 	// (FND-05), как и без признака.
 	fullNote := fullRestartNote(plan.FullRestart[kernel])
+	note := fullNote
 	var hotErr error
+	if kernel == KernelXray && fullNote == "" {
+		if hot := p.currentXrayHot(); hot != nil {
+			prevPID := p.runningPID(KernelXray)
+			var files []HotFile
+			if prevPID <= 0 || set == nil {
+				hotErr = &XrayHotError{Reason: HotReasonNotApplicable}
+			} else {
+				for _, fp := range plan.Files {
+					if fp.Kernel != KernelXray || fp.Inert || (fp.Action != ActionWrite && fp.Action != ActionDelete) {
+						continue
+					}
+					old, existed, err := set.Read(KernelXray, fp.RelPath)
+					if err != nil {
+						hotErr = &XrayHotError{Reason: HotReasonNotApplicable, Err: err}
+						break
+					}
+					files = append(files, HotFile{RelPath: fp.RelPath, Action: fp.Action, New: fp.Content, Old: old, OldExisted: existed})
+				}
+			}
+			if hotErr == nil {
+				hotErr = hot(ctx, files)
+			}
+			if err := interrupted(ctx); err != nil {
+				return interruptedView(kernel), err
+			}
+			if hotErr == nil {
+				if err := p.confirmRunning(ctx, KernelXray, prevPID); err == nil {
+					log.Printf("configlayer: горячая замена Xray: причина=%s файлов=%d PID=%d", NoteXrayHotSwapped, len(files), prevPID)
+					return RestartView{Kernel: kernel, Outcome: RestartOutcomeHotReloaded, NoteCode: NoteXrayHotSwapped}, nil
+				} else {
+					hotErr = &XrayHotError{Reason: HotReasonFailed, Partial: true, Err: err}
+				}
+			}
+			if err := interrupted(ctx); err != nil {
+				return interruptedView(kernel), err
+			}
+			note = HotReasonFailed
+			partial := true
+			var he *XrayHotError
+			if errors.As(hotErr, &he) {
+				note, partial = he.Reason, he.Partial
+			}
+			if partial {
+				p.setStep(StepRestart, StepRunning, NoteXrayHotFailed, "")
+			}
+			log.Printf("configlayer: горячая замена Xray: причина=%s файлов=%d PID=%d", note, len(files), prevPID)
+		}
+	}
 	if kernel == KernelMihomo && fullNote == "" && p.d.Mihomo != nil && p.d.Mihomo.HasController() {
 		var targeted bool
 		if targeted, hotErr = p.hotReloadMihomo(ctx, plan, set); hotErr == nil {
@@ -316,7 +408,7 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 		}
 		return p.rollbackAndRestart(ctx, kernel, set, err)
 	}
-	return RestartView{Kernel: kernel, Outcome: outcome, NoteCode: fullNote}, nil
+	return RestartView{Kernel: kernel, Outcome: outcome, NoteCode: note}, nil
 }
 
 // fullRestartNote переводит причину полного перезапуска в код пояснения; пустая

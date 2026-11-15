@@ -123,6 +123,9 @@ type ApplyRequest struct {
 	// ядра на прежних файлах) и фиксации состояния. Паника хука откат не прерывает.
 	// nil — хука нет.
 	BeforeRollback func()
+	// XrayHot — горячая замена исходящих Xray до перезапуска; задаёт только
+	// RunLive выбора узла (TriggerSelect), nil — прежний путь.
+	XrayHot XrayHotFunc
 	// ReleaseListener — запуск снимает слушатель :53 перехвата DNS (живые данные
 	// перехвата выключаются, DNS роутера уже у прошивки). Ручная правка файлов
 	// панели такой запуск не блокирует: пишутся только файлы, чьё содержимое
@@ -369,6 +372,15 @@ type Pipeline struct {
 	// beforeRollback — хук ApplyRequest.BeforeRollback текущего запуска, под mu:
 	// взводится в begin, снимается первым вызовом fireBeforeRollback и в finish.
 	beforeRollback func()
+	// xrayHot — хук горячей замены текущего запуска, под mu; взводится в begin,
+	// снимается в finish.
+	xrayHot XrayHotFunc
+}
+
+func (p *Pipeline) currentXrayHot() XrayHotFunc {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.xrayHot
 }
 
 // fireBeforeRollback вызывает хук BeforeRollback текущего запуска не больше одного
@@ -461,6 +473,7 @@ func (p *Pipeline) begin(req ApplyRequest) {
 		},
 	}
 	p.beforeRollback = req.BeforeRollback
+	p.xrayHot = req.XrayHot
 	p.mu.Unlock()
 }
 
@@ -494,6 +507,7 @@ func (p *Pipeline) finish(res ResultView) ApplyView {
 	p.view.Result = &res
 	p.beforeRollback = nil
 	out := p.view.clone()
+	p.xrayHot = nil
 	p.mu.Unlock()
 	p.tail.Store(true)
 	p.d.Broker.Publish(Event{Type: EventApplyDone, Data: out})

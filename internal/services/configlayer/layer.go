@@ -1573,6 +1573,8 @@ type LiveRun struct {
 	Overlay Sections
 	// Kernel ограничивает запуск одним ядром; пусто — все установленные.
 	Kernel string
+	// XrayHot — горячая замена исходящих при выборе узла (TriggerSelect).
+	XrayHot XrayHotFunc
 }
 
 // RunLive — запуск конвейера из применённого состояния с оверлеем живых данных
@@ -1604,7 +1606,7 @@ func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 		return ApplyView{}, err
 	}
 	defer release()
-	req := ApplyRequest{Trigger: run.Trigger, Source: SourceApplied, LiveOverlay: run.Overlay, Kernel: run.Kernel}
+	req := ApplyRequest{Trigger: run.Trigger, Source: SourceApplied, LiveOverlay: run.Overlay, Kernel: run.Kernel, XrayHot: run.XrayHot}
 	view := l.runPipeline(req)
 	release()
 	l.afterRun()

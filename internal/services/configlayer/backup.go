@@ -124,6 +124,22 @@ func (b *BackupSet) SaveAbs(absPath, key, kernel, rel, reason string) (BackupFil
 	return m, nil
 }
 
+// Read возвращает прежнюю версию файла из набора копий. Отсутствующая запись
+// или Existed=false означают, что прежнего файла нет.
+func (b *BackupSet) Read(kernel, rel string) (data []byte, existed bool, err error) {
+	for _, m := range b.Meta.Files {
+		if m.Kernel != kernel || m.RelPath != rel {
+			continue
+		}
+		if !m.Existed {
+			return nil, false, nil
+		}
+		data, err = os.ReadFile(b.copyPath(kernel, rel))
+		return data, true, err
+	}
+	return nil, false, nil
+}
+
 // copyPath — путь копии файла внутри набора.
 func (b *BackupSet) copyPath(kernel, rel string) string {
 	return filepath.Join(b.Dir, kernel, filepath.FromSlash(rel))
