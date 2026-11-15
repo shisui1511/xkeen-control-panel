@@ -8,11 +8,14 @@
   import { isProxyAlive, computeGroupHealthStats } from '../../lib/proxyStats';
   import type { ProxiesViewMode } from '../../lib/proxyViewPrefs';
   import Button from '../Button.svelte';
+  import Spinner from '../Spinner.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import ProxyNodeStatus from './ProxyNodeStatus.svelte';
   import {
     splitMembers,
     nowLine,
+    noReply,
+    isFallbackNode,
     resultView,
     historyView,
     proxyLike,
@@ -232,7 +235,22 @@
   );
   // Индекс участника в составе группы: testId плитки не зависит от сортировки
   const pIndex = $derived(new Map((panel?.group.members ?? []).map((m, i) => [m.member, i])));
-  const pNow: NowLine = $derived(panel ? nowLine(panel.group, panel.now) : { kind: 'none' });
+  // Нет совместимых участников (D-23): сетки нет, выбор и пинг недоступны
+  const pEmpty = $derived(!!panel && pSplit.visible.length === 0);
+  // Совместимые узлы есть, но ни один не ответил (D-24): выбор остаётся доступен
+  const pNoReply = $derived(
+    !!panel && !pEmpty && noReply(panel.group, panel.results, panel.kernel)
+  );
+  const pNow: NowLine = $derived(
+    panel ? nowLine(panel.group, panel.now, pNoReply) : { kind: 'none' }
+  );
+  const pAutoLike = $derived(panel?.group.mode === 'auto' || panel?.group.mode === 'fallback');
+  const pFallbackName = $derived.by(() => {
+    if (!panel || panel.group.mode !== 'fallback' || !panel.group.fallback) return '';
+    const p = panel;
+    const m = p.group.members.find((x) => isFallbackNode(p.group, x));
+    return m?.name || p.group.fallback || '';
+  });
 
   /** Замер узла: пинг панели, для авто и резерва без него — история ядра Mihomo (D-05). */
   function pResult(p: PanelCard, m: RuntimeMember): ResultView {
@@ -288,13 +306,28 @@
     return p.group.mode === 'manual' && p.group.selectable;
   }
 
-  /** Выбор сейчас заблокирован: недоступен или идёт переключение (своё или связанной группы). */
+  /**
+   * Выбор сейчас заблокирован: недоступен, не подтверждён активный узел (D-16) или идёт
+   * переключение своей или связанной группы (D-17); независимые группы не блокируются.
+   */
   function pBlocked(p: PanelCard): boolean {
-    return !pCanSelect(p) || p.selecting !== '' || p.locked;
+    return !pCanSelect(p) || p.group.unconfirmed || p.selecting !== '' || p.locked;
   }
 
-  /** Участник — текущий выбор (ручная) или текущий узел ядра (авто и резерв). */
+  /** Подсказка заблокированной плитки: почему выбор недоступен. */
+  function pBlockTitle(p: PanelCard): string | undefined {
+    if (p.group.mode === 'auto' || p.group.mode === 'fallback') return $t('proxies.rt.auto_hint');
+    if (p.group.unconfirmed) return $t('proxies.rt.unconfirmed_title');
+    if (p.selecting !== '' || p.locked) return $t('proxies.rt.locked_title');
+    return undefined;
+  }
+
+  /**
+   * Участник — текущий выбор (ручная) или текущий узел ядра (авто и резерв). Выбор с
+   * неподтверждённым активным узлом текущим не изображается (D-16).
+   */
   function pIsCurrent(p: PanelCard, m: RuntimeMember): boolean {
+    if (p.group.unconfirmed) return false;
     if (p.group.mode === 'manual') return p.group.current === m.member;
     return !!p.now?.ref && m.ref === p.now.ref;
   }
@@ -350,21 +383,23 @@
         <span class="badge badge-neutral">{$t(MODE_KEYS[g.mode])}</span>
 
         <div class="gc-head-actions pc-head-actions">
-          <Button
-            variant="secondary"
-            size="sm"
-            data-testid="proxy-group-ping-{g.id}"
-            data-stop-head-click
-            ariaLabel={$t('proxies.rt.ping.group_aria', { name: g.name })}
-            aria-disabled={p.batchRunning ? 'true' : undefined}
-            title={p.batchRunning ? $t('proxies.rt.ping.busy') : undefined}
-            onclick={(e: MouseEvent) => {
-              e.stopPropagation();
-              if (!p.batchRunning) p.onPing();
-            }}
-          >
-            {$t('proxies.rt.ping.group')}
-          </Button>
+          {#if !pEmpty}
+            <Button
+              variant="secondary"
+              size="sm"
+              data-testid="proxy-group-ping-{g.id}"
+              data-stop-head-click
+              ariaLabel={$t('proxies.rt.ping.group_aria', { name: g.name })}
+              aria-disabled={p.batchRunning ? 'true' : undefined}
+              title={p.batchRunning ? $t('proxies.rt.ping.busy') : undefined}
+              onclick={(e: MouseEvent) => {
+                e.stopPropagation();
+                if (!p.batchRunning) p.onPing();
+              }}
+            >
+              {$t('proxies.rt.ping.group')}
+            </Button>
+          {/if}
           <button
             type="button"
             class="gc-chevron-btn"
@@ -421,124 +456,209 @@
           {:else}
             <span class="pc-now-text">{$t('proxies.rt.now_unknown')}</span>
           {/if}
+          {#if pFallbackName}
+            <span class="pc-now-fallback">
+              {$t('proxies.rt.fallback_node', { name: pFallbackName })}
+            </span>
+          {/if}
         </div>
       {/if}
     </div>
 
+    {#if g.unconfirmed}
+      <!-- D-16: фактический выбор неизвестен — не «Сейчас» с акцентом, а ошибка и повтор -->
+      <div
+        class="alert alert-error pc-alert"
+        role="alert"
+        data-testid="proxy-group-unconfirmed-{g.id}"
+      >
+        <span class="pc-alert-text">{$t('proxies.rt.unconfirmed')}</span>
+        <Button
+          variant="secondary"
+          size="sm"
+          data-testid="proxy-group-retry-{g.id}"
+          onclick={() => p.onRetry()}
+        >
+          {$t('proxies.rt.retry')}
+        </Button>
+      </div>
+    {/if}
+
     {#if isCollapsed}
-      <HealthBar stats={pHealth} />
+      {#if !pEmpty}
+        <HealthBar stats={pHealth} />
+      {/if}
     {:else}
       <div class="gc-body">
         <div class="gc-body-inner">
-          <div class="group-filters">
-            <button
-              type="button"
-              class="filter-chip"
-              class:active={groupFilter !== 'working' && groupFilter !== 'timeouts'}
-              onclick={() => onSetGroupFilter?.(g.id, 'all')}
-            >
-              {$t('proxies.filter_all')}
-              <span class="filter-count">{pSplit.visible.length}</span>
-            </button>
-            <button
-              type="button"
-              class="filter-chip"
-              class:active={groupFilter === 'working'}
-              onclick={() => onSetGroupFilter?.(g.id, 'working')}
-            >
-              {$t('proxies.filter_working')}
-            </button>
-            <button
-              type="button"
-              class="filter-chip"
-              class:active={groupFilter === 'timeouts'}
-              onclick={() => onSetGroupFilter?.(g.id, 'timeouts')}
-            >
-              {$t('proxies.filter_timeouts')}
-            </button>
-
-            <div class="group-actions-spacer"></div>
-
-            <button
-              type="button"
-              class="filter-chip"
-              class:active={p.sorted}
-              aria-pressed={p.sorted}
-              data-testid="proxy-group-sort-{g.id}"
-              onclick={() => p.onToggleSort()}
-            >
-              {$t('proxies.rt.sort_by_ping')}
-            </button>
-          </div>
-
-          <div class="proxy-grid pc-grid">
-            {#each pRendered as m (m.member)}
-              {@const idx = pIndex.get(m.member) ?? 0}
-              {@const current = pIsCurrent(p, m)}
-              {@const v = pResult(p, m)}
-              {@const flag = m.kind === 'node' ? getMissingCountryFlag(m.name) : null}
-              <div class="proxy-card pc-tile" class:now={current && g.mode === 'manual'}>
-                <button
-                  type="button"
-                  class="proxy-select-btn pc-select"
-                  data-testid="proxy-node-{g.id}-{idx}"
-                  aria-pressed={g.mode === 'manual' ? current : undefined}
-                  aria-disabled={pBlocked(p) ? 'true' : undefined}
-                  onclick={() => pSelect(p, m)}
-                >
-                  <span class="p-header">
-                    <span class="p-name">
-                      {#if flag}
-                        <span class="flag-icon" aria-hidden="true">{flag}</span>
-                      {/if}
-                      {m.name}
-                    </span>
-                    {#if m.proto}
-                      <span class="p-type">{getProxyTypeLabel({ type: m.proto })}</span>
-                    {/if}
-                  </span>
-                </button>
-
-                <div class="p-footer">
-                  {#if pPending(p, m, v)}
-                    <span class="lat dim"><span class="lat-spinner"></span></span>
-                  {:else if m.kind === 'node'}
-                    <ProxyNodeStatus
-                      result={v}
-                      groupId={g.id}
-                      index={idx}
-                      onDiagnostics={() => p.onDiagnostics(m)}
-                      onHistory={(e) => p.onHistory(e, m.ref ?? '')}
-                    />
-                  {:else}
-                    <span></span>
-                  {/if}
-                  {#if g.mode === 'manual'}
-                    <span class="selector-dot" class:active={current} aria-hidden="true"
-                      >{current ? '●' : '○'}</span
-                    >
-                  {/if}
-                </div>
-              </div>
-            {/each}
-          </div>
-
-          {#if pOrdered.length > renderLimit}
-            {@const remaining = pOrdered.length - renderLimit}
-            <div class="proxy-grid-footer">
+          {#if pEmpty}
+            <!-- D-23: совместимых участников нет — вместо сетки сообщение и ссылка на группу -->
+            <div class="pc-state" data-testid="proxy-group-empty-{g.id}">
+              <span class="pc-state-text">
+                {$t('proxies.rt.no_nodes', { kernel: kernelLabel(p.kernel) || 'Xray / Mihomo' })}
+              </span>
+              <a class="pc-link" href="#/config/groups">{$t('proxies.rt.open_in_config')}</a>
+            </div>
+          {:else}
+            <div class="group-filters">
               <button
                 type="button"
-                class="proxy-grid-more"
-                onclick={() => onIncreaseRenderLimit?.(g.id, pOrdered.length)}
+                class="filter-chip"
+                class:active={groupFilter !== 'working' && groupFilter !== 'timeouts'}
+                onclick={() => onSetGroupFilter?.(g.id, 'all')}
               >
-                {$t('proxies.show_more_nodes')}
-                {remaining}
-                {$tp('proxies.nodes', remaining)}
+                {$t('proxies.filter_all')}
+                <span class="filter-count">{pSplit.visible.length}</span>
               </button>
-              <span class="rendered-nodes-hint">
-                {$t('proxies.rendered_nodes_hint', { shown: renderLimit, total: pOrdered.length })}
-              </span>
+              <button
+                type="button"
+                class="filter-chip"
+                class:active={groupFilter === 'working'}
+                onclick={() => onSetGroupFilter?.(g.id, 'working')}
+              >
+                {$t('proxies.filter_working')}
+              </button>
+              <button
+                type="button"
+                class="filter-chip"
+                class:active={groupFilter === 'timeouts'}
+                onclick={() => onSetGroupFilter?.(g.id, 'timeouts')}
+              >
+                {$t('proxies.filter_timeouts')}
+              </button>
+
+              <div class="group-actions-spacer"></div>
+
+              <button
+                type="button"
+                class="filter-chip"
+                class:active={p.sorted}
+                aria-pressed={p.sorted}
+                data-testid="proxy-group-sort-{g.id}"
+                onclick={() => p.onToggleSort()}
+              >
+                {$t('proxies.rt.sort_by_ping')}
+              </button>
             </div>
+
+            {#if pNoReply}
+              <!-- D-24: узлы есть, но ни один не ответил — выбор остаётся доступен -->
+              <div class="pc-state pc-noreply" data-testid="proxy-group-noreply-{g.id}">
+                <span class="pc-state-text">
+                  <Icon name="info" size={14} />
+                  {$t('proxies.rt.no_reply')}
+                </span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  aria-disabled={p.batchRunning ? 'true' : undefined}
+                  title={p.batchRunning ? $t('proxies.rt.ping.busy') : undefined}
+                  onclick={() => {
+                    if (!p.batchRunning) p.onPing();
+                  }}
+                >
+                  {$t('proxies.rt.ping_again')}
+                </Button>
+              </div>
+            {/if}
+
+            <div class="proxy-grid pc-grid">
+              {#each pRendered as m (m.member)}
+                {@const idx = pIndex.get(m.member) ?? 0}
+                {@const current = pIsCurrent(p, m)}
+                {@const busy = p.selecting === m.member}
+                {@const v = pResult(p, m)}
+                {@const flag = m.kind === 'node' ? getMissingCountryFlag(m.name) : null}
+                {@const reserve = isFallbackNode(g, m)}
+                <div
+                  class="proxy-card pc-tile"
+                  class:now={current && g.mode === 'manual'}
+                  class:pc-tile-current={current && pAutoLike}
+                  class:pc-subgroup={m.kind === 'group'}
+                >
+                  <button
+                    type="button"
+                    class="proxy-select-btn pc-select"
+                    data-testid="proxy-node-{g.id}-{idx}"
+                    aria-pressed={g.mode === 'manual' ? current : undefined}
+                    aria-disabled={pBlocked(p) ? 'true' : undefined}
+                    aria-busy={busy ? 'true' : undefined}
+                    title={pBlockTitle(p)}
+                    onclick={() => pSelect(p, m)}
+                  >
+                    <span class="p-header">
+                      <span class="p-name">
+                        {#if flag}
+                          <span class="flag-icon" aria-hidden="true">{flag}</span>
+                        {/if}
+                        {m.name}
+                      </span>
+                      {#if m.kind === 'group'}
+                        <span class="badge badge-neutral pc-tag">{$t('proxies.rt.chip.group')}</span
+                        >
+                      {:else if m.proto}
+                        <span class="p-type">{getProxyTypeLabel({ type: m.proto })}</span>
+                      {/if}
+                      {#if reserve}
+                        <span class="badge badge-neutral pc-tag"
+                          >{$t('proxies.rt.chip.fallback')}</span
+                        >
+                      {/if}
+                    </span>
+                  </button>
+
+                  <div class="p-footer">
+                    {#if pPending(p, m, v)}
+                      <span class="lat dim"><span class="lat-spinner"></span></span>
+                    {:else if m.kind === 'node'}
+                      <ProxyNodeStatus
+                        result={v}
+                        groupId={g.id}
+                        index={idx}
+                        onDiagnostics={() => p.onDiagnostics(m)}
+                        onHistory={(e) => p.onHistory(e, m.ref ?? '')}
+                      />
+                    {:else}
+                      <span></span>
+                    {/if}
+                    {#if busy}
+                      <Spinner size={12} tone="current" />
+                    {:else if g.mode === 'manual'}
+                      <span class="selector-dot" class:active={current} aria-hidden="true"
+                        >{current ? '●' : '○'}</span
+                      >
+                    {:else if pAutoLike && current}
+                      <span class="selector-dot pc-auto-dot" aria-hidden="true">●</span>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+
+            {#if pAutoLike}
+              <p class="pc-hint">{$t('proxies.rt.auto_hint')}</p>
+            {/if}
+
+            {#if pOrdered.length > renderLimit}
+              {@const remaining = pOrdered.length - renderLimit}
+              <div class="proxy-grid-footer">
+                <button
+                  type="button"
+                  class="proxy-grid-more"
+                  onclick={() => onIncreaseRenderLimit?.(g.id, pOrdered.length)}
+                >
+                  {$t('proxies.show_more_nodes')}
+                  {remaining}
+                  {$tp('proxies.nodes', remaining)}
+                </button>
+                <span class="rendered-nodes-hint">
+                  {$t('proxies.rendered_nodes_hint', {
+                    shown: renderLimit,
+                    total: pOrdered.length
+                  })}
+                </span>
+              </div>
+            {/if}
           {/if}
 
           {#if pSplit.hidden.length > 0}
@@ -1774,6 +1894,99 @@
   }
   .pc-tile .p-footer > :global(*) {
     pointer-events: auto;
+  }
+  .pc-now-fallback {
+    display: block;
+    color: var(--fg-secondary);
+  }
+  /* Вложенная группа среди участников — строка на всю ширину сетки (D-10) */
+  .pc-subgroup {
+    grid-column: 1 / -1;
+    min-height: 0;
+  }
+  .pc-tag {
+    align-self: flex-start;
+  }
+  /* Текущий узел авто и резерва: тот же индикатор, без акцентной рамки (D-09) */
+  .pc-tile-current {
+    border-color: var(--border-strong);
+  }
+  .selector-dot.pc-auto-dot {
+    color: var(--fg-secondary);
+  }
+  .pc-alert {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-2);
+    margin: var(--spacing-2) var(--spacing-4) 0;
+  }
+  .pc-alert-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  /* Нет совместимых узлов (D-23) и никто не ответил (D-24) */
+  .pc-state {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2) var(--spacing-4);
+    font-size: var(--font-size-sm);
+    color: var(--fg-secondary);
+  }
+  .pc-state-text {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .pc-noreply {
+    border-bottom: 1px solid var(--border);
+  }
+  .pc-link {
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .pc-link:hover,
+  .pc-link:focus-visible {
+    text-decoration: underline;
+  }
+  .pc-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    border-radius: var(--radius-sm);
+  }
+  .pc-hint {
+    margin: 0;
+    padding: 0 var(--spacing-4) var(--spacing-2);
+    font-size: var(--font-size-xs);
+    color: var(--fg-dim);
+  }
+  @media (max-width: 480px) {
+    .pc-grid {
+      grid-template-columns: 1fr;
+    }
+    .pc-state {
+      display: grid;
+    }
+  }
+  @media (pointer: coarse), (max-width: 768px) {
+    .pc-card .gc-chevron-btn,
+    .pc-now-link,
+    .pc-link {
+      min-height: 44px;
+      min-width: 44px;
+    }
+    .pc-now-link,
+    .pc-link {
+      display: inline-flex;
+      align-items: center;
+    }
   }
   /* Узлы, которые активное ядро не умеет (D-06): свёрнутая строка и серый список */
   .pc-hidden {

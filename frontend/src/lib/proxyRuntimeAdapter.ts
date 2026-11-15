@@ -101,10 +101,13 @@ export type NowLine =
 /**
  * «Сейчас» группы: для ручной — звенья выбора с сервера; для авто и резерва — узел из
  * «Сейчас» ядра с подписью из участников, «самый быстрый из живых» при Xray без API,
- * иначе — «неизвестен».
+ * иначе — «неизвестен». Неподтверждённый выбор (D-16) и «самый быстрый», когда ни один
+ * узел не ответил (D-26), — тоже «неизвестен»: последний известный выбор не подставляется.
+ * Узел, подтверждённый ядром, неудачные пробы не опровергают.
  */
-export function nowLine(group: RuntimeGroup, now: GroupNow | null): NowLine {
+export function nowLine(group: RuntimeGroup, now: GroupNow | null, allFailed = false): NowLine {
   if (group.mode === 'source') return { kind: 'none' };
+  if (group.unconfirmed) return { kind: 'unknown' };
   if (group.mode === 'manual') {
     if (group.chain.length > 0) return { kind: 'chain', links: group.chain };
     return { kind: 'unknown' };
@@ -114,8 +117,14 @@ export function nowLine(group: RuntimeGroup, now: GroupNow | null): NowLine {
     const m = group.members.find((x) => x.ref === ref);
     return { kind: 'chain', links: [{ kind: 'node', ref, name: m?.name || ref }] };
   }
-  if (now?.fastest) return { kind: 'fastest' };
+  if (now?.fastest && !allFailed) return { kind: 'fastest' };
   return { kind: 'unknown' };
+}
+
+/** Участник — резервный узел группы «Резерв» (поле fallback — ссылка узла). */
+export function isFallbackNode(group: RuntimeGroup, m: RuntimeMember): boolean {
+  if (group.mode !== 'fallback' || !group.fallback) return false;
+  return m.member === group.fallback || (!!m.ref && m.ref === group.fallback);
 }
 
 // --- Результаты пинга ---
@@ -225,4 +234,21 @@ export function sortByPing(
     .map((m, i) => ({ m, i, r: rank(m) }))
     .sort((a, b) => a.r[0] - b.r[0] || a.r[1] - b.r[1] || a.i - b.i)
     .map((x) => x.m);
+}
+
+/**
+ * Ни один узел не ответил (D-24): у группы есть совместимые узлы, все измерены активным
+ * ядром и ни один замер не удачный. Нет совместимых узлов — другое состояние (D-23).
+ */
+export function noReply(
+  group: RuntimeGroup,
+  results: Record<string, PingResult> | undefined,
+  kernel: ActiveKernel
+): boolean {
+  const nodes = splitMembers(group, kernel).visible.filter((m) => m.kind === 'node');
+  if (nodes.length === 0) return false;
+  return nodes.every((m) => {
+    const v = resultView(results, m.ref, kernel);
+    return measured(v) && v.state !== 'ok';
+  });
 }
