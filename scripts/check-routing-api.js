@@ -9,9 +9,9 @@
  *    типов полей, встроенные структуры (Group в GroupView, Rule в RuleView)
  *    разворачиваются. Тот же файл читают роутерные проверки ответов панели и типы
  *    фронтенда.
- * 2. Проводка: каждый маршрут /api/configlayer/routing* из списка зарегистрирован в
+ * 2. Проводка: каждый маршрут /api/configlayer/routing* и proxies* из списка зарегистрирован в
  *    cmd/xcp/main.go через HandleProtected, у него есть обработчик в
- *    internal/handlers/routing.go, маршруты не входят в kernelGatedPrefixes;
+ *    internal/handlers/routing.go или proxies.go, маршруты не входят в kernelGatedPrefixes;
  *    генераторы и проверка сервиса маршрутизации регистрируются до
  *    configLayer.Start(), routingSvc.Start() идёт после него, шаг остановки — после
  *    шага остановки слоя (defer: сервис останавливается раньше слоя). Сервис
@@ -208,26 +208,33 @@ const ROUTES = {
 };
 
 const MAIN = "cmd/xcp/main.go";
+const PROXY_ROUTES = {
+  "/api/configlayer/proxies": "ConfigProxies",
+  "/api/configlayer/proxies/now": "ConfigProxiesNow",
+};
+const PROXY_HANDLERS = "internal/handlers/proxies.go";
 const HANDLERS = "internal/handlers/routing.go";
 const main = read(MAIN);
 const mainLines = main.split("\n");
 const handlers = read(HANDLERS);
 
-for (const [route, fn] of Object.entries(ROUTES)) {
+for (const [route, fn] of Object.entries({ ...ROUTES, ...PROXY_ROUTES })) {
+  const file = route in PROXY_ROUTES ? PROXY_HANDLERS : HANDLERS;
+  const source = file === HANDLERS ? handlers : read(file);
   const want = `srv.HandleProtected("${route}", api.${fn})`;
   if (!main.includes(want)) errors.push(`${MAIN}: нет ${want}`);
   if (
     !new RegExp(
       `func \\(a \\*API\\) ${fn}\\(w http\\.ResponseWriter, r \\*http\\.Request\\)`,
-    ).test(handlers)
+    ).test(source)
   ) {
-    errors.push(`${HANDLERS}: нет обработчика ${fn}`);
+    errors.push(`${file}: нет обработчика ${fn}`);
   }
 }
-// Любой маршрут /api/configlayer/routing* обязан идти через HandleProtected; маршруты,
+// Любой маршрут /api/configlayer/routing* или proxies* обязан идти через HandleProtected; маршруты,
 // добавленные следующими планами, этим же правилом охраняются.
 for (const m of main.matchAll(
-  /srv\.(Handle|HandlePublic)\("(\/api\/configlayer\/routing[^"]*)"/g,
+  /srv\.(Handle|HandlePublic)\("(\/api\/configlayer\/(?:routing|proxies)[^"]*)"/g,
 )) {
   errors.push(
     `${MAIN}: ${m[2]} зарегистрирован через ${m[1]}, нужен HandleProtected`,
@@ -235,9 +242,9 @@ for (const m of main.matchAll(
 }
 
 const gate = read("internal/handlers/kernel_gate.go");
-if (gate.includes("/api/configlayer/routing")) {
+if (gate.includes("/api/configlayer/routing") || gate.includes("/api/configlayer/proxies")) {
   errors.push(
-    "internal/handlers/kernel_gate.go: маршруты маршрутизации не должны входить в kernelGatedPrefixes",
+    "internal/handlers/kernel_gate.go: маршруты маршрутизации и прокси не должны входить в kernelGatedPrefixes",
   );
 }
 

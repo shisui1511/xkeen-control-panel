@@ -796,6 +796,10 @@ func main() {
 				Installed:     installedKernels,
 				KernelVersion: kernelVersion,
 				Running:       kernelRunning,
+				KernelState:   kernelSvc.ActiveState,
+				XrayBalancer:  xrayGRPCSvc.BalancerTarget,
+				InRestart:     api.XKeenService().InRestart,
+				XrayBin:       func() string { return installedKernelBinary(kernelSvc, "xray") },
 				XrayAPIPort:   func() int { return cfg.XRayAPIPort },
 				Mihomo:        api.MihomoService(),
 				Ping:          pingNodeTLS,
@@ -1017,6 +1021,8 @@ func main() {
 	srv.HandleProtected("/api/configlayer/sources/nodes/save", api.ConfigSourcesNodeSave)
 	srv.HandleProtected("/api/configlayer/sources/nodes/delete", api.ConfigSourcesNodeDelete)
 	srv.HandleProtected("/api/configlayer/routing", api.ConfigRouting)
+	srv.HandleProtected("/api/configlayer/proxies", api.ConfigProxies)
+	srv.HandleProtected("/api/configlayer/proxies/now", api.ConfigProxiesNow)
 	srv.HandleProtected("/api/configlayer/routing/groups/save", api.ConfigRoutingGroupsSave)
 	srv.HandleProtected("/api/configlayer/routing/groups/preview", api.ConfigRoutingGroupsPreview)
 	srv.HandleProtected("/api/configlayer/routing/groups/delete", api.ConfigRoutingGroupsDelete)
