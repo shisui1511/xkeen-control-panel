@@ -4,6 +4,7 @@
 </script>
 
 <script lang="ts">
+  import { tick } from 'svelte';
   import { t } from '../../../i18n';
   import Button from '../../Button.svelte';
   import SegmentedControl from '../../SegmentedControl.svelte';
@@ -21,6 +22,7 @@
     type WizardKernels,
     type WizardStep
   } from '../../../lib/configWizard';
+  import { VALUE_MARK, valueParts } from './valueParts';
 
   // Тело шага 6 «Запуск ядра» (149 D-23, D-15, D-16, FND-05): ядро запускается только
   // явной кнопкой — тем же switchKernel и тостом исхода, что на «Службах»; при двух
@@ -29,6 +31,9 @@
   // последних строк лога ядра (только текстом), «Повторить запуск» — тогда единственный
   // вход в запуск, строка «Запустить …» скрыта, — «Журнал» и «Файлы». Конфликт ядер — не
   // сбой запуска: кнопка неактивна с причиной, кнопки остановки стоят в шаге 5.
+  // Повтор держит блок ошибки и «Повторить запуск» на месте до исхода (D-16): кнопка в ходе
+  // становится disabled, браузер снимает с неё фокус — после исхода он возвращается на
+  // действие шага.
 
   interface Props {
     step: WizardStep | undefined;
@@ -65,7 +70,23 @@
   const runningLabel = $derived(kernelLabel(kernels.running[0] ?? $activeKernelName));
 
   let failReason = $state('');
+  let failKernel = $state<KernelName | ''>('');
   let logLines = $state<string[]>([]);
+  // Запуск начат из блока ошибки: блок с прежними причиной и логом остаётся до исхода
+  let retrying = $state(false);
+  const showError = $derived(phase === 'error' || (running && retrying));
+
+  let root = $state<HTMLDivElement>();
+
+  // Причины нет — имя ядра не выдаётся за причину: текст называет ядро и отсылает к логу
+  const failKey = $derived.by(() => {
+    const withLog = logLines.length > 0;
+    if (failReason !== '')
+      return withLog ? 'cfg.setup.start.failed' : 'cfg.setup.start.failed_nolog';
+    return withLog ? 'cfg.setup.start.failed_unknown_log' : 'cfg.setup.start.failed_unknown';
+  });
+  // Имя ядра — моноширинным
+  const failParts = $derived(valueParts($t(failKey, { kernel: VALUE_MARK, reason: failReason })));
 
   // Первая строка вывода без метки источника в квадратных скобках
   function firstLine(text: string): string {
@@ -98,24 +119,52 @@
   }
 
   async function fail(kernel: KernelName, reason: string) {
-    failReason = reason || kernelLabel(kernel);
+    failReason = reason;
+    failKernel = kernel;
     logLines = await loadLog(kernel);
     phase = 'error';
+  }
+
+  function clearFailure() {
+    failReason = '';
+    failKernel = '';
+    logLines = [];
+  }
+
+  function focusLost(): boolean {
+    const active = document.activeElement;
+    return active === null || active === document.body || !active.isConnected;
+  }
+
+  // Фокус, снятый с кнопки в ходе, возвращается на действие шага: «Повторить запуск»
+  // (новый сбой), иначе «Запустить …», если она видна и активна; иначе не трогается
+  function restoreFocus() {
+    if (!root || !focusLost()) return;
+    for (const cls of ['step-start-retry', 'step-start-main']) {
+      const btn = root.querySelector<HTMLButtonElement>(`button.${cls}`);
+      if (btn && !btn.disabled) {
+        btn.focus();
+        return;
+      }
+    }
   }
 
   // Запрос уходит только по нажатию: автозапуска нет (FND-05)
   async function start() {
     const kernel = chosen;
     if (kernel === '' || running || conflict) return;
+    const hadFocus = root?.contains(document.activeElement) === true;
+    // В ошибке строка «Запустить …» скрыта: вход из ошибки — это повтор
+    retrying = phase === 'error';
     phase = 'running';
-    failReason = '';
-    logLines = [];
+    if (!retrying) clearFailure();
     try {
       const result = await switchKernel(kernel);
       notifySwitchOutcome(result);
       if (result.outcome === 'new_not_started') {
         await fail(kernel, firstLine(result.output));
       } else {
+        clearFailure();
         phase = 'idle';
         if (result.outcome === 'switched') onstarted(kernel);
       }
@@ -124,17 +173,23 @@
       if (err?.code === 'kernel_conflict' || err?.status === 401) {
         // Конфликт возник между ответом и нажатием: это не сбой запуска — шаг покажет
         // причину конфликта после перечитывания
+        clearFailure();
         phase = 'idle';
       } else {
         await fail(kernel, firstLine(e instanceof Error ? e.message : String(e)));
       }
     } finally {
+      retrying = false;
       void loadWizard();
+      if (hadFocus) {
+        await tick();
+        restoreFocus();
+      }
     }
   }
 </script>
 
-<div class="step-start">
+<div class="step-start" bind:this={root}>
   {#if installed.length === 0}
     <p class="step-start-note">{$t('cfg.setup.sections.need_kernel')}</p>
   {:else if done}
@@ -155,11 +210,12 @@
       </div>
     {/if}
 
-    {#if !(phase === 'error' && !conflict)}
+    {#if !(showError && !conflict)}
       <div class="step-start-row">
         <Button
           variant={isCurrent ? 'primary' : 'secondary'}
           size="sm"
+          class="step-start-main"
           data-testid="setup-start"
           disabled={conflict || chosen === ''}
           loading={running}
@@ -181,15 +237,15 @@
         <span class="step-start-icon" aria-hidden="true"><Icon name="warning" size={16} /></span>
         <span>{$t('kernel.conflict_blocked')}</span>
       </p>
-    {:else if phase === 'error'}
+    {:else if showError}
       <div class="alert alert-error step-start-error" role="alert" data-testid="setup-start-error">
         <span class="step-start-icon" aria-hidden="true"><Icon name="warning" size={16} /></span>
         <div class="step-start-error-body">
-          <span>
-            {logLines.length > 0
-              ? $t('cfg.setup.start.failed', { reason: failReason })
-              : $t('cfg.setup.start.failed_nolog', { reason: failReason })}
-          </span>
+          <span
+            >{failParts[0]}{#if failReason === ''}<span class="setup-mono"
+                >{kernelLabel(failKernel || chosen)}</span
+              >{/if}{failParts[1]}</span
+          >
           {#if logLines.length > 0}
             <!-- Строки лога — только текстовый узел: разметка из лога не исполняется -->
             <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -204,6 +260,7 @@
             <Button
               variant="primary"
               size="sm"
+              class="step-start-retry"
               data-testid="setup-start-retry"
               disabled={chosen === ''}
               loading={running}

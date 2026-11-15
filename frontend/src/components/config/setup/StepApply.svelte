@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
   import { t } from '../../../i18n';
   import Button from '../../Button.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
@@ -11,7 +11,8 @@
     applyRunning,
     applyStartedHere,
     draftChanges,
-    layerSnapshot
+    layerSnapshot,
+    type LayerResult
   } from '../../../lib/configLayer';
   import { confirmKernelStop, stopKernelAndReport } from '../../../lib/serviceControl';
   import { kernelLabel, type KernelName } from '../../../lib/kernelState';
@@ -32,7 +33,9 @@
   // черновика: рядом с причиной — «Остановить Xray» и «Остановить Mihomo», ядро выбирает
   // пользователь (FND-05). Ход применения — ApplyProgress прямо в теле шага; сбой — общий
   // блок ошибки с «Повторить применение»: пока он виден, это единственная главная кнопка
-  // шага, а «Применить» скрыта; черновик не сбрасывается (144 D-07).
+  // шага, а «Применить» скрыта; черновик не сбрасывается (144 D-07). Повтор держит блок
+  // и кнопку на месте до исхода (D-16): кнопка в ходе становится disabled, браузер снимает с
+  // неё фокус — после исхода он возвращается на действие шага.
 
   interface Props {
     step: WizardStep | undefined;
@@ -49,16 +52,63 @@
   // Итог применения показывается как сбой шага, только если применение шло при открытой
   // странице: свежая загрузка со старым неудачным итогом блока ошибки не рисует
   let seenRunning = $state(false);
+
+  // Итог сбоя, из которого нажат повтор: начало нового запуска сбрасывает итог в снимке
+  // (apply_step), и без удержания блок с кнопкой повтора исчез бы вместе с фокусом
+  let heldFailure = $state<LayerResult | null>(null);
+  let retryPressed = false;
+  let root = $state<HTMLDivElement>();
+
+  // Ход применения: идёт на сервере или запущено отсюда и ждёт ответа
+  let running = false;
+  let startedHere = false;
+  let wasBusy = false;
+  function syncBusy() {
+    const busy = running || startedHere;
+    if (busy) seenRunning = true;
+    if (wasBusy && !busy) {
+      // Исход пришёл: удержанный итог больше не нужен, фокус — на действие шага
+      heldFailure = null;
+      if (retryPressed) {
+        retryPressed = false;
+        void tick().then(restoreFocus);
+      }
+    }
+    wasBusy = busy;
+  }
   onDestroy(
     applyRunning.subscribe((r) => {
-      if (r) seenRunning = true;
+      running = r;
+      syncBusy();
     })
   );
   onDestroy(
     applyStartedHere.subscribe((here) => {
-      if (here) seenRunning = true;
+      startedHere = here;
+      syncBusy();
     })
   );
+
+  // Фокус потерян — на «Повторить применение» (новый сбой), иначе на «Применить», если она
+  // видна и активна; иначе не трогается
+  function restoreFocus() {
+    const active = document.activeElement;
+    const lost = active === null || active === document.body || !active.isConnected;
+    if (!root || !lost) return;
+    for (const cls of ['step-apply-retry', 'step-apply-main']) {
+      const btn = root.querySelector<HTMLButtonElement>(`button.${cls}`);
+      if (btn && !btn.disabled) {
+        btn.focus();
+        return;
+      }
+    }
+  }
+
+  function retry() {
+    heldFailure = shownFailure;
+    retryPressed = true;
+    onapply();
+  }
 
   const conflict = $derived($conflictVisible);
   // Применять нечего: черновик чист и применённое состояние пустое
@@ -72,10 +122,16 @@
   const failure = $derived(
     seenRunning && !$applyRunning && result !== null && !result.ok ? result : null
   );
+  const shownFailure = $derived(
+    failure ??
+      (heldFailure !== null && ($applyRunning || $applyGate.applyingHere) ? heldFailure : null)
+  );
   const failureReason = $derived.by(() => {
-    if (!failure) return '';
+    if (!shownFailure) return '';
     const text =
-      applyResultText(failure, $t) || (failure.message ?? '').split('\n')[0] || failure.code;
+      applyResultText(shownFailure, $t) ||
+      (shownFailure.message ?? '').split('\n')[0] ||
+      shownFailure.code;
     // Текст ошибки сам ставит точку после причины
     return text.trim().replace(/[.。]+$/, '');
   });
@@ -105,7 +161,7 @@
   }
 </script>
 
-<div class="step-apply">
+<div class="step-apply" bind:this={root}>
   {#if conflict}
     <div class="step-apply-conflict">
       <p
@@ -141,11 +197,12 @@
       {countParts[0]}<span class="setup-mono">{$draftChanges}</span>{countParts[1]}
     </p>
     <!-- При сбое единственный вход в применение — «Повторить применение» в блоке ошибки -->
-    {#if !failure}
+    {#if !shownFailure}
       <div class="step-apply-actions">
         <Button
           variant={isCurrent ? 'primary' : 'secondary'}
           size="sm"
+          class="step-apply-main"
           data-testid="setup-apply"
           disabled={conflict || !$applyGate.canApply}
           loading={$applyGate.applyingHere}
@@ -166,7 +223,7 @@
 
   <ApplyProgress />
 
-  {#if failure}
+  {#if shownFailure}
     <div class="alert alert-error step-apply-error" role="alert" data-testid="setup-apply-error">
       <span class="step-apply-icon" aria-hidden="true"><Icon name="warning" size={16} /></span>
       <div class="step-apply-error-body">
@@ -175,11 +232,12 @@
           <Button
             variant="primary"
             size="sm"
+            class="step-apply-retry"
             data-testid="setup-apply-retry"
             disabled={conflict || !$applyGate.canApply}
             loading={$applyGate.applyingHere}
             ariaDescribedby={describedBy}
-            onclick={() => onapply()}
+            onclick={retry}
           >
             {$t('cfg.setup.apply.retry')}
           </Button>

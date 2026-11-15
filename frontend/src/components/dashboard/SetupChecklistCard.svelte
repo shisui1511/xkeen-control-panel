@@ -101,7 +101,12 @@
                 : $t('dash.quickstart.step_pending')}
             >
               {#if row.done}
-                <Icon name="check" size={16} color="var(--success)" />
+                <!-- Частичный шаг — тем же цветом, что маркер мастера -->
+                <Icon
+                  name="check"
+                  size={16}
+                  color={row.partial ? 'var(--warning)' : 'var(--success)'}
+                />
               {:else}
                 <span class="sc-pending" aria-hidden="true"></span>
               {/if}
@@ -109,7 +114,7 @@
             <span class="sc-text">{$t(`dash.setup.step.${row.id}`)}</span>
             {#if row.partial}
               <Badge tone="warning" testid="setup-card-partial">
-                {$t('dash.setup.partial', {
+                {$t('cfg.setup.status.partial', {
                   done: String(row.partial.done),
                   total: String(row.partial.total)
                 })}
