@@ -508,7 +508,17 @@ async function pickPreset(page: Page): Promise<string> {
 async function applyFromStep(page: Page): Promise<void> {
   await expandStep(page, 5);
   const btn = page.getByTestId('setup-apply');
-  await expect(btn, 'setup-apply активна').toBeEnabled({ timeout: T.action });
+  try {
+    await expect(btn, 'setup-apply активна').toBeEnabled({ timeout: T.action });
+  } catch (err) {
+    // причина блокировки — текст подсказки рядом с кнопкой (только текст интерфейса)
+    const hints = await page.getByTestId('setup-apply-blocked').allTextContents();
+    throw new Error(
+      `setup-apply не стала активной; подсказка блокировки: ${JSON.stringify(hints.map((h) => h.trim()))}; ` +
+        String(err).split('\n')[0],
+      { cause: err }
+    );
+  }
   await btn.click();
   const modal = page.getByTestId('apply-preview-modal');
   const nodesOnly = page.getByTestId('take-routing-nodes-only');
@@ -1748,7 +1758,12 @@ test(
         `/api/service/control?action=stop&kernel=${encodeURIComponent(orig)}`
       );
       const stopOutcome = String(stop.data?.outcome ?? stop.data?.code ?? '');
-      if (stop.status !== 200 || !['stopped', 'not_running'].includes(stopOutcome)) {
+      // still_running — ядро не вышло к дедлайну панели (SIGTERM без принудительного завершения);
+      // на загруженном носителе оно выходит позже, поэтому ниже ждём выхода процесса, а не падаем
+      if (
+        stop.status !== 200 ||
+        !['stopped', 'not_running', 'still_running'].includes(stopOutcome)
+      ) {
         throw new Error(`${START_PREP} остановка ${orig}: HTTP ${stop.status} ${stopOutcome}`);
       }
       // GET мастера может отдать прежнее наблюдение: срок — по виду мастера
@@ -1756,7 +1771,10 @@ test(
       await expect
         .poll(async () => (await wizard(page)).kernels.running.length, {
           message: `${START_PREP} ядро ${orig} остановлено`,
-          timeout: viewDeadline(v)
+          timeout:
+            stopOutcome === 'still_running'
+              ? Math.max(viewDeadline(v), T.switchKernel)
+              : viewDeadline(v)
         })
         .toBe(0);
       const code = await standSh(
