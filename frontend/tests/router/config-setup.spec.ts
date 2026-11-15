@@ -1,9 +1,12 @@
 // e2e-pages: config/setup config dashboard
 // router-area: configlayer
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { test, expect, type Browser, type Page } from '@playwright/test';
 import { attachConsoleGuard, type ConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { SLOW_ANNOTATION, quarantine } from './lib/known';
+import { CORE_TAG, FULL_TAG, SLOW_ANNOTATION, TIER_FULL_ANNOTATION, quarantine } from './lib/known';
 import {
   addToDraft,
   api,
@@ -56,7 +59,15 @@ interface WizardView {
   done_count: number;
   total: number;
   current: number;
-  kernels: { xkeen: boolean; xray: boolean; mihomo: boolean; conflict: boolean };
+  /** Период проверки наблюдателем, с (план 149.1-10); 0 — ответ без поля. */
+  tick_s: number;
+  kernels: {
+    xkeen: boolean;
+    xray: boolean;
+    mihomo: boolean;
+    running: string[];
+    conflict: boolean;
+  };
   steps: WizardStepView[];
 }
 
@@ -79,14 +90,34 @@ function toWizardView(data: Record<string, unknown> | null | undefined): WizardV
     done_count: Number(d.done_count ?? 0),
     total: Number(d.total ?? 0),
     current: Number(d.current ?? 0),
+    tick_s: Number(d.tick_s ?? 0),
     kernels: {
       xkeen: kernels.xkeen === true,
       xray: kernels.xray === true,
       mihomo: kernels.mihomo === true,
+      running: Array.isArray(kernels.running) ? kernels.running.map(String) : [],
       conflict: kernels.conflict === true
     },
     steps: (Array.isArray(d.steps) ? d.steps : []) as WizardStepView[]
   };
+}
+
+/**
+ * Период проверки наблюдателем по ответу мастера, мс. Постоянной подставки нет: ответ без
+ * tick_s — провал с причиной.
+ */
+function tickMs(v: WizardView): number {
+  if (!Number.isFinite(v.tick_s) || v.tick_s <= 0) throw new Error('ответ мастера без tick_s');
+  return v.tick_s * 1000;
+}
+
+/**
+ * Срок отражения действия в виде мастера: GET ждёт наблюдения панели не дольше 1 с, а не
+ * дождавшись, отдаёт прежний вид; позже вид обновляет следующее чтение или проверка
+ * наблюдателя — не реже tick_s.
+ */
+function viewDeadline(v: WizardView): number {
+  return tickMs(v) + T.action;
 }
 
 /** Шаг ответа мастера по id; нет шага — провал с id. */
@@ -755,6 +786,101 @@ async function reloadAt(page: Page, guard: ConsoleGuard, hash: string): Promise<
   return attachConsoleGuard(page);
 }
 
+// --- Сбой запуска ядра под внесённым сбоем (start-failure, G-149.1-8) ---
+// Испорченный файл в каталоге конфигураций Xray: ядро на нём не разбирает конфигурацию и не
+// запускается. Создаётся и удаляется только вычисленный тестом путь; исходное ядро тест
+// возвращает сам, запасной путь — afterAll.
+
+const run = promisify(execFile);
+const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const START_PREP = 'подготовка start-failure:';
+const XRAY_CONFIGS = '/opt/etc/xray/configs';
+const START_FAIL_NAME = /^xcp-e2e-start-fail-\d+\.json$/;
+// Обрезанный JSON: Xray не разбирает конфигурацию и называет файл в ошибке
+const START_FAIL_BODY = '{"log":';
+// Строка скрипта XKeen о смене ядра (тот же смысл, что SWITCH_BANNER шага 6)
+const BANNER = /смен[аы]\s+ядра/iu;
+// Файл сбоя, созданный и ещё не удалённый; ядро, которое ещё надо вернуть (уборка afterAll)
+let startFailFile: string | null = null;
+let startFailKernel: string | null = null;
+
+/**
+ * Команда на стенде arm64 через scripts/router/lib.sh из корня репозитория: алиас и доступы
+ * берутся только из локального файла целей. Возвращает код выхода команды; сбой подготовки
+ * (файл целей, связь) — ошибка. Вывод ssh (в нём может быть алиас) в отчёт не попадает,
+ * поэтому исходная ошибка процесса не прикладывается причиной.
+ */
+async function standSh(remote: string): Promise<number> {
+  const code = await run(
+    'sh',
+    [
+      '-c',
+      '. scripts/router/lib.sh || exit 90; rt_load_targets || exit 91; rt_ssh arm64 "$1"',
+      'sh',
+      remote
+    ],
+    { cwd: REPO_ROOT, env: { ...process.env, ROUTERS: 'arm64' }, timeout: 60_000 }
+  ).then(
+    () => 0 as unknown,
+    (err: unknown) => (err as { code?: unknown } | null)?.code
+  );
+  if (code === 3) throw new Error('стенд arm64: нет связи по ssh');
+  if (code === 90 || code === 91) throw new Error('стенд arm64: файл целей не прочитан');
+  if (typeof code !== 'number') {
+    throw new Error('стенд arm64: команда не выполнена (таймаут или запуск sh)');
+  }
+  return code;
+}
+
+/** Путь файла сбоя: только по имени из шаблона теста. */
+function startFailPath(name: string): string {
+  if (!START_FAIL_NAME.test(name)) throw new Error('имя файла сбоя вне шаблона теста');
+  return `${XRAY_CONFIGS}/${name}`;
+}
+
+/** Удаляет только файл сбоя по вычисленному пути и проверяет, что его больше нет. */
+async function removeStartFailFile(name: string): Promise<void> {
+  const p = startFailPath(name);
+  const code = await standSh(`rm -f ${p}; test ! -e ${p} || exit 10`);
+  if (code !== 0) throw new Error(`start-fail-cleanup: файл сбоя остался (код ${code})`);
+  if (startFailFile === name) startFailFile = null;
+}
+
+/**
+ * Возвращает исходное ядро: switch_kernel с исходом switched (409 kernel_op_in_progress — до
+ * трёх повторов через 5 с, как у restoreSnapshot), затем вид мастера — запущено только оно,
+ * конфликта нет.
+ */
+async function returnKernel(page: Page, kernel: string): Promise<void> {
+  const path = `/api/service/control?action=switch_kernel&kernel=${encodeURIComponent(kernel)}`;
+  let res = await api(page, 'POST', path);
+  for (
+    let attempt = 1;
+    attempt <= 3 && res.status === 409 && res.data?.code === 'kernel_op_in_progress';
+    attempt++
+  ) {
+    await page.waitForTimeout(5000);
+    res = await api(page, 'POST', path);
+  }
+  const outcome = String(res.data?.outcome ?? res.data?.code ?? '');
+  if (res.status !== 200 || outcome !== 'switched') {
+    throw new Error(
+      `start-fail-cleanup: ядро ${kernel} не возвращено (HTTP ${res.status} ${outcome})`
+    );
+  }
+  await expect
+    .poll(
+      async () => {
+        const k = (await wizard(page)).kernels;
+        return !k.conflict && k.running.length === 1 && k.running[0] === kernel
+          ? 'ok'
+          : `запущено ${k.running.join(',') || 'none'}, конфликт ${k.conflict}`;
+      },
+      { message: `start-fail-cleanup: ядро ${kernel} снова запущено`, timeout: T.switchKernel }
+    )
+    .toBe('ok');
+}
+
 // Прежние значения стенда: null — ещё не прочитаны (beforeAll не дошёл), возвращать нечего
 let prevStatus: string | null = null;
 let devWasOn: boolean | null = null;
@@ -773,8 +899,13 @@ test.beforeAll(async ({ browser }) => {
 });
 
 test.afterAll(async ({ browser }) => {
-  // Уцелевший снимок clean-install восстанавливается первым, до прочей уборки
-  test.setTimeout(cleanSnap !== null ? T.save * 8 : T.save * 4);
+  // Уцелевший снимок clean-install восстанавливается первым, до прочей уборки; затем стенд
+  // после start-failure — файл сбоя и исходное ядро (switch_kernel с повторами 409 и опросом)
+  test.setTimeout(
+    (cleanSnap !== null ? T.save * 8 : T.save * 4) +
+      (startFailKernel !== null ? T.switchKernel + 3 * 5_000 + T.action : 0) +
+      (startFailFile !== null ? T.action : 0)
+  );
   // Уборка идёт до конца при любом сбое шага: первая ошибка — после всех шагов
   const errors: unknown[] = [];
   const attempt = async (fn: () => Promise<void>): Promise<void> => {
@@ -804,6 +935,30 @@ test.afterAll(async ({ browser }) => {
   } else if (!cleanRestored) {
     console.log('clean-snapshot: none');
   }
+  // Тест start-failure не вернул стенд (тайм-аут, сбой уборки): файл сбоя, затем ядро
+  let standLeft: Error | null = null;
+  if (startFailFile !== null || startFailKernel !== null) {
+    const file = startFailFile;
+    if (file !== null) await attempt(() => removeStartFailFile(file));
+    const kernel = startFailKernel;
+    if (kernel !== null) {
+      await attempt(() =>
+        withPanel(browser, async (page) => {
+          await returnKernel(page, kernel);
+          startFailKernel = null;
+        })
+      );
+    }
+    if (startFailFile === null && startFailKernel === null) {
+      console.log('start-fail-cleanup: restored-in-hook');
+    } else {
+      const left = [startFailFile !== null ? 'file' : '', startFailKernel !== null ? 'kernel' : '']
+        .filter((x) => x !== '')
+        .join('|');
+      console.log(`start-fail-cleanup: left ${left}`);
+      standLeft = new Error(`start-fail-cleanup: left ${left} — вернуть стенд вручную`);
+    }
+  }
   await attempt(() =>
     withPanel(browser, async (page) => {
       await waitApplyIdle(page, 'перед возвратом статуса мастера');
@@ -817,6 +972,7 @@ test.afterAll(async ({ browser }) => {
   });
   await attempt(() => layer.restore(browser));
   if (snapLeft !== null) throw snapLeft;
+  if (standLeft !== null) throw standLeft;
   if (errors.length > 0) throw errors[0];
 });
 
@@ -1483,4 +1639,220 @@ async function takeRestReleasing(page: Page): Promise<void> {
     )
     .toBe('desired true, не взято 0');
   await resetDraft(page);
+}
+
+// Последним тестом файла: файл идёт в режиме serial, и падение этого теста перед clean-install
+// пропустило бы SC1 в полном прогоне. clean-install остаётся последним разрушающим тестом со
+// снимком, а этот тест сам возвращает стенд (файл сбоя и исходное ядро), запасной путь — afterAll.
+test(
+  'config-setup start-failure vp:1280',
+  {
+    tag: [FULL_TAG, CORE_TAG],
+    annotation: {
+      type: TIER_FULL_ANNOTATION,
+      description:
+        'внесение сбоя: испорченный файл конфигурации Xray, остановка и неудачный запуск ядра'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.switchKernel * 3);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await startPage(page);
+    const name = `xcp-e2e-start-fail-${randomPort()}.json`;
+    const path = startFailPath(name);
+
+    // --- подготовка: провал — ошибка подготовки, не находка мастера ---
+    const w0 = await wizard(page);
+    if (!w0.kernels.xkeen || !w0.kernels.xray) {
+      throw new Error(`${START_PREP} XKeen ${w0.kernels.xkeen}, Xray ${w0.kernels.xray}`);
+    }
+    if (w0.kernels.conflict || w0.kernels.running.length !== 1) {
+      throw new Error(
+        `${START_PREP} запущено ядер ${w0.kernels.running.length}, конфликт ${w0.kernels.conflict}`
+      );
+    }
+    const orig = w0.kernels.running[0];
+    await waitApplyIdle(page, 'перед start-failure');
+    if ((await standSh(`test ! -e ${path} || exit 10`)) !== 0) {
+      throw new Error(`${START_PREP} путь файла сбоя занят`);
+    }
+
+    let primary: unknown;
+    let created = false;
+    try {
+      startFailKernel = orig;
+      // тот же маршрут, что у «Остановить» в интерфейсе
+      const stop = await api(
+        page,
+        'POST',
+        `/api/service/control?action=stop&kernel=${encodeURIComponent(orig)}`
+      );
+      const stopOutcome = String(stop.data?.outcome ?? stop.data?.code ?? '');
+      if (stop.status !== 200 || !['stopped', 'not_running'].includes(stopOutcome)) {
+        throw new Error(`${START_PREP} остановка ${orig}: HTTP ${stop.status} ${stopOutcome}`);
+      }
+      // GET мастера может отдать прежнее наблюдение: срок — по виду мастера
+      const v = await wizard(page);
+      await expect
+        .poll(async () => (await wizard(page)).kernels.running.length, {
+          message: `${START_PREP} ядро ${orig} остановлено`,
+          timeout: viewDeadline(v)
+        })
+        .toBe(0);
+      const code = await standSh(
+        `test -d ${XRAY_CONFIGS} || exit 11; test ! -e ${path} || exit 10; ` +
+          `printf '%s\\n' '${START_FAIL_BODY}' > ${path} || exit 12`
+      );
+      // 10 и 11 — до записи: путь чужой или каталога нет, удалять нечего
+      if (code !== 10 && code !== 11) {
+        startFailFile = name;
+        created = true;
+      }
+      if (code !== 0) throw new Error(`${START_PREP} файл сбоя не записан (код ${code})`);
+      await startFailureScenario(page, name);
+    } catch (err) {
+      primary = err;
+    }
+
+    // --- уборка при любом исходе: файл, затем ядро; ошибка уборки — после ошибки сценария ---
+    const cleanupErrors: unknown[] = [];
+    const file = startFailFile;
+    if (file !== null) {
+      try {
+        await removeStartFailFile(file);
+      } catch (err) {
+        cleanupErrors.push(err);
+      }
+    }
+    const kernel = startFailKernel;
+    if (kernel !== null) {
+      try {
+        await returnKernel(page, kernel);
+        startFailKernel = null;
+      } catch (err) {
+        cleanupErrors.push(err);
+      }
+    }
+    if (created && startFailFile === null) {
+      try {
+        await expect
+          .poll(
+            async () => {
+              const st = await api(page, 'GET', '/api/configlayer/state');
+              const files = Array.isArray(st.data?.files)
+                ? (st.data.files as { key?: unknown }[])
+                : [];
+              return files.some((f) => f?.key === `xray:${name}`);
+            },
+            { message: 'start-fail-cleanup: ключа файла сбоя нет в манифесте', timeout: T.page }
+          )
+          .toBe(false);
+      } catch (err) {
+        cleanupErrors.push(err);
+      }
+    }
+    if (startFailFile === null && startFailKernel === null) {
+      console.log('start-fail-cleanup: restored-in-test');
+    }
+    if (primary !== undefined) throw primary;
+    if (cleanupErrors.length > 0) throw cleanupErrors[0];
+  }
+);
+
+/**
+ * Сценарий при остановленном ядре и внесённом файле: запуск Xray из шага 6, ответ
+ * switch_kernel (исход, вывод, проверка конфигурации) и блок ошибки шага. G-149.1-8
+ * засчитывается, только если причина или хвост называют внесённый файл, а причина — не строка
+ * о смене ядра. В сообщения и аннотацию — только testId, исходы, признаки и счётчики.
+ */
+async function startFailureScenario(page: Page, name: string): Promise<void> {
+  await gotoHash(page, '#/config/setup');
+  await expect(page.getByTestId('config-setup')).toBeVisible({ timeout: T.page });
+  await expandStep(page, 6);
+  const seg = page.getByTestId('setup-start-kernel-xray');
+  if ((await seg.count()) > 0) await seg.click();
+  const startBtn = page.getByTestId('setup-start');
+  await expect(startBtn, 'setup-start активна').toBeEnabled({ timeout: T.action });
+
+  let guard = attachConsoleGuard(page);
+  const switched = page.waitForResponse(
+    (r) => {
+      if (r.request().method() !== 'POST') return false;
+      const u = new URL(r.url());
+      return (
+        u.pathname === '/api/service/control' && u.searchParams.get('action') === 'switch_kernel'
+      );
+    },
+    { timeout: T.switchKernel }
+  );
+  await startBtn.click();
+  const resp = await switched;
+  const http = resp.status();
+  let body: Record<string, unknown> | null = null;
+  try {
+    body = (await resp.json()) as Record<string, unknown>;
+  } catch {
+    body = null;
+  }
+  let output = '';
+  let check = '';
+  if (http === 200) {
+    const data = (body?.data ?? {}) as Record<string, unknown>;
+    const outcome = String(data.outcome ?? '');
+    if (outcome !== 'new_not_started') {
+      throw new Error(`${START_PREP} исход переключения ${outcome}: сбой не внесён`);
+    }
+    output = typeof data.output === 'string' ? data.output : '';
+    check = typeof data.check === 'string' ? data.check : '';
+  } else if (http === 500) {
+    // Ошибка скрипта: в тексте ошибки вывод XKeen и строки проверки конфигурации. Ответ 500
+    // здесь — внесённый сбой, а не находка: сборщик консоли меняется после блока ошибки
+    output = typeof body?.error === 'string' ? body.error : '';
+    guard.detach();
+  } else {
+    throw new Error(`${START_PREP} switch_kernel: HTTP ${http}`);
+  }
+  const banner = output.split('\n').some((l) => BANNER.test(l));
+  const inOutput = output.includes(name);
+  const inCheck = check.includes(name);
+  const file =
+    inOutput && inCheck ? 'output+check' : inOutput ? 'output' : inCheck ? 'check' : 'none';
+
+  const box = page.getByTestId('setup-start-error');
+  await expect(box, 'setup-start-error виден').toBeVisible({ timeout: T.action });
+  if (http === 500) guard = attachConsoleGuard(page);
+  const reason = (
+    (await box.locator('.step-start-error-body > span').first().textContent()) ?? ''
+  ).trim();
+  const source = (await box.getAttribute('data-reason')) ?? 'none';
+  const log = page.getByTestId('setup-start-log');
+  const lines =
+    (await log.count()) > 0
+      ? ((await log.textContent()) ?? '')
+          .split('\n')
+          .map((l) => l.trim())
+          .filter((l) => l !== '')
+      : [];
+  branch(
+    `start-fail: banner ${banner ? 'yes' : 'no'}, http ${http}, reason ${source}, file ${file}, log ${lines.length}`
+  );
+
+  expect(BANNER.test(reason), 'start-failure: причина не баннер смены ядра').toBe(false);
+  await expect(log, 'setup-start-log виден').toBeVisible({ timeout: T.action });
+  expect(lines.length, 'setup-start-log: строк хвоста').toBeGreaterThanOrEqual(1);
+  expect(lines.length, 'setup-start-log: строк хвоста').toBeLessThanOrEqual(8);
+  expect(
+    lines.filter((l) => BANNER.test(l)).length,
+    'start-failure: хвост показан без баннера'
+  ).toBe(0);
+  // Ошибка Xray называет путь файла; общая строка XKeen с «не удалось» или «failed» — нет
+  expect(file, 'start-failure: ошибка внесённого файла не показана').not.toBe('none');
+  expect(
+    reason.includes(name) || lines.some((l) => l.includes(name)),
+    'start-failure: причина или хвост называет внесённый файл'
+  ).toBe(true);
+  await expect(page.getByTestId('setup-start-retry')).toBeVisible();
+  await expect(page.getByTestId('setup-start-logs-link')).toBeVisible();
+  await expect(page.getByTestId('setup-start-files-link')).toBeVisible();
+  await guard.assertClean();
 }
