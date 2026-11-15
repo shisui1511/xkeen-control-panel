@@ -219,6 +219,26 @@ func runtimeCounts(members []RuntimeMember, installed configlayer.InstalledKerne
 	return KernelCounts{Xray: optCount(installed.Xray, xray), Mihomo: optCount(installed.Mihomo, mihomo)}
 }
 
+// runtimeMihomo использует тот же расчёт имён копий и скрытых групп, что
+// генератор профиля, без повторного чтения состояния или каталога.
+func runtimeMihomo(am appliedModel) *mihomoBuild {
+	b := newMihomoBuild(mihomoBuild{groups: am.groups.Items, catalog: am.cat.Mihomo, groupsOK: true})
+	b.prepare()
+	return b
+}
+
+func runtimeMihomoNames(b *mihomoBuild, g Group) map[string]string {
+	names := b.nodeNames(g)
+	if mg := b.shapeByID[g.ID]; mg != nil {
+		for ref, name := range b.copyName {
+			if name != "" && (containsString(mg.copies, name) || mg.reserve == name) {
+				names[ref] = name
+			}
+		}
+	}
+	return names
+}
+
 func runtimeChain(g Group, am appliedModel, live map[string]string) []RuntimeLink {
 	out := []RuntimeLink{}
 	seen := map[string]bool{}
@@ -285,7 +305,9 @@ func (s *Service) RuntimeNow(ctx context.Context) (RuntimeNow, error) {
 		return out, nil
 	}
 	var states map[string]services.ClashProxyState
+	var mh *mihomoBuild
 	if v.Kernel == configlayer.KernelMihomo && v.Modes.Mihomo == RuntimeModePanel && s.d.Mihomo != nil {
+		mh = runtimeMihomo(am)
 		states, err = s.d.Mihomo.ProxiesState(ctx)
 		if err != nil {
 			return out, err
@@ -301,23 +323,31 @@ func (s *Service) RuntimeNow(ctx context.Context) (RuntimeNow, error) {
 			if v.Modes.Mihomo != RuntimeModePanel {
 				continue
 			}
-			for _, n := range am.cat.Mihomo {
-				if name := states[g.Name].Now; name != "" && n.MihomoName == name {
-					now.Ref, now.Known = n.Ref, true
-				}
+			if mh == nil {
+				out.Groups[g.ID] = now
+				continue
 			}
+			names := runtimeMihomoNames(mh, g)
 			nodes := Resolve(g, am.cat.Mihomo, am.groups.Items).Nodes
 			if n, ok := am.byRef[g.Reserve]; g.Mode == ModeFallback && ok {
 				// В объединённом каталоге имя может быть пустым: берём вариант Mihomo.
 				for _, mn := range am.cat.Mihomo {
 					if mn.Ref == n.Ref {
 						nodes = append(nodes, mn)
+						names[mn.Ref] = mh.copyName[mn.Ref]
 						break
 					}
 				}
 			}
+			name := states[g.Name].Now
+			if g.Mode == ModeFallback && name == hiddenName(g.ID) {
+				name = states[name].Now
+			}
 			for _, n := range nodes {
-				if h := states[n.MihomoName].History; len(h) > 0 {
+				if name != "" && name == names[n.Ref] {
+					now.Ref, now.Known = n.Ref, true
+				}
+				if h := states[names[n.Ref]].History; len(h) > 0 {
 					last := h[len(h)-1]
 					out.History[n.Ref] = NowDelay{MS: last.Delay, At: last.Time}
 				}
@@ -373,6 +403,15 @@ func (s *Service) PingRequest(scope, groupID string) (proxyping.Request, error) 
 	mihomo := make(map[string]sources.CatalogNode, len(am.cat.Mihomo))
 	for _, n := range am.cat.Mihomo {
 		mihomo[n.Ref] = n
+	}
+	if req.Method == proxyping.MethodMihomo {
+		for ref, name := range runtimeMihomo(am).copyName {
+			if name != "" {
+				n := mihomo[ref]
+				n.MihomoName = name
+				mihomo[ref] = n
+			}
+		}
 	}
 	seen, found := map[string]bool{}, false
 	for _, g := range v.Groups {

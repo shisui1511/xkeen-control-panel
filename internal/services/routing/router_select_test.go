@@ -6,6 +6,7 @@ package routing
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/proxyping"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 )
 
@@ -104,6 +106,18 @@ func TestRouterSelectXray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SaveGroup: %v", err)
 	}
+	_, outer, err := e.svc.SaveGroup(e.rev(t), Group{
+		Name: "Внешняя", Mode: ModeManual, Members: []Member{{Kind: KindGroup, ID: grp.ID}},
+	})
+	if err != nil {
+		t.Fatal("runtime_outer_save")
+	}
+	_, direct, err := e.svc.SaveGroup(e.rev(t), Group{
+		Name: "Прямо", Mode: ModeManual, Members: []Member{{Kind: KindDirect}},
+	})
+	if err != nil {
+		t.Fatal("runtime_direct_save")
+	}
 
 	// До «Применить» группы нет в применённом состоянии.
 	if _, err := e.svc.Select(ctx, grp.ID, memberNode+nodeB.Ref); !errors.Is(err, ErrGroupNotApplied) {
@@ -177,6 +191,83 @@ func TestRouterSelectXray(t *testing.T) {
 	if got := e.rev(t); got != rev {
 		t.Errorf("выбор изменил ревизию черновика: %d → %d", rev, got)
 	}
+	view, err := e.svc.RuntimeView()
+	if err != nil || view.State != RuntimeStateStopped || view.Running == nil || view.Modes.Xray != RuntimeModePanel || view.Modes.Mihomo != RuntimeModeNotInstalled {
+		t.Fatalf("runtime_view: error=%t state=%s running_nil=%t modes=%+v", err != nil, view.State, view.Running == nil, view.Modes)
+	}
+	findRuntime := func(id string) RuntimeGroup {
+		t.Helper()
+		for _, g := range view.Groups {
+			if g.ID == id {
+				return g
+			}
+		}
+		t.Fatal("runtime_group_missing")
+		return RuntimeGroup{}
+	}
+	runtimeGroup := findRuntime(grp.ID)
+	if runtimeGroup.Mode != string(ModeManual) || runtimeGroup.Current != memberNode+nodeB.Ref || runtimeGroup.CurrentLabel != nodeB.Display || !runtimeGroup.Selectable || runtimeGroup.Unconfirmed {
+		t.Fatalf("runtime_selection: mode=%s current=%t label=%t selectable=%t unconfirmed=%t", runtimeGroup.Mode, runtimeGroup.Current == memberNode+nodeB.Ref, runtimeGroup.CurrentLabel == nodeB.Display, runtimeGroup.Selectable, runtimeGroup.Unconfirmed)
+	}
+	if !reflect.DeepEqual(runtimeGroup.LockedWith, []string{outer.ID}) || !reflect.DeepEqual(findRuntime(outer.ID).LockedWith, []string{grp.ID}) {
+		t.Fatal("runtime_linked_component")
+	}
+	chain := findRuntime(outer.ID).Chain
+	if len(chain) != 2 || chain[0].Kind != KindGroup || chain[0].ID != grp.ID || chain[0].Name != grp.Name || chain[1].Kind != "node" || chain[1].Ref != nodeB.Ref {
+		t.Fatalf("runtime_chain: length=%d", len(chain))
+	}
+	nodes := 0
+	for _, m := range runtimeGroup.Members {
+		if m.Kind == "node" {
+			nodes++
+			if !m.Xray || m.Mihomo || m.Proto == "" || m.Source != sources.MySourceID {
+				t.Fatal("runtime_node_compatibility")
+			}
+		}
+	}
+	if nodes != len(cat) || runtimeGroup.Counts.Xray == nil || *runtimeGroup.Counts.Xray != nodes || runtimeGroup.Counts.Mihomo != nil {
+		t.Fatalf("runtime_counts: nodes=%d", nodes)
+	}
+	request, err := e.svc.PingRequest("group", grp.ID)
+	if err != nil || request.Method != proxyping.MethodXray || len(request.Targets) != nodes || request.URL != view.Probe.URL || request.Timeout != time.Duration(view.Probe.TimeoutS)*time.Second {
+		t.Fatalf("runtime_ping: error=%t method=%s targets=%d", err != nil, request.Method, len(request.Targets))
+	}
+	for _, target := range request.Targets {
+		if target.Fingerprint == "" || !target.Xray {
+			t.Fatal("runtime_ping_fingerprint")
+		}
+	}
+	if _, err := e.svc.PingRequest("bad", grp.ID); err == nil {
+		t.Fatal("runtime_ping_scope_accepted")
+	} else {
+		var input *InvalidInputError
+		if !errors.As(err, &input) || input.Field != "scope" {
+			t.Fatal("runtime_ping_scope_code")
+		}
+	}
+	if _, err := e.svc.PingRequest("group", direct.ID); !errors.Is(err, ErrGroupNoNodes) {
+		t.Fatalf("runtime_ping_empty: expected_code=%t", errors.Is(err, ErrGroupNoNodes))
+	}
+	if _, err := e.svc.PingRequest("group", "0badc0de"); !errors.Is(err, ErrGroupNotFound) {
+		t.Fatal("runtime_ping_unknown_group")
+	}
+	all, err := e.svc.PingRequest("all", "")
+	if err != nil || len(all.Targets) != nodes {
+		t.Fatalf("runtime_ping_all: error=%t targets=%d", err != nil, len(all.Targets))
+	}
+	fingerprints, err := e.svc.NodeFingerprints()
+	if err != nil || len(fingerprints) != nodes {
+		t.Fatalf("runtime_fingerprints: error=%t count=%d", err != nil, len(fingerprints))
+	}
+	for _, target := range all.Targets {
+		if fingerprints[target.Ref] != target.Fingerprint {
+			t.Fatal("runtime_fingerprint_mismatch")
+		}
+	}
+	now, err := e.svc.RuntimeNow(ctx)
+	if err != nil || now.Groups == nil || now.History == nil || len(now.Groups) != 0 || len(now.History) != 0 {
+		t.Fatal("runtime_stopped_now")
+	}
 
 	// Исходящий группы — копия узла B (а не A).
 	ob := rtsOutbound(t, e.xrayDir(), GroupTag(grp.ID))
@@ -200,6 +291,12 @@ func TestRouterSelectXray(t *testing.T) {
 	}
 	if !rtsSameOutbound(rtsOutbound(t, e.xrayDir(), GroupTag(grp.ID)), rtsOutbound(t, e.xrayDir(), nodeB.XrayTag)) {
 		t.Errorf("после «Применить» исходящий группы сменился")
+	}
+	// Неприменённые правки не меняют вид работающих групп и порядок.
+	e.replaceGroups(t, func(cfg *GroupsConfig) { cfg.Items = []Group{} })
+	after, err := e.svc.RuntimeView()
+	if err != nil || !reflect.DeepEqual(view.Groups, after.Groups) {
+		t.Fatal("runtime_read_draft")
 	}
 }
 
@@ -376,6 +473,81 @@ func TestRouterSelectMihomoReconcile(t *testing.T) {
 // выбирается.
 func TestRouterSelectRepick(t *testing.T) {
 	ctx := context.Background()
+
+	t.Run("tunnel_live_node", func(t *testing.T) {
+		rtNeedBins(t, rtXrayBin)
+		probe := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		t.Cleanup(probe.Close)
+		liveURL, hits := rtxaConnectProxy(t, strings.TrimPrefix(probe.URL, "http://"))
+		id, err := newID(rand.Reader)
+		if err != nil {
+			t.Fatal("tunnel_root_id")
+		}
+		root := "/opt/tmp/xcp-ping-rt-" + id
+		if err := os.Mkdir(root, 0o700); err != nil {
+			t.Fatal("tunnel_root_create")
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(root) })
+		var e *rtEnv
+		runner, err := proxyping.New(proxyping.Deps{
+			ActiveKernel: func() string { return "" }, TLSPing: rtTLSPing,
+			XrayBin: func() string { return rtXrayBin }, TmpRoot: root,
+			Fingerprints: func() (map[string]string, error) { return e.svc.NodeFingerprints() },
+			Publish:      func(string) {},
+		})
+		if err != nil {
+			t.Fatal("tunnel_runner_create")
+		}
+		e = rtNewEnv(t, rtWithKernels(rtXrayOnly), rtWithSelection(), rtWithDeps(func(d *Deps) {
+			d.Probe = runner.Probe
+		}))
+		runner.Start()
+		t.Cleanup(runner.Stop)
+		// Сначала назначаем роли по порядку каталога: случайные ID не должны
+		// превращать тест в выбор уже первого живого узла без проверки мёртвого.
+		e.addMyRaw(t, "http://127.0.0.1:9#tunnel-a", "http://127.0.0.1:10#tunnel-b", "http://127.0.0.1:11#tunnel-c")
+		cat := e.catalog(t).Xray
+		if len(cat) != 3 {
+			t.Fatalf("tunnel_catalog: count=%d", len(cat))
+		}
+		deadURL := "http://127.0.0.1:" + strconv.Itoa(rtFreePort(t))
+		if _, err := e.src.SaveNode(e.rev(t), strings.TrimPrefix(cat[0].Ref, sources.MySourceID+"/"), "tunnel-dead", deadURL); err != nil {
+			t.Fatal("tunnel_dead_save")
+		}
+		if _, err := e.src.SaveNode(e.rev(t), strings.TrimPrefix(cat[1].Ref, sources.MySourceID+"/"), "tunnel-live", liveURL); err != nil {
+			t.Fatal("tunnel_live_save")
+		}
+		cat = e.catalog(t).Xray
+		live, removed := cat[1], cat[2]
+		_, grp, err := e.svc.SaveGroup(e.rev(t), Group{Name: "Туннель", Mode: ModeManual, Sources: GroupSources{All: true}})
+		if err != nil || e.svcSaveProbe(probe.URL) != nil {
+			t.Fatal("tunnel_group_probe_save")
+		}
+		e.takeAndApply(t)
+		if _, err := e.svc.Select(ctx, grp.ID, memberNode+removed.Ref); err != nil {
+			t.Fatal("tunnel_initial_selection")
+		}
+		if _, err := e.svc.DeleteNode(e.rev(t), strings.TrimPrefix(removed.Ref, sources.MySourceID+"/")); err != nil {
+			t.Fatal("tunnel_remove_selected")
+		}
+		e.applyOK(t)
+		var note configlayer.NoticeView
+		rtWaitCond(t, 30*time.Second, "повторный выбор через туннель", func() bool {
+			var ok bool
+			note, ok = e.rtsNotice(noticeRepickPrefix + grp.ID)
+			return ok
+		})
+		if note.Params["answered"] != "true" || note.Params["method"] != repickMethodTunnel || e.rtcSelection(t)[grp.ID] != memberNode+live.Ref || hits.Load() == 0 {
+			t.Fatalf("tunnel_repick: answered=%s method=%s selected=%t hits=%d", note.Params["answered"], note.Params["method"], e.rtcSelection(t)[grp.ID] == memberNode+live.Ref, hits.Load())
+		}
+		runner.Stop()
+		entries, err := os.ReadDir(root)
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("tunnel_cleanup: error=%t entries=%d", err != nil, len(entries))
+		}
+	})
 
 	t.Run("tls_none_answered", func(t *testing.T) {
 		e := rtNewEnv(t, rtWithKernels(rtXrayOnly), rtWithSelection(), rtWithDeps(func(d *Deps) { d.Ping = rtTLSPing }))
