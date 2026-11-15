@@ -6,6 +6,7 @@ package routing
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net"
@@ -238,9 +239,20 @@ func (e *rtEnv) addMyLinks(t *testing.T, names ...string) {
 }
 
 // addMyRaw добавляет в «Мои узлы» готовые ссылки (текст как у пользователя).
+// Строка http(s):// верхнего уровня распознаётся как URL подписки, поэтому
+// список с http-прокси подаётся base64-блоком, как его отдаёт подписка: внутри
+// блока http(s) — прокси-ссылка с именем из фрагмента.
 func (e *rtEnv) addMyRaw(t *testing.T, links ...string) {
 	t.Helper()
-	view, err := e.src.Preview(context.Background(), nodes.Input{Text: strings.Join(links, "\n")})
+	text := strings.Join(links, "\n")
+	for _, l := range links {
+		lower := strings.ToLower(l)
+		if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+			text = base64.StdEncoding.EncodeToString([]byte(text))
+			break
+		}
+	}
+	view, err := e.src.Preview(context.Background(), nodes.Input{Text: text})
 	if err != nil {
 		t.Fatalf("Preview: %v", err)
 	}
