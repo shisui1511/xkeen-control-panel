@@ -1,14 +1,18 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -235,6 +239,11 @@ func (a *API) serviceSwitchKernel(w http.ResponseWriter, target, old string) {
 		err = startErr
 	}
 	if err != nil {
+		// Причину сбоя скрипт может не назвать: строки проверки конфигурации
+		// дописываются к тексту ошибки (G-149.1-8).
+		if check := a.switchConfigCheck(target); check != "" {
+			out = strings.TrimRight(out, "\n") + "\n" + check
+		}
 		a.errorResponse(w, out, http.StatusInternalServerError)
 		return
 	}
@@ -245,11 +254,63 @@ func (a *API) serviceSwitchKernel(w http.ResponseWriter, target, old string) {
 		a.dnsAfterSwitch(old, target)
 	}
 	res.Output = lastNonEmptyLines(utils.StripANSI(out), switchOutputLines)
-	log.Printf("switch_kernel: old=%s new=%s outcome=%s",
-		utils.SanitizeLogInput(res.Old), utils.SanitizeLogInput(res.New), utils.SanitizeLogInput(string(res.Outcome)))
+	if res.Outcome == services.SwitchNewNotStarted {
+		// Вывод фонового ядра в вывод `xkeen -start` не попадает: причину
+		// называет проверка конфигурации (G-149.1-8). Успешное переключение её
+		// не запускает и не ждёт.
+		res.Check = a.switchConfigCheck(target)
+	}
+	log.Printf("switch_kernel: old=%s new=%s outcome=%s check=%d",
+		utils.SanitizeLogInput(res.Old), utils.SanitizeLogInput(res.New), utils.SanitizeLogInput(string(res.Outcome)),
+		countLines(res.Check))
 
 	a.ClearCapabilitiesCache()
 	JSONSuccess(w, res)
+}
+
+// switchConfigCheck — вывод проверки конфигурации Xray (`<xray> -test -confdir
+// <каталог конфигураций>`) после неудачного запуска: последние строки без ANSI,
+// если проверка провалилась. Пусто — цель не Xray, бинарника или каталога нет,
+// проверка прошла, не уложилась в срок или не запустилась. Mihomo пишет ошибку
+// конфигурации в свой журнал (буфер mihomo панели), поэтому для него проверки нет.
+// Проверка идёт под замком вспомогательных запусков: во время операции XKeen над
+// ядром XKeen принял бы её за само ядро. Путь к бинарнику берётся до замка
+// (kernel_exec_gate.go: вложенный RLock при ожидающем писателе).
+func (a *API) switchConfigCheck(target string) string {
+	if target != "xray" || a.cfg.XRayConfigDir == "" {
+		return ""
+	}
+	xrayBin := a.getBinaryPath("xray")
+	if xrayBin == "" {
+		return ""
+	}
+	if fi, err := os.Stat(a.cfg.XRayConfigDir); err != nil || !fi.IsDir() {
+		return ""
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), configlayer.ValidateTimeout)
+	defer cancel()
+	defer services.AcquireKernelHelper(ctx)()
+	cmd := exec.CommandContext(ctx, xrayBin, "-test", "-confdir", a.cfg.XRayConfigDir)
+	setupXrayCmdEnv(cmd, a.cfg.XRayConfigDir)
+	cmd.WaitDelay = configlayer.ValidateWaitDelay
+	out, err := cmd.CombinedOutput()
+	if err == nil || ctx.Err() != nil {
+		return ""
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return ""
+	}
+	return lastNonEmptyLines(utils.StripANSI(string(out)), switchOutputLines)
+}
+
+// countLines — число строк непустого текста (для журнала без самих строк).
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
 }
 
 // serviceStopKernel — action=stop&kernel=: остановить конкретное ядро. Если это

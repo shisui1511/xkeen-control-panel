@@ -1,9 +1,12 @@
 // e2e-pages: config/setup config dashboard
 // router-area: configlayer
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { test, expect, type Browser, type Page } from '@playwright/test';
 import { attachConsoleGuard, type ConsoleGuard } from './lib/console';
-import { T } from './lib/env';
-import { SLOW_ANNOTATION, quarantine } from './lib/known';
+import { RT, T } from './lib/env';
+import { CORE_TAG, FULL_TAG, SLOW_ANNOTATION, TIER_FULL_ANNOTATION } from './lib/known';
 import {
   addToDraft,
   api,
@@ -23,8 +26,9 @@ import {
 //
 // Детерминизм при любом состоянии шагов 1–6 стенда: любая проверка, которой нужен статус
 // мастера не done, идёт при удержанном черновике (holdDraft) после сброса признака
-// (wizardReset) — пока черновик открыт, шаг 5 не выполнен, и наблюдатель сервера (тик 10 с)
-// не может поставить «пройдено». Статус мастера, dev_mode, черновик и флаг слоя спек
+// (wizardReset) — пока черновик открыт, шаг 5 не выполнен, и наблюдатель сервера (период
+// tick_s ответа мастера) не может поставить «пройдено». Сроки ожиданий вида мастера — из
+// tick_s ответа панели (viewDeadline, doneDeadline), а не постоянные. Статус мастера, dev_mode, черновик и флаг слоя спек
 // возвращает в afterAll; фактический статус после прогона — строка вывода wizard-status:.
 // В сообщения проверок попадают только testId, статусы и счётчики.
 
@@ -56,7 +60,15 @@ interface WizardView {
   done_count: number;
   total: number;
   current: number;
-  kernels: { xkeen: boolean; xray: boolean; mihomo: boolean; conflict: boolean };
+  /** Период проверки наблюдателем, с (план 149.1-10); 0 — ответ без поля. */
+  tick_s: number;
+  kernels: {
+    xkeen: boolean;
+    xray: boolean;
+    mihomo: boolean;
+    running: string[];
+    conflict: boolean;
+  };
   steps: WizardStepView[];
 }
 
@@ -79,15 +91,45 @@ function toWizardView(data: Record<string, unknown> | null | undefined): WizardV
     done_count: Number(d.done_count ?? 0),
     total: Number(d.total ?? 0),
     current: Number(d.current ?? 0),
+    tick_s: Number(d.tick_s ?? 0),
     kernels: {
       xkeen: kernels.xkeen === true,
       xray: kernels.xray === true,
       mihomo: kernels.mihomo === true,
+      running: Array.isArray(kernels.running) ? kernels.running.map(String) : [],
       conflict: kernels.conflict === true
     },
     steps: (Array.isArray(d.steps) ? d.steps : []) as WizardStepView[]
   };
 }
+
+/**
+ * Период проверки наблюдателем по ответу мастера, мс. Постоянной подставки нет: ответ без
+ * tick_s — провал с причиной.
+ */
+function tickMs(v: WizardView): number {
+  if (!Number.isFinite(v.tick_s) || v.tick_s <= 0) throw new Error('ответ мастера без tick_s');
+  return v.tick_s * 1000;
+}
+
+/**
+ * Срок отражения действия в виде мастера: GET ждёт наблюдения панели не дольше 1 с, а не
+ * дождавшись, отдаёт прежний вид; позже вид обновляет следующее чтение или проверка
+ * наблюдателя — не реже tick_s.
+ */
+function viewDeadline(v: WizardView): number {
+  return tickMs(v) + T.action;
+}
+
+/** Срок отметки «пройдено»: наблюдатель ставит её на одной из двух ближайших проверок. */
+function doneDeadline(v: WizardView): number {
+  return 2 * tickMs(v) + T.action;
+}
+
+// Предел ответа пишущего POST мастера: панель ждёт записи признака не дольше 1 с
+// (wizardWriteWait, план 149.1-10), плюс запас. До исправления ответ ждал запись файла с
+// fsync — 11 с в прогоне 2 сессии 149.1-09.
+const WIZARD_POST_MAX = 2_000 * RT.slow;
 
 /** Шаг ответа мастера по id; нет шага — провал с id. */
 function stepOf(view: WizardView, id: string): WizardStepView {
@@ -108,7 +150,10 @@ async function holdDraft(page: Page): Promise<void> {
         const apply = stepOf(await wizard(page), 'apply');
         return apply.done === false && Number(apply.draft_changes ?? 0) > 0;
       },
-      { message: 'удержание черновика: apply.done ложно, draft_changes > 0', timeout: T.action }
+      {
+        message: 'удержание черновика: apply.done ложно, draft_changes > 0',
+        timeout: viewDeadline(await wizard(page))
+      }
     )
     .toBe(true);
 }
@@ -116,7 +161,8 @@ async function holdDraft(page: Page): Promise<void> {
 /**
  * Снимает признак мастера (нужен dev_mode). Сброс и отметка done наблюдателем идут по
  * очереди, а вид в ответе сброса собран до следующего тика: статус в нём обязан быть пустым
- * с первого сброса.
+ * с первого сброса. Статус ответа — результат сброса, прочие поля — последнее наблюдение
+ * панели (план 149.1-10): свежие факты — только из GET.
  */
 async function wizardReset(page: Page): Promise<WizardView> {
   const res = await api(page, 'POST', `${WIZARD}/reset`);
@@ -206,7 +252,10 @@ async function expectStepsMatchServer(page: Page): Promise<WizardView> {
         }
         return diffs.length === 0 ? 'ok' : diffs.join('; ');
       },
-      { message: 'статусы шагов 1–6 против ответа мастера', timeout: T.action }
+      {
+        message: 'статусы шагов 1–6 против ответа мастера',
+        timeout: viewDeadline(await wizard(page))
+      }
     )
     .toBe('ok');
   return last as unknown as WizardView;
@@ -297,7 +346,10 @@ async function expectPrimaryWhen(page: Page, testId: string, n: number): Promise
           ? 'ok'
           : `${testId}: primary ${primary}, current ${current}`;
       },
-      { message: `${testId}: primary только при current ${n}`, timeout: T.action }
+      {
+        message: `${testId}: primary только при current ${n}`,
+        timeout: viewDeadline(await wizard(page))
+      }
     )
     .toBe('ok');
 }
@@ -418,7 +470,7 @@ async function expectWizardShell(page: Page): Promise<void> {
 /** Ждёт, пока шаг 6 станет выполнен (ядро после перезапуска), не дольше срока; итог — ответ мастера. */
 async function startSettles(page: Page): Promise<WizardView> {
   let view = await wizard(page);
-  const until = Date.now() + T.action;
+  const until = Date.now() + viewDeadline(view);
   while (stepOf(view, 'apply').done && !stepOf(view, 'start').done && Date.now() < until) {
     await page.waitForTimeout(1000);
     view = await wizard(page);
@@ -755,6 +807,101 @@ async function reloadAt(page: Page, guard: ConsoleGuard, hash: string): Promise<
   return attachConsoleGuard(page);
 }
 
+// --- Сбой запуска ядра под внесённым сбоем (start-failure, G-149.1-8) ---
+// Испорченный файл в каталоге конфигураций Xray: ядро на нём не разбирает конфигурацию и не
+// запускается. Создаётся и удаляется только вычисленный тестом путь; исходное ядро тест
+// возвращает сам, запасной путь — afterAll.
+
+const run = promisify(execFile);
+const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const START_PREP = 'подготовка start-failure:';
+const XRAY_CONFIGS = '/opt/etc/xray/configs';
+const START_FAIL_NAME = /^xcp-e2e-start-fail-\d+\.json$/;
+// Обрезанный JSON: Xray не разбирает конфигурацию и называет файл в ошибке
+const START_FAIL_BODY = '{"log":';
+// Строка скрипта XKeen о смене ядра (тот же смысл, что SWITCH_BANNER шага 6)
+const BANNER = /смен[аы]\s+ядра/iu;
+// Файл сбоя, созданный и ещё не удалённый; ядро, которое ещё надо вернуть (уборка afterAll)
+let startFailFile: string | null = null;
+let startFailKernel: string | null = null;
+
+/**
+ * Команда на стенде arm64 через scripts/router/lib.sh из корня репозитория: алиас и доступы
+ * берутся только из локального файла целей. Возвращает код выхода команды; сбой подготовки
+ * (файл целей, связь) — ошибка. Вывод ssh (в нём может быть алиас) в отчёт не попадает,
+ * поэтому исходная ошибка процесса не прикладывается причиной.
+ */
+async function standSh(remote: string): Promise<number> {
+  const code = await run(
+    'sh',
+    [
+      '-c',
+      '. scripts/router/lib.sh || exit 90; rt_load_targets || exit 91; rt_ssh arm64 "$1"',
+      'sh',
+      remote
+    ],
+    { cwd: REPO_ROOT, env: { ...process.env, ROUTERS: 'arm64' }, timeout: 60_000 }
+  ).then(
+    () => 0 as unknown,
+    (err: unknown) => (err as { code?: unknown } | null)?.code
+  );
+  if (code === 3) throw new Error('стенд arm64: нет связи по ssh');
+  if (code === 90 || code === 91) throw new Error('стенд arm64: файл целей не прочитан');
+  if (typeof code !== 'number') {
+    throw new Error('стенд arm64: команда не выполнена (таймаут или запуск sh)');
+  }
+  return code;
+}
+
+/** Путь файла сбоя: только по имени из шаблона теста. */
+function startFailPath(name: string): string {
+  if (!START_FAIL_NAME.test(name)) throw new Error('имя файла сбоя вне шаблона теста');
+  return `${XRAY_CONFIGS}/${name}`;
+}
+
+/** Удаляет только файл сбоя по вычисленному пути и проверяет, что его больше нет. */
+async function removeStartFailFile(name: string): Promise<void> {
+  const p = startFailPath(name);
+  const code = await standSh(`rm -f ${p}; test ! -e ${p} || exit 10`);
+  if (code !== 0) throw new Error(`start-fail-cleanup: файл сбоя остался (код ${code})`);
+  if (startFailFile === name) startFailFile = null;
+}
+
+/**
+ * Возвращает исходное ядро: switch_kernel с исходом switched (409 kernel_op_in_progress — до
+ * трёх повторов через 5 с, как у restoreSnapshot), затем вид мастера — запущено только оно,
+ * конфликта нет.
+ */
+async function returnKernel(page: Page, kernel: string): Promise<void> {
+  const path = `/api/service/control?action=switch_kernel&kernel=${encodeURIComponent(kernel)}`;
+  let res = await api(page, 'POST', path);
+  for (
+    let attempt = 1;
+    attempt <= 3 && res.status === 409 && res.data?.code === 'kernel_op_in_progress';
+    attempt++
+  ) {
+    await page.waitForTimeout(5000);
+    res = await api(page, 'POST', path);
+  }
+  const outcome = String(res.data?.outcome ?? res.data?.code ?? '');
+  if (res.status !== 200 || outcome !== 'switched') {
+    throw new Error(
+      `start-fail-cleanup: ядро ${kernel} не возвращено (HTTP ${res.status} ${outcome})`
+    );
+  }
+  await expect
+    .poll(
+      async () => {
+        const k = (await wizard(page)).kernels;
+        return !k.conflict && k.running.length === 1 && k.running[0] === kernel
+          ? 'ok'
+          : `запущено ${k.running.join(',') || 'none'}, конфликт ${k.conflict}`;
+      },
+      { message: `start-fail-cleanup: ядро ${kernel} снова запущено`, timeout: T.switchKernel }
+    )
+    .toBe('ok');
+}
+
 // Прежние значения стенда: null — ещё не прочитаны (beforeAll не дошёл), возвращать нечего
 let prevStatus: string | null = null;
 let devWasOn: boolean | null = null;
@@ -773,8 +920,13 @@ test.beforeAll(async ({ browser }) => {
 });
 
 test.afterAll(async ({ browser }) => {
-  // Уцелевший снимок clean-install восстанавливается первым, до прочей уборки
-  test.setTimeout(cleanSnap !== null ? T.save * 8 : T.save * 4);
+  // Уцелевший снимок clean-install восстанавливается первым, до прочей уборки; затем стенд
+  // после start-failure — файл сбоя и исходное ядро (switch_kernel с повторами 409 и опросом)
+  test.setTimeout(
+    (cleanSnap !== null ? T.save * 8 : T.save * 4) +
+      (startFailKernel !== null ? T.switchKernel + 3 * 5_000 + T.action : 0) +
+      (startFailFile !== null ? T.action : 0)
+  );
   // Уборка идёт до конца при любом сбое шага: первая ошибка — после всех шагов
   const errors: unknown[] = [];
   const attempt = async (fn: () => Promise<void>): Promise<void> => {
@@ -804,6 +956,30 @@ test.afterAll(async ({ browser }) => {
   } else if (!cleanRestored) {
     console.log('clean-snapshot: none');
   }
+  // Тест start-failure не вернул стенд (тайм-аут, сбой уборки): файл сбоя, затем ядро
+  let standLeft: Error | null = null;
+  if (startFailFile !== null || startFailKernel !== null) {
+    const file = startFailFile;
+    if (file !== null) await attempt(() => removeStartFailFile(file));
+    const kernel = startFailKernel;
+    if (kernel !== null) {
+      await attempt(() =>
+        withPanel(browser, async (page) => {
+          await returnKernel(page, kernel);
+          startFailKernel = null;
+        })
+      );
+    }
+    if (startFailFile === null && startFailKernel === null) {
+      console.log('start-fail-cleanup: restored-in-hook');
+    } else {
+      const left = [startFailFile !== null ? 'file' : '', startFailKernel !== null ? 'kernel' : '']
+        .filter((x) => x !== '')
+        .join('|');
+      console.log(`start-fail-cleanup: left ${left}`);
+      standLeft = new Error(`start-fail-cleanup: left ${left} — вернуть стенд вручную`);
+    }
+  }
   await attempt(() =>
     withPanel(browser, async (page) => {
       await waitApplyIdle(page, 'перед возвратом статуса мастера');
@@ -817,6 +993,7 @@ test.afterAll(async ({ browser }) => {
   });
   await attempt(() => layer.restore(browser));
   if (snapLeft !== null) throw snapLeft;
+  if (standLeft !== null) throw standLeft;
   if (errors.length > 0) throw errors[0];
 });
 
@@ -1188,9 +1365,6 @@ test(
     }
   },
   async ({ page, browser }) => {
-    // Три прогона в сессии 149.1-09: поток прошёл целиком, затем 10-секундные ожидания
-    // упёрлись в медленную панель на разных шагах («Закрыть», отпускание секции).
-    quarantine('wizard-clean-install-slow-panel-timeouts');
     test.setTimeout(T.save * 8);
     await page.setViewportSize({ width: 1280, height: 900 });
     await startPage(page);
@@ -1236,7 +1410,10 @@ test(
                 v.status === prev || (prev === '' && v.done_count === 6 && v.status === 'done');
               return ok ? 'ok' : `статус ${v.status}, было ${prev}, выполнено ${v.done_count}`;
             },
-            { message: 'статус мастера после восстановления снимка', timeout: T.action }
+            {
+              message: 'статус мастера после восстановления снимка',
+              timeout: doneDeadline(await wizard(page))
+            }
           )
           .toBe('ok');
       } catch (err) {
@@ -1250,6 +1427,29 @@ test(
 );
 
 /**
+ * Готовность стенда к clean-install по свежему GET мастера: ответ POST reset несёт статус
+ * записи, а прочие поля — последнее наблюдение панели (план 149.1-10). Опрос до пустого
+ * состояния с автооткрытием и пустым применённым состоянием не дольше viewDeadline; не
+ * сошлось — ошибка подготовки с последними наблюдёнными значениями.
+ */
+async function waitCleanReady(page: Page): Promise<WizardView> {
+  const ready = (v: WizardView): boolean =>
+    v.empty && v.auto_open && stepOf(v, 'apply').applied_empty === true;
+  let last = await wizard(page);
+  const until = Date.now() + viewDeadline(last);
+  while (!ready(last) && Date.now() < until) {
+    await page.waitForTimeout(1000);
+    last = await wizard(page);
+  }
+  if (!ready(last)) {
+    throw new Error(
+      `${PREP} состояние не пустое: empty ${last.empty}, auto_open ${last.auto_open}, applied_empty ${String(stepOf(last, 'apply').applied_empty)}, выполнено шагов ${last.done_count}`
+    );
+  }
+  return last;
+}
+
+/**
  * Тело clean-install под снимком: подготовка до чистой установки, затем проход мастера с нуля
  * (автооткрытие, «Закрыть», возврат ссылкой, взятие, «Добавить», пресет, «Применить», итог IP,
  * «пройдено») и «Взять остальные» для отпущенной в черновике секции Xray.
@@ -1257,13 +1457,9 @@ test(
 async function cleanInstallPass(page: Page, browser: Browser): Promise<void> {
   // --- подготовка: стенд доводится до чистой установки ---
   await prepareClean(page);
-  const w = await wizardReset(page);
-  const applyStep = stepOf(w, 'apply');
-  if (!w.empty || !w.auto_open || applyStep.applied_empty !== true) {
-    throw new Error(
-      `${PREP} состояние не пустое: empty ${w.empty}, auto_open ${w.auto_open}, applied_empty ${String(applyStep.applied_empty)}, выполнено шагов ${w.done_count}`
-    );
-  }
+  // Ответ сброса проверяет только статус; готовность — по свежему GET
+  await wizardReset(page);
+  const w = await waitCleanReady(page);
   const held = Object.entries(await xrayCores(page))
     .filter(([, s]) => s.desired || s.taken)
     .map(([sid]) => sid);
@@ -1294,8 +1490,21 @@ async function cleanInstallPass(page: Page, browser: Browser): Promise<void> {
   await expect(page.getByTestId('setup-step-7')).toHaveAttribute('data-status', 'locked');
   await expect(page.getByTestId('setup-ip-result')).toHaveAttribute('data-state', 'locked');
 
-  // «Закрыть» отменяет автооткрытие на том же пустом черновике (D-10)
+  // «Закрыть» отменяет автооткрытие на том же пустом черновике (D-10); пишущий ответ панели
+  // мерится и не дольше WIZARD_POST_MAX, переход после ответа — действие клиента (T.action)
+  const closeResp = page.waitForResponse(
+    (r) => r.request().method() === 'POST' && new URL(r.url()).pathname === `${WIZARD}/close`,
+    { timeout: T.action }
+  );
+  const closeStart = Date.now();
   await page.getByTestId('setup-close').click();
+  const closeRes = await closeResp;
+  const closeMs = Date.now() - closeStart;
+  branch(`close: ${closeMs}ms`);
+  expect(closeRes.status(), `POST ${WIZARD}/close`).toBe(200);
+  expect(closeMs, 'clean-install: ответ «Закрыть» не дольше WIZARD_POST_MAX').toBeLessThanOrEqual(
+    WIZARD_POST_MAX
+  );
   await expect(page).toHaveURL(/#\/config\/nodes$/, { timeout: T.action });
   const closed = await wizard(page);
   expect(
@@ -1351,7 +1560,7 @@ async function cleanInstallPass(page: Page, browser: Browser): Promise<void> {
   await expect
     .poll(async () => stepOf(await wizard(page), 'sections').done, {
       message: 'шаг sections выполнен',
-      timeout: T.action
+      timeout: viewDeadline(await wizard(page))
     })
     .toBe(true);
 
@@ -1360,7 +1569,7 @@ async function cleanInstallPass(page: Page, browser: Browser): Promise<void> {
   await expect
     .poll(async () => stepOf(await wizard(page), 'nodes').done, {
       message: 'шаг nodes выполнен',
-      timeout: T.action
+      timeout: viewDeadline(await wizard(page))
     })
     .toBe(true);
 
@@ -1372,7 +1581,7 @@ async function cleanInstallPass(page: Page, browser: Browser): Promise<void> {
     await expect
       .poll(async () => stepOf(await wizard(page), 'routing').done, {
         message: 'шаг routing выполнен',
-        timeout: T.action
+        timeout: viewDeadline(await wizard(page))
       })
       .toBe(true);
   }
@@ -1391,16 +1600,17 @@ async function cleanInstallPass(page: Page, browser: Browser): Promise<void> {
 
   // Шаги 6 и 7 — как в wizard-flow после применения
   const after = await startSettles(page);
-  await expectStepsMatchServer(page);
+  const seen = await expectStepsMatchServer(page);
   branch(`ip-apply: ${await expectIpOutcome(page, ipReady(after), 45_000)}`);
 
-  // «Пройдено» ставит сервер при выполненных 1–6 (D-06): карточка исчезает
-  const doneCount = (await wizard(page)).done_count;
+  // «Пройдено» ставит сервер при выполненных 1–6 (D-06): карточка исчезает. Число шагов —
+  // из вида, против которого сверены строки шагов
+  const doneCount = seen.done_count;
   if (doneCount === 6) {
     await expect
       .poll(async () => (await wizard(page)).status, {
         message: 'статус мастера при выполненных шагах 1–6',
-        timeout: 25_000
+        timeout: doneDeadline(seen)
       })
       .toBe('done');
     guard = await reloadAt(page, guard, '#/dashboard');
@@ -1446,7 +1656,10 @@ async function takeRestReleasing(page: Page): Promise<void> {
         const p = stepOf(await wizard(page), 'sections').partial;
         return `desired ${String(c?.desired)}, taken ${String(c?.taken)}, не взято ${p ? p.total - p.done : 0}`;
       },
-      { message: `секция ${sid} отпущена в черновике`, timeout: T.action }
+      {
+        message: `секция ${sid} отпущена в черновике`,
+        timeout: viewDeadline(await wizard(page))
+      }
     )
     .toBe('desired false, taken true, не взято 1');
 
@@ -1479,8 +1692,227 @@ async function takeRestReleasing(page: Page): Promise<void> {
         const p = stepOf(await wizard(page), 'sections').partial;
         return `desired ${String(c?.desired)}, не взято ${p ? p.total - p.done : 0}`;
       },
-      { message: `секция ${sid} снова в черновике`, timeout: T.action }
+      {
+        message: `секция ${sid} снова в черновике`,
+        timeout: viewDeadline(await wizard(page))
+      }
     )
     .toBe('desired true, не взято 0');
   await resetDraft(page);
+}
+
+// Последним тестом файла: файл идёт в режиме serial, и падение этого теста перед clean-install
+// пропустило бы SC1 в полном прогоне. clean-install остаётся последним разрушающим тестом со
+// снимком, а этот тест сам возвращает стенд (файл сбоя и исходное ядро), запасной путь — afterAll.
+test(
+  'config-setup start-failure vp:1280',
+  {
+    tag: [FULL_TAG, CORE_TAG],
+    annotation: {
+      type: TIER_FULL_ANNOTATION,
+      description:
+        'внесение сбоя: испорченный файл конфигурации Xray, остановка и неудачный запуск ядра'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.switchKernel * 3);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await startPage(page);
+    const name = `xcp-e2e-start-fail-${randomPort()}.json`;
+    const path = startFailPath(name);
+
+    // --- подготовка: провал — ошибка подготовки, не находка мастера ---
+    const w0 = await wizard(page);
+    if (!w0.kernels.xkeen || !w0.kernels.xray) {
+      throw new Error(`${START_PREP} XKeen ${w0.kernels.xkeen}, Xray ${w0.kernels.xray}`);
+    }
+    if (w0.kernels.conflict || w0.kernels.running.length !== 1) {
+      throw new Error(
+        `${START_PREP} запущено ядер ${w0.kernels.running.length}, конфликт ${w0.kernels.conflict}`
+      );
+    }
+    const orig = w0.kernels.running[0];
+    await waitApplyIdle(page, 'перед start-failure');
+    if ((await standSh(`test ! -e ${path} || exit 10`)) !== 0) {
+      throw new Error(`${START_PREP} путь файла сбоя занят`);
+    }
+
+    let primary: unknown;
+    let created = false;
+    try {
+      startFailKernel = orig;
+      // тот же маршрут, что у «Остановить» в интерфейсе
+      const stop = await api(
+        page,
+        'POST',
+        `/api/service/control?action=stop&kernel=${encodeURIComponent(orig)}`
+      );
+      const stopOutcome = String(stop.data?.outcome ?? stop.data?.code ?? '');
+      if (stop.status !== 200 || !['stopped', 'not_running'].includes(stopOutcome)) {
+        throw new Error(`${START_PREP} остановка ${orig}: HTTP ${stop.status} ${stopOutcome}`);
+      }
+      // GET мастера может отдать прежнее наблюдение: срок — по виду мастера
+      const v = await wizard(page);
+      await expect
+        .poll(async () => (await wizard(page)).kernels.running.length, {
+          message: `${START_PREP} ядро ${orig} остановлено`,
+          timeout: viewDeadline(v)
+        })
+        .toBe(0);
+      const code = await standSh(
+        `test -d ${XRAY_CONFIGS} || exit 11; test ! -e ${path} || exit 10; ` +
+          `printf '%s\\n' '${START_FAIL_BODY}' > ${path} || exit 12`
+      );
+      // 10 и 11 — до записи: путь чужой или каталога нет, удалять нечего
+      if (code !== 10 && code !== 11) {
+        startFailFile = name;
+        created = true;
+      }
+      if (code !== 0) throw new Error(`${START_PREP} файл сбоя не записан (код ${code})`);
+      await startFailureScenario(page, name);
+    } catch (err) {
+      primary = err;
+    }
+
+    // --- уборка при любом исходе: файл, затем ядро; ошибка уборки — после ошибки сценария ---
+    const cleanupErrors: unknown[] = [];
+    const file = startFailFile;
+    if (file !== null) {
+      try {
+        await removeStartFailFile(file);
+      } catch (err) {
+        cleanupErrors.push(err);
+      }
+    }
+    const kernel = startFailKernel;
+    if (kernel !== null) {
+      try {
+        await returnKernel(page, kernel);
+        startFailKernel = null;
+      } catch (err) {
+        cleanupErrors.push(err);
+      }
+    }
+    if (created && startFailFile === null) {
+      try {
+        await expect
+          .poll(
+            async () => {
+              const st = await api(page, 'GET', '/api/configlayer/state');
+              const files = Array.isArray(st.data?.files)
+                ? (st.data.files as { key?: unknown }[])
+                : [];
+              return files.some((f) => f?.key === `xray:${name}`);
+            },
+            { message: 'start-fail-cleanup: ключа файла сбоя нет в манифесте', timeout: T.page }
+          )
+          .toBe(false);
+      } catch (err) {
+        cleanupErrors.push(err);
+      }
+    }
+    if (startFailFile === null && startFailKernel === null) {
+      console.log('start-fail-cleanup: restored-in-test');
+    }
+    if (primary !== undefined) throw primary;
+    if (cleanupErrors.length > 0) throw cleanupErrors[0];
+  }
+);
+
+/**
+ * Сценарий при остановленном ядре и внесённом файле: запуск Xray из шага 6, ответ
+ * switch_kernel (исход, вывод, проверка конфигурации) и блок ошибки шага. G-149.1-8
+ * засчитывается, только если причина или хвост называют внесённый файл, а причина — не строка
+ * о смене ядра. В сообщения и аннотацию — только testId, исходы, признаки и счётчики.
+ */
+async function startFailureScenario(page: Page, name: string): Promise<void> {
+  await gotoHash(page, '#/config/setup');
+  await expect(page.getByTestId('config-setup')).toBeVisible({ timeout: T.page });
+  await expandStep(page, 6);
+  const seg = page.getByTestId('setup-start-kernel-xray');
+  if ((await seg.count()) > 0) await seg.click();
+  const startBtn = page.getByTestId('setup-start');
+  await expect(startBtn, 'setup-start активна').toBeEnabled({ timeout: T.action });
+
+  let guard = attachConsoleGuard(page);
+  const switched = page.waitForResponse(
+    (r) => {
+      if (r.request().method() !== 'POST') return false;
+      const u = new URL(r.url());
+      return (
+        u.pathname === '/api/service/control' && u.searchParams.get('action') === 'switch_kernel'
+      );
+    },
+    { timeout: T.switchKernel }
+  );
+  await startBtn.click();
+  const resp = await switched;
+  const http = resp.status();
+  let body: Record<string, unknown> | null = null;
+  try {
+    body = (await resp.json()) as Record<string, unknown>;
+  } catch {
+    body = null;
+  }
+  let output = '';
+  let check = '';
+  if (http === 200) {
+    const data = (body?.data ?? {}) as Record<string, unknown>;
+    const outcome = String(data.outcome ?? '');
+    if (outcome !== 'new_not_started') {
+      throw new Error(`${START_PREP} исход переключения ${outcome}: сбой не внесён`);
+    }
+    output = typeof data.output === 'string' ? data.output : '';
+    check = typeof data.check === 'string' ? data.check : '';
+  } else if (http === 500) {
+    // Ошибка скрипта: в тексте ошибки вывод XKeen и строки проверки конфигурации. Ответ 500
+    // здесь — внесённый сбой, а не находка: сборщик консоли меняется после блока ошибки
+    output = typeof body?.error === 'string' ? body.error : '';
+    guard.detach();
+  } else {
+    throw new Error(`${START_PREP} switch_kernel: HTTP ${http}`);
+  }
+  const banner = output.split('\n').some((l) => BANNER.test(l));
+  const inOutput = output.includes(name);
+  const inCheck = check.includes(name);
+  const file =
+    inOutput && inCheck ? 'output+check' : inOutput ? 'output' : inCheck ? 'check' : 'none';
+
+  const box = page.getByTestId('setup-start-error');
+  await expect(box, 'setup-start-error виден').toBeVisible({ timeout: T.action });
+  if (http === 500) guard = attachConsoleGuard(page);
+  const reason = (
+    (await box.locator('.step-start-error-body > span').first().textContent()) ?? ''
+  ).trim();
+  const source = (await box.getAttribute('data-reason')) ?? 'none';
+  const log = page.getByTestId('setup-start-log');
+  const lines =
+    (await log.count()) > 0
+      ? ((await log.textContent()) ?? '')
+          .split('\n')
+          .map((l) => l.trim())
+          .filter((l) => l !== '')
+      : [];
+  branch(
+    `start-fail: banner ${banner ? 'yes' : 'no'}, http ${http}, reason ${source}, file ${file}, log ${lines.length}`
+  );
+
+  expect(BANNER.test(reason), 'start-failure: причина не баннер смены ядра').toBe(false);
+  await expect(log, 'setup-start-log виден').toBeVisible({ timeout: T.action });
+  expect(lines.length, 'setup-start-log: строк хвоста').toBeGreaterThanOrEqual(1);
+  expect(lines.length, 'setup-start-log: строк хвоста').toBeLessThanOrEqual(8);
+  expect(
+    lines.filter((l) => BANNER.test(l)).length,
+    'start-failure: хвост показан без баннера'
+  ).toBe(0);
+  // Ошибка Xray называет путь файла; общая строка XKeen с «не удалось» или «failed» — нет
+  expect(file, 'start-failure: ошибка внесённого файла не показана').not.toBe('none');
+  expect(
+    reason.includes(name) || lines.some((l) => l.includes(name)),
+    'start-failure: причина или хвост называет внесённый файл'
+  ).toBe(true);
+  await expect(page.getByTestId('setup-start-retry')).toBeVisible();
+  await expect(page.getByTestId('setup-start-logs-link')).toBeVisible();
+  await expect(page.getByTestId('setup-start-files-link')).toBeVisible();
+  await guard.assertClean();
 }
