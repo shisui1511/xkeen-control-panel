@@ -27,15 +27,20 @@ const (
 )
 
 // SwitchResult — типизированный ответ switch_kernel. Old — ядро до переключения
-// ("xray" | "mihomo" | "none"), New — целевое. Output заполняет вызывающий
-// (вывод скрипта XKeen); подтверждение его не формирует.
+// ("xray" | "mihomo" | "none"), New — целевое. Output и Check заполняет
+// вызывающий; подтверждение их не формирует.
 type SwitchResult struct {
 	Outcome    SwitchOutcome `json:"outcome"`
 	Old        string        `json:"old"`
 	New        string        `json:"new"`
 	OldRunning bool          `json:"old_running"`
 	NewRunning bool          `json:"new_running"`
-	Output     string        `json:"output"`
+	// Output — последние строки вывода скрипта XKeen без ANSI.
+	Output string `json:"output"`
+	// Check — вывод проверки конфигурации нового ядра, если оно не запустилось
+	// и проверка провалилась: последние строки без ANSI. Вывод фонового ядра в
+	// вывод скрипта XKeen не попадает, поэтому причину сбоя называет проверка.
+	Check string `json:"check,omitempty"`
 }
 
 // KernelSwitcher подтверждает переключение ядра по процессам. Фоновых горутин

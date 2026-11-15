@@ -13,7 +13,14 @@
   import ImmediateMark from '../ImmediateMark.svelte';
   import { apiFetchJSON } from '../../../lib/api';
   import { activeKernelName } from '../../../stores';
-  import { notifySwitchOutcome, switchKernel } from '../../../lib/serviceControl';
+  // SWITCH_BANNER — строка скрипта XKeen о смене ядра, причиной и строкой хвоста не бывает;
+  // ERROR_MARK — признак строки ошибки
+  import {
+    ERROR_MARK,
+    SWITCH_BANNER,
+    notifySwitchOutcome,
+    switchKernel
+  } from '../../../lib/serviceControl';
   import { KERNEL_NAMES, kernelLabel, type KernelName } from '../../../lib/kernelState';
   import {
     WIZARD_STEP_IDS,
@@ -28,9 +35,12 @@
   // явной кнопкой — тем же switchKernel и тостом исхода, что на «Службах»; при двух
   // установленных ядрах выбор Xray | Mihomo. «Запустить …» — главная (primary), только
   // пока шаг текущий. Сбой запуска показывается в шаге общим блоком ошибки: причина, до 8
-  // последних строк лога ядра (только текстом), «Повторить запуск» — тогда единственный
-  // вход в запуск, строка «Запустить …» скрыта, — «Журнал» и «Файлы». Конфликт ядер — не
-  // сбой запуска: кнопка неактивна с причиной, кнопки остановки стоят в шаге 5.
+  // последних строк (только текстом), «Повторить запуск» — тогда единственный вход в запуск,
+  // строка «Запустить …» скрыта, — «Журнал» и «Файлы». Причина и хвост берутся из проверки
+  // конфигурации сервером, вывода переключения и буфера ядра — в этом порядке; строка
+  // скрипта XKeen о смене ядра отбрасывается: это не причина, а сообщение об успехе смены
+  // (G-149.1-8). Конфликт ядер — не сбой запуска: кнопка неактивна с причиной, кнопки
+  // остановки стоят в шаге 5.
   // Повтор держит блок ошибки и «Повторить запуск» на месте до исхода (D-16): кнопка в ходе
   // становится disabled, браузер снимает с неё фокус — после исхода он возвращается на
   // действие шага.
@@ -70,6 +80,8 @@
   const runningLabel = $derived(kernelLabel(kernels.running[0] ?? $activeKernelName));
 
   let failReason = $state('');
+  // Откуда взята причина: проверка конфигурации, вывод переключения, буфер ядра или нигде
+  let failSource = $state<'check' | 'output' | 'buffer' | 'none'>('none');
   let failKernel = $state<KernelName | ''>('');
   let logLines = $state<string[]>([]);
   // Запуск начат из блока ошибки: блок с прежними причиной и логом остаётся до исхода
@@ -88,13 +100,23 @@
   // Имя ядра — моноширинным
   const failParts = $derived(valueParts($t(failKey, { kernel: VALUE_MARK, reason: failReason })));
 
-  // Первая строка вывода без метки источника в квадратных скобках
-  function firstLine(text: string): string {
-    const line =
-      text
-        .split('\n')
-        .map((l) => l.trim())
-        .find((l) => l !== '') ?? '';
+  // Сколько строк хвоста показывает блок ошибки
+  const TAIL_LINES = 8;
+
+  // Строки без пустых и без строки о смене ядра
+  function cleanLines(lines: string[]): string[] {
+    return lines.map((l) => l.trim()).filter((l) => l !== '' && !SWITCH_BANNER.test(l));
+  }
+
+  // Последние строки текста без пустых и без строки о смене ядра
+  function textLines(text: string): string[] {
+    return cleanLines(text.split('\n')).slice(-TAIL_LINES);
+  }
+
+  // Причина — первая строка с признаком ошибки, без метки источника в квадратных скобках
+  // и точек в конце; строки без признака ошибки причиной не выдаются
+  function reasonOf(lines: string[]): string {
+    const line = lines.find((l) => ERROR_MARK.test(l)) ?? '';
     return line.replace(/^\[[^\]]*\]\s*/, '').replace(/[.。]+$/, '');
   }
 
@@ -118,15 +140,40 @@
     }
   }
 
-  async function fail(kernel: KernelName, reason: string) {
+  // Сбой запуска: check — вывод проверки конфигурации сервером, output — вывод
+  // переключения (или текст ошибки запроса), затем буфер ядра. Хвост — строки в этом
+  // порядке без повторов, причина — из первого источника, где есть строка ошибки
+  async function fail(kernel: KernelName, check: string, output: string) {
+    const sources: Array<['check' | 'output' | 'buffer', string[]]> = [
+      ['check', textLines(check)],
+      ['output', textLines(output)],
+      ['buffer', cleanLines(await loadLog(kernel))]
+    ];
+    const tail: string[] = [];
+    for (const [, lines] of sources) {
+      for (const line of lines) {
+        if (tail.length < TAIL_LINES && !tail.includes(line)) tail.push(line);
+      }
+    }
+    let reason = '';
+    let source: 'check' | 'output' | 'buffer' | 'none' = 'none';
+    for (const [name, lines] of sources) {
+      reason = reasonOf(lines);
+      if (reason !== '') {
+        source = name;
+        break;
+      }
+    }
     failReason = reason;
+    failSource = source;
     failKernel = kernel;
-    logLines = await loadLog(kernel);
+    logLines = tail;
     phase = 'error';
   }
 
   function clearFailure() {
     failReason = '';
+    failSource = 'none';
     failKernel = '';
     logLines = [];
   }
@@ -164,7 +211,7 @@
       const result = await switchKernel(kernel);
       notifySwitchOutcome(result);
       if (result.outcome === 'new_not_started') {
-        await fail(kernel, firstLine(result.output));
+        await fail(kernel, result.check, result.output);
       } else {
         clearFailure();
         phase = 'idle';
@@ -178,7 +225,8 @@
         clearFailure();
         phase = 'idle';
       } else {
-        await fail(kernel, firstLine(e instanceof Error ? e.message : String(e)));
+        // При HTTP 500 сервер уже дописал к тексту ошибки строки проверки конфигурации
+        await fail(kernel, '', e instanceof Error ? e.message : String(e));
       }
     } finally {
       retrying = false;
@@ -240,7 +288,12 @@
         <span>{$t('kernel.conflict_blocked')}</span>
       </p>
     {:else if showError}
-      <div class="alert alert-error step-start-error" role="alert" data-testid="setup-start-error">
+      <div
+        class="alert alert-error step-start-error"
+        role="alert"
+        data-testid="setup-start-error"
+        data-reason={failSource}
+      >
         <span class="step-start-icon" aria-hidden="true"><Icon name="warning" size={16} /></span>
         <div class="step-start-error-body">
           <span

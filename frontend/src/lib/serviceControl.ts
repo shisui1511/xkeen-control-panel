@@ -24,8 +24,27 @@ export interface SwitchResult {
   new: KernelName;
   old_running: boolean;
   new_running: boolean;
+  /** Последние строки вывода скрипта XKeen без ANSI. */
   output: string;
+  /**
+   * Вывод проверки конфигурации нового ядра, если оно не запустилось и проверка
+   * провалилась (последние строки без ANSI); иначе пусто.
+   */
+  check: string;
 }
+
+/**
+ * Служебная строка скрипта XKeen о смене ядра («Выполнена смена ядра на Xray»): это
+ * сообщение об успехе смены, причиной сбоя запуска и строкой его хвоста не бывает.
+ */
+export const SWITCH_BANNER = /смен[аы]\s+ядра/iu;
+
+/**
+ * Признак строки ошибки в выводе переключения, проверки конфигурации и журнале ядра:
+ * английские слова целиком, русские — подстрокой.
+ */
+export const ERROR_MARK =
+  /\b(?:fail|failed|failure|errors?|invalid|unexpected|panic|fatal|cannot|unable)\b|ошибк|не удалось|невозможно/iu;
 
 const SWITCH_OUTCOMES: ReadonlySet<string> = new Set([
   'switched',
@@ -190,7 +209,8 @@ export async function switchKernel(kernel: KernelName): Promise<SwitchResult> {
       new: kernel,
       old_running: data.old_running === true,
       new_running: data.new_running === true,
-      output: typeof data.output === 'string' ? data.output : ''
+      output: typeof data.output === 'string' ? data.output : '',
+      check: typeof data.check === 'string' ? data.check : ''
     };
   } catch (e) {
     if (!isOpInProgress(e)) clearRestartGrace();
