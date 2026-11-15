@@ -369,6 +369,7 @@
       "shared": false,
       "paths": [
         "internal/services/routing/**",
+        "internal/services/proxyping/**",
         "internal/handlers/routing.go",
         "internal/handlers/route_tracer.go",
         "internal/handlers/rule_provider_inspect.go",
