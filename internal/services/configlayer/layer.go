@@ -165,6 +165,8 @@ type Layer struct {
 	beforeApply []func(st StateView)
 	// dnsSeq — счётчик событий dns (PublishDNS).
 	dnsSeq atomic.Uint64
+	// proxiesSeq — счётчик событий страницы «Прокси» (PublishProxies).
+	proxiesSeq atomic.Uint64
 	// wizardSeq — счётчик событий wizard (PublishWizard).
 	wizardSeq atomic.Uint64
 	// applySeq — номер запуска, который получают хуки BeforeApply и AfterApply
@@ -775,6 +777,15 @@ func (l *Layer) PublishDNS() {
 		return
 	}
 	l.broker.Publish(Event{Type: EventDNS, Data: DNSEvent{Seq: l.dnsSeq.Add(1)}})
+}
+
+// PublishProxies сообщает клиентам об изменении рантайма, выбора или пинга.
+// Частоту ограничивает вызывающий; выключенный слой события не публикует.
+func (l *Layer) PublishProxies(kind string) {
+	if !l.Enabled() {
+		return
+	}
+	l.broker.Publish(Event{Type: EventProxies, Data: ProxiesEvent{Seq: l.proxiesSeq.Add(1), Kind: kind}})
 }
 
 // PublishRouting сообщает клиентам, что владение маршрутизацией или её дрейф
