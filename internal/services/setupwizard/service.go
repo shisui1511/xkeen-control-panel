@@ -254,6 +254,11 @@ type takeCount struct {
 // наблюдение, дочитанное позже отличие публикуется событием wizard (G-149.1-6).
 const viewWait = time.Second
 
+// slowViewLogEvery — не чаще раза за этот срок пишется строка о долгом чтении
+// вида: при взятых секциях Xray оно медленное постоянно, а смоук считает
+// повторы чаще раза в минуту сбоем.
+const slowViewLogEvery = 5 * time.Minute
+
 // readCall — одно чтение вида: done закрывается по его завершении; served —
 // ключи видов, отданных из кэша, пока оно шло (отличие от них публикуется).
 type readCall struct {
@@ -274,6 +279,7 @@ type Service struct {
 	cancel   context.CancelFunc
 	stopOnce sync.Once
 	started  atomic.Bool
+	slowLog  atomic.Int64 // UnixNano последней строки о долгом чтении вида
 	done     chan struct{}
 
 	// tickMu — только запись признака (WR-03): done тика по фактам слоя,
@@ -520,6 +526,17 @@ func (s *Service) observe(wait time.Duration) (observation, bool) {
 	return o, true
 }
 
+// slowViewDue отвечает, пора ли писать строку о долгом чтении вида: не чаще
+// раза за slowViewLogEvery.
+func (s *Service) slowViewDue() bool {
+	now := time.Now().UnixNano()
+	last := s.slowLog.Load()
+	if last != 0 && now-last < int64(slowViewLogEvery) {
+		return false
+	}
+	return s.slowLog.CompareAndSwap(last, now)
+}
+
 // runRead — одно чтение вида: кладёт наблюдение в кэш, запускает следующее
 // чтение, если оно записано, и публикует событие wizard, если вид отличается от
 // отданного из кэша за время чтения. Одно чтение без цикла — не фоновая служба:
@@ -528,7 +545,7 @@ func (s *Service) runRead(c *readCall) {
 	start := time.Now()
 	o, rt := s.readObservation()
 	s.storeObservation(o)
-	if took := time.Since(start); took > viewWait {
+	if took := time.Since(start); took > viewWait && s.slowViewDue() {
 		log.Printf("setupwizard: чтение вида заняло %v (факты %v, установленность %v, ядра %v, секции Xray %v)",
 			took, rt.facts, rt.inst, rt.kernels, rt.take)
 	}
