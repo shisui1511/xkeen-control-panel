@@ -1953,7 +1953,10 @@ async function startFailureScenario(page: Page, name: string): Promise<void> {
   for (const width of [390, 768, 1280]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     for (const theme of ['light', 'dark']) {
-      await page.evaluate((th) => document.documentElement.setAttribute('data-theme', th), theme);
+      await page.evaluate((th) => {
+        document.documentElement.setAttribute('data-theme', th);
+        document.documentElement.setAttribute('data-scheme', th);
+      }, theme);
       const where = `${width} px, ${theme}`;
       await expect(box, `setup-start-error виден: ${where}`).toBeVisible();
       const m = await page.evaluate(() => {
