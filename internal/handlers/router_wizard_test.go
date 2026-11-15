@@ -103,6 +103,31 @@ func rtWizardViewUntil(e *rtSrc, what string, cond func(v map[string]any) (bool,
 	return v
 }
 
+// rtWizardSettledView — вид мастера, не отстающий от состояния слоя. GET отдаёт прежнее
+// наблюдение, если чтение (ядра, секции Xray) идёт дольше viewWait, поэтому один GET после
+// правки черновика может показать прежнее число выполненных шагов. Вид читается с паузой дольше
+// самого медленного чтения на устройстве, пока два подряд не совпадут по числу выполненных
+// шагов и статусу; срок — период наблюдателя плюс запас, как у rtWizardViewUntil.
+func rtWizardSettledView(e *rtSrc) map[string]any {
+	e.t.Helper()
+	last := rtWizardView(e)
+	limit := rtWizardTick(e.t, last) + 10*time.Second
+	ok, seen := routertest.Poll(limit, 4*time.Second, func() (bool, string) {
+		next := rtWizardView(e)
+		same := rtWizardNum(next, "done_count") == rtWizardNum(last, "done_count") &&
+			rtWizardStatus(next) == rtWizardStatus(last)
+		seen := fmt.Sprintf("done_count %d → %d, статус %q → %q",
+			rtWizardNum(last, "done_count"), rtWizardNum(next, "done_count"),
+			rtWizardStatus(last), rtWizardStatus(next))
+		last = next
+		return same, seen
+	})
+	if !ok {
+		e.t.Fatalf("вид мастера не устоялся за %v: %s", limit, seen)
+	}
+	return last
+}
+
 // rtWizardStep — шаг ответа по id; нет шага — провал.
 func rtWizardStep(t *testing.T, v map[string]any, id string) map[string]any {
 	t.Helper()
@@ -585,7 +610,9 @@ func TestRouterWizardAPI(t *testing.T) {
 	t.Run("done_stamped_by_server", func(t *testing.T) {
 		e := e.with(t)
 		rtDevMode(e, true)
-		v := rtWizardView(e)
+		// Число выполненных шагов определяет ветку проверки: прежнее наблюдение после
+		// правок черновика предыдущих подтестов дало бы не ту ветку.
+		v := rtWizardSettledView(e)
 		prev, doneCount := rtWizardStatus(v), rtWizardNum(v, "done_count")
 		// Период наблюдателя — у процесса панели (tick_s), а не константой.
 		tick := rtWizardTick(t, v)
