@@ -22,6 +22,8 @@
     stableXrayVersion?: string | null;
     /** Канал обновлений Xray на странице: версию подсказываем только для «stable» */
     xrayChannel?: string;
+    /** Блок внутри чужого раздела (шаг мастера): без заголовка секции и карточки */
+    embedded?: boolean;
   }
 
   let {
@@ -30,7 +32,8 @@
     onfinished,
     onopenchange,
     stableXrayVersion = null,
-    xrayChannel = 'stable'
+    xrayChannel = 'stable',
+    embedded = false
   }: Props = $props();
 
   let channel = $state<'stable' | 'beta'>('stable');
@@ -92,41 +95,59 @@
   }
 </script>
 
-<div class="install-section">
-  <Section
-    title={$t('xkinst.title')}
-    description={$t(incomplete ? 'xkinst.desc_incomplete' : 'xkinst.desc')}
-  >
-    <div class="card install-card" class:is-blocked={!available} data-testid="xkeen-install-card">
-      {#if available}
-        <div class="install-row">
-          <span class="install-lbl">{$t('xkinst.channel')}</span>
-          <SegmentedControl
-            ariaLabel={$t('xkinst.channel')}
-            value={channel}
-            items={[
-              { value: 'stable', label: $t('xkinst.channel_stable') },
-              { value: 'beta', label: $t('xkinst.channel_beta') }
-            ]}
-            onchange={(v) => (channel = v === 'beta' ? 'beta' : 'stable')}
-          />
-          <Button variant="primary" onclick={start} data-testid="xkeen-install-start">
-            {$t('xkinst.start')}
-          </Button>
-        </div>
-        <p class="install-hint">{$t('xkinst.hint')}</p>
-        {#if stableHint}
-          <p class="install-hint" data-testid="xkeen-install-stable-hint">{stableHint}</p>
-        {/if}
-      {:else}
-        <p class="install-hint warn">
-          <Icon name="warning" size={16} color="var(--warning)" />
-          <span>{$t('xkinst.no_entware')}</span>
-        </p>
-      {/if}
+<!-- Содержимое одно; обёртка своя: на «Службах» — секция с заголовком и карточкой, во
+     встроенном виде — блок шага без второго заголовка и без карточки в карточке -->
+{#snippet body()}
+  {#if available}
+    <div class="install-row">
+      <span class="install-lbl">{$t('xkinst.channel')}</span>
+      <SegmentedControl
+        ariaLabel={$t('xkinst.channel')}
+        value={channel}
+        items={[
+          { value: 'stable', label: $t('xkinst.channel_stable') },
+          { value: 'beta', label: $t('xkinst.channel_beta') }
+        ]}
+        onchange={(v) => (channel = v === 'beta' ? 'beta' : 'stable')}
+      />
+      <Button
+        variant="primary"
+        size={embedded ? 'sm' : 'md'}
+        onclick={start}
+        data-testid="xkeen-install-start"
+      >
+        {$t('xkinst.start')}
+      </Button>
     </div>
-  </Section>
-</div>
+    <p class="install-hint">{$t('xkinst.hint')}</p>
+    {#if stableHint}
+      <p class="install-hint" data-testid="xkeen-install-stable-hint">{stableHint}</p>
+    {/if}
+  {:else}
+    <p class="install-hint warn">
+      <Icon name="warning" size={16} color="var(--warning)" />
+      <span>{$t('xkinst.no_entware')}</span>
+    </p>
+  {/if}
+{/snippet}
+
+{#if embedded}
+  <div class="install-embedded" class:is-blocked={!available} data-testid="xkeen-install-card">
+    <p class="install-desc">{$t(incomplete ? 'xkinst.desc_incomplete' : 'xkinst.desc')}</p>
+    {@render body()}
+  </div>
+{:else}
+  <div class="install-section">
+    <Section
+      title={$t('xkinst.title')}
+      description={$t(incomplete ? 'xkinst.desc_incomplete' : 'xkinst.desc')}
+    >
+      <div class="card install-card" class:is-blocked={!available} data-testid="xkeen-install-card">
+        {@render body()}
+      </div>
+    </Section>
+  </div>
+{/if}
 
 <Modal
   open={isOpen}
@@ -194,6 +215,47 @@
   .install-card.is-blocked {
     border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
     background: color-mix(in srgb, var(--warning) 6%, var(--bg-card));
+  }
+
+  /* Встроенный вид — блок шага как карточка выбора ядра: фон --bg-elevated, рамка --border,
+     без акцентной рамки; подпись канала 12 px, тексты 14 px */
+  .install-embedded {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+    min-width: 0;
+    padding: var(--spacing-4);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+  }
+
+  .install-embedded.is-blocked {
+    border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+    background: color-mix(in srgb, var(--warning) 6%, var(--bg-elevated));
+  }
+
+  .install-desc {
+    margin: 0;
+    color: var(--fg-secondary);
+    font-size: var(--font-size-base);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .install-embedded .install-row {
+    gap: var(--spacing-2);
+  }
+
+  .install-embedded .install-lbl {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+  }
+
+  .install-embedded .install-hint {
+    font-size: var(--font-size-base);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
   }
 
   .install-hint.warn {

@@ -3534,7 +3534,9 @@ pre.code-output {
     .gc-pin-btn,
     .gc-ping-btn,
     .gc-chevron-btn,
-    .gc-lat-box
+    .gc-lat-box,
+    /* × уведомления — только зона: у кнопки свой position: absolute в .alert-dismissible */
+    .alert-close-btn
   )::after {
     content: '';
     position: absolute;

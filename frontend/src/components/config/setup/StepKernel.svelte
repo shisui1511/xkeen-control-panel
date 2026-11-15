@@ -18,8 +18,9 @@
   import { loadWizard, type WizardKernels, type WizardStep } from '../../../lib/configWizard';
   import { VALUE_MARK, valueParts } from './valueParts';
 
-  // Тело шага 1 «Ядро и XKeen» (D-14, 149 D-23 шаг 1, B2, B4): XKeen ставится встроенной
-  // карточкой установки (терминал — в её окне), ядро — выбором из двух карточек тем же
+  // Тело шага 1 «Ядро и XKeen» (D-14, 149 D-23 шаг 1, B2, B4): XKeen ставится встроенным
+  // блоком установки — без заголовка секции и карточки, терминал — в окне установщика, как
+  // на «Службах»; ядро — выбором из двух карточек тем же
   // клиентом установки, что на «Службах». Установка идёт только по кнопке и сразу, мимо
   // черновика: «Сбросить» её не отменяет (пометка немедленного действия, 149 D-14). Одно
   // ядро уже стоит — шаг выполнен, второе не навязывается: ссылка на «Службы».
@@ -55,6 +56,15 @@
   let failReason = $state('');
   // Текст ошибки сам ставит точку после причины
   const failText = $derived(failReason.trim().replace(/[.。]+$/, ''));
+  // Имя ядра — моноширинным; причины нет — имя ядра не выдаётся за причину, текст отсылает
+  // к журналу
+  const failParts = $derived(
+    valueParts(
+      failText !== ''
+        ? $t('cfg.setup.kernel.install_failed', { kernel: VALUE_MARK, reason: failText })
+        : $t('cfg.setup.kernel.install_failed_unknown', { kernel: VALUE_MARK })
+    )
+  );
 
   // «Установлено: …» — имена ядер моноширинным
   const installedParts = $derived(
@@ -85,7 +95,7 @@
         failKernel = kernel;
         // Причина — как на «Службах»: перевод по error_kind, иначе текст message
         const f = failureMessage(st);
-        failReason = f ? $t(f.key, f.params) : st.message || kernel;
+        failReason = f ? $t(f.key, f.params) : (st.message ?? '');
       }
     } catch (e: unknown) {
       // Отмена при размонтировании — не сбой установки
@@ -113,6 +123,7 @@
     <div class="step-kernel-xkeen" data-testid="setup-kernel-xkeen">
       <ImmediateMark />
       <XKeenInstallCard
+        embedded
         available={xkeenAvailable}
         incomplete={xkeenIncomplete}
         onfinished={() => void loadWizard()}
@@ -151,14 +162,17 @@
             </p>
           {/if}
           {#if failKernel === k && installing === ''}
-            <div class="alert alert-error step-kernel-error" role="alert">
-              <Icon name="warning" size={16} class="step-kernel-error-icon" />
-              <span>
-                {$t('cfg.setup.kernel.install_failed', {
-                  kernel: kernelLabel(k),
-                  reason: failText
-                })}
+            <div
+              class="alert alert-error step-kernel-error"
+              role="alert"
+              data-testid="setup-kernel-error-{k}"
+            >
+              <span class="step-kernel-icon" aria-hidden="true">
+                <Icon name="warning" size={16} />
               </span>
+              <div class="step-kernel-error-body">
+                {failParts[0]}<span class="setup-mono">{kernelLabel(k)}</span>{failParts[1]}
+              </div>
             </div>
           {/if}
         </div>
@@ -212,16 +226,12 @@
     font-family: var(--font-family-mono);
   }
 
-  /* Встроенная карточка установки XKeen: без внешнего отступа, терминал — в её окне */
+  /* Встроенная установка XKeen: блок шага, терминал — в окне установщика */
   .step-kernel-xkeen {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-2);
     min-width: 0;
-  }
-
-  .step-kernel-xkeen :global(.install-section) {
-    margin: 0;
   }
 
   .step-kernel-head {
@@ -262,15 +272,25 @@
     gap: var(--spacing-2);
   }
 
+  /* Блок сбоя — как в шагах 5 и 6: рамка, фон и значок в тоне блока, текст 14 px основным
+     цветом */
   .step-kernel-error {
-    margin: 0;
-    min-width: 0;
-    line-height: 1.5;
-    overflow-wrap: anywhere;
+    margin-bottom: 0;
   }
 
-  .step-kernel-error :global(.step-kernel-error-icon) {
+  .step-kernel-icon {
+    display: inline-flex;
     flex-shrink: 0;
+    align-items: center;
+    height: 1lh;
+  }
+
+  .step-kernel-error-body {
+    min-width: 0;
+    color: var(--fg-primary);
+    font-size: var(--font-size-base);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
   }
 
   .step-kernel-link {

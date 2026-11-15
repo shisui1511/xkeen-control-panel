@@ -17,6 +17,7 @@
   import { t } from '../../../i18n';
   import Icon from '../../../lib/components/Icon.svelte';
   import Spinner from '../../Spinner.svelte';
+  import { motion } from '../../../lib/motion.svelte';
 
   // Строка шага мастера (D-01, UI-SPEC «Строка шага»): маркер с номером или значком,
   // заголовок со строкой статуса и шеврон — одна кнопка-заголовок h2 с aria-expanded; тело —
@@ -58,8 +59,8 @@
 
   // Шаг, раскрытый пользователем (клик, Enter или Space на заголовке), прокручивается в
   // видимую область. Раскрытие снаружи — при загрузке, автопереходом или самораскрытием шага
-  // 5 — страницу не двигает: пользователь читает ход в текущем шаге. При reduced motion —
-  // без плавной прокрутки
+  // 5 — страницу не двигает: пользователь читает ход в текущем шаге. Плавно — только при
+  // включённых анимациях: и в системе, и в переключателе «Анимации» панели (motion.reduced)
   let item: HTMLLIElement | undefined;
 
   async function toggle() {
@@ -67,8 +68,7 @@
     if (!expanded) return;
     await tick();
     if (!expanded || !item) return;
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    item.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
+    item.scrollIntoView({ block: 'nearest', behavior: motion.reduced ? 'auto' : 'smooth' });
   }
 </script>
 

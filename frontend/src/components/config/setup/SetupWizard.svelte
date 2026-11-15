@@ -419,9 +419,11 @@
     </div>
   {:else}
     {#if lost}
-      <p class="alert alert-warning setup-lost" role="status" data-testid="setup-lost">
-        {$t('cfg.sse_lost')}
-      </p>
+      <!-- Тот же вид, что у блоков шага 7: значок в тоне блока, текст 14 px основным цветом -->
+      <div class="alert alert-warning setup-lost" role="status" data-testid="setup-lost">
+        <span class="setup-lost-icon" aria-hidden="true"><Icon name="warning" size={16} /></span>
+        <span class="setup-lost-body">{$t('cfg.sse_lost')}</span>
+      </div>
     {/if}
     <ol class="setup-steps" data-testid="setup-steps" aria-label={$t('cfg.setup.steps_aria')}>
       {#each rows as r (r.n)}
@@ -547,6 +549,21 @@
 
   .setup-lost {
     margin: 0;
+  }
+
+  .setup-lost-icon {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    height: 1lh;
+  }
+
+  .setup-lost-body {
+    min-width: 0;
+    color: var(--fg-primary);
+    font-size: var(--font-size-base);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
   }
 
   .setup-step-hint {
