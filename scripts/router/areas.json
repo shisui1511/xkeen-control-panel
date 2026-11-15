@@ -655,6 +655,7 @@
         "go:TestRouterDNSMihomoSection",
         "go:TestRouterDNSRestorePanelRestart",
         "go:TestRouterDNSTxnRollback",
+        "go:TestRouterDraftEditWithDirtyDisk",
         "go:TestRouterForceProxyRuleFirst",
         "go:TestRouterGCKeepRules",
         "go:TestRouterGCKeepsInflightCandidate",

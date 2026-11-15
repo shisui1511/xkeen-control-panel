@@ -34,6 +34,16 @@ const (
 	// rtWizardDeadSub — подписка на loopback без сервера: защита от SSRF не даёт
 	// скачать набор узлов, источник есть, узлов нет.
 	rtWizardDeadSub = "http://127.0.0.1:9/xcp-wizard-check"
+	// rtWizardPostMax — предел ответа POST close|hide|reset: панель ждёт записи
+	// признака не дольше 1 с (wizardWriteWait службы мастера), дальше отвечает
+	// статусом с учётом этой записи; плюс запас на сеть и процессор стенда. Предел
+	// общий для всех POST: и POST без смены признака идёт через очередь записей и
+	// при занятом замке хранилища отвечает по истечении того же ожидания.
+	rtWizardPostMax = 2 * time.Second
+	// rtWizardGetMax — предел ответа GET мастера: панель ждёт наблюдения (факты
+	// слоя, ядра, секции Xray) не дольше 1 с (viewWait службы мастера), дальше
+	// отдаёт последнее наблюдение; плюс запас.
+	rtWizardGetMax = 2 * time.Second
 )
 
 // rtWizardStepIDs — шаги мастера в порядке ответа.
@@ -190,6 +200,27 @@ func rtWizardPost(e *rtSrc, action string) map[string]any {
 		e.t.Fatalf("POST %s/%s: %d %s", rtWizardBase, action, r.Status, r.Code)
 	}
 	return r.object(e.t)
+}
+
+// rtWizardPostTimed — rtWizardPost с замером времени ответа.
+func rtWizardPostTimed(e *rtSrc, action string) (map[string]any, time.Duration) {
+	e.t.Helper()
+	start := time.Now()
+	r := e.call(http.MethodPost, rtWizardBase+"/"+action, nil)
+	took := time.Since(start)
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("POST %s/%s: %d %s", rtWizardBase, action, r.Status, r.Code)
+	}
+	return r.object(e.t), took
+}
+
+// rtWizardCheckPost — провал, если POST мастера ответил дольше rtWizardPostMax.
+func rtWizardCheckPost(t *testing.T, action string, took time.Duration) {
+	t.Helper()
+	if took > rtWizardPostMax {
+		t.Errorf("POST %s ответил за %v (предел %v): ответ POST мастера ждёт записи признака на носитель или замка хранилища (G-149.1-6)",
+			action, took.Round(time.Millisecond), rtWizardPostMax)
+	}
 }
 
 // Флаг слоя выключен: четыре маршрута мастера отвечают 404 config_layer_disabled.
@@ -430,23 +461,39 @@ func TestRouterWizardAPI(t *testing.T) {
 		// сам); затем отпускается удержание подтеста.
 		t.Cleanup(func() { rtWizardRestore(e, prev) })
 
-		rtWizardReset(e)
-		if st := rtWizardStatus(rtWizardPost(e, "close")); st != "closed" {
+		// Длительности пяти POST — в строке wizard-timing: (план-сессия сверяет их
+		// с журналом панели).
+		v, resetTook := rtWizardPostTimed(e, "reset")
+		if st := rtWizardStatus(v); st != "" {
+			t.Fatalf("после сброса статус мастера %q, ожидался пустой", st)
+		}
+		v, closeTook := rtWizardPostTimed(e, "close")
+		if st := rtWizardStatus(v); st != "closed" {
 			t.Errorf("после close статус %q", st)
 		}
-		if st := rtWizardStatus(rtWizardPost(e, "close")); st != "closed" {
+		v, repeatTook := rtWizardPostTimed(e, "close")
+		if st := rtWizardStatus(v); st != "closed" {
 			t.Errorf("после повторного close статус %q", st)
 		}
-		if st := rtWizardStatus(rtWizardPost(e, "hide")); st != "hidden" {
+		v, hideTook := rtWizardPostTimed(e, "hide")
+		if st := rtWizardStatus(v); st != "hidden" {
 			t.Errorf("после hide статус %q", st)
 		}
-		v := rtWizardPost(e, "close")
+		v, afterHideTook := rtWizardPostTimed(e, "close")
 		if st := rtWizardStatus(v); st != "hidden" {
 			t.Errorf("close после hide понизил статус до %q", st)
 		}
 		if card, _ := v["card_visible"].(bool); card {
 			t.Error("card_visible при статусе hidden")
 		}
+		t.Logf("wizard-timing: reset=%dms close=%dms close-repeat=%dms hide=%dms close-after-hide=%dms",
+			resetTook.Milliseconds(), closeTook.Milliseconds(), repeatTook.Milliseconds(),
+			hideTook.Milliseconds(), afterHideTook.Milliseconds())
+		rtWizardCheckPost(t, "reset", resetTook)
+		rtWizardCheckPost(t, "close", closeTook)
+		rtWizardCheckPost(t, "close (повтор)", repeatTook)
+		rtWizardCheckPost(t, "hide", hideTook)
+		rtWizardCheckPost(t, "close после hide", afterHideTook)
 		rtSetDevMode(e, false)
 		r := e.call(http.MethodPost, rtWizardBase+"/reset", nil)
 		rtSetDevMode(e, true)
