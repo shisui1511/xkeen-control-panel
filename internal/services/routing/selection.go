@@ -7,6 +7,7 @@ import (
 	"log"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -660,11 +661,13 @@ func (s *Service) selectMihomoLocked(ctx context.Context, gid string) string {
 	}
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
+		log.Printf("[routing] выбор Mihomo не поставлен: состояние слоя не прочитано")
 		s.markReconcile()
 		return selFailed
 	}
 	plan, err := s.mihomoPlan(st, s.d.Installed())
 	if err != nil {
+		log.Printf("[routing] выбор Mihomo не поставлен: профиль не рассчитан")
 		s.markReconcile()
 		return selFailed
 	}
@@ -679,16 +682,32 @@ func (s *Service) selectMihomoLocked(ctx context.Context, gid string) string {
 		return selApplied
 	}
 	if s.d.Mihomo == nil || !s.d.Mihomo.HasController() {
+		log.Printf("[routing] выбор Mihomo не поставлен: нет контроллера Clash API")
 		s.markReconcile()
 		return selFailed
 	}
 	cctx, cancel := context.WithTimeout(ctx, reconcileCallTimeout)
 	defer cancel()
 	if err := s.d.Mihomo.SelectProxy(cctx, entry.group, entry.want); err != nil {
+		log.Printf("[routing] выбор Mihomo не поставлен: Clash API: %s", clashErrClass(err))
 		s.markReconcile()
 		return selFailed
 	}
 	return selApplied
+}
+
+// clashErrClass — класс ошибки Clash API для журнала без имён и адресов: код
+// ответа ядра, таймаут или сбой соединения.
+func clashErrClass(err error) string {
+	var status *services.ClashStatusError
+	switch {
+	case errors.As(err, &status):
+		return "ответ " + strconv.Itoa(status.Status)
+	case errors.Is(err, context.DeadlineExceeded):
+		return "таймаут"
+	default:
+		return "сбой соединения"
+	}
 }
 
 // --- выбор в профиле Mihomo ---
