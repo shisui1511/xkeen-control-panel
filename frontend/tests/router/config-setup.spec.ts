@@ -1795,6 +1795,13 @@ test(
         created = true;
       }
       if (code !== 0) throw new Error(`${START_PREP} файл сбоя не записан (код ${code})`);
+      // Внесённый файл должен ломать конфигурацию: иначе запуск пройдёт и сбоя не будет
+      const rejected = await standSh(
+        `/opt/sbin/xray -test -confdir ${XRAY_CONFIGS} >/dev/null 2>&1; test $? -ne 0`
+      );
+      if (rejected !== 0) {
+        throw new Error(`${START_PREP} внесённый файл не ломает проверку конфигурации Xray`);
+      }
       await startFailureScenario(page, name);
     } catch (err) {
       primary = err;
