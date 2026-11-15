@@ -6,11 +6,20 @@ package routing
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -77,6 +86,58 @@ func rtxaCopyDir(t *testing.T, from string) string {
 	return dir
 }
 
+// rtxaConnectProxy — настоящий HTTP CONNECT-прокси к локальной цели со счётчиком.
+func rtxaConnectProxy(t *testing.T, target string) (string, *atomic.Int64) {
+	t.Helper()
+	var hits atomic.Int64
+	var mu sync.Mutex
+	active := map[net.Conn]bool{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect || r.Host != target {
+			http.Error(w, "target", http.StatusForbidden)
+			return
+		}
+		dst, err := net.DialTimeout("tcp", target, time.Second)
+		if err != nil {
+			http.Error(w, "connect", http.StatusBadGateway)
+			return
+		}
+		defer dst.Close()
+		client, rw, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			return
+		}
+		defer client.Close()
+		mu.Lock()
+		active[client] = true
+		mu.Unlock()
+		defer func() { mu.Lock(); delete(active, client); mu.Unlock() }()
+		_ = client.SetDeadline(time.Now().Add(5 * time.Second))
+		_ = dst.SetDeadline(time.Now().Add(5 * time.Second))
+		hits.Add(1)
+		if _, err := rw.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
+			return
+		}
+		if err := rw.Flush(); err != nil {
+			return
+		}
+		done := make(chan struct{})
+		go func() { _, _ = io.Copy(dst, rw); _ = dst.Close(); close(done) }()
+		_, _ = io.Copy(client, dst)
+		_ = client.Close()
+		<-done
+	}))
+	t.Cleanup(func() {
+		srv.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for conn := range active {
+			_ = conn.Close()
+		}
+	})
+	return srv.URL, &hits
+}
+
 func TestRouterXrayAPIBlock(t *testing.T) {
 	rtNeedBins(t, rtXrayBin)
 	apiPort := rtFreePort(t)
@@ -88,6 +149,131 @@ func TestRouterXrayAPIBlock(t *testing.T) {
 		e.addMyLinks(t, "vless_ws", "trojan_grpc", "ss_plain")
 		return e
 	}
+
+	t.Run("hot_swap_manual_group", func(t *testing.T) {
+		var targetHits atomic.Int64
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			targetHits.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		t.Cleanup(target.Close)
+		u, err := url.Parse(target.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		proxyA, hitsA := rtxaConnectProxy(t, u.Host)
+		proxyB, hitsB := rtxaConnectProxy(t, u.Host)
+		version := rtxaRun(t, "version")
+		e := rtNewEnv(t, rtWithKernels(rtXrayOnly), rtWithDeps(func(d *Deps) {
+			d.XrayAPIPort = func() int { return apiPort }
+			d.XrayBin = func() string { return rtXrayBin }
+			d.KernelVersion = func(string) string { return version }
+		}))
+		e.addMyRaw(t, proxyA+"#hot-a", proxyB+"#hot-b")
+		cat := e.catalog(t).Xray
+		a, b := rtsNode(t, cat, "hot-a"), rtsNode(t, cat, "hot-b")
+		_, inner, err := e.svc.SaveGroup(e.rev(t), Group{Name: "Горячая", Mode: ModeManual, Sources: GroupSources{All: true}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, outer, err := e.svc.SaveGroup(e.rev(t), Group{Name: "Внешняя", Mode: ModeManual, Members: []Member{{Kind: KindGroup, ID: inner.ID}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.replaceGroups(t, func(cfg *GroupsConfig) { cfg.Items = []Group{inner, outer} })
+		e.takeAndApply(t)
+		ctx := context.Background()
+		if _, err := e.svc.Select(ctx, inner.ID, memberNode+a.Ref); err != nil {
+			t.Fatal(err)
+		}
+		dir := rtxaCopyDir(t, e.xrayDir())
+		inPort := rtFreePort(t)
+		extra, err := json.Marshal(map[string]any{
+			"inbounds": []any{map[string]any{"tag": "rt-hot-in", "listen": "127.0.0.1", "port": inPort, "protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": false}}},
+			"routing":  map[string]any{"rules": []any{map[string]any{"type": "field", "inboundTag": []string{"rt-hot-in"}, "outboundTag": GroupTag(outer.ID)}}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "99_zz_rt_hot.json"), extra, 0600); err != nil {
+			t.Fatal(err)
+		}
+		proc := rtStartProc(t, rtXrayBin, []string{"run", "-confdir", dir}, utils.XrayAssetEnv(os.Environ(), ""), apiPort)
+		request := func() {
+			t.Helper()
+			status, err := rtSocksGet(inPort, target.URL, 3*time.Second)
+			if err != nil || status != http.StatusNoContent {
+				t.Fatalf("локальный запрос: статус=%d ошибка=%t", status, err != nil)
+			}
+		}
+		request()
+		if hitsA.Load() != 1 || hitsB.Load() != 0 || targetHits.Load() != 1 {
+			t.Fatalf("первый путь: A=%d B=%d цель=%d", hitsA.Load(), hitsB.Load(), targetHits.Load())
+		}
+		old, err := os.ReadFile(filepath.Join(dir, xrayGroupsFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := e.svc.Select(ctx, inner.ID, memberNode+b.Ref)
+		if err != nil || res.Kernels[configlayer.KernelXray] != selPendingStopped {
+			t.Fatalf("подготовка выбора: ошибка=%t исход=%s", err != nil, res.Kernels[configlayer.KernelXray])
+		}
+		next, err := os.ReadFile(filepath.Join(e.xrayDir(), xrayGroupsFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files := []configlayer.HotFile{{RelPath: xrayGroupsFile, Action: configlayer.ActionWrite, Old: old, OldExisted: true, New: next}}
+		changed, _, _, err := hotTags(old, next)
+		if err != nil || len(changed) != 2 {
+			t.Fatalf("изменённые теги: число=%d ошибка=%t", len(changed), err != nil)
+		}
+		started := time.Now()
+		if err := e.svc.xrayHot(ctx, files); err != nil {
+			t.Fatalf("горячая замена: %v", err)
+		}
+		t.Logf("hot-swap: tags=%d dur=%s", len(changed), time.Since(started))
+		server := net.JoinHostPort("127.0.0.1", strconv.Itoa(apiPort))
+		if configlayer.FeatureAvailable(configlayer.KernelXray, version, configlayer.FeatureXrayListOutbounds) == configlayer.Available {
+			out := rtxaRun(t, "api", "lso", "-s", server)
+			if !strings.Contains(out, GroupTag(inner.ID)) || !strings.Contains(out, GroupTag(outer.ID)) {
+				t.Fatal("lso: нет обоих тегов")
+			}
+		}
+		request()
+		if hitsA.Load() != 1 || hitsB.Load() != 1 || targetHits.Load() != 2 {
+			t.Fatalf("новый путь: A=%d B=%d цель=%d", hitsA.Load(), hitsB.Load(), targetHits.Load())
+		}
+		if !proc.alive() {
+			t.Fatal("изолированный процесс не работает после замены")
+		}
+
+		// Отказы до первого rmo не меняют работающий путь.
+		bad := append([]configlayer.HotFile(nil), files...)
+		bad[0].New = []byte(`{"outbounds":[]}`)
+		var hotErr *configlayer.XrayHotError
+		if err := e.svc.xrayHot(ctx, bad); !errors.As(err, &hotErr) || hotErr.Reason != configlayer.HotReasonNotApplicable || hotErr.Partial {
+			t.Fatal("смена набора тегов: неверный код или partial")
+		}
+		port := rtFreePort(t)
+		e.svc.d.XrayAPIPort = func() int { return port }
+		if err := e.svc.xrayHot(ctx, files); !errors.As(err, &hotErr) || hotErr.Reason != configlayer.HotReasonNoAPI || hotErr.Partial {
+			t.Fatal("API недоступен: неверный код или partial")
+		}
+		e.svc.d.XrayAPIPort = func() int { return apiPort }
+		request()
+		if hitsA.Load() != 1 || hitsB.Load() != 2 || targetHits.Load() != 3 {
+			t.Fatal("отказ изменил рабочий путь")
+		}
+
+		rtxaRun(t, "api", "rmo", "-s", server, GroupTag(outer.ID))
+		beforeA, beforeB, beforeTarget := hitsA.Load(), hitsB.Load(), targetHits.Load()
+		if _, err := rtSocksGet(inPort, target.URL, 2*time.Second); err == nil {
+			t.Fatal("запрос после удаления тега прошёл")
+		}
+		if hitsA.Load() != beforeA || hitsB.Load() != beforeB || targetHits.Load() != beforeTarget {
+			t.Fatalf("fail-closed: A=%d B=%d цель=%d", hitsA.Load()-beforeA, hitsB.Load()-beforeB, targetHits.Load()-beforeTarget)
+		}
+	})
 
 	t.Run("panel_api_works_with_rules_elsewhere", func(t *testing.T) {
 		e := newEnv(t)

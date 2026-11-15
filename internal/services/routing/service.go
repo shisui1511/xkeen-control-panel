@@ -177,7 +177,16 @@ func (s *Service) Generators() []configlayer.Generator {
 func (s *Service) Start() {
 	s.startOnce.Do(func() {
 		s.startDatWatcher()
-		s.Go(func() { s.reconcileXray(s.ctx) })
+		// Снимок старта: поздний запуск горутины не должен подхватить маркер
+		// уже начавшегося пользовательского выбора.
+		if st, err := s.d.Layer.ReadState(); err == nil {
+			for _, kernel := range readUnconfirmed(st.Live) {
+				if kernel == configlayer.KernelXray {
+					s.Go(func() { s.reconcileXray(s.ctx) })
+					break
+				}
+			}
+		}
 	})
 }
 

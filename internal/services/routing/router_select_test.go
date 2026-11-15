@@ -143,6 +143,34 @@ func TestRouterSelectXray(t *testing.T) {
 	if got := res.Kernels[configlayer.KernelMihomo]; got != selNotInstalled {
 		t.Errorf("Kernels[mihomo] = %q, ожидалось %q", got, selNotInstalled)
 	}
+	if readUnconfirmed(e.state(t).Live)[grp.ID] != "" || res.RestartReason != "" || res.Reverted || len(res.Unconfirmed) != 0 {
+		t.Fatalf("остановленное ядро: маркер=%t причина=%t возврат=%t неизвестно=%d", readUnconfirmed(e.state(t).Live)[grp.ID] != "", res.RestartReason != "", res.Reverted, len(res.Unconfirmed))
+	}
+	if err := e.layer.UpdateLive(func(live configlayer.Sections) error {
+		return writeUnconfirmed(live, map[string]string{grp.ID: configlayer.KernelXray})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Select(ctx, grp.ID, memberNode+nodeA.Ref); !errors.Is(err, ErrSelectionUnconfirmed) {
+		t.Fatalf("неподтверждённый выбор: ожидаемый код=%t", errors.Is(err, ErrSelectionUnconfirmed))
+	}
+	confirmed, err := e.svc.Confirm(ctx, grp.ID)
+	if err != nil || !confirmed.Confirmed || confirmed.Group != grp.ID {
+		t.Fatalf("Confirm: ошибка=%t подтверждён=%t группа=%t", err != nil, confirmed.Confirmed, confirmed.Group == grp.ID)
+	}
+	if readUnconfirmed(e.state(t).Live)[grp.ID] != "" {
+		t.Fatal("Confirm: маркер остался")
+	}
+	// Файл уже совпадал с Live: Confirm обязан реально переприменить его,
+	// а не снять маркер на основании nothing_to_apply.
+	apply := e.layer.Snapshot().Apply.Result
+	if apply == nil || !apply.OK || apply.Code != configlayer.ResultApplied || apply.Written == 0 {
+		t.Fatal("Confirm: неизменившийся файл не применён повторно")
+	}
+	confirmed, err = e.svc.Confirm(ctx, grp.ID)
+	if err != nil || !confirmed.Confirmed {
+		t.Fatalf("Confirm без маркера: ошибка=%t подтверждён=%t", err != nil, confirmed.Confirmed)
+	}
 	if got := e.rtcSelection(t)[grp.ID]; got != memberNode+nodeB.Ref {
 		t.Fatalf("Live[selection] = %q, ожидался узел B", got)
 	}
