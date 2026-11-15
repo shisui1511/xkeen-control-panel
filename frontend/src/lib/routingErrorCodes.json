@@ -13,6 +13,7 @@
   "group_not_found",
   "group_referenced",
   "invalid_input",
+  "kernel_restarting",
   "member_invalid",
   "nothing_to_reclaim",
   "preset_unknown",

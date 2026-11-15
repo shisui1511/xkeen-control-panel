@@ -148,6 +148,7 @@
   "configlayer.routing.group_not_applied": "Группа ещё не применена: выбор участника доступен после «Применить»",
   "configlayer.routing.member_invalid": "Такого участника нет среди вариантов группы",
   "configlayer.routing.select_busy": "Идёт переключение связанной группы. Дождитесь завершения.",
+  "configlayer.routing.kernel_restarting": "Ядро перезапускается. Данные обновятся сами.",
   "configlayer.routing.selection_unconfirmed": "Активный узел группы не подтверждён. Нажмите «Повторить».",
   "configlayer.routing.preset_unknown": "Неизвестный пресет",
   "configlayer.routing.country_unavailable": "Для выбранной страны нет списков на роутере",
