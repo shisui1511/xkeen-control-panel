@@ -1947,5 +1947,47 @@ async function startFailureScenario(page: Page, name: string): Promise<void> {
   await expect(page.getByTestId('setup-start-retry')).toBeVisible();
   await expect(page.getByTestId('setup-start-logs-link')).toBeVisible();
   await expect(page.getByTestId('setup-start-files-link')).toBeVisible();
+
+  // Блок ошибки в обеих темах на 390, 768 и 1280 px: без горизонтальной прокрутки, хвост
+  // внутри блока, кнопки не меньше 44 px на узком экране
+  for (const width of [390, 768, 1280]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate((th) => document.documentElement.setAttribute('data-theme', th), theme);
+      const where = `${width} px, ${theme}`;
+      await expect(box, `setup-start-error виден: ${where}`).toBeVisible();
+      const m = await page.evaluate(() => {
+        const root = document.documentElement;
+        const err = document.querySelector('[data-testid="setup-start-error"]') as HTMLElement;
+        const lg = document.querySelector('[data-testid="setup-start-log"]') as HTMLElement;
+        const eb = err.getBoundingClientRect();
+        const btns = ['setup-start-retry', 'setup-start-logs-link', 'setup-start-files-link'].map(
+          (id) => {
+            const r = (
+              document.querySelector(`[data-testid="${id}"]`) as HTMLElement
+            ).getBoundingClientRect();
+            return { h: r.height, right: r.right };
+          }
+        );
+        return {
+          scroll: root.scrollWidth - root.clientWidth,
+          errRight: eb.right,
+          viewport: root.clientWidth,
+          logOverflow: lg.scrollWidth - lg.clientWidth,
+          btns
+        };
+      });
+      expect(m.scroll, `горизонтальная прокрутка: ${where}`).toBeLessThanOrEqual(0);
+      expect(m.errRight, `блок ошибки в пределах экрана: ${where}`).toBeLessThanOrEqual(
+        m.viewport + 1
+      );
+      expect(m.logOverflow, `хвост внутри блока: ${where}`).toBeLessThanOrEqual(1);
+      for (const b of m.btns) {
+        expect(b.right, `кнопка в пределах экрана: ${where}`).toBeLessThanOrEqual(m.viewport + 1);
+        if (width <= 480)
+          expect(b.h, `кнопка не меньше 44 px: ${where}`).toBeGreaterThanOrEqual(44);
+      }
+    }
+  }
   await guard.assertClean();
 }
