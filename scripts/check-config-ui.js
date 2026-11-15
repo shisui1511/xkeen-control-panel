@@ -1745,7 +1745,6 @@ const IMMEDIATE_CALLS = [
   "renameProfile",
   "deleteProfile",
   "activateProfile",
-  "selectMember",
   "reclaimRouting",
   "reclaimSection",
   "setAccessLog",

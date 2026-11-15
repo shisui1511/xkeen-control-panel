@@ -572,13 +572,6 @@ export function applyPreset(
   return editRouting<DraftAck>('presets/apply', { choice, take, scope });
 }
 
-/** Выбор участника ручной группы: Mihomo получает его сразу, Xray — перезапуском ядра. */
-export async function selectMember(group: string, member: string): Promise<SelectResult> {
-  const res = await post<SelectResult>(`${BASE}/select`, { group, member });
-  void loadRouting();
-  return res;
-}
-
 // --- Тексты ошибок ---
 
 /** Функция перевода из стора $t. */
