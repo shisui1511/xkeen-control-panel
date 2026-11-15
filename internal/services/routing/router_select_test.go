@@ -289,6 +289,16 @@ func TestRouterSelectMihomoReconcile(t *testing.T) {
 		t.Errorf("Kernels[xray] = %q, ожидалось %q", got, selNotInstalled)
 	}
 	rtsWaitNow(t, core, "Выбор", nodeB.MihomoName, 10*time.Second)
+	proxies, err := core.svc.ProxiesState(ctx)
+	if err != nil {
+		t.Fatalf("ProxiesState: %v", err)
+	}
+	if now := proxies["Выбор"].Now; now != nodeB.MihomoName {
+		t.Errorf("ProxiesState: выбранный узел совпал=%t, длина now=%d", now == nodeB.MihomoName, len(now))
+	}
+	if proxies[nodeB.MihomoName].Type == "" {
+		t.Error("ProxiesState: тип выбранного узла пуст")
+	}
 
 	// Переименование: «Применить» перезапускает процесс на новом профиле, в
 	// cache.db выбор лежит под прежним именем — сверка возвращает B.

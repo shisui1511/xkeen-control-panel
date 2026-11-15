@@ -665,6 +665,38 @@ func (s *MihomoService) UpdateProvider(ctx context.Context, providerType, name s
 	return nil
 }
 
+// ClashDelay — запись истории задержек, которую хранит ядро Mihomo.
+type ClashDelay struct {
+	Time  time.Time `json:"time"`
+	Delay int       `json:"delay"`
+}
+
+// ClashProxyState — состояние узла или группы в профиле Mihomo.
+type ClashProxyState struct {
+	Type    string       `json:"type"`
+	Now     string       `json:"now"`
+	History []ClashDelay `json:"history"`
+}
+
+// ProxiesState читает все прокси одним запросом вместо ProxyNow на группу.
+// Снимок даёт «Сейчас» авто-групп и историю задержек ядра странице «Прокси».
+func (s *MihomoService) ProxiesState(ctx context.Context) (map[string]ClashProxyState, error) {
+	status, body, err := s.clashDo(ctx, http.MethodGet, "/proxies", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, newClashStatusError(status, body)
+	}
+	var doc struct {
+		Proxies map[string]ClashProxyState `json:"proxies"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return nil, fmt.Errorf("mihomo clash api: разбор ответа: %w", err)
+	}
+	return doc.Proxies, nil
+}
+
 // ProxyNow возвращает выбранного участника группы: GET /proxies/{группа}, поле now.
 func (s *MihomoService) ProxyNow(ctx context.Context, group string) (string, error) {
 	status, body, err := s.clashDo(ctx, http.MethodGet, "/proxies/"+url.PathEscape(group), nil)

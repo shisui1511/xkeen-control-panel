@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -127,6 +128,33 @@ func TestRouterXrayAPIBlock(t *testing.T) {
 		server := "127.0.0.1:" + strconv.Itoa(apiPort)
 		rtxaRun(t, "api", "lso", "-s", server)
 		rtxaRun(t, "api", "statssys", "-s", server)
+
+		groups, err := parseGroups(e.state(t).Applied[GroupsSection])
+		if err != nil {
+			t.Fatalf("применённые группы: %v", err)
+		}
+		var balancerTag string
+		for _, group := range groups.Items {
+			if group.Mode == ModeAuto {
+				balancerTag = GroupTag(group.ID)
+				break
+			}
+		}
+		if balancerTag == "" {
+			t.Fatal("среди применённых групп нет группы авто")
+		}
+		balancerOutput := rtxaRun(t, "api", "bi", "-s", server, balancerTag)
+		grpcService := services.NewXrayGRPCService(server)
+		grpcService.Start()
+		t.Cleanup(grpcService.Stop)
+		target, known, err := grpcService.BalancerTarget(context.Background(), balancerTag)
+		if err != nil {
+			t.Fatalf("BalancerTarget: %v", err)
+		}
+		t.Logf("balancer-info: known=%t", known)
+		if known && !strings.Contains(balancerOutput, target) {
+			t.Errorf("цель gRPC отсутствует в ответе api bi: known=%t, длина цели=%d", known, len(target))
+		}
 
 		info := services.FindXrayAPIFragment(dir)
 		if !info.APIPresent || filepath.Base(info.Path) != configlayer.PanelXrayAPIFile {
