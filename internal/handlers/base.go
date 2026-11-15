@@ -18,6 +18,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services/cores"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/dnstakeover"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/geodata"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/proxyping"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/setupwizard"
@@ -91,6 +92,8 @@ type API struct {
 	// routing — сервис маршрутизации (группы, правила, владение); nil, пока
 	// main.go его не подключил: маршруты /api/configlayer/routing* отвечают 404.
 	routing *routing.Service
+	// ping — общий раннер пинга страницы «Прокси»; жизненным циклом владеет main.go.
+	ping *proxyping.Runner
 	// cores — сервис секций ядер (владение, форма и «Дополнительно», пресеты); nil,
 	// пока main.go его не подключил: маршруты /api/configlayer/cores* отвечают 404.
 	cores *cores.Service
@@ -323,6 +326,11 @@ func (a *API) SetSourcesService(s *sources.Service) {
 // останавливается в main.go.
 func (a *API) SetRoutingService(s *routing.Service) {
 	a.routing = s
+}
+
+// SetPingRunner подключает раннер, созданный и запущенный в main.go.
+func (a *API) SetPingRunner(r *proxyping.Runner) {
+	a.ping = r
 }
 
 // SetCoresService подключает сервис секций ядер; создаётся, запускается и

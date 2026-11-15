@@ -1,6 +1,9 @@
 package handlers
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+)
 
 // Маршруты страницы «Прокси» при слое «Конфигурация» (фаза 150) читают
 // применённое состояние через сервис маршрутизации и защищены HandleProtected.
@@ -31,4 +34,76 @@ func (a *API) ConfigProxiesNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSONSuccess(w, now)
+}
+
+func (a *API) requirePing(w http.ResponseWriter, r *http.Request) bool {
+	if !a.requireProxies(w, r) {
+		return false
+	}
+	if a.ping == nil {
+		JSONErrorCode(w, http.StatusNotFound, "config_layer_disabled", a.t(r, "configlayer.disabled"))
+		return false
+	}
+	return true
+}
+
+func (a *API) ConfigProxiesResults(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requirePing(w, r) {
+		return
+	}
+	JSONSuccess(w, a.ping.Snapshot())
+}
+
+func (a *API) ConfigProxiesPing(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requirePing(w, r) {
+		return
+	}
+	var body struct {
+		Scope string `json:"scope"`
+		Group string `json:"group"`
+	}
+	if !a.decodeLayerBody(w, r, &body) {
+		return
+	}
+	req, err := a.routing.PingRequest(body.Scope, body.Group)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	start, err := a.ping.Launch(req)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, start)
+}
+
+func (a *API) ConfigProxiesPingCancel(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requirePing(w, r) {
+		return
+	}
+	batch, err := a.ping.Cancel()
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, batch)
+}
+
+func (a *API) ConfigProxiesConfirm(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireProxies(w, r) {
+		return
+	}
+	var body struct {
+		Group string `json:"group"`
+	}
+	if !a.decodeLayerBody(w, r, &body) {
+		return
+	}
+	res, err := a.routing.Confirm(context.WithoutCancel(r.Context()), body.Group)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, res)
 }
