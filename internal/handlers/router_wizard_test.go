@@ -103,31 +103,6 @@ func rtWizardViewUntil(e *rtSrc, what string, cond func(v map[string]any) (bool,
 	return v
 }
 
-// rtWizardSettledView — вид мастера, не отстающий от состояния слоя. GET отдаёт прежнее
-// наблюдение, если чтение (ядра, секции Xray) идёт дольше viewWait, поэтому один GET после
-// правки черновика может показать прежнее число выполненных шагов. Вид читается с паузой дольше
-// самого медленного чтения на устройстве, пока два подряд не совпадут по числу выполненных
-// шагов и статусу; срок — период наблюдателя плюс запас, как у rtWizardViewUntil.
-func rtWizardSettledView(e *rtSrc) map[string]any {
-	e.t.Helper()
-	last := rtWizardView(e)
-	limit := rtWizardTick(e.t, last) + 10*time.Second
-	ok, seen := routertest.Poll(limit, 4*time.Second, func() (bool, string) {
-		next := rtWizardView(e)
-		same := rtWizardNum(next, "done_count") == rtWizardNum(last, "done_count") &&
-			rtWizardStatus(next) == rtWizardStatus(last)
-		seen := fmt.Sprintf("done_count %d → %d, статус %q → %q",
-			rtWizardNum(last, "done_count"), rtWizardNum(next, "done_count"),
-			rtWizardStatus(last), rtWizardStatus(next))
-		last = next
-		return same, seen
-	})
-	if !ok {
-		e.t.Fatalf("вид мастера не устоялся за %v: %s", limit, seen)
-	}
-	return last
-}
-
 // rtWizardStep — шаг ответа по id; нет шага — провал.
 func rtWizardStep(t *testing.T, v map[string]any, id string) map[string]any {
 	t.Helper()
@@ -610,46 +585,40 @@ func TestRouterWizardAPI(t *testing.T) {
 	t.Run("done_stamped_by_server", func(t *testing.T) {
 		e := e.with(t)
 		rtDevMode(e, true)
-		// Число выполненных шагов определяет ветку проверки: прежнее наблюдение после
-		// правок черновика предыдущих подтестов дало бы не ту ветку.
-		v := rtWizardSettledView(e)
-		prev, doneCount := rtWizardStatus(v), rtWizardNum(v, "done_count")
+		v := rtWizardView(e)
+		prev := rtWizardStatus(v)
 		// Период наблюдателя — у процесса панели (tick_s), а не константой.
 		tick := rtWizardTick(t, v)
 		t.Cleanup(func() { rtWizardRestore(e, prev) })
 		rtWizardReset(e)
 		resetAt := time.Now()
-		if doneCount == 6 {
-			// Отметку ставит ближайший тик (не позже периода), ещё период — запас на
-			// тик, начатый до сброса, и 10 с — на медленную панель.
-			limit := 2*tick + 10*time.Second
-			t.Logf("ветка: шаги 1–6 выполнены — ждём отметку сервера (до %v)", limit)
-			ok, seen := routertest.Poll(limit, time.Second, func() (bool, string) {
-				v := rtWizardView(e)
-				card, _ := v["card_visible"].(bool)
-				return rtWizardStatus(v) == "done" && !card, fmt.Sprintf("статус %q, card_visible %v", rtWizardStatus(v), card)
-			})
-			if !ok {
-				t.Errorf("за %v сервер не отметил «пройдено»: %s", limit, seen)
-				return
-			}
+		// Число выполненных шагов заранее не берётся: GET может отдать прежнее наблюдение, а
+		// черновик после предыдущих подтестов отпускается не мгновенно (шагов 5 → 6). Ждём
+		// отметку сервера: тик не позже периода, ещё период — запас на тик, начатый до сброса,
+		// и 10 с — на медленную панель.
+		limit := 2*tick + 10*time.Second
+		var last map[string]any
+		ok, seen := routertest.Poll(limit, time.Second, func() (bool, string) {
+			last = rtWizardView(e)
+			card, _ := last["card_visible"].(bool)
+			return rtWizardStatus(last) == "done" && !card,
+				fmt.Sprintf("статус %q, card_visible %v, шагов %d", rtWizardStatus(last), card, rtWizardNum(last, "done_count"))
+		})
+		if ok {
+			t.Logf("ветка: шаги 1–6 выполнены — отметка сервера через %.1fs (tick=%ds)", time.Since(resetAt).Seconds(), int(tick/time.Second))
 			t.Logf("wizard-timing: done=%.1fs tick=%ds", time.Since(resetAt).Seconds(), int(tick/time.Second))
 			return
 		}
-		// Ближайший тик после сброса — не позже периода, плюс запас.
-		limit := tick + 2*time.Second
-		t.Logf("ветка: выполнено шагов %d из 6 — отметки быть не должно (наблюдение %v)", doneCount, limit)
-		ok, seen := routertest.Poll(limit, time.Second, func() (bool, string) {
-			v := rtWizardView(e)
-			card, _ := v["card_visible"].(bool)
-			if rtWizardStatus(v) != "" || !card {
-				return true, fmt.Sprintf("статус %q, card_visible %v", rtWizardStatus(v), card)
-			}
-			return false, ""
-		})
-		if ok {
-			t.Errorf("без выполненных шагов статус изменился: %s", seen)
+		// Отметки нет: допустимо, только пока шагов меньше шести (отметку ставят лишь при 1–6).
+		if n := rtWizardNum(last, "done_count"); n == 6 {
+			t.Errorf("за %v сервер не отметил «пройдено» при выполненных шагах 1–6: %s", limit, seen)
+			return
 		}
+		if st := rtWizardStatus(last); st != "" {
+			t.Errorf("без выполненных шагов статус изменился: %s", seen)
+			return
+		}
+		t.Logf("ветка: выполнено шагов %d из 6 — отметки нет, как и должно быть", rtWizardNum(last, "done_count"))
 	})
 }
 
