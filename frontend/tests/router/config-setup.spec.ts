@@ -1777,6 +1777,14 @@ test(
               : viewDeadline(v)
         })
         .toBe(0);
+      // Вид мастера мог отдать прежнее наблюдение: выход процесса проверяется на самом стенде, иначе
+      // переключение пришло бы к ещё живому ядру и сбой не был бы внесён
+      await expect
+        .poll(() => standSh(`test -z "$(pidof ${orig})"`), {
+          message: `${START_PREP} процесс ${orig} не вышел`,
+          timeout: T.switchKernel
+        })
+        .toBe(0);
       const code = await standSh(
         `test -d ${XRAY_CONFIGS} || exit 11; test ! -e ${path} || exit 10; ` +
           `printf '%s\\n' '${START_FAIL_BODY}' > ${path} || exit 12`
