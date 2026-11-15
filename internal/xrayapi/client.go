@@ -227,6 +227,28 @@ func (c *Client) TestRoute(ctx context.Context, input RouteTestInput) (*RouteTes
 	}, nil
 }
 
+// BalancerInfo содержит явную подмену цели и текущие цели балансировщика ядра.
+type BalancerInfo struct {
+	Override string
+	Targets  []string
+}
+
+// BalancerInfo читает состояние балансировщика без изменения его выбора.
+func (c *Client) BalancerInfo(ctx context.Context, tag string) (BalancerInfo, error) {
+	callCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	resp, err := c.router.GetBalancerInfo(callCtx, &routerpb.GetBalancerInfoRequest{Tag: tag})
+	if err != nil {
+		return BalancerInfo{}, normalizeGRPCError(err)
+	}
+	balancer := resp.GetBalancer()
+	return BalancerInfo{
+		Override: balancer.GetOverride().GetTarget(),
+		Targets:  balancer.GetPrincipleTarget().GetTag(),
+	}, nil
+}
+
 // RestartLogger requests Xray core to reopen its log files for safe log rotation.
 func (c *Client) RestartLogger(ctx context.Context) error {
 	callCtx, cancel := context.WithTimeout(ctx, 3*time.Second)

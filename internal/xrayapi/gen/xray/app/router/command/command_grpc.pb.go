@@ -19,7 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	RoutingService_TestRoute_FullMethodName = "/xray.app.router.command.RoutingService/TestRoute"
+	RoutingService_TestRoute_FullMethodName       = "/xray.app.router.command.RoutingService/TestRoute"
+	RoutingService_GetBalancerInfo_FullMethodName = "/xray.app.router.command.RoutingService/GetBalancerInfo"
 )
 
 // RoutingServiceClient is the client API for RoutingService service.
@@ -27,6 +28,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type RoutingServiceClient interface {
 	TestRoute(ctx context.Context, in *TestRouteRequest, opts ...grpc.CallOption) (*RoutingContext, error)
+	GetBalancerInfo(ctx context.Context, in *GetBalancerInfoRequest, opts ...grpc.CallOption) (*GetBalancerInfoResponse, error)
 }
 
 type routingServiceClient struct {
@@ -47,11 +49,22 @@ func (c *routingServiceClient) TestRoute(ctx context.Context, in *TestRouteReque
 	return out, nil
 }
 
+func (c *routingServiceClient) GetBalancerInfo(ctx context.Context, in *GetBalancerInfoRequest, opts ...grpc.CallOption) (*GetBalancerInfoResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetBalancerInfoResponse)
+	err := c.cc.Invoke(ctx, RoutingService_GetBalancerInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RoutingServiceServer is the server API for RoutingService service.
 // All implementations must embed UnimplementedRoutingServiceServer
 // for forward compatibility.
 type RoutingServiceServer interface {
 	TestRoute(context.Context, *TestRouteRequest) (*RoutingContext, error)
+	GetBalancerInfo(context.Context, *GetBalancerInfoRequest) (*GetBalancerInfoResponse, error)
 	mustEmbedUnimplementedRoutingServiceServer()
 }
 
@@ -64,6 +77,9 @@ type UnimplementedRoutingServiceServer struct{}
 
 func (UnimplementedRoutingServiceServer) TestRoute(context.Context, *TestRouteRequest) (*RoutingContext, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TestRoute not implemented")
+}
+func (UnimplementedRoutingServiceServer) GetBalancerInfo(context.Context, *GetBalancerInfoRequest) (*GetBalancerInfoResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBalancerInfo not implemented")
 }
 func (UnimplementedRoutingServiceServer) mustEmbedUnimplementedRoutingServiceServer() {}
 func (UnimplementedRoutingServiceServer) testEmbeddedByValue()                        {}
@@ -104,6 +120,24 @@ func _RoutingService_TestRoute_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RoutingService_GetBalancerInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetBalancerInfoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RoutingServiceServer).GetBalancerInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RoutingService_GetBalancerInfo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RoutingServiceServer).GetBalancerInfo(ctx, req.(*GetBalancerInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RoutingService_ServiceDesc is the grpc.ServiceDesc for RoutingService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -114,6 +148,10 @@ var RoutingService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TestRoute",
 			Handler:    _RoutingService_TestRoute_Handler,
+		},
+		{
+			MethodName: "GetBalancerInfo",
+			Handler:    _RoutingService_GetBalancerInfo_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

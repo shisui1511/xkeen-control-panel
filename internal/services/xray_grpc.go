@@ -136,6 +136,30 @@ func (s *XrayGRPCService) Acquire(ctx context.Context) (*xrayapi.Client, func(),
 	return xrayapi.NewClient(s.conn), release, nil
 }
 
+// BalancerTarget читает текущую цель для опроса «Сейчас» страницы «Прокси».
+// OverrideBalancerTarget панель не вызывает: выбор остаётся за ядром.
+// Пустые цели означают, что текущий узел неизвестен, в том числе без живых узлов.
+func (s *XrayGRPCService) BalancerTarget(ctx context.Context, tag string) (target string, known bool, err error) {
+	client, release, err := s.Acquire(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	defer release()
+	info, err := client.BalancerInfo(ctx, tag)
+	if err != nil {
+		return "", false, err
+	}
+	if info.Override != "" {
+		return info.Override, true, nil
+	}
+	for _, candidate := range info.Targets {
+		if candidate != "" {
+			return candidate, true, nil
+		}
+	}
+	return "", false, nil
+}
+
 // Stop closes the connection and marks the service stopped.
 func (s *XrayGRPCService) Stop() {
 	s.mu.Lock()
