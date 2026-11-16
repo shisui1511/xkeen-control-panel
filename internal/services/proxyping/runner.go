@@ -391,6 +391,11 @@ func (r *Runner) measure(ctx context.Context, req Request, port int) PingResult 
 			continue
 		}
 		_ = resp.Body.Close()
+		// Страница блокировки или 5xx промежуточного прокси — не живой узел
+		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			result.Status, result.Reason = StatusError, ReasonTunnel
+			continue
+		}
 		if i > 0 {
 			sum += max(1, int(time.Since(start).Milliseconds()))
 			good++
