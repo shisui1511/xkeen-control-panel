@@ -427,6 +427,18 @@ type xrayStages struct {
 	b           *xrayBatch
 	// err — ошибка ожидания хода (runXray).
 	err error
+	// syncN0, syncD0 — снимок utils.SyncStats при создании замера (вход в Select):
+	// разность со снимком при строке — fsync синхронных записей процесса панели за
+	// время выбора (поля fsync и fsyncs). Счётчики общие для процесса, поэтому в
+	// разность входят и записи, идущие параллельно выбору.
+	syncN0 int64
+	syncD0 time.Duration
+}
+
+// newXrayStages создаёт замер выбора группы gid со снимком счётчиков fsync.
+func newXrayStages(gid string, start time.Time, model time.Duration, in *xrayIntent) *xrayStages {
+	n, d := utils.SyncStats()
+	return &xrayStages{gid: gid, start: start, model: model, in: in, syncN0: n, syncD0: d}
 }
 
 // stepMS — длительность шага конвейера id в итоге прохода, мс.
@@ -491,8 +503,12 @@ func (st *xrayStages) log() {
 	if !st.answered.IsZero() {
 		total = st.answered.Sub(st.start)
 	}
-	log.Printf("[routing] выбор Xray: этапы group=%s batch=%d wait=%d model=%d live=%d build=%d validate_xray=%d validate_mihomo=%d write=%d restart=%d hot=%d other=%d markers=%d clash=%d tail=%d total=%d outcome=%s",
+	// fsync, fsyncs — ожидание записи на носитель синхронными записями панели
+	// (utils.AtomicWriteFile) от входа в Select до этой строки.
+	syncN, syncD := utils.SyncStats()
+	log.Printf("[routing] выбор Xray: этапы group=%s batch=%d wait=%d model=%d live=%d build=%d validate_xray=%d validate_mihomo=%d write=%d restart=%d hot=%d other=%d markers=%d clash=%d tail=%d fsync=%d fsyncs=%d total=%d outcome=%s",
 		st.gid, batch, wait.Milliseconds(), st.model.Milliseconds(), live.Milliseconds(),
 		build, valX, valM, write, restart, hot.Milliseconds(), other.Milliseconds(),
-		st.markers.Milliseconds(), st.clash.Milliseconds(), st.tail.Milliseconds(), total.Milliseconds(), st.outcome())
+		st.markers.Milliseconds(), st.clash.Milliseconds(), st.tail.Milliseconds(),
+		(syncD - st.syncD0).Milliseconds(), syncN-st.syncN0, total.Milliseconds(), st.outcome())
 }
