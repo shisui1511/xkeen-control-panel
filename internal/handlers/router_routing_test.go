@@ -894,6 +894,320 @@ func (e *rtSrc) rtRtTakeSnap() (rtRtSnap, bool) {
 	return s, true
 }
 
+// rtRtSourcesCount — число источников вида не «Мои узлы» (подписок): только число.
+func (e *rtSrc) rtRtSourcesCount() int {
+	e.t.Helper()
+	view := e.call(http.MethodGet, rtSourcesBase, nil)
+	if view.Status != http.StatusOK {
+		e.t.Fatalf("GET %s: %d %s", rtSourcesBase, view.Status, view.Code)
+	}
+	srcs, _ := view.object(e.t)["sources"].([]any)
+	n := 0
+	for _, it := range srcs {
+		if src, _ := it.(map[string]any); src != nil && src["kind"] != "my" {
+			n++
+		}
+	}
+	return n
+}
+
+// rtRtScaleUAT снимает этапы горячего выбора Xray на конфигурации уровня UAT
+// (G-150-3): настоящая подписка стенда в «Выбор» (sources.all), правила пресета со
+// списками geosite/geoip из dat-файлов стенда, «Применить», четыре
+// последовательных горячих выбора и пара ожидания — выбор «Выбор» и независимый
+// выбор «Вторая», отправленный, когда «Выбор» уже switching. Возвращает
+// наибольший wait строк этапов ответов 200. Адрес подписки, ответы источников с
+// ним, подписи узлов, адреса и содержимое файлов не печатаются (T-150-45,
+// T-150-54): в журнал теста — только числа, ID групп и коды.
+func (e *rtSrc) rtRtScaleUAT(subURL, gid, secondID string, runtimeView func() map[string]any) int64 {
+	t := e.t
+	t.Helper()
+	var maxWait int64
+
+	// Подписка удаляется при любом исходе блока, до общей очистки теста.
+	t.Cleanup(func() {
+		c := e.with(t)
+		for i := 0; i < 5; i++ {
+			id := c.rtDNSSubscriptionID()
+			if id == "" {
+				break
+			}
+			if r := c.call(http.MethodPost, rtSourcesBase+"/delete", map[string]any{"revision": c.revision(), "id": id}); r.Status != http.StatusOK {
+				t.Errorf("очистка масштаба: удаление подписки: %d %s", r.Status, r.Code)
+				return
+			}
+		}
+		if c.rtRtDraftChanges() > 0 {
+			c.rtRtApplyOK("очистка масштаба: подписка")
+		}
+	})
+	pv := e.call(http.MethodPost, rtSourcesBase+"/preview", map[string]any{"text": subURL})
+	if pv.Status != http.StatusOK {
+		t.Fatalf("масштаб: sources/preview: %d %s", pv.Status, pv.Code)
+	}
+	token, _ := pv.object(t)["token"].(string)
+	if add := e.call(http.MethodPost, rtSourcesBase+"/add", map[string]any{"revision": e.revision(), "token": token}); add.Status != http.StatusOK {
+		t.Fatalf("масштаб: sources/add: %d %s", add.Status, add.Code)
+	}
+	subID := e.rtDNSSubscriptionID()
+	if subID == "" {
+		t.Fatal("масштаб: подписки стенда нет в источниках после добавления")
+	}
+
+	// Правила пресета со списками: «всё, кроме страны» с RU, если RU есть среди
+	// стран пресетов, иначе «всё через прокси». Маршрутизация уже взята.
+	pr := e.call(http.MethodGet, rtRoutingBase+"/presets", nil)
+	if pr.Status != http.StatusOK {
+		t.Fatalf("масштаб: GET presets: %d %s", pr.Status, pr.Code)
+	}
+	hasRU := false
+	presets, _ := pr.object(t)["presets"].([]any)
+	for _, p := range presets {
+		pm, _ := p.(map[string]any)
+		cs, _ := pm["countries"].([]any)
+		for _, c := range cs {
+			if c == "RU" {
+				hasRU = true
+			}
+		}
+	}
+	flags := map[string]bool{"quic": false, "torrent": false, "ads": false, "service_groups": false}
+	choice := map[string]any{"id": "all_proxy", "flags": flags}
+	if hasRU {
+		choice = map[string]any{"id": "except_country", "country": "RU", "flags": flags}
+	}
+	pl := e.call(http.MethodPost, rtRoutingBase+"/presets/plan", map[string]any{"choice": choice})
+	if pl.Status != http.StatusOK {
+		t.Fatalf("масштаб: presets/plan: %d %s", pl.Status, pl.Code)
+	}
+	if add, _ := pl.object(t)["add"].([]any); len(add) == 0 {
+		t.Errorf("масштаб: presets/plan (%s) не добавляет правил", choice["id"])
+	}
+	if ap := e.call(http.MethodPost, rtRoutingBase+"/presets/apply", map[string]any{"revision": e.rtRtRevision(), "choice": choice, "take": false}); ap.Status != http.StatusOK {
+		t.Fatalf("масштаб: presets/apply: %d %s", ap.Status, ap.Code)
+	}
+	e.rtRtApplyOK("масштаб UAT")
+	draftScale := e.rtRtDraftChanges()
+
+	// Конфигурация замера: узлы «Выбор», совместимые с Xray, правила и
+	// условия-списки, размеры файлов панели (только числа).
+	rv := runtimeView()
+	rg := rtRtFindGroup(rv, "Выбор")
+	if rg == nil {
+		t.Fatal("масштаб: нет группы «Выбор» в виде «Прокси»")
+	}
+	members, _ := rg["members"].([]any)
+	var cands []string
+	xrayNodes := 0
+	for _, it := range members {
+		m, _ := it.(map[string]any)
+		if m["kind"] != "node" || m["xray"] != true {
+			continue
+		}
+		xrayNodes++
+		if m["source"] == subID {
+			member, _ := m["member"].(string)
+			cands = append(cands, member)
+		}
+	}
+	rules, lists := 0, 0
+	rs, _ := e.rtRtView()["rules"].([]any)
+	for _, it := range rs {
+		r, _ := it.(map[string]any)
+		rules++
+		conds, _ := r["conds"].([]any)
+		for _, ci := range conds {
+			c, _ := ci.(map[string]any)
+			ls, _ := c["lists"].([]any)
+			if c["type"] == "geosite" || c["type"] == "geoip" || len(ls) > 0 {
+				lists++
+			}
+		}
+	}
+	size := func(name string) int64 {
+		st, err := os.Stat(filepath.Join(rtRtXrayDir, name))
+		if err != nil {
+			return 0
+		}
+		return st.Size()
+	}
+	t.Logf("scale-config: core=xray nodes=%d rules=%d lists=%d groups_bytes=%d routing_bytes=%d",
+		xrayNodes, rules, lists, size("04_outbounds.xcp-groups.tail.json"), size("99_xcp-routing.json"))
+	if xrayNodes < 20 {
+		t.Logf("scale: узлов группы, совместимых с Xray, %d (меньше 20): замер менее представителен", xrayNodes)
+	}
+	// Четыре выбора замера и выбор A пары ожидания — пять разных узлов подписки.
+	if len(cands) < 5 {
+		t.Fatalf("масштаб: узлов подписки, совместимых с Xray, %d, ожидалось не меньше 5", len(cands))
+	}
+	used := map[string]bool{}
+	pick := func(cur string) string {
+		for _, m := range cands {
+			if m != cur && !used[m] {
+				used[m] = true
+				return m
+			}
+		}
+		return ""
+	}
+	currentOf := func(name string) string {
+		g := rtRtFindGroup(e.rtRtView(), name)
+		if g == nil {
+			t.Fatalf("масштаб: нет группы %s в представлении", name)
+		}
+		cur, _ := g["current"].(string)
+		return cur
+	}
+	expectHot := func(label string, obj map[string]any) {
+		ks, _ := obj["kernels"].(map[string]any)
+		if out, _ := ks["xray"].(string); out != "applied" {
+			t.Errorf("%s: исход Xray %q, ожидалось applied", label, out)
+		}
+		if reason, present := obj["restart_reason"]; present {
+			t.Errorf("%s: горячая смена потребовала перезапуск: restart_reason=%v", label, reason)
+		}
+	}
+	pids, _ := rtRstKernelPIDs("xray")
+	if len(pids) != 1 {
+		t.Fatalf("масштаб: до выборов PID Xray %d, ожидался один", len(pids))
+	}
+
+	// Четыре последовательных горячих выбора: строка RunLive окна принадлежит
+	// своему выбору. Порога времени нет (план 150-17).
+	for n := 1; n <= 4; n++ {
+		member := pick(currentOf("Выбор"))
+		offset := rtRtLogOffset(t)
+		start := time.Now()
+		r := e.callSlow(http.MethodPost, rtRoutingBase+"/select", map[string]string{"group": gid, "member": member})
+		httpMS := time.Since(start).Milliseconds()
+		if r.Status != http.StatusOK {
+			t.Fatalf("масштаб: выбор №%d: %d %s", n, r.Status, r.Code)
+		}
+		expectHot("масштаб: выбор №"+strconv.Itoa(n), r.object(t))
+		stages, runlive, ok := rtRtWaitStages(offset, []string{gid}, 1)
+		if !ok {
+			t.Errorf("масштаб: выбор №%d: в журнале панели нет строки этапов или RunLive (строк RunLive %d)", n, len(runlive))
+			continue
+		}
+		st := stages[gid]
+		t.Logf("select-stages: core=xray kind=scale n=%d http=%d %s", n, httpMS, st.pairs)
+		for _, rl := range runlive {
+			t.Logf("runlive-stages: core=xray kind=scale n=%d %s", n, rl)
+		}
+		maxWait = max(maxWait, st.num("wait"))
+	}
+	checkAfter := func(label string, groups ...string) {
+		after, _ := rtRstKernelPIDs("xray")
+		if len(after) != 1 || after[0] != pids[0] {
+			t.Errorf("%s: PID Xray прежний=%t, процессов %d", label, reflect.DeepEqual(after, pids), len(after))
+		}
+		v := runtimeView()
+		for _, name := range groups {
+			g := rtRtFindGroup(v, name)
+			if g == nil || g["switching"] != false || g["unconfirmed"] != false {
+				t.Errorf("%s: группа %s не в покое (есть=%t)", label, name, g != nil)
+			}
+		}
+		if e.rtRtDraftChanges() != draftScale {
+			t.Errorf("%s: выборы изменили черновик", label)
+		}
+	}
+	checkAfter("масштаб", "Выбор")
+
+	// Пара ожидания: условие отказа G-150-3 на проходе уровня UAT. A — «Выбор»; B
+	// — независимая «Вторая», отправленная, когда «Выбор» уже switching (или пришёл
+	// ответ A). Оба обязаны получить 200; длительность прохода тест не подстраивает.
+	mA := pick(currentOf("Выбор"))
+	sg := rtRtFindGroup(runtimeView(), "Вторая")
+	if sg == nil {
+		t.Fatal("масштаб: нет группы «Вторая» в виде «Прокси»")
+	}
+	curLabel, _ := sg["current_label"].(string)
+	mB := ""
+	sm, _ := sg["members"].([]any)
+	for _, it := range sm {
+		m, _ := it.(map[string]any)
+		if m["kind"] == "node" && m["xray"] == true && m["name"] != curLabel {
+			mB, _ = m["member"].(string)
+			break
+		}
+	}
+	if mB == "" {
+		t.Fatal("масштаб: у «Вторая» нет узла Xray с подписью, отличной от текущей")
+	}
+	offset := rtRtLogOffset(t)
+	startA, startB := make(chan struct{}), make(chan struct{})
+	out := make(chan rtRtSelRes, 2)
+	go e.rtRtSelectAsync(0, gid, mA, startA, out)
+	go e.rtRtSelectAsync(1, secondID, mB, startB, out)
+	close(startA)
+	var res [2]rtRtSelRes
+	got, switching := 0, false
+	for got == 0 && !switching {
+		if s, ok := e.rtRtTakeSnap(); ok && s.switching[gid] {
+			switching = true
+			break
+		}
+		select {
+		case r := <-out:
+			res[r.job] = r
+			got++
+		case <-time.After(rtRtSnapPoll):
+		}
+	}
+	close(startB)
+	for ; got < 2; got++ {
+		r := <-out
+		res[r.job] = r
+	}
+	pair := [2]struct{ name, id, member string }{{"Выбор", gid, mA}, {"Вторая", secondID, mB}}
+	var okGroups []string
+	for i, r := range res {
+		if r.err != nil {
+			t.Fatalf("масштаб: пара ожидания, выбор %s: %v", pair[i].id, r.err)
+		}
+		resp := e.decode(r.status, r.raw)
+		httpMS := r.done.Sub(r.sent).Milliseconds()
+		switch {
+		case resp.Code == "apply_busy":
+			t.Errorf("G-150-3: независимый выбор получил apply_busy во время прохода (группа %s, ответ через %d мс)", pair[i].id, httpMS)
+		case r.status != http.StatusOK:
+			t.Errorf("масштаб: пара ожидания, выбор %s: %d %s, ожидалось 200", pair[i].id, resp.Status, resp.Code)
+		default:
+			okGroups = append(okGroups, pair[i].id)
+			expectHot("масштаб: пара ожидания, выбор "+pair[i].id, resp.object(t))
+		}
+	}
+	// Строки этапов обеих групп (у отказа apply_busy она тоже есть — с его wait).
+	stages, runlive, ok := rtRtWaitStages(offset, []string{gid, secondID}, 1)
+	if !ok {
+		t.Errorf("масштаб: пара ожидания: в журнале панели нет строк этапов обеих групп или RunLive (строк RunLive %d)", len(runlive))
+	}
+	for i, p := range pair {
+		st, present := stages[p.id]
+		if !present {
+			continue
+		}
+		t.Logf("select-stages: core=xray kind=longwait group=%s http=%d %s", p.id, res[i].done.Sub(res[i].sent).Milliseconds(), st.pairs)
+		for _, g := range okGroups {
+			if g == p.id {
+				maxWait = max(maxWait, st.num("wait"))
+			}
+		}
+	}
+	for _, rl := range runlive {
+		t.Logf("runlive-stages: core=xray kind=longwait %s", rl)
+	}
+	t.Logf("scale: пара ожидания: B отправлен после switching «Выбор»=%t", switching)
+	for _, p := range pair {
+		if cur := currentOf(p.name); cur != p.member {
+			t.Errorf("масштаб: пара ожидания: current группы %s не равен цели", p.id)
+		}
+	}
+	checkAfter("масштаб: пара ожидания", "Выбор", "Вторая")
+	return maxWait
+}
+
 // Выбор участника ручной группы: флаг → два узла → ручная группа → take → «Применить»
 // → вид работающих прокси → POST select → «Сейчас» в представлении, now группы в
 // Mihomo или исходящий группы в Xray (горячая замена без смены PID Xray) → вид и
@@ -909,6 +1223,32 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	e.rtRtPurge()
 	contract := rtLoadContractFile(t, routertest.RoutingContractFile(t))
 	taken := false
+
+	// Набор источников стенда: подписка, оставшаяся от прерванного прогона, иначе
+	// попала бы в «Выбор» (sources.all) и в цели блока D-17. Число подписок до
+	// удаления и после всех очисток сверяют план-сессии; печатаются только числа.
+	t.Logf("sources-start: core=%s subscriptions=%d", tg.Core, e.rtRtSourcesCount())
+	for i := 0; i < 5; i++ {
+		id := e.rtDNSSubscriptionID()
+		if id == "" {
+			break
+		}
+		if r := e.call(http.MethodPost, rtSourcesBase+"/delete", map[string]any{"revision": e.revision(), "id": id}); r.Status != http.StatusOK {
+			t.Fatalf("удаление оставшейся подписки: %d %s", r.Status, r.Code)
+		}
+	}
+	if e.rtRtDraftChanges() > 0 {
+		e.rtRtApplyOK("удаление оставшейся подписки")
+	}
+	// Регистрируется раньше общей очистки и выполняется после неё (и после очистки
+	// блока масштаба): последний шаг — число подписок, ожидается 0.
+	t.Cleanup(func() {
+		n := e.with(t).rtRtSourcesCount()
+		t.Logf("sources-end: core=%s subscriptions=%d", tg.Core, n)
+		if n > 0 {
+			t.Errorf("очистка: подписка осталась в источниках (%d)", n)
+		}
+	})
 
 	// Очистка при любом исходе: release → «Применить», затем узлы и секции. Выбор в
 	// Live уходит вместе с группой при «Применить».
@@ -1637,6 +1977,17 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 		again, ok := rtRtGroupOutbound(t, gid)
 		if !ok || reflect.DeepEqual(again, xrayBefore) || !rtRtMatchesNode(t, again) {
 			t.Error("Xray: после «Применить» исходящий группы не соответствует выбранному узлу")
+		}
+	}
+
+	// Масштаб UAT: этапы горячего выбора Xray на настоящей подписке стенда с
+	// правилами пресета (13 с UAT — горячий путь Xray). Только на ядре xray и только
+	// при адресе подписки; без него — запись в журнале теста, тест не пропускается.
+	if tg.Core == "xray" {
+		if subURL := os.Getenv("XCP_RT_SUBSCRIPTION_URL"); subURL == "" {
+			t.Logf("scale: пропуск, нет подписки стенда")
+		} else {
+			maxWait = max(maxWait, e.rtRtScaleUAT(subURL, gid, secondID, runtimeView))
 		}
 	}
 
