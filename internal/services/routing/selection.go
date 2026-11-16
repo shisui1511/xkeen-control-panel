@@ -566,11 +566,12 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 				return res, err
 			}
 		case runErr != nil || xraySelectionReverted(outcome):
-			// Исход прохода один на пачку: возврат касается только своей группы и
-			// только при неизменённом значении.
-			if err := s.restoreSelection(groupID, member, in.prev, in.had, comp); err != nil {
+			// Возврат выбора уже выполнен под ходом (settleXrayBatch): исход прохода
+			// один на пачку, возврат касается только своей группы и только при
+			// неизменённом значении.
+			if in.restoreErr != nil {
 				res.Unconfirmed = comp
-				return res, err
+				return res, in.restoreErr
 			}
 			res.Reverted = true
 			if desired.ManagedFor(configlayer.KernelMihomo) && am.installed.Mihomo {
@@ -583,16 +584,9 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 			if desired.ManagedFor(configlayer.KernelMihomo) && am.installed.Mihomo {
 				res.Kernels[configlayer.KernelMihomo] = selFailed
 			}
-			if !in.pending {
-				if err := s.d.Layer.UpdateLive(func(live configlayer.Sections) error {
-					m := readUnconfirmed(live)
-					for _, id := range comp {
-						m[id] = configlayer.KernelXray
-					}
-					return writeUnconfirmed(live, m)
-				}); err != nil {
-					return res, err
-				}
+			// Маркер без записи Prepare поставлен под ходом (settleXrayBatch).
+			if in.markErr != nil {
+				return res, in.markErr
 			}
 			return res, nil
 		}

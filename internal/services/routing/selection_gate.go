@@ -56,6 +56,11 @@ type xrayIntent struct {
 	pending bool
 	wrote   bool
 	err     error
+	// Разбор исхода под ходом выбора (settleXrayBatch): ошибка возврата выбора и
+	// ошибка записи маркера неизвестного исхода. Возврат идёт до освобождения хода,
+	// чтобы следующая пачка не собрала xcp-groups с отвергнутым выбором (CR-01).
+	restoreErr error
+	markErr    error
 	// joined — вступление в пачку; wait — от вступления до запечатывания пачки.
 	joined time.Time
 	wait   time.Duration
@@ -215,6 +220,55 @@ func (s *Service) execXrayBatch(b *xrayBatch) {
 		b.err = ErrApplyBusy
 	default:
 		b.out, b.err = selFailed, err
+	}
+	s.settleXrayBatch(b)
+}
+
+// settleXrayBatch разбирает исход пачки выбора под ходом, до освобождения хода и
+// закрытия b.done: возврат выбора неудачного прохода и маркеры неизвестного
+// исхода. Вне хода следующая пачка успела бы собрать xcp-groups с отвергнутым
+// выбором чужой группы, и Live разошёлся бы с ядром (CR-01, D-17). Возврат касается
+// только своей группы и только при неизменённом значении; результат каждого
+// намерения — restoreErr и markErr, Select их читает.
+func (s *Service) settleXrayBatch(b *xrayBatch) {
+	if b.kind != xrayRunSelect {
+		return
+	}
+	switch {
+	case selectionOK(b.out) && b.err == nil:
+		// Маркеры снимает Select (clearUnconfirmed) уже без хода: файлы совпадают с Live.
+	case b.err != nil || xraySelectionReverted(b.outcome):
+		for _, in := range b.intents {
+			if in.wrote {
+				in.restoreErr = s.restoreSelection(in.gid, in.member, in.prev, in.had, in.comp)
+			}
+		}
+	default:
+		// Неизвестный исход никогда не выдаётся за успешный возврат: компоненты
+		// намерений без маркера из Prepare получают его здесь.
+		var comps [][]string
+		for _, in := range b.intents {
+			if in.wrote && !in.pending {
+				comps = append(comps, in.comp)
+			}
+		}
+		if len(comps) == 0 {
+			return
+		}
+		err := s.d.Layer.UpdateLive(func(live configlayer.Sections) error {
+			m := readUnconfirmed(live)
+			for _, comp := range comps {
+				for _, id := range comp {
+					m[id] = configlayer.KernelXray
+				}
+			}
+			return writeUnconfirmed(live, m)
+		})
+		for _, in := range b.intents {
+			if in.wrote && !in.pending {
+				in.markErr = err
+			}
+		}
 	}
 }
 
