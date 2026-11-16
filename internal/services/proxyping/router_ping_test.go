@@ -179,6 +179,67 @@ func TestRouterPingTempXray(t *testing.T) {
 		}
 	})
 
+	// WR-02: карта отпечатков, прочитанная до запуска пачки (кэш 2 с), не знает нового узла;
+	// пачка читает каталог заново и не исключает такой узел.
+	t.Run("fingerprint_stale_before_batch", func(t *testing.T) {
+		proxy := pingSOCKS(t, false)
+		targets := pingTargets(proxy.port, 3)
+		full := make(map[string]string, len(targets))
+		stale := make(map[string]string, len(targets))
+		for i, target := range targets {
+			full[target.Ref] = target.Fingerprint
+			if i < 2 {
+				stale[target.Ref] = target.Fingerprint
+			}
+		}
+		var fingerprints atomic.Value
+		fingerprints.Store(stale)
+		r, _ := pingRunner(t, func(d *Deps) {
+			d.Fingerprints = func() (map[string]string, error) { return fingerprints.Load().(map[string]string), nil }
+		})
+		r.Snapshot()
+		fingerprints.Store(full)
+		pingLaunch(t, r, targets, pingHTTP(t, 0))
+		s := pingWaitBatch(t, r, StateDone, 15*time.Second)
+		if s.Batch.Excluded != 0 || s.Batch.Done != len(targets) {
+			t.Fatalf("stale_fingerprints: excluded=%d done=%d", s.Batch.Excluded, s.Batch.Done)
+		}
+		if _, ok := s.Results[targets[2].Ref]; !ok {
+			t.Fatal("new_node_not_measured")
+		}
+	})
+
+	// WR-01: пачка повторного выбора не дошла до конца (временный Xray не запустился) —
+	// неизмеренные узлы проверяет TLS, а не считает мёртвыми.
+	t.Run("probe_failed_batch_tls", func(t *testing.T) {
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+		t.Cleanup(server.Close)
+		_, port, _ := net.SplitHostPort(server.Listener.Addr().String())
+		n, _ := strconv.Atoi(port)
+		targets := pingTargets(n, 2)
+		fakeDir, err := os.MkdirTemp("/opt/tmp", "xcp-ping-fake-")
+		if err != nil {
+			t.Fatal("fake_dir")
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(fakeDir) })
+		fake := filepath.Join(fakeDir, "xray")
+		if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+			t.Fatal("fake_xray")
+		}
+		r, _ := pingRunner(t, func(d *Deps) { d.XrayBin = func() string { return fake } })
+		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		defer cancel()
+		got := r.Probe(ctx, Request{Kernel: "xray", Method: MethodXray, Targets: targets, URL: server.URL})
+		if last := r.Snapshot().Batch; last == nil || last.State != StateFailed || last.ReasonCode != ReasonStart {
+			t.Fatalf("batch_not_failed: %+v", last)
+		}
+		for _, target := range targets {
+			if res, ok := got[target.Ref]; !ok || res.Method != MethodTLS || res.Status != StatusOK {
+				t.Fatalf("not_tls_checked: %s %+v", target.Ref, res)
+			}
+		}
+	})
+
 	t.Run("tls_fallback", func(t *testing.T) {
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 		t.Cleanup(server.Close)

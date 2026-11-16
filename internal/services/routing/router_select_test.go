@@ -466,6 +466,88 @@ func TestRouterSelectMihomoReconcile(t *testing.T) {
 	}
 }
 
+// Связанные группы Mihomo (WR-03, WR-04): маркер сбоя выбора стоит только на группе со
+// сбоем и не блокирует выбор в связанной группе; снятие отсутствующего маркера не пишет
+// состояние и не публикует событие; сверка снимает маркеры подтверждённых групп одной
+// записью. Сбой выбора — убранный сокет контроллера при живом процессе. Отдельный процесс
+// Mihomo в каталоге теста, ядро стенда не трогается.
+func TestRouterSelectMihomoLinked(t *testing.T) {
+	ctx := context.Background()
+	core := rtNewMihomoCore(t)
+	e := rtNewEnv(t, rtWithKernels(rtMihomoOnly), rtWithMihomoCore(core), rtWithSelection())
+	e.writeUserProfile(t)
+	e.addMyRaw(t, "socks5://127.0.0.1:9#lnk-a", "socks5://127.0.0.1:10#lnk-b")
+	nodeB := rtsNode(t, e.catalog(t).Mihomo, "lnk-b")
+	_, inner, err := e.svc.SaveGroup(e.rev(t), Group{Name: "Внутр", Mode: ModeManual, Sources: GroupSources{All: true}})
+	if err != nil {
+		t.Fatalf("SaveGroup inner: %v", err)
+	}
+	_, outer, err := e.svc.SaveGroup(e.rev(t), Group{Name: "Внеш", Mode: ModeManual, Members: []Member{{Kind: KindGroup, ID: inner.ID}}})
+	if err != nil {
+		t.Fatalf("SaveGroup outer: %v", err)
+	}
+	e.takeAndApply(t)
+	core.start(t, e)
+	comp := []string{inner.ID, outer.ID}
+	markers := func() map[string]string {
+		st, err := e.layer.ReadState()
+		if err != nil {
+			t.Fatalf("ReadState: %v", err)
+		}
+		return readUnconfirmed(st.Live)
+	}
+
+	// WR-04: маркеров нет — снятие не пишет состояние и не публикует событие proxies.
+	events, cancel, err := e.layer.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer cancel()
+	if err := e.svc.clearUnconfirmed(comp, configlayer.KernelMihomo); err != nil {
+		t.Fatalf("clearUnconfirmed без маркера: %v", err)
+	}
+	select {
+	case ev := <-events:
+		if ev.Type == configlayer.EventProxies {
+			t.Fatalf("снятие отсутствующего маркера опубликовало событие %q", ev.Type)
+		}
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	// Сбой выбора во внутренней группе: маркер только на ней.
+	if err := os.Remove(filepath.Join(core.dir, "c.sock")); err != nil {
+		t.Fatalf("сокет контроллера: %v", err)
+	}
+	res, err := e.svc.Select(ctx, inner.ID, memberNode+nodeB.Ref)
+	if err != nil {
+		t.Fatalf("Select внутренней: %v", err)
+	}
+	if got := res.Kernels[configlayer.KernelMihomo]; got != selFailed {
+		t.Fatalf("Kernels[mihomo] = %q, ожидалось %q", got, selFailed)
+	}
+	if m := markers(); m[inner.ID] != configlayer.KernelMihomo || m[outer.ID] != "" {
+		t.Fatalf("маркеры после сбоя: внутренняя=%q внешняя=%q", m[inner.ID], m[outer.ID])
+	}
+
+	// WR-03: связанная группа без своего маркера выбирается; сама помеченная — нет.
+	if _, err := e.svc.Select(ctx, outer.ID, memberGroup+inner.ID); errors.Is(err, ErrSelectionUnconfirmed) {
+		t.Fatalf("маркер Mihomo внутренней группы заблокировал связанную: %v", err)
+	} else if err != nil {
+		t.Fatalf("Select внешней: %v", err)
+	}
+	if _, err := e.svc.Select(ctx, inner.ID, memberNode+nodeB.Ref); !errors.Is(err, ErrSelectionUnconfirmed) {
+		t.Fatalf("Select помеченной группы: err = %v, ожидалось ErrSelectionUnconfirmed", err)
+	}
+
+	// Процесс с контроллером возвращается: сверка снимает маркеры обеих групп.
+	core.stop()
+	core.start(t, e)
+	e.rtsReconcile(t, ctx)
+	if m := markers(); len(m) != 0 {
+		t.Fatalf("после сверки остались маркеры: %d", len(m))
+	}
+}
+
 // Пропавший выбранный узел заменяется первым живым: фиксатор записывает первого
 // по порядку и маркер, затем проверка узлов решает. Без запущенного Mihomo узлы
 // проверяет TLSPing (способ tls, мёртвые узлы не отвечают, остаётся первый по
