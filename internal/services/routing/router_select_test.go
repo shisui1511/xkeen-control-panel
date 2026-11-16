@@ -16,7 +16,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -298,80 +297,6 @@ func TestRouterSelectXray(t *testing.T) {
 	after, err := e.svc.RuntimeView()
 	if err != nil || !reflect.DeepEqual(view.Groups, after.Groups) {
 		t.Fatal("runtime_read_draft")
-	}
-
-	// Отказ проверки конвейера (WR-04, CR-01, 150-14): чужой файл Xray с исходящим
-	// неизвестного протокола не проходит `xray run -test`, поэтому выбор каждой из
-	// двух независимых групп (одновременно, в одной или двух пачках) получает
-	// reverted: Live и xcp-groups возвращаются к прежнему выбору, и последующий
-	// выбор третьей группы не несёт отвергнутых выборов.
-	e.replaceGroups(t, func(cfg *GroupsConfig) { cfg.Items = []Group{} })
-	var revert [3]Group
-	for i := range revert {
-		_, g, err := e.svc.SaveGroup(e.rev(t), Group{Name: "Откат " + strconv.Itoa(i+1), Mode: ModeManual, Sources: GroupSources{All: true}})
-		if err != nil {
-			t.Fatalf("SaveGroup (откат %d): %v", i+1, err)
-		}
-		revert[i] = g
-	}
-	e.takeAndApply(t)
-	for _, g := range revert[:2] {
-		if _, err := e.svc.Select(ctx, g.ID, memberNode+nodeA.Ref); err != nil {
-			t.Fatalf("Select (откат, исходный выбор): %v", err)
-		}
-	}
-	badFile := filepath.Join(e.xrayDir(), "98_bad_outbound.json")
-	if err := os.WriteFile(badFile, []byte(`{"outbounds":[{"tag":"rt-bad","protocol":"no-such-protocol"}]}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	type revertRes struct {
-		res SelectResult
-		err error
-	}
-	var wg sync.WaitGroup
-	results := make([]revertRes, 2)
-	start := make(chan struct{})
-	for i, g := range revert[:2] {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			results[i].res, results[i].err = e.svc.Select(ctx, g.ID, memberNode+nodeB.Ref)
-		}()
-	}
-	close(start)
-	wg.Wait()
-	for i, r := range results {
-		if r.err != nil || !r.res.Reverted {
-			t.Errorf("выбор группы отката %d при отказе проверки: ошибка=%t reverted=%t, ожидалось reverted", i+1, r.err != nil, r.res.Reverted)
-		}
-	}
-	sel := e.rtcSelection(t)
-	for i, g := range revert[:2] {
-		if sel[g.ID] != memberNode+nodeA.Ref {
-			t.Errorf("Live[selection] группы отката %d: возврат не выполнен (прежний узел=%t)", i+1, sel[g.ID] == memberNode+nodeA.Ref)
-		}
-		if !rtsSameOutbound(rtsOutbound(t, e.xrayDir(), GroupTag(g.ID)), rtsOutbound(t, e.xrayDir(), nodeA.XrayTag)) {
-			t.Errorf("исходящий группы отката %d сменился при отказе проверки", i+1)
-		}
-		if readUnconfirmed(e.state(t).Live)[g.ID] != "" {
-			t.Errorf("группа отката %d осталась с маркером неизвестного исхода", i+1)
-		}
-	}
-	if err := os.Remove(badFile); err != nil {
-		t.Fatal(err)
-	}
-	if res, err := e.svc.Select(ctx, revert[2].ID, memberNode+nodeB.Ref); err != nil || res.Reverted {
-		t.Fatalf("выбор третьей группы после отказов: ошибка=%t reverted=%t", err != nil, res.Reverted)
-	}
-	sel = e.rtcSelection(t)
-	for i, g := range revert[:2] {
-		if sel[g.ID] != memberNode+nodeA.Ref || !rtsSameOutbound(rtsOutbound(t, e.xrayDir(), GroupTag(g.ID)), rtsOutbound(t, e.xrayDir(), nodeA.XrayTag)) {
-			t.Errorf("выбор третьей группы закрепил отвергнутый выбор группы отката %d", i+1)
-		}
-	}
-	if !rtsSameOutbound(rtsOutbound(t, e.xrayDir(), GroupTag(revert[2].ID)), rtsOutbound(t, e.xrayDir(), nodeB.XrayTag)) {
-		t.Error("исходящий третьей группы не совпадает с выбранным узлом B")
 	}
 }
 

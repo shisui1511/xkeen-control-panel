@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -204,6 +205,33 @@ func (e *rtSrc) rtFltSelect(gid, member string) rtFltSel {
 	s.unconfirmed = len(un)
 	return s
 }
+
+// rtFltSelectBare — rtFltSelect без t.*: для одновременных выборов из горутин.
+func (e *rtSrc) rtFltSelectBare(gid, member string) (rtFltSel, error) {
+	status, raw, err := e.p.CallSlow(http.MethodPost, rtRoutingBase+"/select", map[string]string{"group": gid, "member": member})
+	if err != nil {
+		return rtFltSel{}, err
+	}
+	r := e.decode(status, raw)
+	s := rtFltSel{status: r.Status, code: r.Code}
+	if r.Status != http.StatusOK {
+		return s, nil
+	}
+	var obj struct {
+		Kernels       map[string]string `json:"kernels"`
+		RestartReason string            `json:"restart_reason"`
+		Reverted      bool              `json:"reverted"`
+		Unconfirmed   []any             `json:"unconfirmed"`
+	}
+	if err := json.Unmarshal(r.Data, &obj); err != nil {
+		return s, fmt.Errorf("data ответа select не объект: %w", err)
+	}
+	s.xray, s.reason, s.reverted, s.unconfirmed = obj.Kernels["xray"], obj.RestartReason, obj.Reverted, len(obj.Unconfirmed)
+	return s, nil
+}
+
+// rtFltBatchName — имя i-й независимой группы возврата пачки.
+func rtFltBatchName(i int) string { return fmt.Sprintf("Пачка %d", i+1) }
 
 // rtFltCurrent — выбор группы в представлении маршрутизации (Live).
 func (e *rtSrc) rtFltCurrent(name string) string {
@@ -410,12 +438,14 @@ func (e *rtSrc) rtFltWatchRollback(ctx context.Context) <-chan rtFltRollback {
 }
 
 // Сбои при выборе узла Xray: CR-02 (сокращённая проверка выбора, неприменимая
-// горячая замена и отвергаемый каталог — откат без остановки Xray) и D-15
+// горячая замена и отвергаемый каталог — откат без остановки Xray), D-15
 // (падение Xray сразу после горячей замены: доводящий перезапуск; при
 // отвергаемом каталоге — откат с подъёмом Xray на прежних файлах или маркер
-// D-16). Подготовка: слой включён, три узла «Моих узлов», ручная группа «Сбой»
-// со всеми узлами и вложенная ручная «Внешняя» с участником-группой «Сбой»,
-// маршрутизация Xray взята, «Применить», в «Сбой» выбран узел A. Метка ядра:
+// D-16) и CR-01 (возврат пачки одновременных выборов при отказе полной проверки).
+// Подготовка: слой включён, три узла «Моих узлов», ручная группа «Сбой» со всеми
+// узлами, вложенная ручная «Внешняя» с участником-группой «Сбой» и три
+// независимые ручные группы «Пачка» со всеми узлами, маршрутизация Xray взята,
+// «Применить», в «Сбой» выбран узел A. Метка ядра:
 // горячая замена и каталог есть только у Xray, на Mihomo тест пропускается.
 func TestRouterSelectXrayFaults(t *testing.T) {
 	routertest.Tier(t, routertest.Full, "внесение сбоя: закрытый порт API Xray, отвергаемый каталог и падение процесса Xray посреди горячей замены")
@@ -468,6 +498,12 @@ func TestRouterSelectXrayFaults(t *testing.T) {
 	}
 	gid := saveGroup("Сбой", map[string]any{"all": true}, []map[string]string{})
 	outerID := saveGroup("Внешняя", map[string]any{"all": false, "ids": []string{}}, []map[string]string{{"kind": "group", "id": gid}})
+	// Независимые ручные группы возврата пачки (fallback_batch_return): применяются
+	// вместе со взятием, отдельного «Применить» в подтесте нет.
+	var batch [3]string
+	for i := range batch {
+		batch[i] = saveGroup(rtFltBatchName(i), map[string]any{"all": true}, []map[string]string{})
+	}
 
 	if tk := e.call(http.MethodPost, rtRoutingBase+"/take", map[string]int64{"revision": e.rtRtRevision()}); tk.Status != http.StatusOK {
 		t.Fatalf("take: %d %s", tk.Status, tk.Code)
@@ -607,6 +643,129 @@ func TestRouterSelectXrayFaults(t *testing.T) {
 			t.Error("CR-02: исходящий «Сбой» не сменился на узел B")
 		}
 		obs[nodeB] = in
+	})
+
+	// CR-01, возврат пачки: порт API закрыт и чужой файл лежит, как в
+	// fallback_full_validation. Одновременные выборы узла B в двух независимых
+	// группах «Пачка» отвергаются полной проверкой перед перезапуском, и каждый
+	// получает reverted: Live и xcp-groups обеих групп возвращаются к узлу A, Xray
+	// работает с прежним PID. После снятия сбоев выбор третьей группы применяется
+	// горячей заменой и не несёт отвергнутых выборов первых двух.
+	t.Run("fallback_batch_return", func(t *testing.T) {
+		c := e.with(t)
+		t.Cleanup(func() {
+			if !rtFltDropBad() {
+				t.Error("очистка: чужой файл Xray не удалён")
+			}
+			for i, id := range batch {
+				c.rtFltConfirmIfMarked(rtFltBatchName(i), id)
+			}
+		})
+
+		// Исходный выбор — узел A в обеих группах, горячей заменой при открытом API.
+		prev := map[string]map[string]any{}
+		for i, id := range batch[:2] {
+			name := rtFltBatchName(i)
+			if c.rtFltCurrent(name) != nodeA {
+				if s := c.rtFltSelect(id, nodeA); s.status != http.StatusOK || s.xray != "applied" {
+					t.Fatalf("исходный выбор узла A в «%s»: %s", name, s)
+				}
+			}
+			ob, ok := rtRtGroupOutbound(t, id)
+			if !ok || !reflect.DeepEqual(ob, obs[nodeA]) {
+				t.Fatalf("Xray: исходящий «%s» до сбоя не совпадает с узлом A (найден=%t)", name, ok)
+			}
+			prev[id] = ob
+		}
+
+		pid := rtFltXrayPID()
+		if pid == 0 {
+			t.Fatal("до выбора нет единственного процесса Xray")
+		}
+		unblock := rtFltBlockAPI(t, rtFltAPIPort(t))
+		rtFltPutBad(t)
+
+		offset := rtRtLogOffset(t)
+		type selRes struct {
+			s   rtFltSel
+			err error
+		}
+		var wg sync.WaitGroup
+		results := make([]selRes, 2)
+		start := make(chan struct{})
+		for i, id := range batch[:2] {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				results[i].s, results[i].err = c.rtFltSelectBare(id, nodeB)
+			}()
+		}
+		close(start)
+		wg.Wait()
+		code, rolledBack, xrayOut := c.rtFltApplyCode()
+		window := rtFltLogSince(offset)
+		pidSame := rtFltXrayPID() == pid
+		t.Logf("cr01: reverted=%t/%t pid_same=%t code=%s", results[0].s.reverted, results[1].s.reverted, pidSame, code)
+		for i, r := range results {
+			if r.err != nil {
+				t.Errorf("CR-01: выбор в «%s»: %v", rtFltBatchName(i), r.err)
+				continue
+			}
+			if r.s.status != http.StatusOK || !r.s.reverted {
+				t.Errorf("CR-01: выбор в «%s» при закрытом API и отвергаемом каталоге: %s, ожидалось 200 reverted", rtFltBatchName(i), r.s)
+			}
+		}
+		if code != "restart_failed" || !rolledBack || xrayOut != "failed_rolled_back" {
+			t.Errorf("CR-01: итог прохода code=%q rolled_back=%t xray=%q, ожидалось restart_failed с откатом и failed_rolled_back", code, rolledBack, xrayOut)
+		}
+		if !strings.Contains(window, rtFltNoAPIMark) {
+			t.Error("CR-01: в журнале панели нет строки горячей замены с причиной no_api")
+		}
+		if !pidSame {
+			t.Errorf("CR-01: Xray перезапущен или остановлен при отказе полной проверки (PID прежний=%t, процесс есть=%t)", pidSame, rtFltXrayPID() > 0)
+		}
+		// restored проверяет, что выбор и исходящий группы — прежние (узел A).
+		restored := func(label string) {
+			t.Helper()
+			for i, id := range batch[:2] {
+				name := rtFltBatchName(i)
+				if c.rtFltCurrent(name) != nodeA {
+					t.Errorf("%s: выбор «%s» в Live не узел A", label, name)
+				}
+				if cur, marked := c.rtFltRuntime(name); cur != nodeA || marked {
+					t.Errorf("%s: вид «Прокси» «%s»: выбор A=%t, маркер selection_unconfirmed=%t", label, name, cur == nodeA, marked)
+				}
+				if ob, ok := rtRtGroupOutbound(t, id); !ok || !reflect.DeepEqual(ob, prev[id]) {
+					t.Errorf("%s: исходящий «%s» в xcp-groups не прежний (найден=%t)", label, name, ok)
+				}
+			}
+		}
+		restored("CR-01")
+
+		// Сбои сняты: выбор третьей группы применяется и не несёт отвергнутых.
+		if !rtFltDropBad() {
+			t.Fatal("чужой файл Xray не удалён")
+		}
+		unblock()
+		third := rtFltBatchName(2)
+		if s := c.rtFltSelect(batch[2], nodeB); s.status != http.StatusOK || s.xray != "applied" || s.reverted {
+			t.Fatalf("CR-01: выбор B в «%s» после снятия сбоев: %s, ожидалось applied", third, s)
+		}
+		if rtFltXrayPID() != pid {
+			t.Errorf("CR-01: выбор в «%s» после снятия сбоев сменил PID Xray", third)
+		}
+		restored("CR-01, после выбора третьей группы")
+		if c.rtFltCurrent(third) != nodeB {
+			t.Errorf("CR-01: выбор «%s» в Live не узел B", third)
+		}
+		ob, ok := rtRtGroupOutbound(t, batch[2])
+		if !ok || reflect.DeepEqual(ob, obs[nodeA]) || !rtRtMatchesNode(t, ob) {
+			t.Errorf("CR-01: исходящий «%s» не сменился на узел «Моих узлов», отличный от A (найден=%t)", third, ok)
+		}
+		if want, known := obs[nodeB]; known && !reflect.DeepEqual(ob, want) {
+			t.Errorf("CR-01: исходящий «%s» не совпадает с узлом B", third)
+		}
 	})
 
 	// other — узел «Сбой», отличный от текущего выбора.
