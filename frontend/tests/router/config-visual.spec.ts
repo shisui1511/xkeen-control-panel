@@ -143,7 +143,7 @@ async function checkTab(
   if (tab === PROXIES) {
     const card = page.locator('[data-testid^="proxy-group-"].pc-card').first();
     if ((await card.count()) > 0) {
-      const head = card.locator('.gc-head').first();
+      const head = card.locator('.pc-toggle').first();
       if ((await head.getAttribute('aria-expanded')) !== 'true') {
         await card.locator('.pc-name').first().click();
       }

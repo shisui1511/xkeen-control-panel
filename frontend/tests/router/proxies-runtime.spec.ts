@@ -112,7 +112,7 @@ async function openProxies(page: Page, hash = '#/proxies'): Promise<void> {
 async function cardOf(page: Page, id: string, expand = false) {
   const card = page.getByTestId(`proxy-group-${id}`);
   await expect(card, `proxy-group-${id}`).toBeVisible({ timeout: T.page });
-  const head = card.locator('.gc-head').first();
+  const head = card.locator('.pc-toggle').first();
   if (expand && (await head.getAttribute('aria-expanded')) !== 'true') {
     await card.locator('.pc-name').first().click();
   }
@@ -382,7 +382,7 @@ test(
       // вторая вкладка: карточку раскрывает адрес ?group=
       await openProxies(second, `#/proxies?group=${proxyId}`);
       await expect(
-        second.getByTestId(`proxy-group-${proxyId}`).locator('.gc-head').first()
+        second.getByTestId(`proxy-group-${proxyId}`).locator('.pc-toggle').first()
       ).toHaveAttribute('aria-expanded', 'true', { timeout: T.action });
       await cardOf(page, proxyId, true);
 
@@ -490,6 +490,12 @@ test(
 
     // «Проверить все» и сразу «Отменить проверку»: итог «Отменено, проверено N из M»
     await startBatch(page, 'proxies-ping-all', groupBatch);
+    // пока пачка идёт, «Проверить все» с aria-disabled выглядит неактивной (не как обычная)
+    if ((await lastBatch(page)).state === 'running') {
+      const all = page.getByTestId('proxies-ping-all');
+      await expect(all).toHaveAttribute('aria-disabled', 'true', { timeout: T.action });
+      await expect(all).toHaveCSS('opacity', '0.45');
+    }
     const cancel = page.getByTestId('proxies-ping-cancel');
     const cancelled = await cancel
       .click({ timeout: T.action })
@@ -525,7 +531,7 @@ test(
     const guard = attachConsoleGuard(page);
     await openProxies(page);
     const outerCard = await cardOf(page, outerId);
-    const innerHead = page.getByTestId(`proxy-group-${proxyId}`).locator('.gc-head').first();
+    const innerHead = page.getByTestId(`proxy-group-${proxyId}`).locator('.pc-toggle').first();
     await expect(innerHead).toHaveAttribute('aria-expanded', 'false', { timeout: T.action });
 
     // звено «Сейчас» внешней группы ведёт к вложенной: раскрыть и перевести фокус на шапку
@@ -538,14 +544,14 @@ test(
     await expect(innerHead).toHaveAttribute('aria-expanded', 'true', { timeout: T.action });
     await expect(innerHead).toBeFocused({ timeout: T.action });
     // нажатие на звено не сворачивает и не раскрывает внешнюю карточку
-    await expect(outerCard.locator('.gc-head').first()).toHaveAttribute('aria-expanded', 'false');
+    await expect(outerCard.locator('.pc-toggle').first()).toHaveAttribute('aria-expanded', 'false');
 
     // адрес ?group= раскрывает внешнюю карточку
     await page.goto(`/#/proxies?group=${outerId}`, {
       timeout: T.page,
       waitUntil: 'domcontentloaded'
     });
-    const outerHead = page.getByTestId(`proxy-group-${outerId}`).locator('.gc-head').first();
+    const outerHead = page.getByTestId(`proxy-group-${outerId}`).locator('.pc-toggle').first();
     await expect(outerHead).toHaveAttribute('aria-expanded', 'true', { timeout: T.page });
     await expect(outerHead).toBeFocused({ timeout: T.action });
     await guard.assertClean();

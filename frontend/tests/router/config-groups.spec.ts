@@ -172,9 +172,19 @@ test(
       await link.click();
       await expect(page.getByTestId('proxies-layer-page')).toBeVisible({ timeout: T.page });
       const card = page.getByTestId(`proxy-group-${groupId}`);
-      await expect(card.locator('.gc-head').first()).toHaveAttribute('aria-expanded', 'true', {
+      await expect(card.locator('.pc-toggle').first()).toHaveAttribute('aria-expanded', 'true', {
         timeout: T.page
       });
+
+      // ссылка «Прокси» → «Конфигурация» (D-23): адрес ?group= раскрывает карточку группы
+      // и ставит фокус на её кнопку раскрытия
+      await page.goto(`/#/config/groups?group=${groupId}`, {
+        timeout: T.page,
+        waitUntil: 'domcontentloaded'
+      });
+      const toggle = page.getByTestId(`group-toggle-${groupId}`);
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true', { timeout: T.page });
+      await expect(toggle).toBeFocused({ timeout: T.action });
 
       // цель — DIRECT или REJECT, который сейчас не выбран; плитка по индексу в составе
       const view = await api(page, 'GET', '/api/configlayer/proxies');
