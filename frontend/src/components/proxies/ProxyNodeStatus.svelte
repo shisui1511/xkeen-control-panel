@@ -130,7 +130,8 @@
   }
 
   function openDiagnostics() {
-    close(false);
+    // Фокус — на статус до окна диагностики: Modal запоминает его и вернёт по закрытию
+    close(true);
     onDiagnostics();
   }
 
@@ -169,6 +170,11 @@
       // вернуть фокус на статус, следующий Tab пойдёт по плиткам
       if (e.key === 'Tab' && node.contains(document.activeElement)) {
         e.preventDefault();
+        // Фокус на самом окне (после нажатия мышью на текст причины): Tab ведёт на его кнопку
+        if (document.activeElement === node && !e.shiftKey) {
+          node.querySelector<HTMLElement>('button')?.focus();
+          return;
+        }
         close(true);
       }
     }
@@ -336,7 +342,7 @@
   /* Без смены фона: --hover несёт акцентный оттенок, а на метках акцента нет */
   .pns-tag:hover,
   .pns-tag[aria-expanded='true'] {
-    box-shadow: inset 0 0 0 1px var(--border-strong);
+    border-color: var(--border-strong);
     color: var(--fg-primary);
   }
   .pns-pop:focus {
