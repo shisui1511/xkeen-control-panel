@@ -4,6 +4,7 @@
   // (D-07); замер другим ядром — приглушён и с меткой ядра (D-20); возраст замера (D-05).
   // «Таймаут» и «Ошибка» — отдельная кнопка: нажатие не выбирает узел, а открывает окно
   // с причиной и входом в диагностику (D-25).
+  import { untrack } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import { t } from '../../i18n';
   import Button from '../Button.svelte';
@@ -32,12 +33,17 @@
     start_failed: 'proxies.rt.reason.start_failed'
   };
 
-  let open = $state(false);
   let statusEl: HTMLButtonElement | null = $state(null);
   let top = $state(0);
   let left = $state(0);
 
   const failed = $derived(result.state === 'timeout' || result.state === 'error');
+  // Окно открывает нажатие (переопределение значения); смена исхода замера закрывает
+  // его: у «ok» кнопки-якоря нет, и окно не должно висеть на прежнем месте
+  let open = $derived.by(() => {
+    void failed;
+    return false;
+  });
   const other = $derived(result.otherKernel !== undefined);
   // Цвет задержки — только у замера активного ядра (D-20)
   const latClass = $derived.by(() => {
@@ -110,7 +116,9 @@
       }
     }
 
-    place();
+    // statusEl читается без отслеживания: смена якоря не перезапускает вложение
+    // (перенос узла и перехват фокуса)
+    untrack(place);
     node.querySelector<HTMLElement>('button')?.focus();
     window.addEventListener('pointerdown', onPointerDown, true);
     window.addEventListener('keydown', onKeyDown);
