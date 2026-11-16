@@ -347,7 +347,7 @@ func TestRouterXrayAPIBlock(t *testing.T) {
 		}
 		for _, c := range cases {
 			if _, _, _, err := hotTags(c.before, c.after); err != nil {
-				t.Fatalf("%s: набор тегов изменился: %t", c.name, err != nil)
+				t.Fatalf("%s: hotTags: %v", c.name, err)
 			}
 			files := []configlayer.HotFile{{RelPath: xrayGroupsFile, Action: configlayer.ActionWrite, Old: c.before, OldExisted: true, New: c.after}}
 			short := e.svc.xrayValidateChanged(ctx, rtXrayBin, tmpBase, files)
