@@ -384,6 +384,11 @@ func (s *Service) PingRequest(scope, groupID string) (proxyping.Request, error) 
 	if scope != proxyping.ScopeAll && scope != proxyping.ScopeGroup {
 		return proxyping.Request{}, &InvalidInputError{Field: "scope", Reason: "ожидалось all или group"}
 	}
+	// Пачка во время перезапуска взяла бы переходное ядро и кончилась бы
+	// kernel_changed или start_failed; клиент получает 409 kernel_restarting.
+	if s.d.InRestart != nil && s.d.InRestart() {
+		return proxyping.Request{}, ErrKernelRestarting
+	}
 	v, am, err := s.runtimeSnapshot()
 	if err != nil {
 		return proxyping.Request{}, err
