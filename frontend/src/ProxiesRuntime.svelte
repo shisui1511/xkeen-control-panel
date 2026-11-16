@@ -60,6 +60,12 @@
     type ObservatoryFilter,
     type ProxyLike
   } from './lib/proxyStats';
+  import {
+    layerSnapshot,
+    visibleNotices,
+    selectBgReason,
+    type LayerNotice
+  } from './lib/configLayer';
   import type { ProxiesViewMode } from './lib/proxyViewPrefs';
   import type { SelectResult } from './lib/configRouting';
   import type { KernelName } from './lib/configSources';
@@ -257,6 +263,47 @@
     // Фокус остаётся на плитке: карточка перерисовывает плитки по ключу участника
     await loadRuntime();
   }
+
+  // Отказ фонового прохода выбора при запущенном Mihomo (D-11): сервер публикует уведомление
+  // routing_select:<gid>:<n> с новым n на каждый отказ, и каждый новый идентификатор даёт один
+  // тост ошибки. Уведомления первого загруженного снимка слоя появились до открытия страницы
+  // и тоста не дают. Виденные идентификаторы — служебное множество вне реактивности
+  const SELECT_NOTICE_PREFIX = 'routing_select:';
+  const seenSelectNotices = new Set<string>();
+  let selectNoticesPrimed = false;
+  const layerLoaded = $derived($layerSnapshot !== null);
+
+  /** ID группы уведомления: params.gid, иначе часть идентификатора между префиксом и поколением. */
+  function selectNoticeGid(n: LayerNotice): string {
+    const gid = n.params?.gid;
+    if (gid) return gid;
+    const rest = n.id.slice(SELECT_NOTICE_PREFIX.length);
+    const cut = rest.lastIndexOf(':');
+    return cut > 0 ? rest.slice(0, cut) : rest;
+  }
+
+  function notifySelectRejected(n: LayerNotice) {
+    const gid = selectNoticeGid(n);
+    const name = n.params?.group || view?.groups.find((g) => g.id === gid)?.name || gid;
+    const reason = $t(`proxies.rt.select_bg_reason.${selectBgReason(n.params?.reason)}`);
+    showToast('error', $t('proxies.rt.toast.reverted_bg', { name, reason }));
+  }
+
+  $effect(() => {
+    const notices = $visibleNotices;
+    if (!layerLoaded) return;
+    const fresh = notices.filter(
+      (n) => n.id.startsWith(SELECT_NOTICE_PREFIX) && !seenSelectNotices.has(n.id)
+    );
+    for (const n of fresh) seenSelectNotices.add(n.id);
+    if (!selectNoticesPrimed) {
+      selectNoticesPrimed = true;
+      return;
+    }
+    untrack(() => {
+      for (const n of fresh) notifySelectRejected(n);
+    });
+  });
 
   // Группы с идущим «Повторить» (D-16): повторное применение может перезапустить Xray
   // и идти долго, каждое нажатие не должно отправлять новый confirm
