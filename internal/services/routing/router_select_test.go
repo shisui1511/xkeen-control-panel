@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/proxyping"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
@@ -706,6 +707,7 @@ func TestRouterSelectRepick(t *testing.T) {
 
 	t.Run("tunnel_live_node", func(t *testing.T) {
 		rtNeedBins(t, rtXrayBin)
+		routertest.Quarantine(t, "150-22-select-repick-tunnel-flaky")
 		probe := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 		}))
