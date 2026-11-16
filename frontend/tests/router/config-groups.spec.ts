@@ -14,10 +14,18 @@ import {
   randomPort,
   resetDraft
 } from './lib/nodes-api';
+import {
+  draftChanges,
+  myEntryIds,
+  restoreRouting,
+  routingInfo,
+  takeAndApply
+} from './lib/routing-api';
 
 // Вкладка «Группы» раздела «Конфигурация» на настоящей панели (фаза 146, план 19): карточки
 // групп со сводкой по ядрам, группы по умолчанию после первого источника, строка «Сейчас» ручной
-// группы (выбор участника без черновика и диалога, D-38) и диалог группы. Ответы сети не
+// группы со ссылкой на «Прокси», где участник выбирается плиткой без черновика и диалога (D-12,
+// фаза 150), и диалог группы. Ответы сети не
 // подменяются. Флаг слоя включается на время прогона и возвращается прежним, черновик
 // сбрасывается, взятая маршрутизация возвращается. В вывод не попадают имена узлов.
 
@@ -45,77 +53,6 @@ async function openGroups(page: Page, width = 1440): Promise<void> {
   const tab = page.getByTestId('groups-tab');
   await expect(tab).toBeVisible({ timeout: T.action });
   await expect(tab.locator('.skeleton')).toHaveCount(0, { timeout: T.action });
-}
-
-interface GroupInfo {
-  id: string;
-  name: string;
-  mode: string;
-  current: string;
-  applied: boolean;
-}
-
-interface RoutingInfo {
-  revision: number;
-  desired: boolean;
-  hasSources: boolean;
-  defaultsDone: boolean;
-  groups: GroupInfo[];
-}
-
-async function routingInfo(page: Page): Promise<RoutingInfo> {
-  const view = await api(page, 'GET', '/api/configlayer/routing');
-  expect(view.status, 'GET /api/configlayer/routing').toBe(200);
-  const d = view.data ?? {};
-  return {
-    revision: Number(d.revision ?? 0),
-    desired: d.desired === true,
-    hasSources: d.has_sources === true,
-    defaultsDone: d.defaults_done === true,
-    groups: ((d.groups ?? []) as GroupInfo[]).map((g) => ({
-      id: g.id,
-      name: g.name,
-      mode: g.mode,
-      current: g.current ?? '',
-      applied: g.applied === true
-    }))
-  };
-}
-
-/** Идентификаторы записей «Моих узлов» в черновике. */
-async function myEntryIds(page: Page): Promise<string[]> {
-  const view = await api(page, 'GET', '/api/configlayer/sources');
-  const sources = (view.data?.sources ?? []) as { id: string; nodes?: { entry_id?: string }[] }[];
-  const my = sources.find((s) => s.id === 'my');
-  return (my?.nodes ?? []).map((n) => n.entry_id ?? '').filter((id) => id !== '');
-}
-
-/** Убирает из черновика записи «Моих узлов», которых не было в списке `keep`. */
-async function removeMyEntries(page: Page, keep: string[]): Promise<void> {
-  for (const entryId of await myEntryIds(page)) {
-    if (keep.includes(entryId)) continue;
-    const view = await api(page, 'GET', '/api/configlayer/sources');
-    await api(page, 'POST', '/api/configlayer/sources/nodes/delete', {
-      revision: Number(view.data?.draft_revision ?? 0),
-      entry_id: entryId
-    });
-  }
-}
-
-/** Запускает применение и ждёт его конца: идёт ли применение, видно в снимке слоя. */
-async function applyAndWait(page: Page): Promise<void> {
-  const start = await api(page, 'POST', '/api/configlayer/apply', {});
-  expect(start.status, 'запуск применения').toBe(200);
-  await expect
-    .poll(
-      async () => {
-        const st = await api(page, 'GET', '/api/configlayer/state');
-        const apply = (st.data?.apply ?? {}) as { running?: boolean };
-        return apply.running === false && Number(st.data?.draft_changes ?? -1) === 0;
-      },
-      { timeout: T.save * 3, intervals: [2000] }
-    )
-    .toBe(true);
 }
 
 test('groups: группы по умолчанию — «Авто» и «Прокси» после первого источника, чип режима и сводка по ядрам', async ({
@@ -168,9 +105,9 @@ test('groups: группы по умолчанию — «Авто» и «Про�
     await expect(page.getByTestId('groups-kernel-segment')).toHaveCount(
       inst.xray && inst.mihomo ? 1 : 0
     );
-    // «Авто» не имеет строки «Сейчас», «Прокси» — имеет
-    await expect(page.getByTestId(`group-current-${auto!.id}`)).toHaveCount(0);
-    await expect(page.getByTestId(`group-current-${proxy!.id}`)).toHaveCount(1);
+    // «Авто» не имеет строки «Сейчас» и ссылки на «Прокси», ручная «Прокси» — имеет (D-12)
+    await expect(page.getByTestId(`group-select-link-${auto!.id}`)).toHaveCount(0);
+    await expect(page.getByTestId(`group-select-link-${proxy!.id}`)).toHaveCount(1);
     await guard.assertClean();
   } finally {
     await resetDraft(page);
@@ -178,7 +115,7 @@ test('groups: группы по умолчанию — «Авто» и «Про�
 });
 
 test(
-  'groups: «Сейчас» — выбор участника ручной группы без черновика, подсказка о перезапуске Xray',
+  'groups: «Сейчас» — ссылка «Выбрать на «Прокси»» и выбор плиткой без черновика',
   {
     tag: CORE_TAG,
     annotation: {
@@ -191,11 +128,12 @@ test(
     const guard = attachConsoleGuard(page);
     await startPage(page);
     await resetDraft(page);
-    const inst = await installedKernels(page);
-    const wasManaged = (await routingInfo(page)).desired;
-    const myBefore = await myEntryIds(page);
+    const stand = {
+      groupIds: [] as string[],
+      myBefore: await myEntryIds(page),
+      wasManaged: (await routingInfo(page)).desired
+    };
     const port = randomPort();
-    let groupId = '';
     try {
       await addToDraft(page, nodeLink('vless_ws.txt', port, 'GrpCur'));
       // собственная ручная группа: участники DIRECT и REJECT дают два заведомо допустимых выбора
@@ -215,74 +153,72 @@ test(
         }
       });
       expect(saved.status, 'сохранение группы').toBe(200);
-      groupId = String((saved.data?.group as { id?: string } | undefined)?.id ?? '');
+      const groupId = String((saved.data?.group as { id?: string } | undefined)?.id ?? '');
       expect(groupId, 'идентификатор группы').not.toBe('');
-      // группа есть только в черновике: Select её отвергнет, выбор недоступен
+      stand.groupIds = [groupId];
+      // группа есть только в черновике: выбор её отвергнет, пока она не применена
       const draftOnly = (await routingInfo(page)).groups.find((g) => g.id === groupId);
       expect(draftOnly?.applied, 'группа черновика не отмечена применённой').toBe(false);
-      const take = await api(page, 'POST', '/api/configlayer/routing/take', {
-        revision: (await routingInfo(page)).revision
-      });
-      expect(take.status, 'взятие маршрутизации').toBe(200);
-      await applyAndWait(page);
+      await takeAndApply(page);
       const appliedGroup = (await routingInfo(page)).groups.find((g) => g.id === groupId);
       expect(appliedGroup?.applied, 'применённая группа отмечена применённой').toBe(true);
 
+      // на «Группах» — строка «Сейчас» и ссылка на «Прокси» вместо Select (D-12)
       await openGroups(page);
-      const select = page.getByTestId(`group-current-${groupId}`);
-      await expect(select).toBeVisible({ timeout: T.action });
-      await expect(select).toBeEnabled({ timeout: T.action });
-      // постоянная подсказка про Xray и отсутствие диалога подтверждения
-      if (inst.xray) {
-        await expect(page.getByTestId(`group-hint-xray-${groupId}`)).toBeVisible();
-      } else {
-        await expect(page.getByTestId(`group-hint-xray-${groupId}`)).toHaveCount(0);
-      }
-
-      const current = await select.inputValue();
-      const target = current === 'direct' ? 'reject' : 'direct';
-      const draftBefore = Number(
-        (await api(page, 'GET', '/api/configlayer/state')).data?.draft_changes ?? 0
-      );
-      await select.selectOption(target);
-      await expect(
-        page.locator('.toast--success').filter({ hasText: /Выбрано|Selected/ })
-      ).toBeVisible({
-        timeout: T.save
+      await expect(page.getByTestId(`group-now-${groupId}`)).toBeVisible({ timeout: T.action });
+      await expect(page.getByTestId(`group-now-${groupId}`)).toContainText(/Сейчас|Now/);
+      const link = page.getByTestId(`group-select-link-${groupId}`);
+      await expect(link).toHaveAttribute('href', `#/proxies?group=${groupId}`);
+      await link.click();
+      await expect(page.getByTestId('proxies-layer-page')).toBeVisible({ timeout: T.page });
+      const card = page.getByTestId(`proxy-group-${groupId}`);
+      await expect(card.locator('.gc-head').first()).toHaveAttribute('aria-expanded', 'true', {
+        timeout: T.page
       });
-      await expect(select).toBeEnabled({ timeout: T.save });
+
+      // цель — DIRECT или REJECT, который сейчас не выбран; плитка по индексу в составе
+      const view = await api(page, 'GET', '/api/configlayer/proxies');
+      expect(view.status, 'GET /api/configlayer/proxies').toBe(200);
+      const rg = (
+        (view.data?.groups ?? []) as {
+          id: string;
+          current?: string;
+          members?: { member: string; kind: string }[];
+        }[]
+      ).find((g) => g.id === groupId);
+      const members = rg?.members ?? [];
+      const currentKind = members.find((m) => m.member === rg?.current)?.kind;
+      const targetKind = currentKind === 'direct' ? 'reject' : 'direct';
+      const idx = members.findIndex((m) => m.kind === targetKind);
+      expect(idx, `участник ${targetKind} в составе группы`).toBeGreaterThanOrEqual(0);
+      const target = members[idx].member;
+      const tile = page.getByTestId(`proxy-node-${groupId}-${idx}`);
+      await expect(tile).toHaveAttribute('aria-pressed', 'false', { timeout: T.action });
+
+      const draftBefore = await draftChanges(page);
+      await tile.click();
+      await expect(
+        page
+          .locator('.toast--success')
+          .filter({ hasText: /Выбрано|Selected|Узел выбран|Node selected/ })
+      ).toBeVisible({ timeout: T.save });
       await expect(page.getByRole('dialog')).toHaveCount(0);
       // выбор не попал в черновик
-      const draftAfter = Number(
-        (await api(page, 'GET', '/api/configlayer/state')).data?.draft_changes ?? 0
-      );
-      expect(draftAfter, 'выбор не создаёт изменений черновика').toBe(draftBefore);
+      expect(await draftChanges(page), 'выбор не создаёт изменений черновика').toBe(draftBefore);
+      await expect(tile).toHaveAttribute('aria-pressed', 'true', { timeout: T.action });
 
-      // после перечитывания страницы выбран тот же участник
+      // после перечитывания «Групп» строка «Сейчас» называет выбранного участника
       await openGroups(page);
-      await expect(page.getByTestId(`group-current-${groupId}`)).toHaveValue(target, {
-        timeout: T.action
-      });
+      await expect(page.getByTestId(`group-now-${groupId}`)).toContainText(
+        targetKind === 'direct' ? /DIRECT/i : /REJECT/i,
+        { timeout: T.action }
+      );
       const now = (await routingInfo(page)).groups.find((g) => g.id === groupId);
       expect(now?.current, `выбор (${RT.core || 'ядро'}) сохранён`).toBe(target);
       await guard.assertClean();
     } finally {
       // возврат стенда: своя группа удаляется, маршрутизация отпускается, если не была взята
-      const rev = async () => (await routingInfo(page)).revision;
-      if (groupId) {
-        await api(page, 'POST', '/api/configlayer/routing/groups/delete', {
-          revision: await rev(),
-          id: groupId,
-          cascade: { mode: '' }
-        });
-      }
-      await removeMyEntries(page, myBefore);
-      if (!wasManaged) {
-        await api(page, 'POST', '/api/configlayer/routing/release', { revision: await rev() });
-      }
-      const st = await api(page, 'GET', '/api/configlayer/state');
-      if (Number(st.data?.draft_changes ?? 0) > 0) await applyAndWait(page);
-      await resetDraft(page);
+      await restoreRouting(page, stand);
     }
   }
 );

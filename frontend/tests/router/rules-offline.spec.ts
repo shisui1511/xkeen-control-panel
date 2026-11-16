@@ -265,16 +265,27 @@ async function mihomoInstalled(page: Page): Promise<boolean> {
 const CONFIG_TABS = ['nodes', 'groups', 'rules', 'lists', 'cores', 'files'];
 
 // CFG-01: плашка «Mihomo API оффлайн» пишет причину по состоянию ядер и не предлагает запуск
-// второго ядра; раздел «Конфигурация» открыт при любом ядре и плашкой не закрывается.
+// второго ядра; раздел «Конфигурация» открыт при любом ядре и плашкой не закрывается. При
+// включённом слое у «Прокси» своя страница (фаза 150): плашки нет при любом ядре.
 test(`proxies offline reason core:${RT.core}`, { tag: CORE_TAG }, async ({ page }) => {
   const guard = attachConsoleGuard(page);
   await page.setViewportSize({ width: 1440, height: 900 });
+  // флаг читается до проверок плашки: при слое страница «Прокси» своя и плашки нет (150 F5)
+  const layer = await configLayerFlag(page);
   await page.goto('/#/proxies', { timeout: T.page, waitUntil: 'domcontentloaded' });
   await expect(page.locator('.main-content .page-header h1').first()).toBeVisible({
     timeout: T.page
   });
 
-  if (RT.core === 'xray') {
+  if (layer) {
+    // при включённом слое плашки ApiOffline нет ни при Xray, ни при Mihomo; пункт меню на месте
+    await expect(page.getByTestId('proxies-layer-page')).toBeVisible({ timeout: T.page });
+    await page.waitForLoadState('networkidle', { timeout: T.network }).catch(() => {});
+    await expect(page.locator('.api-offline')).toHaveCount(0);
+    await expect(page.locator('.sidebar-nav a[href="#/proxies"]')).toBeVisible({
+      timeout: T.action
+    });
+  } else if (RT.core === 'xray') {
     test.skip(!(await mihomoInstalled(page)), 'Mihomo не установлен: плашки нет по замыслу');
     const banner = page.locator('.api-offline');
     await expect(banner).toHaveAttribute('data-reason', 'xray', { timeout: T.page });
@@ -287,7 +298,7 @@ test(`proxies offline reason core:${RT.core}`, { tag: CORE_TAG }, async ({ page 
     await expect(page.locator('.api-offline')).toHaveCount(0, { timeout: T.page });
   }
 
-  if (!(await configLayerFlag(page))) {
+  if (!layer) {
     test.info().annotations.push({
       type: 'skip-part',
       description: 'флаг config_layer выключен на стенде: раздел #/config не проверен'
