@@ -241,6 +241,7 @@ const NOTICE_PREFIXES = [
   'source_network:',
   'routing_auto_taken:',
   'routing_reconcile:',
+  'routing_select:',
   'routing_repick:',
   'routing_list_missing:',
   'geodata_update:',
@@ -253,6 +254,17 @@ const NOTICE_PREFIXES = [
 /** Показывается ли уведомление: незнакомые идентификаторы не рисуются и в бейдж не попадают. */
 export function isKnownNoticeId(id: string): boolean {
   return NOTICE_IDS.includes(id) || NOTICE_PREFIXES.some((p) => id.startsWith(p));
+}
+
+/** Классы причины отказа фонового прохода выбора (params.reason уведомления выбора). */
+const SELECT_BG_REASONS = ['rejected', 'busy', 'stopped', 'failed'] as const;
+export type SelectBgReason = (typeof SELECT_BG_REASONS)[number];
+
+/** Класс причины из параметров уведомления: незнакомый или пустой — 'failed'. */
+export function selectBgReason(raw: string | undefined): SelectBgReason {
+  return (SELECT_BG_REASONS as readonly string[]).includes(raw ?? '')
+    ? (raw as SelectBgReason)
+    : 'failed';
 }
 
 /** Уведомления, которые видит пользователь (в том же порядке, что в снимке). */
