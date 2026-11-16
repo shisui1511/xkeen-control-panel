@@ -206,6 +206,11 @@ func (r *Runner) run(b *batchRun, req Request) {
 		} else if b.ctx.Err() != nil {
 			state = StateCancelled
 		}
+		// Сбой старта из-за отмены — не причина пачки: отменённая или прерванная
+		// сменой ядра пачка идёт без reason_code.
+		if state == StateCancelled || state == StateKernelChanged {
+			reason = ""
+		}
 		now := r.d.Now()
 		b.batch.State, b.batch.ReasonCode, b.batch.FinishedAt = state, reason, &now
 		last := b.batch
