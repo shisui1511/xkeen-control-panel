@@ -50,6 +50,8 @@ type batchRun struct {
 	completed map[string]bool
 	inflight  map[string]context.CancelFunc
 	results   map[string]PingResult
+	// fpReady — отпечатки прочитаны после запуска пачки; до этого узлы не исключаются.
+	fpReady bool
 }
 
 // Runner создаётся в main; Start не запускает замеров. Сетевую работу
@@ -216,7 +218,7 @@ func (r *Runner) run(b *batchRun, req Request) {
 	watchDone := make(chan struct{})
 	go func() { defer close(watchDone); r.watch(watchCtx, b, req.Kernel) }()
 	defer func() { stopWatch(); <-watchDone }()
-	r.refreshFingerprints()
+	r.syncFingerprints(true)
 	l := r.limits()
 	bin := ""
 	if r.d.XrayBin != nil {
@@ -527,22 +529,34 @@ func (r *Runner) watch(ctx context.Context, b *batchRun, kernel string) {
 
 // refreshFingerprints сериализует чтение каталога, не держит mu во время I/O
 // и сохраняет новые отпечатки атомарно с удалением устаревших результатов.
-func (r *Runner) refreshFingerprints() {
+func (r *Runner) refreshFingerprints() { r.syncFingerprints(false) }
+
+// syncFingerprints с force читает каталог без двухсекундного кэша: так пачка
+// начинает с отпечатков не старше себя. Пачка исключает узлы только по
+// отпечаткам, чтение которых началось после её запуска (fpReady): карта,
+// прочитанная до «Применить», не знает новых и изменённых узлов.
+func (r *Runner) syncFingerprints(force bool) {
 	if r.d.Fingerprints == nil {
 		return
 	}
 	r.fpMu.Lock()
 	defer r.fpMu.Unlock()
-	if time.Since(r.fpAt) < 2*time.Second {
+	if !force && time.Since(r.fpAt) < 2*time.Second {
 		return
 	}
 	r.fpAt = time.Now()
+	r.mu.Lock()
+	readFor := r.active
+	r.mu.Unlock()
 	fp, err := r.d.Fingerprints()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.fpOK = err == nil
 	if err != nil {
 		return
+	}
+	if readFor != nil && readFor == r.active {
+		readFor.fpReady = true
 	}
 	r.fp = make(map[string]string, len(fp))
 	for ref, fingerprint := range fp {
@@ -561,7 +575,7 @@ func (r *Runner) refreshFingerprints() {
 }
 
 func (r *Runner) excludeChangedLocked(b *batchRun, target Target) {
-	if !r.fpOK || b.excluded[target.Ref] {
+	if !r.fpOK || !b.fpReady || b.excluded[target.Ref] {
 		return
 	}
 	if current, ok := r.fp[target.Ref]; ok && current == target.Fingerprint {
