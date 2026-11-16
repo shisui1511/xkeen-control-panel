@@ -1525,7 +1525,14 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	prior, _ := readResults("proxies/results/prior")["results"].(map[string]any)
 	pingBody := map[string]string{"scope": "group", "group": gid}
 	launch := func(path string) map[string]any {
+		// Пачка во время окна перезапуска XKeen (60 с после «Применить» этого теста)
+		// отвечает 409 kernel_restarting: ждём конца окна, любой другой отказ — сразу.
+		restartDeadline := time.Now().Add(75 * time.Second)
 		r := e.call(http.MethodPost, "/api/configlayer/proxies/ping", pingBody)
+		for r.Status == http.StatusConflict && r.Code == "kernel_restarting" && time.Now().Before(restartDeadline) {
+			time.Sleep(time.Second)
+			r = e.call(http.MethodPost, "/api/configlayer/proxies/ping", pingBody)
+		}
 		if r.Status != http.StatusOK {
 			t.Fatalf("%s: %d %s", path, r.Status, r.Code)
 		}
