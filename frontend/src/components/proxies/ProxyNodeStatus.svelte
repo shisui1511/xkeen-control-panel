@@ -9,6 +9,7 @@
   import { t } from '../../i18n';
   import Button from '../Button.svelte';
   import { formatTimeAgo } from '../../lib/batchLatencyTester';
+  import { ageTick } from '../../lib/clockTick';
   import { LATENCY_FAST_MS, LATENCY_DEGRADED_MS } from '../../lib/proxyClassification';
   import type { ResultView } from '../../lib/proxyRuntimeAdapter';
 
@@ -53,14 +54,9 @@
     if (ms > 0 && ms < LATENCY_DEGRADED_MS) return 'mid';
     return 'bad';
   });
-  // Возраст замера обновляется раз в 30 с, как «Последняя проверка» панели пинга
-  let clock = $state(0);
-  $effect(() => {
-    const timer = setInterval(() => (clock += 1), 30_000);
-    return () => clearInterval(timer);
-  });
+  // Возраст замера обновляется общим тиком раз в 30 с, как «Последняя проверка» панели пинга
   const ago = $derived.by(() => {
-    void clock;
+    void $ageTick;
     return result.at !== undefined ? formatTimeAgo(result.at, $t) : '';
   });
 
@@ -83,10 +79,30 @@
     })
   );
   const hintId = $derived(`pns-hint-${groupId}-${index}`);
+  let tagEls = $state<HTMLElement[]>([]);
   function toggleHint(kind: 'tls' | 'kernel', e: MouseEvent) {
     e.stopPropagation();
     hint = hint === kind ? null : kind;
   }
+
+  // Пояснение закрывается по Esc и нажатию вне метки и самого пояснения
+  $effect(() => {
+    if (hint === null) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') hint = null;
+    }
+    function onDown(e: PointerEvent) {
+      const target = e.target as Node | null;
+      if (target && tagEls.some((el) => el?.contains(target))) return;
+      hint = null;
+    }
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('pointerdown', onDown, true);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('pointerdown', onDown, true);
+    };
+  });
   const statusText = $derived(
     result.state === 'timeout' ? $t('proxies.rt.status.timeout') : $t('proxies.rt.status.error')
   );
@@ -152,7 +168,9 @@
     // Окно не модальное: фокус ушёл из него (Tab) — закрыть, не оставляя висеть
     function onFocusOut(e: FocusEvent) {
       const next = e.relatedTarget as Node | null;
-      if (next && (node.contains(next) || statusEl?.contains(next))) return;
+      // Нажатие внутри окна (или на его кнопку в WebKit) даёт relatedTarget === null:
+      // нажатия вне окна закрывает onPointerDown, здесь — только уход фокуса на другой элемент
+      if (!next || node.contains(next) || statusEl?.contains(next)) return;
       close(false);
     }
     node.addEventListener('focusout', onFocusOut);
@@ -209,7 +227,8 @@
         type="button"
         class="badge badge-neutral pns-tag tap-zone-44"
         aria-expanded={hint === 'tls'}
-        aria-controls={hintId}
+        aria-controls={hint === 'tls' ? hintId : undefined}
+        bind:this={tagEls[0]}
         title={$t('proxies.rt.node.tls_title')}
         onclick={(e) => toggleHint('tls', e)}>{$t('proxies.rt.node.tls')}</button
       >
@@ -219,7 +238,8 @@
         type="button"
         class="badge badge-neutral pns-tag tap-zone-44"
         aria-expanded={hint === 'kernel'}
-        aria-controls={hintId}
+        aria-controls={hint === 'kernel' ? hintId : undefined}
+        bind:this={tagEls[1]}
         title={hintTitleKernel}
         onclick={(e) => toggleHint('kernel', e)}
         >{$t('proxies.rt.node.via_kernel', { kernel: result.otherKernel })}</button
@@ -238,6 +258,7 @@
   <div
     {@attach popover}
     class="pns-pop"
+    tabindex="-1"
     style:top="{top}px"
     style:left="{left}px"
     role="dialog"
@@ -261,6 +282,7 @@
   .pns-dim,
   .pns-age {
     font-size: var(--font-size-xs);
+    font-weight: 600;
     color: var(--fg-dim);
   }
   .lat {
@@ -303,9 +325,18 @@
     cursor: pointer;
     font-family: inherit;
   }
+  .pns-tag:hover,
+  .pns-tag[aria-expanded='true'] {
+    background: var(--hover);
+    color: var(--fg-primary);
+  }
+  .pns-pop:focus {
+    outline: none;
+  }
   .pns-hint {
     flex: 1 0 100%;
     font-size: var(--font-size-xs);
+    font-weight: 600;
     line-height: 1.5;
     color: var(--fg-secondary);
     overflow-wrap: anywhere;

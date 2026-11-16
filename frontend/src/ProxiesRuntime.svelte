@@ -271,6 +271,15 @@
       confirming.delete(id);
     }
     await loadRuntime();
+    // Кнопка на время запроса неактивна и теряет фокус: вернуть его на кнопку (сбой)
+    // или на имя группы (плашка исчезла), если он никуда больше не ушёл
+    await tick();
+    if (document.activeElement && document.activeElement !== document.body) return;
+    const card = cardEls[id];
+    (
+      card?.querySelector<HTMLElement>(`[data-testid="proxy-group-retry-${CSS.escape(id)}"]`) ??
+      card?.querySelector<HTMLElement>('.pc-toggle')
+    )?.focus();
   }
 
   // --- Пинг (D-05, D-07, D-08, D-19…D-22) ---
@@ -280,7 +289,12 @@
 
   /** Причина отказа для строки «Не удалось запустить проверку: …» без точки в конце. */
   function reasonText(code: string | undefined): string {
-    return lowerFirst(proxiesErrorText($t, code).replace(/\.\s*$/, ''));
+    // Только первое предложение: «Повторите…» и прочее в середину фразы не встаёт
+    return lowerFirst(
+      proxiesErrorText($t, code)
+        .split(/\.\s/)[0]
+        .replace(/\.\s*$/, '')
+    );
   }
 
   // После двоеточия фраза продолжает предложение: «…проверку: проверка узлов недоступна»
@@ -292,8 +306,10 @@
 
   /** Причина сбоя пачки: код пачки (proxies.rt.reason.*), а не код ответа API. */
   function batchReasonText(code: string | undefined): string {
-    const key = code ? `proxies.rt.reason.${code}` : '';
-    return key !== '' && $t(key) !== key ? lowerFirst($t(key)) : reasonText(code);
+    // Причина пачки встаёт после «Не удалось запустить проверку:», поэтому для start_failed
+    // свой короткий текст без повтора глагола
+    const key = code === 'start_failed' ? 'proxies.rt.ping.reason_start_failed' : '';
+    return key !== '' ? $t(key) : reasonText(code);
   }
 
   function setBatch(b: PingBatch) {

@@ -329,7 +329,7 @@
     !!panel &&
       panel.view.state === 'stopped' &&
       pSplit.visible.some((m) => m.kind === 'node') &&
-      pSplit.visible.every((m) => m.kind !== 'node' || pResult(panel, m).state === 'none')
+      pSplit.visible.some((m) => m.kind === 'node' && pResult(panel, m).state === 'none')
   );
 
   /**
@@ -1902,6 +1902,10 @@
   .pc-now-node {
     color: var(--fg-primary);
   }
+  .pc-card .proxy-grid-footer {
+    padding-left: var(--spacing-4);
+    padding-right: var(--spacing-4);
+  }
   /* Левый край шапки, фильтров, сетки и вспомогательных строк карточки один: 16px */
   .pc-card .gc-head {
     padding-left: var(--spacing-4);
@@ -1955,6 +1959,10 @@
   }
   .pc-tile.pc-static:not(.now):not(.pc-tile-current):hover {
     border-color: var(--border);
+    background: var(--bg-elevated);
+  }
+  .pc-tile.pc-static.pc-tile-current:hover {
+    border-color: var(--border-strong);
     background: var(--bg-elevated);
   }
   .pc-tile.pc-static:hover::after {
@@ -2022,6 +2030,7 @@
     margin: 0;
     padding: 0 var(--spacing-4) var(--spacing-2);
     font-size: var(--font-size-xs);
+    font-weight: 600;
     color: var(--fg-dim);
   }
   @media (max-width: 480px) {

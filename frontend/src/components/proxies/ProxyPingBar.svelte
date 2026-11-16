@@ -3,6 +3,7 @@
   // ход общей пачки, отмена из любой вкладки и итог до следующего запуска.
   import { t, tp } from '../../i18n';
   import { formatTimeAgo } from '../../lib/batchLatencyTester';
+  import { ageTick } from '../../lib/clockTick';
   import type { PingBatch } from '../../lib/configProxies';
   import Button from '../Button.svelte';
   import Icon from '../../lib/components/Icon.svelte';
@@ -36,6 +37,15 @@
   }: Props = $props();
 
   const running = $derived(batch?.state === 'running');
+  // В живой области есть текст: отступ до «Последней проверки» нужен только тогда
+  const hasLive = $derived(
+    running ||
+      restarting ||
+      batch?.state === 'done' ||
+      batch?.state === 'cancelled' ||
+      batch?.state === 'kernel_changed' ||
+      (batch?.excluded ?? 0) > 0
+  );
 
   // Ход для читалки экрана — не чаще раза в секунду
   const THROTTLE_MS = 1000;
@@ -56,14 +66,9 @@
     return () => clearTimeout(timer);
   });
 
-  // Возраст самого свежего замера обновляется раз в 30 с
-  let clock = $state(0);
-  $effect(() => {
-    const timer = setInterval(() => (clock += 1), 30_000);
-    return () => clearInterval(timer);
-  });
+  // Возраст самого свежего замера обновляется общим тиком раз в 30 с
   const lastAgo = $derived.by(() => {
-    void clock;
+    void $ageTick;
     return lastAt !== undefined ? formatTimeAgo(lastAt, $t) : '';
   });
 
@@ -105,7 +110,13 @@
     </div>
 
     <div class="ppb-status">
-      <div class="ppb-live" data-testid="proxies-ping-status" role="status" aria-live="polite">
+      <div
+        class="ppb-live"
+        class:has-text={hasLive}
+        data-testid="proxies-ping-status"
+        role="status"
+        aria-live="polite"
+      >
         {#if running && batch}
           {#if joined}
             <span>{$t('proxies.rt.ping.joined')}</span>
@@ -182,8 +193,13 @@
     min-width: 0;
   }
 
+  .ppb-live.has-text {
+    margin-right: var(--spacing-4);
+  }
+
   .ppb-status {
     grid-area: status;
+    column-gap: 0;
     font-size: var(--font-size-sm);
     line-height: 1.5;
     color: var(--fg-primary);
