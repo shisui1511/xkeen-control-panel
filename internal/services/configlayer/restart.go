@@ -321,6 +321,9 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 	fullNote := fullRestartNote(plan.FullRestart[kernel])
 	note := fullNote
 	var hotErr error
+	// hotPartial — горячая замена Xray упала после начала замены: процесс мог остаться
+	// в промежуточном состоянии, и его нужно перезапустить на прежних файлах.
+	hotPartial := false
 	if kernel == KernelXray && fullNote == "" {
 		if hot := p.currentXrayHot(); hot != nil {
 			prevPID := p.runningPID(KernelXray)
@@ -391,6 +394,24 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 		// Мягкий путь не удался: обычный рестарт Mihomo.
 		p.setStep(StepRestart, StepRunning, NoteHotReloadFailed, "")
 		outcome = RestartOutcomeRestartedReload
+	}
+	// Сокращённая проверка Xray не видела каталог целиком, а xkeen -restart
+	// загружает его весь: до перезапуска каталог с планом проверяется полностью.
+	// Отказ — откат файлов; Xray перезапускается на прежних файлах, только если
+	// горячая замена успела его тронуть, иначе работающий процесс не трогаем.
+	if kernel == KernelXray && p.xrayValidatedShort() {
+		bins := p.binaries()
+		r := ValidateXray(ctx, filepath.Join(p.d.DataDir, "tmp"), p.d.Roots, bins.Xray, plan, p.d.XrayEnv)
+		if err := interrupted(ctx); err != nil {
+			return interruptedView(kernel), err
+		}
+		if !r.OK && !r.Skipped {
+			cause := fmt.Errorf("полная проверка Xray перед перезапуском: %s", r.Code)
+			if hotErr != nil {
+				cause = fmt.Errorf("перезагрузка конфигурации: %v; %w", hotErr, cause)
+			}
+			return p.rollbackKernel(ctx, kernel, set, cause, hotPartial)
+		}
 	}
 	applied, err := p.restartAndConfirm(ctx, kernel)
 	if err == nil && applied != services.ApplyRestarted {
@@ -625,6 +646,13 @@ func (p *Pipeline) checkExpect(ctx context.Context, plan Plan, wait bool) error 
 // повторного подъёма ядра: то, что вызывающий сделал в BeforeWrite (например,
 // DNS роутера), возвращается раньше медленного отката (RESEARCH Pitfall 2).
 func (p *Pipeline) rollbackAndRestart(ctx context.Context, kernel string, set *BackupSet, cause error) (RestartView, error) {
+	return p.rollbackKernel(ctx, kernel, set, cause, true)
+}
+
+// rollbackKernel — откат файлов панели; restart=false не перезапускает ядро (оно
+// не тронуто и работает на прежних файлах), restart=true поднимает его на прежних
+// файлах, как rollbackAndRestart.
+func (p *Pipeline) rollbackKernel(ctx context.Context, kernel string, set *BackupSet, cause error, restart bool) (RestartView, error) {
 	p.fireBeforeRollback()
 	p.setStep(StepRestart, StepRunning, NoteRestartFailedRolling, "")
 	view := RestartView{Kernel: kernel, Outcome: RestartOutcomeFailedRolledBack, NoteCode: NoteRestartFailedRolling}
@@ -641,6 +669,10 @@ func (p *Pipeline) rollbackAndRestart(ctx context.Context, kernel string, set *B
 		// Файлы на месте, не снялся только журнал: ядро поднимаем на прежних файлах.
 		re.Err = fmt.Errorf("%w; журнал отката не снят: %v", cause, rbErr)
 		cause = re.Err
+	}
+	if !restart {
+		re.Recovered = true
+		return view, re
 	}
 	if rerr := p.recoverKernel(ctx, kernel); rerr != nil {
 		re.Err = fmt.Errorf("%w; повторный рестарт на прежних файлах: %v", cause, rerr)

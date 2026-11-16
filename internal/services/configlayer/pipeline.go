@@ -392,9 +392,21 @@ type Pipeline struct {
 	// xrayHot — хук горячей замены текущего запуска, под mu; взводится в begin,
 	// снимается в finish.
 	xrayHot XrayHotFunc
+	// xrayShortValidated — проверка Xray текущего запуска была сокращённой (хук
+	// ApplyRequest.XrayValidate), каталог целиком не проверялся; под mu, сбрасывается
+	// в begin. Резервный перезапуск Xray загружает весь каталог, поэтому перед ним
+	// restartKernel выполняет полную проверку (CR-02).
+	xrayShortValidated bool
 	// stepStart — начало шага текущего запуска (первый переход в running), под mu;
 	// сбрасывается в begin.
 	stepStart map[StepID]time.Time
+}
+
+// xrayValidatedShort — проверка Xray текущего запуска была сокращённой.
+func (p *Pipeline) xrayValidatedShort() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.xrayShortValidated
 }
 
 func (p *Pipeline) currentXrayHot() XrayHotFunc {
@@ -494,6 +506,7 @@ func (p *Pipeline) begin(req ApplyRequest) {
 	}
 	p.beforeRollback = req.BeforeRollback
 	p.xrayHot = req.XrayHot
+	p.xrayShortValidated = false
 	p.stepStart = map[StepID]time.Time{}
 	p.mu.Unlock()
 }
@@ -616,7 +629,13 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	// проверяются второй раз; отказ или неприменимость хука ведут в тот же
 	// единственный вызов полной проверки, что у запусков без хука.
 	xr := ValidationResult{Kernel: KernelXray, OK: true}
-	if !p.xrayValidatedByHook(ctx, req, bins.Xray, plan) {
+	if p.xrayValidatedByHook(ctx, req, bins.Xray, plan) {
+		// Каталог целиком не проверялся: перед резервным перезапуском Xray, который
+		// его загрузит, проверка выполняется полностью (restartKernel).
+		p.mu.Lock()
+		p.xrayShortValidated = true
+		p.mu.Unlock()
+	} else {
 		xr = ValidateXray(ctx, tmpBase, p.d.Roots, bins.Xray, plan, p.d.XrayEnv)
 	}
 	if res, failed := p.afterValidation(StepValidateXray, xr); failed {
