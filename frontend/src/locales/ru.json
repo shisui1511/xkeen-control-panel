@@ -82,6 +82,7 @@
   "cfg.routing.err.select_busy": "Группа уже переключается. Дождитесь завершения.",
   "cfg.routing.err.selection_unconfirmed": "Активный узел не подтверждён. Повторите подтверждение на «Прокси».",
   "cfg.routing.err.ping_unavailable": "Проверка узлов сейчас недоступна.",
+  "cfg.routing.err.ping_no_targets": "Нет узлов для проверки активным ядром.",
   "cfg.routing.err.group_no_nodes": "В группе нет узлов для активного ядра.",
   "cfg.routing.err.kernel_restarting": "Ядро перезапускается. Дождитесь завершения.",
   "cfg.routing.err.confirm_failed": "Не удалось подтвердить активный узел. Повторите.",

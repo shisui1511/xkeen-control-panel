@@ -18,6 +18,7 @@
   "kernel_restarting",
   "member_invalid",
   "nothing_to_reclaim",
+  "ping_no_targets",
   "ping_unavailable",
   "preset_unknown",
   "profile_unknown",

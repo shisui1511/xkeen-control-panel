@@ -150,6 +150,7 @@
   "configlayer.routing.select_busy": "A linked group is switching. Wait for it to finish.",
   "configlayer.routing.kernel_restarting": "The core is restarting. The data will refresh automatically.",
   "configlayer.routing.ping_unavailable": "Checks are unavailable on this page: a custom Mihomo profile or both cores are running.",
+  "configlayer.routing.ping_no_targets": "There are no nodes to check for the active core.",
   "configlayer.routing.group_no_nodes": "The group has no nodes for the active core.",
   "configlayer.routing.confirm_failed": "Could not confirm the active node. Try again later.",
   "configlayer.routing.selection_unconfirmed": "The active group member is not confirmed. Click Retry.",

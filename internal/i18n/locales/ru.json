@@ -150,6 +150,7 @@
   "configlayer.routing.select_busy": "Идёт переключение связанной группы. Дождитесь завершения.",
   "configlayer.routing.kernel_restarting": "Ядро перезапускается. Данные обновятся сами.",
   "configlayer.routing.ping_unavailable": "Проверка на этой странице недоступна: работает свой профиль Mihomo или запущены оба ядра.",
+  "configlayer.routing.ping_no_targets": "Нет узлов для проверки активным ядром.",
   "configlayer.routing.group_no_nodes": "В группе нет узлов для активного ядра.",
   "configlayer.routing.confirm_failed": "Не удалось подтвердить активный узел. Повторите позже.",
   "configlayer.routing.selection_unconfirmed": "Активный узел группы не подтверждён. Нажмите «Повторить».",

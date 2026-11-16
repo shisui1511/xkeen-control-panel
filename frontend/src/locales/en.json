@@ -82,6 +82,7 @@
   "cfg.routing.err.select_busy": "The group is already switching. Wait for it to finish.",
   "cfg.routing.err.selection_unconfirmed": "The active node is unconfirmed. Retry confirmation on Proxies.",
   "cfg.routing.err.ping_unavailable": "Node checks are currently unavailable.",
+  "cfg.routing.err.ping_no_targets": "There are no nodes to check for the active core.",
   "cfg.routing.err.group_no_nodes": "The group has no nodes for the active core.",
   "cfg.routing.err.kernel_restarting": "The core is restarting. Wait for it to finish.",
   "cfg.routing.err.confirm_failed": "Could not confirm the active node. Retry.",
