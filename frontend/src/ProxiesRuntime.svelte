@@ -252,8 +252,10 @@
   async function onRetry(id: string) {
     try {
       await confirmGroup(id);
-    } catch {
-      showToast('error', $t('cfg.routing.err.confirm_failed'));
+    } catch (e) {
+      // Занятость выбора или применения и снятая группа — своими текстами; без кода — сверка
+      const code = codeOf(e);
+      showToast('error', code ? proxiesErrorText($t, code) : $t('cfg.routing.err.confirm_failed'));
     }
     await loadRuntime();
   }
