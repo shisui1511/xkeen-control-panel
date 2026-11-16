@@ -855,7 +855,13 @@ func (s *Service) reconcileXray(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	defer release()
+	// Как в Confirm: события начала и конца, иначе вкладка, перечитавшая вид во время
+	// сверки, остаётся с заблокированными плитками (switching без события конца).
+	s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
+	defer func() {
+		release()
+		s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
+	}()
 	b, err := s.runXray(ctx, xrayRunConfirm, nil)
 	if err == nil && b.err == nil && selectionOK(b.out) {
 		_ = s.clearUnconfirmed(ids, configlayer.KernelXray)
