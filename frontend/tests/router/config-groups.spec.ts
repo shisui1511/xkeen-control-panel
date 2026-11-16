@@ -186,6 +186,16 @@ test(
       await expect(toggle).toHaveAttribute('aria-expanded', 'true', { timeout: T.page });
       await expect(toggle).toBeFocused({ timeout: T.action });
 
+      // дальше шаги идут на странице «Прокси»
+      await page.goto(`/#/proxies?group=${groupId}`, {
+        timeout: T.page,
+        waitUntil: 'domcontentloaded'
+      });
+      await expect(page.getByTestId('proxies-layer-page')).toBeVisible({ timeout: T.page });
+      await expect(card.locator('.pc-toggle').first()).toHaveAttribute('aria-expanded', 'true', {
+        timeout: T.page
+      });
+
       // цель — DIRECT или REJECT, который сейчас не выбран; плитка по индексу в составе
       const view = await api(page, 'GET', '/api/configlayer/proxies');
       expect(view.status, 'GET /api/configlayer/proxies').toBe(200);
