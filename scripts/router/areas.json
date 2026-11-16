@@ -753,6 +753,7 @@
         "go:TestRouterSchedulerBacksOffAfterSnapshotFailure",
         "go:TestRouterSchedulerFlagOffZeroRequests",
         "go:TestRouterSchedulerNetworkRetries",
+        "go:TestRouterSelectXrayFaults",
         "go:TestRouterShareLinks",
         "go:TestRouterSourcesMyNodesFlow",
         "go:TestRouterSourcesSubscriptionFlow",
