@@ -261,6 +261,108 @@ test(
   }
 );
 
+/** Состояние службы ядра: работающие ядра по GET /api/service/status. */
+async function runningKernels(page: Page): Promise<string[]> {
+  const res = await page.request.get('/api/service/status');
+  if (!res.ok()) return ['http ' + res.status()];
+  const body = (await res.json()) as { data?: { running_kernels?: string[] } };
+  return body.data?.running_kernels ?? [];
+}
+
+test(
+  'proxies-runtime: «Сейчас» авто-группы и окно причины снимаются при остановке ядра',
+  {
+    tag: CORE_TAG,
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description: 'остановка и запуск службы ядра с ожиданием устойчивого состояния'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.save * 8);
+    const guard = attachConsoleGuard(page);
+    await openProxies(page);
+    const now = page.getByTestId(`proxy-group-now-${autoId}`);
+    await expect(now).toBeVisible({ timeout: T.page });
+    const unknown = /неизвестен|unknown/i;
+    // ядро отдало «Сейчас» авто-группы: строка не «неизвестен» (Mihomo — узел, Xray — быстрый)
+    const known = await expect
+      .poll(async () => !unknown.test((await now.textContent()) ?? ''), { timeout: T.save })
+      .toBe(true)
+      .then(() => true)
+      .catch(() => false);
+    const core = RT.core;
+    try {
+      if (known) {
+        const before = ((await now.textContent()) ?? '').trim();
+        // IN-05: окно причины у «Таймаут»/«Ошибка» узла авто-группы закрывается, когда замер
+        // узла пропадает (после остановки ядра история задержек сбрасывается)
+        const autoCard = await cardOf(page, autoId, true);
+        const reasonStatus = autoCard.locator(`[data-testid^="proxy-node-status-${autoId}-"]`);
+        const pop = page.getByRole('dialog').filter({ hasText: /Причина|Reason/ });
+        const popOpened =
+          (await reasonStatus
+            .first()
+            .waitFor({ state: 'visible', timeout: T.action })
+            .then(() => true)
+            .catch(() => false)) &&
+          (await reasonStatus
+            .first()
+            .click()
+            .then(() => pop.isVisible())
+            .catch(() => false));
+        const stop = await api(page, 'POST', '/api/service/control?action=stop');
+        expect(stop.status, 'остановка службы').toBe(200);
+        await expect
+          .poll(async () => (await runningKernels(page)).length, {
+            message: 'ядро остановлено',
+            timeout: T.save * 3,
+            intervals: [2000]
+          })
+          .toBe(0);
+        // WR-07: опрос остановлен, прежний «Сейчас» не показывается (D-26)
+        await expect(now, `строка «Сейчас» была «${before}»`).toContainText(unknown, {
+          timeout: T.save
+        });
+        if (popOpened) {
+          // окно не висит без якоря: если статус узла пропал, окно закрыто (при замерах пачки
+          // статус остаётся, и окно вправе остаться открытым)
+          await expect
+            .poll(
+              async () => (await pop.count()) === 0 || (await reasonStatus.first().isVisible()),
+              { message: 'IN-05: окно причины без якоря', timeout: T.action }
+            )
+            .toBe(true);
+        } else {
+          test.info().annotations.push({
+            type: 'skip-part',
+            description:
+              'у узлов авто-группы нет статуса «Таймаут»/«Ошибка»: окно причины не проверено'
+          });
+        }
+      } else {
+        test.info().annotations.push({
+          type: 'skip-part',
+          description: `ядро ${core} не отдаёт «Сейчас» авто-группы без замеров: сброс не проверен`
+        });
+      }
+    } finally {
+      // служба возвращается и после падения: следующие спеки начинают с рабочего ядра
+      if ((await runningKernels(page)).length === 0) {
+        await api(page, 'POST', '/api/service/control?action=start');
+      }
+      await expect
+        .poll(async () => (await runningKernels(page)).join(','), {
+          message: 'ядро вернулось в рабочее состояние',
+          timeout: T.save * 4,
+          intervals: [3000]
+        })
+        .toBe(core);
+    }
+    await guard.assertClean();
+  }
+);
+
 test(
   'proxies-runtime: выбор плиткой без черновика, вторая вкладка видит выбор по событию',
   {
@@ -446,101 +548,6 @@ test(
     const outerHead = page.getByTestId(`proxy-group-${outerId}`).locator('.gc-head').first();
     await expect(outerHead).toHaveAttribute('aria-expanded', 'true', { timeout: T.page });
     await expect(outerHead).toBeFocused({ timeout: T.action });
-    await guard.assertClean();
-  }
-);
-
-/** Состояние службы ядра: работающие ядра по GET /api/service/status. */
-async function runningKernels(page: Page): Promise<string[]> {
-  const res = await page.request.get('/api/service/status');
-  if (!res.ok()) return ['http ' + res.status()];
-  const body = (await res.json()) as { data?: { running_kernels?: string[] } };
-  return body.data?.running_kernels ?? [];
-}
-
-test(
-  'proxies-runtime: «Сейчас» авто-группы и окно причины снимаются при остановке ядра',
-  {
-    tag: CORE_TAG,
-    annotation: {
-      type: SLOW_ANNOTATION,
-      description: 'остановка и запуск службы ядра с ожиданием устойчивого состояния'
-    }
-  },
-  async ({ page }) => {
-    test.setTimeout(T.save * 8);
-    const guard = attachConsoleGuard(page);
-    await openProxies(page);
-    const now = page.getByTestId(`proxy-group-now-${autoId}`);
-    await expect(now).toBeVisible({ timeout: T.page });
-    const unknown = /неизвестен|unknown/i;
-    // ядро отдало «Сейчас» авто-группы: строка не «неизвестен» (Mihomo — узел, Xray — быстрый)
-    const known = await expect
-      .poll(async () => !unknown.test((await now.textContent()) ?? ''), { timeout: T.save })
-      .toBe(true)
-      .then(() => true)
-      .catch(() => false);
-    const core = RT.core;
-    try {
-      if (known) {
-        const before = ((await now.textContent()) ?? '').trim();
-        // IN-05: окно причины у «Таймаут»/«Ошибка» узла авто-группы закрывается, когда замер
-        // узла пропадает (после остановки ядра история задержек сбрасывается)
-        const autoCard = await cardOf(page, autoId, true);
-        const reasonStatus = autoCard.locator(`[data-testid^="proxy-node-status-${autoId}-"]`);
-        const pop = page.getByRole('dialog').filter({ hasText: /Причина|Reason/ });
-        const popOpened =
-          (await reasonStatus
-            .first()
-            .waitFor({ state: 'visible', timeout: T.action })
-            .then(() => true)
-            .catch(() => false)) &&
-          (await reasonStatus
-            .first()
-            .click()
-            .then(() => pop.isVisible())
-            .catch(() => false));
-        const stop = await api(page, 'POST', '/api/service/control?action=stop');
-        expect(stop.status, 'остановка службы').toBe(200);
-        await expect
-          .poll(async () => (await runningKernels(page)).length, {
-            message: 'ядро остановлено',
-            timeout: T.save * 3,
-            intervals: [2000]
-          })
-          .toBe(0);
-        // WR-07: опрос остановлен, прежний «Сейчас» не показывается (D-26)
-        await expect(now, `строка «Сейчас» была «${before}»`).toContainText(unknown, {
-          timeout: T.save
-        });
-        if (popOpened) {
-          await expect(pop, 'IN-05: окно причины закрыто').toHaveCount(0, { timeout: T.action });
-        } else {
-          test.info().annotations.push({
-            type: 'skip-part',
-            description:
-              'у узлов авто-группы нет статуса «Таймаут»/«Ошибка»: окно причины не проверено'
-          });
-        }
-      } else {
-        test.info().annotations.push({
-          type: 'skip-part',
-          description: `ядро ${core} не отдаёт «Сейчас» авто-группы без замеров: сброс не проверен`
-        });
-      }
-    } finally {
-      // служба возвращается и после падения: следующие спеки начинают с рабочего ядра
-      if ((await runningKernels(page)).length === 0) {
-        await api(page, 'POST', '/api/service/control?action=start');
-      }
-      await expect
-        .poll(async () => (await runningKernels(page)).join(','), {
-          message: 'ядро вернулось в рабочее состояние',
-          timeout: T.save * 4,
-          intervals: [3000]
-        })
-        .toBe(core);
-    }
     await guard.assertClean();
   }
 );
