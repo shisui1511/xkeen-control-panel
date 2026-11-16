@@ -93,7 +93,7 @@
     <div class="ppb-all">
       <Button
         variant="secondary"
-        class="ppb-btn"
+        class="ppb-btn tap-zone-44"
         data-testid="proxies-ping-all"
         aria-disabled={running ? 'true' : undefined}
         title={running ? $t('proxies.rt.ping.busy') : undefined}
@@ -104,25 +104,28 @@
       </Button>
     </div>
 
-    <div class="ppb-status" data-testid="proxies-ping-status" role="status" aria-live="polite">
-      {#if running && batch}
-        {#if joined}
-          <span>{$t('proxies.rt.ping.joined')}</span>
+    <div class="ppb-status">
+      <div class="ppb-live" data-testid="proxies-ping-status" role="status" aria-live="polite">
+        {#if running && batch}
+          {#if joined}
+            <span>{$t('proxies.rt.ping.joined')}</span>
+          {/if}
+          <span>{$t('proxies.rt.ping.progress', { done: shownDone, total: batch.total })}</span>
+        {:else if restarting}
+          <span>{$t('proxies.rt.ping.restarting')}</span>
+        {:else if batch?.state === 'done'}
+          <span>{$tp('proxies.rt.ping.done', batch.total)}</span>
+        {:else if batch?.state === 'cancelled'}
+          <span>{$t('proxies.rt.ping.cancelled', { done: batch.done, total: batch.total })}</span>
+        {:else if batch?.state === 'kernel_changed'}
+          <span>{$t('proxies.rt.ping.kernel_changed', { kernel: kernel || 'Xray / Mihomo' })}</span>
         {/if}
-        <span>{$t('proxies.rt.ping.progress', { done: shownDone, total: batch.total })}</span>
-      {:else if restarting}
-        <span>{$t('proxies.rt.ping.restarting')}</span>
-      {:else if batch?.state === 'done'}
-        <span>{$tp('proxies.rt.ping.done', batch.total)}</span>
-      {:else if batch?.state === 'cancelled'}
-        <span>{$t('proxies.rt.ping.cancelled', { done: batch.done, total: batch.total })}</span>
-      {:else if batch?.state === 'kernel_changed'}
-        <span>{$t('proxies.rt.ping.kernel_changed', { kernel: kernel || 'Xray / Mihomo' })}</span>
-      {/if}
-      {#if batch && batch.excluded > 0}
-        <span class="ppb-secondary">{$tp('proxies.rt.ping.excluded', batch.excluded)}</span>
-      {/if}
+        {#if batch && batch.excluded > 0}
+          <span class="ppb-secondary">{$tp('proxies.rt.ping.excluded', batch.excluded)}</span>
+        {/if}
+      </div>
       {#if !running && lastAgo}
+        <!-- Возраст обновляется по таймеру: вне живой области, чтобы читалка не зачитывала его -->
         <span class="ppb-last">{$t('proxies.rt.ping.last', { ago: lastAgo })}</span>
       {/if}
     </div>
@@ -131,7 +134,7 @@
       <div class="ppb-cancel">
         <Button
           variant="secondary"
-          class="ppb-btn"
+          class="ppb-btn tap-zone-44"
           data-testid="proxies-ping-cancel"
           loading={cancelling}
           onclick={cancel}
@@ -169,14 +172,18 @@
     grid-area: all;
   }
 
-  .ppb-status {
-    grid-area: status;
+  .ppb-status,
+  .ppb-live {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     column-gap: var(--spacing-4);
     row-gap: var(--spacing-1);
     min-width: 0;
+  }
+
+  .ppb-status {
+    grid-area: status;
     font-size: var(--font-size-sm);
     line-height: 1.5;
     color: var(--fg-primary);

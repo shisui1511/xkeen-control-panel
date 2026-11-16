@@ -431,7 +431,7 @@
     gap: var(--spacing-1) var(--spacing-2);
     min-width: 0;
     margin: 0;
-    font-size: var(--font-size-base);
+    font-size: var(--font-size-sm);
     color: var(--fg-secondary);
     overflow-wrap: anywhere;
   }

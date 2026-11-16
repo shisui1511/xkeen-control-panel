@@ -159,16 +159,21 @@
 
   // --- Выбор (D-11, D-15…D-18) ---
 
-  /** Идущий выбор: группа и участник; повторные нажатия во время него игнорируются. */
-  let selecting = $state<{ group: string; member: string } | null>(null);
+  /**
+   * Идущие выборы: ID группы → участник. Повторные нажатия в той же группе и в связанных
+   * с ней игнорируются, независимые группы выбираются параллельно (D-17).
+   */
+  const selecting = new SvelteMap<string, string>();
 
   /** Группа заблокирована идущим выбором в связанной группе (D-17). */
   function lockedBy(g: RuntimeGroup, v: RuntimeView): boolean {
-    const s = selecting;
-    if (!s || s.group === g.id) return false;
-    if (g.locked_with.includes(s.group)) return true;
-    const sg = v.groups.find((x) => x.id === s.group);
-    return !!sg && sg.locked_with.includes(g.id);
+    for (const sid of selecting.keys()) {
+      if (sid === g.id) continue;
+      if (g.locked_with.includes(sid)) return true;
+      const sg = v.groups.find((x) => x.id === sid);
+      if (sg && sg.locked_with.includes(g.id)) return true;
+    }
+    return false;
   }
 
   /** Ядро, по исходу которого судим о выборе: активное, при остановленных — первое управляемое. */
@@ -234,28 +239,36 @@
 
   async function onSelect(g: RuntimeGroup, member: string) {
     const v = view;
-    if (!v || selecting !== null) return;
+    if (!v || selecting.has(g.id) || lockedBy(g, v)) return;
     const name = memberName(g, member);
-    selecting = { group: g.id, member };
+    selecting.set(g.id, member);
     try {
       const res = await selectNode(g.id, member);
       notifySelect(v, res, name);
     } catch (e) {
       showToast('error', proxiesErrorText($t, codeOf(e)));
     } finally {
-      selecting = null;
+      selecting.delete(g.id);
     }
     // Фокус остаётся на плитке: карточка перерисовывает плитки по ключу участника
     await loadRuntime();
   }
 
+  // Группы с идущим «Повторить» (D-16): повторное применение может перезапустить Xray
+  // и идти долго, каждое нажатие не должно отправлять новый confirm
+  const confirming = new SvelteSet<string>();
+
   async function onRetry(id: string) {
+    if (confirming.has(id)) return;
+    confirming.add(id);
     try {
       await confirmGroup(id);
     } catch (e) {
       // Занятость выбора или применения и снятая группа — своими текстами; без кода — сверка
       const code = codeOf(e);
       showToast('error', code ? proxiesErrorText($t, code) : $t('cfg.routing.err.confirm_failed'));
+    } finally {
+      confirming.delete(id);
     }
     await loadRuntime();
   }
@@ -267,7 +280,20 @@
 
   /** Причина отказа для строки «Не удалось запустить проверку: …» без точки в конце. */
   function reasonText(code: string | undefined): string {
-    return proxiesErrorText($t, code).replace(/\.\s*$/, '');
+    return lowerFirst(proxiesErrorText($t, code).replace(/\.\s*$/, ''));
+  }
+
+  // После двоеточия фраза продолжает предложение: «…проверку: проверка узлов недоступна»
+  function lowerFirst(text: string): string {
+    // Имена и сокращения («Xray», «Mihomo», «TLS», «API») остаются как есть
+    if (text === '' || /^(Xray|Mihomo|TLS|API|DNS|SSH)\b/.test(text)) return text;
+    return text.charAt(0).toLowerCase() + text.slice(1);
+  }
+
+  /** Причина сбоя пачки: код пачки (proxies.rt.reason.*), а не код ответа API. */
+  function batchReasonText(code: string | undefined): string {
+    const key = code ? `proxies.rt.reason.${code}` : '';
+    return key !== '' && $t(key) !== key ? lowerFirst($t(key)) : reasonText(code);
   }
 
   function setBatch(b: PingBatch) {
@@ -301,8 +327,22 @@
   }
 
   const pingErrorReason = $derived(
-    pingError !== '' ? pingError : batch?.state === 'failed' ? reasonText(batch.reason_code) : ''
+    pingError !== ''
+      ? pingError
+      : batch?.state === 'failed'
+        ? batchReasonText(batch.reason_code)
+        : ''
   );
+
+  // Отказ запуска относится к своей попытке: новая пачка (в том числе из другой вкладки)
+  // не должна возвращать его рядом с итогом «Проверено N узлов»
+  let seenBatch = '';
+  $effect(() => {
+    const id = batch?.id ?? '';
+    if (id === seenBatch) return;
+    seenBatch = id;
+    untrack(() => (pingError = ''));
+  });
 
   const lastAt = $derived.by(() => {
     let max: number | undefined;
@@ -370,7 +410,7 @@
     const el = cardEls[id];
     if (!el) return;
     el.scrollIntoView({ block: 'start', behavior: motion.reduced ? 'auto' : 'smooth' });
-    el.querySelector<HTMLElement>('.gc-head')?.focus({ preventScroll: true });
+    el.querySelector<HTMLElement>('.pc-toggle')?.focus({ preventScroll: true });
   }
 
   let pendingGroup = $state('');
@@ -398,7 +438,8 @@
       results,
       now: $runtimeNow?.groups[g.id] ?? null,
       history: $runtimeNow?.history ?? {},
-      selecting: selecting?.group === g.id ? selecting.member : '',
+      selecting: selecting.get(g.id) ?? '',
+      confirming: confirming.has(g.id),
       locked: lockedBy(g, v),
       pinging: pingCovers(g),
       pingSince: pingCovers(g) ? batch?.started_at : undefined,

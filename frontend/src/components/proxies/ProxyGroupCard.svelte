@@ -319,8 +319,18 @@
     if (p.group.mode === 'auto' || p.group.mode === 'fallback') return $t('proxies.rt.auto_hint');
     if (p.group.unconfirmed) return $t('proxies.rt.unconfirmed_title');
     if (p.selecting !== '' || p.locked) return $t('proxies.rt.locked_title');
+    if (p.group.mode === 'source') return $t('proxies.rt.source_title');
+    if (!pCanSelect(p)) return $t('proxies.rt.select_unavailable_title');
     return undefined;
   }
+
+  // Подсказка «проверка пойдёт через временный процесс»: ядра стоят, замеров в группе нет
+  const pStoppedHint = $derived(
+    !!panel &&
+      panel.view.state === 'stopped' &&
+      pSplit.visible.some((m) => m.kind === 'node') &&
+      pSplit.visible.every((m) => m.kind !== 'node' || pResult(panel, m).state === 'none')
+  );
 
   /**
    * Участник — текущий выбор (ручная) или текущий узел ядра (авто и резерв). Выбор с
@@ -344,14 +354,6 @@
     onToggleCollapse?.(id);
   }
 
-  function pHeadKeydown(e: KeyboardEvent, id: string) {
-    if (e.target !== e.currentTarget) return;
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      onToggleCollapse?.(id);
-    }
-  }
-
   /** Текст шаблона вокруг подстановки {name}: интерактивные звенья встают на её место. */
   function aroundName(text: (name: string) => string): [string, string] {
     const mark = '\u0000';
@@ -370,16 +372,23 @@
     data-testid="proxy-group-{g.id}"
     bind:this={cardEl}
   >
-    <div
-      class="gc-head collapsible"
-      role="button"
-      tabindex="0"
-      aria-expanded={!isCollapsed}
-      onclick={(e) => pHeadClick(e, g.id)}
-      onkeydown={(e) => pHeadKeydown(e, g.id)}
-    >
+    <!-- Шапка кликается мышью для удобства; с клавиатуры и читалкой группу сворачивает
+         кнопка с именем (aria-expanded), а действия шапки — её соседи, не вложены в неё -->
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <div class="gc-head collapsible" onclick={(e) => pHeadClick(e, g.id)}>
       <div class="gc-head-row1 pc-head-row1">
-        <span class="pc-name">{g.name}</span>
+        <button
+          type="button"
+          class="pc-toggle"
+          aria-expanded={!isCollapsed}
+          data-stop-head-click
+          onclick={(e) => {
+            e.stopPropagation();
+            onToggleCollapse?.(g.id);
+          }}
+        >
+          <span class="pc-name">{g.name}</span>
+        </button>
         <span class="badge badge-neutral">{$t(MODE_KEYS[g.mode])}</span>
 
         <div class="gc-head-actions pc-head-actions">
@@ -387,6 +396,7 @@
             <Button
               variant="secondary"
               size="sm"
+              class="tap-zone-44"
               data-testid="proxy-group-ping-{g.id}"
               data-stop-head-click
               ariaLabel={$t('proxies.rt.ping.group_aria', { name: g.name })}
@@ -404,8 +414,8 @@
             type="button"
             class="gc-chevron-btn"
             data-stop-head-click
-            aria-expanded={!isCollapsed}
-            aria-label={$t('proxies.toggle_group_nodes')}
+            tabindex="-1"
+            aria-hidden="true"
             onclick={(e) => {
               e.stopPropagation();
               onToggleCollapse?.(g.id);
@@ -476,7 +486,9 @@
         <Button
           variant="secondary"
           size="sm"
+          class="tap-zone-44"
           data-testid="proxy-group-retry-{g.id}"
+          loading={p.confirming}
           onclick={() => p.onRetry()}
         >
           {$t('proxies.rt.retry')}
@@ -497,7 +509,9 @@
               <span class="pc-state-text">
                 {$t('proxies.rt.no_nodes', { kernel: kernelLabel(p.kernel) || 'Xray / Mihomo' })}
               </span>
-              <a class="pc-link" href="#/config/groups">{$t('proxies.rt.open_in_config')}</a>
+              <a class="pc-link" href="#/config/groups?group={g.id}"
+                >{$t('proxies.rt.open_in_config')}</a
+              >
             </div>
           {:else}
             <div class="group-filters">
@@ -551,6 +565,7 @@
                 <Button
                   variant="secondary"
                   size="sm"
+                  class="tap-zone-44"
                   aria-disabled={p.batchRunning ? 'true' : undefined}
                   title={p.batchRunning ? $t('proxies.rt.ping.busy') : undefined}
                   onclick={() => {
@@ -575,6 +590,7 @@
                   class:now={current && g.mode === 'manual'}
                   class:pc-tile-current={current && pAutoLike}
                   class:pc-subgroup={m.kind === 'group'}
+                  class:pc-static={pBlocked(p) || current}
                 >
                   <button
                     type="button"
@@ -637,6 +653,11 @@
 
             {#if pAutoLike}
               <p class="pc-hint">{$t('proxies.rt.auto_hint')}</p>
+            {/if}
+            {#if pStoppedHint}
+              <p class="pc-hint" data-testid="proxy-group-stopped-hint-{g.id}">
+                {$t('proxies.rt.node.stopped_hint')}
+              </p>
             {/if}
 
             {#if pOrdered.length > renderLimit}
@@ -1822,8 +1843,24 @@
   .pc-head-row1 {
     flex-wrap: wrap;
   }
-  .pc-name {
+  /* Кнопка-имя группы: сворачивает и раскрывает карточку (клавиатура, читалка экрана) */
+  .pc-toggle {
     flex: 1 1 auto;
+    min-width: 0;
+    padding: 0;
+    background: none;
+    border: 0;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .pc-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+  .pc-name {
+    display: block;
     min-width: 0;
     color: var(--fg-primary);
     font-size: var(--font-size-lg);
@@ -1864,11 +1901,16 @@
   }
   .pc-now-node {
     color: var(--fg-primary);
-    font-weight: 600;
+  }
+  /* Левый край шапки, фильтров, сетки и вспомогательных строк карточки один: 16px */
+  .pc-card .gc-head {
+    padding-left: var(--spacing-4);
+    padding-right: var(--spacing-4);
   }
   .pc-grid {
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
     gap: var(--spacing-2);
+    padding: var(--spacing-4);
   }
   /* Кнопка выбора растянута на всю плитку; кнопки нижней строки лежат поверх неё */
   .pc-select {
@@ -1906,6 +1948,21 @@
   }
   .pc-tag {
     align-self: flex-start;
+  }
+  /* Плитка без действия (выбор недоступен или узел уже выбран): не «приподнимается» под курсором */
+  .pc-tile.pc-static:hover {
+    transform: none;
+  }
+  .pc-tile.pc-static:not(.now):not(.pc-tile-current):hover {
+    border-color: var(--border);
+    background: var(--bg-elevated);
+  }
+  .pc-tile.pc-static:hover::after {
+    opacity: 0;
+  }
+  .pc-select[aria-disabled='true'],
+  .pc-tile.pc-static .pc-select {
+    cursor: default;
   }
   /* Текущий узел авто и резерва: тот же индикатор, без акцентной рамки (D-09) */
   .pc-tile-current {

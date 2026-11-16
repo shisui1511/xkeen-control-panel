@@ -53,7 +53,40 @@
     if (ms > 0 && ms < LATENCY_DEGRADED_MS) return 'mid';
     return 'bad';
   });
-  const ago = $derived(result.at !== undefined ? formatTimeAgo(result.at, $t) : '');
+  // Возраст замера обновляется раз в 30 с, как «Последняя проверка» панели пинга
+  let clock = $state(0);
+  $effect(() => {
+    const timer = setInterval(() => (clock += 1), 30_000);
+    return () => clearInterval(timer);
+  });
+  const ago = $derived.by(() => {
+    void clock;
+    return result.at !== undefined ? formatTimeAgo(result.at, $t) : '';
+  });
+
+  // Пояснение метки «TLS» или «через {ядро}»: по нажатию, а не только title (клавиатура, касание)
+  let hint = $state<'tls' | 'kernel' | null>(null);
+  const hintText = $derived(
+    hint === 'tls'
+      ? $t('proxies.rt.node.tls_title')
+      : hint === 'kernel'
+        ? $t('proxies.rt.node.via_kernel_title', {
+            kernel: result.otherKernel ?? '',
+            active: result.active ?? ''
+          })
+        : ''
+  );
+  const hintTitleKernel = $derived(
+    $t('proxies.rt.node.via_kernel_title', {
+      kernel: result.otherKernel ?? '',
+      active: result.active ?? ''
+    })
+  );
+  const hintId = $derived(`pns-hint-${groupId}-${index}`);
+  function toggleHint(kind: 'tls' | 'kernel', e: MouseEvent) {
+    e.stopPropagation();
+    hint = hint === kind ? null : kind;
+  }
   const statusText = $derived(
     result.state === 'timeout' ? $t('proxies.rt.status.timeout') : $t('proxies.rt.status.error')
   );
@@ -116,6 +149,14 @@
       }
     }
 
+    // Окно не модальное: фокус ушёл из него (Tab) — закрыть, не оставляя висеть
+    function onFocusOut(e: FocusEvent) {
+      const next = e.relatedTarget as Node | null;
+      if (next && (node.contains(next) || statusEl?.contains(next))) return;
+      close(false);
+    }
+    node.addEventListener('focusout', onFocusOut);
+
     // statusEl читается без отслеживания: смена якоря не перезапускает вложение
     // (перенос узла и перехват фокуса)
     untrack(place);
@@ -126,6 +167,7 @@
     window.addEventListener('scroll', place, true);
 
     return () => {
+      node.removeEventListener('focusout', onFocusOut);
       window.removeEventListener('pointerdown', onPointerDown, true);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('resize', place);
@@ -143,6 +185,8 @@
       <button
         type="button"
         class="lat {latClass}"
+        title={$t('proxies.rt.node.history_title')}
+        aria-label={$t('proxies.rt.node.history_aria', { ms: result.ms ?? 0 })}
         onclick={(e) => {
           e.stopPropagation();
           onHistory(e);
@@ -161,21 +205,31 @@
       >
     {/if}
     {#if result.tls}
-      <span class="badge badge-neutral" title={$t('proxies.rt.node.tls_title')}
-        >{$t('proxies.rt.node.tls')}</span
+      <button
+        type="button"
+        class="badge badge-neutral pns-tag tap-zone-44"
+        aria-expanded={hint === 'tls'}
+        aria-controls={hintId}
+        title={$t('proxies.rt.node.tls_title')}
+        onclick={(e) => toggleHint('tls', e)}>{$t('proxies.rt.node.tls')}</button
       >
     {/if}
     {#if result.otherKernel}
-      <span
-        class="badge badge-neutral"
-        title={$t('proxies.rt.node.via_kernel_title', {
-          kernel: result.otherKernel,
-          active: result.active ?? ''
-        })}>{$t('proxies.rt.node.via_kernel', { kernel: result.otherKernel })}</span
+      <button
+        type="button"
+        class="badge badge-neutral pns-tag tap-zone-44"
+        aria-expanded={hint === 'kernel'}
+        aria-controls={hintId}
+        title={hintTitleKernel}
+        onclick={(e) => toggleHint('kernel', e)}
+        >{$t('proxies.rt.node.via_kernel', { kernel: result.otherKernel })}</button
       >
     {/if}
     {#if ago}
-      <span class="pns-age" title={$t('proxies.stale_tooltip', { timeAgo: ago })}>{ago}</span>
+      <span class="pns-age" title={$t('proxies.rt.node.age_title', { timeAgo: ago })}>{ago}</span>
+    {/if}
+    {#if hint !== null}
+      <span class="pns-hint" id={hintId}>{hintText}</span>
     {/if}
   {/if}
 </span>
@@ -190,7 +244,7 @@
     aria-label={statusText}
   >
     <p class="pns-reason">{$t('proxies.rt.reason_label', { reason: reasonText })}</p>
-    <Button variant="secondary" size="sm" onclick={openDiagnostics}>
+    <Button variant="secondary" size="sm" class="tap-zone-44" onclick={openDiagnostics}>
       {$t('proxies.rt.diagnostics')}
     </Button>
   </div>
@@ -215,7 +269,7 @@
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
     font-weight: 400;
-    line-height: 1.2;
+    line-height: 1.5;
     padding: var(--spacing-1);
     border-radius: var(--radius-sm);
     white-space: nowrap;
@@ -223,7 +277,8 @@
     align-items: center;
   }
   .lat:focus-visible,
-  .pns-fail:focus-visible {
+  .pns-fail:focus-visible,
+  .pns-tag:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
   }
@@ -243,6 +298,17 @@
   .lat.dim {
     color: var(--fg-dim);
     background: var(--surface-tint);
+  }
+  .pns-tag {
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .pns-hint {
+    flex: 1 0 100%;
+    font-size: var(--font-size-xs);
+    line-height: 1.5;
+    color: var(--fg-secondary);
+    overflow-wrap: anywhere;
   }
   .pns-fail {
     background: none;

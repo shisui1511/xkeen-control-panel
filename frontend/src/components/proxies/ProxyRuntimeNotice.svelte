@@ -64,7 +64,7 @@
         <Button
           variant="primary"
           size="sm"
-          class="prn-start"
+          class="prn-start tap-zone-44"
           data-testid="proxies-runtime-start"
           loading={starting}
           onclick={start}
