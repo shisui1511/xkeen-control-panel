@@ -489,7 +489,13 @@
           class="tap-zone-44"
           data-testid="proxy-group-retry-{g.id}"
           loading={p.confirming}
-          onclick={() => p.onRetry()}
+          aria-disabled={p.locked ? 'true' : undefined}
+          title={p.locked ? $t('proxies.rt.locked_title') : undefined}
+          onclick={() => {
+            // D-17: пока группа переключается (в том числе в другой вкладке или при сверке),
+            // «Повторить» получил бы select_busy
+            if (!p.locked) p.onRetry();
+          }}
         >
           {$t('proxies.rt.retry')}
         </Button>
