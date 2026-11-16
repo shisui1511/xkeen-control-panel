@@ -640,8 +640,12 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 		defer func() { stages.markers = time.Since(markersStart) }()
 		switch {
 		case selectionOK(out) && runErr == nil:
-			if err := s.clearUnconfirmed(comp, configlayer.KernelXray); err != nil {
-				return res, err
+			// Маркер снят записью коммита прохода (CommitLive); отдельная запись —
+			// только если коммита не было (слой выключен посреди запуска).
+			if !b.markersCommitted {
+				if err := s.clearUnconfirmed(comp, configlayer.KernelXray); err != nil {
+					return res, err
+				}
 			}
 		case runErr != nil || xraySelectionReverted(outcome):
 			// Возврат выбора уже выполнен под ходом (settleXrayBatch): исход прохода
@@ -881,8 +885,11 @@ func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name
 			failErr = ErrApplyBusy
 		}
 	case selectionOK(b.out) && b.err == nil:
-		if err := s.clearUnconfirmed(in.comp, configlayer.KernelXray); err != nil {
-			log.Printf("[routing] выбор группы %s: маркер Xray не снят: %v", in.gid, err)
+		// Маркер снят записью коммита прохода (CommitLive), без коммита — здесь.
+		if !b.markersCommitted {
+			if err := s.clearUnconfirmed(in.comp, configlayer.KernelXray); err != nil {
+				log.Printf("[routing] выбор группы %s: маркер Xray не снят: %v", in.gid, err)
+			}
 		}
 		s.selNotes.drop(s.d.Layer, in.gid)
 	case b.err != nil || xraySelectionReverted(b.outcome):
@@ -1357,7 +1364,36 @@ func (s *Service) setReconcileNotices(failed []mihomoSelEntry) {
 // живым по пингу. Выбор удалённых групп и участников-групп, DIRECT/REJECT,
 // которых в составе больше нет, снимается молча и в повторный выбор не идёт:
 // это правка пользователя, а не пропавший узел.
+//
+// Запуск выбора Xray (TriggerSelect) сначала, до ранних возвратов, снимает маркеры
+// selection_unconfirmed Xray с групп компонент своих записанных намерений
+// (xrayRunGate.commitComp): запись коммита идёт только после успешного
+// перезапуска, отдельной записи после ответа нет (150-26, IO=B). Отказ коммита
+// отменяет и снятие; неизвестный исход ставит маркер снова (settleXrayBatch).
 func (s *Service) CommitLive(st *configlayer.State, req configlayer.ApplyRequest, used configlayer.Input) error {
+	if req.Trigger == configlayer.TriggerSelect {
+		g := &s.xrun
+		g.mu.Lock()
+		comp := g.commitComp
+		g.mu.Unlock()
+		if len(comp) > 0 {
+			if st.Live == nil {
+				st.Live = configlayer.Sections{}
+			}
+			m := readUnconfirmed(st.Live)
+			for _, id := range comp {
+				if m[id] == configlayer.KernelXray {
+					delete(m, id)
+				}
+			}
+			if err := writeUnconfirmed(st.Live, m); err != nil {
+				return err
+			}
+			g.mu.Lock()
+			g.committed = true
+			g.mu.Unlock()
+		}
+	}
 	fullDraft := req.Source == configlayer.SourceDraft && len(req.Only) == 0
 	if !fullDraft && req.Source != configlayer.SourceApplied {
 		return nil
