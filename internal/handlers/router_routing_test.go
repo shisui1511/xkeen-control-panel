@@ -2146,12 +2146,13 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 		if len(mihomoTotals) == 0 {
 			t.Errorf("время выбора Mihomo: нет строк этапов выборов, граница %d мс", rtRtMihomoSelectBudget.Milliseconds())
 		} else {
-			routertest.Verdict(t, medTotal <= float64(rtRtMihomoSelectBudget.Milliseconds()), mark,
-				"время выбора Mihomo: медиана total %.1f мс по %d строкам, граница %d мс", medTotal, len(mihomoTotals), rtRtMihomoSelectBudget.Milliseconds())
-		}
-		if len(mihomoHTTP) > 0 {
-			routertest.Verdict(t, medHTTP <= float64(rtRtMihomoHTTPBudget.Milliseconds()), mark,
-				"время ответа выбора Mihomo: медиана http %.1f мс по %d выборам, граница %d мс", medHTTP, len(mihomoHTTP), rtRtMihomoHTTPBudget.Milliseconds())
+			// Обе границы — один вердикт: время плавает между прогонами (носитель), и по
+			// одной из них метка снималась бы случайно.
+			ok := medTotal <= float64(rtRtMihomoSelectBudget.Milliseconds()) &&
+				(len(mihomoHTTP) == 0 || medHTTP <= float64(rtRtMihomoHTTPBudget.Milliseconds()))
+			routertest.Verdict(t, ok, mark,
+				"время выбора Mihomo: медиана total %.1f мс по %d строкам (граница %d мс), медиана http %.1f мс по %d выборам (граница %d мс)",
+				medTotal, len(mihomoTotals), rtRtMihomoSelectBudget.Milliseconds(), medHTTP, len(mihomoHTTP), rtRtMihomoHTTPBudget.Milliseconds())
 		}
 	}
 
