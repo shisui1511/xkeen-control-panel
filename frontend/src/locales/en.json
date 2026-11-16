@@ -3859,6 +3859,7 @@
   "cfg.hint.xray_selector_prefix": "A node tag in Xray matches the beginning of another node tag. Exclude one of them from the group.",
   "cfg.notice.routing_auto_taken": "{kernel} is installed: the panel took over its routing automatically. Check the groups and rules.",
   "cfg.notice.routing_reconcile": "Could not restore the choice in group “{group}”: Mihomo returned an error. Select the member again.",
+  "cfg.notice.routing_select": "The selection in group “{group}” was cancelled — {reason}. The previous node has been restored.",
   "cfg.notice.routing_repick": "Group “{group}”: the selected node is gone after the update, “{node}” was chosen.",
   "cfg.notice.routing_list_missing": "List not found: {file} · {tag}. “Apply” is unavailable until you choose another list.",
   "cfg.feature.mihomo_groups_unavailable": "Mihomo {version}: groups are not created, Mihomo {min} is required.",

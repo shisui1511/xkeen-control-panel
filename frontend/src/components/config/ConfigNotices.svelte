@@ -7,6 +7,7 @@
     handleLayerError,
     driftCount,
     layerSnapshot,
+    selectBgReason,
     type LayerNotice
   } from '../../lib/configLayer';
   import { editorOpenRequest } from '../../stores';
@@ -144,6 +145,15 @@
         notice: n,
         tone: 'warning',
         text: $t('cfg.routing.reconcile_failed', { group: p.group ?? '' })
+      };
+    }
+    // Отказ фонового прохода выбора при запущенном Mihomo: причина по классу, незнакомый — failed
+    if (n.id.startsWith('routing_select:')) {
+      const reason = $t(`proxies.rt.select_bg_reason.${selectBgReason(p.reason)}`);
+      return {
+        notice: n,
+        tone: 'error',
+        text: $t('cfg.notice.routing_select', { group: p.group || p.gid || '', reason })
       };
     }
     if (n.id.startsWith('routing_repick:')) {
