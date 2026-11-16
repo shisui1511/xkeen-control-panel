@@ -5,6 +5,7 @@
 package handlers
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -314,6 +316,99 @@ func rtFltLogSince(offset int64) string {
 	return text
 }
 
+// rtFltKill — итог горутины убийства: процесс убит по строке горячей замены.
+type rtFltKill struct {
+	killed bool
+	err    error
+}
+
+// rtFltKillOnHot читает журнал панели с offset каждые rtFltKillPoll и при первой
+// строке горячей замены убивает процесс pid (SIGKILL). Горутина без t.*: итог —
+// через канал, выход — по ctx.
+func rtFltKillOnHot(ctx context.Context, offset int64, pid int) <-chan rtFltKill {
+	out := make(chan rtFltKill, 1)
+	go func() {
+		tick := time.NewTicker(rtFltKillPoll)
+		defer tick.Stop()
+		for {
+			if strings.Contains(rtFltLogSince(offset), rtFltHotMark) {
+				err := syscall.Kill(pid, syscall.SIGKILL)
+				out <- rtFltKill{killed: err == nil, err: err}
+				return
+			}
+			select {
+			case <-ctx.Done():
+				out <- rtFltKill{}
+				return
+			case <-tick.C:
+			}
+		}
+	}()
+	return out
+}
+
+// rtFltRollback — итог наблюдения за потоком событий слоя: событие шага restart
+// с пояснением restart_failed_rolling_back пришло, и чужой файл снят по нему.
+type rtFltRollback struct {
+	seen    bool
+	removed bool
+}
+
+// rtFltWatchRollback открывает поток событий слоя и ждёт его первого события
+// (подписка заведена). Горутина без t.*: на первое apply_step шага restart с
+// пояснением restart_failed_rolling_back сразу удаляет чужой файл — до отката
+// файлов и подъёма Xray на прежних. Итог — в канал после закрытия потока по ctx.
+func (e *rtSrc) rtFltWatchRollback(ctx context.Context) <-chan rtFltRollback {
+	e.t.Helper()
+	const path = "/api/configlayer/events"
+	resp, err := e.p.Stream(ctx, path)
+	if err != nil {
+		e.t.Fatalf("поток %s не открылся: %v", path, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		e.t.Fatalf("поток %s: http %d", path, resp.StatusCode)
+	}
+	first := make(chan struct{})
+	out := make(chan rtFltRollback, 1)
+	go func() {
+		defer resp.Body.Close()
+		var res rtFltRollback
+		defer func() { out <- res }()
+		sc := bufio.NewScanner(resp.Body)
+		sc.Buffer(make([]byte, 64<<10), 16<<20)
+		event, got := "", false
+		for sc.Scan() {
+			line := sc.Text()
+			if !got {
+				got = true
+				close(first)
+			}
+			switch {
+			case strings.HasPrefix(line, "event: "):
+				event = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "data: ") && event == "apply_step" && !res.seen:
+				var sv struct {
+					ID       string `json:"id"`
+					NoteCode string `json:"note_code"`
+				}
+				if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &sv) == nil && sv.ID == "restart" && sv.NoteCode == rtFltRollingNote {
+					res.seen = true
+					res.removed = rtFltDropBad()
+				}
+			case line == "":
+				event = ""
+			}
+		}
+	}()
+	select {
+	case <-first:
+	case <-time.After(30 * time.Second):
+		e.t.Fatalf("поток %s не отдал первое событие за 30 с", path)
+	}
+	return out
+}
+
 // Сбои при выборе узла Xray: CR-02 (сокращённая проверка выбора, неприменимая
 // горячая замена и отвергаемый каталог — откат без остановки Xray) и D-15
 // (падение Xray сразу после горячей замены: доводящий перезапуск; при
@@ -512,5 +607,199 @@ func TestRouterSelectXrayFaults(t *testing.T) {
 			t.Error("CR-02: исходящий «Сбой» не сменился на узел B")
 		}
 		obs[nodeB] = in
+	})
+
+	// other — узел «Сбой», отличный от текущего выбора.
+	other := func(c *rtSrc) (prev, target string) {
+		prev = c.rtFltCurrent("Сбой")
+		if prev == nodeB {
+			return prev, nodeA
+		}
+		return prev, nodeB
+	}
+
+	// D-15, доводящий перезапуск: Xray убит сразу после горячей замены (строка
+	// журнала панели), опрос PID после хука видит частичный сбой, Xray
+	// перезапускается на новых файлах. Попадание в окно подтверждения — по исходу
+	// ответа: restarted с причиной hot_failed; applied — убийство пришло после
+	// подтверждения, попытка повторяется.
+	t.Run("hot_kill_restart", func(t *testing.T) {
+		c := e.with(t)
+		t.Cleanup(func() {
+			c.rtFltEnsureXray()
+			c.rtFltConfirmIfMarked("Сбой", gid)
+		})
+		hit, failed, attempts := false, false, 0
+		for attempts < rtFltAttempts && !hit && !failed {
+			attempts++
+			pid := c.rtFltEnsureXray()
+			_, target := other(c)
+			prevIn, _ := rtFltOutbounds(t, gid, outerID)
+			var s rtFltSel
+			var k rtFltKill
+			func() {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				killed := rtFltKillOnHot(ctx, rtRtLogOffset(t), pid)
+				s = c.rtFltSelect(gid, target)
+				cancel()
+				k = <-killed
+			}()
+			switch {
+			case s.status == http.StatusOK && s.xray == "restarted" && s.reason == "hot_failed":
+				hit = true
+				newPID := routertest.WaitKernelReady(t, "xray", rtFltXrayWait)
+				t.Logf("d15: window=hit attempts=%d outcome=%s reason=%s killed=%t pid_changed=%t", attempts, s.xray, s.reason, k.killed, newPID != pid)
+				if newPID == pid {
+					t.Error("D-15: после доводящего перезапуска Xray работает с убитым PID")
+				}
+				if s.reverted || s.unconfirmed > 0 {
+					t.Errorf("D-15: доводящий перезапуск вернул выбор или поставил маркер: %s", s)
+				}
+				if cur := c.rtFltCurrent("Сбой"); cur != target {
+					t.Error("D-15: выбор «Сбой» в Live не равен новому узлу")
+				}
+				if cur, marked := c.rtFltRuntime("Сбой"); cur != target || marked {
+					t.Errorf("D-15: вид «Прокси»: новый узел=%t, маркер selection_unconfirmed=%t", cur == target, marked)
+				}
+				in, out := rtFltOutbounds(t, gid, outerID)
+				switch {
+				case reflect.DeepEqual(in, prevIn):
+					t.Error("D-15: исходящий «Сбой» в xcp-groups не сменился")
+				case !rtRtMatchesNode(t, in):
+					t.Error("D-15: исходящий «Сбой» не совпадает ни с одним узлом «Моих узлов»")
+				case obs[target] != nil && !reflect.DeepEqual(in, obs[target]):
+					t.Error("D-15: исходящий «Сбой» не совпадает с выбранным узлом")
+				}
+				if !reflect.DeepEqual(out, in) {
+					t.Error("D-15: исходящий «Внешняя» не совпадает с новым исходящим «Сбой»")
+				}
+			case s.status == http.StatusOK && s.xray == "applied" && !s.reverted && s.unconfirmed == 0:
+				// Убийство пришло после подтверждения (или строки замены не было):
+				// Xray поднимается и попытка повторяется.
+				t.Logf("d15: попытка %d мимо окна: %s killed=%t", attempts, s, k.killed)
+				c.rtFltEnsureXray()
+			default:
+				failed = true
+				t.Errorf("D-15: доводящий перезапуск не сработал: %s killed=%t (ожидалось restarted с причиной hot_failed)", s, k.killed)
+			}
+		}
+		if !hit && !failed {
+			t.Logf("d15: window=missed attempts=%d", attempts)
+			t.Errorf("d15: окно подтверждения не поймано")
+		}
+	})
+
+	// D-15, «перезапуск не помог», и D-16: чужой отвергаемый файл в каталоге и
+	// Xray, убитый сразу после горячей замены. Частичный сбой ведёт к полной
+	// проверке перед перезапуском (CR-02), она отказывает, откат файлов поднимает
+	// Xray на прежних файлах (hotPartial). Чужой файл снимается по событию шага
+	// отката (apply_step, restart, restart_failed_rolling_back): успел —
+	// reverted с работающим Xray и прежним выбором (rollback_up); не успел — маркер
+	// selection_unconfirmed с остановленным Xray (rollback_down), затем
+	// «Повторить». reverted при остановленном Xray без маркера — откат без
+	// перезапуска (hotPartial не присвоена): ошибка.
+	t.Run("hot_kill_rejected", func(t *testing.T) {
+		c := e.with(t)
+		t.Cleanup(func() {
+			if !rtFltDropBad() {
+				t.Error("очистка: чужой файл Xray не удалён")
+			}
+			c.rtFltEnsureXray()
+			c.rtFltConfirmIfMarked("Сбой", gid)
+		})
+		hit, failed, attempts := false, false, 0
+		for attempts < rtFltAttempts && !hit && !failed {
+			attempts++
+			pid := c.rtFltEnsureXray()
+			prev, target := other(c)
+			prevIn, _ := rtFltOutbounds(t, gid, outerID)
+			rtFltPutBad(t)
+			var (
+				s  rtFltSel
+				k  rtFltKill
+				rb rtFltRollback
+			)
+			func() {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				rolled := c.rtFltWatchRollback(ctx)
+				killed := rtFltKillOnHot(ctx, rtRtLogOffset(t), pid)
+				s = c.rtFltSelect(gid, target)
+				cancel()
+				k, rb = <-killed, <-rolled
+			}()
+			xrayPID := rtFltXrayPID()
+			marker := s.unconfirmed > 0
+			report := func(window, branch string) {
+				t.Logf("d15b: window=%s attempts=%d branch=%s outcome=%s marker=%t xray_up=%t rollback_event=%t", window, attempts, branch, s.xray, marker, xrayPID > 0, rb.seen)
+			}
+			switch {
+			case s.status == http.StatusOK && s.xray == "applied" && !s.reverted && !marker:
+				// Убийство после подтверждения: чужой файл не дал бы поднять Xray —
+				// файл снимается, ядро запускается, попытка повторяется.
+				t.Logf("d15b: попытка %d мимо окна: %s killed=%t", attempts, s, k.killed)
+				if !rtFltDropBad() {
+					t.Fatal("чужой файл Xray не удалён")
+				}
+				c.rtFltEnsureXray()
+			case s.status == http.StatusOK && s.reverted && !marker && xrayPID > 0 && xrayPID != pid:
+				hit = true
+				report("hit", "rollback_up")
+				if !rb.seen {
+					t.Error("D-15: исход reverted без события отката restart_failed_rolling_back")
+				}
+				if rtFltBadPresent() {
+					t.Error("D-15: чужой файл остался в каталоге после события отката")
+				}
+				if cur := c.rtFltCurrent("Сбой"); cur != prev {
+					t.Error("D-15: выбор «Сбой» в Live не вернулся к прежнему узлу")
+				}
+				if cur, marked := c.rtFltRuntime("Сбой"); cur != prev || marked {
+					t.Errorf("D-15: вид «Прокси»: прежний узел=%t, маркер selection_unconfirmed=%t", cur == prev, marked)
+				}
+				in, out := rtFltOutbounds(t, gid, outerID)
+				if !reflect.DeepEqual(in, prevIn) || !reflect.DeepEqual(out, prevIn) {
+					t.Errorf("D-15: исходящие групп в xcp-groups не прежние: «Сбой»=%t «Внешняя»=%t", reflect.DeepEqual(in, prevIn), reflect.DeepEqual(out, prevIn))
+				}
+				routertest.WaitKernelReady(t, "xray", rtFltXrayWait)
+			case s.status == http.StatusOK && marker && xrayPID == 0:
+				hit = true
+				report("hit", "rollback_down")
+				if !rb.seen {
+					t.Error("D-16: маркер без события отката restart_failed_rolling_back")
+				}
+				if !rtFltDropBad() {
+					t.Fatal("чужой файл Xray не удалён")
+				}
+				c.rtFltEnsureXray()
+				before := c.rtRstApplyView()
+				r := c.callSlow(http.MethodPost, "/api/configlayer/proxies/confirm", map[string]string{"group": gid})
+				if r.Status != http.StatusOK {
+					t.Fatalf("D-16: «Повторить»: %d %s", r.Status, r.Code)
+				}
+				if ok, _ := r.object(t)["confirmed"].(bool); !ok {
+					t.Error("D-16: «Повторить» не подтвердило выбор")
+				}
+				if ok, code := rtRstResult(c.rtRstWaitApply(before)); !ok {
+					t.Errorf("D-16: итог «Повторить» %q", code)
+				}
+				if _, marked := c.rtFltRuntime("Сбой"); marked {
+					t.Error("D-16: маркер selection_unconfirmed остался после «Повторить»")
+				}
+				routertest.WaitKernelReady(t, "xray", rtFltXrayWait)
+			case s.status == http.StatusOK && s.reverted && !marker && xrayPID == 0:
+				failed = true
+				report("hit", "rollback_none")
+				t.Errorf("D-15: откат после частичного сбоя замены не перезапустил Xray (hotPartial): %s", s)
+			default:
+				failed = true
+				t.Errorf("D-15: исход выбора при отвергаемом каталоге и падении Xray: %s killed=%t xray_up=%t rollback_event=%t (полная проверка не видела отвергаемый каталог или исход неизвестен)", s, k.killed, xrayPID > 0, rb.seen)
+			}
+		}
+		if !hit && !failed {
+			t.Logf("d15b: window=missed attempts=%d", attempts)
+			t.Errorf("d15b: окно подтверждения не поймано")
+		}
 	})
 }
