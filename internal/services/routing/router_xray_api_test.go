@@ -350,7 +350,7 @@ func TestRouterXrayAPIBlock(t *testing.T) {
 				t.Fatalf("%s: набор тегов изменился: %t", c.name, err != nil)
 			}
 			files := []configlayer.HotFile{{RelPath: xrayGroupsFile, Action: configlayer.ActionWrite, Old: c.before, OldExisted: true, New: c.after}}
-			short := e.svc.xrayValidateChanged(ctx, files)
+			short := e.svc.xrayValidateChanged(ctx, rtXrayBin, tmpBase, files)
 			plan := configlayer.Plan{Files: []configlayer.FilePlan{{
 				Key: configlayer.ManifestKey(configlayer.KernelXray, xrayGroupsFile), Kernel: configlayer.KernelXray,
 				RelPath: xrayGroupsFile, Action: configlayer.ActionWrite, Content: c.after,

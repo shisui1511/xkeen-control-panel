@@ -273,22 +273,18 @@ func (s *Service) settleXrayBatch(b *xrayBatch) {
 }
 
 // xrayValidateChanged — сокращённая проверка Xray запуска выбора
-// (configlayer.XrayValidateFunc): true только если план меняет ровно один файл
+// (configlayer.XrayValidateFunc; бинарник и каталог — от конвейера): true только если план меняет ровно один файл
 // xcp-groups (запись поверх существующего), набор тегов прежний (hotTags), есть
 // изменённые исходящие и `xray run -test` по минимальному конфигу из одних этих
 // исходящих завершился с кодом 0. Любая неприменимость или ошибка — false:
 // конвейер выполняет полную проверку ValidateXray. Временный каталог (0700, файл
 // 0600) удаляется сразу; в журнал — только число тегов и код выхода (тела несут
 // учётные данные узлов).
-func (s *Service) xrayValidateChanged(ctx context.Context, files []configlayer.HotFile) bool {
+func (s *Service) xrayValidateChanged(ctx context.Context, bin, tmpBase string, files []configlayer.HotFile) bool {
 	if len(files) != 1 || files[0].RelPath != xrayGroupsFile || files[0].Action != configlayer.ActionWrite || !files[0].OldExisted {
 		return false
 	}
-	if s.d.XrayBin == nil {
-		return false
-	}
-	bin := s.d.XrayBin()
-	if bin == "" {
+	if bin == "" || tmpBase == "" {
 		return false
 	}
 	tags, next, _, err := hotTags(files[0].Old, files[0].New)
@@ -305,7 +301,13 @@ func (s *Service) xrayValidateChanged(ctx context.Context, files []configlayer.H
 	if err != nil {
 		return false
 	}
-	dir, err := os.MkdirTemp("", "xcp-val-")
+	// Каталог в <data_dir>/tmp с префиксом apply-, как у полной проверки: тела
+	// исходящих несут учётные данные узлов, а остаток после падения процесса уберёт
+	// configlayer.CleanupStale (в общем /tmp его никто не подметал бы).
+	if err := os.MkdirAll(tmpBase, 0o700); err != nil {
+		return false
+	}
+	dir, err := os.MkdirTemp(tmpBase, "apply-val-")
 	if err != nil {
 		return false
 	}

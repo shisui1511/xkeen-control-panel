@@ -62,9 +62,11 @@ const (
 
 // XrayValidateFunc — сокращённая проверка Xray запуска выбора: получает файлы
 // Xray плана (новое содержимое и прежнее с диска) и возвращает true, если
-// проверка пройдена; false — нужна полная проверка ValidateXray. Содержимое
-// несёт учётные данные узлов и не должно попадать в журнал.
-type XrayValidateFunc func(ctx context.Context, files []HotFile) bool
+// проверка пройдена; false — нужна полная проверка ValidateXray. bin — тот же
+// бинарник Xray, что у полной проверки конвейера; tmpBase — каталог для временных
+// файлов (<data_dir>/tmp, его подметает CleanupStale). Содержимое несёт учётные
+// данные узлов и не должно попадать в журнал.
+type XrayValidateFunc func(ctx context.Context, bin, tmpBase string, files []HotFile) bool
 
 // ApplyRequest — параметры одного запуска.
 type ApplyRequest struct {
@@ -629,7 +631,7 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	// проверяются второй раз; отказ или неприменимость хука ведут в тот же
 	// единственный вызов полной проверки, что у запусков без хука.
 	xr := ValidationResult{Kernel: KernelXray, OK: true}
-	if p.xrayValidatedByHook(ctx, req, bins.Xray, plan) {
+	if p.xrayValidatedByHook(ctx, req, bins.Xray, tmpBase, plan) {
 		// Каталог целиком не проверялся: перед резервным перезапуском Xray, который
 		// его загрузит, проверка выполняется полностью (restartKernel).
 		p.mu.Lock()
@@ -1160,7 +1162,7 @@ func applyRestore(st *State, spec *RestoreSpec) error {
 // маршрутизации над файлами Xray), и прочитанных прежних версиях этих файлов;
 // файлы с признаком Inert тоже передаются — полная проверка читает весь каталог.
 // Любой иной случай и отказ хука — false: запуск идёт полной проверкой.
-func (p *Pipeline) xrayValidatedByHook(ctx context.Context, req ApplyRequest, bin string, plan Plan) bool {
+func (p *Pipeline) xrayValidatedByHook(ctx context.Context, req ApplyRequest, bin, tmpBase string, plan Plan) bool {
 	if req.XrayValidate == nil || bin == "" || !plan.Changes(KernelXray) || plan.Routing.hasDisk(KernelXray) {
 		return false
 	}
@@ -1187,7 +1189,7 @@ func (p *Pipeline) xrayValidatedByHook(ctx context.Context, req ApplyRequest, bi
 	// Как и полная проверка, процесс Xray не запускается во время операции XKeen
 	// над ядром.
 	defer services.AcquireKernelHelper(ctx)()
-	return req.XrayValidate(ctx, files)
+	return req.XrayValidate(ctx, bin, tmpBase, files)
 }
 
 // afterValidation отражает итог проверки в шаге; failed=true — применение
