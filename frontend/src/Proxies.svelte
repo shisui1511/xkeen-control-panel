@@ -1,6 +1,6 @@
 <script lang="ts">
   import { pullToRefresh } from './lib/gestures';
-  import { onMount, onDestroy, tick } from 'svelte';
+  import { onMount, onDestroy, tick, type Snippet } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { t, tp, currentLang } from './i18n';
   import { usePoller } from './lib/poller';
@@ -78,9 +78,11 @@
 
   interface Props {
     onSwitchTab?: (tab: string) => void;
+    /** Плашка под шапкой (страница «Прокси» при слое, свой профиль Mihomo); без неё разметка прежняя. */
+    notice?: Snippet;
   }
 
-  let { onSwitchTab = () => {} }: Props = $props();
+  let { onSwitchTab = () => {}, notice }: Props = $props();
 
   const mihomoOffline = $derived($capabilities !== null && !$capabilities.mihomo.reachable);
 
@@ -1007,6 +1009,7 @@
       </Button>
     {/if}
   </PageHeader>
+  {#if notice}{@render notice()}{/if}
 
   {#if !isLayerActive}
     <Tabs

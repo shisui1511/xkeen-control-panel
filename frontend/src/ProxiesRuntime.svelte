@@ -2,38 +2,78 @@
   // Страница «Прокси» при включённом слое «Конфигурация»: что выбрано сейчас в группах
   // панели для обоих ядер. Без флага слоя Dashboard рисует прежний Proxies.svelte, и этот
   // модуль вместе с клиентом configProxies.ts не загружается.
-  import { onMount } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
+  import { writable } from 'svelte/store';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import { t } from './i18n';
   import { activeKernelName, runningKernels, showToast } from './stores';
+  import { usePoller } from './lib/poller';
+  import { motion } from './lib/motion.svelte';
   import PageHeader from './PageHeader.svelte';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
+  import LatencyHistoryPopover from './components/LatencyHistoryPopover.svelte';
   import ClientExitIpBadge from './components/network/ClientExitIpBadge.svelte';
   import ProxyGroupCard from './components/proxies/ProxyGroupCard.svelte';
+  import ProxyFilterBar from './components/proxies/ProxyFilterBar.svelte';
+  import ObservatoryPanel from './components/proxies/ObservatoryPanel.svelte';
+  import MihomoModeSwitch from './components/proxies/MihomoModeSwitch.svelte';
+  import ProxyRuntimeNotice from './components/proxies/ProxyRuntimeNotice.svelte';
+  import ProxyPingBar from './components/proxies/ProxyPingBar.svelte';
+  import SourceDiagnosticsModal from './components/config/nodes/SourceDiagnosticsModal.svelte';
   import {
     runtimeView,
     runtimeLoadError,
     pingSnapshot,
     runtimeNow,
+    runtimeRestarting,
     loadRuntime,
     loadResults,
+    loadNow,
     selectNode,
+    startPing,
+    cancelPing,
     confirmGroup,
     attachProxiesLive,
     proxiesErrorText,
+    type PingBatch,
     type ProxyKernel,
     type RuntimeGroup,
+    type RuntimeMember,
     type RuntimeView
   } from './lib/configProxies';
-  import { kernelLabel, type ActiveKernel, type PanelCard } from './lib/proxyRuntimeAdapter';
+  import {
+    kernelLabel,
+    splitMembers,
+    resultView,
+    historyView,
+    proxyLike,
+    pingHistory,
+    type ActiveKernel,
+    type PanelCard
+  } from './lib/proxyRuntimeAdapter';
+  import {
+    computeObservatoryStats,
+    groupMatchesLatencyFilter,
+    type NodeSnapshot,
+    type ObservatoryFilter,
+    type ProxyLike
+  } from './lib/proxyStats';
+  import type { ProxiesViewMode } from './lib/proxyViewPrefs';
   import type { SelectResult } from './lib/configRouting';
+  import type { KernelName } from './lib/configSources';
 
   // Перечитывание вида после смены ядра: события процесса приходят пачкой
   const KERNEL_DEBOUNCE_MS = 300;
+  // Опрос «Сейчас» авто- и резервных групп (D-14)
+  const NOW_POLL_MS = 12000;
+  const RENDER_STEP = 60;
 
   const view = $derived($runtimeView);
   const loadError = $derived($runtimeLoadError);
+  const results = $derived($pingSnapshot?.results ?? {});
+  const batch: PingBatch | undefined = $derived($pingSnapshot?.batch);
+  const batchRunning = $derived(batch?.state === 'running');
 
   // Активное ядро карточек: при остановленных ядрах — '' (видны узлы обоих ядер)
   const kernel: ActiveKernel = $derived(
@@ -45,12 +85,76 @@
   const groupFilters = new SvelteMap<string, string>();
   const renderLimits = new SvelteMap<string, number>();
   const sortedGroups = new SvelteSet<string>();
-  const RENDER_STEP = 60;
+  let cardEls = $state<Record<string, HTMLElement | null>>({});
 
   function toggleCollapse(id: string) {
     if (expanded.has(id)) expanded.delete(id);
     else expanded.add(id);
   }
+
+  // --- Поиск и фильтр сводки (D-04) ---
+  let filterQuery = $state('');
+  // Карточка панели всегда сеткой: режим вида влияет только на прежнюю страницу
+  let viewMode = $state<ProxiesViewMode>('grid');
+  let obsFilter = $state<ObservatoryFilter>(null);
+  let refreshing = $state(false);
+
+  /** Замер узла: пинг панели, для авто и резерва без него — история ядра Mihomo (D-05). */
+  function measure(g: RuntimeGroup, m: RuntimeMember) {
+    const v = resultView(results, m.ref, kernel);
+    if (v.state !== 'none' || g.mode === 'manual' || !m.ref) return v;
+    return historyView($runtimeNow?.history[m.ref]);
+  }
+
+  // Узлы, которые умеет активное ядро, по ссылкам: сводка и фильтр групп
+  const snapshots = $derived.by(() => {
+    const out = new Map<string, NodeSnapshot & ProxyLike>();
+    const system = new Map<string, ProxyLike>();
+    for (const g of view?.groups ?? []) {
+      for (const m of splitMembers(g, kernel).visible) {
+        if (m.kind === 'direct' || m.kind === 'reject') {
+          system.set(m.kind, { name: m.kind.toUpperCase(), type: m.kind });
+          continue;
+        }
+        if (m.kind !== 'node' || !m.ref) continue;
+        const prev = out.get(m.ref);
+        const v = measure(g, m);
+        if (prev && v.state === 'none') continue;
+        out.set(m.ref, { ...proxyLike(m.ref, v), type: m.proto });
+      }
+    }
+    return { nodes: out, system };
+  });
+
+  const observatoryStats = $derived(
+    computeObservatoryStats(
+      Object.fromEntries([...snapshots.nodes, ...snapshots.system].map(([k, v]) => [k, v]))
+    )
+  );
+
+  function nodeRefs(g: RuntimeGroup): string[] {
+    return splitMembers(g, kernel)
+      .visible.filter((m) => m.kind === 'node' && !!m.ref)
+      .map((m) => m.ref as string);
+  }
+
+  const shownGroups = $derived.by(() => {
+    if (!view) return [];
+    const q = filterQuery.trim().toLowerCase();
+    const filter = obsFilter;
+    return view.groups.filter((g) => {
+      if (
+        filter !== null &&
+        !groupMatchesLatencyFilter(nodeRefs(g), filter, (ref) => snapshots.nodes.get(ref))
+      ) {
+        return false;
+      }
+      if (q === '') return true;
+      return (
+        g.name.toLowerCase().includes(q) || g.members.some((m) => m.name.toLowerCase().includes(q))
+      );
+    });
+  });
 
   // --- Выбор (D-11, D-15…D-18) ---
 
@@ -76,6 +180,11 @@
 
   function memberName(g: RuntimeGroup, member: string): string {
     return g.members.find((m) => m.member === member)?.name || member;
+  }
+
+  function codeOf(e: unknown): string | undefined {
+    const code = (e as { code?: unknown } | null)?.code;
+    return typeof code === 'string' && code !== '' ? code : undefined;
   }
 
   /** Уведомление по исходу выбора: «возвращён» — только когда сервер вернул прежний выбор. */
@@ -131,8 +240,7 @@
       const res = await selectNode(g.id, member);
       notifySelect(v, res, name);
     } catch (e) {
-      const code = (e as { code?: unknown } | null)?.code;
-      showToast('error', proxiesErrorText($t, typeof code === 'string' ? code : undefined));
+      showToast('error', proxiesErrorText($t, codeOf(e)));
     } finally {
       selecting = null;
     }
@@ -149,53 +257,204 @@
     await loadRuntime();
   }
 
+  // --- Пинг (D-05, D-07, D-08, D-19…D-22) ---
+
+  let joined = $state(false);
+  let pingError = $state('');
+
+  /** Причина отказа для строки «Не удалось запустить проверку: …» без точки в конце. */
+  function reasonText(code: string | undefined): string {
+    return proxiesErrorText($t, code).replace(/\.\s*$/, '');
+  }
+
+  function setBatch(b: PingBatch) {
+    pingSnapshot.update((s) => ({ results: s?.results ?? {}, batch: b }));
+  }
+
+  async function runPing(scope: 'all' | 'group', group?: string) {
+    if (batchRunning) return;
+    pingError = '';
+    joined = false;
+    try {
+      const res = await startPing(scope, group);
+      joined = res.joined;
+      setBatch(res.batch);
+    } catch (e) {
+      const code = codeOf(e);
+      if (code === 'kernel_restarting') runtimeRestarting.set(true);
+      else pingError = reasonText(code);
+    }
+  }
+
+  // Отмена общей пачки из любой вкладки (D-22); закрытие вкладки пачку не трогает
+  async function stopPing() {
+    try {
+      setBatch(await cancelPing());
+    } catch (e) {
+      showToast('error', proxiesErrorText($t, codeOf(e)));
+    }
+  }
+
+  const pingErrorReason = $derived(
+    pingError !== '' ? pingError : batch?.state === 'failed' ? reasonText(batch.reason_code) : ''
+  );
+
+  const lastAt = $derived.by(() => {
+    let max: number | undefined;
+    for (const r of Object.values(results)) {
+      const at = Date.parse(r.at);
+      if (!Number.isNaN(at) && (max === undefined || at > max)) max = at;
+    }
+    return max;
+  });
+
+  /** Идущая пачка охватывает группу. */
+  function pingCovers(g: RuntimeGroup): boolean {
+    if (!batch || batch.state !== 'running') return false;
+    if (batch.scope === 'all') return true;
+    return batch.group === g.id || (batch.scope === 'repick' && !batch.group);
+  }
+
+  // --- История и диагностика узла ---
+
+  let popover = $state<{
+    name: string;
+    history: { time: string; delay: number }[];
+    el: HTMLElement;
+  } | null>(null);
+
+  function openHistory(e: MouseEvent, g: RuntimeGroup, ref: string) {
+    const el = e.currentTarget as HTMLElement | null;
+    if (!el || !ref) return;
+    let history = pingHistory(results[ref]);
+    // Авто и резерв без замера панели — история ядра Mihomo (D-04, D-05)
+    const delay = $runtimeNow?.history[ref];
+    if (history.length === 0 && delay) history = [{ time: delay.at, delay: delay.ms }];
+    popover = { name: g.members.find((m) => m.ref === ref)?.name || ref, history, el };
+  }
+
+  let diag = $state<{ sourceId: string; name: string } | null>(null);
+
+  const installed = $derived({
+    xray: view?.modes.xray !== undefined && view.modes.xray !== 'not_installed',
+    mihomo: view?.modes.mihomo !== undefined && view.modes.mihomo !== 'not_installed'
+  });
+  const diagKernel: KernelName = $derived(
+    kernel !== '' ? kernel : installed.xray || !installed.mihomo ? 'xray' : 'mihomo'
+  );
+
+  // Диагностика узла — диагностика его источника (Open Question 1)
+  function openDiagnostics(m: RuntimeMember) {
+    if (!m.source) return;
+    const src = m.source;
+    const sourceGroup = view?.groups.find((g) => g.id === `source:${src}`);
+    diag = { sourceId: src, name: sourceGroup?.name || m.name };
+  }
+
+  // --- Раскрытие группы по адресу и по звену цепочки (D-10, D-12) ---
+
+  async function focusGroup(id: string) {
+    if (!view?.groups.some((g) => g.id === id)) return;
+    expanded.add(id);
+    // Фильтры страницы не должны прятать группу, к которой ведёт ссылка
+    if (!shownGroups.some((g) => g.id === id)) {
+      filterQuery = '';
+      obsFilter = null;
+    }
+    await tick();
+    const el = cardEls[id];
+    if (!el) return;
+    el.scrollIntoView({ block: 'start', behavior: motion.reduced ? 'auto' : 'smooth' });
+    el.querySelector<HTMLElement>('.gc-head')?.focus({ preventScroll: true });
+  }
+
+  let pendingGroup = $state('');
+
+  function groupFromHash(): string {
+    const q = window.location.hash.split('?')[1] ?? '';
+    return new URLSearchParams(q).get('group') ?? '';
+  }
+
+  // Группа из адреса раскрывается, как только загружен вид
+  $effect(() => {
+    const id = pendingGroup;
+    if (id === '' || !view) return;
+    untrack(() => {
+      pendingGroup = '';
+      void focusGroup(id);
+    });
+  });
+
   function panelOf(g: RuntimeGroup, v: RuntimeView): PanelCard {
     return {
       group: g,
       view: v,
       kernel,
-      results: $pingSnapshot?.results ?? {},
+      results,
       now: $runtimeNow?.groups[g.id] ?? null,
       history: $runtimeNow?.history ?? {},
       selecting: selecting?.group === g.id ? selecting.member : '',
       locked: lockedBy(g, v),
-      pinging: false,
-      batchRunning: false,
+      pinging: pingCovers(g),
+      pingSince: pingCovers(g) ? batch?.started_at : undefined,
+      batchRunning,
       sorted: sortedGroups.has(g.id),
       onSelect: (member) => void onSelect(g, member),
-      onPing: () => {},
+      onPing: () => void runPing('group', g.id),
       onRetry: () => void onRetry(g.id),
       onToggleSort: () => {
         if (sortedGroups.has(g.id)) sortedGroups.delete(g.id);
         else sortedGroups.add(g.id);
       },
-      onFocusGroup: (id) => {
-        expanded.add(id);
-      },
-      onDiagnostics: () => {},
-      onHistory: () => {}
+      onFocusGroup: (id) => void focusGroup(id),
+      onDiagnostics: openDiagnostics,
+      onHistory: (e, ref) => openHistory(e, g, ref)
     };
   }
 
   // --- Загрузка и живое обновление (D-14) ---
 
-  function reload() {
-    void loadRuntime();
-    void loadResults();
+  async function reload() {
+    refreshing = true;
+    try {
+      await Promise.all([loadRuntime(), loadResults()]);
+    } finally {
+      refreshing = false;
+    }
   }
 
+  // «Сейчас» авто-групп — опрос только при видимой вкладке, запущенном ядре и наличии
+  // авто- или резервных групп; выбор и пинг приходят событиями общего SSE
+  const nowPollEnabled = writable(false);
+  usePoller(loadNow, NOW_POLL_MS, { enabledWhen: nowPollEnabled });
+  const needsNow = $derived(
+    $runningKernels.length > 0 &&
+      (view?.groups.some((g) => g.mode === 'auto' || g.mode === 'fallback') ?? false)
+  );
+  $effect(() => {
+    nowPollEnabled.set(needsNow);
+  });
+
+  let kernelTimer: ReturnType<typeof setTimeout> | null = null;
+
   onMount(() => {
-    reload();
+    void reload();
     const detach = attachProxiesLive();
+    const onHash = () => {
+      const id = groupFromHash();
+      if (id !== '') pendingGroup = id;
+    };
+    onHash();
+    window.addEventListener('hashchange', onHash);
     return () => {
       detach();
+      window.removeEventListener('hashchange', onHash);
       if (kernelTimer !== null) clearTimeout(kernelTimer);
       kernelTimer = null;
     };
   });
 
   // Смена активного или запущенных ядер меняет режим страницы: перечитать вид
-  let kernelTimer: ReturnType<typeof setTimeout> | null = null;
   let kernelSeen = '';
   $effect(() => {
     const key = `${$activeKernelName}|${$runningKernels.join(',')}`;
@@ -215,57 +474,178 @@
   const showEmpty = $derived(
     !!view && view.groups.length === 0 && (view.state === 'panel' || view.state === 'stopped')
   );
+  // Режим Mihomo — только когда Mihomo работает на профиле панели (D-04)
+  const showModeSwitch = $derived($activeKernelName === 'mihomo' && view?.modes.mihomo === 'panel');
 </script>
 
-<div class="container" data-testid="proxies-layer-page">
-  <PageHeader title={$t('proxies.title')} subtitle={$t('proxies.subtitle')}>
-    <ClientExitIpBadge />
-  </PageHeader>
+{#snippet userProfileNotice()}
+  <div class="pr-notice-slot">
+    <ProxyRuntimeNotice viewState="user_profile" />
+  </div>
+{/snippet}
 
-  {#if !view && loadError !== ''}
-    <EmptyState
-      title={$t('cfg.load_error_title')}
-      description={$t('cfg.load_error_body')}
-      ctaText={$t('cfg.load_error_retry')}
-      oncta={reload}
-    />
-  {:else if !view}
-    <div class="pr-stack" aria-busy="true">
-      <Skeleton type="card" height="120px" />
-      <Skeleton type="card" height="120px" />
-    </div>
-  {:else if showEmpty}
-    <EmptyState
-      title={$t('proxies.rt.empty.title')}
-      description={$t('proxies.rt.empty.body')}
-      ctaText={$t('proxies.rt.empty.cta')}
-      ctaVariant="secondary"
-      oncta={() => (window.location.hash = '#/config/groups')}
-    />
-  {:else}
-    <div class="pr-stack">
-      {#each view.groups as g (g.id)}
-        <ProxyGroupCard
-          group={g}
-          role="core"
-          panel={panelOf(g, view)}
-          isCollapsed={!expanded.has(g.id)}
-          onToggleCollapse={toggleCollapse}
-          groupFilter={groupFilters.get(g.id) ?? 'all'}
-          onSetGroupFilter={(id, f) => groupFilters.set(id, f)}
-          renderLimit={renderLimits.get(g.id) ?? RENDER_STEP}
-          onIncreaseRenderLimit={(id) =>
-            renderLimits.set(id, (renderLimits.get(id) ?? RENDER_STEP) + RENDER_STEP)}
+<div data-testid="proxies-layer-page">
+  {#if view?.state === 'user_profile'}
+    <!-- D-02: свой профиль Mihomo — прежняя страница Clash API запущенного профиля:
+         выбор сразу через API, State.Live не пишется -->
+    {#await import('./Proxies.svelte')}
+      <div class="container">
+        <Skeleton type="card" height="120px" />
+      </div>
+    {:then { default: Proxies }}
+      <Proxies notice={userProfileNotice} />
+    {:catch}
+      <div class="container">
+        <EmptyState
+          title={$t('app.chunk_load_failed')}
+          description=""
+          ctaText={$t('app.retry')}
+          oncta={() => window.location.reload()}
         />
-      {/each}
+      </div>
+    {/await}
+  {:else}
+    <div class="container">
+      <PageHeader title={$t('proxies.title')} subtitle={$t('proxies.subtitle')}>
+        <ClientExitIpBadge />
+        {#if showModeSwitch}
+          <MihomoModeSwitch onchanged={() => void loadRuntime()} />
+        {/if}
+        <ProxyFilterBar
+          bind:filterQuery
+          bind:viewMode
+          loading={refreshing}
+          onExpandAll={() => shownGroups.forEach((g) => expanded.add(g.id))}
+          onCollapseAll={() => expanded.clear()}
+          onRefresh={() => void reload()}
+        />
+      </PageHeader>
+
+      <div class="pr-body">
+        {#if !view && loadError !== ''}
+          <EmptyState
+            title={$t('cfg.load_error_title')}
+            description={$t('cfg.load_error_body')}
+            ctaText={$t('cfg.load_error_retry')}
+            oncta={() => void reload()}
+          />
+        {:else if !view}
+          <div class="pr-stack" aria-busy="true">
+            <Skeleton type="card" height="120px" />
+            <Skeleton type="card" height="120px" />
+          </div>
+        {:else}
+          {#if view.state === 'stopped' || view.state === 'user_managed' || batch?.fallback_reason}
+            <div class="pr-notices">
+              <ProxyRuntimeNotice
+                viewState={view.state}
+                fallbackReason={batch?.fallback_reason ?? ''}
+                onstarted={() => void loadRuntime()}
+              />
+            </div>
+          {/if}
+
+          {#if showEmpty}
+            <EmptyState
+              title={$t('proxies.rt.empty.title')}
+              description={$t('proxies.rt.empty.body')}
+              ctaText={$t('proxies.rt.empty.cta')}
+              ctaVariant="secondary"
+              oncta={() => (window.location.hash = '#/config/groups')}
+            />
+          {:else}
+            <ObservatoryPanel
+              stats={observatoryStats}
+              activeFilter={obsFilter}
+              onFilterChange={(f) => (obsFilter = f)}
+            />
+
+            <ProxyPingBar
+              {batch}
+              {lastAt}
+              {joined}
+              errorReason={pingErrorReason}
+              restarting={$runtimeRestarting}
+              kernel={kernelLabel(kernel)}
+              onpingall={() => void runPing('all')}
+              oncancel={stopPing}
+            />
+
+            <div class="pr-stack">
+              {#each shownGroups as g (g.id)}
+                <ProxyGroupCard
+                  group={g}
+                  role="core"
+                  panel={panelOf(g, view)}
+                  isCollapsed={!expanded.has(g.id)}
+                  onToggleCollapse={toggleCollapse}
+                  groupFilter={groupFilters.get(g.id) ?? 'all'}
+                  onSetGroupFilter={(id, f) => groupFilters.set(id, f)}
+                  renderLimit={renderLimits.get(g.id) ?? RENDER_STEP}
+                  onIncreaseRenderLimit={(id) =>
+                    renderLimits.set(id, (renderLimits.get(id) ?? RENDER_STEP) + RENDER_STEP)}
+                  bind:cardEl={cardEls[g.id]}
+                />
+              {/each}
+            </div>
+          {/if}
+        {/if}
+      </div>
     </div>
   {/if}
 </div>
 
+{#if popover}
+  <LatencyHistoryPopover
+    proxyName={popover.name}
+    history={popover.history}
+    anchorEl={popover.el}
+    onclose={() => (popover = null)}
+  />
+{/if}
+
+{#if diag}
+  <SourceDiagnosticsModal
+    open={true}
+    name={diag.name}
+    sourceId={diag.sourceId}
+    {installed}
+    initialKernel={diagKernel}
+    onclose={() => (diag = null)}
+  />
+{/if}
+
 <style>
+  .pr-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-4);
+  }
+
+  .pr-notices {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+  }
+
+  .pr-notice-slot {
+    margin-bottom: var(--spacing-4);
+  }
+
   .pr-stack {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-4);
+  }
+
+  /* ObservatoryPanel несёт свой нижний отступ на прежней странице */
+  .pr-body :global(.obs-card) {
+    margin-bottom: 0;
+  }
+
+  @media (min-width: 769px) {
+    .pr-body {
+      gap: var(--spacing-6);
+    }
   }
 </style>
