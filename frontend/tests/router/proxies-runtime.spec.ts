@@ -498,6 +498,15 @@ test(
     await expect(pop).toHaveCount(0, { timeout: T.action });
     await expect(nodeStatus).toBeFocused();
 
+    // «Диагностика узла» открывает окно источника, а Esc возвращает фокус на статус
+    await page.keyboard.press('Enter');
+    await expect(pop).toBeVisible({ timeout: T.action });
+    await pop.getByRole('button', { name: /Диагностика узла|Node diagnostics/ }).click();
+    await expect(page.getByRole('dialog').first()).toBeVisible({ timeout: T.action });
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: T.action });
+    await expect(nodeStatus).toBeFocused();
+
     // «Проверить все» и сразу «Отменить проверку»: итог «Отменено, проверено N из M»
     await startBatch(page, 'proxies-ping-all', groupBatch);
     // пока пачка идёт, «Проверить все» с aria-disabled выглядит неактивной (не как обычная)
