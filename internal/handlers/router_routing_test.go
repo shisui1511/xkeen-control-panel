@@ -198,6 +198,39 @@ func (e *rtSrc) rtRtPurge() {
 	e.rtRstIdle()
 }
 
+// rtRtRebuildReleased возвращает панели файлы в состоянии released («Принять
+// правку» другого сценария или пользователя): «Пересобрать» по их ключам и итог
+// применения. Зовётся после взятия маршрутизации: до него профиля Mihomo среди
+// файлов панели нет, а released-профиль слой не пишет, и группы панели в Mihomo
+// не попадают. В журнал — только число файлов.
+func (e *rtSrc) rtRtRebuildReleased() {
+	e.t.Helper()
+	r := e.call(http.MethodGet, "/api/configlayer/state", nil)
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("GET /api/configlayer/state: %d %s", r.Status, r.Code)
+	}
+	files, _ := r.object(e.t)["files"].([]any)
+	var keys []string
+	for _, f := range files {
+		m, _ := f.(map[string]any)
+		if key, _ := m["key"].(string); key != "" && m["state"] == "released" {
+			keys = append(keys, key)
+		}
+	}
+	if len(keys) == 0 {
+		return
+	}
+	e.t.Logf("файлов панели в состоянии released: %d — пересборка", len(keys))
+	before := e.rtRstApplyView()
+	rb := e.call(http.MethodPost, "/api/configlayer/files/rebuild", map[string]any{"keys": keys})
+	if rb.Status != http.StatusOK {
+		e.t.Fatalf("files/rebuild: %d %s", rb.Status, rb.Code)
+	}
+	if ok, code := rtRstResult(e.rtRstWaitApply(before)); !ok {
+		e.t.Fatalf("files/rebuild: итог %q", code)
+	}
+}
+
 // rtRtOwnership читает владение маршрутизацией ядра из GET /api/configlayer/state.
 func (e *rtSrc) rtRtOwnership(kernel string) (desired, taken bool) {
 	e.t.Helper()
@@ -730,6 +763,7 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	}
 	taken = true
 	e.rtRtApplyOK("взятие")
+	e.rtRtRebuildReleased()
 
 	view := e.rtRtView()
 	rtAssertContractKeys(t, contract, view, "RoutingView", "routing")
