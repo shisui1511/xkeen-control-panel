@@ -275,6 +275,97 @@ func TestRouterXrayAPIBlock(t *testing.T) {
 		}
 	})
 
+	// Сокращённая проверка Xray запуска выбора (150-17, F4, T-150-48): вердикт
+	// настоящего `xray run -test` по изменённым исходящим совпадает с полной
+	// ValidateXray каталога окружения для принимаемого и отвергаемого содержимого
+	// xcp-groups; отказ сокращённой — путь к полной. В журнал — только вердикты и коды.
+	t.Run("validate_changed_agrees_with_full", func(t *testing.T) {
+		e := rtNewEnv(t, rtWithKernels(rtXrayOnly), rtWithDeps(func(d *Deps) {
+			d.XrayAPIPort = func() int { return apiPort }
+			d.XrayBin = func() string { return rtXrayBin }
+		}))
+		e.addMyLinks(t, "vless_ws", "trojan_grpc", "ss_plain")
+		_, g, err := e.svc.SaveGroup(e.rev(t), Group{Name: "Проверка", Mode: ModeManual, Sources: GroupSources{All: true}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.replaceGroups(t, func(cfg *GroupsConfig) { cfg.Items = []Group{g} })
+		e.takeAndApply(t)
+		groupsPath := filepath.Join(e.xrayDir(), xrayGroupsFile)
+		old, err := os.ReadFile(groupsPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// (1) Тело исходящего группы заменено телом другого узла окружения — так,
+		// как его пишет выбор.
+		ctx := context.Background()
+		var next []byte
+		for _, n := range e.catalog(t).Xray {
+			if _, err := e.svc.Select(ctx, g.ID, memberNode+n.Ref); err != nil {
+				continue
+			}
+			if data, err := os.ReadFile(groupsPath); err == nil && string(data) != string(old) {
+				next = data
+				break
+			}
+		}
+		if next == nil {
+			t.Fatal("выбор другого узла не изменил xcp-groups")
+		}
+		// (2) Тот же исходящий с прежним тегом и протоколом, который Xray отвергает.
+		var doc map[string]any
+		if err := json.Unmarshal(next, &doc); err != nil {
+			t.Fatal(err)
+		}
+		obs, _ := doc["outbounds"].([]any)
+		replaced := false
+		for i, it := range obs {
+			if ob, _ := it.(map[string]any); ob != nil && ob["tag"] == GroupTag(g.ID) {
+				obs[i] = map[string]any{"tag": GroupTag(g.ID), "protocol": "xcp-unknown-protocol"}
+				replaced = true
+			}
+		}
+		if !replaced {
+			t.Fatal("в xcp-groups нет исходящего группы")
+		}
+		doc["outbounds"] = obs
+		bad, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		roots := configlayer.Roots{Xray: e.xrayDir(), Mihomo: filepath.Join(e.dir, "mihomo")}
+		tmpBase := rtWorkSubdir(t, "rt-val-")
+		env := func(string) []string { return utils.XrayAssetEnv(os.Environ(), "") }
+		cases := []struct {
+			name          string
+			before, after []byte
+			want          bool
+		}{
+			{"accept", old, next, true},
+			{"reject", next, bad, false},
+		}
+		for _, c := range cases {
+			if _, _, _, err := hotTags(c.before, c.after); err != nil {
+				t.Fatalf("%s: набор тегов изменился: %t", c.name, err != nil)
+			}
+			files := []configlayer.HotFile{{RelPath: xrayGroupsFile, Action: configlayer.ActionWrite, Old: c.before, OldExisted: true, New: c.after}}
+			short := e.svc.xrayValidateChanged(ctx, files)
+			plan := configlayer.Plan{Files: []configlayer.FilePlan{{
+				Key: configlayer.ManifestKey(configlayer.KernelXray, xrayGroupsFile), Kernel: configlayer.KernelXray,
+				RelPath: xrayGroupsFile, Action: configlayer.ActionWrite, Content: c.after,
+			}}}
+			full := configlayer.ValidateXray(ctx, tmpBase, roots, rtXrayBin, plan, env)
+			t.Logf("validate-changed: case=%s short=%t full=%t code=%s", c.name, short, full.OK, full.Code)
+			if short != c.want || full.OK != c.want {
+				t.Errorf("%s: сокращённая проверка %t, полная %t, ожидалось %t", c.name, short, full.OK, c.want)
+			}
+			if short && !full.OK {
+				t.Errorf("%s: сокращённая проверка приняла то, что отвергла полная", c.name)
+			}
+		}
+	})
+
 	t.Run("panel_api_works_with_rules_elsewhere", func(t *testing.T) {
 		e := newEnv(t)
 		e.takeAndApply(t)

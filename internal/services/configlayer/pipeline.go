@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -58,6 +59,12 @@ const (
 	SourceDraft   SourceKind = "draft"
 	SourceApplied SourceKind = "applied"
 )
+
+// XrayValidateFunc — сокращённая проверка Xray запуска выбора: получает файлы
+// Xray плана (новое содержимое и прежнее с диска) и возвращает true, если
+// проверка пройдена; false — нужна полная проверка ValidateXray. Содержимое
+// несёт учётные данные узлов и не должно попадать в журнал.
+type XrayValidateFunc func(ctx context.Context, files []HotFile) bool
 
 // ApplyRequest — параметры одного запуска.
 type ApplyRequest struct {
@@ -128,6 +135,11 @@ type ApplyRequest struct {
 	// XrayHot — горячая замена исходящих Xray до перезапуска; задаёт только
 	// RunLive выбора узла (TriggerSelect), nil — прежний путь.
 	XrayHot XrayHotFunc
+	// XrayValidate — сокращённая проверка Xray запуска выбора узла (TriggerSelect):
+	// true — изменения Xray плана проверены, полная ValidateXray не запускается;
+	// false, неприменимость или nil — обычная полная проверка («Применить» хука не
+	// задаёт и всегда идёт полной проверкой).
+	XrayValidate XrayValidateFunc
 	// ReleaseListener — запуск снимает слушатель :53 перехвата DNS (живые данные
 	// перехвата выключаются, DNS роутера уже у прошивки). Ручная правка файлов
 	// панели такой запуск не блокирует: пишутся только файлы, чьё содержимое
@@ -600,7 +612,13 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 
 	tmpBase := filepath.Join(p.d.DataDir, "tmp")
 	p.setStep(StepValidateXray, StepRunning, "", "")
-	xr := ValidateXray(ctx, tmpBase, p.d.Roots, bins.Xray, plan, p.d.XrayEnv)
+	// Запуск выбора с хуком сокращённой проверки: принятые хуком изменения не
+	// проверяются второй раз; отказ или неприменимость хука ведут в тот же
+	// единственный вызов полной проверки, что у запусков без хука.
+	xr := ValidationResult{Kernel: KernelXray, OK: true}
+	if !p.xrayValidatedByHook(ctx, req, bins.Xray, plan) {
+		xr = ValidateXray(ctx, tmpBase, p.d.Roots, bins.Xray, plan, p.d.XrayEnv)
+	}
 	if res, failed := p.afterValidation(StepValidateXray, xr); failed {
 		return p.finish(res)
 	}
@@ -1114,6 +1132,43 @@ func applyRestore(st *State, spec *RestoreSpec) error {
 		st.DraftRevision++
 	}
 	return nil
+}
+
+// xrayValidatedByHook исполняет сокращённую проверку Xray запуска
+// (ApplyRequest.XrayValidate). true — хук принял изменения Xray плана, полная
+// проверка не нужна. Хук зовётся только при установленном Xray, изменениях Xray в
+// плане, которые исчерпываются записями и удалениями файлов (без сирот и операций
+// маршрутизации над файлами Xray), и прочитанных прежних версиях этих файлов;
+// файлы с признаком Inert тоже передаются — полная проверка читает весь каталог.
+// Любой иной случай и отказ хука — false: запуск идёт полной проверкой.
+func (p *Pipeline) xrayValidatedByHook(ctx context.Context, req ApplyRequest, bin string, plan Plan) bool {
+	if req.XrayValidate == nil || bin == "" || !plan.Changes(KernelXray) || plan.Routing.hasDisk(KernelXray) {
+		return false
+	}
+	for _, o := range plan.Orphans {
+		if o.Kernel == KernelXray {
+			return false
+		}
+	}
+	var files []HotFile
+	for _, fp := range plan.Files {
+		if fp.Kernel != KernelXray || (fp.Action != ActionWrite && fp.Action != ActionDelete) {
+			continue
+		}
+		abs, err := p.d.Roots.Abs(KernelXray, fp.RelPath)
+		if err != nil {
+			return false
+		}
+		old, err := os.ReadFile(abs)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return false
+		}
+		files = append(files, HotFile{RelPath: fp.RelPath, Action: fp.Action, New: fp.Content, Old: old, OldExisted: err == nil})
+	}
+	// Как и полная проверка, процесс Xray не запускается во время операции XKeen
+	// над ядром.
+	defer services.AcquireKernelHelper(ctx)()
+	return req.XrayValidate(ctx, files)
 }
 
 // afterValidation отражает итог проверки в шаге; failed=true — применение

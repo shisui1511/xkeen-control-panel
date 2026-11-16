@@ -2,12 +2,17 @@ package routing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // Порядок запусков выбора Xray (G-150-3, D-17). Все ручные группы Xray пишут
@@ -186,6 +191,9 @@ func (s *Service) execXrayBatch(b *xrayBatch) {
 		run.ReapplyKeys = []string{configlayer.ManifestKey(configlayer.KernelXray, xrayGroupsFile)}
 	} else {
 		run.Prepare = func() error { return s.prepareXrayBatch(b) }
+		// Выбор меняет только тела исходящих xcp-groups: проверка Xray — по
+		// изменённым исходящим, отказ — полная проверка конвейера (150-17, F4).
+		run.XrayValidate = s.xrayValidateChanged
 	}
 	run.XrayHot = func(hctx context.Context, files []configlayer.HotFile) error {
 		start := time.Now()
@@ -208,6 +216,64 @@ func (s *Service) execXrayBatch(b *xrayBatch) {
 	default:
 		b.out, b.err = selFailed, err
 	}
+}
+
+// xrayValidateChanged — сокращённая проверка Xray запуска выбора
+// (configlayer.XrayValidateFunc): true только если план меняет ровно один файл
+// xcp-groups (запись поверх существующего), набор тегов прежний (hotTags), есть
+// изменённые исходящие и `xray run -test` по минимальному конфигу из одних этих
+// исходящих завершился с кодом 0. Любая неприменимость или ошибка — false:
+// конвейер выполняет полную проверку ValidateXray. Временный каталог (0700, файл
+// 0600) удаляется сразу; в журнал — только число тегов и код выхода (тела несут
+// учётные данные узлов).
+func (s *Service) xrayValidateChanged(ctx context.Context, files []configlayer.HotFile) bool {
+	if len(files) != 1 || files[0].RelPath != xrayGroupsFile || files[0].Action != configlayer.ActionWrite || !files[0].OldExisted {
+		return false
+	}
+	if s.d.XrayBin == nil {
+		return false
+	}
+	bin := s.d.XrayBin()
+	if bin == "" {
+		return false
+	}
+	tags, next, _, err := hotTags(files[0].Old, files[0].New)
+	if err != nil || len(tags) == 0 {
+		return false
+	}
+	bodies := make([]json.RawMessage, 0, len(tags))
+	for _, tag := range tags {
+		bodies = append(bodies, next[tag])
+	}
+	data, err := json.Marshal(struct {
+		Outbounds []json.RawMessage `json:"outbounds"`
+	}{bodies})
+	if err != nil {
+		return false
+	}
+	dir, err := os.MkdirTemp("", "xcp-val-")
+	if err != nil {
+		return false
+	}
+	defer os.RemoveAll(dir)
+	if err := os.WriteFile(filepath.Join(dir, "outbounds.json"), data, 0600); err != nil {
+		return false
+	}
+	cctx, cancel := context.WithTimeout(ctx, configlayer.ValidateTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, bin, "run", "-test", "-confdir", dir)
+	cmd.Env = utils.XrayAssetEnv(os.Environ(), "")
+	cmd.WaitDelay = configlayer.ValidateWaitDelay
+	code := 0
+	if err := cmd.Run(); err != nil {
+		code = -1
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			code = exit.ExitCode()
+		}
+	}
+	log.Printf("[routing] проверка Xray выбора по изменённым исходящим: тегов %d, код %d", len(tags), code)
+	return code == 0
 }
 
 // prepareXrayBatch пишет намерения пачки одной записью Live (под замками

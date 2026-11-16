@@ -1589,6 +1589,8 @@ type LiveRun struct {
 	Kernel string
 	// XrayHot — горячая замена исходящих при выборе узла (TriggerSelect).
 	XrayHot XrayHotFunc
+	// XrayValidate — сокращённая проверка Xray выбора узла (ApplyRequest.XrayValidate).
+	XrayValidate XrayValidateFunc
 	// ReapplyKeys повторно записывает файлы для сверки неизвестного рантайма.
 	ReapplyKeys []string
 	// Prepare вызывается под замками применения и жизненного цикла до сборки:
@@ -1645,7 +1647,7 @@ func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 			return ApplyView{}, err
 		}
 	}
-	req := ApplyRequest{Trigger: run.Trigger, Source: SourceApplied, LiveOverlay: run.Overlay, Kernel: run.Kernel, XrayHot: run.XrayHot, ReapplyKeys: run.ReapplyKeys}
+	req := ApplyRequest{Trigger: run.Trigger, Source: SourceApplied, LiveOverlay: run.Overlay, Kernel: run.Kernel, XrayHot: run.XrayHot, XrayValidate: run.XrayValidate, ReapplyKeys: run.ReapplyKeys}
 	view := l.runPipeline(req)
 	pipeD = time.Since(start)
 	release()
