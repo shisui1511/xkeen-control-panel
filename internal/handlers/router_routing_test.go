@@ -788,6 +788,31 @@ const rtRtSelectWaitBudget = 35000 * time.Millisecond
 // хода (порог rtRtSelectWaitBudget).
 const rtRtWaitedMS = 100
 
+// rtRtMihomoSelectBudget — граница медианы total строк этапов выбора на ядре mihomo
+// (одиночный выбор и выборы барьера D-17), объявленная планом 150-19 до замера и
+// по его итогу не пересматриваемая. При запущенном Mihomo и остановленном Xray
+// ответ приходит после Clash API, проход файла Xray идёт следом, поэтому total —
+// время до ответа. 1000 мс — верхняя граница θ из правил 150-17 («этап заметен
+// пользователю»). Медиана, а не каждый выбор: PUT Clash API сам пишет cache.db
+// Mihomo на флешку (store-selected не выключается), и редкая остановка носителя
+// одной строки не должна делать тест плавающим; медиана четырёх строк одну
+// остановку в итог не пропускает.
+const rtRtMihomoSelectBudget = 1000 * time.Millisecond
+
+// rtRtMihomoHTTPBudget — граница медианы http тех же выборов на ядре mihomo:
+// rtRtMihomoSelectBudget плюс 1000 мс допуска времени вне Select из правила 150-16.
+const rtRtMihomoHTTPBudget = 2000 * time.Millisecond
+
+// rtRtStagesWait — срок ожидания строк этапов выбора: на ядре xray строка пишется до
+// ответа (5 с на запись журнала), на ядре mihomo — в конце фонового прохода файла
+// Xray после ответа (до 90 с).
+func rtRtStagesWait(core string) time.Duration {
+	if core == "mihomo" {
+		return 90 * time.Second
+	}
+	return 5 * time.Second
+}
+
 // rtRtStageBudget — бюджет медианы этапа строк kind=scale для сработавших правил
 // с подтверждаемым эффектом: вниз до 100 мс от min(0,7·med; med − разброс) по
 // выборке 150-16. F4 (validate_xray): med 1310, разброс 9151 − 1189 = 7962,
@@ -891,15 +916,16 @@ func rtRtParseStages(text string) (stages []rtRtStage, runlive []string) {
 	return stages, runlive
 }
 
-// rtRtWaitStages ждёт до 5 с в окне журнала с offset строк этапов групп groups
-// (у каждой — последняя строка окна) и не меньше minRunLive строк RunLive выбора.
-// Журнал, ротированный за время окна, читается с начала нового файла.
-func rtRtWaitStages(offset int64, groups []string, minRunLive int) (map[string]rtRtStage, []string, bool) {
+// rtRtWaitStages ждёт не дольше wait (rtRtStagesWait) в окне журнала с offset строк
+// этапов групп groups (у каждой — последняя строка окна) и не меньше minRunLive
+// строк RunLive выбора. Журнал, ротированный за время окна, читается с начала
+// нового файла.
+func rtRtWaitStages(offset int64, groups []string, minRunLive int, wait time.Duration) (map[string]rtRtStage, []string, bool) {
 	var (
 		byGroup map[string]rtRtStage
 		runlive []string
 	)
-	ok, _ := routertest.Poll(5*time.Second, 200*time.Millisecond, func() (bool, string) {
+	ok, _ := routertest.Poll(wait, 200*time.Millisecond, func() (bool, string) {
 		text, err := rtReadLogFrom(rtRtLogPath(), offset)
 		if err != nil {
 			text, _ = rtReadLogFrom(rtRtLogPath(), 0)
@@ -1164,7 +1190,7 @@ func (e *rtSrc) rtRtScaleUAT(subURL, gid, secondID string, runtimeView func() ma
 			t.Fatalf("масштаб: выбор №%d: %d %s", n, r.Status, r.Code)
 		}
 		expectHot("масштаб: выбор №"+strconv.Itoa(n), r.object(t))
-		stages, runlive, ok := rtRtWaitStages(offset, []string{gid}, 1)
+		stages, runlive, ok := rtRtWaitStages(offset, []string{gid}, 1, rtRtStagesWait("xray"))
 		if !ok {
 			t.Errorf("масштаб: выбор №%d: в журнале панели нет строки этапов или RunLive (строк RunLive %d)", n, len(runlive))
 			continue
@@ -1279,7 +1305,7 @@ func (e *rtSrc) rtRtScaleUAT(subURL, gid, secondID string, runtimeView func() ma
 		}
 	}
 	// Строки этапов обеих групп (у отказа apply_busy она тоже есть — с его wait).
-	stages, runlive, ok := rtRtWaitStages(offset, []string{gid, secondID}, 1)
+	stages, runlive, ok := rtRtWaitStages(offset, []string{gid, secondID}, 1, rtRtStagesWait("xray"))
 	if !ok {
 		t.Errorf("масштаб: пара ожидания: в журнале панели нет строк этапов обеих групп или RunLive (строк RunLive %d)", len(runlive))
 	}
@@ -1521,8 +1547,14 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	// Выбор участника через API. maxWait — наибольшее ожидание чужого прохода (wait
 	// строк этапов ответов 200) за весь тест: строка d17-longwait в конце.
 	var maxWait int64
+	// mihomoTotals и mihomoHTTP — total строк этапов и http выборов на ядре mihomo
+	// (одиночный и барьер D-17): медианы сверяются с rtRtMihomoSelectBudget и
+	// rtRtMihomoHTTPBudget после блока D-17.
+	var mihomoTotals, mihomoHTTP []int64
 	logOffset := rtRtLogOffset(t)
+	selStart := time.Now()
 	sel := e.callSlow(http.MethodPost, rtRoutingBase+"/select", map[string]string{"group": gid, "member": target})
+	selHTTP := time.Since(selStart).Milliseconds()
 	if sel.Status != http.StatusOK {
 		t.Fatalf("select: %d %s", sel.Status, sel.Code)
 	}
@@ -1533,15 +1565,19 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	xrayOutcome, _ := kernels["xray"].(string)
 	xrayPath := xrayOutcome != "not_installed"
 	if xrayPath {
-		stages, _, ok := rtRtWaitStages(logOffset, []string{gid}, 0)
+		// На ядре mihomo строка этапов пишется в конце фонового прохода файла Xray.
+		stages, _, ok := rtRtWaitStages(logOffset, []string{gid}, 0, rtRtStagesWait(tg.Core))
 		if !ok {
 			t.Errorf("журнал панели: нет строки этапов выбора Xray группы %s", gid)
 		} else {
 			st := stages[gid]
-			t.Logf("select-stages: core=%s kind=single nodes=%d group=%s %s", tg.Core, len(distinct), gid, st.pairs)
+			t.Logf("select-stages: core=%s kind=single nodes=%d group=%s http=%d %s", tg.Core, len(distinct), gid, selHTTP, st.pairs)
 			maxWait = max(maxWait, st.num("wait"))
 			if tg.Core == "xray" {
 				rtRtCheckSelectBudget(t, "одиночный", st)
+			} else {
+				mihomoTotals = append(mihomoTotals, st.num("total"))
+				mihomoHTTP = append(mihomoHTTP, selHTTP)
 			}
 		}
 	}
@@ -1873,16 +1909,24 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 					t.Errorf("D-17: выбор №%d группы %s: %d %s", i+1, jobs[i][0], resp[i].Status, resp[i].Code)
 				}
 			}
-			stages, runlive, ok := rtRtWaitStages(offset, okGroups, 1)
+			stages, runlive, ok := rtRtWaitStages(offset, okGroups, 1, rtRtStagesWait(tg.Core))
 			if !ok {
 				t.Fatalf("D-17: в журнале панели нет строк этапов всех ответов 200 (групп %d, строк RunLive %d)", len(okGroups), len(runlive))
 			}
-			for _, g := range okGroups {
+			for i, r := range res {
+				if r.status != http.StatusOK {
+					continue
+				}
+				g := jobs[i][0]
 				st := stages[g]
-				t.Logf("select-stages: core=%s kind=parallel group=%s %s", tg.Core, g, st.pairs)
+				httpMS := r.done.Sub(r.sent).Milliseconds()
+				t.Logf("select-stages: core=%s kind=parallel group=%s http=%d %s", tg.Core, g, httpMS, st.pairs)
 				maxWait = max(maxWait, st.num("wait"))
 				if tg.Core == "xray" {
 					rtRtCheckSelectBudget(t, "барьер "+g, st)
+				} else {
+					mihomoTotals = append(mihomoTotals, st.num("total"))
+					mihomoHTTP = append(mihomoHTTP, httpMS)
 				}
 			}
 			for _, rl := range runlive {
@@ -2057,6 +2101,23 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 			t.Errorf("D-17: наложение не обеспечено: разброс отправки не меньше прохода (spread=%d мс, hold=%d мс, попыток 3)", lastSpread, lastHold)
 		}
 	}
+	// Граница времени выбора на ядре mihomo (план 150-19): ответ после Clash API,
+	// без ожидания прохода файла Xray. Медианы строк одиночного выбора и барьера.
+	if tg.Core == "mihomo" && xrayPath {
+		medTotal, medHTTP := rtRtMedian(mihomoTotals), rtRtMedian(mihomoHTTP)
+		t.Logf("mihomo-select-budget: lines=%d total_med=%.1f http_med=%.1f total_budget=%d http_budget=%d",
+			len(mihomoTotals), medTotal, medHTTP, rtRtMihomoSelectBudget.Milliseconds(), rtRtMihomoHTTPBudget.Milliseconds())
+		switch {
+		case len(mihomoTotals) == 0:
+			t.Errorf("время выбора Mihomo: нет строк этапов выборов, граница %d мс", rtRtMihomoSelectBudget.Milliseconds())
+		case medTotal > float64(rtRtMihomoSelectBudget.Milliseconds()):
+			t.Errorf("время выбора Mihomo: медиана total %.1f мс по %d строкам, граница %d мс", medTotal, len(mihomoTotals), rtRtMihomoSelectBudget.Milliseconds())
+		}
+		if len(mihomoHTTP) > 0 && medHTTP > float64(rtRtMihomoHTTPBudget.Milliseconds()) {
+			t.Errorf("время ответа выбора Mihomo: медиана http %.1f мс по %d выборам, граница %d мс", medHTTP, len(mihomoHTTP), rtRtMihomoHTTPBudget.Milliseconds())
+		}
+	}
+
 	// Последующие проверки после «Применить» идут по текущему выбору «Выбор»: он
 	// отличен от startMember, поэтому сравнение с xrayBefore остаётся верным.
 	if g := rtRtFindGroup(e.rtRtView(), "Выбор"); g != nil {

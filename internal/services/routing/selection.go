@@ -59,7 +59,18 @@ const (
 const (
 	noticeReconcilePrefix = "routing_reconcile:"
 	noticeRepickPrefix    = "routing_repick:"
-	noticeWarning         = "warning"
+	// noticeSelectPrefix — отказ фонового прохода файла Xray после раннего ответа
+	// выбора: routing_select:<gid>:<n>, n — новый номер на каждый отказ (D-11).
+	noticeSelectPrefix = "routing_select:"
+	noticeWarning      = "warning"
+)
+
+// Классы причины отказа в уведомлении routing_select (параметр reason).
+const (
+	selReasonRejected = "rejected"
+	selReasonBusy     = "busy"
+	selReasonStopped  = "stopped"
+	selReasonFailed   = "failed"
 )
 
 // Способ проверки в уведомлении routing_repick.
@@ -287,6 +298,25 @@ func (s *Service) beginSelection(comp []string, kind string) (func(), error) {
 	}, nil
 }
 
+// setInflightTarget запоминает цель выбора группы, уже поставленную в Mihomo
+// ранним PUT быстрого пути: вид «Прокси» показывает её до записи Live фоновым
+// проходом. Память процесса, не State.Live (выбор пишется только в Live).
+func (s *Service) setInflightTarget(gid, member string) {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	if s.targets == nil {
+		s.targets = map[string]string{}
+	}
+	s.targets[gid] = member
+}
+
+// clearInflightTarget снимает цель выбора группы: Live уже итоговый.
+func (s *Service) clearInflightTarget(gid string) {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	delete(s.targets, gid)
+}
+
 // inflightKinds — копия отметок идущих операций: ID группы → вид.
 func (s *Service) inflightKinds() map[string]string {
 	s.inflightMu.Lock()
@@ -478,6 +508,13 @@ func (s *Service) markReconcile() { s.reconcilePending.Store(true) }
 // горячую замену с резервным перезапуском. Остановленное ядро не запускается: Xray
 // прочитает файл при старте, Mihomo получит выбор сверкой при запуске процесса.
 // Ревизия черновика не меняется.
+//
+// Быстрый путь (SC2): Mihomo запущен, Xray установлен и остановлен, маршрутизацией
+// обоих ядер управляет панель. Выбор ставится в Mihomo до прохода файла Xray, ответ
+// приходит сразу после Clash API, а xcp-groups дописывает фоновое продолжение той
+// же пачки выбора (selectMihomoFirstTail): отметка компоненты (D-17) держится до
+// его конца, возврат неудачного прохода — под ходом (CR-01), затем Mihomo получает
+// выбор из Live. Ранний PUT не удался — прежний синхронный порядок.
 func (s *Service) Select(ctx context.Context, groupID, member string) (SelectResult, error) {
 	start := time.Now()
 	st, err := s.d.Layer.ReadState()
@@ -508,9 +545,14 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 	model := time.Since(start)
 	// Событие начала: другие вкладки перечитывают вид и видят переключение.
 	// Событие конца — после снятия отметки, иначе перечитывание увидит группу
-	// ещё занятой (D-14, D-17); уходит во всех исходах.
+	// ещё занятой (D-14, D-17); уходит во всех исходах. handoff — отметку и событие
+	// конца забрала фоновая задача быстрого пути.
 	s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
+	handoff := false
 	defer func() {
+		if handoff {
+			return
+		}
 		release()
 		s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
 	}()
@@ -532,12 +574,36 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 	res := SelectResult{Member: member, Kernels: map[string]string{
 		configlayer.KernelXray: selNotInstalled, configlayer.KernelMihomo: selNotInstalled,
 	}}
+	mihomoManaged := am.installed.Mihomo && desired.ManagedFor(configlayer.KernelMihomo)
 	if am.installed.Xray && desired.ManagedFor(configlayer.KernelXray) {
 		// Намерение пишется в Live под замками применения до сборки (Prepare), в
 		// одной пачке с выборами независимых групп, пришедшими за время идущего
 		// запуска (G-150-3).
 		in := &xrayIntent{gid: groupID, member: member, comp: comp}
 		stages := &xrayStages{gid: groupID, start: start, model: model, in: in}
+		if mihomoManaged && s.d.Running(configlayer.KernelMihomo) && !s.d.Running(configlayer.KernelXray) {
+			clashStart := time.Now()
+			early := s.selectMihomoEarly(ctx, groupID, member)
+			stages.clash = time.Since(clashStart)
+			if early == selApplied {
+				// Цель видна виду «Прокси» до записи Live фоновым проходом; событие —
+				// вторая вкладка перечитывает вид и видит выбор (D-14).
+				s.setInflightTarget(groupID, member)
+				s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
+				stages.answered = time.Now()
+				handoff = true
+				if s.Go(func() { s.selectMihomoFirstTail(in, stages, g.Name, release) }) {
+					res.Kernels[configlayer.KernelMihomo] = selApplied
+					res.Kernels[configlayer.KernelXray] = selPendingStopped
+					return res, nil
+				}
+				// Сервис останавливается: прежний синхронный порядок.
+				handoff = false
+				stages.answered = time.Time{}
+				s.clearInflightTarget(groupID)
+			}
+			// Ранний PUT не удался: прежний порядок, исходы и маркеры как раньше.
+		}
 		defer stages.log()
 		b, err := s.runXray(ctx, xrayRunSelect, in)
 		stages.b, stages.err = b, err
@@ -574,14 +640,21 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 				return res, in.restoreErr
 			}
 			res.Reverted = true
-			if desired.ManagedFor(configlayer.KernelMihomo) && am.installed.Mihomo {
+			if mihomoManaged {
 				res.Kernels[configlayer.KernelMihomo] = selFailed
+				if stages.clash > 0 {
+					// Ранний PUT не подтвердился, но мог дойти до ядра: Mihomo получает
+					// возвращённый выбор из Live.
+					s.selMu.Lock()
+					s.selectMihomoLocked(ctx, groupID)
+					s.selMu.Unlock()
+				}
 			}
 			return res, runErr
 		default:
 			// Неизвестный исход никогда не выдаётся за успешный возврат.
 			res.Unconfirmed = comp
-			if desired.ManagedFor(configlayer.KernelMihomo) && am.installed.Mihomo {
+			if mihomoManaged {
 				res.Kernels[configlayer.KernelMihomo] = selFailed
 			}
 			// Маркер без записи Prepare поставлен под ходом (settleXrayBatch).
@@ -595,25 +668,36 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 			return SelectResult{}, err
 		}
 	}
-	if am.installed.Mihomo && desired.ManagedFor(configlayer.KernelMihomo) {
+	// Выбор записан в Live: прежнее уведомление об отказе группы снимается.
+	s.selNotes.drop(s.d.Layer, groupID)
+	if mihomoManaged {
 		// Маркер и ответ фиксируются под тем же замком, что фоновая сверка.
 		s.selMu.Lock()
-		out := s.selectMihomoLocked(ctx, groupID)
+		out, err := s.selectMihomoMarked(ctx, groupID)
+		s.selMu.Unlock()
 		res.Kernels[configlayer.KernelMihomo] = out
 		if out == selFailed {
-			err = s.d.Layer.UpdateLive(func(live configlayer.Sections) error {
-				m := readUnconfirmed(live)
-				m[groupID] = configlayer.KernelMihomo
-				return writeUnconfirmed(live, m)
-			})
 			res.Unconfirmed = []string{groupID}
 		}
-		s.selMu.Unlock()
 		if err != nil {
 			return res, err
 		}
 	}
 	return res, nil
+}
+
+// selectMihomoMarked ставит выбор группы из Live в Mihomo (selectMihomoLocked);
+// сбой — маркер Mihomo на группе (D-16). Вызывается под selMu.
+func (s *Service) selectMihomoMarked(ctx context.Context, gid string) (string, error) {
+	out := s.selectMihomoLocked(ctx, gid)
+	if out != selFailed {
+		return out, nil
+	}
+	return out, s.d.Layer.UpdateLive(func(live configlayer.Sections) error {
+		m := readUnconfirmed(live)
+		m[gid] = configlayer.KernelMihomo
+		return writeUnconfirmed(live, m)
+	})
 }
 
 // appliedOptions — варианты участника ручной группы g по применённому состоянию:
@@ -688,15 +772,170 @@ func (s *Service) xrayOutcome(view configlayer.ApplyView) (string, string, strin
 	return selPendingStopped, "", ""
 }
 
-// selectMihomo ставит выбор в запущенном Mihomo. Сбой связи или ответа не
-// откатывает выбор: Live уже записан, а повторить его поставит сверка.
-func (s *Service) selectMihomo(ctx context.Context, gid string) string {
+// mihomoEntryFor — ожидаемый выбор группы gid в профиле Mihomo, если её выбор в
+// Live станет member: расчёт mihomoPlan по копии Live с этим выбором. nil — группа
+// в профиле Mihomo не материализована. Расчёт чистый: ни Live, ни диск не меняются.
+func (s *Service) mihomoEntryFor(st configlayer.StateView, installed configlayer.InstalledKernels, gid, member string) (*mihomoSelEntry, error) {
+	live := make(configlayer.Sections, len(st.Live)+1)
+	for k, v := range st.Live {
+		live[k] = append(json.RawMessage(nil), v...)
+	}
+	sel := liveSelection(live)
+	sel[gid] = member
+	if err := writeSelection(live, sel); err != nil {
+		return nil, err
+	}
+	st.Live = live
+	plan, err := s.mihomoPlan(st, installed)
+	if err != nil {
+		return nil, err
+	}
+	for i := range plan {
+		if plan[i].gid == gid {
+			e := plan[i]
+			return &e, nil
+		}
+	}
+	return nil, nil
+}
+
+// selectMihomoEarly — ранний PUT быстрого пути: ставит в запущенный Mihomo выбор,
+// который фоновый проход ещё запишет в Live. Под selMu, как сверка: сверка не
+// перетирает выбор между расчётом и вызовом. Не applied — вызывающий идёт прежним
+// синхронным порядком.
+func (s *Service) selectMihomoEarly(ctx context.Context, gid, member string) string {
+	s.selMu.Lock()
+	defer s.selMu.Unlock()
 	if !s.d.Running(configlayer.KernelMihomo) {
 		return selPendingStopped
 	}
+	st, err := s.d.Layer.ReadState()
+	if err != nil {
+		return selFailed
+	}
+	entry, err := s.mihomoEntryFor(st, s.d.Installed(), gid, member)
+	if err != nil {
+		return selFailed
+	}
+	if entry == nil {
+		// Группа в профиле Mihomo не материализована: выбирать там нечего.
+		return selApplied
+	}
+	if s.d.Mihomo == nil || !s.d.Mihomo.HasController() {
+		return selFailed
+	}
+	cctx, cancel := context.WithTimeout(ctx, reconcileCallTimeout)
+	defer cancel()
+	if err := s.d.Mihomo.SelectProxy(cctx, entry.group, entry.want); err != nil {
+		log.Printf("[routing] ранний выбор Mihomo не поставлен: Clash API: %s", clashErrClass(err))
+		return selFailed
+	}
+	return selApplied
+}
+
+// selectMihomoFirstTail — фоновое продолжение быстрого пути после ответа: проход
+// файла Xray той же пачкой выбора (Prepare пишет намерение в Live под замками
+// применения, возврат неудачного прохода — settleXrayBatch под ходом, CR-01), снятие
+// цели вида, уведомление об отказе, затем Mihomo получает выбор из Live под selMu
+// (после возврата — прежний узел). В конце, в любом исходе, — снятие отметки
+// компоненты, событие конца (D-14, D-17) и строка этапов.
+func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name string, release func()) {
+	tailStart := time.Now()
+	defer func() {
+		release()
+		s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
+		stages.tail = time.Since(tailStart)
+		stages.log()
+	}()
+	b, err := s.runXray(s.ctx, xrayRunSelect, in)
+	// Live уже итоговый (записан Prepare или возвращён под ходом): вид берёт выбор
+	// из Live. Окно до события конца закрывает само событие.
+	s.clearInflightTarget(in.gid)
+	stages.b, stages.err = b, err
+	markersStart := time.Now()
+	defer func() { stages.markers = time.Since(markersStart) }()
+
+	var failErr error
+	failCode := ""
+	switch {
+	case err != nil:
+		failErr = err
+	case in.err != nil:
+		failErr = in.err
+	case !in.wrote:
+		// Выбор не записан (замок применения занят, слой остановлен): Live прежний.
+		failErr = b.err
+		if failErr == nil {
+			failErr = ErrApplyBusy
+		}
+	case selectionOK(b.out) && b.err == nil:
+		if err := s.clearUnconfirmed(in.comp, configlayer.KernelXray); err != nil {
+			log.Printf("[routing] выбор группы %s: маркер Xray не снят: %v", in.gid, err)
+		}
+		s.selNotes.drop(s.d.Layer, in.gid)
+	case b.err != nil || xraySelectionReverted(b.outcome):
+		// Возврат уже выполнен под ходом (settleXrayBatch).
+		failErr, failCode = b.err, b.outcome
+		if in.restoreErr != nil {
+			failErr, failCode = in.restoreErr, ""
+		}
+	default:
+		// Неизвестный исход: маркер Xray поставлен под ходом, D-16 показывает
+		// «Повторить». Уведомление — только если маркер не записан.
+		failErr = in.markErr
+	}
+	if failErr != nil || failCode != "" {
+		code, reason := selectFailClass(failErr, failCode)
+		s.noticeSelectFailed(in.gid, name, code, reason)
+	}
+
+	// Mihomo получает выбор из Live: после возврата — прежний узел, после успеха —
+	// повтор на случай вмешательства. Сбой — маркер Mihomo (D-16).
 	s.selMu.Lock()
-	defer s.selMu.Unlock()
-	return s.selectMihomoLocked(ctx, gid)
+	if _, err := s.selectMihomoMarked(s.ctx, in.gid); err != nil {
+		log.Printf("[routing] выбор группы %s: маркер Mihomo не записан: %v", in.gid, err)
+	}
+	s.selMu.Unlock()
+}
+
+// selectFailClass — код исхода и класс причины отказа фонового прохода для
+// уведомления routing_select: rejected — отказ проверки, сборки, записи, откат или
+// дрейф; busy — замок применения или операция с ядром; stopped — слой или сервис
+// остановлен; failed — прочее.
+func selectFailClass(err error, outcome string) (code, reason string) {
+	switch {
+	case errors.Is(err, ErrApplyBusy):
+		return "apply_busy", selReasonBusy
+	case errors.Is(err, configlayer.ErrKernelBusy):
+		return "kernel_op_in_progress", selReasonBusy
+	case errors.Is(err, configlayer.ErrStopped), errors.Is(err, configlayer.ErrDisabled),
+		errors.Is(err, context.Canceled):
+		return "stopped", selReasonStopped
+	case errors.Is(err, configlayer.ErrDriftBlocked):
+		return "drift_blocked", selReasonRejected
+	case errors.Is(err, configlayer.ErrDraftConflict):
+		return configlayer.ResultDraftConflict, selReasonRejected
+	case errors.Is(err, ErrSelectionUnconfirmed):
+		return "selection_unconfirmed", selReasonFailed
+	case outcome != "" && xraySelectionReverted(outcome):
+		return outcome, selReasonRejected
+	case outcome != "":
+		return outcome, selReasonFailed
+	}
+	return selFailed, selReasonFailed
+}
+
+// noticeSelectFailed публикует уведомление отказа фонового прохода группы gid с
+// новым идентификатором routing_select:<gid>:<n>: каждый отказ — новое уведомление
+// (D-11), прежнее уведомление группы заменяется. В параметрах — ID и имя группы, код
+// исхода и класс причины; имён узлов и адресов нет.
+func (s *Service) noticeSelectFailed(gid, name, code, reason string) {
+	n := s.selNoticeSeq.Add(1)
+	s.selNotes.put(s.d.Layer, gid, configlayer.NoticeView{
+		ID: noticeSelectPrefix + gid + ":" + strconv.FormatUint(n, 10), Kind: noticeWarning,
+		Params: map[string]string{"gid": gid, "group": name, "code": code, "reason": reason},
+	})
+	log.Printf("[routing] выбор группы %s не записан в файл Xray: code=%s reason=%s", gid, code, reason)
 }
 
 func (s *Service) selectMihomoLocked(ctx context.Context, gid string) string {
@@ -1194,17 +1433,19 @@ func (s *Service) AfterApply(ctx context.Context, info configlayer.AfterApplyInf
 	s.repickAll(ctx)
 }
 
-// repickNotes — уведомления routing_repick по группам: хранятся, пока группа
-// существует, потому что SetNotices заменяет набор целиком.
-type repickNotes struct {
-	mu    sync.Mutex
-	notes map[string]configlayer.NoticeView
+// groupNotes — уведомления одного префикса по группам (routing_repick,
+// routing_select): одно на группу, хранятся, пока группа существует, потому что
+// SetNotices заменяет набор префикса целиком. prefix задаётся при создании сервиса.
+type groupNotes struct {
+	prefix string
+	mu     sync.Mutex
+	notes  map[string]configlayer.NoticeView
 }
 
 // put сохраняет уведомление группы и заменяет набор в слое. Закрытое
 // пользователем уведомление той же группы возвращается новым событием: набор
 // сначала обновляется без него.
-func (r *repickNotes) put(l *configlayer.Layer, gid string, n configlayer.NoticeView) {
+func (r *groupNotes) put(l *configlayer.Layer, gid string, n configlayer.NoticeView) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.notes == nil {
@@ -1212,14 +1453,25 @@ func (r *repickNotes) put(l *configlayer.Layer, gid string, n configlayer.Notice
 	}
 	if _, had := r.notes[gid]; had {
 		delete(r.notes, gid)
-		l.SetNotices(noticeRepickPrefix, r.listLocked())
+		l.SetNotices(r.prefix, r.listLocked())
 	}
 	r.notes[gid] = n
-	l.SetNotices(noticeRepickPrefix, r.listLocked())
+	l.SetNotices(r.prefix, r.listLocked())
+}
+
+// drop снимает уведомление группы; нет уведомления — набор в слое не трогается.
+func (r *groupNotes) drop(l *configlayer.Layer, gid string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, had := r.notes[gid]; !had {
+		return
+	}
+	delete(r.notes, gid)
+	l.SetNotices(r.prefix, r.listLocked())
 }
 
 // prune убирает уведомления групп, которых больше нет.
-func (r *repickNotes) prune(l *configlayer.Layer, exists func(gid string) bool) {
+func (r *groupNotes) prune(l *configlayer.Layer, exists func(gid string) bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	changed := false
@@ -1230,11 +1482,11 @@ func (r *repickNotes) prune(l *configlayer.Layer, exists func(gid string) bool) 
 		}
 	}
 	if changed {
-		l.SetNotices(noticeRepickPrefix, r.listLocked())
+		l.SetNotices(r.prefix, r.listLocked())
 	}
 }
 
-func (r *repickNotes) listLocked() []configlayer.NoticeView {
+func (r *groupNotes) listLocked() []configlayer.NoticeView {
 	out := make([]configlayer.NoticeView, 0, len(r.notes))
 	for _, n := range r.notes {
 		out = append(out, n)
@@ -1261,6 +1513,7 @@ func (s *Service) repickAll(ctx context.Context) {
 			ids[g.ID] = true
 		}
 		s.repick.prune(s.d.Layer, func(gid string) bool { return ids[gid] })
+		s.selNotes.prune(s.d.Layer, func(gid string) bool { return ids[gid] })
 	}
 	for _, gid := range readRepick(st.Live) {
 		if ctx.Err() != nil || s.ctx.Err() != nil {

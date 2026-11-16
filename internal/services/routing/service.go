@@ -132,13 +132,20 @@ type Service struct {
 	inflightMu sync.Mutex
 	// inflight — ID группы → вид идущей операции (inflightSelect, inflightConfirm).
 	inflight map[string]string
+	// targets — ID группы → участник, уже поставленный в Mihomo ранним PUT быстрого
+	// пути выбора и ещё не записанный в Live фоновым проходом (под inflightMu).
+	targets map[string]string
 	// xrun — один запуск выбора Xray за раз (G-150-3, D-17): независимые выборы
 	// собираются в пачку одного прохода xcp-groups. Порядок замков: ход выбора →
 	// applyMu → lifecycleMu.
 	xrun             xrayRunGate
 	reconcilePending atomic.Bool
 	repickMu         sync.Mutex
-	repick           repickNotes
+	repick           groupNotes
+	// selNotes — уведомления routing_select по группам (отказ фонового прохода
+	// выбора); selNoticeSeq — номер идентификатора, новый на каждый отказ (D-11).
+	selNotes     groupNotes
+	selNoticeSeq atomic.Uint64
 }
 
 // New создаёт сервис. Слой, сервис источников и источник «установленных ядер»
@@ -172,7 +179,8 @@ func New(d Deps) (*Service, error) {
 		d.Rand = rand.Reader
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Service{d: d, ctx: ctx, cancel: cancel, gens: map[string][]configlayer.GeneratedFile{}, provs: map[string][]byte{}}
+	s := &Service{d: d, ctx: ctx, cancel: cancel, gens: map[string][]configlayer.GeneratedFile{}, provs: map[string][]byte{},
+		repick: groupNotes{prefix: noticeRepickPrefix}, selNotes: groupNotes{prefix: noticeSelectPrefix}}
 	return s, nil
 }
 
