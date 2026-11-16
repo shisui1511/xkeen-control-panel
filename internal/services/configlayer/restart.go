@@ -347,11 +347,17 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 				return interruptedView(kernel), err
 			}
 			if hotErr == nil {
-				if err := p.confirmRunning(ctx, KernelXray, prevPID); err == nil {
+				// Процесс не перезапускается, а хук уже сверил теги (lso или код
+				// ado), поэтому достаточно снимка «тот же процесс в работе» (замысел
+				// 150-01). Окно устойчивости RestartStableWindow — для xkeen -restart
+				// и перезагрузки профиля Mihomo; здесь оно добавляло к каждому
+				// горячему выбору не меньше 5 с. Другой PID или остановленный
+				// процесс — частичный сбой и доводящий перезапуск (D-15).
+				if pid := p.runningPID(KernelXray); pid == prevPID {
 					log.Printf("configlayer: горячая замена Xray: причина=%s файлов=%d PID=%d", NoteXrayHotSwapped, len(files), prevPID)
 					return RestartView{Kernel: kernel, Outcome: RestartOutcomeHotReloaded, NoteCode: NoteXrayHotSwapped}, nil
 				} else {
-					hotErr = &XrayHotError{Reason: HotReasonFailed, Partial: true, Err: err}
+					hotErr = &XrayHotError{Reason: HotReasonFailed, Partial: true, Err: fmt.Errorf("PID Xray после замены: был %d, стал %d", prevPID, pid)}
 				}
 			}
 			if err := interrupted(ctx); err != nil {

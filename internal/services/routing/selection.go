@@ -253,19 +253,30 @@ func linkedGroups(items []Group, gid string) []string {
 	return ids
 }
 
-func (s *Service) beginSelection(comp []string) (func(), error) {
+// Виды идущей операции в отметке компоненты (Service.inflight).
+const (
+	// inflightSelect — выбор участника (Select).
+	inflightSelect = "select"
+	// inflightConfirm — «Повторить» (Confirm) и сверка маркеров при старте.
+	inflightConfirm = "confirm"
+)
+
+// beginSelection отмечает компоненту comp идущей операцией вида kind. Хотя бы
+// одна группа компоненты уже отмечена — ErrSelectBusy сразу, без ожидания и без
+// очереди (D-17).
+func (s *Service) beginSelection(comp []string, kind string) (func(), error) {
 	s.inflightMu.Lock()
 	defer s.inflightMu.Unlock()
 	for _, id := range comp {
-		if s.inflight[id] {
+		if s.inflight[id] != "" {
 			return nil, ErrSelectBusy
 		}
 	}
 	if s.inflight == nil {
-		s.inflight = map[string]bool{}
+		s.inflight = map[string]string{}
 	}
 	for _, id := range comp {
-		s.inflight[id] = true
+		s.inflight[id] = kind
 	}
 	return func() {
 		s.inflightMu.Lock()
@@ -274,6 +285,17 @@ func (s *Service) beginSelection(comp []string) (func(), error) {
 			delete(s.inflight, id)
 		}
 	}, nil
+}
+
+// inflightKinds — копия отметок идущих операций: ID группы → вид.
+func (s *Service) inflightKinds() map[string]string {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	out := make(map[string]string, len(s.inflight))
+	for id, kind := range s.inflight {
+		out[id] = kind
+	}
+	return out
 }
 
 // clearUnconfirmed снимает маркер kernel с групп comp. Запись состояния идёт на
@@ -478,11 +500,18 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 	}
 
 	comp := linkedGroups(am.groups.Items, groupID)
-	release, err := s.beginSelection(comp)
+	release, err := s.beginSelection(comp, inflightSelect)
 	if err != nil {
 		return SelectResult{}, err
 	}
-	defer release()
+	// Событие начала: другие вкладки перечитывают вид и видят переключение.
+	// Событие конца — после снятия отметки, иначе перечитывание увидит группу
+	// ещё занятой (D-14, D-17); уходит во всех исходах.
+	s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
+	defer func() {
+		release()
+		s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
+	}()
 	// Повторное чтение после захвата компоненты исключает устаревший маркер.
 	st, err = s.d.Layer.ReadState()
 	if err != nil {
@@ -521,7 +550,6 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 			}
 			return SelectResult{}, ErrApplyBusy
 		}
-		defer s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
 		out, reason, outcome, runErr := b.out, b.reason, b.outcome, b.err
 		res.Kernels[configlayer.KernelXray], res.RestartReason = out, reason
 		switch {
@@ -564,7 +592,6 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 		if err := s.setSelection(groupID, member, nil); err != nil {
 			return SelectResult{}, err
 		}
-		defer s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
 	}
 	if am.installed.Mihomo && desired.ManagedFor(configlayer.KernelMihomo) {
 		// Маркер и ответ фиксируются под тем же замком, что фоновая сверка.
@@ -612,25 +639,6 @@ func memberAllowed(g Group, member string, am appliedModel) bool {
 		}
 	}
 	return false
-}
-
-func (s *Service) runSelectXray(ctx context.Context, confirm bool) (string, string, string, error) {
-	rctx, cancel := context.WithTimeout(ctx, selectBusyWait)
-	defer cancel()
-	run := configlayer.LiveRun{Trigger: configlayer.TriggerSelect, Kernel: configlayer.KernelXray, XrayHot: s.xrayHot}
-	if confirm {
-		run.ReapplyKeys = []string{configlayer.ManifestKey(configlayer.KernelXray, xrayGroupsFile)}
-		run.XrayHot = s.xrayHotConfirm
-	}
-	view, err := s.d.Layer.RunLive(rctx, run)
-	if err != nil {
-		if errors.Is(err, ErrApplyBusy) || (rctx.Err() != nil && ctx.Err() == nil) {
-			return "", "", "", ErrApplyBusy
-		}
-		return selFailed, "", "", err
-	}
-	out, reason, outcome := s.xrayOutcome(view)
-	return out, reason, outcome, nil
 }
 
 // xrayOutcome переводит итог запуска конвейера в исход выбора для Xray.
@@ -763,11 +771,16 @@ func (s *Service) Confirm(ctx context.Context, groupID string) (ConfirmResult, e
 		return res, err
 	}
 	comp := linkedGroups(groups.Items, groupID)
-	release, err := s.beginSelection(comp)
+	release, err := s.beginSelection(comp, inflightConfirm)
 	if err != nil {
 		return res, err
 	}
-	defer release()
+	// События начала и конца — как у Select: конец после снятия отметки.
+	s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
+	defer func() {
+		release()
+		s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
+	}()
 	st, err = s.d.Layer.ReadState()
 	if err != nil {
 		return res, err
@@ -777,10 +790,11 @@ func (s *Service) Confirm(ctx context.Context, groupID string) (ConfirmResult, e
 		res.Confirmed = true
 		return res, nil
 	}
-	defer s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
 	if kernel == configlayer.KernelXray {
-		out, _, _, runErr := s.runSelectXray(ctx, true)
-		if runErr != nil || !selectionOK(out) {
+		// Тот же порядок запусков, что у выбора: во время выбора независимой
+		// группы «Повторить» ждёт его конца, а не отвечает apply_busy.
+		b, err := s.runXray(ctx, xrayRunConfirm, nil)
+		if err != nil || b.err != nil || !selectionOK(b.out) {
 			return res, ErrConfirmFailed
 		}
 		if err := s.clearUnconfirmed(comp, kernel); err != nil {
@@ -835,13 +849,13 @@ func (s *Service) reconcileXray(ctx context.Context) {
 	for id := range locked {
 		comp = append(comp, id)
 	}
-	release, err := s.beginSelection(comp)
+	release, err := s.beginSelection(comp, inflightConfirm)
 	if err != nil {
 		return
 	}
 	defer release()
-	out, _, _, err := s.runSelectXray(ctx, true)
-	if err == nil && selectionOK(out) {
+	b, err := s.runXray(ctx, xrayRunConfirm, nil)
+	if err == nil && b.err == nil && selectionOK(b.out) {
 		_ = s.clearUnconfirmed(ids, configlayer.KernelXray)
 	}
 }
