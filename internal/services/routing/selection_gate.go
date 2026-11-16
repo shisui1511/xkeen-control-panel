@@ -83,12 +83,15 @@ type xrayBatch struct {
 	// hot — хук горячей замены.
 	size           int
 	live, run, hot time.Duration
+	// markersCommitted — маркеры Xray компонент записанных намерений сняты записью
+	// коммита прохода (CommitLive, 150-26 IO=B); false — коммита не было.
+	markersCommitted bool
 }
 
 // xrayRunGate — один запуск выбора Xray за раз и собирающиеся пачки по видам.
-// mu — листовой замок: под ним только next, waiters, список намерений и ленивое
-// создание turn; ни проход конвейера, ни ожидание turn или done под mu не идут.
-// Нулевое значение рабочее.
+// mu — листовой замок: под ним только next, waiters, список намерений, группы
+// коммита и ленивое создание turn; ни проход конвейера, ни ожидание turn или done
+// под mu не идут. Нулевое значение рабочее.
 type xrayRunGate struct {
 	mu sync.Mutex
 	// next — собирающаяся (ещё не запечатанная) пачка каждого вида.
@@ -96,6 +99,13 @@ type xrayRunGate struct {
 	// turn — право запустить конвейер выбора (ёмкость 1): занят отправкой,
 	// освобождается чтением.
 	turn chan struct{}
+	// commitComp — группы компонент намерений, записанных текущим проходом выбора
+	// (заполняет Prepare, очищает держатель хода после RunLive): CommitLive запуска
+	// выбора снимает их маркеры Xray той же записью, что фиксирует манифест, и
+	// ставит committed (150-26, IO=B). Другой запуск выбора между Prepare и
+	// очисткой не начнётся: ход держит этот проход.
+	commitComp []string
+	committed  bool
 }
 
 // runXray ставит намерение in (nil у «Повторить» и сверки) в собирающуюся пачку
@@ -216,6 +226,12 @@ func (s *Service) execXrayBatch(b *xrayBatch) {
 	view, err := s.d.Layer.RunLive(rctx, run)
 	b.run = time.Since(start)
 	b.view = view
+	// Группы коммита — только этого прохода: следующий запуск их не снимет.
+	g := &s.xrun
+	g.mu.Lock()
+	b.markersCommitted = g.committed
+	g.commitComp, g.committed = nil, false
+	g.mu.Unlock()
 	switch {
 	case err == nil:
 		b.out, b.reason, b.outcome = s.xrayOutcome(view)
@@ -241,7 +257,8 @@ func (s *Service) settleXrayBatch(b *xrayBatch) {
 	}
 	switch {
 	case selectionOK(b.out) && b.err == nil:
-		// Маркеры снимает Select (clearUnconfirmed) уже без хода: файлы совпадают с Live.
+		// Маркеры сняты записью коммита прохода (CommitLive); без коммита их снимает
+		// Select (clearUnconfirmed) уже без хода: файлы совпадают с Live.
 	case b.err != nil || xraySelectionReverted(b.outcome):
 		for _, in := range b.intents {
 			if in.wrote {
@@ -250,10 +267,11 @@ func (s *Service) settleXrayBatch(b *xrayBatch) {
 		}
 	default:
 		// Неизвестный исход никогда не выдаётся за успешный возврат: компоненты
-		// намерений без маркера из Prepare получают его здесь.
+		// намерений без маркера из Prepare получают его здесь, а после коммита прохода
+		// (он снял маркеры Prepare) — все записанные (замысел F5 плана 150-17).
 		var comps [][]string
 		for _, in := range b.intents {
-			if in.wrote && !in.pending {
+			if in.wrote && (!in.pending || b.markersCommitted) {
 				comps = append(comps, in.comp)
 			}
 		}
@@ -270,7 +288,7 @@ func (s *Service) settleXrayBatch(b *xrayBatch) {
 			return writeUnconfirmed(live, m)
 		})
 		for _, in := range b.intents {
-			if in.wrote && !in.pending {
+			if in.wrote && (!in.pending || b.markersCommitted) {
 				in.markErr = err
 			}
 		}
@@ -341,7 +359,8 @@ func (s *Service) xrayValidateChanged(ctx context.Context, bin, tmpBase string, 
 // применения и жизненного цикла, до сборки): выбор каждой группы, маркер
 // неизвестного исхода Xray на её компоненту при запущенном Xray и снятие группы
 // из повторного выбора — то же, что setSelection. Группа с маркером получает
-// ErrSelectionUnconfirmed и в запись не попадает.
+// ErrSelectionUnconfirmed и в запись не попадает. Компоненты записанных намерений
+// становятся группами коммита хода (xrayRunGate.commitComp).
 func (s *Service) prepareXrayBatch(b *xrayBatch) error {
 	start := time.Now()
 	running := s.d.Running(configlayer.KernelXray)
@@ -409,6 +428,17 @@ func (s *Service) prepareXrayBatch(b *xrayBatch) error {
 	if err != nil {
 		return err
 	}
+	// Группы, маркеры которых снимет запись коммита этого прохода (CommitLive).
+	var comp []string
+	for _, in := range b.intents {
+		if in.wrote {
+			comp = append(comp, in.comp...)
+		}
+	}
+	g := &s.xrun
+	g.mu.Lock()
+	g.commitComp, g.committed = comp, false
+	g.mu.Unlock()
 	b.size = n
 	b.live = time.Since(start)
 	return nil
