@@ -1614,7 +1614,8 @@ type LiveRun struct {
 // AddAfterApply уже после снятия замка применения.
 func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 	// Замер: ожидание замков, конвейер (Prepare и проход), хвост (afterRun и
-	// хуки после применения) — одна строка журнала на вызов выбора, целые мс. Другие
+	// хуки после применения; у выбора afterRun в фоне) — одна строка журнала на
+	// вызов выбора, целые мс. Другие
 	// триггеры (обновление источников и geodata) строки не пишут: на роутере с частым
 	// обновлением это лишние записи на флешку в xcp.log.
 	var lockD, pipeD, afterD time.Duration
@@ -1660,7 +1661,15 @@ func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 	pipeD = time.Since(start)
 	release()
 	start = time.Now()
-	l.afterRun()
+	if run.Trigger == TriggerSelect {
+		// Ответ выбора не ждёт сверки файлов, событий черновика и уведомлений
+		// (150-24, F2): afterRun идёт в фоне, checkNow сериализует checkMu; остановка
+		// слоя ждёт фоновые задачи (wg), остановленный слой afterRun не запускает.
+		// Строка замера для выбора меряет только запуск хуков.
+		l.spawn(l.afterRun)
+	} else {
+		l.afterRun()
+	}
 	l.fireAfterApply(req, view)
 	afterD = time.Since(start)
 	if view.Result != nil && view.Result.Code == ResultDriftBlocked {
