@@ -480,6 +480,9 @@ test(
     await expect(
       pop.getByRole('button', { name: /Диагностика узла|Node diagnostics/ })
     ).toBeVisible();
+    // нажатие внутри окна (на текст причины) его не закрывает: фокус уходит на body
+    await pop.locator('.pns-reason').click();
+    await expect(pop).toBeVisible();
     const pressedAfter = await tiles.evaluateAll((els) =>
       els.map((el) => el.getAttribute('aria-pressed'))
     );
