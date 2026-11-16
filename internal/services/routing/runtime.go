@@ -81,13 +81,20 @@ type RuntimeMember struct {
 
 // runtimeSnapshot собирает все данные из одной версии состояния и каталога.
 func (s *Service) runtimeSnapshot() (RuntimeView, appliedModel, error) {
+	// Отметки идущих выборов читаются до и после состояния и объединяются: отметка,
+	// видимая хотя бы в одном из двух чтений, перекрывает оба края окна, в котором
+	// чтение состояния (с обращением к диску) успевает захватить маркер уже снятого
+	// выбора (снятие маркера идёт раньше снятия отметки).
+	kinds := s.inflightKinds()
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
 		return RuntimeView{}, appliedModel{}, err
 	}
-	// Отметки идущих выборов читаются сразу после состояния: маркер и отметка
-	// сравниваются почти в один момент (снятие маркера идёт раньше снятия отметки).
-	kinds := s.inflightKinds()
+	for id, kind := range s.inflightKinds() {
+		if kinds[id] == "" {
+			kinds[id] = kind
+		}
+	}
 	am, err := s.appliedModelOf(st)
 	if err != nil {
 		return RuntimeView{}, appliedModel{}, err
