@@ -471,8 +471,13 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 	if err != nil {
 		return SelectResult{}, err
 	}
+	// Маркер Xray ставится на всю компоненту (общий файл групп), маркер Mihomo —
+	// только на группу со сбоем: выбор в Mihomo у каждой группы свой. Связанная
+	// группа без своего маркера не показывает «Повторить», поэтому маркер Mihomo
+	// другой группы её выбор не блокирует.
+	unconfirmed := readUnconfirmed(st.Live)
 	for _, id := range comp {
-		if readUnconfirmed(st.Live)[id] != "" {
+		if k := unconfirmed[id]; k == configlayer.KernelXray || (id == groupID && k != "") {
 			return SelectResult{}, ErrSelectionUnconfirmed
 		}
 	}
