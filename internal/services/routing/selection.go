@@ -317,6 +317,18 @@ func (s *Service) clearInflightTarget(gid string) {
 	delete(s.targets, gid)
 }
 
+// inflightTargets — копия целей идущих выборов быстрого пути: ID группы →
+// участник, уже поставленный в Mihomo и ещё не записанный в Live.
+func (s *Service) inflightTargets() map[string]string {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	out := make(map[string]string, len(s.targets))
+	for id, member := range s.targets {
+		out[id] = member
+	}
+	return out
+}
+
 // inflightKinds — копия отметок идущих операций: ID группы → вид.
 func (s *Service) inflightKinds() map[string]string {
 	s.inflightMu.Lock()

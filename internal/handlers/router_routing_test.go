@@ -5,6 +5,8 @@
 package handlers
 
 import (
+	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -998,6 +1000,231 @@ func (e *rtSrc) rtRtTakeSnap() (rtRtSnap, bool) {
 	return s, true
 }
 
+// rtRtGroupNow читает current, switching и unconfirmed группы вида «Прокси» без
+// t.Fatalf (ошибка или нет группы — ok=false).
+func (e *rtSrc) rtRtGroupNow(gid string) (current string, switching, unconfirmed, ok bool) {
+	status, raw, err := e.p.Call(http.MethodGet, "/api/configlayer/proxies", nil)
+	if err != nil || status != http.StatusOK {
+		return "", false, false, false
+	}
+	var body struct {
+		Data struct {
+			Groups []struct {
+				ID          string `json:"id"`
+				Current     string `json:"current"`
+				Switching   bool   `json:"switching"`
+				Unconfirmed bool   `json:"unconfirmed"`
+			} `json:"groups"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(raw, &body) != nil {
+		return "", false, false, false
+	}
+	for _, g := range body.Data.Groups {
+		if g.ID == gid {
+			return g.Current, g.Switching, g.Unconfirmed, true
+		}
+	}
+	return "", false, false, false
+}
+
+// rtRtProxiesEvents открывает поток событий слоя (вторая вкладка) и отдаёт время
+// прихода каждого события proxies. Горутина чтения — без t.*; поток закрывает
+// отмена контекста (stop и t.Cleanup).
+func (e *rtSrc) rtRtProxiesEvents(t *testing.T) (<-chan time.Time, func()) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	resp, err := e.p.Stream(ctx, "/api/configlayer/events")
+	if err != nil {
+		cancel()
+		t.Fatalf("поток событий слоя не открылся: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		cancel()
+		t.Fatalf("поток событий слоя: http %d", resp.StatusCode)
+	}
+	out := make(chan time.Time, 256)
+	go func() {
+		defer resp.Body.Close()
+		sc := bufio.NewScanner(resp.Body)
+		sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
+		for sc.Scan() {
+			if strings.TrimSpace(sc.Text()) == "event: proxies" {
+				select {
+				case out <- time.Now():
+				default:
+				}
+			}
+		}
+	}()
+	return out, cancel
+}
+
+// rtRtSelectNotices — уведомления routing_select: группы gid в снимке слоя:
+// идентификаторы и параметры code и reason (без имён узлов).
+func (e *rtSrc) rtRtSelectNotices(gid string) (ids []string, code, reason string) {
+	e.t.Helper()
+	r := e.call(http.MethodGet, "/api/configlayer/state", nil)
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("GET /api/configlayer/state: %d %s", r.Status, r.Code)
+	}
+	list, _ := r.object(e.t)["notices"].([]any)
+	for _, it := range list {
+		n, _ := it.(map[string]any)
+		id, _ := n["id"].(string)
+		if !strings.HasPrefix(id, "routing_select:"+gid+":") {
+			continue
+		}
+		ids = append(ids, id)
+		params, _ := n["params"].(map[string]any)
+		code, _ = params["code"].(string)
+		reason, _ = params["reason"].(string)
+	}
+	return ids, code, reason
+}
+
+// rtRtWaitSettled ждёт конца переключения группы в виде «Прокси» (switching=false)
+// не дольше 90 с: на ядре mihomo фоновый проход файла Xray идёт после ответа.
+func (e *rtSrc) rtRtWaitSettled(gid string) bool {
+	ok, _ := routertest.Poll(90*time.Second, 200*time.Millisecond, func() (bool, string) {
+		_, sw, _, got := e.rtRtGroupNow(gid)
+		return got && !sw, ""
+	})
+	return ok
+}
+
+// rtRtDriftFile — управляемый панелью файл Xray в каталоге конфигов, кроме
+// xcp-groups, в состоянии ok: его правка — дрейф, на котором фоновый проход выбора
+// отказывает. Пусто — такого файла нет.
+func (e *rtSrc) rtRtDriftFile() string {
+	e.t.Helper()
+	r := e.call(http.MethodGet, "/api/configlayer/state", nil)
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("GET /api/configlayer/state: %d %s", r.Status, r.Code)
+	}
+	files, _ := r.object(e.t)["files"].([]any)
+	for _, f := range files {
+		m, _ := f.(map[string]any)
+		p, _ := m["path"].(string)
+		if m["kernel"] != "xray" || m["owner"] != "panel" || m["state"] != "ok" || filepath.Dir(p) != rtRtXrayDir ||
+			strings.Contains(filepath.Base(p), "xcp-groups") {
+			continue
+		}
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+// rtRtBackgroundFail — фоновый отказ быстрого пути на ядре mihomo (план 150-19,
+// D-11): дрейф управляемого файла Xray (не xcp-groups) при остановленном Xray.
+// Два выбора подряд отвечают 200 с kernels.mihomo=applied, после каждого current
+// и now группы возвращаются к прежнему узлу, у группы ровно одно уведомление
+// routing_select:<gid>:, идентификатор второго отличается от первого, маркера нет.
+// После возврата файла тот же выбор применяется, уведомление снято. В журнал —
+// только ID группы, коды и числа.
+func (e *rtSrc) rtRtBackgroundFail(gid, groupName string, nodeMembers []string, labels map[string]string) {
+	t := e.t
+	t.Helper()
+	cur, _, _, ok := e.rtRtGroupNow(gid)
+	if !ok || cur == "" {
+		t.Fatalf("фоновый отказ: нет группы %s в виде «Прокси»", gid)
+	}
+	other := ""
+	for _, m := range nodeMembers {
+		if labels[m] != labels[cur] {
+			other = m
+			break
+		}
+	}
+	if other == "" {
+		t.Fatal("фоновый отказ: нет узла с подписью, отличной от текущей")
+	}
+	path := e.rtRtDriftFile()
+	if path == "" {
+		t.Fatal("фоновый отказ: нет управляемого файла Xray вне xcp-groups в состоянии ok")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("фоновый отказ: файл Xray: %v", err)
+	}
+	orig, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("фоновый отказ: файл Xray не читается: %v", err)
+	}
+	restored := false
+	restore := func() {
+		if restored {
+			return
+		}
+		if err := os.WriteFile(path, orig, info.Mode().Perm()); err != nil {
+			t.Errorf("фоновый отказ: файл Xray не возвращён: %v", err)
+			return
+		}
+		restored = true
+	}
+	t.Cleanup(restore)
+	if err := os.WriteFile(path, append(append([]byte(nil), orig...), '\n'), info.Mode().Perm()); err != nil {
+		t.Fatalf("фоновый отказ: файл Xray не изменён: %v", err)
+	}
+	selectMihomo := func(label string) {
+		r := e.callSlow(http.MethodPost, rtRoutingBase+"/select", map[string]string{"group": gid, "member": other})
+		if r.Status != http.StatusOK {
+			t.Fatalf("%s: %d %s", label, r.Status, r.Code)
+		}
+		ks, _ := r.object(t)["kernels"].(map[string]any)
+		if out, _ := ks["mihomo"].(string); out != "applied" {
+			t.Errorf("%s: исход Mihomo %q, ожидалось applied", label, out)
+		}
+		if !e.rtRtWaitSettled(gid) {
+			t.Fatalf("%s: группа %s не вышла из переключения за 90 с", label, gid)
+		}
+	}
+	firstID := ""
+	for n := 1; n <= 2; n++ {
+		label := "фоновый отказ №" + strconv.Itoa(n)
+		selectMihomo(label)
+		now, _, unconf, _ := e.rtRtGroupNow(gid)
+		if now != cur {
+			t.Errorf("%s: current группы %s не вернулся к прежнему узлу (цель осталась=%t)", label, gid, now == other)
+		}
+		if unconf {
+			t.Errorf("%s: у группы %s маркер selection_unconfirmed", label, gid)
+		}
+		if mnow := e.rtRtWaitNow(groupName, labels[cur]); mnow != labels[cur] {
+			t.Errorf("%s: now группы %s в Mihomo не вернулся к прежнему узлу (длина now %d)", label, gid, len(mnow))
+		}
+		ids, code, reason := e.rtRtSelectNotices(gid)
+		if len(ids) != 1 {
+			t.Errorf("%s: уведомлений routing_select группы %s %d, ожидалось одно", label, gid, len(ids))
+		}
+		fresh := false
+		if len(ids) == 1 {
+			fresh = ids[0] != firstID
+			if n == 1 {
+				firstID = ids[0]
+			} else if !fresh {
+				t.Errorf("%s: идентификатор уведомления группы %s не сменился (D-11: каждый отказ — новое уведомление)", label, gid)
+			}
+		}
+		t.Logf("mihomo-first: fail=%d code=%s reason=%s notice_new=%t", n, code, reason, fresh)
+	}
+	restore()
+	selectMihomo("выбор после возврата файла")
+	if now, _, unconf, _ := e.rtRtGroupNow(gid); now != other || unconf {
+		t.Errorf("выбор после возврата файла: current группы %s равен цели=%t, маркер=%t", gid, now == other, unconf)
+	}
+	if mnow := e.rtRtWaitNow(groupName, labels[other]); mnow != labels[other] {
+		t.Errorf("выбор после возврата файла: now группы %s в Mihomo не равен цели (длина now %d)", gid, len(mnow))
+	}
+	if ids, _, _ := e.rtRtSelectNotices(gid); len(ids) != 0 {
+		t.Errorf("выбор после возврата файла: уведомлений routing_select группы %s %d, ожидалось 0", gid, len(ids))
+	}
+}
+
 // rtRtSourcesCount — число источников вида не «Мои узлы» (подписок): только число.
 func (e *rtSrc) rtRtSourcesCount() int {
 	e.t.Helper()
@@ -1551,6 +1778,12 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	// (одиночный и барьер D-17): медианы сверяются с rtRtMihomoSelectBudget и
 	// rtRtMihomoHTTPBudget после блока D-17.
 	var mihomoTotals, mihomoHTTP []int64
+	// Вторая вкладка (ядро mihomo): поток событий слоя открыт до отправки выбора.
+	var proxiesEv <-chan time.Time
+	stopEvents := func() {}
+	if tg.Core == "mihomo" {
+		proxiesEv, stopEvents = e.rtRtProxiesEvents(t)
+	}
 	logOffset := rtRtLogOffset(t)
 	selStart := time.Now()
 	sel := e.callSlow(http.MethodPost, rtRoutingBase+"/select", map[string]string{"group": gid, "member": target})
@@ -1558,12 +1791,49 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	if sel.Status != http.StatusOK {
 		t.Fatalf("select: %d %s", sel.Status, sel.Code)
 	}
+	// Своя вкладка: вид «Прокси» сразу после ответа (до ожидания строк этапов).
+	ownCur, ownSwitching, _, ownRead := e.rtRtGroupNow(gid)
 	rtAssertContractKeys(t, contract, sel.object(t), "SelectResult", "select")
 	kernels, _ := sel.object(t)["kernels"].(map[string]any)
 	outcome, _ := kernels[tg.Core].(string)
 	// Путь Xray: выбор пишет xcp-groups общим проходом (исход Xray не not_installed).
 	xrayOutcome, _ := kernels["xray"].(string)
 	xrayPath := xrayOutcome != "not_installed"
+	if tg.Core == "mihomo" && xrayPath {
+		// Быстрый путь (план 150-19, D-14): ответ после Clash API, файл Xray следом.
+		// Своя вкладка видит выбранный узел сразу; вторая — по событию proxies,
+		// пришедшему до конца фонового прохода (switching=true). Кончился ли проход
+		// к чтению своей вкладки — тогда вторая исход не различает (executed=false).
+		ownOK := ownRead && ownCur == target
+		eventOK, eventSwitching, eventMS := false, false, int64(-1)
+		deadline := time.After(5 * time.Second)
+	events:
+		for {
+			select {
+			case at := <-proxiesEv:
+				if at.Before(selStart) {
+					continue
+				}
+				cur, sw, _, ok := e.rtRtGroupNow(gid)
+				if ok && cur == target {
+					eventOK, eventSwitching, eventMS = true, sw, at.Sub(selStart).Milliseconds()
+					break events
+				}
+			case <-deadline:
+				break events
+			}
+		}
+		stopEvents()
+		executed := ownSwitching
+		t.Logf("mihomo-view: own_ok=%t own_switching=%t event_ok=%t event_switching=%t event_ms=%d executed=%t",
+			ownOK, ownSwitching, eventOK, eventSwitching, eventMS, executed)
+		if !ownOK || !eventOK || (executed && !eventSwitching) {
+			t.Errorf("вид после ответа выбора Mihomo: own_ok=%t own_switching=%t event_ok=%t event_switching=%t executed=%t",
+				ownOK, ownSwitching, eventOK, eventSwitching, executed)
+		}
+	} else {
+		stopEvents()
+	}
 	if xrayPath {
 		// На ядре mihomo строка этапов пишется в конце фонового прохода файла Xray.
 		stages, _, ok := rtRtWaitStages(logOffset, []string{gid}, 0, rtRtStagesWait(tg.Core))
@@ -1636,6 +1906,11 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 		t.Errorf("proxies/now: %d %s", now.Status, now.Code)
 	} else {
 		rtAssertContractKeys(t, contract, now.object(t), "RuntimeNow", "proxies/now")
+	}
+	// Фоновый отказ быстрого пути (ядро mihomo, Xray установлен и остановлен): два
+	// отказа подряд — два уведомления с разными идентификаторами (D-11).
+	if tg.Core == "mihomo" && xrayPath {
+		e.rtRtBackgroundFail(gid, "Выбор", nodeMembers, labels)
 	}
 
 	// Очистка пинга регистрируется после очистки маршрутизации и выполняется раньше
@@ -1945,9 +2220,12 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 				}
 			}
 			spread := last.Sub(first).Milliseconds()
+			// Удержание — срок отметки: на быстром пути Mihomo total фиксируется при
+			// ответе, а отметка держится до конца фонового прохода (tail); на других
+			// путях tail = 0.
 			hold := int64(-1)
 			for _, g := range okGroups {
-				if h := stages[g].num("total") - stages[g].num("model"); hold < 0 || h < hold {
+				if h := stages[g].num("total") - stages[g].num("model") + stages[g].num("tail"); hold < 0 || h < hold {
 					hold = h
 				}
 			}
