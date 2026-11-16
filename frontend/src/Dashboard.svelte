@@ -1119,8 +1119,9 @@
           <span class="spinner"></span>
           <span>{$t('service.restarting_wait')}</span>
         </div>
-      {:else if currentTab !== 'rules'}
-        <!-- «Правила» работают без API Mihomo: вместо баннера — пометка на самой странице (D-19) -->
+      {:else if currentTab !== 'rules' && !(currentTab === 'proxies' && $configLayerFlagKnown && $configLayerEnabled)}
+        <!-- «Правила» работают без API Mihomo: вместо баннера — пометка на самой странице (D-19).
+             «Прокси» при слое сама объясняет состояние ядра плашкой (D-01…D-03) -->
         <div class="shell-banner-slot">
           <ApiOffline
             reason={apiOfflineReason}
@@ -1355,22 +1356,45 @@
           </div>
         {/await}
       {:else if currentTab === 'proxies'}
-        {#await import('./Proxies.svelte')}
+        <!-- Пока флаг слоя неизвестен — заглушка: прежняя страница не начинает опросы Clash API -->
+        {#if !$configLayerFlagKnown}
           <Skeleton type="card" height="60vh" />
-        {:then { default: Proxies }}
-          <div in:pageIn>
-            <Proxies />
-          </div>
-        {:catch err}
-          <div {@attach reportChunkErrorAttachment(err)}>
-            <EmptyState
-              title={$t('app.chunk_load_failed')}
-              description=""
-              ctaText={$t('app.retry')}
-              oncta={retryChunkLoad}
-            />
-          </div>
-        {/await}
+        {:else if $configLayerEnabled}
+          <!-- Слой включён: страница групп панели для обоих ядер (фаза 150) -->
+          {#await import('./ProxiesRuntime.svelte')}
+            <Skeleton type="card" height="60vh" />
+          {:then { default: ProxiesRuntime }}
+            <div in:pageIn>
+              <ProxiesRuntime />
+            </div>
+          {:catch err}
+            <div {@attach reportChunkErrorAttachment(err)}>
+              <EmptyState
+                title={$t('app.chunk_load_failed')}
+                description=""
+                ctaText={$t('app.retry')}
+                oncta={retryChunkLoad}
+              />
+            </div>
+          {/await}
+        {:else}
+          {#await import('./Proxies.svelte')}
+            <Skeleton type="card" height="60vh" />
+          {:then { default: Proxies }}
+            <div in:pageIn>
+              <Proxies />
+            </div>
+          {:catch err}
+            <div {@attach reportChunkErrorAttachment(err)}>
+              <EmptyState
+                title={$t('app.chunk_load_failed')}
+                description=""
+                ctaText={$t('app.retry')}
+                oncta={retryChunkLoad}
+              />
+            </div>
+          {/await}
+        {/if}
       {:else if currentTab === 'connections'}
         {#await import('./Connections.svelte')}
           <Skeleton type="card" height="60vh" />
