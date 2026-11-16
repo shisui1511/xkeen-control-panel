@@ -1611,9 +1611,14 @@ type LiveRun struct {
 // AddAfterApply уже после снятия замка применения.
 func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 	// Замер: ожидание замков, конвейер (Prepare и проход), хвост (afterRun и
-	// хуки после применения) — одна строка журнала на вызов, целые мс.
+	// хуки после применения) — одна строка журнала на вызов выбора, целые мс. Другие
+	// триггеры (обновление источников и geodata) строки не пишут: на роутере с частым
+	// обновлением это лишние записи на флешку в xcp.log.
 	var lockD, pipeD, afterD time.Duration
 	defer func() {
+		if run.Trigger != TriggerSelect {
+			return
+		}
 		log.Printf("configlayer: RunLive trigger=%s lock=%d pipeline=%d after=%d",
 			run.Trigger, lockD.Milliseconds(), pipeD.Milliseconds(), afterD.Milliseconds())
 	}()
