@@ -418,8 +418,13 @@ type xrayStages struct {
 	// разбор исхода (снятие, возврат или запись маркеров).
 	start          time.Time
 	model, markers time.Duration
-	in             *xrayIntent
-	b              *xrayBatch
+	// clash — ранний PUT Clash API быстрого пути; tail — фоновое продолжение после
+	// ответа; answered — момент ответа быстрого пути (total — до него). На других
+	// путях нули.
+	clash, tail time.Duration
+	answered    time.Time
+	in          *xrayIntent
+	b           *xrayBatch
 	// err — ошибка ожидания хода (runXray).
 	err error
 }
@@ -481,8 +486,13 @@ func (st *xrayStages) log() {
 			other = d
 		}
 	}
-	log.Printf("[routing] выбор Xray: этапы group=%s batch=%d wait=%d model=%d live=%d build=%d validate_xray=%d validate_mihomo=%d write=%d restart=%d hot=%d other=%d markers=%d total=%d outcome=%s",
+	// total — от входа в Select до ответа: на быстром пути ответ раньше строки.
+	total := time.Since(st.start)
+	if !st.answered.IsZero() {
+		total = st.answered.Sub(st.start)
+	}
+	log.Printf("[routing] выбор Xray: этапы group=%s batch=%d wait=%d model=%d live=%d build=%d validate_xray=%d validate_mihomo=%d write=%d restart=%d hot=%d other=%d markers=%d clash=%d tail=%d total=%d outcome=%s",
 		st.gid, batch, wait.Milliseconds(), st.model.Milliseconds(), live.Milliseconds(),
 		build, valX, valM, write, restart, hot.Milliseconds(), other.Milliseconds(),
-		st.markers.Milliseconds(), time.Since(st.start).Milliseconds(), st.outcome())
+		st.markers.Milliseconds(), st.clash.Milliseconds(), st.tail.Milliseconds(), total.Milliseconds(), st.outcome())
 }

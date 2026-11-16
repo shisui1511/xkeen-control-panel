@@ -95,6 +95,12 @@ func (s *Service) runtimeSnapshot() (RuntimeView, appliedModel, error) {
 			kinds[id] = kind
 		}
 	}
+	// Цели идущих выборов быстрого пути (уже в Mihomo, ещё не в Live) читаются
+	// только после состояния: фоновый проход снимает цель после записи или возврата
+	// Live, поэтому цели, снятой к этому чтению, соответствует уже итоговый Live в
+	// прочитанном состоянии, а видимая цель перекрывает ещё прежний Live. Отметки
+	// читаются до и после состояния по другой причине — см. выше.
+	targets := s.inflightTargets()
 	am, err := s.appliedModelOf(st)
 	if err != nil {
 		return RuntimeView{}, appliedModel{}, err
@@ -141,6 +147,14 @@ func (s *Service) runtimeSnapshot() (RuntimeView, appliedModel, error) {
 	switch v.State {
 	case RuntimeStatePanel, RuntimeStateStopped:
 		live, unconfirmed := liveSelection(st.Live), readUnconfirmed(st.Live)
+		// Цель выбора подставляется только группе с отметкой select: ядро уже несёт
+		// узел, Live его ещё не записал. Копия live — общая для current и цепочек
+		// всех групп, поэтому внешняя группа с участником-группой видит ту же цель.
+		for id, member := range targets {
+			if kinds[id] == inflightSelect {
+				live[id] = member
+			}
+		}
 		for _, g := range am.groups.Items {
 			r := Resolve(g, am.union, am.groups.Items)
 			// Select отказывает при маркере xray на компоненте, поэтому маркер
