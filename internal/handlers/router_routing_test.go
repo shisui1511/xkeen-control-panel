@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -757,6 +758,83 @@ const rtRtSelectBusyWait = 2 * time.Second
 // rtRtSnapPoll — шаг опроса вида «Прокси» во время параллельных выборов.
 const rtRtSnapPoll = 25 * time.Millisecond
 
+// rtRtSelectFixes — решение плана 150-17 по выборке масштаба UAT сессии 150-16
+// (четыре строки select-stages: core=xray kind=scale): θ = min(1000; 0,2·T₁) =
+// 779,9 мс; F2 (сверка и публикация после запуска выбора в фоне) — A = медиана
+// after RunLive 663,5 < θ, не сработало; F4 (проверка Xray запуска выбора по
+// изменённым исходящим с откатом к полной) — V = медиана validate_xray 1310 ≥ θ,
+// сработало; F5 (снятие маркеров selection_unconfirmed в записи коммита) — M =
+// медиана markers 46,5 < θ, не сработало.
+const rtRtSelectFixes = "F2=skip F4=fired F5=skip"
+
+// rtRtSelectBudget — порог total строки этапов выбора Xray (только ядро xray) с
+// wait ≤ 100 мс; rtRtSelectWaitBudget — с wait > 100 мс (выбор ждал не больше
+// одного чужого прохода и прошёл свой). Формулы плана 150-17:
+// B = вверх до 500 мс (T_max − R) + selectBusyWait (2 с),
+// B_wait = 2 × вверх до 500 мс (T_max − R) + selectBusyWait (2 с),
+// R = [F2]·A + [F5]·M — снятые этапы; сокращение F4 не вычитается.
+// Выборка: отчёт build/router/20261116-143808-1686a2f2 (xray, перегон 2), total
+// 3939, 3860, 3838, 16163 мс: T₁ = медиана 3899,5, T_max = 16163, разброс 12325
+// (четвёртый выбор — выброс: validate_xray 9151, write 4441; максимум его
+// учитывает). R = 0 (F2 и F5 не сработали): B = 16500 + 2000 = 18500 мс,
+// B_wait = 2 × 16500 + 2000 = 35000 мс. Порог — регрессионный страж общего
+// времени, эффект исправлений доказывают бюджеты этапов rtRtStageBudget.
+const rtRtSelectBudget = 18500 * time.Millisecond
+
+// rtRtSelectWaitBudget — порог total строки с wait > 100 мс (см. rtRtSelectBudget).
+const rtRtSelectWaitBudget = 35000 * time.Millisecond
+
+// rtRtWaitedMS — wait строки этапов, начиная с которого выбор считается ждавшим
+// хода (порог rtRtSelectWaitBudget).
+const rtRtWaitedMS = 100
+
+// rtRtStageBudget — бюджет медианы этапа строк kind=scale для сработавших правил
+// с подтверждаемым эффектом: вниз до 100 мс от min(0,7·med; med − разброс) по
+// выборке 150-16. F4 (validate_xray): med 1310, разброс 9151 − 1189 = 7962,
+// min(917; −6652) < 100 мс — этап шумный, эффект F4 не подтверждаем, бюджета нет.
+// Ключ after — медиана after строк runlive-stages: масштаба.
+var rtRtStageBudget = map[string]time.Duration{}
+
+// rtRtCheckSelectBudget сверяет total строки этапов выбора Xray с порогом по wait.
+// В сообщении — вид выбора и числа.
+func rtRtCheckSelectBudget(t *testing.T, kind string, st rtRtStage) {
+	t.Helper()
+	wait, total := st.num("wait"), st.num("total")
+	limit := rtRtSelectBudget
+	if wait > rtRtWaitedMS {
+		limit = rtRtSelectWaitBudget
+	}
+	if total > limit.Milliseconds() {
+		t.Errorf("время выбора Xray (%s): total %d мс при wait %d мс, порог %d мс", kind, total, wait, limit.Milliseconds())
+	}
+}
+
+// rtRtMedian — медиана выборки (пустая — 0).
+func rtRtMedian(vals []int64) float64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	s := append([]int64(nil), vals...)
+	sort.Slice(s, func(i, j int) bool { return s[i] < s[j] })
+	n := len(s)
+	if n%2 == 1 {
+		return float64(s[n/2])
+	}
+	return float64(s[n/2-1]+s[n/2]) / 2
+}
+
+// rtRtRunLiveNum — целое значение ключа строки «configlayer: RunLive …» (нет — -1).
+func rtRtRunLiveNum(line, key string) int64 {
+	for _, f := range strings.Fields(line) {
+		if k, v, ok := strings.Cut(f, "="); ok && k == key {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				return n
+			}
+		}
+	}
+	return -1
+}
+
 // rtRtLogPath — журнал панели на устройстве.
 func rtRtLogPath() string {
 	if p := config.Default().XCPLogPath; p != "" {
@@ -1073,7 +1151,9 @@ func (e *rtSrc) rtRtScaleUAT(subURL, gid, secondID string, runtimeView func() ma
 	}
 
 	// Четыре последовательных горячих выбора: строка RunLive окна принадлежит
-	// своему выбору. Порога времени нет (план 150-17).
+	// своему выбору. Порог total — rtRtSelectBudget/rtRtSelectWaitBudget, медианы
+	// этапов сработавших правил — rtRtStageBudget (план 150-17).
+	scaleVals := map[string][]int64{}
 	for n := 1; n <= 4; n++ {
 		member := pick(currentOf("Выбор"))
 		offset := rtRtLogOffset(t)
@@ -1093,8 +1173,28 @@ func (e *rtSrc) rtRtScaleUAT(subURL, gid, secondID string, runtimeView func() ma
 		t.Logf("select-stages: core=xray kind=scale n=%d http=%d %s", n, httpMS, st.pairs)
 		for _, rl := range runlive {
 			t.Logf("runlive-stages: core=xray kind=scale n=%d %s", n, rl)
+			if after := rtRtRunLiveNum(rl, "after"); after >= 0 {
+				scaleVals["after"] = append(scaleVals["after"], after)
+			}
 		}
 		maxWait = max(maxWait, st.num("wait"))
+		rtRtCheckSelectBudget(t, "масштаб №"+strconv.Itoa(n), st)
+		for stage := range rtRtStageBudget {
+			if stage != "after" {
+				scaleVals[stage] = append(scaleVals[stage], st.num(stage))
+			}
+		}
+	}
+	// Эффект сработавших правил: медиана этапа по строкам масштаба не больше бюджета.
+	for stage, budget := range rtRtStageBudget {
+		vals := scaleVals[stage]
+		if len(vals) == 0 {
+			t.Errorf("масштаб: этап %s: нет значений в строках этапов, бюджет %d мс", stage, budget.Milliseconds())
+			continue
+		}
+		if med := rtRtMedian(vals); med > float64(budget.Milliseconds()) {
+			t.Errorf("масштаб: медиана этапа %s %.1f мс по %d выборам, бюджет %d мс", stage, med, len(vals), budget.Milliseconds())
+		}
 	}
 	checkAfter := func(label string, groups ...string) {
 		after, _ := rtRstKernelPIDs("xray")
@@ -1192,6 +1292,7 @@ func (e *rtSrc) rtRtScaleUAT(subURL, gid, secondID string, runtimeView func() ma
 		for _, g := range okGroups {
 			if g == p.id {
 				maxWait = max(maxWait, st.num("wait"))
+				rtRtCheckSelectBudget(t, "пара ожидания "+p.id, st)
 			}
 		}
 	}
@@ -1217,6 +1318,7 @@ func (e *rtSrc) rtRtScaleUAT(subURL, gid, secondID string, runtimeView func() ma
 func TestRouterRoutingSelectLive(t *testing.T) {
 	routertest.Slow(t, "серия «Применить» и переключение группы на живом ядре")
 	tg := routertest.CoreSpecific(t)
+	t.Logf("select-fixes: %s", rtRtSelectFixes)
 	e := rtNewSrc(t)
 	e.enableLayer()
 	e.rtRstIdle()
@@ -1438,6 +1540,9 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 			st := stages[gid]
 			t.Logf("select-stages: core=%s kind=single nodes=%d group=%s %s", tg.Core, len(distinct), gid, st.pairs)
 			maxWait = max(maxWait, st.num("wait"))
+			if tg.Core == "xray" {
+				rtRtCheckSelectBudget(t, "одиночный", st)
+			}
 		}
 	}
 	if outcome != "applied" && outcome != "restarted" {
@@ -1776,6 +1881,9 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 				st := stages[g]
 				t.Logf("select-stages: core=%s kind=parallel group=%s %s", tg.Core, g, st.pairs)
 				maxWait = max(maxWait, st.num("wait"))
+				if tg.Core == "xray" {
+					rtRtCheckSelectBudget(t, "барьер "+g, st)
+				}
 			}
 			for _, rl := range runlive {
 				t.Logf("runlive-stages: core=%s %s", tg.Core, rl)
