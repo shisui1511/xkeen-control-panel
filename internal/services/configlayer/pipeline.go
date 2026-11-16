@@ -253,6 +253,9 @@ type StepView struct {
 	// Trigger — что запустило конвейер: по нему клиент отличает фоновое обновление
 	// источника (source_refresh) от «Применить».
 	Trigger Trigger `json:"trigger,omitempty"`
+	// DurationMS — длительность шага от первого перехода в running до итогового
+	// состояния, мс; 0 — шаг не шёл или короче 1 мс.
+	DurationMS int64 `json:"duration_ms,omitempty"`
 }
 
 // RestartView — итог шага «Перезапуск» по одному ядру.
@@ -377,6 +380,9 @@ type Pipeline struct {
 	// xrayHot — хук горячей замены текущего запуска, под mu; взводится в begin,
 	// снимается в finish.
 	xrayHot XrayHotFunc
+	// stepStart — начало шага текущего запуска (первый переход в running), под mu;
+	// сбрасывается в begin.
+	stepStart map[StepID]time.Time
 }
 
 func (p *Pipeline) currentXrayHot() XrayHotFunc {
@@ -476,6 +482,7 @@ func (p *Pipeline) begin(req ApplyRequest) {
 	}
 	p.beforeRollback = req.BeforeRollback
 	p.xrayHot = req.XrayHot
+	p.stepStart = map[StepID]time.Time{}
 	p.mu.Unlock()
 }
 
@@ -488,10 +495,25 @@ func (p *Pipeline) setStep(id StepID, state StepState, note, msg string) {
 		p.mu.Unlock()
 		return
 	}
+	var dur int64
+	switch state {
+	case StepRunning:
+		// Повторный running (перезапуск после частичного сбоя) начало не сдвигает.
+		if _, ok := p.stepStart[id]; !ok {
+			if p.stepStart == nil {
+				p.stepStart = map[StepID]time.Time{}
+			}
+			p.stepStart[id] = p.d.Now()
+		}
+	case StepDone, StepFailed, StepSkipped, StepDeferred:
+		if start, ok := p.stepStart[id]; ok {
+			dur = p.d.Now().Sub(start).Milliseconds()
+		}
+	}
 	var sv StepView
 	for i := range p.view.Steps {
 		if p.view.Steps[i].ID == id {
-			p.view.Steps[i] = StepView{ID: id, State: state, NoteCode: note, Message: msg, Trigger: p.view.Trigger}
+			p.view.Steps[i] = StepView{ID: id, State: state, NoteCode: note, Message: msg, Trigger: p.view.Trigger, DurationMS: dur}
 			sv = p.view.Steps[i]
 		}
 	}

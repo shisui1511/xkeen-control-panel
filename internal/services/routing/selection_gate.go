@@ -3,6 +3,7 @@ package routing
 import (
 	"context"
 	"errors"
+	"log"
 	"sync"
 	"time"
 
@@ -284,4 +285,82 @@ func (s *Service) prepareXrayBatch(b *xrayBatch) error {
 	b.size = n
 	b.live = time.Since(start)
 	return nil
+}
+
+// xrayStages — замер одного выбора с путём Xray для строки этапов журнала: по
+// ней план-сессия объясняет время выбора. В строку попадают только ID группы,
+// коды и числа — без имён узлов, адресов и содержимого файлов (T-150-41).
+type xrayStages struct {
+	gid string
+	// start — вход в Select; model — от входа до захвата компоненты; markers —
+	// разбор исхода (снятие, возврат или запись маркеров).
+	start          time.Time
+	model, markers time.Duration
+	in             *xrayIntent
+	b              *xrayBatch
+	// err — ошибка ожидания хода (runXray).
+	err error
+}
+
+// stepMS — длительность шага конвейера id в итоге прохода, мс.
+func stepMS(view configlayer.ApplyView, id configlayer.StepID) int64 {
+	for _, st := range view.Steps {
+		if st.ID == id {
+			return st.DurationMS
+		}
+	}
+	return 0
+}
+
+// outcome — исход выбора для строки этапов: исход прохода, если намерение
+// записано, иначе код ошибки.
+func (st *xrayStages) outcome() string {
+	if st.b != nil && st.in != nil && st.in.wrote && st.b.out != "" {
+		return st.b.out
+	}
+	err := st.err
+	if err == nil && st.in != nil {
+		err = st.in.err
+	}
+	if err == nil && st.b != nil {
+		err = st.b.err
+	}
+	switch {
+	case errors.Is(err, ErrApplyBusy):
+		return "apply_busy"
+	case errors.Is(err, configlayer.ErrStopped), errors.Is(err, context.Canceled):
+		return "stopped"
+	case errors.Is(err, ErrSelectionUnconfirmed):
+		return "selection_unconfirmed"
+	}
+	return selFailed
+}
+
+// log пишет строку этапов: одна на выбор с путём Xray в любом исходе, целые мс.
+// other — время RunLive вне пяти шагов конвейера (замки, Prepare, коммит, хвост).
+func (st *xrayStages) log() {
+	var (
+		batch                                       int
+		wait, live, hot, other                      time.Duration
+		build, valX, valM, write, restart, stepsSum int64
+	)
+	if st.in != nil {
+		wait = st.in.wait
+	}
+	if b := st.b; b != nil {
+		batch, live, hot = b.size, b.live, b.hot
+		build = stepMS(b.view, configlayer.StepBuild)
+		valX = stepMS(b.view, configlayer.StepValidateXray)
+		valM = stepMS(b.view, configlayer.StepValidateMihomo)
+		write = stepMS(b.view, configlayer.StepWrite)
+		restart = stepMS(b.view, configlayer.StepRestart)
+		stepsSum = build + valX + valM + write + restart
+		if d := b.run - time.Duration(stepsSum)*time.Millisecond; d > 0 {
+			other = d
+		}
+	}
+	log.Printf("[routing] выбор Xray: этапы group=%s batch=%d wait=%d model=%d live=%d build=%d validate_xray=%d validate_mihomo=%d write=%d restart=%d hot=%d other=%d markers=%d total=%d outcome=%s",
+		st.gid, batch, wait.Milliseconds(), st.model.Milliseconds(), live.Milliseconds(),
+		build, valX, valM, write, restart, hot.Milliseconds(), other.Milliseconds(),
+		st.markers.Milliseconds(), time.Since(st.start).Milliseconds(), st.outcome())
 }

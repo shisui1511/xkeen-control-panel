@@ -479,6 +479,7 @@ func (s *Service) markReconcile() { s.reconcilePending.Store(true) }
 // прочитает файл при старте, Mihomo получит выбор сверкой при запуске процесса.
 // Ревизия черновика не меняется.
 func (s *Service) Select(ctx context.Context, groupID, member string) (SelectResult, error) {
+	start := time.Now()
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
 		return SelectResult{}, err
@@ -504,6 +505,7 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 	if err != nil {
 		return SelectResult{}, err
 	}
+	model := time.Since(start)
 	// Событие начала: другие вкладки перечитывают вид и видят переключение.
 	// Событие конца — после снятия отметки, иначе перечитывание увидит группу
 	// ещё занятой (D-14, D-17); уходит во всех исходах.
@@ -535,7 +537,10 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 		// одной пачке с выборами независимых групп, пришедшими за время идущего
 		// запуска (G-150-3).
 		in := &xrayIntent{gid: groupID, member: member, comp: comp}
+		stages := &xrayStages{gid: groupID, start: start, model: model, in: in}
+		defer stages.log()
 		b, err := s.runXray(ctx, xrayRunSelect, in)
+		stages.b, stages.err = b, err
 		if err != nil {
 			return SelectResult{}, err
 		}
@@ -552,6 +557,9 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 		}
 		out, reason, outcome, runErr := b.out, b.reason, b.outcome, b.err
 		res.Kernels[configlayer.KernelXray], res.RestartReason = out, reason
+		// Разбор исхода замеряется до строки этапов (defer выполняется раньше).
+		markersStart := time.Now()
+		defer func() { stages.markers = time.Since(markersStart) }()
 		switch {
 		case selectionOK(out) && runErr == nil:
 			if err := s.clearUnconfirmed(comp, configlayer.KernelXray); err != nil {

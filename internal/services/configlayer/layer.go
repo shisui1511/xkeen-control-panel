@@ -1608,6 +1608,13 @@ type LiveRun struct {
 // вызывающий сервис со своим wg. После успешного запуска слой зовёт хуки
 // AddAfterApply уже после снятия замка применения.
 func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
+	// Замер: ожидание замков, конвейер (Prepare и проход), хвост (afterRun и
+	// хуки после применения) — одна строка журнала на вызов, целые мс.
+	var lockD, pipeD, afterD time.Duration
+	defer func() {
+		log.Printf("configlayer: RunLive trigger=%s lock=%d pipeline=%d after=%d",
+			run.Trigger, lockD.Milliseconds(), pipeD.Milliseconds(), afterD.Milliseconds())
+	}()
 	if !l.Enabled() {
 		return ApplyView{}, ErrDisabled
 	}
@@ -1620,7 +1627,9 @@ func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 	if stopped {
 		return ApplyView{}, ErrStopped
 	}
+	start := time.Now()
 	release, err := l.pipeline.TryBegin(ctx, false)
+	lockD = time.Since(start)
 	if err != nil {
 		if l.ctx.Err() != nil {
 			return ApplyView{}, ErrStopped
@@ -1628,17 +1637,22 @@ func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 		return ApplyView{}, err
 	}
 	defer release()
+	start = time.Now()
 	if run.Prepare != nil {
 		if err := run.Prepare(); err != nil {
+			pipeD = time.Since(start)
 			release()
 			return ApplyView{}, err
 		}
 	}
 	req := ApplyRequest{Trigger: run.Trigger, Source: SourceApplied, LiveOverlay: run.Overlay, Kernel: run.Kernel, XrayHot: run.XrayHot, ReapplyKeys: run.ReapplyKeys}
 	view := l.runPipeline(req)
+	pipeD = time.Since(start)
 	release()
+	start = time.Now()
 	l.afterRun()
 	l.fireAfterApply(req, view)
+	afterD = time.Since(start)
 	if view.Result != nil && view.Result.Code == ResultDriftBlocked {
 		return view, ErrDriftBlocked
 	}
