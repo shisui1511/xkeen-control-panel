@@ -201,18 +201,33 @@ export async function loadResults(): Promise<void> {
  * Читает «Сейчас» авто- и резервных групп (опрос страницы). 409 kernel_restarting —
  * признак runtimeRestarting без ошибки; прочие ошибки пробрасываются опросу (пауза).
  */
+let nowSeq = 0;
+
 export async function loadNow(signal?: AbortSignal): Promise<void> {
+  const seq = ++nowSeq;
   try {
     const data = await apiFetchJSON<RuntimeNow>(`${PROXIES_BASE}/now`, { signal });
+    // Поздний ответ не перекрывает более новый и сброс после смены ядра
+    if (seq !== nowSeq) return;
     runtimeNow.set({ ...data, groups: data.groups ?? {}, history: data.history ?? {} });
     runtimeRestarting.set(false);
   } catch (e) {
+    if (seq !== nowSeq) return;
     if ((e as { code?: unknown } | null)?.code === 'kernel_restarting') {
       runtimeRestarting.set(true);
       return;
     }
     throw e;
   }
+}
+
+/**
+ * Сбрасывает «Сейчас» и историю ядра: после остановки или смены ядра и при входе на
+ * страницу последний известный выбор не показывается (D-26). Идущий ответ отбрасывается.
+ */
+export function resetNow(): void {
+  nowSeq++;
+  runtimeNow.set(null);
 }
 
 // --- Действия ---

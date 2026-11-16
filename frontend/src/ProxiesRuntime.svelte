@@ -30,6 +30,7 @@
     loadRuntime,
     loadResults,
     loadNow,
+    resetNow,
     selectNode,
     startPing,
     cancelPing,
@@ -438,11 +439,15 @@
   );
   $effect(() => {
     nowPollEnabled.set(needsNow);
+    // Опрос остановлен (ядра стоят, авто-групп нет): прежний «Сейчас» не показывается (D-26)
+    if (!needsNow) resetNow();
   });
 
   let kernelTimer: ReturnType<typeof setTimeout> | null = null;
 
   onMount(() => {
+    // Данные прошлого визита страницы могли устареть на минуты
+    resetNow();
     void reload();
     const detach = attachProxiesLive();
     const onHash = () => {
@@ -469,10 +474,14 @@
     }
     if (key === kernelSeen) return;
     kernelSeen = key;
+    // «Сейчас» и история другого ядра не показываются до ответа нового
+    resetNow();
     if (kernelTimer !== null) clearTimeout(kernelTimer);
     kernelTimer = setTimeout(() => {
       kernelTimer = null;
       void loadRuntime();
+      // Опрос не перезапускается сам, если остался включённым: не ждать его такта
+      if (needsNow) loadNow().catch(() => {});
     }, KERNEL_DEBOUNCE_MS);
   });
 
