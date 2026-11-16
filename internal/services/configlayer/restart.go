@@ -90,6 +90,11 @@ var (
 	RestartExpectTimeout = defaultRestartExpectTimeout(runtime.GOARCH)
 )
 
+// hotAliveChecks — число повторных снимков PID (через RestartPollInterval) после
+// горячей замены Xray: ядро, упавшее в первые секунды, не считается применившим
+// выбор (WR-03). Подтверждение без окна устойчивости: 3 × 0,5 с вместо 5 с.
+const hotAliveChecks = 3
+
 // defaultRestartExpectTimeout — время ожидания API и провайдеров Mihomo после
 // рестарта для платформы. На MIPS (mips, mipsle) Mihomo с geodata и rule-провайдерами
 // поднимает Clash API заметно дольше, поэтому там 60 с, иначе 15 с (допущение не
@@ -354,9 +359,26 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 				// ado), поэтому достаточно снимка «тот же процесс в работе» (замысел
 				// 150-01). Окно устойчивости RestartStableWindow — для xkeen -restart
 				// и перезагрузки профиля Mihomo; здесь оно добавляло к каждому
-				// горячему выбору не меньше 5 с. Другой PID или остановленный
-				// процесс — частичный сбой и доводящий перезапуск (D-15).
-				if pid := p.runningPID(KernelXray); pid == prevPID {
+				// горячему выбору не меньше 5 с. Вместо него — короткий опрос
+				// (hotAliveChecks × RestartPollInterval): ядро, упавшее в первые
+				// секунды после замены, не выдаётся за применённое выбор (WR-03).
+				// Другой PID или остановленный процесс — частичный сбой и доводящий
+				// перезапуск (D-15).
+				pid := p.runningPID(KernelXray)
+				for i := 0; i < hotAliveChecks && pid == prevPID; i++ {
+					select {
+					case <-ctx.Done():
+					case <-time.After(RestartPollInterval):
+					}
+					if interrupted(ctx) != nil {
+						break
+					}
+					pid = p.runningPID(KernelXray)
+				}
+				if err := interrupted(ctx); err != nil {
+					return interruptedView(kernel), err
+				}
+				if pid == prevPID {
 					log.Printf("configlayer: горячая замена Xray: причина=%s файлов=%d PID=%d", NoteXrayHotSwapped, len(files), prevPID)
 					return RestartView{Kernel: kernel, Outcome: RestartOutcomeHotReloaded, NoteCode: NoteXrayHotSwapped}, nil
 				} else {
