@@ -177,24 +177,21 @@ test(
       });
 
       // ссылка «Прокси» → «Конфигурация» (D-23): адрес ?group= раскрывает карточку группы
-      // и ставит фокус на её кнопку раскрытия
-      await page.goto(`/#/config/groups?group=${groupId}`, {
-        timeout: T.page,
-        waitUntil: 'domcontentloaded'
-      });
-      const toggle = page.getByTestId(`group-toggle-${groupId}`);
-      await expect(toggle).toHaveAttribute('aria-expanded', 'true', { timeout: T.page });
-      await expect(toggle).toBeFocused({ timeout: T.action });
-
-      // дальше шаги идут на странице «Прокси»
-      await page.goto(`/#/proxies?group=${groupId}`, {
-        timeout: T.page,
-        waitUntil: 'domcontentloaded'
-      });
-      await expect(page.getByTestId('proxies-layer-page')).toBeVisible({ timeout: T.page });
-      await expect(card.locator('.pc-toggle').first()).toHaveAttribute('aria-expanded', 'true', {
-        timeout: T.page
-      });
+      // и ставит фокус на её кнопку раскрытия; во второй вкладке, чтобы уход с «Прокси» не
+      // обрывал опрос «Сейчас» в охраняемой консоли
+      const second = await page.context().newPage();
+      try {
+        await second.setViewportSize({ width: 1440, height: 900 });
+        await second.goto(`/#/config/groups?group=${groupId}`, {
+          timeout: T.page,
+          waitUntil: 'domcontentloaded'
+        });
+        const toggle = second.getByTestId(`group-toggle-${groupId}`);
+        await expect(toggle).toHaveAttribute('aria-expanded', 'true', { timeout: T.page });
+        await expect(toggle).toBeFocused({ timeout: T.action });
+      } finally {
+        await second.close();
+      }
 
       // цель — DIRECT или REJECT, который сейчас не выбран; плитка по индексу в составе
       const view = await api(page, 'GET', '/api/configlayer/proxies');
