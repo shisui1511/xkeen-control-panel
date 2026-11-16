@@ -744,6 +744,7 @@
         "go:TestRouterRoutingPresetsAndLists",
         "go:TestRouterRoutingProviderTargeted",
         "go:TestRouterRoutingSelectLive",
+        "go:TestRouterRoutingSelectScale",
         "go:TestRouterRoutingView",
         "go:TestRouterRoutingViewRules",
         "go:TestRouterRuleCondConflict",
