@@ -509,7 +509,7 @@ func TestRouterSelectMihomoLinked(t *testing.T) {
 	select {
 	case ev := <-events:
 		if ev.Type == configlayer.EventProxies {
-			t.Fatalf("снятие отсутствующего маркера опубликовало событие %q", ev.Type)
+			t.Errorf("снятие отсутствующего маркера опубликовало событие %q", ev.Type)
 		}
 	case <-time.After(500 * time.Millisecond):
 	}
