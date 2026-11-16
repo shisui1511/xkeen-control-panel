@@ -81,6 +81,7 @@
   "proxies.rt.reason.resolve_failed": "Could not resolve the server address",
   "proxies.rt.reason.delay_failed": "Could not measure latency",
   "proxies.rt.reason.start_failed": "Could not start the check process",
+  "proxies.rt.reason.unknown": "unknown error",
   "proxies.rt.diagnostics": "Node diagnostics",
   "proxies.rt.empty.title": "No groups",
   "proxies.rt.empty.body": "Create a group in Configuration to select a node here.",

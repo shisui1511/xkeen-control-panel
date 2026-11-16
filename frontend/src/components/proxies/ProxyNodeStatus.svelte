@@ -94,6 +94,7 @@
     function onDown(e: PointerEvent) {
       const target = e.target as Node | null;
       if (target && tagEls.some((el) => el?.contains(target))) return;
+      if (target && document.getElementById(hintId)?.contains(target)) return;
       hint = null;
     }
     window.addEventListener('keydown', onKey);
@@ -160,6 +161,13 @@
 
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
+        e.preventDefault();
+        close(true);
+        return;
+      }
+      // Окно вынесено в конец body: Tab изнутри увёл бы фокус из страницы. Закрыть окно и
+      // вернуть фокус на статус, следующий Tab пойдёт по плиткам
+      if (e.key === 'Tab' && node.contains(document.activeElement)) {
         e.preventDefault();
         close(true);
       }
@@ -325,9 +333,10 @@
     cursor: pointer;
     font-family: inherit;
   }
+  /* Без смены фона: --hover несёт акцентный оттенок, а на метках акцента нет */
   .pns-tag:hover,
   .pns-tag[aria-expanded='true'] {
-    background: var(--hover);
+    box-shadow: inset 0 0 0 1px var(--border-strong);
     color: var(--fg-primary);
   }
   .pns-pop:focus {

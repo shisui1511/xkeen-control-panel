@@ -81,6 +81,7 @@
   "proxies.rt.reason.resolve_failed": "Не удалось определить адрес сервера",
   "proxies.rt.reason.delay_failed": "Не удалось измерить задержку",
   "proxies.rt.reason.start_failed": "Не удалось запустить процесс проверки",
+  "proxies.rt.reason.unknown": "неизвестная ошибка",
   "proxies.rt.diagnostics": "Диагностика узла",
   "proxies.rt.empty.title": "Групп нет",
   "proxies.rt.empty.body": "Создайте группу в «Конфигурации» — здесь появится выбор узла.",

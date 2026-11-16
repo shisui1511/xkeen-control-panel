@@ -289,12 +289,10 @@
 
   /** Причина отказа для строки «Не удалось запустить проверку: …» без точки в конце. */
   function reasonText(code: string | undefined): string {
-    // Только первое предложение: «Повторите…» и прочее в середину фразы не встаёт
-    return lowerFirst(
-      proxiesErrorText($t, code)
-        .split(/\.\s/)[0]
-        .replace(/\.\s*$/, '')
-    );
+    const text = proxiesErrorText($t, code);
+    // Незнакомый код даёт общий текст про обновление страницы: в середину фразы он не встаёт
+    if (text === proxiesErrorText($t, undefined)) return $t('proxies.rt.reason.unknown');
+    return lowerFirst(text.replace(/\.\s*$/, ''));
   }
 
   // После двоеточия фраза продолжает предложение: «…проверку: проверка узлов недоступна»
