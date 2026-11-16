@@ -85,6 +85,9 @@ func (s *Service) runtimeSnapshot() (RuntimeView, appliedModel, error) {
 	if err != nil {
 		return RuntimeView{}, appliedModel{}, err
 	}
+	// Отметки идущих выборов читаются сразу после состояния: маркер и отметка
+	// сравниваются почти в один момент (снятие маркера идёт раньше снятия отметки).
+	kinds := s.inflightKinds()
 	am, err := s.appliedModelOf(st)
 	if err != nil {
 		return RuntimeView{}, appliedModel{}, err
@@ -128,7 +131,6 @@ func (s *Service) runtimeSnapshot() (RuntimeView, appliedModel, error) {
 		v.State = RuntimeStatePanel
 	}
 	xray, mihomo := runtimeRefs(am.cat.Xray), runtimeRefs(am.cat.Mihomo)
-	kinds := s.inflightKinds()
 	switch v.State {
 	case RuntimeStatePanel, RuntimeStateStopped:
 		live, unconfirmed := liveSelection(st.Live), readUnconfirmed(st.Live)
