@@ -16,7 +16,8 @@
  *    configLayer.Start(), routingSvc.Start() идёт после него, шаг остановки — после
  *    шага остановки слоя (defer: сервис останавливается раньше слоя). Сервис
  *    маршрутизации и раннер пинга создаются только в main.go. Раннер создаётся
- *    после маршрутизации, SweepStale идёт до старта слоя, Start — после него;
+ *    после маршрутизации, уборка остатков пачек (SweepStaleAt) идёт до создания
+ *    слоя и маршрутизации, Start — после старта слоя;
  *    шаг остановки proxy-ping идёт после routing и выполняется раньше него.
  * 3. Коды ошибок: каждый код из frontend/src/lib/routingErrorCodes.json встречается
  *    в internal/handlers/routing.go и имеет ключ configlayer.routing.<код> в обоих
@@ -288,7 +289,8 @@ const need = {
   watcherStart: lineOf("selWatch.Start()", created),
   watcherStop: lineOf('defer stops.run("routing-selection"', created),
   pingNew: lineOf("proxyping.New("),
-  pingSweep: lineOf("pingRunner.SweepStale()"),
+  pingSweep: lineOf("proxyping.SweepStaleAt("),
+  layerNew: lineOf("configlayer.New("),
   pingStart: lineOf("pingRunner.Start()"),
   pingSet: lineOf("api.SetPingRunner(pingRunner)"),
   pingStop: lineOf('defer stops.run("proxy-ping", pingRunner.Stop)'),
@@ -303,15 +305,11 @@ if (Object.values(need).every((v) => v > 0)) {
   order("new", "register", "routing.New( должен идти до configLayer.Register(");
   order("new", "pingNew", "раннер пинга должен создаваться после routing.New(");
   order(
-    "pingNew",
     "pingSweep",
-    "SweepStale должен идти после создания раннера пинга",
+    "layerNew",
+    "SweepStaleAt должен идти до configlayer.New(: остатки убираются и без раннера",
   );
-  order(
-    "pingSweep",
-    "layerStart",
-    "SweepStale должен идти до configLayer.Start()",
-  );
+  order("pingSweep", "new", "SweepStaleAt должен идти до routing.New(");
   order(
     "layerStart",
     "pingStart",

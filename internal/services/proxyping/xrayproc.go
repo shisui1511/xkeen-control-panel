@@ -262,22 +262,27 @@ func (p *tempXray) stop() {
 // SweepStale вызывается в main до приёма запросов. Сигнал получает только
 // процесс, чей cmdline содержит точный каталог пачки; чужой PID не трогается.
 // Каталоги удаляются и без PID, чтобы не оставлять учётные данные на носителе.
-func (r *Runner) SweepStale() error {
-	if _, err := os.Lstat(r.d.TmpRoot); errors.Is(err, os.ErrNotExist) {
+func (r *Runner) SweepStale() error { return SweepStaleAt(r.d.TmpRoot) }
+
+// SweepStaleAt убирает остатки пачек в root без раннера: main вызывает её до
+// создания сервисов, чтобы остатки прошлого запуска не пережили старт, в котором
+// маршрутизация или раннер не поднялись.
+func SweepStaleAt(root string) error {
+	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	// Подменённый корень (ссылка, чужой владелец, открытые права) не читается:
 	// иначе уборка удалила бы содержимое каталога, на который он указывает.
-	if err := checkTmpRoot(r.d.TmpRoot); err != nil {
+	if err := checkTmpRoot(root); err != nil {
 		return errors.New("ping_sweep_read")
 	}
-	entries, err := os.ReadDir(r.d.TmpRoot)
+	entries, err := os.ReadDir(root)
 	if err != nil {
 		return errors.New("ping_sweep_read")
 	}
 	var errs []error
 	for _, entry := range entries {
-		dir := filepath.Join(r.d.TmpRoot, entry.Name())
+		dir := filepath.Join(root, entry.Name())
 		if entry.IsDir() {
 			data, e := os.ReadFile(filepath.Join(dir, "pid"))
 			if e == nil {

@@ -654,6 +654,13 @@ func main() {
 	srv.HandleProtected("/api/kernels/{name}/upload", api.KernelUpload)
 	srv.HandleProtected("/api/kernels/{name}/download", api.KernelDownload)
 
+	// Остатки временных пачек пинга прошлого запуска (каталоги с учётными данными
+	// узлов, живой xcp-pingcore) убираются до создания слоя и маршрутизации: и
+	// тогда, когда раннер пинга в этом запуске не поднимется.
+	if err := proxyping.SweepStaleAt(proxyping.DefaultTmpRoot); err != nil {
+		log.Printf("Уборка остатков раннера пинга: %v", err)
+	}
+
 	// Слой «Конфигурация» (фаза 144): создаётся и запускается здесь, Stop — через
 	// defer. Замок жизненного цикла — тот же, что у KernelApplier и обработчиков.
 	// Не создался — слой не подключается, маршруты отвечают 404.
@@ -844,8 +851,6 @@ func main() {
 				if pingErr != nil {
 					log.Printf("Раннер пинга не создан, маршруты /api/configlayer/proxies/ping* отвечают 404: %v", pingErr)
 					pingRunner = nil
-				} else if err := pingRunner.SweepStale(); err != nil {
-					log.Printf("Уборка остатков раннера пинга: %v", err)
 				}
 				// Менеджер geodata (фаза 146.1) создаётся только здесь, после сервиса
 				// маршрутизации: его хук AfterApply (удаление источника после «Применить»)
