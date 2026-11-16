@@ -1591,6 +1591,12 @@ type LiveRun struct {
 	XrayHot XrayHotFunc
 	// ReapplyKeys повторно записывает файлы для сверки неизвестного рантайма.
 	ReapplyKeys []string
+	// Prepare вызывается под замками применения и жизненного цикла до сборки:
+	// вызывающий пишет здесь живые данные, которые должна увидеть сборка этого
+	// запуска (намерения выбора). Ошибка — конвейер не запускается, RunLive
+	// возвращает её, файлы и ядро не тронуты, afterRun и хуки после применения не
+	// вызываются. nil — шага нет.
+	Prepare func() error
 }
 
 // RunLive — запуск конвейера из применённого состояния с оверлеем живых данных
@@ -1622,6 +1628,12 @@ func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 		return ApplyView{}, err
 	}
 	defer release()
+	if run.Prepare != nil {
+		if err := run.Prepare(); err != nil {
+			release()
+			return ApplyView{}, err
+		}
+	}
 	req := ApplyRequest{Trigger: run.Trigger, Source: SourceApplied, LiveOverlay: run.Overlay, Kernel: run.Kernel, XrayHot: run.XrayHot, ReapplyKeys: run.ReapplyKeys}
 	view := l.runPipeline(req)
 	release()

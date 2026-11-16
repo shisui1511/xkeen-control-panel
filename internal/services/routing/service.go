@@ -128,9 +128,13 @@ type Service struct {
 	// друг друга. reconcilePending взводит markReconcile (сбой выбора в Mihomo),
 	// забирает SelectionWatcher через Swap(false). repickMu — один проход замены
 	// пропавшего узла за раз; repick — уведомления routing_repick по группам.
-	selMu            sync.Mutex
-	inflightMu       sync.Mutex
-	inflight         map[string]bool
+	selMu      sync.Mutex
+	inflightMu sync.Mutex
+	inflight   map[string]bool
+	// xrun — один запуск выбора Xray за раз (G-150-3, D-17): независимые выборы
+	// собираются в пачку одного прохода xcp-groups. Порядок замков: ход выбора →
+	// applyMu → lifecycleMu.
+	xrun             xrayRunGate
 	reconcilePending atomic.Bool
 	repickMu         sync.Mutex
 	repick           repickNotes

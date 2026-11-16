@@ -1,0 +1,287 @@
+package routing
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+)
+
+// Порядок запусков выбора Xray (G-150-3, D-17). Все ручные группы Xray пишут
+// один файл xcp-groups, поэтому конвейер выбора идёт один за раз. Выборы
+// независимых групп, пришедшие, пока идёт запуск, не отклоняются, а собираются в
+// следующую пачку и применяются одним проходом xcp-groups: намерения пачки
+// пишутся одной записью Live под замками применения до сборки (LiveRun.Prepare),
+// поэтому сборка видит выборы всех групп пачки, а идущий запуск не захватывает в
+// свой файл выбор ещё ждущей группы.
+//
+// Порядок замков: ход выбора (turn) → applyMu → lifecycleMu. Под applyMu и
+// lifecycleMu ход выбора не берётся: хуки AfterApply запускаются после снятия
+// замка применения, CommitLive выбор не вызывает. Связанные группы и та же группа
+// сюда не доходят: их отсекает отметка идущего выбора (beginSelection) раньше
+// ожидания хода, очереди нажатий в одной группе нет.
+
+// xrayRunKind — вид запуска выбора Xray: у каждого вида своя собирающаяся пачка.
+type xrayRunKind int
+
+const (
+	// xrayRunSelect — выбор участника: пачка намерений, запись в Prepare.
+	xrayRunSelect xrayRunKind = 0
+	// xrayRunConfirm — «Повторить» и сверка маркеров при старте: повторная запись
+	// xcp-groups по сохранённому намерению, без новых выборов.
+	xrayRunConfirm xrayRunKind = 1
+)
+
+// errXrayNothingToRun — в пачке не записано ни одного намерения: конвейер не
+// запускается, исхода нет.
+var errXrayNothingToRun = errors.New("routing: в пачке выбора нет намерений")
+
+// xrayIntent — намерение одного выбора в пачке.
+type xrayIntent struct {
+	// Вход: группа, участник и связная компонента группы.
+	gid, member string
+	comp        []string
+	// Выход записи (Prepare): прежнее значение выбора, поставлен ли маркер
+	// неизвестного исхода на компоненту, записано ли намерение и ошибка до записи.
+	prev    string
+	had     bool
+	pending bool
+	wrote   bool
+	err     error
+	// joined — вступление в пачку; wait — от вступления до запечатывания пачки.
+	joined time.Time
+	wait   time.Duration
+}
+
+// xrayBatch — пачка запуска выбора Xray: намерения одного прохода конвейера и
+// его итог, общий для всех участников пачки.
+type xrayBatch struct {
+	kind    xrayRunKind
+	intents []*xrayIntent
+	waiters int
+	// done закрывается, когда итог пачки готов.
+	done chan struct{}
+	// Итог прохода: исход по Xray, причина перезапуска, исход шага, ошибка
+	// запуска и состояние конвейера.
+	out, reason, outcome string
+	err                  error
+	view                 configlayer.ApplyView
+	// size — число записанных намерений; live — запись Live; run — весь RunLive;
+	// hot — хук горячей замены.
+	size           int
+	live, run, hot time.Duration
+}
+
+// xrayRunGate — один запуск выбора Xray за раз и собирающиеся пачки по видам.
+// mu — листовой замок: под ним только next, waiters, список намерений и ленивое
+// создание turn; ни проход конвейера, ни ожидание turn или done под mu не идут.
+// Нулевое значение рабочее.
+type xrayRunGate struct {
+	mu sync.Mutex
+	// next — собирающаяся (ещё не запечатанная) пачка каждого вида.
+	next [2]*xrayBatch
+	// turn — право запустить конвейер выбора (ёмкость 1): занят отправкой,
+	// освобождается чтением.
+	turn chan struct{}
+}
+
+// runXray ставит намерение in (nil у «Повторить» и сверки) в собирающуюся пачку
+// вида kind и ждёт её итога. Первый получивший ход запечатывает пачку и
+// запускает её проход; остальные участники получают тот же итог. До
+// запечатывания ожидание прерывают отмена ctx и остановка сервиса — намерение
+// убирается из пачки; после запечатывания вызывающий ждёт итог (намерение могло
+// быть записано, ему нужен исход).
+func (s *Service) runXray(ctx context.Context, kind xrayRunKind, in *xrayIntent) (*xrayBatch, error) {
+	g := &s.xrun
+	g.mu.Lock()
+	if g.turn == nil {
+		g.turn = make(chan struct{}, 1)
+	}
+	turn := g.turn
+	b := g.next[kind]
+	if b == nil {
+		b = &xrayBatch{kind: kind, done: make(chan struct{})}
+		g.next[kind] = b
+	}
+	b.waiters++
+	if in != nil {
+		in.joined = time.Now()
+		b.intents = append(b.intents, in)
+	}
+	g.mu.Unlock()
+
+	var stop <-chan struct{}
+	if s.ctx != nil {
+		stop = s.ctx.Done()
+	}
+	var waitErr error
+	select {
+	case <-b.done:
+		return b, nil
+	case turn <- struct{}{}:
+		g.mu.Lock()
+		if g.next[kind] == b {
+			g.next[kind] = nil
+			now := time.Now()
+			for _, x := range b.intents {
+				x.wait = now.Sub(x.joined)
+			}
+			g.mu.Unlock()
+			s.execXrayBatch(b)
+			<-turn
+			return b, nil
+		}
+		// Пачку запечатал другой: он держит ход до закрытия done, значит итог готов.
+		g.mu.Unlock()
+		<-turn
+		<-b.done
+		return b, nil
+	case <-ctx.Done():
+		waitErr = ctx.Err()
+	case <-stop:
+		waitErr = configlayer.ErrStopped
+	}
+	g.mu.Lock()
+	if g.next[kind] == b {
+		if in != nil {
+			for i, x := range b.intents {
+				if x == in {
+					b.intents = append(b.intents[:i:i], b.intents[i+1:]...)
+					break
+				}
+			}
+		}
+		b.waiters--
+		if b.waiters == 0 {
+			g.next[kind] = nil
+		}
+		g.mu.Unlock()
+		return nil, waitErr
+	}
+	g.mu.Unlock()
+	<-b.done
+	return b, nil
+}
+
+// execXrayBatch выполняет проход конвейера пачки b. Вызывается только держателем
+// хода; в конце всегда закрывает b.done.
+func (s *Service) execXrayBatch(b *xrayBatch) {
+	defer close(b.done)
+	base := s.ctx
+	if base == nil {
+		base = context.Background()
+	}
+	// Ожидание замка применения ограничено: его держат «Применить», фоновый запуск
+	// или операция с ядром, а не другие выборы.
+	rctx, cancel := context.WithTimeout(base, selectBusyWait)
+	defer cancel()
+
+	hot := s.xrayHot
+	run := configlayer.LiveRun{Trigger: configlayer.TriggerSelect, Kernel: configlayer.KernelXray}
+	if b.kind == xrayRunConfirm {
+		hot = s.xrayHotConfirm
+		run.ReapplyKeys = []string{configlayer.ManifestKey(configlayer.KernelXray, xrayGroupsFile)}
+	} else {
+		run.Prepare = func() error { return s.prepareXrayBatch(b) }
+	}
+	run.XrayHot = func(hctx context.Context, files []configlayer.HotFile) error {
+		start := time.Now()
+		err := hot(hctx, files)
+		b.hot = time.Since(start)
+		return err
+	}
+
+	start := time.Now()
+	view, err := s.d.Layer.RunLive(rctx, run)
+	b.run = time.Since(start)
+	b.view = view
+	switch {
+	case err == nil:
+		b.out, b.reason, b.outcome = s.xrayOutcome(view)
+	case errors.Is(err, errXrayNothingToRun):
+		// Ни одно намерение не записано: у каждого своя ошибка, исхода нет.
+	case errors.Is(err, ErrApplyBusy) || (errors.Is(err, context.DeadlineExceeded) && base.Err() == nil):
+		b.err = ErrApplyBusy
+	default:
+		b.out, b.err = selFailed, err
+	}
+}
+
+// prepareXrayBatch пишет намерения пачки одной записью Live (под замками
+// применения и жизненного цикла, до сборки): выбор каждой группы, маркер
+// неизвестного исхода Xray на её компоненту при запущенном Xray и снятие группы
+// из повторного выбора — то же, что setSelection. Группа с маркером получает
+// ErrSelectionUnconfirmed и в запись не попадает.
+func (s *Service) prepareXrayBatch(b *xrayBatch) error {
+	start := time.Now()
+	running := s.d.Running(configlayer.KernelXray)
+	type result struct {
+		prev    string
+		had     bool
+		pending bool
+		err     error
+	}
+	results := make([]result, len(b.intents))
+	n := 0
+	err := s.d.Layer.UpdateLive(func(live configlayer.Sections) error {
+		n = 0
+		unconfirmed := readUnconfirmed(live)
+		sel := liveSelection(live)
+		repick := readRepick(live)
+		hadRepick := len(repick) > 0
+		for i, in := range b.intents {
+			results[i] = result{}
+			if unconfirmed[in.gid] != "" {
+				results[i].err = ErrSelectionUnconfirmed
+				continue
+			}
+			prev, had := sel[in.gid]
+			results[i].prev, results[i].had = prev, had
+			sel[in.gid] = in.member
+			if running {
+				for _, id := range in.comp {
+					unconfirmed[id] = configlayer.KernelXray
+				}
+				results[i].pending = true
+			}
+			repick = without(repick, in.gid)
+			n++
+		}
+		if n == 0 {
+			// Нечего писать: запись на флешку не нужна.
+			return errXrayNothingToRun
+		}
+		if err := writeSelection(live, sel); err != nil {
+			return err
+		}
+		if err := writeUnconfirmed(live, unconfirmed); err != nil {
+			return err
+		}
+		if hadRepick {
+			return writeRepick(live, repick)
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, errXrayNothingToRun) {
+		for i, in := range b.intents {
+			if results[i].err != nil {
+				in.err = results[i].err
+			} else {
+				in.err = err
+			}
+		}
+		return err
+	}
+	for i, in := range b.intents {
+		in.prev, in.had, in.pending, in.err = results[i].prev, results[i].had, results[i].pending, results[i].err
+		in.wrote = in.err == nil && err == nil
+	}
+	if err != nil {
+		return err
+	}
+	b.size = n
+	b.live = time.Since(start)
+	return nil
+}

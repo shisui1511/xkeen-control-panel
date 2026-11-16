@@ -41,8 +41,10 @@ const (
 
 // Параметры выбора и сверки.
 const (
-	// selectBusyWait — сколько Select ждёт замок применения, прежде чем
-	// ответить apply_busy.
+	// selectBusyWait — сколько запуск выбора Xray ждёт замок применения, занятый
+	// не выбором («Применить», фоновый запуск, операция с ядром), прежде чем
+	// ответить apply_busy. Другие выборы этот замок не держат: их упорядочивает
+	// xrayRunGate.
 	selectBusyWait = 2 * time.Second
 	// reconcileCallTimeout — предел одного обращения к Clash API при сверке.
 	reconcileCallTimeout = 10 * time.Second
@@ -481,7 +483,7 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 		return SelectResult{}, err
 	}
 	defer release()
-	// Повторное чтение после захвата компоненты исключает устаревший prev/маркер.
+	// Повторное чтение после захвата компоненты исключает устаревший маркер.
 	st, err = s.d.Layer.ReadState()
 	if err != nil {
 		return SelectResult{}, err
@@ -496,20 +498,31 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 			return SelectResult{}, ErrSelectionUnconfirmed
 		}
 	}
-	prev, had := liveSelection(st.Live)[groupID]
-	var pending []string
-	if am.installed.Xray && desired.ManagedFor(configlayer.KernelXray) && s.d.Running(configlayer.KernelXray) {
-		pending = comp
-	}
-	if err := s.setSelection(groupID, member, pending); err != nil {
-		return SelectResult{}, err
-	}
-	defer s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
 	res := SelectResult{Member: member, Kernels: map[string]string{
 		configlayer.KernelXray: selNotInstalled, configlayer.KernelMihomo: selNotInstalled,
 	}}
 	if am.installed.Xray && desired.ManagedFor(configlayer.KernelXray) {
-		out, reason, outcome, runErr := s.selectXray(ctx)
+		// Намерение пишется в Live под замками применения до сборки (Prepare), в
+		// одной пачке с выборами независимых групп, пришедшими за время идущего
+		// запуска (G-150-3).
+		in := &xrayIntent{gid: groupID, member: member, comp: comp}
+		b, err := s.runXray(ctx, xrayRunSelect, in)
+		if err != nil {
+			return SelectResult{}, err
+		}
+		if in.err != nil {
+			return SelectResult{}, in.err
+		}
+		if !in.wrote {
+			// Выбор не записан (замок применения занят, слой остановлен): ни
+			// возврата, ни маркеров.
+			if b.err != nil {
+				return SelectResult{}, b.err
+			}
+			return SelectResult{}, ErrApplyBusy
+		}
+		defer s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
+		out, reason, outcome, runErr := b.out, b.reason, b.outcome, b.err
 		res.Kernels[configlayer.KernelXray], res.RestartReason = out, reason
 		switch {
 		case selectionOK(out) && runErr == nil:
@@ -517,7 +530,9 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 				return res, err
 			}
 		case runErr != nil || xraySelectionReverted(outcome):
-			if err := s.restoreSelection(groupID, member, prev, had, comp); err != nil {
+			// Исход прохода один на пачку: возврат касается только своей группы и
+			// только при неизменённом значении.
+			if err := s.restoreSelection(groupID, member, in.prev, in.had, comp); err != nil {
 				res.Unconfirmed = comp
 				return res, err
 			}
@@ -532,7 +547,7 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 			if desired.ManagedFor(configlayer.KernelMihomo) && am.installed.Mihomo {
 				res.Kernels[configlayer.KernelMihomo] = selFailed
 			}
-			if len(pending) == 0 {
+			if !in.pending {
 				if err := s.d.Layer.UpdateLive(func(live configlayer.Sections) error {
 					m := readUnconfirmed(live)
 					for _, id := range comp {
@@ -545,6 +560,11 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 			}
 			return res, nil
 		}
+	} else {
+		if err := s.setSelection(groupID, member, nil); err != nil {
+			return SelectResult{}, err
+		}
+		defer s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
 	}
 	if am.installed.Mihomo && desired.ManagedFor(configlayer.KernelMihomo) {
 		// Маркер и ответ фиксируются под тем же замком, что фоновая сверка.
@@ -592,12 +612,6 @@ func memberAllowed(g Group, member string, am appliedModel) bool {
 		}
 	}
 	return false
-}
-
-// selectXray запускает конвейер для одного Xray: файл xcp-groups меняется,
-// запущенный Xray перезапускается. Идущее применение — ErrApplyBusy.
-func (s *Service) selectXray(ctx context.Context) (string, string, string, error) {
-	return s.runSelectXray(ctx, false)
 }
 
 func (s *Service) runSelectXray(ctx context.Context, confirm bool) (string, string, string, error) {
