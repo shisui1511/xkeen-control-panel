@@ -274,7 +274,12 @@ func (s *Service) beginSelection(comp []string) (func(), error) {
 	}, nil
 }
 
+// clearUnconfirmed снимает маркер kernel с групп comp. Запись состояния идёт на
+// флешку, поэтому без маркера на comp ничего не пишется и не публикуется.
 func (s *Service) clearUnconfirmed(comp []string, kernel string) error {
+	if st, err := s.d.Layer.ReadState(); err == nil && !hasUnconfirmed(readUnconfirmed(st.Live), comp, kernel) {
+		return nil
+	}
 	err := s.d.Layer.UpdateLive(func(live configlayer.Sections) error {
 		m := readUnconfirmed(live)
 		for _, id := range comp {
@@ -288,6 +293,16 @@ func (s *Service) clearUnconfirmed(comp []string, kernel string) error {
 		s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
 	}
 	return err
+}
+
+// hasUnconfirmed — хотя бы одна группа comp помечена маркером kernel.
+func hasUnconfirmed(m map[string]string, comp []string, kernel string) bool {
+	for _, id := range comp {
+		if m[id] == kernel {
+			return true
+		}
+	}
+	return false
 }
 
 func selectionOK(out string) bool {
@@ -960,6 +975,17 @@ func (s *Service) reconcileMihomo(ctx context.Context) error {
 		return nil
 	}
 	var failed []mihomoSelEntry
+	var confirmed []string
+	// Маркеры подтверждённых групп снимаются одной записью и при раннем выходе:
+	// поставленный выбор не должен остаться «неподтверждённым».
+	defer func() {
+		if len(confirmed) == 0 {
+			return
+		}
+		if err := s.clearUnconfirmed(confirmed, configlayer.KernelMihomo); err != nil {
+			log.Printf("[routing] сверка Mihomo: маркер неподтверждённого выбора не снят: %v", err)
+		}
+	}()
 	for _, e := range plan {
 		cctx, cancel := context.WithTimeout(ctx, reconcileCallTimeout)
 		now, err := s.d.Mihomo.ProxyNow(cctx, e.group)
@@ -968,9 +994,7 @@ func (s *Service) reconcileMihomo(ctx context.Context) error {
 		}
 		cancel()
 		if err == nil {
-			if err := s.clearUnconfirmed([]string{e.gid}, configlayer.KernelMihomo); err != nil {
-				return err
-			}
+			confirmed = append(confirmed, e.gid)
 			continue
 		}
 		var status *services.ClashStatusError
