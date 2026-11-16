@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 )
 
@@ -748,6 +749,151 @@ func rtRtNodeOptions(group map[string]any) (members []string, labels map[string]
 	return members, labels
 }
 
+// rtRtSelectBusyWait — selectBusyWait сервиса маршрутизации (2 с): столько выбор
+// Xray ждёт замок применения перед apply_busy. Отказ select_busy связанной группы
+// приходит до любого ожидания замка, поэтому быстрее этого срока.
+const rtRtSelectBusyWait = 2 * time.Second
+
+// rtRtSnapPoll — шаг опроса вида «Прокси» во время параллельных выборов.
+const rtRtSnapPoll = 25 * time.Millisecond
+
+// rtRtLogPath — журнал панели на устройстве.
+func rtRtLogPath() string {
+	if p := config.Default().XCPLogPath; p != "" {
+		return p
+	}
+	return "/opt/var/log/xcp.log"
+}
+
+// rtRtLogOffset — текущий размер журнала панели: начало окна строк выбора.
+func rtRtLogOffset(t *testing.T) int64 {
+	t.Helper()
+	st, err := os.Stat(rtRtLogPath())
+	if err != nil {
+		t.Fatalf("журнал панели: %v", err)
+	}
+	return st.Size()
+}
+
+// rtRtStage — строка этапов выбора Xray («[routing] выбор Xray: этапы group=…»):
+// ID группы, пары ключ=значение без group и сами пары строкой. Строка несёт только
+// ID группы, числа и код исхода.
+type rtRtStage struct {
+	group string
+	kv    map[string]string
+	pairs string
+}
+
+// num — целое значение ключа строки этапов (нет ключа — 0).
+func (s rtRtStage) num(key string) int64 {
+	n, _ := strconv.ParseInt(s.kv[key], 10, 64)
+	return n
+}
+
+var (
+	rtRtStageRe   = regexp.MustCompile(`выбор Xray: этапы group=(\S+)((?: \S+=\S*)*)`)
+	rtRtRunLiveRe = regexp.MustCompile(`configlayer: RunLive (trigger=select(?: \S+=\S*)*)`)
+)
+
+// rtRtParseStages разбирает окно журнала: строки этапов выбора Xray по порядку и
+// пары строк «configlayer: RunLive trigger=select».
+func rtRtParseStages(text string) (stages []rtRtStage, runlive []string) {
+	for _, m := range rtRtStageRe.FindAllStringSubmatch(text, -1) {
+		st := rtRtStage{group: m[1], kv: map[string]string{}, pairs: strings.TrimSpace(m[2])}
+		for _, f := range strings.Fields(m[2]) {
+			if k, v, ok := strings.Cut(f, "="); ok {
+				st.kv[k] = v
+			}
+		}
+		stages = append(stages, st)
+	}
+	for _, m := range rtRtRunLiveRe.FindAllStringSubmatch(text, -1) {
+		runlive = append(runlive, m[1])
+	}
+	return stages, runlive
+}
+
+// rtRtWaitStages ждёт до 5 с в окне журнала с offset строк этапов групп groups
+// (у каждой — последняя строка окна) и не меньше minRunLive строк RunLive выбора.
+// Журнал, ротированный за время окна, читается с начала нового файла.
+func rtRtWaitStages(offset int64, groups []string, minRunLive int) (map[string]rtRtStage, []string, bool) {
+	var (
+		byGroup map[string]rtRtStage
+		runlive []string
+	)
+	ok, _ := routertest.Poll(5*time.Second, 200*time.Millisecond, func() (bool, string) {
+		text, err := rtReadLogFrom(rtRtLogPath(), offset)
+		if err != nil {
+			text, _ = rtReadLogFrom(rtRtLogPath(), 0)
+		}
+		stages, rl := rtRtParseStages(text)
+		byGroup, runlive = map[string]rtRtStage{}, rl
+		for _, st := range stages {
+			byGroup[st.group] = st
+		}
+		for _, g := range groups {
+			if _, ok := byGroup[g]; !ok {
+				return false, ""
+			}
+		}
+		return len(runlive) >= minRunLive, ""
+	})
+	return byGroup, runlive, ok
+}
+
+// rtRtSelRes — ответ выбора, отправленного из горутины: только данные, разбор и
+// вердикт — в горутине теста.
+type rtRtSelRes struct {
+	job        int
+	status     int
+	raw        []byte
+	err        error
+	sent, done time.Time
+}
+
+// rtRtSelectAsync отправляет POST select после закрытия start и кладёт ответ в out.
+// Вызывается в горутине: без t.* и без e.call (они зовут t.Fatalf).
+func (e *rtSrc) rtRtSelectAsync(job int, gid, member string, start <-chan struct{}, out chan<- rtRtSelRes) {
+	<-start
+	sent := time.Now()
+	status, raw, err := e.p.CallSlow(http.MethodPost, rtRoutingBase+"/select", map[string]string{"group": gid, "member": member})
+	out <- rtRtSelRes{job: job, status: status, raw: raw, err: err, sent: sent, done: time.Now()}
+}
+
+// rtRtSnap — снимок вида «Прокси» во время выборов: признаки групп по ID.
+type rtRtSnap struct {
+	at        time.Time
+	dur       time.Duration
+	switching map[string]bool
+	unconf    map[string]bool
+}
+
+// rtRtTakeSnap читает вид «Прокси» без t.Fatalf (ошибка — снимка нет).
+func (e *rtSrc) rtRtTakeSnap() (rtRtSnap, bool) {
+	start := time.Now()
+	status, raw, err := e.p.Call(http.MethodGet, "/api/configlayer/proxies", nil)
+	s := rtRtSnap{at: start, dur: time.Since(start), switching: map[string]bool{}, unconf: map[string]bool{}}
+	if err != nil || status != http.StatusOK {
+		return s, false
+	}
+	var body struct {
+		Data struct {
+			Groups []struct {
+				ID          string `json:"id"`
+				Switching   bool   `json:"switching"`
+				Unconfirmed bool   `json:"unconfirmed"`
+			} `json:"groups"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(raw, &body) != nil {
+		return s, false
+	}
+	for _, g := range body.Data.Groups {
+		s.switching[g.ID], s.unconf[g.ID] = g.Switching, g.Unconfirmed
+	}
+	return s, true
+}
+
 // Выбор участника ручной группы: флаг → два узла → ручная группа → take → «Применить»
 // → вид работающих прокси → POST select → «Сейчас» в представлении, now группы в
 // Mihomo или исходящий группы в Xray (горячая замена без смены PID Xray) → вид и
@@ -779,14 +925,19 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 		c.rtRtPurge()
 	})
 
-	// Оба узла выражаются в обоих ядрах: выбор узла, которого активное ядро не
-	// умеет (trojan_ws в Xray — xray_no_insecure), на его файлы не влияет. Адрес
+	// Все четыре узла выражаются в обоих ядрах: выбор узла, которого активное ядро
+	// не умеет (trojan_ws в Xray — xray_no_insecure), на его файлы не влияет. Адрес
 	// узлов — «чёрная дыра» на loopback: соединение принимается и молчит, замер
 	// идёт до таймаута пробы, и повтор пинга успевает присоединиться к пачке
-	// (отказ соединения закончил бы пачку Mihomo раньше повтора).
+	// (отказ соединения закончил бы пачку Mihomo раньше повтора). Узлов четыре с
+	// различными подписями («VLESS WS», «Trojan gRPC», «VLESS gRPC», «VLESS TLS»):
+	// блоку D-17 нужны две цели «Выбор», отличные по подписи и от текущего выбора,
+	// и от исходного startMember.
 	hole := rtRtBlackhole(t)
 	e.rtRstAddMyNode(rtRtLinkAt(t, "vless_ws", hole))
 	e.rtRstAddMyNode(rtRtLinkAt(t, "trojan_grpc", hole))
+	e.rtRstAddMyNode(rtRtLinkAt(t, "vless_grpc", hole))
+	e.rtRstAddMyNode(rtRtLinkAt(t, "vless_tls_alpn", hole))
 
 	// До взятия и «Применить» группа не применена: select отвечает group_not_applied.
 	save := e.call(http.MethodPost, rtRoutingBase+"/groups/save", map[string]any{
@@ -807,6 +958,30 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	e.rtRtExpect("select: группа не применена", e.call(http.MethodPost, rtRoutingBase+"/select",
 		map[string]string{"group": gid, "member": "direct"}), http.StatusConflict, "group_not_applied")
 
+	// Группы блока D-17: «Связанная» содержит «Выбор» (одна компонента с ним),
+	// «Вторая» и «Третья» без участников-групп — независимые.
+	saveGroup := func(name string, members []map[string]string) string {
+		r := e.call(http.MethodPost, rtRoutingBase+"/groups/save", map[string]any{
+			"revision": e.rtRtRevision(),
+			"group": map[string]any{
+				"name": name, "mode": "manual",
+				"sources": map[string]any{"all": true},
+				"members": members,
+			},
+		})
+		if r.Status != http.StatusOK {
+			t.Fatalf("groups/save (D-17): %d %s", r.Status, r.Code)
+		}
+		id, _ := r.object(t)["group"].(map[string]any)["id"].(string)
+		if len(id) != 8 {
+			t.Fatalf("groups/save (D-17): идентификатор группы длиной %d, ожидалось 8", len(id))
+		}
+		return id
+	}
+	linkedID := saveGroup("Связанная", []map[string]string{{"kind": "group", "id": gid}})
+	secondID := saveGroup("Вторая", []map[string]string{})
+	thirdID := saveGroup("Третья", []map[string]string{})
+
 	if tk := e.call(http.MethodPost, rtRoutingBase+"/take", map[string]int64{"revision": e.rtRtRevision()}); tk.Status != http.StatusOK {
 		t.Fatalf("take: %d %s", tk.Status, tk.Code)
 	}
@@ -821,8 +996,12 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 		t.Fatal("представление: нет группы «Выбор»")
 	}
 	nodeMembers, labels := rtRtNodeOptions(group)
-	if len(nodeMembers) < 2 {
-		t.Fatalf("представление: узлов среди вариантов группы %d, ожидалось не меньше 2", len(nodeMembers))
+	distinct := map[string]bool{}
+	for _, m := range nodeMembers {
+		distinct[labels[m]] = true
+	}
+	if len(distinct) < 4 {
+		t.Fatalf("представление: различных подписей узлов среди вариантов группы %d, ожидалось не меньше 4", len(distinct))
 	}
 	startMember, _ := group["current"].(string)
 	if !strings.HasPrefix(startMember, "node:") {
@@ -873,8 +1052,8 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 			}
 		}
 	}
-	if nodeCount < 2 {
-		t.Errorf("proxies: узлов %d, ожидалось не меньше 2", nodeCount)
+	if nodeCount < 4 {
+		t.Errorf("proxies: узлов %d, ожидалось не меньше 4", nodeCount)
 	}
 	draftBefore := e.rtRtDraftChanges()
 
@@ -897,7 +1076,10 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 		}
 	}
 
-	// Выбор участника через API.
+	// Выбор участника через API. maxWait — наибольшее ожидание чужого прохода (wait
+	// строк этапов ответов 200) за весь тест: строка d17-longwait в конце.
+	var maxWait int64
+	logOffset := rtRtLogOffset(t)
 	sel := e.callSlow(http.MethodPost, rtRoutingBase+"/select", map[string]string{"group": gid, "member": target})
 	if sel.Status != http.StatusOK {
 		t.Fatalf("select: %d %s", sel.Status, sel.Code)
@@ -905,6 +1087,19 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	rtAssertContractKeys(t, contract, sel.object(t), "SelectResult", "select")
 	kernels, _ := sel.object(t)["kernels"].(map[string]any)
 	outcome, _ := kernels[tg.Core].(string)
+	// Путь Xray: выбор пишет xcp-groups общим проходом (исход Xray не not_installed).
+	xrayOutcome, _ := kernels["xray"].(string)
+	xrayPath := xrayOutcome != "not_installed"
+	if xrayPath {
+		stages, _, ok := rtRtWaitStages(logOffset, []string{gid}, 0)
+		if !ok {
+			t.Errorf("журнал панели: нет строки этапов выбора Xray группы %s", gid)
+		} else {
+			st := stages[gid]
+			t.Logf("select-stages: core=%s kind=single nodes=%d group=%s %s", tg.Core, len(distinct), gid, st.pairs)
+			maxWait = max(maxWait, st.num("wait"))
+		}
+	}
 	if outcome != "applied" && outcome != "restarted" {
 		t.Errorf("select: исход для активного ядра %q, ожидалось applied или restarted", outcome)
 	}
@@ -1077,6 +1272,345 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 		t.Error("выбор, пинг или подтверждение изменили черновик")
 	}
 
+	// D-17: параллельные выборы. Пять выборов уходят одновременно по общему барьеру:
+	// A и B — «Выбор» (B — повторное нажатие другим узлом), C — связанная
+	// «Связанная», D и E — независимые «Вторая» и «Третья». Наложение гарантирует
+	// построение, а не скорость выбора: разброс отправки меньше удержания компоненты
+	// проходом (total − model строки этапов), иначе попытка повторяется с новыми
+	// целями. В журнал теста — только ID групп, коды и числа.
+	names := []string{"Выбор", "Связанная", "Вторая", "Третья"}
+	ids := map[string]string{"Выбор": gid, "Связанная": linkedID, "Вторая": secondID, "Третья": thirdID}
+	// d17Groups — current и подписи вариантов-узлов групп блока по GET routing.
+	d17Groups := func() (cur map[string]string, opts map[string][]string, lbl map[string]map[string]string) {
+		view := e.rtRtView()
+		cur, opts, lbl = map[string]string{}, map[string][]string{}, map[string]map[string]string{}
+		for _, name := range names {
+			g := rtRtFindGroup(view, name)
+			if g == nil {
+				t.Fatalf("D-17: нет группы %s в представлении", ids[name])
+			}
+			cur[name], _ = g["current"].(string)
+			opts[name], lbl[name] = rtRtNodeOptions(g)
+		}
+		return cur, opts, lbl
+	}
+	// d17Pick — первый узел группы, подпись которого не входит в avoid.
+	d17Pick := func(opts []string, lbl map[string]string, avoid ...string) string {
+		for _, m := range opts {
+			ok := true
+			for _, a := range avoid {
+				if lbl[m] == a {
+					ok = false
+				}
+			}
+			if ok {
+				return m
+			}
+		}
+		return ""
+	}
+	// d17Fire отправляет выборы jobs (группа, участник) одновременно по барьеру и
+	// опрашивает вид «Прокси», пока не придут все ответы.
+	d17Fire := func(jobs [][2]string) ([]rtRtSelRes, []rtRtSnap) {
+		start := make(chan struct{})
+		out := make(chan rtRtSelRes, len(jobs))
+		for i, j := range jobs {
+			go e.rtRtSelectAsync(i, j[0], j[1], start, out)
+		}
+		close(start)
+		res := make([]rtRtSelRes, len(jobs))
+		var snaps []rtRtSnap
+		for got := 0; got < len(jobs); {
+			select {
+			case r := <-out:
+				res[r.job] = r
+				got++
+				continue
+			default:
+			}
+			if s, ok := e.rtRtTakeSnap(); ok {
+				snaps = append(snaps, s)
+			}
+			select {
+			case r := <-out:
+				res[r.job] = r
+				got++
+			case <-time.After(rtRtSnapPoll):
+			}
+		}
+		for _, r := range res {
+			if r.err != nil {
+				t.Fatalf("D-17: выбор №%d: %v", r.job+1, r.err)
+			}
+		}
+		return res, snaps
+	}
+
+	if !xrayPath {
+		// Без прохода Xray выбор Mihomo — один вызов Clash API без общего прохода:
+		// наложению не на чем случиться, проверяется только приём независимых выборов.
+		cur, opts, lbl := d17Groups()
+		d := d17Pick(opts["Вторая"], lbl["Вторая"], lbl["Вторая"][cur["Вторая"]])
+		ee := d17Pick(opts["Третья"], lbl["Третья"], lbl["Третья"][cur["Третья"]])
+		if d == "" || ee == "" {
+			t.Fatal("D-17: у независимых групп нет узла, отличного от текущего")
+		}
+		res, _ := d17Fire([][2]string{{secondID, d}, {thirdID, ee}})
+		for _, r := range res {
+			if r.status != http.StatusOK {
+				resp := e.decode(r.status, r.raw)
+				t.Errorf("D-17: независимый выбор №%d: %d %s, ожидалось 200", r.job+1, resp.Status, resp.Code)
+			}
+		}
+		t.Logf("d17-overlap: core=%s skipped=no_xray_path", tg.Core)
+	} else {
+		guaranteed := false
+		var lastSpread, lastHold int64
+		for attempt := 1; attempt <= 3 && !guaranteed; attempt++ {
+			cur, opts, lbl := d17Groups()
+			// Цели «Выбор»: узлы с подписью, отличной от текущего выбора и от
+			// startMember, с различными подписями; при четырёх узлах их ровно два.
+			var cands []string
+			seenLabel := map[string]bool{}
+			for _, m := range opts["Выбор"] {
+				l := lbl["Выбор"][m]
+				if l == lbl["Выбор"][cur["Выбор"]] || l == labels[startMember] || seenLabel[l] {
+					continue
+				}
+				seenLabel[l] = true
+				cands = append(cands, m)
+			}
+			if len(cands) < 2 {
+				t.Fatalf("D-17: целей «Выбор» %d, ожидалось 2", len(cands))
+			}
+			a, b := cands[0], cands[1]
+			// c отличается по подписи и от своего текущего выбора, и от текущего
+			// выбора «Выбор»: исходящий «Связанная» при её выигрыше обязан смениться.
+			c := d17Pick(opts["Связанная"], lbl["Связанная"], lbl["Связанная"][cur["Связанная"]], lbl["Выбор"][cur["Выбор"]])
+			d := d17Pick(opts["Вторая"], lbl["Вторая"], lbl["Вторая"][cur["Вторая"]])
+			ee := d17Pick(opts["Третья"], lbl["Третья"], lbl["Третья"][cur["Третья"]])
+			if c == "" || d == "" || ee == "" {
+				t.Fatalf("D-17: нет цели связанной (%t) или независимых (%t, %t) групп", c != "", d != "", ee != "")
+			}
+			jobs := [][2]string{{gid, a}, {gid, b}, {linkedID, c}, {secondID, d}, {thirdID, ee}}
+			obBefore := map[string]map[string]any{}
+			var pidsD17 []int
+			if tg.Core == "xray" {
+				for _, name := range names {
+					ob, ok := rtRtGroupOutbound(t, ids[name])
+					if !ok {
+						t.Fatalf("D-17: в файлах Xray нет исходящего группы %s", ids[name])
+					}
+					obBefore[name] = ob
+				}
+				pidsD17, _ = rtRstKernelPIDs("xray")
+			}
+			offset := rtRtLogOffset(t)
+			res, snaps := d17Fire(jobs)
+			resp := make([]rtSrcResp, len(res))
+			var okGroups []string
+			for i, r := range res {
+				resp[i] = e.decode(r.status, r.raw)
+				if r.status == http.StatusOK {
+					okGroups = append(okGroups, jobs[i][0])
+				}
+				if resp[i].Code == "apply_busy" {
+					t.Errorf("D-17: выбор №%d группы %s получил apply_busy (ожидание %d мс)", i+1, jobs[i][0], r.done.Sub(r.sent).Milliseconds())
+				}
+				if r.status >= 500 {
+					t.Errorf("D-17: выбор №%d группы %s: %d %s", i+1, jobs[i][0], resp[i].Status, resp[i].Code)
+				}
+			}
+			stages, runlive, ok := rtRtWaitStages(offset, okGroups, 1)
+			if !ok {
+				t.Fatalf("D-17: в журнале панели нет строк этапов всех ответов 200 (групп %d, строк RunLive %d)", len(okGroups), len(runlive))
+			}
+			for _, g := range okGroups {
+				st := stages[g]
+				t.Logf("select-stages: core=%s kind=parallel group=%s %s", tg.Core, g, st.pairs)
+				maxWait = max(maxWait, st.num("wait"))
+			}
+			for _, rl := range runlive {
+				t.Logf("runlive-stages: core=%s %s", tg.Core, rl)
+			}
+
+			// Гарантия наложения: все пять запросов ушли, пока первый проход держал
+			// компоненту (разброс отправки меньше наименьшего удержания ответов 200).
+			first, last := res[0].sent, res[0].sent
+			for _, r := range res {
+				if r.sent.Before(first) {
+					first = r.sent
+				}
+				if r.sent.After(last) {
+					last = r.sent
+				}
+			}
+			spread := last.Sub(first).Milliseconds()
+			hold := int64(-1)
+			for _, g := range okGroups {
+				if h := stages[g].num("total") - stages[g].num("model"); hold < 0 || h < hold {
+					hold = h
+				}
+			}
+			guaranteed = len(okGroups) > 0 && spread < hold
+			lastSpread, lastHold = spread, hold
+			t.Logf("d17-overlap: core=%s attempt=%d spread=%d hold=%d guaranteed=%t", tg.Core, attempt, spread, hold, guaranteed)
+			if !guaranteed {
+				// Без наложения два 200 в компоненте законны: проверены только
+				// apply_busy и 5xx, цели следующей попытки — от текущего выбора.
+				continue
+			}
+
+			// Вердикт по D-17. Компонента {A, B, C}: ровно один 200, остальные —
+			// select_busy быстрее selectBusyWait от своей отправки (без очереди).
+			winner, winners := -1, 0
+			for i := 0; i < 3; i++ {
+				if res[i].status == http.StatusOK {
+					winner = i
+					winners++
+					continue
+				}
+				if resp[i].Status != http.StatusConflict || resp[i].Code != "select_busy" {
+					t.Errorf("D-17: выбор №%d в компоненте: %d %q, ожидалось 409 select_busy", i+1, resp[i].Status, resp[i].Code)
+				} else if wait := res[i].done.Sub(res[i].sent); wait >= rtRtSelectBusyWait {
+					t.Errorf("D-17: select_busy выбора №%d через %d мс, ожидалось быстрее %d мс", i+1, wait.Milliseconds(), rtRtSelectBusyWait.Milliseconds())
+				}
+			}
+			if winners != 1 {
+				t.Fatalf("D-17: в компоненте «Выбор»+«Связанная» ответов 200 %d, ожидался один", winners)
+			}
+			for i, r := range res {
+				if r.status != http.StatusOK {
+					if i >= 3 {
+						t.Errorf("D-17: независимый выбор №%d группы %s: %d %s, ожидалось 200", i+1, jobs[i][0], resp[i].Status, resp[i].Code)
+					}
+					continue
+				}
+				obj := resp[i].object(t)
+				rtAssertContractKeys(t, contract, obj, "SelectResult", "select (D-17)")
+				ks, _ := obj["kernels"].(map[string]any)
+				if out, _ := ks[tg.Core].(string); out != "applied" {
+					t.Errorf("D-17: выбор №%d группы %s: исход активного ядра %q, ожидалось applied", i+1, jobs[i][0], out)
+				}
+				if reason, present := obj["restart_reason"]; present && tg.Core == "xray" {
+					t.Errorf("D-17: выбор №%d группы %s потребовал перезапуск Xray: restart_reason=%v", i+1, jobs[i][0], reason)
+				}
+			}
+			// Три одновременных прохода не начинаются сразу: порядок запусков их
+			// развёл (wait > 0) или собрал в пачку (batch ≥ 2).
+			ordered := false
+			for _, g := range okGroups {
+				if stages[g].num("wait") > 0 || stages[g].num("batch") >= 2 {
+					ordered = true
+				}
+			}
+			if !ordered {
+				t.Error("D-17: ни одна строка этапов ответов 200 не несёт wait > 0 или batch ≥ 2")
+			}
+
+			// Итог: выборы победителя и независимых групп применены, цель
+			// проигравших нажатий — нет (очереди нет), вторая группа компоненты прежняя.
+			winName := "Выбор"
+			if winner == 2 {
+				winName = "Связанная"
+			}
+			want := map[string]string{"Выбор": cur["Выбор"], "Связанная": cur["Связанная"], "Вторая": d, "Третья": ee}
+			want[winName] = jobs[winner][1]
+			after, _, afterLbl := d17Groups()
+			for _, name := range names {
+				if after[name] != want[name] {
+					t.Errorf("D-17: current группы %s не равен ожидаемому (выбор применён=%t, прежний=%t)", ids[name], after[name] == jobs[winner][1], after[name] == cur[name])
+				}
+			}
+			changed := map[string]bool{winName: true, "Вторая": true, "Третья": true}
+			switch tg.Core {
+			case "xray":
+				for _, name := range names {
+					ob, ok := rtRtGroupOutbound(t, ids[name])
+					switch {
+					case !ok:
+						t.Errorf("D-17: исходящий группы %s пропал", ids[name])
+					case changed[name] && reflect.DeepEqual(ob, obBefore[name]):
+						t.Errorf("D-17: исходящий группы %s не сменился после выбора", ids[name])
+					case changed[name] && !rtRtMatchesNode(t, ob):
+						t.Errorf("D-17: исходящий группы %s не совпадает ни с одним узлом «Моих узлов»", ids[name])
+					case !changed[name] && strings.HasPrefix(cur[name], "node:") && !reflect.DeepEqual(ob, obBefore[name]):
+						// Группа, выбравшая группу, повторяет её исходящий: сравнение
+						// осмысленно, только когда её выбор — узел.
+						t.Errorf("D-17: исходящий неизменённой группы %s сменился", ids[name])
+					}
+				}
+				pidsAfter, _ := rtRstKernelPIDs("xray")
+				if len(pidsD17) != 1 || len(pidsAfter) != 1 || pidsAfter[0] != pidsD17[0] {
+					t.Errorf("D-17: PID Xray прежний=%t, процессов до %d, после %d", reflect.DeepEqual(pidsAfter, pidsD17), len(pidsD17), len(pidsAfter))
+				}
+			case "mihomo":
+				for name := range changed {
+					l := afterLbl[name][want[name]]
+					if now := e.rtRtWaitNow(name, l); now != l {
+						t.Errorf("D-17: now группы %s в Mihomo не равен выбранному узлу (длина now %d)", ids[name], len(now))
+					}
+				}
+			}
+			// Потерянного обновления xcp-groups нет: после всех ответов ни одна
+			// группа не переключается и не показана неподтверждённой.
+			rv := runtimeView()
+			for _, name := range names {
+				rg := rtRtFindGroup(rv, name)
+				if rg == nil {
+					t.Errorf("D-17: нет группы %s в виде «Прокси»", ids[name])
+					continue
+				}
+				if rg["switching"] != false || rg["unconfirmed"] != false {
+					t.Errorf("D-17: группа %s после выборов switching=%v unconfirmed=%v", ids[name], rg["switching"], rg["unconfirmed"])
+				}
+			}
+			if e.rtRtDraftChanges() != draftBefore {
+				t.Error("D-17: параллельные выборы изменили черновик")
+			}
+
+			// Снимки опроса: идущий выбор виден switching без unconfirmed у обеих
+			// групп компоненты. Обязателен, когда удержание победителя не короче
+			// четырёх периодов опроса.
+			var maxGet time.Duration
+			seen, masked := false, 0
+			for _, s := range snaps {
+				maxGet = max(maxGet, s.dur)
+				if s.switching[gid] && s.switching[linkedID] && !s.unconf[gid] && !s.unconf[linkedID] {
+					seen = true
+				}
+				for _, id := range ids {
+					if s.switching[id] && s.unconf[id] {
+						masked++
+					}
+				}
+			}
+			if masked > 0 {
+				t.Errorf("D-16: идущий выбор показан неподтверждённым в %d снимках вида", masked)
+			}
+			winHold := stages[jobs[winner][0]].num("total") - stages[jobs[winner][0]].num("model")
+			period := (rtRtSnapPoll + maxGet).Milliseconds()
+			if winHold >= 4*period {
+				if !seen {
+					t.Errorf("D-17: ни в одном из %d снимков вида обе группы компоненты не были switching без unconfirmed (удержание %d мс, период %d мс)", len(snaps), winHold, period)
+				}
+			} else {
+				t.Logf("D-17: окно короче опроса: удержание %d мс, период опроса %d мс, снимков %d, switching увиден=%t", winHold, period, len(snaps), seen)
+			}
+		}
+		if !guaranteed {
+			t.Errorf("D-17: наложение не обеспечено: разброс отправки не меньше прохода (spread=%d мс, hold=%d мс, попыток 3)", lastSpread, lastHold)
+		}
+	}
+	// Последующие проверки после «Применить» идут по текущему выбору «Выбор»: он
+	// отличен от startMember, поэтому сравнение с xrayBefore остаётся верным.
+	if g := rtRtFindGroup(e.rtRtView(), "Выбор"); g != nil {
+		target, _ = g["current"].(string)
+	}
+	if target == startMember || !strings.HasPrefix(target, "node:") {
+		t.Fatalf("D-17: current «Выбор» после блока совпал с исходным=%t, узел=%t", target == startMember, strings.HasPrefix(target, "node:"))
+	}
+
 	// Правка правила и «Применить»: выбор остаётся.
 	rs := e.call(http.MethodPost, rtRoutingBase+"/rules/save", map[string]any{
 		"revision": e.rtRtRevision(),
@@ -1105,6 +1639,12 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 			t.Error("Xray: после «Применить» исходящий группы не соответствует выбранному узлу")
 		}
 	}
+
+	// Условие отказа G-150-3: выбор ждал чужой проход дольше selectBusyWait (2 с) и
+	// принят 200 — прежняя реализация через 2 с отдала бы apply_busy. Короткий
+	// проход (на loopback) — не регрессия: строка показывает, исполнено ли условие.
+	t.Logf("d17-longwait: core=%s maxwait=%d busy_wait=%d executed=%t",
+		tg.Core, maxWait, rtRtSelectBusyWait.Milliseconds(), maxWait >= rtRtSelectBusyWait.Milliseconds())
 }
 
 // --- каталог списков, «Добавить в XKeen» и пресеты -----------------------------
