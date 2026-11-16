@@ -279,6 +279,8 @@
       const res = await startPing(scope, group);
       joined = res.joined;
       setBatch(res.batch);
+      // Пачка стартовала — окно перезапуска закончилось: прежний 409 не держит строку
+      runtimeRestarting.set(false);
     } catch (e) {
       const code = codeOf(e);
       if (code === 'kernel_restarting') runtimeRestarting.set(true);
@@ -424,12 +426,15 @@
   }
 
   // «Сейчас» авто-групп — опрос только при видимой вкладке, запущенном ядре и наличии
-  // авто- или резервных групп; выбор и пинг приходят событиями общего SSE
+  // авто- или резервных групп; выбор и пинг приходят событиями общего SSE. Пока страница
+  // считает ядро перезапускающимся (409 запуска пинга), опрос идёт и без авто-групп: его
+  // первый успешный ответ снимает строку «Ядро перезапускается»
   const nowPollEnabled = writable(false);
   usePoller(loadNow, NOW_POLL_MS, { enabledWhen: nowPollEnabled });
   const needsNow = $derived(
-    $runningKernels.length > 0 &&
-      (view?.groups.some((g) => g.mode === 'auto' || g.mode === 'fallback') ?? false)
+    $runtimeRestarting ||
+      ($runningKernels.length > 0 &&
+        (view?.groups.some((g) => g.mode === 'auto' || g.mode === 'fallback') ?? false))
   );
   $effect(() => {
     nowPollEnabled.set(needsNow);
