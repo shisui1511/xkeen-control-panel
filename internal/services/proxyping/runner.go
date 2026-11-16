@@ -613,13 +613,25 @@ func (r *Runner) Probe(ctx context.Context, req Request) map[string]PingResult {
 				return nil
 			case <-own.done:
 				r.mu.Lock()
+				state := own.batch.State
 				out := make(map[string]PingResult, len(own.results))
 				for ref, result := range own.results {
 					result.History = append([]PingPoint(nil), result.History[max(0, len(result.History)-10):]...)
 					out[ref] = result
 				}
+				excluded := make(map[string]bool, len(own.excluded))
+				for ref := range own.excluded {
+					excluded[ref] = true
+				}
 				r.mu.Unlock()
-				return out
+				if state == StateDone {
+					return out
+				}
+				// Пачка не дошла до конца (временный Xray не запустился, ядро
+				// сменилось, пачку отменили): неизмеренные узлы — не «мёртвые»,
+				// их проверяет TLS, как до общего раннера. Исключённые из пачки
+				// (узел изменился или пропал) не проверяются.
+				return r.probeMissing(ctx, req, out, excluded)
 			}
 		}
 		r.mu.Lock()
@@ -641,6 +653,29 @@ func (r *Runner) Probe(ctx context.Context, req Request) map[string]PingResult {
 			return r.probeTLS(ctx, req)
 		}
 	}
+}
+
+// probeMissing дополняет результаты незавершённой пачки TLS-пробами узлов,
+// которые она не успела измерить. Раннер остановлен — nil, как у Probe.
+func (r *Runner) probeMissing(ctx context.Context, req Request, out map[string]PingResult, excluded map[string]bool) map[string]PingResult {
+	var missing []Target
+	for _, target := range req.Targets {
+		if _, ok := out[target.Ref]; !ok && !excluded[target.Ref] {
+			missing = append(missing, target)
+		}
+	}
+	if len(missing) == 0 {
+		return out
+	}
+	req.Targets = missing
+	extra := r.probeTLS(ctx, req)
+	if extra == nil {
+		return nil
+	}
+	for ref, result := range extra {
+		out[ref] = result
+	}
+	return out
 }
 
 func (r *Runner) probeTLS(ctx context.Context, req Request) map[string]PingResult {
