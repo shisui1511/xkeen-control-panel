@@ -117,6 +117,13 @@ func (r *Runner) launch(req Request, onStart func(*batchRun)) (PingStart, error)
 		return PingStart{}, ErrStopped
 	}
 	if r.active != nil {
+		// Пользовательский запуск присоединяется только к такой же проверке
+		// (тот же охват и группа); чужую пачку молча не подсовываем. Probe
+		// (onStart != nil) ждёт любую идущую пачку, как раньше.
+		if onStart == nil && !sameCheck(r.active.batch, req) {
+			r.mu.Unlock()
+			return PingStart{}, ErrBusy
+		}
 		start := PingStart{BatchID: r.active.batch.ID, Joined: true, Batch: r.active.batch}
 		r.mu.Unlock()
 		return start, nil
@@ -603,6 +610,15 @@ func (r *Runner) excludeChangedLocked(b *batchRun, target Target) {
 	if cancel := b.inflight[ref]; cancel != nil {
 		cancel()
 	}
+}
+
+// sameCheck — идущая пачка отвечает на тот же запрос: совпадают охват и группа.
+func sameCheck(b PingBatch, req Request) bool {
+	scope := req.Scope
+	if scope == "" {
+		scope = ScopeAll
+	}
+	return b.Scope == scope && b.Group == req.Group
 }
 
 // Probe использует ту же очередь, что и пользователь. После 30 секунд

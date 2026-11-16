@@ -107,6 +107,8 @@ func (a *API) writeRoutingError(w http.ResponseWriter, r *http.Request, err erro
 		JSONErrorCode(w, http.StatusConflict, "kernel_restarting", a.t(r, "configlayer.routing.kernel_restarting"))
 	case errors.Is(err, routing.ErrPingUnavailable), errors.Is(err, proxyping.ErrStopped):
 		JSONErrorCode(w, http.StatusConflict, "ping_unavailable", a.t(r, "configlayer.routing.ping_unavailable"))
+	case errors.Is(err, proxyping.ErrBusy):
+		JSONErrorCode(w, http.StatusConflict, "ping_busy", a.t(r, "configlayer.routing.ping_busy"))
 	case errors.Is(err, routing.ErrGroupNoNodes):
 		JSONErrorCode(w, http.StatusConflict, "group_no_nodes", a.t(r, "configlayer.routing.group_no_nodes"))
 	case errors.Is(err, proxyping.ErrNoTargets):

@@ -107,9 +107,12 @@ func TestRouterPingTempXray(t *testing.T) {
 		r, _ := pingRunner(t, nil)
 		first := pingLaunch(t, r, targets, pingHTTP(t, 0))
 		pid, dir := pingWaitProcess(t, r.d.TmpRoot)
-		joined, err := r.Launch(Request{Scope: ScopeGroup})
+		joined, err := r.Launch(Request{Scope: ScopeAll})
 		if err != nil || !joined.Joined || joined.BatchID != first.BatchID {
 			t.Fatal("batch_not_joined")
+		}
+		if _, err := r.Launch(Request{Scope: ScopeGroup, Group: "other"}); !errors.Is(err, ErrBusy) {
+			t.Fatalf("foreign_batch_not_busy: %v", err)
 		}
 		routertest.WaitCond(t, 5*time.Second, "готовый узел", func() bool { return r.Snapshot().Results[targets[0].Ref].Status == StatusOK })
 		start := time.Now()

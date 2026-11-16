@@ -40,6 +40,9 @@ const (
 var (
 	ErrNoTargets = errors.New("ping_no_targets")
 	ErrStopped   = errors.New("ping_stopped")
+	// ErrBusy — идёт пачка другого охвата или другой группы: пользовательский
+	// запуск не присоединяется к ней молча (ping_busy).
+	ErrBusy = errors.New("ping_busy")
 )
 
 type Target struct {
