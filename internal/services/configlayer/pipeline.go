@@ -77,6 +77,12 @@ type ApplyRequest struct {
 	Trigger     Trigger
 	Source      SourceKind
 	Only        []string
+	// BuildOnly — ID генераторов, которыми собирается запуск (пусто — все). Только
+	// запуск выбора Xray: выбор меняет один файл исходящих групп, остальные файлы от
+	// него не зависят. План сужается до ключей файлов этих генераторов (их отпущенные
+	// файлы не забираются), сироты не собираются; проверка дрейфа и проверки до
+	// записи (Registry.Check) идут полностью, как без поля.
+	BuildOnly []string
 	// ApplySeq — номер запуска «Применить» из хуков BeforeApply (0 — хуки не
 	// вызывались); возвращается хукам AfterApply в AfterApplyInfo.
 	ApplySeq int64
@@ -808,9 +814,12 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 		files []GeneratedFile
 		err   error
 	)
-	if timed {
+	switch {
+	case len(req.BuildOnly) > 0:
+		files, bt.gens, err = p.d.Registry.BuildSubsetTimed(used, installed, req.BuildOnly)
+	case timed:
 		files, bt.gens, err = p.d.Registry.BuildTimed(used, installed)
-	} else {
+	default:
 		files, err = p.d.Registry.Build(used, installed)
 	}
 	if err == nil {
@@ -832,6 +841,23 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 		only := make(map[string]bool, len(req.Only))
 		for _, k := range req.Only {
 			only[k] = true
+		}
+		if len(req.BuildOnly) > 0 {
+			// Сокращённая сборка: файлы остальных генераторов не собраны, поэтому план
+			// (запись, удаление, сироты) — только по ключам собранных файлов, иначе
+			// файлы других генераторов ушли бы в удаление. Отпущенный файл в only не
+			// попадает: имя в only его забирает («Пересобрать»), а полная сборка его
+			// пропускает.
+			for _, f := range files {
+				if e, ok := manifest[f.Key()]; ok && e.Status == StatusReleased && !only[f.Key()] {
+					continue
+				}
+				only[f.Key()] = true
+			}
+			if len(only) == 0 {
+				// Собранные файлы все отпущены: писать нечего (пустой only снял бы сужение).
+				only[""] = true
+			}
 		}
 		skipPlan := false
 		if listenerOnly {

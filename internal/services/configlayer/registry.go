@@ -180,12 +180,46 @@ type GenTiming struct {
 // каждого генератора в порядке регистрации. Время возвращается и при ошибке
 // сборки: по нему видно, какой генератор держал этап.
 func (r *Registry) BuildTimed(in Input, installed InstalledKernels) ([]GeneratedFile, []GenTiming, error) {
-	var out []GeneratedFile
-	owner := make(map[string]string)
-	var issues []BuildIssue
 	r.mu.RLock()
 	generators := append([]Generator(nil), r.generators...)
 	r.mu.RUnlock()
+	return buildGenerators(generators, in, installed, nil)
+}
+
+// BuildSubsetTimed — сборка BuildTimed только генераторами с ID из ids (порядок
+// регистрации, отбор файлов и ошибки прежние). Нужна запуску выбора: выбор меняет
+// файлы одного генератора, остальные от него не зависят. ID, которого нет в
+// реестре, — ошибка сборки generator_failed с этим ID.
+func (r *Registry) BuildSubsetTimed(in Input, installed InstalledKernels, ids []string) ([]GeneratedFile, []GenTiming, error) {
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	r.mu.RLock()
+	var generators []Generator
+	for _, g := range r.generators {
+		if want[g.ID()] {
+			generators = append(generators, g)
+			delete(want, g.ID())
+		}
+	}
+	r.mu.RUnlock()
+	var unknown []BuildIssue
+	for _, id := range ids {
+		if want[id] {
+			unknown = append(unknown, BuildIssue{Key: id, Code: IssueGeneratorFailed, Detail: id + ": генератор не зарегистрирован"})
+			delete(want, id)
+		}
+	}
+	return buildGenerators(generators, in, installed, unknown)
+}
+
+// buildGenerators — общая часть BuildTimed и BuildSubsetTimed: вызывает генераторы
+// по порядку, отбрасывает файлы неустановленных ядер и собирает проблемы (issues —
+// проблемы, найденные до вызова генераторов).
+func buildGenerators(generators []Generator, in Input, installed InstalledKernels, issues []BuildIssue) ([]GeneratedFile, []GenTiming, error) {
+	var out []GeneratedFile
+	owner := make(map[string]string)
 	timings := make([]GenTiming, 0, len(generators))
 	for _, g := range generators {
 		genStart := time.Now()

@@ -199,6 +199,11 @@ func (s *Service) execXrayBatch(b *xrayBatch) {
 		// Выбор меняет только тела исходящих xcp-groups: проверка Xray — по
 		// изменённым исходящим, отказ — полная проверка конвейера (150-17, F4).
 		run.XrayValidate = s.xrayValidateChanged
+		// Выбор меняет только xcp-groups, остальные файлы Xray от выбора не зависят:
+		// сборка — только генератором этого файла (150-24, F6); дрейф и проверки до
+		// записи конвейер проводит полностью. «Повторить» (xrayRunConfirm) переписывает
+		// файл целиком и собирает всё.
+		run.BuildOnly = []string{xrayGenID}
 	}
 	run.XrayHot = func(hctx context.Context, files []configlayer.HotFile) error {
 		start := time.Now()

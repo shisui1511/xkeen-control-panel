@@ -1593,6 +1593,9 @@ type LiveRun struct {
 	XrayValidate XrayValidateFunc
 	// ReapplyKeys повторно записывает файлы для сверки неизвестного рантайма.
 	ReapplyKeys []string
+	// BuildOnly — ID генераторов сокращённой сборки (ApplyRequest.BuildOnly);
+	// пусто — все генераторы.
+	BuildOnly []string
 	// Prepare вызывается под замками применения и жизненного цикла до сборки:
 	// вызывающий пишет здесь живые данные, которые должна увидеть сборка этого
 	// запуска (намерения выбора). Ошибка — конвейер не запускается, RunLive
@@ -1652,7 +1655,7 @@ func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 			return ApplyView{}, err
 		}
 	}
-	req := ApplyRequest{Trigger: run.Trigger, Source: SourceApplied, LiveOverlay: run.Overlay, Kernel: run.Kernel, XrayHot: run.XrayHot, XrayValidate: run.XrayValidate, ReapplyKeys: run.ReapplyKeys}
+	req := ApplyRequest{Trigger: run.Trigger, Source: SourceApplied, LiveOverlay: run.Overlay, Kernel: run.Kernel, XrayHot: run.XrayHot, XrayValidate: run.XrayValidate, ReapplyKeys: run.ReapplyKeys, BuildOnly: run.BuildOnly}
 	view := l.runPipeline(req)
 	pipeD = time.Since(start)
 	release()
