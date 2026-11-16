@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -115,6 +117,49 @@ func rtRtUniqueLinkOf(t *testing.T, fixture string, salt int) string {
 		t.Fatal("в ссылке фикстуры нет порта")
 	}
 	return re.ReplaceAllString(link, "${1}:"+strconv.Itoa(port))
+}
+
+// rtRtLinkAt — ссылка фикстуры с адресом 127.0.0.1:port.
+func rtRtLinkAt(t *testing.T, fixture string, port int) string {
+	t.Helper()
+	link := rtLinkText(t, fixture)
+	re := regexp.MustCompile(`@[^:/?#]+:\d+`)
+	if !re.MatchString(link) {
+		t.Fatal("в ссылке фикстуры нет адреса с портом")
+	}
+	return re.ReplaceAllString(link, "@127.0.0.1:"+strconv.Itoa(port))
+}
+
+// rtRtBlackhole — TCP на loopback, который принимает соединения и не отвечает
+// до конца теста. Возвращает порт.
+func rtRtBlackhole(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("чёрная дыра: %v", err)
+	}
+	var mu sync.Mutex
+	var conns []net.Conn
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+	})
+	return ln.Addr().(*net.TCPAddr).Port
 }
 
 // rtRtView читает представление маршрутизации.
@@ -735,9 +780,13 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	})
 
 	// Оба узла выражаются в обоих ядрах: выбор узла, которого активное ядро не
-	// умеет (trojan_ws в Xray — xray_no_insecure), на его файлы не влияет.
-	e.rtRstAddMyNode(rtRtUniqueLinkOf(t, "vless_ws", 1))
-	e.rtRstAddMyNode(rtRtUniqueLinkOf(t, "trojan_grpc", 2))
+	// умеет (trojan_ws в Xray — xray_no_insecure), на его файлы не влияет. Адрес
+	// узлов — «чёрная дыра» на loopback: соединение принимается и молчит, замер
+	// идёт до таймаута пробы, и повтор пинга успевает присоединиться к пачке
+	// (отказ соединения закончил бы пачку Mihomo раньше повтора).
+	hole := rtRtBlackhole(t)
+	e.rtRstAddMyNode(rtRtLinkAt(t, "vless_ws", hole))
+	e.rtRstAddMyNode(rtRtLinkAt(t, "trojan_grpc", hole))
 
 	// До взятия и «Применить» группа не применена: select отвечает group_not_applied.
 	save := e.call(http.MethodPost, rtRoutingBase+"/groups/save", map[string]any{
