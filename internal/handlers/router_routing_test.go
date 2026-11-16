@@ -760,36 +760,6 @@ const rtRtSelectBusyWait = 2 * time.Second
 // rtRtSnapPoll — шаг опроса вида «Прокси» во время параллельных выборов.
 const rtRtSnapPoll = 25 * time.Millisecond
 
-// rtRtSelectFixes — решение плана 150-17 по выборке масштаба UAT сессии 150-16
-// (четыре строки select-stages: core=xray kind=scale): θ = min(1000; 0,2·T₁) =
-// 779,9 мс; F2 (сверка и публикация после запуска выбора в фоне) — A = медиана
-// after RunLive 663,5 < θ, не сработало; F4 (проверка Xray запуска выбора по
-// изменённым исходящим с откатом к полной) — V = медиана validate_xray 1310 ≥ θ,
-// сработало; F5 (снятие маркеров selection_unconfirmed в записи коммита) — M =
-// медиана markers 46,5 < θ, не сработало.
-const rtRtSelectFixes = "F2=skip F4=fired F5=skip"
-
-// rtRtSelectBudget — порог total строки этапов выбора Xray (только ядро xray) с
-// wait ≤ 100 мс; rtRtSelectWaitBudget — с wait > 100 мс (выбор ждал не больше
-// одного чужого прохода и прошёл свой). Формулы плана 150-17:
-// B = вверх до 500 мс (T_max − R) + selectBusyWait (2 с),
-// B_wait = 2 × вверх до 500 мс (T_max − R) + selectBusyWait (2 с),
-// R = [F2]·A + [F5]·M — снятые этапы; сокращение F4 не вычитается.
-// Выборка: отчёт build/router/20261116-143808-1686a2f2 (xray, перегон 2), total
-// 3939, 3860, 3838, 16163 мс: T₁ = медиана 3899,5, T_max = 16163, разброс 12325
-// (четвёртый выбор — выброс: validate_xray 9151, write 4441; максимум его
-// учитывает). R = 0 (F2 и F5 не сработали): B = 16500 + 2000 = 18500 мс,
-// B_wait = 2 × 16500 + 2000 = 35000 мс. Порог — регрессионный страж общего
-// времени, эффект исправлений доказывают бюджеты этапов rtRtStageBudget.
-const rtRtSelectBudget = 18500 * time.Millisecond
-
-// rtRtSelectWaitBudget — порог total строки с wait > 100 мс (см. rtRtSelectBudget).
-const rtRtSelectWaitBudget = 35000 * time.Millisecond
-
-// rtRtWaitedMS — wait строки этапов, начиная с которого выбор считается ждавшим
-// хода (порог rtRtSelectWaitBudget).
-const rtRtWaitedMS = 100
-
 // rtRtMihomoSelectBudget — граница медианы total строк этапов выбора на ядре mihomo
 // (одиночный выбор и выборы барьера D-17), объявленная планом 150-19 до замера и
 // по его итогу не пересматриваемая. При запущенном Mihomo и остановленном Xray
@@ -813,27 +783,6 @@ func rtRtStagesWait(core string) time.Duration {
 		return 90 * time.Second
 	}
 	return 5 * time.Second
-}
-
-// rtRtStageBudget — бюджет медианы этапа строк kind=scale для сработавших правил
-// с подтверждаемым эффектом: вниз до 100 мс от min(0,7·med; med − разброс) по
-// выборке 150-16. F4 (validate_xray): med 1310, разброс 9151 − 1189 = 7962,
-// min(917; −6652) < 100 мс — этап шумный, эффект F4 не подтверждаем, бюджета нет.
-// Ключ after — медиана after строк runlive-stages: масштаба.
-var rtRtStageBudget = map[string]time.Duration{}
-
-// rtRtCheckSelectBudget сверяет total строки этапов выбора Xray с порогом по wait.
-// В сообщении — вид выбора и числа.
-func rtRtCheckSelectBudget(t *testing.T, kind string, st rtRtStage) {
-	t.Helper()
-	wait, total := st.num("wait"), st.num("total")
-	limit := rtRtSelectBudget
-	if wait > rtRtWaitedMS {
-		limit = rtRtSelectWaitBudget
-	}
-	if total > limit.Milliseconds() {
-		t.Errorf("время выбора Xray (%s): total %d мс при wait %d мс, порог %d мс", kind, total, wait, limit.Milliseconds())
-	}
 }
 
 // rtRtMedian — медиана выборки (пустая — 0).
@@ -1242,257 +1191,54 @@ func (e *rtSrc) rtRtSourcesCount() int {
 	return n
 }
 
-// rtRtScaleUAT снимает этапы горячего выбора Xray на конфигурации уровня UAT
-// (G-150-3): настоящая подписка стенда в «Выбор» (sources.all), правила пресета со
-// списками geosite/geoip из dat-файлов стенда, «Применить», четыре
-// последовательных горячих выбора и пара ожидания — выбор «Выбор» и независимый
-// выбор «Вторая», отправленный, когда «Выбор» уже switching. Возвращает
-// наибольший wait строк этапов ответов 200. Адрес подписки, ответы источников с
-// ним, подписи узлов, адреса и содержимое файлов не печатаются (T-150-45,
-// T-150-54): в журнал теста — только числа, ID групп и коды.
-func (e *rtSrc) rtRtScaleUAT(subURL, gid, secondID string, runtimeView func() map[string]any) int64 {
+// rtRtFindGroupID ищет группу представления по ID.
+func rtRtFindGroupID(view map[string]any, id string) map[string]any {
+	groups, _ := view["groups"].([]any)
+	for _, g := range groups {
+		if m, _ := g.(map[string]any); m != nil && m["id"] == id {
+			return m
+		}
+	}
+	return nil
+}
+
+// rtRtLongwaitPair — пара ожидания (условие отказа G-150-3, D-17): выбор A группы
+// gid и выбор B независимой группы secondID, отправленный, когда gid уже switching
+// (или пришёл ответ A). Цели — узлы ядра core с подписью, отличной от текущей
+// (вид «Прокси» из runtimeView). Внутри — только проверки правильности: оба ответа
+// 200 без apply_busy, исход ядра core applied (на Xray — без restart_reason),
+// current обеих групп — цели; ошибки начинаются с «корректность:». Порог времени —
+// только через check (nil — без порога). Строки select-stages: и runlive-stages:
+// несут метку kind. Возвращает наибольший wait строк этапов ответов 200 и wait
+// строки secondID (-1 — строки нет). В журнал теста — только ID групп, коды и числа.
+func (e *rtSrc) rtRtLongwaitPair(core, kind, gid, secondID string, check func(t *testing.T, kind string, st rtRtStage), runtimeView func() map[string]any) (maxWait, secondWait int64) {
 	t := e.t
 	t.Helper()
-	var maxWait int64
-
-	// Подписка удаляется при любом исходе блока, до общей очистки теста.
-	t.Cleanup(func() {
-		c := e.with(t)
-		for i := 0; i < 5; i++ {
-			id := c.rtDNSSubscriptionID()
-			if id == "" {
-				break
-			}
-			if r := c.call(http.MethodPost, rtSourcesBase+"/delete", map[string]any{"revision": c.revision(), "id": id}); r.Status != http.StatusOK {
-				t.Errorf("очистка масштаба: удаление подписки: %d %s", r.Status, r.Code)
-				return
-			}
-		}
-		if c.rtRtDraftChanges() > 0 {
-			c.rtRtApplyOK("очистка масштаба: подписка")
-		}
-	})
-	pv := e.call(http.MethodPost, rtSourcesBase+"/preview", map[string]any{"text": subURL})
-	if pv.Status != http.StatusOK {
-		t.Fatalf("масштаб: sources/preview: %d %s", pv.Status, pv.Code)
-	}
-	token, _ := pv.object(t)["token"].(string)
-	if add := e.call(http.MethodPost, rtSourcesBase+"/add", map[string]any{"revision": e.revision(), "token": token}); add.Status != http.StatusOK {
-		t.Fatalf("масштаб: sources/add: %d %s", add.Status, add.Code)
-	}
-	subID := e.rtDNSSubscriptionID()
-	if subID == "" {
-		t.Fatal("масштаб: подписки стенда нет в источниках после добавления")
-	}
-
-	// Правила пресета со списками: «всё, кроме страны» с RU, если RU есть среди
-	// стран пресетов, иначе «всё через прокси». Маршрутизация уже взята.
-	pr := e.call(http.MethodGet, rtRoutingBase+"/presets", nil)
-	if pr.Status != http.StatusOK {
-		t.Fatalf("масштаб: GET presets: %d %s", pr.Status, pr.Code)
-	}
-	hasRU := false
-	presets, _ := pr.object(t)["presets"].([]any)
-	for _, p := range presets {
-		pm, _ := p.(map[string]any)
-		cs, _ := pm["countries"].([]any)
-		for _, c := range cs {
-			if c == "RU" {
-				hasRU = true
-			}
-		}
-	}
-	flags := map[string]bool{"quic": false, "torrent": false, "ads": false, "service_groups": false}
-	choice := map[string]any{"id": "all_proxy", "flags": flags}
-	if hasRU {
-		choice = map[string]any{"id": "except_country", "country": "RU", "flags": flags}
-	}
-	pl := e.call(http.MethodPost, rtRoutingBase+"/presets/plan", map[string]any{"choice": choice})
-	if pl.Status != http.StatusOK {
-		t.Fatalf("масштаб: presets/plan: %d %s", pl.Status, pl.Code)
-	}
-	if add, _ := pl.object(t)["add"].([]any); len(add) == 0 {
-		t.Errorf("масштаб: presets/plan (%s) не добавляет правил", choice["id"])
-	}
-	if ap := e.call(http.MethodPost, rtRoutingBase+"/presets/apply", map[string]any{"revision": e.rtRtRevision(), "choice": choice, "take": false}); ap.Status != http.StatusOK {
-		t.Fatalf("масштаб: presets/apply: %d %s", ap.Status, ap.Code)
-	}
-	e.rtRtApplyOK("масштаб UAT")
-	draftScale := e.rtRtDraftChanges()
-
-	// Конфигурация замера: узлы «Выбор», совместимые с Xray, правила и
-	// условия-списки, размеры файлов панели (только числа).
+	secondWait = -1
 	rv := runtimeView()
-	rg := rtRtFindGroup(rv, "Выбор")
-	if rg == nil {
-		t.Fatal("масштаб: нет группы «Выбор» в виде «Прокси»")
-	}
-	members, _ := rg["members"].([]any)
-	var cands []string
-	xrayNodes := 0
-	for _, it := range members {
-		m, _ := it.(map[string]any)
-		if m["kind"] != "node" || m["xray"] != true {
-			continue
+	target := func(id string) string {
+		g := rtRtFindGroupID(rv, id)
+		if g == nil {
+			t.Fatalf("пара ожидания (%s): нет группы %s в виде «Прокси»", kind, id)
 		}
-		xrayNodes++
-		if m["source"] == subID {
-			member, _ := m["member"].(string)
-			cands = append(cands, member)
-		}
-	}
-	rules, lists := 0, 0
-	rs, _ := e.rtRtView()["rules"].([]any)
-	for _, it := range rs {
-		r, _ := it.(map[string]any)
-		rules++
-		conds, _ := r["conds"].([]any)
-		for _, ci := range conds {
-			c, _ := ci.(map[string]any)
-			ls, _ := c["lists"].([]any)
-			if c["type"] == "geosite" || c["type"] == "geoip" || len(ls) > 0 {
-				lists++
+		curLabel, _ := g["current_label"].(string)
+		ms, _ := g["members"].([]any)
+		for _, it := range ms {
+			m, _ := it.(map[string]any)
+			if m["kind"] == "node" && m[core] == true && m["name"] != curLabel {
+				member, _ := m["member"].(string)
+				return member
 			}
 		}
-	}
-	size := func(name string) int64 {
-		st, err := os.Stat(filepath.Join(rtRtXrayDir, name))
-		if err != nil {
-			return 0
-		}
-		return st.Size()
-	}
-	t.Logf("scale-config: core=xray nodes=%d rules=%d lists=%d groups_bytes=%d routing_bytes=%d",
-		xrayNodes, rules, lists, size("04_outbounds.xcp-groups.tail.json"), size("99_xcp-routing.json"))
-	if xrayNodes < 20 {
-		t.Logf("scale: узлов группы, совместимых с Xray, %d (меньше 20): замер менее представителен", xrayNodes)
-	}
-	// Четыре выбора замера и выбор A пары ожидания — пять разных узлов подписки.
-	if len(cands) < 5 {
-		t.Fatalf("масштаб: узлов подписки, совместимых с Xray, %d, ожидалось не меньше 5", len(cands))
-	}
-	used := map[string]bool{}
-	pick := func(cur string) string {
-		for _, m := range cands {
-			if m != cur && !used[m] {
-				used[m] = true
-				return m
-			}
-		}
+		t.Fatalf("пара ожидания (%s): у группы %s нет узла ядра %s с подписью, отличной от текущей", kind, id, core)
 		return ""
 	}
-	currentOf := func(name string) string {
-		g := rtRtFindGroup(e.rtRtView(), name)
-		if g == nil {
-			t.Fatalf("масштаб: нет группы %s в представлении", name)
-		}
-		cur, _ := g["current"].(string)
-		return cur
-	}
-	expectHot := func(label string, obj map[string]any) {
-		ks, _ := obj["kernels"].(map[string]any)
-		if out, _ := ks["xray"].(string); out != "applied" {
-			t.Errorf("%s: исход Xray %q, ожидалось applied", label, out)
-		}
-		if reason, present := obj["restart_reason"]; present {
-			t.Errorf("%s: горячая смена потребовала перезапуск: restart_reason=%v", label, reason)
-		}
-	}
-	pids, _ := rtRstKernelPIDs("xray")
-	if len(pids) != 1 {
-		t.Fatalf("масштаб: до выборов PID Xray %d, ожидался один", len(pids))
-	}
-
-	// Четыре последовательных горячих выбора: строка RunLive окна принадлежит
-	// своему выбору. Порог total — rtRtSelectBudget/rtRtSelectWaitBudget, медианы
-	// этапов сработавших правил — rtRtStageBudget (план 150-17).
-	scaleVals := map[string][]int64{}
-	for n := 1; n <= 4; n++ {
-		member := pick(currentOf("Выбор"))
-		offset := rtRtLogOffset(t)
-		start := time.Now()
-		r := e.callSlow(http.MethodPost, rtRoutingBase+"/select", map[string]string{"group": gid, "member": member})
-		httpMS := time.Since(start).Milliseconds()
-		if r.Status != http.StatusOK {
-			t.Fatalf("масштаб: выбор №%d: %d %s", n, r.Status, r.Code)
-		}
-		expectHot("масштаб: выбор №"+strconv.Itoa(n), r.object(t))
-		stages, runlive, ok := rtRtWaitStages(offset, []string{gid}, 1, rtRtStagesWait("xray"))
-		if !ok {
-			t.Errorf("масштаб: выбор №%d: в журнале панели нет строки этапов или RunLive (строк RunLive %d)", n, len(runlive))
-			continue
-		}
-		st := stages[gid]
-		t.Logf("select-stages: core=xray kind=scale n=%d http=%d %s", n, httpMS, st.pairs)
-		for _, rl := range runlive {
-			t.Logf("runlive-stages: core=xray kind=scale n=%d %s", n, rl)
-			if after := rtRtRunLiveNum(rl, "after"); after >= 0 {
-				scaleVals["after"] = append(scaleVals["after"], after)
-			}
-		}
-		maxWait = max(maxWait, st.num("wait"))
-		rtRtCheckSelectBudget(t, "масштаб №"+strconv.Itoa(n), st)
-		for stage := range rtRtStageBudget {
-			if stage != "after" {
-				scaleVals[stage] = append(scaleVals[stage], st.num(stage))
-			}
-		}
-	}
-	// Эффект сработавших правил: медиана этапа по строкам масштаба не больше бюджета.
-	for stage, budget := range rtRtStageBudget {
-		vals := scaleVals[stage]
-		if len(vals) == 0 {
-			t.Errorf("масштаб: этап %s: нет значений в строках этапов, бюджет %d мс", stage, budget.Milliseconds())
-			continue
-		}
-		if med := rtRtMedian(vals); med > float64(budget.Milliseconds()) {
-			t.Errorf("масштаб: медиана этапа %s %.1f мс по %d выборам, бюджет %d мс", stage, med, len(vals), budget.Milliseconds())
-		}
-	}
-	checkAfter := func(label string, groups ...string) {
-		after, _ := rtRstKernelPIDs("xray")
-		if len(after) != 1 || after[0] != pids[0] {
-			t.Errorf("%s: PID Xray прежний=%t, процессов %d", label, reflect.DeepEqual(after, pids), len(after))
-		}
-		v := runtimeView()
-		for _, name := range groups {
-			g := rtRtFindGroup(v, name)
-			if g == nil || g["switching"] != false || g["unconfirmed"] != false {
-				t.Errorf("%s: группа %s не в покое (есть=%t)", label, name, g != nil)
-			}
-		}
-		if e.rtRtDraftChanges() != draftScale {
-			t.Errorf("%s: выборы изменили черновик", label)
-		}
-	}
-	checkAfter("масштаб", "Выбор")
-
-	// Пара ожидания: условие отказа G-150-3 на проходе уровня UAT. A — «Выбор»; B
-	// — независимая «Вторая», отправленная, когда «Выбор» уже switching (или пришёл
-	// ответ A). Оба обязаны получить 200; длительность прохода тест не подстраивает.
-	mA := pick(currentOf("Выбор"))
-	sg := rtRtFindGroup(runtimeView(), "Вторая")
-	if sg == nil {
-		t.Fatal("масштаб: нет группы «Вторая» в виде «Прокси»")
-	}
-	curLabel, _ := sg["current_label"].(string)
-	mB := ""
-	sm, _ := sg["members"].([]any)
-	for _, it := range sm {
-		m, _ := it.(map[string]any)
-		if m["kind"] == "node" && m["xray"] == true && m["name"] != curLabel {
-			mB, _ = m["member"].(string)
-			break
-		}
-	}
-	if mB == "" {
-		t.Fatal("масштаб: у «Вторая» нет узла Xray с подписью, отличной от текущей")
-	}
+	pair := [2]struct{ id, member string }{{gid, target(gid)}, {secondID, target(secondID)}}
 	offset := rtRtLogOffset(t)
 	startA, startB := make(chan struct{}), make(chan struct{})
 	out := make(chan rtRtSelRes, 2)
-	go e.rtRtSelectAsync(0, gid, mA, startA, out)
-	go e.rtRtSelectAsync(1, secondID, mB, startB, out)
+	go e.rtRtSelectAsync(0, pair[0].id, pair[0].member, startA, out)
+	go e.rtRtSelectAsync(1, pair[1].id, pair[1].member, startB, out)
 	close(startA)
 	var res [2]rtRtSelRes
 	got, switching := 0, false
@@ -1513,53 +1259,65 @@ func (e *rtSrc) rtRtScaleUAT(subURL, gid, secondID string, runtimeView func() ma
 		r := <-out
 		res[r.job] = r
 	}
-	pair := [2]struct{ name, id, member string }{{"Выбор", gid, mA}, {"Вторая", secondID, mB}}
 	var okGroups []string
 	for i, r := range res {
 		if r.err != nil {
-			t.Fatalf("масштаб: пара ожидания, выбор %s: %v", pair[i].id, r.err)
+			t.Fatalf("пара ожидания (%s), выбор %s: %v", kind, pair[i].id, r.err)
 		}
 		resp := e.decode(r.status, r.raw)
 		httpMS := r.done.Sub(r.sent).Milliseconds()
 		switch {
 		case resp.Code == "apply_busy":
-			t.Errorf("G-150-3: независимый выбор получил apply_busy во время прохода (группа %s, ответ через %d мс)", pair[i].id, httpMS)
+			t.Errorf("корректность: G-150-3 (%s): независимый выбор получил apply_busy во время прохода (группа %s, ответ через %d мс)", kind, pair[i].id, httpMS)
 		case r.status != http.StatusOK:
-			t.Errorf("масштаб: пара ожидания, выбор %s: %d %s, ожидалось 200", pair[i].id, resp.Status, resp.Code)
+			t.Errorf("корректность: пара ожидания (%s), выбор %s: %d %s, ожидалось 200", kind, pair[i].id, resp.Status, resp.Code)
 		default:
 			okGroups = append(okGroups, pair[i].id)
-			expectHot("масштаб: пара ожидания, выбор "+pair[i].id, resp.object(t))
+			obj := resp.object(t)
+			ks, _ := obj["kernels"].(map[string]any)
+			if o, _ := ks[core].(string); o != "applied" {
+				t.Errorf("корректность: пара ожидания (%s), выбор %s: исход ядра %s %q, ожидалось applied", kind, pair[i].id, core, o)
+			}
+			if reason, present := obj["restart_reason"]; present && core == "xray" {
+				t.Errorf("корректность: пара ожидания (%s), выбор %s: горячая смена потребовала перезапуск: restart_reason=%v", kind, pair[i].id, reason)
+			}
 		}
 	}
 	// Строки этапов обеих групп (у отказа apply_busy она тоже есть — с его wait).
-	stages, runlive, ok := rtRtWaitStages(offset, []string{gid, secondID}, 1, rtRtStagesWait("xray"))
+	stages, runlive, ok := rtRtWaitStages(offset, []string{gid, secondID}, 1, rtRtStagesWait(core))
 	if !ok {
-		t.Errorf("масштаб: пара ожидания: в журнале панели нет строк этапов обеих групп или RunLive (строк RunLive %d)", len(runlive))
+		t.Errorf("пара ожидания (%s): в журнале панели нет строк этапов обеих групп или RunLive (строк RunLive %d)", kind, len(runlive))
 	}
 	for i, p := range pair {
 		st, present := stages[p.id]
 		if !present {
 			continue
 		}
-		t.Logf("select-stages: core=xray kind=longwait group=%s http=%d %s", p.id, res[i].done.Sub(res[i].sent).Milliseconds(), st.pairs)
+		t.Logf("select-stages: core=%s kind=%s group=%s http=%d %s", core, kind, p.id, res[i].done.Sub(res[i].sent).Milliseconds(), st.pairs)
+		if p.id == secondID {
+			secondWait = st.num("wait")
+		}
 		for _, g := range okGroups {
 			if g == p.id {
 				maxWait = max(maxWait, st.num("wait"))
-				rtRtCheckSelectBudget(t, "пара ожидания "+p.id, st)
+				if check != nil {
+					check(t, "пара ожидания "+p.id, st)
+				}
 			}
 		}
 	}
 	for _, rl := range runlive {
-		t.Logf("runlive-stages: core=xray kind=longwait %s", rl)
+		t.Logf("runlive-stages: core=%s kind=%s %s", core, kind, rl)
 	}
-	t.Logf("scale: пара ожидания: B отправлен после switching «Выбор»=%t", switching)
+	t.Logf("%s: B отправлен после switching группы %s=%t", kind, gid, switching)
+	view := e.rtRtView()
 	for _, p := range pair {
-		if cur := currentOf(p.name); cur != p.member {
-			t.Errorf("масштаб: пара ожидания: current группы %s не равен цели", p.id)
+		g := rtRtFindGroupID(view, p.id)
+		if cur, _ := g["current"].(string); g == nil || cur != p.member {
+			t.Errorf("корректность: пара ожидания (%s): current группы %s не равен цели", kind, p.id)
 		}
 	}
-	checkAfter("масштаб: пара ожидания", "Выбор", "Вторая")
-	return maxWait
+	return maxWait, secondWait
 }
 
 // Выбор участника ручной группы: флаг → два узла → ручная группа → take → «Применить»
@@ -1571,7 +1329,6 @@ func (e *rtSrc) rtRtScaleUAT(subURL, gid, secondID string, runtimeView func() ma
 func TestRouterRoutingSelectLive(t *testing.T) {
 	routertest.Slow(t, "серия «Применить» и переключение группы на живом ядре")
 	tg := routertest.CoreSpecific(t)
-	t.Logf("select-fixes: %s", rtRtSelectFixes)
 	e := rtNewSrc(t)
 	e.enableLayer()
 	e.rtRstIdle()
@@ -1595,8 +1352,8 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	if e.rtRtDraftChanges() > 0 {
 		e.rtRtApplyOK("удаление оставшейся подписки")
 	}
-	// Регистрируется раньше общей очистки и выполняется после неё (и после очистки
-	// блока масштаба): последний шаг — число подписок, ожидается 0.
+	// Регистрируется раньше общей очистки и выполняется после неё: последний шаг —
+	// число подписок, ожидается 0.
 	t.Cleanup(func() {
 		n := e.with(t).rtRtSourcesCount()
 		t.Logf("sources-end: core=%s subscriptions=%d", tg.Core, n)
@@ -1843,9 +1600,9 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 			st := stages[gid]
 			t.Logf("select-stages: core=%s kind=single nodes=%d group=%s http=%d %s", tg.Core, len(distinct), gid, selHTTP, st.pairs)
 			maxWait = max(maxWait, st.num("wait"))
-			if tg.Core == "xray" {
-				rtRtCheckSelectBudget(t, "одиночный", st)
-			} else {
+			// Порог времени Xray — в TestRouterRoutingSelectScale (карантин);
+			// здесь строка этапов только пишется в журнал.
+			if tg.Core == "mihomo" {
 				mihomoTotals = append(mihomoTotals, st.num("total"))
 				mihomoHTTP = append(mihomoHTTP, selHTTP)
 			}
@@ -2197,9 +1954,7 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 				httpMS := r.done.Sub(r.sent).Milliseconds()
 				t.Logf("select-stages: core=%s kind=parallel group=%s http=%d %s", tg.Core, g, httpMS, st.pairs)
 				maxWait = max(maxWait, st.num("wait"))
-				if tg.Core == "xray" {
-					rtRtCheckSelectBudget(t, "барьер "+g, st)
-				} else {
+				if tg.Core == "mihomo" {
 					mihomoTotals = append(mihomoTotals, st.num("total"))
 					mihomoHTTP = append(mihomoHTTP, httpMS)
 				}
@@ -2434,15 +2189,24 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 		}
 	}
 
-	// Масштаб UAT: этапы горячего выбора Xray на настоящей подписке стенда с
-	// правилами пресета (13 с UAT — горячий путь Xray). Только на ядре xray и только
-	// при адресе подписки; без него — запись в журнале теста, тест не пропускается.
-	if tg.Core == "xray" {
-		if subURL := os.Getenv("XCP_RT_SUBSCRIPTION_URL"); subURL == "" {
-			t.Logf("scale: пропуск, нет подписки стенда")
-		} else {
-			maxWait = max(maxWait, e.rtRtScaleUAT(subURL, gid, secondID, runtimeView))
+	// Пара ожидания без порога времени (D-17, условие отказа G-150-3): выбор
+	// независимой «Вторая», отправленный, пока идёт проход «Выбор», получает 200 без
+	// apply_busy, current обеих групп — цели. Идёт после проверок «Применить»: цель
+	// «Выбор» пары может совпасть по подписи с исходным выбором. До трёх попыток,
+	// пока ожидание строки «Вторая» не станет не меньше selectBusyWait; короткий
+	// проход — executed=false в строке d17-longwait, не ошибка. Без прохода Xray
+	// строк этапов нет — пара не исполняется.
+	if xrayPath {
+		for attempt := 1; attempt <= 3; attempt++ {
+			w, second := e.rtRtLongwaitPair(tg.Core, "longwait-live", gid, secondID, nil, runtimeView)
+			maxWait = max(maxWait, w)
+			t.Logf("longwait-live: core=%s attempt=%d second_wait=%d busy_wait=%d", tg.Core, attempt, second, rtRtSelectBusyWait.Milliseconds())
+			if second >= rtRtSelectBusyWait.Milliseconds() {
+				break
+			}
 		}
+	} else {
+		t.Logf("longwait-live: core=%s skipped=no_xray_path", tg.Core)
 	}
 
 	// Условие отказа G-150-3: выбор ждал чужой проход дольше selectBusyWait (2 с) и

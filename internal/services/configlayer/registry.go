@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 )
 
 // Expectation — что должно быть видно в Mihomo после перезагрузки провайдера:
@@ -164,14 +165,32 @@ func (r *Registry) Has(id string) bool {
 // generator_failed с ID генератора. Результат отсортирован по ключу: сборка
 // детерминирована, иначе каждое «Применить» переписывало бы файлы.
 func (r *Registry) Build(in Input, installed InstalledKernels) ([]GeneratedFile, error) {
+	files, _, err := r.BuildTimed(in, installed)
+	return files, err
+}
+
+// GenTiming — время одного генератора в сборке (BuildTimed): ID генератора и
+// длительность его Generate.
+type GenTiming struct {
+	ID string
+	D  time.Duration
+}
+
+// BuildTimed — та же сборка, что Build (порядок, отбор и ошибки прежние), и время
+// каждого генератора в порядке регистрации. Время возвращается и при ошибке
+// сборки: по нему видно, какой генератор держал этап.
+func (r *Registry) BuildTimed(in Input, installed InstalledKernels) ([]GeneratedFile, []GenTiming, error) {
 	var out []GeneratedFile
 	owner := make(map[string]string)
 	var issues []BuildIssue
 	r.mu.RLock()
 	generators := append([]Generator(nil), r.generators...)
 	r.mu.RUnlock()
+	timings := make([]GenTiming, 0, len(generators))
 	for _, g := range generators {
+		genStart := time.Now()
 		files, err := g.Generate(in, installed)
+		timings = append(timings, GenTiming{ID: g.ID(), D: time.Since(genStart)})
 		if err != nil {
 			issues = append(issues, BuildIssue{Key: g.ID(), Code: IssueGeneratorFailed, Detail: fmt.Sprintf("%s: %v", g.ID(), err)})
 			continue
@@ -190,8 +209,8 @@ func (r *Registry) Build(in Input, installed InstalledKernels) ([]GeneratedFile,
 		}
 	}
 	if len(issues) > 0 {
-		return nil, &BuildError{Issues: issues}
+		return nil, timings, &BuildError{Issues: issues}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
-	return out, nil
+	return out, timings, nil
 }

@@ -592,7 +592,7 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 		// одной пачке с выборами независимых групп, пришедшими за время идущего
 		// запуска (G-150-3).
 		in := &xrayIntent{gid: groupID, member: member, comp: comp}
-		stages := &xrayStages{gid: groupID, start: start, model: model, in: in}
+		stages := newXrayStages(groupID, start, model, in)
 		if mihomoManaged && s.d.Running(configlayer.KernelMihomo) && !s.d.Running(configlayer.KernelXray) {
 			clashStart := time.Now()
 			early := s.selectMihomoEarly(ctx, groupID, member)
