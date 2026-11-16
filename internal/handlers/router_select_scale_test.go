@@ -40,8 +40,16 @@ import (
 // after RunLive 663,5 < θ, не сработало; F4 (проверка Xray запуска выбора по
 // изменённым исходящим с откатом к полной) — V = медиана validate_xray 1310 ≥ θ,
 // сработало; F5 (снятие маркеров selection_unconfirmed в записи коммита) — M =
-// медиана markers 46,5 < θ, не сработало.
-const rtRtSelectFixes = "F2=skip F4=fired F5=skip"
+// медиана markers 46,5 < θ, не сработало. План 150-24 пересмотрел F2 и добавил F6
+// по 24 строкам kind=scale сессии 150-23 (отчёт build/router/20261116-192531-ceb56a96),
+// разброс r = второй сверху − второй снизу: F6 (сборка запуска выбора только
+// генератором файла xcp-groups) срабатывает при медиане build ≥ θ, вариант — по
+// наибольшей составляющей build (generate/plan — fired-gen, drift — fired-drift,
+// check/routing — skip); медиана build 835 ≥ 779,9, наибольшая составляющая —
+// generate 592 (drift 7,5, check 229, plan 1, routing 0), сработало fired-gen. F2
+// срабатывает при медиане total > G = 2000 мс и медиане after ≥ 100 мс; медиана
+// total 4296 > 2000, after 714,5 ≥ 100, сработало.
+const rtRtSelectFixes = "F2=fired F4=fired F5=skip F6=fired-gen"
 
 // rtRtSelectBudget — порог total строки этапов выбора Xray (только ядро xray) с
 // wait ≤ 100 мс; rtRtSelectWaitBudget — с wait > 100 мс (выбор ждал не больше
@@ -72,8 +80,14 @@ const rtRtScaleSelects = 12
 // с подтверждаемым эффектом: вниз до 100 мс от min(0,7·med; med − разброс) по
 // выборке 150-16. F4 (validate_xray): med 1310, разброс 9151 − 1189 = 7962,
 // min(917; −6652) < 100 мс — этап шумный, эффект F4 не подтверждаем, бюджета нет.
-// Ключ after — медиана after строк runlive-stages: масштаба.
-var rtRtStageBudget = map[string]time.Duration{}
+// Ключ after — медиана after строк runlive-stages: масштаба. План 150-24 по 24
+// строкам сессии 150-23 (отчёт build/router/20261116-192531-ceb56a96): build (F6) —
+// med 835, r 903 − 813 = 90, min(584,5; 745) → 500 мс; after (F2) — med 714,5,
+// r 1166 − 633 = 533, min(500,2; 181,5) → 100 мс.
+var rtRtStageBudget = map[string]time.Duration{
+	"after": 100 * time.Millisecond,
+	"build": 500 * time.Millisecond,
+}
 
 // rtRtCheckSelectBudget сверяет total строки этапов выбора Xray с порогом по wait.
 // В сообщении — пометка «порог:», вид выбора и числа.
