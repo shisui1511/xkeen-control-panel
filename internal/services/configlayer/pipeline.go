@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -753,6 +755,16 @@ func runSections(snap State, req ApplyRequest) Sections {
 // проблемы сборки и проверок — *BuildError.
 func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledKernels) (Plan, Input, error) {
 	src := runSections(snap, *req)
+	// Составляющие этапа build запуска выбора (G-150-3, пункт 2): одна строка на
+	// запуск выбора в любом исходе — отрезки drift, generate, check, plan, routing и
+	// время каждого генератора. Другие триггеры строку не пишут: xcp.log лежит на
+	// флешке, а «Применить», предпросмотр и фоновые запуски замер не нужен.
+	timed := req.Trigger == TriggerSelect
+	var bt buildTimes
+	if timed {
+		defer bt.log(req.Trigger)
+	}
+	mark := time.Now()
 	// Дрейф проверяется здесь, под замками применения, а не только в StartApply:
 	// фоновые запуски (установка ядра, включение слоя) идут мимо кнопки и иначе
 	// молча перезаписали бы ручную правку (D-11). «Пересобрать» дрейф разрешает сам.
@@ -790,12 +802,22 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 			return Plan{}, Input{Sections: src}, &driftBlockedError{count: blocked}
 		}
 	}
+	bt.drift = bt.lap(&mark)
 	used := Input{Sections: src, Live: req.runLive(snap.Live), Mode: req.Source, Routing: routingFacts(p.d.Roots, snap.Routing)}
-	files, err := p.d.Registry.Build(used, installed)
+	var (
+		files []GeneratedFile
+		err   error
+	)
+	if timed {
+		files, bt.gens, err = p.d.Registry.BuildTimed(used, installed)
+	} else {
+		files, err = p.d.Registry.Build(used, installed)
+	}
 	if err == nil {
 		files = filesOfScope(files, req.Kernel)
 		err = CheckGenerated(files, p.d.ForeignOwned)
 	}
+	bt.generate = bt.lap(&mark)
 	if err == nil {
 		// Проверки до записи (пустая группа, висячая ссылка): при любом триггере,
 		// в том числе фоновом, иначе обновление источника обошло бы блокировку
@@ -804,6 +826,7 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 			err = &BuildError{Issues: issues}
 		}
 	}
+	bt.check = bt.lap(&mark)
 	var plan Plan
 	if err == nil {
 		only := make(map[string]bool, len(req.Only))
@@ -845,6 +868,7 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 			plan.Orphans = orphansOfScope(plan.Orphans, installed, req.Kernel)
 		}
 	}
+	bt.plan = bt.lap(&mark)
 	if err == nil && !listenerOnly {
 		// Взятие и возврат маршрутизации — часть этого же плана: проверка ядрами
 		// идёт на итоговой раскладке, запись и откат общие.
@@ -854,6 +878,7 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 		// Секции Xray (взятие и возврат файлов, D-01) идут теми же операциями.
 		plan.Routing, err = p.planCores(src, snap.Cores, plan.Routing, installed, *req)
 	}
+	bt.routing = bt.lap(&mark)
 	if err == nil && req.Source == SourceDraft && len(req.Only) == 0 {
 		// Смена порта прозрачного входящего или tun — полный перезапуск вместо
 		// горячей перезагрузки Mihomo (D-16): правила XKeen пересобираются только им.
@@ -869,6 +894,34 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 		plan.FullRestart[KernelMihomo] = RestartReasonFirmwareDNS
 	}
 	return plan, used, err
+}
+
+// buildTimes — составляющие этапа build одного запуска (buildPlan): отрезки и время
+// генераторов. В строку попадают только числа и ID генераторов — идентификаторы
+// кода, без содержимого файлов, имён узлов и адресов.
+type buildTimes struct {
+	drift, generate, check, plan, routing time.Duration
+	gens                                  []GenTiming
+}
+
+// lap возвращает время от *mark до сейчас и сдвигает *mark.
+func (bt *buildTimes) lap(mark *time.Time) time.Duration {
+	now := time.Now()
+	d := now.Sub(*mark)
+	*mark = now
+	return d
+}
+
+// log пишет строку составляющих build; отрезки, до которых запуск не дошёл
+// (дрейф прервал сборку), — нули.
+func (bt *buildTimes) log(trigger Trigger) {
+	gens := make([]string, 0, len(bt.gens))
+	for _, g := range bt.gens {
+		gens = append(gens, g.ID+":"+strconv.FormatInt(g.D.Milliseconds(), 10))
+	}
+	log.Printf("configlayer: build trigger=%s drift=%d generate=%d check=%d plan=%d routing=%d gens=%s",
+		trigger, bt.drift.Milliseconds(), bt.generate.Milliseconds(), bt.check.Milliseconds(),
+		bt.plan.Milliseconds(), bt.routing.Milliseconds(), strings.Join(gens, ","))
 }
 
 // listenerFileKeys — ключи файлов, чьё содержимое в этом запуске меняют живые данные
