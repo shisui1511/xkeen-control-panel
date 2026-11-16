@@ -54,10 +54,12 @@ func privateJSON(path string, v any) error {
 	return privateFile(path, b, 0o600)
 }
 
+// linkBinary ставит в каталог пачки жёсткую ссылку на бинарник Xray. Любой
+// отказ ссылки (другая ФС, ФС без жёстких ссылок, EPERM/ENOTSUP/EMLINK) —
+// копия: она работает везде, где каталог доступен на запись.
 func linkBinary(bin, dest string) error {
-	err := os.Link(bin, dest)
-	if !errors.Is(err, syscall.EXDEV) {
-		return err
+	if err := os.Link(bin, dest); err == nil {
+		return nil
 	}
 	src, err := os.Open(bin)
 	if err != nil {
