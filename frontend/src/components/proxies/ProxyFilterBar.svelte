@@ -11,6 +11,7 @@
     filterQuery: string;
     viewMode: ProxiesViewMode;
     loading: boolean;
+    showViewMode?: boolean;
     onSearchInput?: () => void;
     onExpandAll?: () => void;
     onCollapseAll?: () => void;
@@ -21,6 +22,7 @@
     filterQuery = $bindable(''),
     viewMode = $bindable('grid'),
     loading = false,
+    showViewMode = true,
     onSearchInput,
     onExpandAll,
     onCollapseAll,
@@ -37,15 +39,17 @@
     placeholder={$t('proxies.filter_placeholder')}
     aria-label={$t('proxies.filter_placeholder')}
   />
-  <SegmentedControl
-    value={viewMode}
-    ariaLabel={$t('proxies.view_mode_label')}
-    items={[
-      { value: 'grid', label: $t('proxies.view_mode_grid'), icon: ViewGrid },
-      { value: 'list', label: $t('proxies.view_mode_list'), icon: ViewList }
-    ]}
-    onchange={(mode) => (viewMode = mode as ProxiesViewMode)}
-  />
+  {#if showViewMode}
+    <SegmentedControl
+      value={viewMode}
+      ariaLabel={$t('proxies.view_mode_label')}
+      items={[
+        { value: 'grid', label: $t('proxies.view_mode_grid'), icon: ViewGrid },
+        { value: 'list', label: $t('proxies.view_mode_list'), icon: ViewList }
+      ]}
+      onchange={(mode) => (viewMode = mode as ProxiesViewMode)}
+    />
+  {/if}
   <Button
     variant="secondary"
     onclick={() => onExpandAll?.()}

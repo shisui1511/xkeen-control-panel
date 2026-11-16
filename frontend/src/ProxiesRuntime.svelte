@@ -514,6 +514,7 @@
         <ProxyFilterBar
           bind:filterQuery
           bind:viewMode
+          showViewMode={false}
           loading={refreshing}
           onExpandAll={() => shownGroups.forEach((g) => expanded.add(g.id))}
           onCollapseAll={() => expanded.clear()}
