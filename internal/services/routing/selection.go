@@ -1273,7 +1273,26 @@ func (s *Service) reconcileMihomo(ctx context.Context) error {
 			log.Printf("[routing] сверка Mihomo: маркер неподтверждённого выбора не снят: %v", err)
 		}
 	}()
+	// Группы с идущей операцией пропускаются: быстрый путь выбора уже поставил
+	// новый узел в Mihomo ранним PUT, а Live его запишет фоновый проход позже —
+	// сверка в этом окне вернула бы прежний узел. Выбор таких групп ставит владелец
+	// отметки по окончании прохода (под selMu, из Live); их маркеры и уведомления
+	// сверки остаются как есть.
+	busy := s.inflightKinds()
+	noted := map[string]bool{}
+	for _, n := range snap.Notices {
+		if strings.HasPrefix(n.ID, noticeReconcilePrefix) {
+			noted[strings.TrimPrefix(n.ID, noticeReconcilePrefix)] = true
+		}
+	}
 	for _, e := range plan {
+		if busy[e.gid] != "" {
+			// Уведомление сверки группы сохраняется: набор заменяется целиком.
+			if noted[e.gid] {
+				failed = append(failed, e)
+			}
+			continue
+		}
 		cctx, cancel := context.WithTimeout(ctx, reconcileCallTimeout)
 		now, err := s.d.Mihomo.ProxyNow(cctx, e.group)
 		if err == nil && now != e.want {

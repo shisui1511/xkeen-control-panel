@@ -541,6 +541,154 @@ func TestRouterSelectMihomoReconcile(t *testing.T) {
 	}
 }
 
+// rtsCurrent — current группы в виде «Прокси» (RuntimeView).
+func (e *rtEnv) rtsCurrent(t *testing.T, gid string) string {
+	t.Helper()
+	v, err := e.svc.RuntimeView()
+	if err != nil {
+		t.Fatalf("RuntimeView: %v", err)
+	}
+	for _, g := range v.Groups {
+		if g.ID == gid {
+			return g.Current
+		}
+	}
+	t.Fatalf("в виде «Прокси» нет группы %s", gid)
+	return ""
+}
+
+// Быстрый путь выбора при запущенном Mihomo и установленном, но остановленном Xray
+// (план 150-19, SC2): ответ после Clash API, xcp-groups дописывает фоновый проход.
+// Вид сразу показывает выбранный узел, now процесса — тот же узел; сверка Mihomo,
+// вызванная, пока фоновый проход независимой группы ждёт хода и Live группы ещё
+// прежний, не возвращает прежний узел (группа с идущим выбором пропускается). После
+// проходов Live, xcp-groups и now сходятся, уведомлений routing_select: и маркеров
+// нет. Отдельный процесс Mihomo в каталоге теста, ядро стенда не трогается.
+func TestRouterSelectMihomoFirst(t *testing.T) {
+	ctx := context.Background()
+	core := rtNewMihomoCore(t)
+	e := rtNewEnv(t, rtWithMihomoCore(core), rtWithSelection())
+	e.writeUserProfile(t)
+	e.addMyRaw(t, "socks5://127.0.0.1:9#mf-a", "socks5://127.0.0.1:10#mf-b")
+	cat := e.catalog(t)
+	refs := []string{rtsNode(t, cat.Xray, "mf-a").Ref, rtsNode(t, cat.Xray, "mf-b").Ref}
+	xrayTag := map[string]string{}
+	mihomoName := map[string]string{}
+	for _, d := range []string{"mf-a", "mf-b"} {
+		x, m := rtsNode(t, cat.Xray, d), rtsNode(t, cat.Mihomo, d)
+		xrayTag[memberNode+x.Ref], mihomoName[memberNode+m.Ref] = x.XrayTag, m.MihomoName
+	}
+	type grp struct{ id, name string }
+	var groups [2]grp
+	for i, name := range []string{"Ранний 1", "Ранний 2"} {
+		_, g, err := e.svc.SaveGroup(e.rev(t), Group{Name: name, Mode: ModeManual, Sources: GroupSources{All: true}})
+		if err != nil {
+			t.Fatalf("SaveGroup №%d: %v", i+1, err)
+		}
+		groups[i] = grp{g.ID, name}
+	}
+	g1, g2 := groups[0], groups[1]
+	e.takeAndApply(t)
+	core.start(t, e)
+	e.rtsReconcile(t, ctx)
+
+	// other — узел, отличный от current группы.
+	other := func(gid string) string {
+		cur := e.rtsCurrent(t, gid)
+		for _, r := range refs {
+			if memberNode+r != cur {
+				return memberNode + r
+			}
+		}
+		t.Fatalf("у группы %s нет узла, отличного от текущего", gid)
+		return ""
+	}
+	// settle ждёт снятия отметок обеих групп (конец фоновых проходов).
+	settle := func() {
+		rtWaitCond(t, 60*time.Second, "конец фоновых проходов выбора", func() bool {
+			k := e.svc.inflightKinds()
+			return k[g1.id] == "" && k[g2.id] == ""
+		})
+	}
+	expectFast := func(label string, res SelectResult, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		if got := res.Kernels[configlayer.KernelMihomo]; got != selApplied {
+			t.Errorf("%s: Kernels[mihomo] = %q, ожидалось %q", label, got, selApplied)
+		}
+		if got := res.Kernels[configlayer.KernelXray]; got != selPendingStopped {
+			t.Errorf("%s: Kernels[xray] = %q, ожидалось %q", label, got, selPendingStopped)
+		}
+	}
+
+	executed, attempts, livePrev, nowKept := false, 0, false, false
+	var want1, want2 string
+	for attempts < 3 && !executed {
+		attempts++
+		settle()
+		want1, want2 = other(g1.id), other(g2.id)
+
+		// Шаг 1: ранний ответ, вид и now процесса.
+		res, err := e.svc.Select(ctx, g1.id, want1)
+		expectFast("выбор группы 1", res, err)
+		if cur := e.rtsCurrent(t, g1.id); cur != want1 {
+			t.Errorf("попытка %d: current группы 1 сразу после ответа не равен выбранному узлу", attempts)
+		}
+		rtsWaitNow(t, core, g1.name, mihomoName[want1], 5*time.Second)
+
+		// Шаг 2: выбор независимой группы, пока фоновый проход группы 1 держит ход.
+		res, err = e.svc.Select(ctx, g2.id, want2)
+		expectFast("выбор группы 2", res, err)
+		markBefore := e.svc.inflightKinds()[g2.id] == inflightSelect
+		liveBefore := e.rtcSelection(t)[g2.id]
+		if err := e.svc.reconcileMihomo(ctx); err != nil {
+			t.Fatalf("попытка %d: сверка Mihomo: %v", attempts, err)
+		}
+		now, err := core.svc.ProxyNow(ctx, g2.name)
+		if err != nil {
+			t.Fatalf("попытка %d: ProxyNow: %v", attempts, err)
+		}
+		markAfter := e.svc.inflightKinds()[g2.id] == inflightSelect
+		liveAfter := e.rtcSelection(t)[g2.id]
+		livePrev = liveBefore != want2 && liveAfter != want2
+		nowKept = now == mihomoName[want2]
+		executed = markBefore && markAfter && livePrev
+		if executed && !nowKept {
+			t.Errorf("попытка %d: сверка во время фонового прохода вернула в Mihomo прежний узел группы 2", attempts)
+		}
+	}
+	t.Logf("mihomo-reconcile-skip: executed=%t attempts=%d live_prev=%t now_kept=%t", executed, attempts, livePrev, nowKept)
+	if !executed {
+		t.Errorf("окно сверки не поймано: за %d попыток фоновый проход группы 2 не ждал хода во время сверки", attempts)
+	}
+
+	// После фоновых проходов Live, xcp-groups и now сходятся.
+	settle()
+	sel := e.rtcSelection(t)
+	for _, c := range []struct {
+		g    grp
+		want string
+	}{{g1, want1}, {g2, want2}} {
+		if sel[c.g.id] != c.want {
+			t.Errorf("Live группы %s не равен выбранному узлу", c.g.id)
+		}
+		if !rtsSameOutbound(rtsOutbound(t, e.xrayDir(), GroupTag(c.g.id)), rtsOutbound(t, e.xrayDir(), xrayTag[c.want])) {
+			t.Errorf("исходящий группы %s в xcp-groups не совпадает с выбранным узлом", c.g.id)
+		}
+		rtsWaitNow(t, core, c.g.name, mihomoName[c.want], 10*time.Second)
+	}
+	for _, n := range e.layer.Snapshot().Notices {
+		if strings.HasPrefix(n.ID, noticeSelectPrefix) {
+			t.Errorf("после проходов осталось уведомление routing_select: (%s)", n.Params["code"])
+		}
+	}
+	if m := readUnconfirmed(e.state(t).Live); len(m) != 0 {
+		t.Errorf("после проходов остались маркеры selection_unconfirmed: %d", len(m))
+	}
+}
+
 // Связанные группы Mihomo (WR-03, WR-04): маркер сбоя выбора стоит только на группе со
 // сбоем и не блокирует выбор в связанной группе; снятие отсутствующего маркера не пишет
 // состояние и не публикует событие; сверка снимает маркеры подтверждённых групп одной
