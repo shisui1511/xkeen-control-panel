@@ -74,6 +74,28 @@ func linkBinary(bin, dest string) error {
 	return errors.Join(err, dst.Close())
 }
 
+// checkTmpRoot допускает корень временных пачек, только если это настоящий
+// каталог (не ссылка) внутри своего родителя, владелец — сам процесс, а у группы
+// и остальных нет прав. Путь в общем tmp мог создать кто-то другой: в чужой
+// каталог не пишутся учётные данные узлов, его содержимое не удаляется.
+func checkTmpRoot(root string) error {
+	unsafe := errors.New("ping_tmp_root_unsafe")
+	if _, err := utils.NewPathValidator([]string{filepath.Dir(root)}).Validate(root); err != nil {
+		return unsafe
+	}
+	info, err := os.Lstat(root)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
+		return unsafe
+	}
+	if st, ok := info.Sys().(*syscall.Stat_t); !ok || int(st.Uid) != os.Geteuid() {
+		return unsafe
+	}
+	return nil
+}
+
 // startTempXray повторяет всю подготовку после раннего выхода (например,
 // другой процесс занял освобождённый порт). Ошибки наружу — только коды.
 func startTempXray(ctx context.Context, bin, root string, targets []Target) (*tempXray, error) {
@@ -95,6 +117,9 @@ func startTempAttempt(ctx context.Context, bin, root string, targets []Target) (
 		return nil, err
 	}
 	if err = os.MkdirAll(root, 0o700); err != nil {
+		return nil, err
+	}
+	if err = checkTmpRoot(root); err != nil {
 		return nil, err
 	}
 	dir := filepath.Join(root, id)
@@ -238,10 +263,15 @@ func (p *tempXray) stop() {
 // процесс, чей cmdline содержит точный каталог пачки; чужой PID не трогается.
 // Каталоги удаляются и без PID, чтобы не оставлять учётные данные на носителе.
 func (r *Runner) SweepStale() error {
-	entries, err := os.ReadDir(r.d.TmpRoot)
-	if errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Lstat(r.d.TmpRoot); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
+	// Подменённый корень (ссылка, чужой владелец, открытые права) не читается:
+	// иначе уборка удалила бы содержимое каталога, на который он указывает.
+	if err := checkTmpRoot(r.d.TmpRoot); err != nil {
+		return errors.New("ping_sweep_read")
+	}
+	entries, err := os.ReadDir(r.d.TmpRoot)
 	if err != nil {
 		return errors.New("ping_sweep_read")
 	}
