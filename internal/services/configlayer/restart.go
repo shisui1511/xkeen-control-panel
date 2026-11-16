@@ -437,6 +437,14 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 		}
 	}
 	applied, err := p.restartAndConfirm(ctx, kernel)
+	if err == nil && applied == services.ApplySavedKernelStopped && hotPartial && kernel == KernelXray {
+		// Xray работал до замены (Preview дал рестарт), а остановила его сама
+		// частично неудавшаяся горячая замена: Applier по свежему статусу видит
+		// «остановлен» и перезапуск откладывает, хотя выбор должен дойти до ядра
+		// (D-15). Доводим принудительным перезапуском, как при откате.
+		err = p.recoverKernel(ctx, kernel)
+		applied = services.ApplyRestarted
+	}
 	if err == nil && applied != services.ApplyRestarted {
 		// Applier по свежему статусу решил не перезапускать (ядро остановили между
 		// Preview и ApplyLocked): это не отказ ядра, откатывать файлы незачем.
