@@ -43,18 +43,21 @@ type RuntimeModes struct {
 }
 
 type RuntimeGroup struct {
-	ID           string          `json:"id"`
-	Name         string          `json:"name"`
-	Mode         string          `json:"mode"`
-	Current      string          `json:"current"`
-	CurrentLabel string          `json:"current_label"`
-	Chain        []RuntimeLink   `json:"chain"`
-	Fallback     string          `json:"fallback,omitempty"`
-	Selectable   bool            `json:"selectable"`
-	Unconfirmed  bool            `json:"unconfirmed"`
-	LockedWith   []string        `json:"locked_with"`
-	Counts       KernelCounts    `json:"counts"`
-	Members      []RuntimeMember `json:"members"`
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	Mode         string        `json:"mode"`
+	Current      string        `json:"current"`
+	CurrentLabel string        `json:"current_label"`
+	Chain        []RuntimeLink `json:"chain"`
+	Fallback     string        `json:"fallback,omitempty"`
+	Selectable   bool          `json:"selectable"`
+	Unconfirmed  bool          `json:"unconfirmed"`
+	// Switching — группа в компоненте идущей на сервере операции выбора или
+	// «Повторить» (D-17); любая вкладка блокирует её плитки.
+	Switching  bool            `json:"switching"`
+	LockedWith []string        `json:"locked_with"`
+	Counts     KernelCounts    `json:"counts"`
+	Members    []RuntimeMember `json:"members"`
 }
 
 type RuntimeLink struct {
@@ -125,16 +128,24 @@ func (s *Service) runtimeSnapshot() (RuntimeView, appliedModel, error) {
 		v.State = RuntimeStatePanel
 	}
 	xray, mihomo := runtimeRefs(am.cat.Xray), runtimeRefs(am.cat.Mihomo)
+	kinds := s.inflightKinds()
 	switch v.State {
 	case RuntimeStatePanel, RuntimeStateStopped:
 		live, unconfirmed := liveSelection(st.Live), readUnconfirmed(st.Live)
 		for _, g := range am.groups.Items {
 			r := Resolve(g, am.union, am.groups.Items)
+			// Select отказывает при маркере xray на компоненте, поэтому маркер
+			// xray у группы с отметкой select записан этим идущим выбором:
+			// известное намерение не показывается неизвестным (D-16). Маркер
+			// mihomo и маркеры во время «Повторить» видны как есть.
+			marker := unconfirmed[g.ID]
+			ownMarker := marker == configlayer.KernelXray && kinds[g.ID] == inflightSelect
 			rg := RuntimeGroup{
 				ID: g.ID, Name: g.Name, Mode: string(g.Mode),
 				Chain: []RuntimeLink{}, LockedWith: []string{}, Members: []RuntimeMember{},
 				Selectable:  g.Mode == ModeManual && desired.AnyManaged(),
-				Unconfirmed: unconfirmed[g.ID] != "",
+				Unconfirmed: marker != "" && !ownMarker,
+				Switching:   kinds[g.ID] != "",
 			}
 			for _, id := range linkedGroups(am.groups.Items, g.ID) {
 				if id != g.ID {

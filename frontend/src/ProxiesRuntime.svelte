@@ -165,8 +165,12 @@
    */
   const selecting = new SvelteMap<string, string>();
 
-  /** Группа заблокирована идущим выбором в связанной группе (D-17). */
+  /**
+   * Группа заблокирована идущим на сервере выбором (в том числе из другой вкладки) или
+   * выбором этой вкладки в связанной группе (D-17).
+   */
   function lockedBy(g: RuntimeGroup, v: RuntimeView): boolean {
+    if (g.switching) return true;
     for (const sid of selecting.keys()) {
       if (sid === g.id) continue;
       if (g.locked_with.includes(sid)) return true;

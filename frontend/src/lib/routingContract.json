@@ -380,6 +380,7 @@
       "chain",
       "selectable",
       "unconfirmed",
+      "switching",
       "locked_with",
       "counts",
       "members"

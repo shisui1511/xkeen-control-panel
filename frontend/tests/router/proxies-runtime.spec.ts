@@ -399,7 +399,78 @@ test(
       await expect(tile2).toHaveAttribute('aria-pressed', 'false', { timeout: T.action });
 
       const draftBefore = await draftChanges(page);
+
+      // τ — время перечитывания вида (GET /api/configlayer/proxies), наибольшее из трёх замеров
+      let tau = 0;
+      for (let i = 0; i < 3; i++) {
+        const t0 = Date.now();
+        const r = await page.request.get('/api/configlayer/proxies');
+        expect(r.status(), 'GET /api/configlayer/proxies (замер τ)').toBe(200);
+        tau = Math.max(tau, Date.now() - t0);
+      }
+
+      // Наблюдатель во второй вкладке (D-17): идущий на сервере выбор (switching) блокирует
+      // плитки группы и в той вкладке, где выбора не нажимали — aria-disabled и подсказка
+      // «Идёт переключение группы. Дождитесь завершения.» (proxies.rt.locked_title)
+      await second.evaluate((gid) => {
+        const locked = /Идёт переключение группы|The group is switching/;
+        const w = window as unknown as {
+          __rtSwitching?: { seen: boolean };
+          __rtSwitchingObs?: MutationObserver;
+        };
+        const rec = { seen: false };
+        w.__rtSwitching = rec;
+        const check = () => {
+          if (rec.seen) return;
+          const tiles = document.querySelectorAll(`[data-testid^="proxy-node-${gid}-"]`);
+          for (const el of tiles) {
+            if (
+              el.getAttribute('aria-disabled') === 'true' &&
+              locked.test(el.getAttribute('title') ?? '')
+            ) {
+              rec.seen = true;
+              return;
+            }
+          }
+        };
+        const obs = new MutationObserver(check);
+        obs.observe(document.body, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ['aria-disabled', 'title']
+        });
+        w.__rtSwitchingObs = obs;
+        check();
+      }, proxyId);
+
+      const selectResp = page.waitForResponse(
+        (r) =>
+          r.request().method() === 'POST' && r.url().includes('/api/configlayer/routing/select'),
+        { timeout: T.save }
+      );
+      const clickedAt = Date.now();
       await tile.click();
+      const resp = await selectResp;
+      const d = Date.now() - clickedAt;
+      expect(resp.status(), 'POST routing/select').toBe(200);
+      const seen = await second.evaluate(
+        () =>
+          (window as unknown as { __rtSwitching?: { seen: boolean } }).__rtSwitching?.seen ?? false
+      );
+      test.info().annotations.push({
+        type: 'proxies-switching',
+        description: `proxies-switching: d=${d} tau=${tau} blocked_seen=${seen}`
+      });
+      // Окно выбора короче четырёх перечитываний вида: событие начала, перечитывание и отрисовка
+      // могут не успеть — не регрессия D-17, только аннотация с числами
+      if (d >= 4 * tau) {
+        expect(
+          seen,
+          `D-17: во второй вкладке плитки группы не были заблокированы за выбор (d=${d} мс, τ=${tau} мс)`
+        ).toBe(true);
+      }
+
       await expect(
         page
           .locator('.toast--success')
@@ -417,6 +488,13 @@ test(
       await guard.assertClean();
       await guard2.assertClean();
     } finally {
+      await second
+        .evaluate(() =>
+          (
+            window as unknown as { __rtSwitchingObs?: MutationObserver }
+          ).__rtSwitchingObs?.disconnect()
+        )
+        .catch(() => undefined);
       await second.close();
     }
   }

@@ -41,6 +41,8 @@ export interface RuntimeGroup {
   fallback?: string;
   selectable: boolean;
   unconfirmed: boolean;
+  /** Идёт выбор или «Повторить» в этой группе или связанной (на сервере, из любой вкладки, D-17). */
+  switching: boolean;
   locked_with: string[];
   counts: KernelCounts;
   members: RuntimeMember[];
@@ -162,7 +164,8 @@ function normalizeView(v: RuntimeView): RuntimeView {
       ...g,
       chain: g.chain ?? [],
       locked_with: g.locked_with ?? [],
-      members: g.members ?? []
+      members: g.members ?? [],
+      switching: g.switching ?? false
     }))
   };
 }
