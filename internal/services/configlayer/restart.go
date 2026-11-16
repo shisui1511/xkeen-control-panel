@@ -326,8 +326,8 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 	fullNote := fullRestartNote(plan.FullRestart[kernel])
 	note := fullNote
 	var hotErr error
-	// hotPartial — горячая замена Xray упала после начала замены: процесс мог остаться
-	// в промежуточном состоянии, и его нужно перезапустить на прежних файлах.
+	// hotPartial — откат после отказа полной проверки перезапускает Xray на прежних
+	// файлах только при частичном сбое горячей замены.
 	hotPartial := false
 	if kernel == KernelXray && fullNote == "" {
 		if hot := p.currentXrayHot(); hot != nil {
@@ -394,6 +394,7 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 			if errors.As(hotErr, &he) {
 				note, partial = he.Reason, he.Partial
 			}
+			hotPartial = partial
 			if partial {
 				p.setStep(StepRestart, StepRunning, NoteXrayHotFailed, "")
 			}
