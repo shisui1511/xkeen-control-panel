@@ -781,7 +781,8 @@
         "tests/router/config-presets.spec.ts",
         "tests/router/config-profiles.spec.ts",
         "tests/router/config-routing.spec.ts",
-        "tests/router/config-setup.spec.ts"
+        "tests/router/config-setup.spec.ts",
+        "tests/router/proxies-runtime.spec.ts"
       ]
     },
     "contract-routing": {
