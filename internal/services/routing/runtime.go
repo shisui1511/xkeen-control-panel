@@ -310,6 +310,10 @@ func (s *Service) RuntimeNow(ctx context.Context) (RuntimeNow, error) {
 		mh = runtimeMihomo(am)
 		states, err = s.d.Mihomo.ProxiesState(ctx)
 		if err != nil {
+			// Ядро остановили между проверкой и запросом: фактов нет, это не сбой чтения
+			if v2, _, e2 := s.runtimeSnapshot(); e2 == nil && !runtimeRunning(v2, v.Kernel) {
+				return out, nil
+			}
 			return out, err
 		}
 	}
