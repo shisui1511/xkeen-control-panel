@@ -521,10 +521,17 @@ test(
     // Иначе пачка, закончившаяся до подписки (поток открывается после чтения состояния слоя,
     // на роутере — через секунды), оставалась бы «Проверяется 0 из 3». Считаются запросы
     // результатов после ответа потока (открытие) — до первых вызовов api теста.
+    // Вид тоже: событие открытия могло прийти до ответа первого чтения вида, и тогда
+    // перечитывание ждёт конца первой загрузки — считается чтение вида, начатое после
+    // открытия потока и после первого ответа вида.
     let streamOpen = false;
+    let viewLoaded = false;
     let resultsAfterOpen = 0;
+    let viewAfterOpen = 0;
+    const isView = (u: string) => new URL(u).pathname === '/api/configlayer/proxies';
     page.on('response', (r) => {
       if (r.url().includes('/api/configlayer/events')) streamOpen = true;
+      if (r.request().method() === 'GET' && isView(r.url())) viewLoaded = true;
     });
     page.on('request', (r) => {
       if (
@@ -533,6 +540,7 @@ test(
         r.url().includes('/api/configlayer/proxies/results')
       )
         resultsAfterOpen++;
+      if (streamOpen && viewLoaded && r.method() === 'GET' && isView(r.url())) viewAfterOpen++;
     });
     await openProxies(page, `#/proxies?group=${proxyId}`);
     const card = await cardOf(page, proxyId, true);
@@ -541,6 +549,12 @@ test(
     await expect
       .poll(() => (streamOpen ? resultsAfterOpen : -1), {
         message: 'перечитывание результатов пинга при первом открытии потока событий слоя',
+        timeout: T.page
+      })
+      .toBeGreaterThan(0);
+    await expect
+      .poll(() => (streamOpen ? viewAfterOpen : -1), {
+        message: 'перечитывание вида «Прокси» после первого открытия потока и первой загрузки',
         timeout: T.page
       })
       .toBeGreaterThan(0);

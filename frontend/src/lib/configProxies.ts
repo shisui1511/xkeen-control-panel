@@ -306,14 +306,20 @@ function eventKind(data: unknown): string {
  * Подписка страницы на события слоя через общий поток SSE (второго потока нет).
  * proxies: выбор и состав — перечитать вид, пинг и пачка — результаты, без данных
  * (восстановление связи) — оба; routing и sources — вид. Перечитывание с дебаунсом
- * 300 мс и только после первой загрузки. Возвращает отписку для ухода со страницы.
+ * 300 мс; событие до первой загрузки вида откладывается до её конца (первое чтение
+ * могло уйти раньше события). Возвращает отписку для ухода со страницы.
  */
 export function attachProxiesLive(): () => void {
   let viewTimer: ReturnType<typeof setTimeout> | null = null;
   let resultsTimer: ReturnType<typeof setTimeout> | null = null;
+  // Событие вида пришло, пока первая загрузка не закончилась: перечитать после неё
+  let viewAfterLoad = false;
 
   const viewSoon = (): void => {
-    if (get(runtimeView) === null) return;
+    if (get(runtimeView) === null) {
+      viewAfterLoad = true;
+      return;
+    }
     if (viewTimer !== null) clearTimeout(viewTimer);
     viewTimer = setTimeout(() => {
       viewTimer = null;
@@ -339,7 +345,12 @@ export function attachProxiesLive(): () => void {
       }
     }),
     onLayerEvent('routing', viewSoon),
-    onLayerEvent('sources', viewSoon)
+    onLayerEvent('sources', viewSoon),
+    runtimeView.subscribe((view) => {
+      if (view === null || !viewAfterLoad) return;
+      viewAfterLoad = false;
+      viewSoon();
+    })
   ];
 
   return () => {
