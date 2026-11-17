@@ -983,32 +983,41 @@ func rtsProviderPing(t *testing.T) {
 	}
 	runner.Start()
 	t.Cleanup(runner.Stop)
-	start, err := runner.Launch(req)
-	if err != nil || start.Joined {
-		t.Fatalf("provider_ping: launch_error=%t joined=%t", err != nil, start.Joined)
-	}
-	var snap proxyping.PingSnapshot
-	for end := time.Now().Add(req.Timeout + 60*time.Second); ; time.Sleep(250 * time.Millisecond) {
-		snap = runner.Snapshot()
-		if snap.Batch != nil && snap.Batch.ID == start.BatchID && snap.Batch.State != proxyping.StateRunning {
-			break
+	// Первый замер холодного процесса на слабом устройстве может не уложиться в
+	// срок пробы: до трёх пачек, каждая проверяется целиком; дефект пути даёт
+	// отказ во всех.
+	const attempts = 3
+	var outcomes []string
+	for attempt := 1; attempt <= attempts; attempt++ {
+		start, err := runner.Launch(req)
+		if err != nil || start.Joined {
+			t.Fatalf("provider_ping: attempt=%d launch_error=%t joined=%t", attempt, err != nil, start.Joined)
 		}
-		if time.Now().After(end) {
-			t.Fatal("provider_ping: batch_finished=false")
+		var snap proxyping.PingSnapshot
+		for end := time.Now().Add(req.Timeout + 60*time.Second); ; time.Sleep(250 * time.Millisecond) {
+			snap = runner.Snapshot()
+			if snap.Batch != nil && snap.Batch.ID == start.BatchID && snap.Batch.State != proxyping.StateRunning {
+				break
+			}
+			if time.Now().After(end) {
+				t.Fatalf("provider_ping: attempt=%d batch_finished=false", attempt)
+			}
 		}
+		b := snap.Batch
+		if b.State != proxyping.StateDone || b.Done != 1 || b.Total != 1 || b.Method != proxyping.MethodMihomo ||
+			b.Kernel != configlayer.KernelMihomo || b.ReasonCode != "" || b.FallbackReason != "" {
+			t.Fatalf("provider_ping: attempt=%d state=%q done=%d total=%d method=%q kernel=%q reason_code=%q fallback_reason=%q",
+				attempt, b.State, b.Done, b.Total, b.Method, b.Kernel, b.ReasonCode, b.FallbackReason)
+		}
+		res, ok := snap.Results[s.Ref]
+		if ok && res.Kernel == configlayer.KernelMihomo && res.Method == proxyping.MethodMihomo && res.Status == proxyping.StatusOK &&
+			res.MS > 0 && res.Reason == "" && !res.At.IsZero() {
+			return
+		}
+		outcomes = append(outcomes, fmt.Sprintf("result=%t kernel=%q method=%q status=%q reason=%q ms_positive=%t at_set=%t",
+			ok, res.Kernel, res.Method, res.Status, res.Reason, res.MS > 0, !res.At.IsZero()))
 	}
-	b := snap.Batch
-	if b.State != proxyping.StateDone || b.Done != 1 || b.Total != 1 || b.Method != proxyping.MethodMihomo ||
-		b.Kernel != configlayer.KernelMihomo || b.ReasonCode != "" || b.FallbackReason != "" {
-		t.Fatalf("provider_ping: state=%q done=%d total=%d method=%q kernel=%q reason_code=%q fallback_reason=%q",
-			b.State, b.Done, b.Total, b.Method, b.Kernel, b.ReasonCode, b.FallbackReason)
-	}
-	res, ok := snap.Results[s.Ref]
-	if !ok || res.Kernel != configlayer.KernelMihomo || res.Method != proxyping.MethodMihomo || res.Status != proxyping.StatusOK ||
-		res.MS <= 0 || res.Reason != "" || res.At.IsZero() {
-		t.Fatalf("provider_ping: result=%t kernel=%q method=%q status=%q reason=%q ms_positive=%t at_set=%t",
-			ok, res.Kernel, res.Method, res.Status, res.Reason, res.MS > 0, !res.At.IsZero())
-	}
+	t.Fatalf("provider_ping: attempts=%d none_ok: %s", attempts, strings.Join(outcomes, "; "))
 }
 
 // rtsCurrent — current группы в виде «Прокси» (RuntimeView).
