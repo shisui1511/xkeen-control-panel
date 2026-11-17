@@ -645,14 +645,14 @@ func (e *rtSrc) rtRtScaleUAT(subURL, gid, secondID string, runtimeView func() ma
 	checkAfter("масштаб: пара ожидания", "Выбор", "Вторая")
 }
 
-// Масштаб горячего выбора Xray (G-150-3, пункт 2) в карантине: подготовка —
+// Масштаб горячего выбора Xray (G-150-3, пункт 2; карантин снят по вердикту
+// повторного замера 150-40 — условия У1–У5 выполнены): подготовка —
 // слой, очистка, четыре узла «Моих узлов» на «чёрной дыре», группы «Выбор» и
 // «Вторая», взятие маршрутизации, «Применить»; затем rtRtScaleUAT. Метка ядра:
 // горячая замена исходящих есть только у Xray, на Mihomo тест пропускается. Без
 // подписки стенда (XCP_RT_SUBSCRIPTION_URL) тест пропускается: класс stand.
 func TestRouterRoutingSelectScale(t *testing.T) {
 	routertest.Slow(t, "конфигурация уровня UAT: подписка, «Применить» и серия горячих выборов Xray")
-	routertest.Quarantine(t, "150-18-select-sporadic-io-stalls")
 	tg := routertest.CoreSpecific(t)
 	if tg.Core != "xray" {
 		t.Skip("ядро ветви не Xray: горячего выбора Xray нет")
