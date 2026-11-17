@@ -16,6 +16,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -483,6 +484,85 @@ func (e *rtEnv) rtsCurrent(t *testing.T, gid string) string {
 	return ""
 }
 
+// rtsGroup — ручная группа сценария быстрого пути: ID и имя (оно же имя группы в
+// профиле Mihomo).
+type rtsGroup struct{ id, name string }
+
+// rtsFast — окружение быстрого пути выбора: свой процесс Mihomo в каталоге теста
+// запущен, Xray установлен и остановлен, две ручные группы на узлах mf-a и mf-b
+// применены, выбор в Mihomo сверен с Live. Ядро стенда не трогается.
+type rtsFast struct {
+	e          *rtEnv
+	core       *rtMihomoCore
+	refs       []string
+	xrayTag    map[string]string
+	mihomoName map[string]string
+	groups     [2]rtsGroup
+}
+
+// rtsNewFast готовит окружение быстрого пути с группами names.
+func rtsNewFast(t *testing.T, names [2]string) *rtsFast {
+	t.Helper()
+	core := rtNewMihomoCore(t)
+	e := rtNewEnv(t, rtWithMihomoCore(core), rtWithSelection())
+	e.writeUserProfile(t)
+	e.addMyRaw(t, "socks5://127.0.0.1:9#mf-a", "socks5://127.0.0.1:10#mf-b")
+	cat := e.catalog(t)
+	f := &rtsFast{e: e, core: core, xrayTag: map[string]string{}, mihomoName: map[string]string{}}
+	for _, d := range []string{"mf-a", "mf-b"} {
+		x, m := rtsNode(t, cat.Xray, d), rtsNode(t, cat.Mihomo, d)
+		f.refs = append(f.refs, x.Ref)
+		f.xrayTag[memberNode+x.Ref], f.mihomoName[memberNode+m.Ref] = x.XrayTag, m.MihomoName
+	}
+	for i, name := range names {
+		_, g, err := e.svc.SaveGroup(e.rev(t), Group{Name: name, Mode: ModeManual, Sources: GroupSources{All: true}})
+		if err != nil {
+			t.Fatalf("SaveGroup №%d: %v", i+1, err)
+		}
+		f.groups[i] = rtsGroup{g.ID, name}
+	}
+	e.takeAndApply(t)
+	core.start(t, e)
+	e.rtsReconcile(t, context.Background())
+	return f
+}
+
+// other — узел, отличный от current группы.
+func (f *rtsFast) other(t *testing.T, gid string) string {
+	t.Helper()
+	cur := f.e.rtsCurrent(t, gid)
+	for _, r := range f.refs {
+		if memberNode+r != cur {
+			return memberNode + r
+		}
+	}
+	t.Fatalf("у группы %s нет узла, отличного от текущего", gid)
+	return ""
+}
+
+// settle ждёт снятия отметок обеих групп (конец фоновых проходов).
+func (f *rtsFast) settle(t *testing.T) {
+	t.Helper()
+	rtWaitCond(t, 60*time.Second, "конец фоновых проходов выбора", func() bool {
+		k := f.e.svc.inflightKinds()
+		return k[f.groups[0].id] == "" && k[f.groups[1].id] == ""
+	})
+}
+
+// rtsExpectFast проверяет ответ быстрого пути: Mihomo applied, Xray pending_stopped.
+func rtsExpectFast(t *testing.T, label string, res SelectResult, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", label, err)
+	}
+	if got := res.Kernels[configlayer.KernelMihomo]; got != selApplied {
+		t.Errorf("%s: Kernels[mihomo] = %q, ожидалось %q", label, got, selApplied)
+	}
+	if got := res.Kernels[configlayer.KernelXray]; got != selPendingStopped {
+		t.Errorf("%s: Kernels[xray] = %q, ожидалось %q", label, got, selPendingStopped)
+	}
+}
+
 // Быстрый путь выбора при запущенном Mihomo и установленном, но остановленном Xray
 // (план 150-19, SC2): ответ после Clash API, xcp-groups дописывает фоновый проход.
 // Вид сразу показывает выбранный узел, now процесса — тот же узел; сверка Mihomo,
@@ -492,61 +572,14 @@ func (e *rtEnv) rtsCurrent(t *testing.T, gid string) string {
 // нет. Отдельный процесс Mihomo в каталоге теста, ядро стенда не трогается.
 func TestRouterSelectMihomoFirst(t *testing.T) {
 	ctx := context.Background()
-	core := rtNewMihomoCore(t)
-	e := rtNewEnv(t, rtWithMihomoCore(core), rtWithSelection())
-	e.writeUserProfile(t)
-	e.addMyRaw(t, "socks5://127.0.0.1:9#mf-a", "socks5://127.0.0.1:10#mf-b")
-	cat := e.catalog(t)
-	refs := []string{rtsNode(t, cat.Xray, "mf-a").Ref, rtsNode(t, cat.Xray, "mf-b").Ref}
-	xrayTag := map[string]string{}
-	mihomoName := map[string]string{}
-	for _, d := range []string{"mf-a", "mf-b"} {
-		x, m := rtsNode(t, cat.Xray, d), rtsNode(t, cat.Mihomo, d)
-		xrayTag[memberNode+x.Ref], mihomoName[memberNode+m.Ref] = x.XrayTag, m.MihomoName
-	}
-	type grp struct{ id, name string }
-	var groups [2]grp
-	for i, name := range []string{"Ранний 1", "Ранний 2"} {
-		_, g, err := e.svc.SaveGroup(e.rev(t), Group{Name: name, Mode: ModeManual, Sources: GroupSources{All: true}})
-		if err != nil {
-			t.Fatalf("SaveGroup №%d: %v", i+1, err)
-		}
-		groups[i] = grp{g.ID, name}
-	}
-	g1, g2 := groups[0], groups[1]
-	e.takeAndApply(t)
-	core.start(t, e)
-	e.rtsReconcile(t, ctx)
-
-	// other — узел, отличный от current группы.
-	other := func(gid string) string {
-		cur := e.rtsCurrent(t, gid)
-		for _, r := range refs {
-			if memberNode+r != cur {
-				return memberNode + r
-			}
-		}
-		t.Fatalf("у группы %s нет узла, отличного от текущего", gid)
-		return ""
-	}
-	// settle ждёт снятия отметок обеих групп (конец фоновых проходов).
-	settle := func() {
-		rtWaitCond(t, 60*time.Second, "конец фоновых проходов выбора", func() bool {
-			k := e.svc.inflightKinds()
-			return k[g1.id] == "" && k[g2.id] == ""
-		})
-	}
+	f := rtsNewFast(t, [2]string{"Ранний 1", "Ранний 2"})
+	e, core, xrayTag, mihomoName := f.e, f.core, f.xrayTag, f.mihomoName
+	g1, g2 := f.groups[0], f.groups[1]
+	other := func(gid string) string { return f.other(t, gid) }
+	settle := func() { f.settle(t) }
 	expectFast := func(label string, res SelectResult, err error) {
 		t.Helper()
-		if err != nil {
-			t.Fatalf("%s: %v", label, err)
-		}
-		if got := res.Kernels[configlayer.KernelMihomo]; got != selApplied {
-			t.Errorf("%s: Kernels[mihomo] = %q, ожидалось %q", label, got, selApplied)
-		}
-		if got := res.Kernels[configlayer.KernelXray]; got != selPendingStopped {
-			t.Errorf("%s: Kernels[xray] = %q, ожидалось %q", label, got, selPendingStopped)
-		}
+		rtsExpectFast(t, label, res, err)
 	}
 
 	executed, attempts, livePrev, nowKept := false, 0, false, false
@@ -594,7 +627,7 @@ func TestRouterSelectMihomoFirst(t *testing.T) {
 	settle()
 	sel := e.rtcSelection(t)
 	for _, c := range []struct {
-		g    grp
+		g    rtsGroup
 		want string
 	}{{g1, want1}, {g2, want2}} {
 		if sel[c.g.id] != c.want {
@@ -613,6 +646,98 @@ func TestRouterSelectMihomoFirst(t *testing.T) {
 	if m := readUnconfirmed(e.state(t).Live); len(m) != 0 {
 		t.Errorf("после проходов остались маркеры selection_unconfirmed: %d", len(m))
 	}
+}
+
+// Внесение сбоя в быстрый путь выбора (план 150-32) на своём процессе Mihomo в
+// каталоге теста, без подмены функций сервиса: сбой создают настоящий процесс
+// (SIGSTOP), настоящий замок применения и убранный сокет контроллера.
+//
+// put_timeout_after_accept (WR-02): процесс остановлен, замок применения занят.
+// Ранний PUT отказывает по сроку, синхронный путь не пишет выбор и отвечает
+// занятостью; Live и маркеры прежние, сверка Mihomo запрошена. После SIGCONT ядро,
+// принявшее PUT уже после таймаута клиента, сходится к Live.
+//
+// Ядро стенда не трогается, метка ядра не нужна. Тест не ссылается на символы,
+// которых нет в продукте до исправления: проход mf-before собирает его с прежними
+// selection.go и selection_gate.go.
+func TestRouterSelectMihomoFaults(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "внесение сбоя: остановка своего процесса Mihomo и убранный сокет контроллера посреди быстрого пути выбора")
+	ctx := context.Background()
+	f := rtsNewFast(t, [2]string{"Сбой 1", "Сбой 2"})
+	e, core := f.e, f.core
+	g := f.groups[0]
+
+	t.Run("put_timeout_after_accept", func(t *testing.T) {
+		f.settle(t)
+		want := f.other(t, g.id)
+		livePrev := e.rtcSelection(t)[g.id]
+		nowPrev, err := core.svc.ProxyNow(ctx, g.name)
+		if err != nil {
+			t.Fatalf("ProxyNow до сбоя: %v", err)
+		}
+		// Наблюдатель в тесте не работает: флаг сверки читается напрямую.
+		e.svc.reconcilePending.Swap(false)
+		release, err := e.layer.BeginExclusive(ctx, false, configlayer.HolderGeodataWrite)
+		if err != nil {
+			t.Fatalf("замок применения: %v", err)
+		}
+		t.Cleanup(release)
+		pid := core.pid()
+		if pid == 0 {
+			t.Fatalf("процесс Mihomo теста не запущен")
+		}
+		if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
+			t.Fatalf("SIGSTOP: %v", err)
+		}
+		t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGCONT) })
+
+		_, err = e.svc.Select(context.Background(), g.id, want)
+		busy := "none"
+		switch {
+		case errors.Is(err, ErrApplyBusy):
+			busy = "apply_busy"
+		case errors.Is(err, configlayer.ErrGeodataBusy):
+			busy = "geodata_busy"
+		default:
+			code, _ := selectFailClass(err, "")
+			t.Errorf("Select при занятом замке применения: код %s, ожидалась ошибка занятости", code)
+		}
+		if got := e.rtcSelection(t)[g.id]; got != livePrev {
+			t.Errorf("Live группы изменился, хотя выбор не записан")
+		}
+		if m := readUnconfirmed(e.state(t).Live); m[g.id] != "" {
+			t.Errorf("у группы маркер selection_unconfirmed=%s, хотя выбор не записан", m[g.id])
+		}
+		requested := e.svc.reconcilePending.Load()
+		if !requested {
+			t.Errorf("WR-02: после неудачного раннего PUT сверка Mihomo не запрошена")
+		}
+
+		release()
+		if err := syscall.Kill(pid, syscall.SIGCONT); err != nil {
+			t.Fatalf("SIGCONT: %v", err)
+		}
+		rtWaitCond(t, 20*time.Second, "Clash API после SIGCONT", func() bool {
+			_, err := core.svc.ProxyNow(ctx, g.name)
+			return err == nil
+		})
+		// Запросы, принятые сокетом до SIGCONT, процесс может разобрать уже после
+		// ответа на первое чтение: now читается после короткой паузы.
+		time.Sleep(time.Second)
+		now, _ := core.svc.ProxyNow(ctx, g.name)
+		lateApplied := now == f.mihomoName[want]
+		if requested {
+			e.rtsReconcile(t, ctx)
+		}
+		converged, _ := routertest.Poll(10*time.Second, 200*time.Millisecond, func() (bool, string) {
+			now, err := core.svc.ProxyNow(ctx, g.name)
+			return err == nil && now == nowPrev, ""
+		})
+		t.Logf("wr02: busy=%s reconcile_requested=%t early_applied_late=%t converged=%t", busy, requested, lateApplied, converged)
+		if !converged {
+			t.Errorf("WR-02: now группы в Mihomo не сошёлся с Live после неудачного раннего PUT (early_applied_late=%t)", lateApplied)
+		}
+	})
 }
 
 // Связанные группы Mihomo (WR-03, WR-04): маркер сбоя выбора стоит только на группе со
