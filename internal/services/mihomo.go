@@ -790,14 +790,26 @@ func (s *MihomoService) ProxyDelay(ctx context.Context, name, testURL string, ti
 	return s.delayAt(ctx, "/providers/proxies/"+url.PathEscape(provider)+"/"+url.PathEscape(name)+"/healthcheck?"+q.Encode())
 }
 
+// ProviderProxyDelay измеряет задержку узла известного провайдера:
+// GET /providers/proxies/{провайдер}/{имя}/healthcheck. Имя узла уникально
+// только внутри провайдера, поэтому узлы источников панели меряются через свой
+// провайдер, без поиска провайдера по имени (providerOf).
+func (s *MihomoService) ProviderProxyDelay(ctx context.Context, provider, name, testURL string, timeout time.Duration) (int, error) {
+	q := url.Values{}
+	q.Set("url", testURL)
+	q.Set("timeout", fmt.Sprintf("%d", timeout.Milliseconds()))
+	return s.delayAt(ctx, "/providers/proxies/"+url.PathEscape(provider)+"/"+url.PathEscape(name)+"/healthcheck?"+q.Encode())
+}
+
 // providerOfTTL — сколько карта узлов провайдеров считается свежей: пачка
 // пинга обходится одним чтением /providers/proxies, а новый набор провайдера
 // подхватывается промахом или по сроку.
 const providerOfTTL = 30 * time.Second
 
 // providerOf возвращает провайдер, в котором Mihomo держит узел name; пусто —
-// узла нет ни в одном провайдере. Промах или устаревшая карта перечитывают
-// GET /providers/proxies.
+// узла нет ни в одном провайдере или имя есть у нескольких провайдеров (какой
+// узел имелся в виду, по имени не понять). Промах или устаревшая карта
+// перечитывают GET /providers/proxies.
 func (s *MihomoService) providerOf(ctx context.Context, name string) (string, error) {
 	s.provMu.Lock()
 	defer s.provMu.Unlock()
@@ -829,7 +841,14 @@ func (s *MihomoService) providerOf(ctx context.Context, name string) (string, er
 			continue
 		}
 		for _, px := range p.Proxies {
-			if _, dup := m[px.Name]; px.Name != "" && !dup {
+			if px.Name == "" {
+				continue
+			}
+			// Имя у нескольких провайдеров неоднозначно: пустое значение, а не
+			// первый провайдер случайного обхода карты.
+			if prev, dup := m[px.Name]; dup && prev != pn {
+				m[px.Name] = ""
+			} else if !dup {
 				m[px.Name] = pn
 			}
 		}

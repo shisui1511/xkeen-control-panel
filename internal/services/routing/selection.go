@@ -1825,6 +1825,12 @@ func (s *Service) repickOne(ctx context.Context, gid string) {
 		rp.up = true
 		if b, err := s.mihomoBuildOf(st, am.installed); err == nil && b != nil {
 			rp.names = b.nodeNames(g)
+			rp.providers = make(map[string]string, len(rp.names))
+			for ref, name := range rp.names {
+				if prov := b.probeProvider(ref, name); prov != "" {
+					rp.providers[ref] = prov
+				}
+			}
 		}
 	}
 
@@ -1910,6 +1916,9 @@ type repickProbe struct {
 	up bool
 	// names — имена узлов в профиле Mihomo по ссылке.
 	names map[string]string
+	// providers — провайдер узла по ссылке, если имя из names — имя в файле
+	// провайдера (probeProvider): такой узел меряется через свой провайдер.
+	providers map[string]string
 }
 
 // method — способ проверки по умолчанию.
@@ -1931,7 +1940,12 @@ func (s *Service) probeNode(ctx context.Context, n sources.CatalogNode, p repick
 	if name := p.names[n.Ref]; p.up && name != "" {
 		cctx, cancel := context.WithTimeout(ctx, timeout+2*time.Second)
 		defer cancel()
-		_, err := s.d.Mihomo.ProxyDelay(cctx, name, p.cfg.URL, timeout)
+		var err error
+		if prov := p.providers[n.Ref]; prov != "" {
+			_, err = s.d.Mihomo.ProviderProxyDelay(cctx, prov, name, p.cfg.URL, timeout)
+		} else {
+			_, err = s.d.Mihomo.ProxyDelay(cctx, name, p.cfg.URL, timeout)
+		}
 		return err == nil, repickMethodDelay
 	}
 	if s.d.Ping == nil {
@@ -1982,8 +1996,8 @@ func (s *Service) pickAlive(ctx context.Context, g Group, am appliedModel, p rep
 			}
 			n := am.byRef[strings.TrimPrefix(c, memberNode)]
 			req.Targets = append(req.Targets, proxyping.Target{
-				Ref: n.Ref, Node: n.Node, MihomoName: p.names[n.Ref], Xray: xray[n.Ref],
-				Fingerprint: proxyping.Fingerprint(n.Node),
+				Ref: n.Ref, Node: n.Node, MihomoName: p.names[n.Ref], MihomoProvider: p.providers[n.Ref],
+				Xray: xray[n.Ref], Fingerprint: proxyping.Fingerprint(n.Node),
 			})
 			if len(req.Targets) == repickMaxProbe {
 				break

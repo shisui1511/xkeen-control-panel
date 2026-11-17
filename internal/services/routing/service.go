@@ -42,6 +42,8 @@ type MihomoAPI interface {
 	SelectProxy(ctx context.Context, group, name string) error
 	// ProxyDelay измеряет задержку узла.
 	ProxyDelay(ctx context.Context, name, testURL string, timeout time.Duration) (int, error)
+	// ProviderProxyDelay измеряет задержку узла через его провайдер.
+	ProviderProxyDelay(ctx context.Context, provider, name, testURL string, timeout time.Duration) (int, error)
 	// ProxiesState читает текущий выбор и историю всех узлов одним запросом.
 	ProxiesState(ctx context.Context) (map[string]services.ClashProxyState, error)
 }

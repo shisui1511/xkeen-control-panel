@@ -18,6 +18,7 @@ import (
 
 type DelayAPI interface {
 	ProxyDelay(ctx context.Context, name, testURL string, timeout time.Duration) (int, error)
+	ProviderProxyDelay(ctx context.Context, provider, name, testURL string, timeout time.Duration) (int, error)
 }
 
 type Deps struct {
@@ -475,9 +476,12 @@ func (r *Runner) directMeasure(ctx context.Context, req Request, target Target, 
 	reason := ReasonTLS
 	if method == MethodMihomo {
 		reason = ReasonDelay
-		if r.d.Mihomo == nil {
+		switch {
+		case r.d.Mihomo == nil:
 			err = errors.New(ReasonDelay)
-		} else {
+		case target.MihomoProvider != "":
+			result.MS, err = r.d.Mihomo.ProviderProxyDelay(ctx, target.MihomoProvider, target.MihomoName, req.URL, probeTimeout(req))
+		default:
 			result.MS, err = r.d.Mihomo.ProxyDelay(ctx, target.MihomoName, req.URL, probeTimeout(req))
 		}
 	} else {

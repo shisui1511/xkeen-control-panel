@@ -46,11 +46,16 @@ var (
 )
 
 type Target struct {
-	Ref         string
-	Node        nodes.Node
-	MihomoName  string
-	Xray        bool
-	Fingerprint string
+	Ref        string
+	Node       nodes.Node
+	MihomoName string
+	// MihomoProvider — провайдер профиля, в файле которого лежит узел под
+	// MihomoName: имя узла уникально только внутри провайдера, и замер идёт через
+	// него. Пусто — MihomoName ищется в /proxies (копия узла в proxies профиля,
+	// имя уникально).
+	MihomoProvider string
+	Xray           bool
+	Fingerprint    string
 }
 
 type Request struct {

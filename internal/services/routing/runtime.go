@@ -273,6 +273,46 @@ func runtimeMihomoNames(b *mihomoBuild, g Group) map[string]string {
 	return names
 }
 
+// probeProvider — провайдер, через который меряется узел ref под именем name в
+// профиле: имя узла уникально только внутри провайдера источника, и одноимённые
+// узлы разных источников по одному имени не различить. Пусто — имя ищется в
+// /proxies: это копия узла в proxies профиля (имя уникально, freeName) или имя,
+// которого нет в файле провайдера.
+func (b *mihomoBuild) probeProvider(ref, name string) string {
+	if name == "" || b.copyName[ref] == name {
+		return ""
+	}
+	if n, ok := b.nodeByRef[ref]; ok && n.MihomoName == name {
+		return providerName(n.Source)
+	}
+	return ""
+}
+
+// ambiguousNames — имена, которые в профиле носят разные узлы (одноимённые
+// узлы разных источников, копия с именем узла другого источника): факты Mihomo
+// по такому имени нельзя приписать одному узлу.
+func (b *mihomoBuild) ambiguousNames() map[string]bool {
+	owner := map[string]string{}
+	out := map[string]bool{}
+	add := func(name, ref string) {
+		if name == "" {
+			return
+		}
+		if o, ok := owner[name]; !ok {
+			owner[name] = ref
+		} else if o != ref {
+			out[name] = true
+		}
+	}
+	for _, n := range b.catalog {
+		add(n.MihomoName, n.Ref)
+	}
+	for ref, name := range b.copyName {
+		add(name, ref)
+	}
+	return out
+}
+
 func runtimeChain(g Group, am appliedModel, live map[string]string) []RuntimeLink {
 	out := []RuntimeLink{}
 	seen := map[string]bool{}
@@ -340,8 +380,10 @@ func (s *Service) RuntimeNow(ctx context.Context) (RuntimeNow, error) {
 	}
 	var states map[string]services.ClashProxyState
 	var mh *mihomoBuild
+	var ambiguous map[string]bool
 	if v.Kernel == configlayer.KernelMihomo && v.Modes.Mihomo == RuntimeModePanel && s.d.Mihomo != nil {
 		mh = runtimeMihomo(am)
+		ambiguous = mh.ambiguousNames()
 		states, err = s.d.Mihomo.ProxiesState(ctx)
 		if err != nil {
 			// Ядро остановили между проверкой и запросом: фактов нет, это не сбой чтения
@@ -385,7 +427,9 @@ func (s *Service) RuntimeNow(ctx context.Context) (RuntimeNow, error) {
 				if name != "" && name == names[n.Ref] {
 					now.Ref, now.Known = n.Ref, true
 				}
-				if h := states[names[n.Ref]].History; len(h) > 0 {
+				// История по имени, которое носят разные узлы, принадлежит
+				// неизвестно какому из них: такой узел остаётся без истории.
+				if h := states[names[n.Ref]].History; len(h) > 0 && !ambiguous[names[n.Ref]] {
 					last := h[len(h)-1]
 					out.History[n.Ref] = NowDelay{MS: last.Delay, At: last.Time}
 				}
@@ -447,8 +491,10 @@ func (s *Service) PingRequest(scope, groupID string) (proxyping.Request, error) 
 	for _, n := range am.cat.Mihomo {
 		mihomo[n.Ref] = n
 	}
+	var mh *mihomoBuild
 	if req.Method == proxyping.MethodMihomo {
-		for ref, name := range runtimeMihomo(am).copyName {
+		mh = runtimeMihomo(am)
+		for ref, name := range mh.copyName {
 			if name != "" {
 				n := mihomo[ref]
 				n.MihomoName = name
@@ -470,10 +516,14 @@ func (s *Service) PingRequest(scope, groupID string) (proxyping.Request, error) 
 			}
 			n := am.byRef[m.Ref]
 			seen[m.Ref] = true
-			req.Targets = append(req.Targets, proxyping.Target{
+			t := proxyping.Target{
 				Ref: n.Ref, Node: n.Node, MihomoName: mihomo[n.Ref].MihomoName,
 				Xray: xray[n.Ref], Fingerprint: proxyping.Fingerprint(n.Node),
-			})
+			}
+			if mh != nil {
+				t.MihomoProvider = mh.probeProvider(n.Ref, t.MihomoName)
+			}
+			req.Targets = append(req.Targets, t)
 		}
 	}
 	if scope == proxyping.ScopeGroup {

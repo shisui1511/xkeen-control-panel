@@ -560,7 +560,7 @@ func providersSection(srcs []string) *yaml.Node {
 	}
 	m := &yaml.Node{Kind: yaml.MappingNode}
 	for _, id := range srcs {
-		name := "xcp-" + id
+		name := providerName(id)
 		m.Content = append(m.Content, yKey(name), yMap(
 			"type", yStr("file"),
 			"path", yStr("./"+proxyProviderDir+"/"+name+".yaml"),
@@ -632,11 +632,14 @@ func (b *mihomoBuild) groupNode(name, typ string, hidden bool, proxies, use []st
 	return n
 }
 
+// providerName — имя провайдера профиля с узлами источника id.
+func providerName(id string) string { return "xcp-" + id }
+
 // uses приводит имена источников к именам провайдеров профиля.
 func uses(srcs []string) []string {
 	out := make([]string, 0, len(srcs))
 	for _, id := range srcs {
-		out = append(out, "xcp-"+id)
+		out = append(out, providerName(id))
 	}
 	return out
 }
