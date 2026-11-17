@@ -160,7 +160,13 @@
       };
     }
     if (n.id.startsWith('routing_repick:')) {
-      const key = p.answered === 'true' ? 'cfg.groups.repick_alive' : 'cfg.groups.repick_none';
+      // Замену поставить не удалось (возврат, неизвестный исход, отказ прохода): повтора не будет
+      const key =
+        p.failed === 'true'
+          ? 'cfg.groups.repick_failed'
+          : p.answered === 'true'
+            ? 'cfg.groups.repick_alive'
+            : 'cfg.groups.repick_none';
       let text = $t(key, { group: p.group ?? '', node: p.node ?? '' });
       // Mihomo не запущен: узлы проверялись без него, по доступности сервера (D-36)
       if (p.method === 'tls') text += ' ' + $t('cfg.groups.repick_method_tls');

@@ -3537,6 +3537,7 @@
   "cfg.groups.first_node_instead_auto": "In Xray {version} “Auto” is unavailable: “{name}” will use the first node.",
   "cfg.groups.repick_alive": "Group “{group}”: the selected node is gone after the update; “{node}” was chosen — the first to respond.",
   "cfg.groups.repick_none": "Group “{group}”: the selected node is gone and no node responded. The first one in order was chosen: “{node}”.",
+  "cfg.groups.repick_failed": "Group “{group}”: the selected node is gone; the replacement “{node}” could not be set or confirmed. Choose a node manually.",
   "cfg.groups.repick_method_tls": "Check: server reachability over TLS.",
   "cfg.groups.probe_title": "Node availability check",
   "cfg.groups.probe_desc": "The same settings for both kernels. Used by the “Auto” and “Fallback” modes.",

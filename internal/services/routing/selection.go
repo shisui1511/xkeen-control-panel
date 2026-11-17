@@ -1836,8 +1836,15 @@ func (s *Service) repickOne(ctx context.Context, gid string) {
 
 	picked, answered, method := s.pickAlive(ctx, g, am, rp)
 	cur := liveSelection(st.Live)[gid]
+	failed := false
 	if picked != "" && picked != cur {
-		if !s.selectWithRetry(ctx, gid, picked) {
+		switch s.selectWithRetry(ctx, gid, picked) {
+		case repickSet:
+		case repickFailed:
+			// Окончательный отказ: маркер снимается, иначе отвергнутая замена
+			// повторялась бы после каждого успешного запуска без предела.
+			failed = true
+		default:
 			return
 		}
 	}
@@ -1861,36 +1868,58 @@ func (s *Service) repickOne(ctx context.Context, gid string) {
 	if answered {
 		ans = "true"
 	}
+	params := map[string]string{"group": g.Name, "node": node, "answered": ans, "method": method}
+	if failed {
+		params["failed"] = "true"
+	}
 	s.repick.put(s.d.Layer, gid, configlayer.NoticeView{
-		ID: noticeRepickPrefix + gid, Kind: noticeWarning,
-		Params: map[string]string{"group": g.Name, "node": node, "answered": ans, "method": method},
+		ID: noticeRepickPrefix + gid, Kind: noticeWarning, Params: params,
 	})
 }
+
+// repickOutcome — исход постановки замены повторным выбором.
+type repickOutcome int
+
+const (
+	// repickSet — замена поставлена.
+	repickSet repickOutcome = iota
+	// repickLater — не поставлена из-за занятости или остановки: маркер остаётся
+	// для следующего применения, уведомления нет.
+	repickLater
+	// repickFailed — окончательный отказ (возврат, неизвестный исход, ошибка
+	// прохода): маркер снимается, уведомление сообщает об отказе.
+	repickFailed
+	// repickGone — группа больше не подлежит выбору: маркер снят, уведомления нет.
+	repickGone
+)
 
 // selectWithRetry ставит выбор синхронным входом (selectSync, без раннего ответа:
 // WR-01 ревью 2); при идущем применении повторяет через 30 с, не больше 5 раз.
 // Поставленным выбор считается только без ошибки, без возврата (Reverted) и без
-// неизвестного исхода (Unconfirmed). false — выбор не поставлен (маркер остаётся для
-// следующего применения, уведомления routing_repick: нет) или группа больше не
-// подлежит выбору (маркер снят).
-func (s *Service) selectWithRetry(ctx context.Context, gid, member string) bool {
+// неизвестного исхода (Unconfirmed). Повтор при следующем применении остаётся
+// только для занятости и остановки (repickLater): отвергнутая замена,
+// оставленная в маркере, повторялась бы после каждого успешного запуска, в том
+// числе после выбора пользователя (WR-04 ревью 4).
+func (s *Service) selectWithRetry(ctx context.Context, gid, member string) repickOutcome {
 	for attempt := 0; ; attempt++ {
 		res, err := s.selectSync(ctx, gid, member)
 		switch {
 		case err == nil && !res.Reverted && len(res.Unconfirmed) == 0:
-			return true
+			return repickSet
 		case err == nil:
 			// Возврат без ошибки прохода или неизвестный исход: выбор не поставлен.
-			return false
+			return repickFailed
 		case errors.Is(err, ErrGroupNotApplied), errors.Is(err, ErrMemberInvalid):
 			s.clearRepick(gid)
-			return false
+			return repickGone
 		case errors.Is(err, ErrApplyBusy) && attempt < repickBusyRetries:
 			if !s.sleep(ctx, repickBusyDelay) {
-				return false
+				return repickLater
 			}
+		case errors.Is(err, ErrApplyBusy), ctx.Err() != nil, s.ctx.Err() != nil:
+			return repickLater
 		default:
-			return false
+			return repickFailed
 		}
 	}
 }

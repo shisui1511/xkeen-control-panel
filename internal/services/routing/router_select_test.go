@@ -683,9 +683,11 @@ func TestRouterSelectMihomoFirst(t *testing.T) {
 // repick_fast_path (WR-01 ревью 2, план 150-35): дрейф управляемого файла Xray,
 // маркер повторного выбора у группы и настоящий repickOne (тот же вход, что
 // repickAll после «Применить»). Проход отказывает, поэтому замена не поставлена:
-// маркер повторного выбора остаётся для следующего применения, уведомления
-// routing_repick: нет, Live прежний. После снятия дрейфа повторный repickOne
-// ставит первый по порядку узел (оба узла — мёртвые адреса, никто не отвечает).
+// отказ окончательный (WR-04 ревью 4) — маркер повторного выбора снят, иначе
+// замена повторялась бы после каждого успешного запуска; уведомление
+// routing_repick: сообщает об отказе (failed=true), Live прежний. После снятия
+// дрейфа повторный repickOne ставит первый по порядку узел (оба узла — мёртвые
+// адреса, никто не отвечает).
 //
 // Ядро стенда не трогается, метка ядра не нужна. Тест не ссылается на символы,
 // которых нет в продукте до исправления: проход mf-before собирает его с прежними
@@ -986,11 +988,11 @@ func TestRouterSelectMihomoFaults(t *testing.T) {
 		if noticed && note.Params["node"] == display[livePrev] {
 			t.Fatalf("repick_setup: повторный выбор оставил текущий узел — замена не пробовалась")
 		}
-		if !markerKept {
-			t.Errorf("WR-01: маркер повторного выбора снят до исхода прохода: отказ прохода не оставил его для следующего применения")
+		if markerKept {
+			t.Errorf("WR-04: окончательный отказ прохода оставил маркер повторного выбора: замена повторялась бы после каждого запуска")
 		}
-		if noticed {
-			t.Errorf("WR-01: замена объявлена до исхода прохода: уведомление routing_repick: при отказе прохода файла Xray")
+		if !noticed || note.Params["failed"] != "true" {
+			t.Errorf("WR-04: отказ замены не сообщён: уведомление routing_repick: %t, failed=%q", noticed, note.Params["failed"])
 		}
 		f.settle(t)
 		liveKept := e.rtcSelection(t)[g.id] == livePrev
@@ -1002,7 +1004,8 @@ func TestRouterSelectMihomoFaults(t *testing.T) {
 		restoreFile()
 		e.svc.repickOne(ctx, g.id)
 		f.settle(t)
-		_, noticed2 := e.rtsNotice(noticeRepickPrefix + g.id)
+		note2, noticed2 := e.rtsNotice(noticeRepickPrefix + g.id)
+		noticed2 = noticed2 && note2.Params["failed"] != "true"
 		markerGone := !e.rtsHasRepick(t, g.id)
 		liveFirst := e.rtcSelection(t)[g.id] == first
 		secondOK := noticed2 && markerGone && liveFirst
