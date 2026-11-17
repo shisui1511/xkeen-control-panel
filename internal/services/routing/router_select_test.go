@@ -675,6 +675,13 @@ func TestRouterSelectMihomoFirst(t *testing.T) {
 // принимает: маркер Mihomo у группы (D-16), уведомление routing_select: с
 // reason=rejected и reverted=false — «Прежний узел возвращён» было бы ложью.
 //
+// repick_fast_path (WR-01 ревью 2, план 150-35): дрейф управляемого файла Xray,
+// маркер повторного выбора у группы и настоящий repickOne (тот же вход, что
+// repickAll после «Применить»). Проход отказывает, поэтому замена не поставлена:
+// маркер повторного выбора остаётся для следующего применения, уведомления
+// routing_repick: нет, Live прежний. После снятия дрейфа повторный repickOne
+// ставит первый по порядку узел (оба узла — мёртвые адреса, никто не отвечает).
+//
 // Ядро стенда не трогается, метка ядра не нужна. Тест не ссылается на символы,
 // которых нет в продукте до исправления: проход mf-before собирает его с прежними
 // selection.go и selection_gate.go.
@@ -904,6 +911,106 @@ func TestRouterSelectMihomoFaults(t *testing.T) {
 			t.Errorf("после сверки остались маркеры selection_unconfirmed: %d", len(m))
 		}
 	})
+
+	t.Run("repick_fast_path", func(t *testing.T) {
+		f.settle(t)
+		// Ожидаемая замена — первый узел группы по порядку участников: проверка
+		// мёртвых узлов не отвечает, pickAlive оставляет первого (answered=false).
+		am, err := e.svc.appliedModelOf(e.state(t))
+		if err != nil {
+			t.Fatalf("repick_setup: применённая модель: %v", err)
+		}
+		grp, ok := am.group(g.id)
+		if !ok {
+			t.Fatalf("repick_setup: нет группы в применённой модели")
+		}
+		first := ""
+		for _, c := range am.candidates(grp) {
+			if strings.HasPrefix(c, memberNode) {
+				first = c
+				break
+			}
+		}
+		if first == "" || f.mihomoName[first] == "" {
+			t.Fatalf("repick_setup: у группы нет первого узла с именем в Mihomo")
+		}
+		display := map[string]string{}
+		for _, n := range e.catalog(t).Mihomo {
+			display[memberNode+n.Ref] = n.Display
+		}
+		// Текущий выбор — не первый по порядку: иначе повторному выбору нечего менять.
+		if e.rtcSelection(t)[g.id] == first {
+			res, err := e.svc.Select(ctx, g.id, f.other(t, g.id))
+			rtsExpectFast(t, "repick_setup: выбор второго узла", res, err)
+			f.settle(t)
+		}
+		livePrev := e.rtcSelection(t)[g.id]
+		if livePrev == first || livePrev == "" {
+			t.Fatalf("repick_setup: текущий выбор группы — первый узел или пуст")
+		}
+		if _, ok := e.rtsNotice(noticeRepickPrefix + g.id); ok {
+			t.Fatalf("repick_setup: уведомление routing_repick: группы уже есть до сценария")
+		}
+
+		restoreFile := drift(t)
+		if err := e.layer.UpdateLive(func(live configlayer.Sections) error {
+			return writeRepick(live, append(without(readRepick(live), g.id), g.id))
+		}); err != nil {
+			t.Fatalf("repick_setup: маркер повторного выбора: %v", err)
+		}
+		t.Cleanup(func() { e.svc.clearRepick(g.id) })
+
+		// Тот же вход, что repickAll после «Применить»: проход файла Xray отказывает
+		// (дрейф), замена не поставлена.
+		e.svc.repickOne(ctx, g.id)
+		markerKept := e.rtsHasRepick(t, g.id)
+		note, noticed := e.rtsNotice(noticeRepickPrefix + g.id)
+		if noticed && note.Params["node"] == display[livePrev] {
+			t.Fatalf("repick_setup: повторный выбор оставил текущий узел — замена не пробовалась")
+		}
+		if !markerKept {
+			t.Errorf("WR-01: маркер повторного выбора снят до исхода прохода: отказ прохода не оставил его для следующего применения")
+		}
+		if noticed {
+			t.Errorf("WR-01: замена объявлена до исхода прохода: уведомление routing_repick: при отказе прохода файла Xray")
+		}
+		f.settle(t)
+		liveKept := e.rtcSelection(t)[g.id] == livePrev
+		if !liveKept {
+			t.Errorf("Live группы после отказа повторного выбора не равен прежнему узлу")
+		}
+
+		// Без дрейфа повторный выбор ставит первый узел и снимает маркер.
+		restoreFile()
+		e.svc.repickOne(ctx, g.id)
+		f.settle(t)
+		_, noticed2 := e.rtsNotice(noticeRepickPrefix + g.id)
+		markerGone := !e.rtsHasRepick(t, g.id)
+		liveFirst := e.rtcSelection(t)[g.id] == first
+		secondOK := noticed2 && markerGone && liveFirst
+		t.Logf("wr01: marker_kept=%t repick_notice=%t live_prev=%t second_ok=%t", markerKept, noticed, liveKept, secondOK)
+		if !markerGone {
+			t.Errorf("повторный выбор без дрейфа не снял маркер повторного выбора")
+		}
+		if !noticed2 {
+			t.Errorf("повторный выбор без дрейфа не опубликовал уведомление routing_repick:")
+		}
+		if !liveFirst {
+			t.Errorf("Live группы после повторного выбора не равен первому узлу по порядку")
+		}
+		rtsWaitNow(t, core, g.name, f.mihomoName[first], 10*time.Second)
+	})
+}
+
+// rtsHasRepick — группа gid в маркере повторного выбора Live.
+func (e *rtEnv) rtsHasRepick(t *testing.T, gid string) bool {
+	t.Helper()
+	for _, id := range readRepick(e.state(t).Live) {
+		if id == gid {
+			return true
+		}
+	}
+	return false
 }
 
 // rtsXrayDriftFile — управляемый панелью файл Xray в каталоге теста вне xcp-groups

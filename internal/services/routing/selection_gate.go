@@ -49,6 +49,10 @@ type xrayIntent struct {
 	// Вход: группа, участник и связная компонента группы.
 	gid, member string
 	comp        []string
+	// keepRepick — намерение повторного выбора (selectSync): Prepare не снимает
+	// маркер повторного выбора группы, его снимает repickOne после поставленного
+	// выбора (WR-01 ревью 2).
+	keepRepick bool
 	// Выход записи (Prepare): прежнее значение выбора, поставлен ли маркер
 	// неизвестного исхода на компоненту, записано ли намерение и ошибка до записи.
 	prev    string
@@ -358,7 +362,8 @@ func (s *Service) xrayValidateChanged(ctx context.Context, bin, tmpBase string, 
 // prepareXrayBatch пишет намерения пачки одной записью Live (под замками
 // применения и жизненного цикла, до сборки): выбор каждой группы, маркер
 // неизвестного исхода Xray на её компоненту при запущенном Xray и снятие группы
-// из повторного выбора — то же, что setSelection. Группа с маркером получает
+// из повторного выбора (кроме намерения самого повторного выбора, keepRepick) — то
+// же, что setSelection. Группа с маркером получает
 // ErrSelectionUnconfirmed и в запись не попадает. Компоненты записанных намерений
 // становятся группами коммита хода (xrayRunGate.commitComp).
 func (s *Service) prepareXrayBatch(b *xrayBatch) error {
@@ -393,7 +398,9 @@ func (s *Service) prepareXrayBatch(b *xrayBatch) error {
 				}
 				results[i].pending = true
 			}
-			repick = without(repick, in.gid)
+			if !in.keepRepick {
+				repick = without(repick, in.gid)
+			}
 			n++
 		}
 		if n == 0 {

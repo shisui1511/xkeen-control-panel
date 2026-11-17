@@ -444,7 +444,9 @@ func without(ids []string, id string) []string {
 
 // setSelection записывает выбор группы и снимает с неё маркер повторного выбора:
 // ручной выбор пользователя не должен быть перекрыт заменой пропавшего узла.
-func (s *Service) setSelection(gid, member string, pending []string) error {
+// keepRepick — выбор ставит сам повторный выбор (selectSync): маркер снимет
+// repickOne после поставленного выбора, иначе он остаётся для следующего применения.
+func (s *Service) setSelection(gid, member string, pending []string, keepRepick bool) error {
 	return s.d.Layer.UpdateLive(func(live configlayer.Sections) error {
 		unconfirmed := readUnconfirmed(live)
 		if unconfirmed[gid] != "" {
@@ -461,7 +463,7 @@ func (s *Service) setSelection(gid, member string, pending []string) error {
 		if err := writeUnconfirmed(live, unconfirmed); err != nil {
 			return err
 		}
-		if ids := readRepick(live); len(ids) > 0 {
+		if ids := readRepick(live); len(ids) > 0 && !keepRepick {
 			return writeRepick(live, without(ids, gid))
 		}
 		return nil
@@ -532,7 +534,26 @@ func (s *Service) markReconcile() { s.reconcilePending.Store(true) }
 // выбор из Live. Ранний PUT не удался — прежний синхронный порядок; ядро могло
 // принять PUT после таймаута клиента, поэтому сверка Mihomo запрошена, а выходы,
 // где выбор не записан или возвращён, ставят Mihomo по Live (WR-02).
+//
+// Select — вход клика пользователя (обработчик): быстрый путь разрешён.
 func (s *Service) Select(ctx context.Context, groupID, member string) (SelectResult, error) {
+	return s.selectOpts(ctx, groupID, member, true)
+}
+
+// selectSync — служебный вход выбора без раннего ответа (WR-01 ревью 2): повторный
+// выбор (selectWithRetry) не получает ответ до прохода файла Xray, его итог — маркер
+// повторного выбора и уведомление routing_repick:, поэтому он ждёт исход прохода и
+// постановку Mihomo по Live. Маркер повторного выбора группы проход не снимает:
+// его снимает repickOne только после поставленного выбора.
+func (s *Service) selectSync(ctx context.Context, groupID, member string) (SelectResult, error) {
+	return s.selectOpts(ctx, groupID, member, false)
+}
+
+// selectOpts — тело выбора (Select, selectSync). fast — разрешён быстрый путь при
+// запущенном Mihomo и остановленном Xray (ранний PUT и фоновый хвост); false —
+// прежний синхронный порядок: проход файла Xray, затем Mihomo по Live, и маркер
+// повторного выбора группы остаётся за вызывающим (keepRepick).
+func (s *Service) selectOpts(ctx context.Context, groupID, member string, fast bool) (SelectResult, error) {
 	start := time.Now()
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
@@ -596,7 +617,7 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 		// Намерение пишется в Live под замками применения до сборки (Prepare), в
 		// одной пачке с выборами независимых групп, пришедшими за время идущего
 		// запуска (G-150-3).
-		in := &xrayIntent{gid: groupID, member: member, comp: comp}
+		in := &xrayIntent{gid: groupID, member: member, comp: comp, keepRepick: !fast}
 		stages := newXrayStages(groupID, start, model, in)
 		// earlyTried — ранний PUT отправлялся, но ответ ушёл синхронным путём: Mihomo
 		// мог принять цель (в том числе после таймаута клиента, WR-02). Выходы, где
@@ -612,7 +633,7 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 			s.selectMihomoLocked(context.WithoutCancel(ctx), groupID)
 			s.selMu.Unlock()
 		}
-		if mihomoManaged && s.d.Running(configlayer.KernelMihomo) && !s.d.Running(configlayer.KernelXray) {
+		if fast && mihomoManaged && s.d.Running(configlayer.KernelMihomo) && !s.d.Running(configlayer.KernelXray) {
 			clashStart := time.Now()
 			// pre — от захвата компоненты до раннего PUT (повторное чтение состояния,
 			// проверка маркеров, событие начала).
@@ -704,7 +725,7 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 			return res, nil
 		}
 	} else {
-		if err := s.setSelection(groupID, member, nil); err != nil {
+		if err := s.setSelection(groupID, member, nil, !fast); err != nil {
 			return SelectResult{}, err
 		}
 	}
@@ -1740,15 +1761,21 @@ func (s *Service) repickOne(ctx context.Context, gid string) {
 	})
 }
 
-// selectWithRetry ставит выбор; при идущем применении повторяет через 30 с, не
-// больше 5 раз. false — выбор не поставлен (маркер остаётся для следующего
-// применения) или группа больше не подлежит выбору (маркер снят).
+// selectWithRetry ставит выбор синхронным входом (selectSync, без раннего ответа:
+// WR-01 ревью 2); при идущем применении повторяет через 30 с, не больше 5 раз.
+// Поставленным выбор считается только без ошибки, без возврата (Reverted) и без
+// неизвестного исхода (Unconfirmed). false — выбор не поставлен (маркер остаётся для
+// следующего применения, уведомления routing_repick: нет) или группа больше не
+// подлежит выбору (маркер снят).
 func (s *Service) selectWithRetry(ctx context.Context, gid, member string) bool {
 	for attempt := 0; ; attempt++ {
-		_, err := s.Select(ctx, gid, member)
+		res, err := s.selectSync(ctx, gid, member)
 		switch {
-		case err == nil:
+		case err == nil && !res.Reverted && len(res.Unconfirmed) == 0:
 			return true
+		case err == nil:
+			// Возврат без ошибки прохода или неизвестный исход: выбор не поставлен.
+			return false
 		case errors.Is(err, ErrGroupNotApplied), errors.Is(err, ErrMemberInvalid):
 			s.clearRepick(gid)
 			return false
