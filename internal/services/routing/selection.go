@@ -611,8 +611,12 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 		}
 		if mihomoManaged && s.d.Running(configlayer.KernelMihomo) && !s.d.Running(configlayer.KernelXray) {
 			clashStart := time.Now()
-			early := s.selectMihomoEarly(ctx, groupID, member)
+			// pre — от захвата компоненты до раннего PUT (повторное чтение состояния,
+			// проверка маркеров, событие начала).
+			stages.pre = clashStart.Sub(start) - model
+			early, et := s.selectMihomoEarly(ctx, groupID, member)
 			stages.clash = time.Since(clashStart)
+			stages.clashWait, stages.clashPlan, stages.clashPut = et.wait, et.plan, et.put
 			if early == selApplied {
 				// Цель видна виду «Прокси» до записи Live фоновым проходом; событие —
 				// вторая вкладка перечитывает вид и видит выбор (D-14).
@@ -832,41 +836,59 @@ func (s *Service) mihomoEntryFor(st configlayer.StateView, installed configlayer
 	return nil, nil
 }
 
+// earlyTiming — части времени раннего PUT для строки этапов (разбор пробела 2):
+// wait — ожидание selMu; plan — под замком до вызова Clash API и после него
+// (чтение состояния, расчёт цели mihomoEntryFor); put — сам вызов SelectProxy (без
+// вызова — 0). Сумма — поле clash строки этапов без накладных расходов замера.
+type earlyTiming struct {
+	wait, plan, put time.Duration
+}
+
 // selectMihomoEarly — ранний PUT быстрого пути: ставит в запущенный Mihomo выбор,
 // который фоновый проход ещё запишет в Live. Под selMu, как сверка: сверка не
 // перетирает выбор между расчётом и вызовом. Не applied — вызывающий идёт прежним
-// синхронным порядком.
-func (s *Service) selectMihomoEarly(ctx context.Context, gid, member string) string {
+// синхронным порядком. Вместе с исходом — замер частей (earlyTiming); поведение
+// выбора замер не меняет.
+func (s *Service) selectMihomoEarly(ctx context.Context, gid, member string) (out string, tm earlyTiming) {
+	waitStart := time.Now()
 	s.selMu.Lock()
 	defer s.selMu.Unlock()
+	locked := time.Now()
+	tm.wait = locked.Sub(waitStart)
+	// plan — всё время под замком, кроме вызова Clash API; отложенный вызов идёт до
+	// снятия замка (порядок defer обратный).
+	defer func() { tm.plan = time.Since(locked) - tm.put }()
 	if !s.d.Running(configlayer.KernelMihomo) {
-		return selPendingStopped
+		return selPendingStopped, tm
 	}
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
-		return selFailed
+		return selFailed, tm
 	}
 	entry, err := s.mihomoEntryFor(st, s.d.Installed(), gid, member)
 	if err != nil {
-		return selFailed
+		return selFailed, tm
 	}
 	if entry == nil {
 		// Группа в профиле Mihomo не материализована: выбирать там нечего.
-		return selApplied
+		return selApplied, tm
 	}
 	if s.d.Mihomo == nil || !s.d.Mihomo.HasController() {
-		return selFailed
+		return selFailed, tm
 	}
 	cctx, cancel := context.WithTimeout(ctx, reconcileCallTimeout)
 	defer cancel()
-	if err := s.d.Mihomo.SelectProxy(cctx, entry.group, entry.want); err != nil {
+	putStart := time.Now()
+	err = s.d.Mihomo.SelectProxy(cctx, entry.group, entry.want)
+	tm.put = time.Since(putStart)
+	if err != nil {
 		// PUT мог дойти до ядра (принят после таймаута клиента, WR-02): сверка
 		// вернёт Mihomo к Live ближайшим циклом наблюдателя.
 		log.Printf("[routing] ранний выбор Mihomo не поставлен: группа=%s Clash API: %s", gid, clashErrClass(err))
 		s.markReconcile()
-		return selFailed
+		return selFailed, tm
 	}
-	return selApplied
+	return selApplied, tm
 }
 
 // selectMihomoFirstTail — фоновое продолжение быстрого пути после ответа: проход

@@ -775,6 +775,31 @@ const rtRtMihomoSelectBudget = 1000 * time.Millisecond
 // rtRtMihomoSelectBudget плюс 1000 мс допуска времени вне Select из правила 150-16.
 const rtRtMihomoHTTPBudget = 2000 * time.Millisecond
 
+// rtRtMihomoPanelTheta — θM, порог правил плана 150-38 для составляющих времени
+// выбора на ядре mihomo (10 % rtRtMihomoSelectBudget): объявлен до замера и в этом
+// тесте не проверка — строка mihomo-select-parts: только печатает его рядом с
+// медианами (P1: медиана clash_plan ≥ θM — цель раннего PUT из каталога Select;
+// медиана clash_wait, model или pre ≥ θM — todo с цифрами; clash_put — время
+// самого Mihomo, без правила).
+const rtRtMihomoPanelTheta = 100 * time.Millisecond
+
+// rtRtMihomoParts — составляющие времени строк этапов выбора на ядре mihomo (те
+// же строки, что mihomoTotals): model, pre, части раннего PUT и накладные расходы
+// панели panel = total − clash_put.
+type rtRtMihomoParts struct {
+	model, pre, wait, plan, put, panel []int64
+}
+
+// add берёт составляющие из строки этапов st.
+func (p *rtRtMihomoParts) add(st rtRtStage) {
+	p.model = append(p.model, st.num("model"))
+	p.pre = append(p.pre, st.num("pre"))
+	p.wait = append(p.wait, st.num("clash_wait"))
+	p.plan = append(p.plan, st.num("clash_plan"))
+	p.put = append(p.put, st.num("clash_put"))
+	p.panel = append(p.panel, st.num("total")-st.num("clash_put"))
+}
+
 // rtRtStagesWait — срок ожидания строк этапов выбора: на ядре xray строка пишется до
 // ответа (5 с на запись журнала), на ядре mihomo — в конце фонового прохода файла
 // Xray после ответа (до 90 с).
@@ -1566,6 +1591,9 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	// (одиночный и барьер D-17): медианы сверяются с rtRtMihomoSelectBudget и
 	// rtRtMihomoHTTPBudget после блока D-17.
 	var mihomoTotals, mihomoHTTP []int64
+	// mihomoParts — составляющие времени тех же строк для разбора пробела 2 (строка
+	// mihomo-select-parts:, без проверки).
+	var mihomoParts rtRtMihomoParts
 	// Вторая вкладка (ядро mihomo): поток событий слоя открыт до отправки выбора.
 	var proxiesEv <-chan time.Time
 	stopEvents := func() {}
@@ -1636,6 +1664,7 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 			if tg.Core == "mihomo" {
 				mihomoTotals = append(mihomoTotals, st.num("total"))
 				mihomoHTTP = append(mihomoHTTP, selHTTP)
+				mihomoParts.add(st)
 			}
 		}
 	}
@@ -1993,6 +2022,7 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 				if tg.Core == "mihomo" {
 					mihomoTotals = append(mihomoTotals, st.num("total"))
 					mihomoHTTP = append(mihomoHTTP, httpMS)
+					mihomoParts.add(st)
 					switch st.kv["reput"] {
 					case "skip":
 						evSkip++
@@ -2223,6 +2253,12 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 		medTotal, medHTTP := rtRtMedian(mihomoTotals), rtRtMedian(mihomoHTTP)
 		t.Logf("mihomo-select-budget: lines=%d total_med=%.1f http_med=%.1f total_budget=%d http_budget=%d",
 			len(mihomoTotals), medTotal, medHTTP, rtRtMihomoSelectBudget.Milliseconds(), rtRtMihomoHTTPBudget.Milliseconds())
+		// Разбор пробела 2: какая часть времени — панель, какая — сам Mihomo. Строка
+		// разбора, не проверка: порогов и меток здесь нет, θM — для правил 150-38.
+		p := mihomoParts
+		t.Logf("mihomo-select-parts: lines=%d model_med=%.1f pre_med=%.1f wait_med=%.1f plan_med=%.1f put_med=%.1f panel_med=%.1f theta=%d",
+			len(p.panel), rtRtMedian(p.model), rtRtMedian(p.pre), rtRtMedian(p.wait), rtRtMedian(p.plan),
+			rtRtMedian(p.put), rtRtMedian(p.panel), rtRtMihomoPanelTheta.Milliseconds())
 		// Граница не выдерживается на флешке стенда (Clash API отвечает секундами при
 		// записи на носитель): известное падение до решения владельца (todo в pending).
 		mark := routertest.Known("*/mihomo", "150-22-mihomo-select-clash-put-slow")
