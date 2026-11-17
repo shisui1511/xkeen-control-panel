@@ -2259,9 +2259,9 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 		t.Logf("mihomo-select-parts: lines=%d model_med=%.1f pre_med=%.1f wait_med=%.1f plan_med=%.1f put_med=%.1f panel_med=%.1f theta=%d",
 			len(p.panel), rtRtMedian(p.model), rtRtMedian(p.pre), rtRtMedian(p.wait), rtRtMedian(p.plan),
 			rtRtMedian(p.put), rtRtMedian(p.panel), rtRtMihomoPanelTheta.Milliseconds())
-		// Граница не выдерживается на флешке стенда (Clash API отвечает секундами при
-		// записи на носитель): известное падение до решения владельца (todo в pending).
-		mark := routertest.Known("*/mihomo", "150-22-mihomo-select-clash-put-slow")
+		// Метка Known 150-22-mihomo-select-clash-put-slow снята по XPASS сессии 150-37;
+		// граница 150-19 (пробел 2) остаётся вопросом владельца.
+		mark := routertest.KnownMark{}
 		if len(mihomoTotals) == 0 {
 			t.Errorf("время выбора Mihomo: нет строк этапов выборов, граница %d мс", rtRtMihomoSelectBudget.Milliseconds())
 		} else {
