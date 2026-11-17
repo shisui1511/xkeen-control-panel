@@ -1570,10 +1570,15 @@ func (l *Layer) updateAutoTakenNotices(auto string, now RoutingState) {
 // коммита, уведомления (запуск мог восстановить файлы по журналу) и внеочередная
 // сверка.
 func (l *Layer) afterRun() {
+	l.publishRunEvents()
+	l.checkNow(true)
+}
+
+// publishRunEvents публикует события черновика и уведомлений после запуска.
+func (l *Layer) publishRunEvents() {
 	st := l.store.Snapshot()
 	l.broker.Publish(Event{Type: EventDraft, Data: l.store.draftEventOf(st)})
 	l.broker.Publish(Event{Type: EventNotices, Data: NoticesEvent{Notices: l.noticeViews(st)}})
-	l.checkNow(true)
 }
 
 // LiveRun — параметры фонового запуска конвейера в обход черновика (RunLive).
@@ -1662,11 +1667,18 @@ func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 	release()
 	start = time.Now()
 	if run.Trigger == TriggerSelect {
-		// Ответ выбора не ждёт сверки файлов, событий черновика и уведомлений
-		// (150-24, F2): afterRun идёт в фоне, checkNow сериализует checkMu; остановка
-		// слоя ждёт фоновые задачи (wg), остановленный слой afterRun не запускает.
-		// Строка замера для выбора меряет только запуск хуков.
-		l.spawn(l.afterRun)
+		// Ответ выбора не ждёт сверки файлов (150-24, F2): в фоне идёт только
+		// checkNow (сериализует checkMu; остановка слоя ждёт фоновые задачи, wg).
+		// События черновика и уведомлений публикуются здесь, синхронно: из фона
+		// они могли прийти позже SetNotices хвоста следующего запуска. Сверка
+		// пропускается, если конвейер уже занят следующей пачкой: посреди её
+		// записи она показала бы ложный дрейф, а итог сверит afterRun той пачки.
+		l.publishRunEvents()
+		l.spawn(func() {
+			if !l.pipeline.Busy() {
+				l.checkNow(true)
+			}
+		})
 	} else {
 		l.afterRun()
 	}

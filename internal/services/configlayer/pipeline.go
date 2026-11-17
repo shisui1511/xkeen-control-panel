@@ -391,6 +391,8 @@ type Pipeline struct {
 	// tail — итог запуска опубликован (finish), а замок применения держится до конца
 	// хвоста запуска; сбрасывает тот, кто взял замок следующим (TryBegin).
 	tail atomic.Bool
+	// held — замки TryBegin взяты и ещё не сняты (Busy).
+	held atomic.Bool
 	mu   sync.Mutex
 	view ApplyView
 	// commitLive — хуки фиксации живых данных (PipelineDeps.CommitLive) в порядке

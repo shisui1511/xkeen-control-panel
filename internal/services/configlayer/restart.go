@@ -992,9 +992,11 @@ func (p *Pipeline) TryBegin(ctx context.Context, user bool) (release func(), err
 			}
 		}
 	}
+	p.held.Store(true)
 	var once sync.Once
 	return func() {
 		once.Do(func() {
+			p.held.Store(false)
 			if lifecycle != nil {
 				lifecycle.Unlock()
 			}
@@ -1002,3 +1004,7 @@ func (p *Pipeline) TryBegin(ctx context.Context, user bool) (release func(), err
 		})
 	}, nil
 }
+
+// Busy — замки применения сейчас держит запуск (TryBegin без release). Только
+// подсказка для фоновой работы, которую можно пропустить: замок не берётся.
+func (p *Pipeline) Busy() bool { return p.held.Load() }
