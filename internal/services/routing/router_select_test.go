@@ -656,24 +656,29 @@ func TestRouterSelectMihomoFirst(t *testing.T) {
 
 // Внесение сбоя в быстрый путь выбора (план 150-32) на своём процессе Mihomo в
 // каталоге теста, без подмены функций сервиса: сбой создают настоящий процесс
-// (SIGSTOP), настоящий замок применения и убранный сокет контроллера.
+// (SIGSTOP) и настоящий замок применения. Остановленный процесс не отвечает ни по
+// новому соединению, ни по открытому: клиент Clash API панели держит соединения
+// раннего PUT открытыми, поэтому убранный файл сокета контроллера следующий вызов
+// не останавливает.
 //
 // put_timeout_after_accept (WR-02): процесс остановлен, замок применения занят.
 // Ранний PUT отказывает по сроку, синхронный путь не пишет выбор и отвечает
 // занятостью; Live и маркеры прежние, сверка Mihomo запрошена. После SIGCONT ядро,
 // принявшее PUT уже после таймаута клиента, сходится к Live.
 //
-// tail_reput_unreachable (пробел 3, D-17): сразу после ответа быстрого пути сокет
-// контроллера убирается, пока фоновый проход держит отметку группы. Успешный
-// хвост не повторяет PUT подтверждённого значения: маркера selection_unconfirmed и
-// уведомления routing_select: нет, Live и xcp-groups — цель; новый процесс после
-// сверки показывает цель.
+// tail_reput_unreachable (пробел 3, D-17): сразу после ответа быстрого пути процесс
+// Mihomo останавливается (SIGSTOP), пока фоновый проход держит отметку группы.
+// Успешный хвост не повторяет PUT подтверждённого значения: маркера
+// selection_unconfirmed и уведомления routing_select: нет, Live и xcp-groups —
+// цель; новый процесс после сверки показывает цель. Повтор PUT ждал бы ответа до
+// срока и ставил маркер Mihomo группе, которой ответили «применено».
 //
 // revert_unreachable (WR-03, план 150-35): дрейф управляемого файла Xray вне
-// xcp-groups, выбор быстрым путём, сразу — убранный сокет контроллера. Фоновый
-// проход отказывает, Live возвращается к прежнему узлу, а Mihomo выбор из Live не
-// принимает: маркер Mihomo у группы (D-16), уведомление routing_select: с
-// reason=rejected и reverted=false — «Прежний узел возвращён» было бы ложью.
+// xcp-groups, выбор быстрым путём, сразу — SIGSTOP процесса Mihomo. Фоновый проход
+// отказывает, Live возвращается к прежнему узлу, а Mihomo выбор из Live не
+// принимает (срок вызова): маркер Mihomo у группы (D-16), уведомление
+// routing_select: с reason=rejected и reverted=false — «Прежний узел возвращён»
+// было бы ложью.
 //
 // repick_fast_path (WR-01 ревью 2, план 150-35): дрейф управляемого файла Xray,
 // маркер повторного выбора у группы и настоящий repickOne (тот же вход, что
@@ -686,7 +691,7 @@ func TestRouterSelectMihomoFirst(t *testing.T) {
 // которых нет в продукте до исправления: проход mf-before собирает его с прежними
 // selection.go и selection_gate.go.
 func TestRouterSelectMihomoFaults(t *testing.T) {
-	routertest.Tier(t, routertest.Full, "внесение сбоя: остановка своего процесса Mihomo и убранный сокет контроллера посреди быстрого пути выбора")
+	routertest.Tier(t, routertest.Full, "внесение сбоя: остановка своего процесса Mihomo и замок применения посреди быстрого пути выбора")
 	ctx := context.Background()
 	f := rtsNewFast(t, [2]string{"Сбой 1", "Сбой 2"})
 	e, core := f.e, f.core
@@ -765,27 +770,29 @@ func TestRouterSelectMihomoFaults(t *testing.T) {
 	})
 
 	t.Run("tail_reput_unreachable", func(t *testing.T) {
-		sock := filepath.Join(core.dir, "c.sock")
-		executed, attempts := false, 0
+		executed, attempts, pid := false, 0, 0
 		var want string
 		for attempts < 3 && !executed {
 			attempts++
 			f.settle(t)
 			want = f.other(t, g.id)
+			if pid = core.pid(); pid == 0 {
+				t.Fatalf("процесс Mihomo теста не запущен")
+			}
 			res, err := e.svc.Select(ctx, g.id, want)
 			rtsExpectFast(t, "выбор быстрым путём", res, err)
-			// Ответ пришёл после раннего PUT: контроллер убирается, пока фоновый
-			// проход файла Xray ещё держит отметку группы.
-			if err := os.Remove(sock); err != nil {
-				t.Fatalf("сокет контроллера: %v", err)
+			// Ответ пришёл после раннего PUT: процесс Mihomo останавливается, пока
+			// фоновый проход файла Xray ещё держит отметку группы.
+			if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
+				t.Fatalf("SIGSTOP: %v", err)
 			}
+			stopped := pid
+			t.Cleanup(func() { _ = syscall.Kill(stopped, syscall.SIGCONT) })
 			executed = e.svc.inflightKinds()[g.id] == inflightSelect
 			if !executed {
-				// Хвост закончился до удаления сокета: контроллер возвращается, выбор
-				// в Mihomo сверяется с Live, попытка повторяется.
-				core.stop()
-				core.start(t, e)
-				e.rtsReconcile(t, ctx)
+				// Хвост закончился до остановки процесса: процесс продолжает работу,
+				// попытка повторяется.
+				_ = syscall.Kill(pid, syscall.SIGCONT)
 			}
 		}
 		marker := "none"
@@ -795,9 +802,12 @@ func TestRouterSelectMihomoFaults(t *testing.T) {
 				marker = k
 			}
 		}
+		if err := syscall.Kill(pid, syscall.SIGCONT); err != nil {
+			t.Fatalf("SIGCONT: %v", err)
+		}
 		t.Logf("tail-reput: executed=%t attempts=%d marker=%s", executed, attempts, marker)
 		if !executed {
-			t.Errorf("окно хвоста не поймано: за %d попыток фоновый проход закончился до удаления сокета контроллера", attempts)
+			t.Errorf("окно хвоста не поймано: за %d попыток фоновый проход закончился до остановки процесса Mihomo", attempts)
 			return
 		}
 		if marker != "none" {
@@ -815,7 +825,7 @@ func TestRouterSelectMihomoFaults(t *testing.T) {
 			t.Errorf("исходящий группы в xcp-groups не совпадает с выбранным узлом")
 		}
 
-		// Контроллер возвращается новым процессом: сверка ставит выбор из Live.
+		// Процесс Mihomo заменяется новым: сверка ставит выбор из Live.
 		core.stop()
 		core.start(t, e)
 		e.rtsReconcile(t, ctx)
@@ -834,7 +844,6 @@ func TestRouterSelectMihomoFaults(t *testing.T) {
 	}
 
 	t.Run("revert_unreachable", func(t *testing.T) {
-		sock := filepath.Join(core.dir, "c.sock")
 		f.settle(t)
 		livePrev := e.rtcSelection(t)[g.id]
 		curPrev := e.rtsCurrent(t, g.id)
@@ -844,25 +853,34 @@ func TestRouterSelectMihomoFaults(t *testing.T) {
 			attempts++
 			f.settle(t)
 			want := f.other(t, g.id)
+			pid := core.pid()
+			if pid == 0 {
+				t.Fatalf("процесс Mihomo теста не запущен")
+			}
 			res, err := e.svc.Select(ctx, g.id, want)
 			rtsExpectFast(t, "выбор быстрым путём при дрейфе", res, err)
-			// Ответ пришёл после раннего PUT: контроллер убирается, пока фоновый
-			// проход ещё держит отметку группы и Mihomo по Live не поставлен.
-			if err := os.Remove(sock); err != nil {
-				t.Fatalf("сокет контроллера: %v", err)
+			// Ответ пришёл после раннего PUT: процесс Mihomo останавливается, пока
+			// фоновый проход ещё держит отметку группы и Mihomo по Live не поставлен.
+			if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
+				t.Fatalf("SIGSTOP: %v", err)
 			}
+			t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGCONT) })
+			inTail := e.svc.inflightKinds()[g.id] == inflightSelect
 			f.settle(t)
+			if err := syscall.Kill(pid, syscall.SIGCONT); err != nil {
+				t.Fatalf("SIGCONT: %v", err)
+			}
 			marker = "none"
 			if k := readUnconfirmed(e.state(t).Live)[g.id]; k != "" {
 				marker = k
 			}
-			// Сценарий исполнен, только если хвост не дошёл до Mihomo до удаления
-			// сокета: ранний PUT прошёл, значит, отказ постановки по Live и маркер
-			// Mihomo у группы — следствие убранного сокета.
-			executed = marker == configlayer.KernelMihomo
-			if !executed {
-				// Хвост поставил Mihomo по Live до удаления сокета: контроллер
-				// возвращается, попытка повторяется.
+			// Сценарий исполнен, только если хвост не дошёл до Mihomo до остановки
+			// процесса: ранний PUT прошёл, значит, отказ постановки по Live и маркер
+			// Mihomo у группы — следствие остановленного процесса.
+			executed = inTail && marker == configlayer.KernelMihomo
+			if !executed && marker != "none" {
+				// Маркер без попадания в окно: сверка новым процессом снимает его,
+				// попытка повторяется.
 				core.stop()
 				core.start(t, e)
 				e.rtsReconcile(t, ctx)
@@ -881,7 +899,7 @@ func TestRouterSelectMihomoFaults(t *testing.T) {
 		}
 		t.Logf("wr03: executed=%t attempts=%d reverted=%s reason=%s marker=%s", executed, attempts, reverted, reason, marker)
 		if !executed {
-			t.Errorf("окно хвоста не поймано: за %d попыток Mihomo получил выбор из Live до удаления сокета контроллера", attempts)
+			t.Errorf("окно хвоста не поймано: за %d попыток Mihomo получил выбор из Live до остановки процесса", attempts)
 		} else {
 			if got := e.rtcSelection(t)[g.id]; got != livePrev {
 				t.Errorf("Live группы не вернулся к прежнему узлу после отказа прохода")

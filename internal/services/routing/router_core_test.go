@@ -129,6 +129,14 @@ func rtWorkSubdir(t *testing.T, prefix string) string {
 // или порт, не открывшийся вовремя, — провал теста с очищенным выводом.
 func rtStartProc(t *testing.T, bin string, args []string, env []string, port int) *rtProc {
 	t.Helper()
+	return rtStartProcOwned(t, t, bin, args, env, port)
+}
+
+// rtStartProcOwned — rtStartProc, у которого процесс останавливается в очистке
+// owner, а провалы запуска идут в t: подтест перезапускает процесс, который
+// переживает подтест и нужен следующим подтестам того же теста.
+func rtStartProcOwned(t, owner *testing.T, bin string, args []string, env []string, port int) *rtProc {
+	t.Helper()
 	p := &rtProc{exited: make(chan struct{})}
 	p.cmd = exec.Command(bin, args...)
 	p.cmd.Stdout = p
@@ -143,7 +151,7 @@ func rtStartProc(t *testing.T, bin string, args []string, env []string, port int
 		_ = p.cmd.Wait()
 		close(p.exited)
 	}()
-	t.Cleanup(p.stop)
+	owner.Cleanup(p.stop)
 
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	deadline := time.Now().Add(rtCoreReadyTimeout)
@@ -210,7 +218,14 @@ func rtStartXrayDir(t *testing.T, dir string, port int) *rtProc {
 // (config.yaml в нём) и ждёт порт socks. Для сценариев Mihomo (146-11).
 func rtStartMihomoCore(t *testing.T, dir string, port int) *rtProc {
 	t.Helper()
-	return rtStartProc(t, rtMihomoBin, []string{"-d", dir, "-f", filepath.Join(dir, "config.yaml")}, nil, port)
+	return rtStartMihomoCoreOwned(t, t, dir, port)
+}
+
+// rtStartMihomoCoreOwned — rtStartMihomoCore с остановкой процесса в очистке owner
+// (rtStartProcOwned).
+func rtStartMihomoCoreOwned(t, owner *testing.T, dir string, port int) *rtProc {
+	t.Helper()
+	return rtStartProcOwned(t, owner, rtMihomoBin, []string{"-d", dir, "-f", filepath.Join(dir, "config.yaml")}, nil, port)
 }
 
 // rtStartNode запускает «узел»: Xray с socks-входящим без авторизации и freedom,

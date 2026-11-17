@@ -369,10 +369,14 @@ func (e *rtEnv) check(t *testing.T) []configlayer.BuildIssue {
 // сокет не трогаются. Процесс можно остановить и запустить снова в том же
 // каталоге: cache.db (store-selected) остаётся и восстанавливает прежний выбор
 // процесса — ровно как при перезапуске или переключении ядра на устройстве.
+// Процесс принадлежит тесту, создавшему ядро (owner): запущенный в подтесте
+// процесс останавливается в очистке owner, а не в конце подтеста, и следующий
+// подтест получает живое ядро.
 type rtMihomoCore struct {
-	dir  string
-	port int
-	svc  *services.MihomoService
+	dir   string
+	port  int
+	svc   *services.MihomoService
+	owner *testing.T
 
 	mu   sync.Mutex
 	proc *rtProc
@@ -383,7 +387,7 @@ func rtNewMihomoCore(t *testing.T) *rtMihomoCore {
 	t.Helper()
 	rtNeedBins(t, rtMihomoBin)
 	dir := rtWorkSubdir(t, "rm-")
-	return &rtMihomoCore{dir: dir, port: rtFreePort(t), svc: services.NewMihomoService(rtMihomoBin, "", dir)}
+	return &rtMihomoCore{dir: dir, port: rtFreePort(t), svc: services.NewMihomoService(rtMihomoBin, "", dir), owner: t}
 }
 
 // rtWithMihomoCore подключает отдельный процесс к Deps окружения: Clash API
@@ -482,7 +486,7 @@ func (c *rtMihomoCore) start(t *testing.T, e *rtEnv) {
 	}
 	rtCopyFiles(t, e.mihomoPath(proxyProviderDir), filepath.Join(c.dir, proxyProviderDir))
 	rtCopyFiles(t, e.mihomoPath(mihomoRuleProviderDir), filepath.Join(c.dir, mihomoRuleProviderDir))
-	p := rtStartMihomoCore(t, c.dir, c.port)
+	p := rtStartMihomoCoreOwned(t, c.owner, c.dir, c.port)
 	c.mu.Lock()
 	c.proc = p
 	c.mu.Unlock()
