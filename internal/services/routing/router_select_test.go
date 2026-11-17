@@ -1189,13 +1189,15 @@ func TestRouterSelectMihomoFirst(t *testing.T) {
 // было бы ложью.
 //
 // repick_fast_path (WR-01 ревью 2, план 150-35): дрейф управляемого файла Xray,
-// маркер повторного выбора у группы и настоящий repickOne (тот же вход, что
-// repickAll после «Применить»). Проход отказывает, поэтому замена не поставлена:
-// отказ окончательный (WR-04 ревью 4) — маркер повторного выбора снят, иначе
-// замена повторялась бы после каждого успешного запуска; уведомление
-// routing_repick: сообщает об отказе (failed=true), Live прежний. После снятия
-// дрейфа повторный repickOne ставит первый по порядку узел (оба узла — мёртвые
-// адреса, никто не отвечает).
+// маркер повторного выбора у группы (наличие в Live подтверждено до вызова) и
+// настоящий repickOne (тот же вход, что repickAll после «Применить»). Проход
+// отказывает, поэтому замена не поставлена: отказ окончательный (WR-04 ревью 4) —
+// маркер повторного выбора снят, иначе замена повторялась бы после каждого
+// успешного запуска; уведомление routing_repick: сообщает об отказе
+// (failed=true), Live и now процесса Mihomo прежние. После снятия дрейфа маркер
+// ставится заново и подтверждается (IN-07 ревью 5), повторный repickOne ставит
+// первый по порядку узел и снимает этот маркер (оба узла — мёртвые адреса, никто
+// не отвечает).
 //
 // Ядро стенда не трогается, метка ядра не нужна. Тест не ссылается на символы,
 // которых нет в продукте до исправления: проход mf-before собирает его с прежними
@@ -1480,13 +1482,24 @@ func TestRouterSelectMihomoFaults(t *testing.T) {
 			t.Fatalf("repick_setup: уведомление routing_repick: группы уже есть до сценария")
 		}
 
-		restoreFile := drift(t)
-		if err := e.layer.UpdateLive(func(live configlayer.Sections) error {
-			return writeRepick(live, append(without(readRepick(live), g.id), g.id))
-		}); err != nil {
-			t.Fatalf("repick_setup: маркер повторного выбора: %v", err)
+		// mark ставит маркер повторного выбора группы настоящей записью Live и
+		// подтверждает его наличие: каждая ветка начинается со своего маркера, иначе
+		// проверка его снятия пуста (IN-07 ревью 5).
+		mark := func(stage string) {
+			t.Helper()
+			if err := e.layer.UpdateLive(func(live configlayer.Sections) error {
+				return writeRepick(live, append(without(readRepick(live), g.id), g.id))
+			}); err != nil {
+				t.Fatalf("repick_setup: маркер повторного выбора перед %s: %v", stage, err)
+			}
+			if !e.rtsHasRepick(t, g.id) {
+				t.Fatalf("repick_setup: маркера повторного выбора нет в Live перед %s", stage)
+			}
 		}
 		t.Cleanup(func() { e.svc.clearRepick(g.id) })
+
+		restoreFile := drift(t)
+		mark("отказным проходом")
 
 		// Тот же вход, что repickAll после «Применить»: проход файла Xray отказывает
 		// (дрейф), замена не поставлена.
@@ -1507,9 +1520,19 @@ func TestRouterSelectMihomoFaults(t *testing.T) {
 		if !liveKept {
 			t.Errorf("Live группы после отказа повторного выбора не равен прежнему узлу")
 		}
+		// Синхронный проход отказал на файле Xray до Mihomo: процесс держит прежний
+		// узел. Ошибка чтения — неизвестный исход, прежним он не считается (D-16).
+		nowFail, err := core.svc.ProxyNow(ctx, g.name)
+		nowKept := err == nil && nowFail == f.mihomoName[livePrev]
+		if !nowKept {
+			t.Errorf("now группы в Mihomo после отказа повторного выбора не равен прежнему узлу (ошибка чтения: %t)", err != nil)
+		}
 
-		// Без дрейфа повторный выбор ставит первый узел и снимает маркер.
+		// Без дрейфа повторный выбор ставит первый узел и снимает маркер. Отказ уже
+		// снял маркер, поэтому он ставится заново и проверяется перед вызовом:
+		// markerGone ниже — переход «есть → снят», а не след отказной ветки.
 		restoreFile()
+		mark("успешным проходом")
 		e.svc.repickOne(ctx, g.id)
 		f.settle(t)
 		note2, noticed2 := e.rtsNotice(noticeRepickPrefix + g.id)
@@ -1517,7 +1540,7 @@ func TestRouterSelectMihomoFaults(t *testing.T) {
 		markerGone := !e.rtsHasRepick(t, g.id)
 		liveFirst := e.rtcSelection(t)[g.id] == first
 		secondOK := noticed2 && markerGone && liveFirst
-		t.Logf("wr01: marker_kept=%t repick_notice=%t live_prev=%t second_ok=%t", markerKept, noticed, liveKept, secondOK)
+		t.Logf("wr01: marker_kept=%t repick_notice=%t live_prev=%t second_ok=%t now_prev=%t", markerKept, noticed, liveKept, secondOK, nowKept)
 		if !markerGone {
 			t.Errorf("повторный выбор без дрейфа не снял маркер повторного выбора")
 		}
