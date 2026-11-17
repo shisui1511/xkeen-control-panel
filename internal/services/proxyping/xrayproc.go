@@ -96,9 +96,28 @@ func checkTmpRoot(root string) error {
 	return nil
 }
 
+// xrayEmits — исходящее Xray узла собирается: узел без него не попадает в
+// конфиг временного процесса и не валит запуск всего куска.
+func xrayEmits(target Target) bool {
+	_, err := nodes.XrayOutbound(target.Node, "pout-check")
+	return err == nil
+}
+
+// errXrayExited — процесс вышел до готовности всех слушателей: конфиг куска
+// отвергнут (исходящее узла, которого установленная версия не принимает) или
+// освобождённый порт занял другой процесс.
+var errXrayExited = errors.New("ping_xray_exited")
+
+// errXrayRejected — процесс выходил до готовности во всех попытках: кусок не
+// проверить временным Xray, но это свойство его узлов, а не всей пачки.
+var errXrayRejected = errors.New("ping_xray_rejected")
+
 // startTempXray повторяет всю подготовку после раннего выхода (например,
-// другой процесс занял освобождённый порт). Ошибки наружу — только коды.
+// другой процесс занял освобождённый порт). Ошибки наружу — только коды:
+// errXrayRejected — процесс выходил при старте во всех попытках, иначе
+// ReasonStart (каталог, бинарник, запуск процесса).
 func startTempXray(ctx context.Context, bin, root string, targets []Target) (*tempXray, error) {
+	exited := true
 	for attempt := 0; attempt < 3; attempt++ {
 		p, err := startTempAttempt(ctx, bin, root, targets)
 		if err == nil {
@@ -107,6 +126,10 @@ func startTempXray(ctx context.Context, bin, root string, targets []Target) (*te
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+		exited = exited && errors.Is(err, errXrayExited)
+	}
+	if exited {
+		return nil, errXrayRejected
 	}
 	return nil, errors.New(ReasonStart)
 }
@@ -202,14 +225,14 @@ func startTempAttempt(ctx context.Context, bin, root string, targets []Target) (
 		if ready {
 			select {
 			case <-p.done:
-				return nil, errors.New(ReasonStart)
+				return nil, errXrayExited
 			default:
 				return p, nil
 			}
 		}
 		select {
 		case <-p.done:
-			return nil, errors.New(ReasonStart)
+			return nil, errXrayExited
 		case <-readyCtx.Done():
 			return nil, readyCtx.Err()
 		case <-tick.C:

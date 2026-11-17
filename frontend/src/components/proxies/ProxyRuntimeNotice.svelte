@@ -86,7 +86,7 @@
   </div>
 {/if}
 
-{#if fallbackReason === 'no_xray_binary' || fallbackReason === 'low_memory'}
+{#if fallbackReason === 'no_xray_binary' || fallbackReason === 'low_memory' || fallbackReason === 'xray_rejected'}
   <p class="prn-tls" data-testid="proxies-tls-reason">
     <span class="icon-first-line prn-icon" aria-hidden="true">
       <Icon name="info" size={12} />

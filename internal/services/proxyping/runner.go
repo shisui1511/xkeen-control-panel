@@ -261,16 +261,23 @@ func (r *Runner) run(b *batchRun, req Request) {
 			r.work(b, targets, l.Parallel, func(ctx context.Context, i int) PingResult { return r.directMeasure(ctx, req, targets[i], MethodTLS) })
 			continue
 		}
-		var xrayTargets, tlsTargets []Target
+		var xrayTargets, tlsTargets, badTargets []Target
 		for _, target := range targets {
-			if target.Xray {
-				xrayTargets = append(xrayTargets, target)
-			} else {
+			switch {
+			case !target.Xray:
 				tlsTargets = append(tlsTargets, target)
+			case !xrayEmits(target):
+				// Исходящее узла не собрать: узел не валит кусок, у него свой отказ.
+				badTargets = append(badTargets, target)
+			default:
+				xrayTargets = append(xrayTargets, target)
 			}
 		}
 		r.work(b, tlsTargets, l.Parallel, func(ctx context.Context, i int) PingResult {
 			return r.directMeasure(ctx, req, tlsTargets[i], MethodTLS)
+		})
+		r.work(b, badTargets, l.Parallel, func(context.Context, int) PingResult {
+			return PingResult{Kernel: req.Kernel, Method: MethodXray, Status: StatusError, Reason: ReasonStart, At: r.d.Now()}
 		})
 		if len(xrayTargets) == 0 || b.ctx.Err() != nil {
 			continue
@@ -294,6 +301,20 @@ func (r *Runner) run(b *batchRun, req Request) {
 		}
 		p, err := startTempXray(b.ctx, bin, r.d.TmpRoot, xrayTargets)
 		release()
+		if errors.Is(err, errXrayRejected) {
+			// Временный Xray отверг конфиг куска (исходящее одного из узлов):
+			// это не сбой всей пачки. Узлы куска проверяются по TLS, следующие
+			// куски — своим процессом.
+			r.mu.Lock()
+			if b.batch.FallbackReason == "" {
+				b.batch.FallbackReason = FallbackXrayRejected
+			}
+			r.mu.Unlock()
+			r.work(b, xrayTargets, l.Parallel, func(ctx context.Context, i int) PingResult {
+				return r.directMeasure(ctx, req, xrayTargets[i], MethodTLS)
+			})
+			continue
+		}
 		if err != nil {
 			state, reason = StateFailed, ReasonStart
 			return

@@ -210,8 +210,42 @@ func TestRouterPingTempXray(t *testing.T) {
 	})
 
 	// WR-01: пачка повторного выбора не дошла до конца (временный Xray не запустился) —
-	// неизмеренные узлы проверяет TLS, а не считает мёртвыми.
+	// неизмеренные узлы проверяет TLS, а не считает мёртвыми. Пачку валит корень
+	// временных каталогов, который нельзя использовать (ссылка), а не отказ конфига.
 	t.Run("probe_failed_batch_tls", func(t *testing.T) {
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+		t.Cleanup(server.Close)
+		_, port, _ := net.SplitHostPort(server.Listener.Addr().String())
+		n, _ := strconv.Atoi(port)
+		targets := pingTargets(n, 2)
+		realRoot, err := os.MkdirTemp("/opt/tmp", "xcp-ping-real-")
+		if err != nil {
+			t.Fatal("real_root")
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(realRoot) })
+		linkRoot := realRoot + "-link"
+		if err := os.Symlink(realRoot, linkRoot); err != nil {
+			t.Fatal("link_root")
+		}
+		t.Cleanup(func() { _ = os.Remove(linkRoot) })
+		r, _ := pingRunner(t, func(d *Deps) { d.TmpRoot = linkRoot })
+		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		defer cancel()
+		got := r.Probe(ctx, Request{Kernel: "xray", Method: MethodXray, Targets: targets, URL: server.URL})
+		if last := r.Snapshot().Batch; last == nil || last.State != StateFailed || last.ReasonCode != ReasonStart {
+			t.Fatalf("batch_not_failed: %+v", last)
+		}
+		for _, target := range targets {
+			if res, ok := got[target.Ref]; !ok || res.Method != MethodTLS || res.Status != StatusOK {
+				t.Fatalf("not_tls_checked: %s %+v", target.Ref, res)
+			}
+		}
+	})
+
+	// WR-02 ревью 4: временный Xray куска выходит при старте (отверг конфиг) — пачка
+	// не валится: узлы куска проверяются по TLS с причиной xray_rejected, следующие
+	// куски (здесь по одному узлу) запускаются дальше.
+	t.Run("rejected_chunk_tls", func(t *testing.T) {
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 		t.Cleanup(server.Close)
 		_, port, _ := net.SplitHostPort(server.Listener.Addr().String())
@@ -226,15 +260,17 @@ func TestRouterPingTempXray(t *testing.T) {
 		if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
 			t.Fatal("fake_xray")
 		}
-		r, _ := pingRunner(t, func(d *Deps) { d.XrayBin = func() string { return fake } })
-		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
-		defer cancel()
-		got := r.Probe(ctx, Request{Kernel: "xray", Method: MethodXray, Targets: targets, URL: server.URL})
-		if last := r.Snapshot().Batch; last == nil || last.State != StateFailed || last.ReasonCode != ReasonStart {
-			t.Fatalf("batch_not_failed: %+v", last)
+		r, _ := pingRunner(t, func(d *Deps) {
+			d.XrayBin = func() string { return fake }
+			d.Limits = func() Limits { return Limits{2, 1, 1, "test"} }
+		})
+		pingLaunch(t, r, targets, server.URL)
+		s := pingWaitBatch(t, r, StateDone, 40*time.Second)
+		if s.Batch.FallbackReason != FallbackXrayRejected || s.Batch.ReasonCode != "" || s.Batch.Done != len(targets) {
+			t.Fatalf("rejected_chunk: %+v", s.Batch)
 		}
 		for _, target := range targets {
-			if res, ok := got[target.Ref]; !ok || res.Method != MethodTLS || res.Status != StatusOK {
+			if res, ok := s.Results[target.Ref]; !ok || res.Method != MethodTLS || res.Status != StatusOK {
 				t.Fatalf("not_tls_checked: %s %+v", target.Ref, res)
 			}
 		}

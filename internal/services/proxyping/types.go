@@ -28,6 +28,9 @@ const (
 	StateFailed          = "failed"
 	FallbackNoXrayBinary = "no_xray_binary"
 	FallbackLowMemory    = "low_memory"
+	// FallbackXrayRejected — временный Xray куска вышел, не дойдя до готовности
+	// (отверг исходящее одного из узлов): узлы куска проверены по TLS.
+	FallbackXrayRejected = "xray_rejected"
 	ReasonTimeout        = "timeout"
 	ReasonConnect        = "connect_failed"
 	ReasonTunnel         = "tunnel_failed"
