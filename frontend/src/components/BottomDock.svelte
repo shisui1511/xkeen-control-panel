@@ -1,7 +1,15 @@
 <script lang="ts">
   import { t } from '../i18n';
-  import { isSidebarOpen, isConflict, isMihomo, mihomoApiAvailable, navCaps } from '../stores';
-  import { showMihomoNavFor } from '../lib/navCaps';
+  import {
+    isSidebarOpen,
+    isConflict,
+    isMihomo,
+    mihomoApiAvailable,
+    navCaps,
+    configLayerFlagKnown,
+    configLayerEnabled
+  } from '../stores';
+  import { showProxiesNavFor } from '../lib/navCaps';
   import Icon from '../lib/components/Icon.svelte';
 
   // Нижняя панель разделов на телефоне (≤768 px): четыре частых раздела под большим
@@ -15,14 +23,15 @@
     onOpenMenu?: () => void;
   } = $props();
 
-  // Второй пункт зависит от ядра: при Mihomo — «Прокси», иначе — «Редактор» (Xray
-  // правится файлами). Пока срез неизвестен (null), показываем нейтральный «Редактор».
-  const showMihomoNav = $derived($isConflict ? false : showMihomoNavFor($navCaps) === true);
+  // При слое «Прокси» доступна обоим ядрам. Пока срез неизвестен, показываем «Редактор».
+  const showProxiesNav = $derived(
+    $isConflict ? false : showProxiesNavFor($navCaps, $configLayerFlagKnown && $configLayerEnabled)
+  );
   const showApiBadge = $derived($isMihomo && !$mihomoApiAvailable);
 
   const items = $derived([
     { tab: 'dashboard', icon: 'dashboard', label: $t('nav.dashboard') },
-    showMihomoNav
+    showProxiesNav === true
       ? { tab: 'proxies', icon: 'proxies', label: $t('nav.proxies'), badge: showApiBadge }
       : { tab: 'editor', icon: 'editor', label: $t('nav.editor') },
     { tab: 'logs', icon: 'logs', label: $t('nav.logs') },

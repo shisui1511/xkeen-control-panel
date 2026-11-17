@@ -1,4 +1,4 @@
-// e2e-pages: config/nodes config/groups config/rules config/lists config/cores config/files config/setup
+// e2e-pages: config/nodes config/groups config/rules config/lists config/cores config/files config/setup proxies
 // e2e-kind: read
 // router-area: ui-shell
 import { test, expect, type Page } from '@playwright/test';
@@ -15,6 +15,9 @@ import { FULL_TAG, TIER_FULL_ANNOTATION } from './lib/known';
 // каждый шаг раскрывается по очереди (нажатие заголовка — не изменяющее действие), и пункты 2
 // и 3 повторяются; сообщение провала называет номер шага. Внешние запросы автопроверки IP идут
 // под сборщиком консоли, как у бейджа IP на «Прокси» (pages.spec.ts).
+// Страница «Прокси» при слое (фаза 150) — отдельный срез, как мастер: корень proxies-layer-page,
+// без полосы вкладок; первая карточка группы раскрывается нажатием на имя в шапке (не изменяющее
+// действие), и пункты 2 и 3 повторяются на раскрытой карточке.
 // Проверяет:
 // 1. Консоль и сеть: нет console.error, pageerror, ответов 5xx или оборванных запросов.
 // 2. Горизонтальная прокрутка страницы: document.scrollingElement.scrollWidth <= innerWidth.
@@ -34,7 +37,10 @@ const TABS = ['nodes', 'groups', 'rules', 'lists', 'cores', 'files'] as const;
 // Страница мастера — не вкладка раздела: свой корень и без полосы вкладок
 const SETUP = 'setup';
 
-type TabName = (typeof TABS)[number] | typeof SETUP;
+// Страница «Прокси» при слое: не вкладка раздела, свой адрес и корень
+const PROXIES = 'proxies';
+
+type TabName = (typeof TABS)[number] | typeof SETUP | typeof PROXIES;
 
 // Итог проверки IP шага 7 мастера (IpCheckResult data-state)
 const IP_RESULT = /^(proxied|direct_ok|direct_warn|failed)$/;
@@ -94,7 +100,7 @@ async function checkTab(
     }, theme)
     .catch(() => {});
 
-  await page.goto(`/#/config/${tab}`);
+  await page.goto(tab === PROXIES ? '/#/proxies' : `/#/config/${tab}`);
 
   await page.evaluate((th) => {
     localStorage.setItem('theme', th);
@@ -102,7 +108,14 @@ async function checkTab(
     document.documentElement.setAttribute('data-scheme', th === 'light' ? 'light' : 'dark');
   }, theme);
 
-  if (tab === SETUP) {
+  if (tab === PROXIES) {
+    await expect(page.getByTestId('proxies-layer-page')).toBeVisible({ timeout: T.page });
+    // вид загружен: скелетонов страницы нет
+    await expect(page.locator('[data-testid="proxies-layer-page"] [aria-busy="true"]')).toHaveCount(
+      0,
+      { timeout: T.page }
+    );
+  } else if (tab === SETUP) {
     await expect(page.getByTestId('config-setup')).toBeVisible({ timeout: T.page });
     await expect(page.getByTestId('setup-steps')).toBeVisible({ timeout: T.page });
   } else {
@@ -126,8 +139,22 @@ async function checkTab(
     }
   }
 
-  // 4. Полоса вкладок на узком экране не шире окна (у мастера полосы нет)
-  if (width <= 768 && tab !== SETUP) {
+  // «Прокси»: первая карточка группы раскрывается, пункты 2 и 3 повторяются на раскрытой
+  if (tab === PROXIES) {
+    const card = page.locator('[data-testid^="proxy-group-"].pc-card').first();
+    if ((await card.count()) > 0) {
+      const head = card.locator('.pc-toggle').first();
+      if ((await head.getAttribute('aria-expanded')) !== 'true') {
+        await card.locator('.pc-name').first().click();
+      }
+      await expect(head).toHaveAttribute('aria-expanded', 'true', { timeout: T.action });
+      await page.waitForTimeout(300);
+      for (const p of await layoutProblems(page)) problems.push(`раскрытая карточка группы: ${p}`);
+    }
+  }
+
+  // 4. Полоса вкладок на узком экране не шире окна (у мастера и «Прокси» полосы нет)
+  if (width <= 768 && tab !== SETUP && tab !== PROXIES) {
     const tabsWidth = await page.evaluate(() => {
       const tabs = document.querySelector('[data-testid="config-tabs"]');
       if (!tabs) return null;
@@ -281,5 +308,34 @@ test(
     await checkTab(page, SETUP, 'light', 768);
     await checkTab(page, SETUP, 'dark', 768);
     await checkTab(page, SETUP, 'light', 1280);
+  }
+);
+
+// ── Страница «Прокси» при слое (фаза 150): те же срезы gate и матрица full ──
+test('config-visual tab:proxies slices:gate', async ({ page }) => {
+  if (!(await layerOn(page))) {
+    test.skip(true, 'флаг config_layer выключен на этом устройстве: страница «Прокси» без слоя');
+  }
+  await checkTab(page, PROXIES, 'light', 390);
+  await checkTab(page, PROXIES, 'dark', 1280);
+});
+
+test(
+  'config-visual tab:proxies matrix:full',
+  {
+    tag: FULL_TAG,
+    annotation: {
+      type: TIER_FULL_ANNOTATION,
+      description: 'визуальная матрица: 390/768/1280 × две темы, кроме срезов gate (150 UI-SPEC)'
+    }
+  },
+  async ({ page }) => {
+    if (!(await layerOn(page))) {
+      test.skip(true, 'флаг config_layer выключен на этом устройстве: страница «Прокси» без слоя');
+    }
+    await checkTab(page, PROXIES, 'dark', 390);
+    await checkTab(page, PROXIES, 'light', 768);
+    await checkTab(page, PROXIES, 'dark', 768);
+    await checkTab(page, PROXIES, 'light', 1280);
   }
 );

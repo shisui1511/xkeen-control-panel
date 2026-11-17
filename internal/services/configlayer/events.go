@@ -24,6 +24,17 @@ const (
 	EventDNS = "dns"
 	// EventWizard — признак мастера первого запуска изменился: счётчик событий.
 	EventWizard = "wizard"
+	// EventProxies — выбор, состав групп или ход пинга изменились: клиент
+	// перечитывает страницу «Прокси»; данные в событие не входят (D-14).
+	EventProxies = "proxies"
+)
+
+// Виды изменений страницы «Прокси» в ProxiesEvent.Kind.
+const (
+	ProxiesKindSelect    = "select"
+	ProxiesKindStructure = "structure"
+	ProxiesKindPing      = "ping"
+	ProxiesKindBatch     = "batch"
 )
 
 const (
@@ -76,6 +87,13 @@ type GeodataEvent struct {
 // перехвата через шину слоя не идёт: клиент по счётчику перечитывает его.
 type DNSEvent struct {
 	Seq uint64 `json:"seq"`
+}
+
+// ProxiesEvent — сигнал перечитать рантайм, выбор или результаты пинга.
+// Имена узлов, ссылки и сами результаты по шине не передаются.
+type ProxiesEvent struct {
+	Seq  uint64 `json:"seq"`
+	Kind string `json:"kind"`
 }
 
 // WizardEvent — данные события wizard: счётчик событий мастера. Само состояние

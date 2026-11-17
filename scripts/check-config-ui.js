@@ -30,7 +30,7 @@
  *    карточки и строки узла; удаление через showConfirm; полнота словарей.
  *
  * 8. Маршрутизация (план 146-17): вкладки «Группы» и «Правила» и их testId; интерфейсы
- *    configRouting.ts совпадают по ключам с routingContract.json; событие routing,
+ *    configRouting.ts, configLayer.ts и configProxies.ts совпадают по ключам с routingContract.json; событие routing,
  *    подписки клиента (дебаунс 300 мс), нет обратного импорта в configLayer.ts и импорта
  *    клиента вне config-раздела; {@html} в компонентах config запрещён; у каждого кода
  *    из routingErrorCodes.json и каждой причины invalid_input есть текст в ru и en;
@@ -84,6 +84,17 @@
  *    $configLayerEnabled и card_visible; в SetupChecklistCard и components/config/setup/
  *    нет {@html}; configSubTab.ts экспортирует isConfigSetupHash, а CONFIG_SUBTABS не
  *    содержит setup; ключи входа в мастер и карточки есть в ru и en.
+ *
+ * 15. Страница «Прокси» при слое (план 150-10): не-type импорт клиента configProxies и
+ *    адаптера proxyRuntimeAdapter есть только в ProxiesRuntime.svelte, components/proxies/**
+ *    и lib/proxyRuntimeAdapter.ts (при выключенном флаге запросов слоя нет); configLayer.ts
+ *    знает событие proxies (EVENT_NAMES и HandlerEvent), configProxies.ts подписан на него с
+ *    дебаунсом PROXIES_DEBOUNCE_MS = 300 и второго EventSource не открывает; в Dashboard.svelte
+ *    ближайшее условие {#if …}/{:else if …} перед ленивым импортом ProxiesRuntime.svelte
+ *    содержит $configLayerEnabled, прежняя страница рисуется только как <Proxies /> без
+ *    пропов, а условие плашки ApiOffline упоминает 'proxies' и $configLayerEnabled; в
+ *    ProxiesRuntime.svelte и components/proxies/*.svelte нет {@html}, у ключей $tp этих
+ *    файлов есть формы _one/_few/_many в ru и en.
  *
  * Usage: node scripts/check-config-ui.js [--root <каталог>]
  */
@@ -996,10 +1007,12 @@ for (const [file, id] of [
 }
 
 // Типы ответов против routingContract.json; интерфейс может наследовать другой
-// (`extends`), RoutingSnapshot и RoutingKernelView объявлены в configLayer.ts
+// (`extends`), типы страницы «Прокси» объявлены в configProxies.ts,
+// RoutingSnapshot и RoutingKernelView объявлены в configLayer.ts
 // (configLayer не импортирует configRouting)
 const routingTs = read(ROUTING_TS);
-const routingSources = [routingTs, layerTs];
+const proxiesTs = read(`${SRC}/lib/configProxies.ts`);
+const routingSources = [routingTs, layerTs, proxiesTs];
 function routingInterfaceKeys(name, seen = new Set()) {
   if (seen.has(name)) return null;
   seen.add(name);
@@ -1745,7 +1758,6 @@ const IMMEDIATE_CALLS = [
   "renameProfile",
   "deleteProfile",
   "activateProfile",
-  "selectMember",
   "reclaimRouting",
   "reclaimSection",
   "setAccessLog",
@@ -1984,6 +1996,123 @@ for (const lang of ["ru", "en"]) {
       typeof dict[key] === "string" && dict[key].trim() !== "",
       `${file}: нет текста ${key} (мастер первого запуска, 149.1)`,
     );
+  }
+}
+
+// --- 15. Страница «Прокси» при слое (план 150-10) ---------------------------
+
+const PROXIES_TS = `${SRC}/lib/configProxies.ts`;
+const PROXY_ADAPTER_TS = `${SRC}/lib/proxyRuntimeAdapter.ts`;
+const PROXIES_PAGE = `${SRC}/ProxiesRuntime.svelte`;
+const PROXIES_DIR = `${SRC}/components/proxies`;
+
+// (а) Клиент «Прокси» и адаптер подключают только страница слоя и её компоненты: без
+// флага Dashboard рисует прежнюю страницу, и запросов /api/configlayer/proxies нет
+// (import type стирается при сборке и запросов не делает)
+for (const file of walk(SRC, [])) {
+  if (file === PROXIES_TS || file === PROXY_ADAPTER_TS || file === PROXIES_PAGE) continue;
+  if (file.startsWith(`${PROXIES_DIR}/`)) continue;
+  const text = read(file);
+  for (const mod of ["configProxies", "proxyRuntimeAdapter"]) {
+    if (
+      new RegExp(
+        `^\\s*import(?!\\s+type\\b)[^;]*?from '[^']*\\/${mod}'`,
+        "m",
+      ).test(text)
+    ) {
+      errors.push(
+        `${file}: импортирует ${mod} вне ProxiesRuntime.svelte и components/proxies/ (запросы страницы «Прокси» при выключенном флаге, 15. Страница «Прокси»)`,
+      );
+    }
+  }
+}
+
+// (б) Событие proxies: один SSE-поток слоя, подписка клиента с дебаунсом 300 мс
+const eventNames = /const EVENT_NAMES = \[([\s\S]*?)\]/.exec(layerTs);
+expect(
+  !!eventNames && /'proxies'/.test(eventNames[1]),
+  `${LAYER_TS}: EVENT_NAMES не содержит 'proxies' (15. Страница «Прокси»)`,
+);
+const handlerEvent = /type HandlerEvent\s*=([^;]*);/.exec(layerTs);
+expect(
+  !!handlerEvent && /'proxies'/.test(handlerEvent[1]),
+  `${LAYER_TS}: HandlerEvent не содержит 'proxies' (15. Страница «Прокси»)`,
+);
+const proxiesClient = stripCommentsForCalls(proxiesTs);
+expect(
+  /onLayerEvent\(\s*'proxies'/.test(proxiesClient),
+  `${PROXIES_TS}: нет подписки onLayerEvent('proxies' (живое обновление, D-14)`,
+);
+expect(
+  /\bPROXIES_DEBOUNCE_MS\s*=\s*300\b/.test(proxiesClient),
+  `${PROXIES_TS}: нет PROXIES_DEBOUNCE_MS = 300 (дебаунс перечитывания по событиям)`,
+);
+expect(
+  !/\bEventSource\b/.test(proxiesClient),
+  `${PROXIES_TS}: открывает свой EventSource — события идут общим потоком слоя (T-150-29)`,
+);
+
+// (в) Выбор страницы в Dashboard: страница слоя — только при включённом флаге, прежняя
+// страница — без пропов (веха M1, T-150-30)
+const proxiesCond = conditionBefore(dashText, "import('./ProxiesRuntime.svelte')");
+if (proxiesCond === null) {
+  errors.push(
+    `${DASHBOARD}: нет условия {#if}/{:else if} перед ленивым импортом ProxiesRuntime.svelte (15. Страница «Прокси»)`,
+  );
+} else {
+  expect(
+    /(^|[^!\s])\s*\$configLayerEnabled\b/.test(proxiesCond) &&
+      !/!\s*\$configLayerEnabled\b/.test(proxiesCond),
+    `${DASHBOARD}: ветка ProxiesRuntime не требует включённого слоя $configLayerEnabled — без флага страница слоя заменит прежнюю (T-150-30)`,
+  );
+}
+const oldProxiesTags = [...dashText.matchAll(/<Proxies\b[^>]*>/g)].map((m) => m[0]);
+expect(
+  oldProxiesTags.length > 0 && oldProxiesTags.every((tag) => /^<Proxies\s*\/>$/.test(tag)),
+  `${DASHBOARD}: прежняя страница рисуется не как <Proxies /> без пропов (веха M1, 15. Страница «Прокси»)`,
+);
+
+// (г) Плашка ApiOffline на «Прокси» при слое не рисуется: страница объясняет состояние
+// ядра своей плашкой (D-01…D-03)
+const bannerCond = conditionBefore(dashText, "<ApiOffline");
+expect(
+  bannerCond !== null &&
+    /'proxies'/.test(bannerCond) &&
+    /\$configLayerEnabled\b/.test(bannerCond),
+  `${DASHBOARD}: условие плашки ApiOffline не исключает «Прокси» при слое ('proxies' и $configLayerEnabled, 15. Страница «Прокси»)`,
+);
+
+// (д) XSS (T-150-27): имена групп, узлов и причины замеров — только интерполяцией;
+// (е) ключи $tp страницы и компонентов «Прокси» — во всех трёх формах
+const proxiesUiFiles = [PROXIES_PAGE];
+for (const file of walk(PROXIES_DIR, [])) {
+  if (file.endsWith(".svelte")) proxiesUiFiles.push(file);
+}
+const proxiesTpKeys = new Set();
+for (const file of proxiesUiFiles) {
+  if (!fs.existsSync(path.join(root, file))) {
+    errors.push(`${file}: нет файла страницы «Прокси» при слое (15. Страница «Прокси»)`);
+    continue;
+  }
+  const text = read(file);
+  expect(
+    !/\{@html/.test(text),
+    `${file}: {@html} запрещён на странице «Прокси» и в её компонентах (XSS, T-150-27)`,
+  );
+  for (const m of text.matchAll(/\$tp\(\s*['"`]([^'"`]+)['"`]/g)) {
+    proxiesTpKeys.add(m[1]);
+  }
+}
+for (const lang of ["ru", "en"]) {
+  const file = `${SRC}/locales/${lang}.json`;
+  const dict = JSON.parse(read(file));
+  for (const base of proxiesTpKeys) {
+    for (const suffix of ["_one", "_few", "_many"]) {
+      expect(
+        typeof dict[base + suffix] === "string" && dict[base + suffix].trim() !== "",
+        `${file}: нет формы ${base}${suffix} (15. Страница «Прокси»)`,
+      );
+    }
   }
 }
 

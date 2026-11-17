@@ -238,6 +238,234 @@ func (x *TestRouteRequest) GetPublishResult() bool {
 	return false
 }
 
+type GetBalancerInfoRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Tag           string                 `protobuf:"bytes,1,opt,name=tag,proto3" json:"tag,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetBalancerInfoRequest) Reset() {
+	*x = GetBalancerInfoRequest{}
+	mi := &file_xray_app_router_command_command_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetBalancerInfoRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetBalancerInfoRequest) ProtoMessage() {}
+
+func (x *GetBalancerInfoRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_xray_app_router_command_command_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetBalancerInfoRequest.ProtoReflect.Descriptor instead.
+func (*GetBalancerInfoRequest) Descriptor() ([]byte, []int) {
+	return file_xray_app_router_command_command_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *GetBalancerInfoRequest) GetTag() string {
+	if x != nil {
+		return x.Tag
+	}
+	return ""
+}
+
+type GetBalancerInfoResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Balancer      *BalancerMsg           `protobuf:"bytes,1,opt,name=balancer,proto3" json:"balancer,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetBalancerInfoResponse) Reset() {
+	*x = GetBalancerInfoResponse{}
+	mi := &file_xray_app_router_command_command_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetBalancerInfoResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetBalancerInfoResponse) ProtoMessage() {}
+
+func (x *GetBalancerInfoResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_xray_app_router_command_command_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetBalancerInfoResponse.ProtoReflect.Descriptor instead.
+func (*GetBalancerInfoResponse) Descriptor() ([]byte, []int) {
+	return file_xray_app_router_command_command_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GetBalancerInfoResponse) GetBalancer() *BalancerMsg {
+	if x != nil {
+		return x.Balancer
+	}
+	return nil
+}
+
+type BalancerMsg struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Override        *OverrideInfo          `protobuf:"bytes,5,opt,name=override,proto3" json:"override,omitempty"`
+	PrincipleTarget *PrincipleTargetInfo   `protobuf:"bytes,6,opt,name=principle_target,json=principleTarget,proto3" json:"principle_target,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *BalancerMsg) Reset() {
+	*x = BalancerMsg{}
+	mi := &file_xray_app_router_command_command_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BalancerMsg) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BalancerMsg) ProtoMessage() {}
+
+func (x *BalancerMsg) ProtoReflect() protoreflect.Message {
+	mi := &file_xray_app_router_command_command_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BalancerMsg.ProtoReflect.Descriptor instead.
+func (*BalancerMsg) Descriptor() ([]byte, []int) {
+	return file_xray_app_router_command_command_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *BalancerMsg) GetOverride() *OverrideInfo {
+	if x != nil {
+		return x.Override
+	}
+	return nil
+}
+
+func (x *BalancerMsg) GetPrincipleTarget() *PrincipleTargetInfo {
+	if x != nil {
+		return x.PrincipleTarget
+	}
+	return nil
+}
+
+type OverrideInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Target        string                 `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OverrideInfo) Reset() {
+	*x = OverrideInfo{}
+	mi := &file_xray_app_router_command_command_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OverrideInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OverrideInfo) ProtoMessage() {}
+
+func (x *OverrideInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_xray_app_router_command_command_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OverrideInfo.ProtoReflect.Descriptor instead.
+func (*OverrideInfo) Descriptor() ([]byte, []int) {
+	return file_xray_app_router_command_command_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *OverrideInfo) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+type PrincipleTargetInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Tag           []string               `protobuf:"bytes,1,rep,name=tag,proto3" json:"tag,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PrincipleTargetInfo) Reset() {
+	*x = PrincipleTargetInfo{}
+	mi := &file_xray_app_router_command_command_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PrincipleTargetInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PrincipleTargetInfo) ProtoMessage() {}
+
+func (x *PrincipleTargetInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_xray_app_router_command_command_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PrincipleTargetInfo.ProtoReflect.Descriptor instead.
+func (*PrincipleTargetInfo) Descriptor() ([]byte, []int) {
+	return file_xray_app_router_command_command_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *PrincipleTargetInfo) GetTag() []string {
+	if x != nil {
+		return x.Tag
+	}
+	return nil
+}
+
 var File_xray_app_router_command_command_proto protoreflect.FileDescriptor
 
 const file_xray_app_router_command_command_proto_rawDesc = "" +
@@ -276,9 +504,21 @@ const file_xray_app_router_command_command_proto_rawDesc = "" +
 	"\x10TestRouteRequest\x12O\n" +
 	"\x0eRoutingContext\x18\x01 \x01(\v2'.xray.app.router.command.RoutingContextR\x0eRoutingContext\x12&\n" +
 	"\x0eFieldSelectors\x18\x02 \x03(\tR\x0eFieldSelectors\x12$\n" +
-	"\rPublishResult\x18\x03 \x01(\bR\rPublishResult2s\n" +
+	"\rPublishResult\x18\x03 \x01(\bR\rPublishResult\"*\n" +
+	"\x16GetBalancerInfoRequest\x12\x10\n" +
+	"\x03tag\x18\x01 \x01(\tR\x03tag\"[\n" +
+	"\x17GetBalancerInfoResponse\x12@\n" +
+	"\bbalancer\x18\x01 \x01(\v2$.xray.app.router.command.BalancerMsgR\bbalancer\"\xa9\x01\n" +
+	"\vBalancerMsg\x12A\n" +
+	"\boverride\x18\x05 \x01(\v2%.xray.app.router.command.OverrideInfoR\boverride\x12W\n" +
+	"\x10principle_target\x18\x06 \x01(\v2,.xray.app.router.command.PrincipleTargetInfoR\x0fprincipleTarget\"&\n" +
+	"\fOverrideInfo\x12\x16\n" +
+	"\x06target\x18\x02 \x01(\tR\x06target\"'\n" +
+	"\x13PrincipleTargetInfo\x12\x10\n" +
+	"\x03tag\x18\x01 \x03(\tR\x03tag2\xeb\x01\n" +
 	"\x0eRoutingService\x12a\n" +
-	"\tTestRoute\x12).xray.app.router.command.TestRouteRequest\x1a'.xray.app.router.command.RoutingContext\"\x00BXZVgithub.com/shisui1511/xkeen-control-panel/internal/xrayapi/gen/xray/app/router/commandb\x06proto3"
+	"\tTestRoute\x12).xray.app.router.command.TestRouteRequest\x1a'.xray.app.router.command.RoutingContext\"\x00\x12v\n" +
+	"\x0fGetBalancerInfo\x12/.xray.app.router.command.GetBalancerInfoRequest\x1a0.xray.app.router.command.GetBalancerInfoResponse\"\x00BXZVgithub.com/shisui1511/xkeen-control-panel/internal/xrayapi/gen/xray/app/router/commandb\x06proto3"
 
 var (
 	file_xray_app_router_command_command_proto_rawDescOnce sync.Once
@@ -292,24 +532,34 @@ func file_xray_app_router_command_command_proto_rawDescGZIP() []byte {
 	return file_xray_app_router_command_command_proto_rawDescData
 }
 
-var file_xray_app_router_command_command_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_xray_app_router_command_command_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_xray_app_router_command_command_proto_goTypes = []any{
-	(*RoutingContext)(nil),   // 0: xray.app.router.command.RoutingContext
-	(*TestRouteRequest)(nil), // 1: xray.app.router.command.TestRouteRequest
-	nil,                      // 2: xray.app.router.command.RoutingContext.AttributesEntry
-	(net.Network)(0),         // 3: xray.common.net.Network
+	(*RoutingContext)(nil),          // 0: xray.app.router.command.RoutingContext
+	(*TestRouteRequest)(nil),        // 1: xray.app.router.command.TestRouteRequest
+	(*GetBalancerInfoRequest)(nil),  // 2: xray.app.router.command.GetBalancerInfoRequest
+	(*GetBalancerInfoResponse)(nil), // 3: xray.app.router.command.GetBalancerInfoResponse
+	(*BalancerMsg)(nil),             // 4: xray.app.router.command.BalancerMsg
+	(*OverrideInfo)(nil),            // 5: xray.app.router.command.OverrideInfo
+	(*PrincipleTargetInfo)(nil),     // 6: xray.app.router.command.PrincipleTargetInfo
+	nil,                             // 7: xray.app.router.command.RoutingContext.AttributesEntry
+	(net.Network)(0),                // 8: xray.common.net.Network
 }
 var file_xray_app_router_command_command_proto_depIdxs = []int32{
-	3, // 0: xray.app.router.command.RoutingContext.Network:type_name -> xray.common.net.Network
-	2, // 1: xray.app.router.command.RoutingContext.Attributes:type_name -> xray.app.router.command.RoutingContext.AttributesEntry
+	8, // 0: xray.app.router.command.RoutingContext.Network:type_name -> xray.common.net.Network
+	7, // 1: xray.app.router.command.RoutingContext.Attributes:type_name -> xray.app.router.command.RoutingContext.AttributesEntry
 	0, // 2: xray.app.router.command.TestRouteRequest.RoutingContext:type_name -> xray.app.router.command.RoutingContext
-	1, // 3: xray.app.router.command.RoutingService.TestRoute:input_type -> xray.app.router.command.TestRouteRequest
-	0, // 4: xray.app.router.command.RoutingService.TestRoute:output_type -> xray.app.router.command.RoutingContext
-	4, // [4:5] is the sub-list for method output_type
-	3, // [3:4] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 3: xray.app.router.command.GetBalancerInfoResponse.balancer:type_name -> xray.app.router.command.BalancerMsg
+	5, // 4: xray.app.router.command.BalancerMsg.override:type_name -> xray.app.router.command.OverrideInfo
+	6, // 5: xray.app.router.command.BalancerMsg.principle_target:type_name -> xray.app.router.command.PrincipleTargetInfo
+	1, // 6: xray.app.router.command.RoutingService.TestRoute:input_type -> xray.app.router.command.TestRouteRequest
+	2, // 7: xray.app.router.command.RoutingService.GetBalancerInfo:input_type -> xray.app.router.command.GetBalancerInfoRequest
+	0, // 8: xray.app.router.command.RoutingService.TestRoute:output_type -> xray.app.router.command.RoutingContext
+	3, // 9: xray.app.router.command.RoutingService.GetBalancerInfo:output_type -> xray.app.router.command.GetBalancerInfoResponse
+	8, // [8:10] is the sub-list for method output_type
+	6, // [6:8] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_xray_app_router_command_command_proto_init() }
@@ -323,7 +573,7 @@ func file_xray_app_router_command_command_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_xray_app_router_command_command_proto_rawDesc), len(file_xray_app_router_command_command_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

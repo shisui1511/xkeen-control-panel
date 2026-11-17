@@ -31,6 +31,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services/cores"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/dnstakeover"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/geodata"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/proxyping"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/setupwizard"
@@ -653,6 +654,13 @@ func main() {
 	srv.HandleProtected("/api/kernels/{name}/upload", api.KernelUpload)
 	srv.HandleProtected("/api/kernels/{name}/download", api.KernelDownload)
 
+	// Остатки временных пачек пинга прошлого запуска (каталоги с учётными данными
+	// узлов, живой xcp-pingcore) убираются до создания слоя и маршрутизации: и
+	// тогда, когда раннер пинга в этом запуске не поднимется.
+	if err := proxyping.SweepStaleAt(proxyping.DefaultTmpRoot); err != nil {
+		log.Printf("Уборка остатков раннера пинга: %v", err)
+	}
+
 	// Слой «Конфигурация» (фаза 144): создаётся и запускается здесь, Stop — через
 	// defer. Замок жизненного цикла — тот же, что у KernelApplier и обработчиков.
 	// Не создался — слой не подключается, маршруты отвечают 404.
@@ -779,6 +787,7 @@ func main() {
 		// слоя. Не создался или не подключился — маршруты
 		// /api/configlayer/routing* отвечают 404, панель работает без них.
 		var routingSvc *routing.Service
+		var pingRunner *proxyping.Runner
 		var geoSvc *geodata.Service
 		// Индекс dat и хранилище записей geodata — одни на сервисы маршрутизации и
 		// менеджера. Хранилище создаётся без собственного запуска `xkeen -ug`: единственный
@@ -796,10 +805,21 @@ func main() {
 				Installed:     installedKernels,
 				KernelVersion: kernelVersion,
 				Running:       kernelRunning,
+				KernelState:   kernelSvc.ActiveState,
+				XrayBalancer:  xrayGRPCSvc.BalancerTarget,
+				InRestart:     api.XKeenService().InRestart,
+				XrayBin:       func() string { return installedKernelBinary(kernelSvc, "xray") },
 				XrayAPIPort:   func() int { return cfg.XRayAPIPort },
 				Mihomo:        api.MihomoService(),
 				Ping:          pingNodeTLS,
-				GOARCH:        runtime.GOARCH,
+				// Раннер создаётся ниже; повторный выбор вызывается после старта сервисов.
+				Probe: func(ctx context.Context, req proxyping.Request) map[string]proxyping.PingResult {
+					if pingRunner == nil {
+						return nil
+					}
+					return pingRunner.Probe(ctx, req)
+				},
+				GOARCH: runtime.GOARCH,
 			})
 			// Генераторы, проверка и хуки выбора участника (D-36, D-39) подключаются
 			// одним вызовом: при ошибке в слое не остаётся ничего от остановленного
@@ -818,6 +838,20 @@ func main() {
 			if routeErr == nil {
 				// Хук групп по умолчанию ставится только после полной регистрации.
 				routingSvc.Attach()
+				var pingErr error
+				pingRunner, pingErr = proxyping.New(proxyping.Deps{
+					Publish:      configLayer.PublishProxies,
+					ActiveKernel: func() string { return kernelSvc.ActiveState().Kernel },
+					Mihomo:       api.MihomoService(),
+					TLSPing:      pingNodeTLS,
+					XrayBin:      func() string { return installedKernelBinary(kernelSvc, "xray") },
+					Fingerprints: routingSvc.NodeFingerprints,
+					KernelHelper: services.TryAcquireKernelHelper,
+				})
+				if pingErr != nil {
+					log.Printf("Раннер пинга не создан, маршруты /api/configlayer/proxies/ping* отвечают 404: %v", pingErr)
+					pingRunner = nil
+				}
 				// Менеджер geodata (фаза 146.1) создаётся только здесь, после сервиса
 				// маршрутизации: его хук AfterApply (удаление источника после «Применить»)
 				// регистрируется до Start слоя. Не создался или не подключился — маршруты
@@ -964,6 +998,11 @@ func main() {
 			}, 0)
 			selWatch.Start()
 			defer stops.run("routing-selection", selWatch.Stop)
+			if pingRunner != nil {
+				pingRunner.Start()
+				api.SetPingRunner(pingRunner)
+				defer stops.run("proxy-ping", pingRunner.Stop)
+			}
 		}
 		if coresSvc != nil {
 			// Как и остальные сервисы: стартует после слоя, останавливается раньше него.
@@ -1017,6 +1056,12 @@ func main() {
 	srv.HandleProtected("/api/configlayer/sources/nodes/save", api.ConfigSourcesNodeSave)
 	srv.HandleProtected("/api/configlayer/sources/nodes/delete", api.ConfigSourcesNodeDelete)
 	srv.HandleProtected("/api/configlayer/routing", api.ConfigRouting)
+	srv.HandleProtected("/api/configlayer/proxies", api.ConfigProxies)
+	srv.HandleProtected("/api/configlayer/proxies/now", api.ConfigProxiesNow)
+	srv.HandleProtected("/api/configlayer/proxies/results", api.ConfigProxiesResults)
+	srv.HandleProtected("/api/configlayer/proxies/ping", api.ConfigProxiesPing)
+	srv.HandleProtected("/api/configlayer/proxies/ping/cancel", api.ConfigProxiesPingCancel)
+	srv.HandleProtected("/api/configlayer/proxies/confirm", api.ConfigProxiesConfirm)
 	srv.HandleProtected("/api/configlayer/routing/groups/save", api.ConfigRoutingGroupsSave)
 	srv.HandleProtected("/api/configlayer/routing/groups/preview", api.ConfigRoutingGroupsPreview)
 	srv.HandleProtected("/api/configlayer/routing/groups/delete", api.ConfigRoutingGroupsDelete)

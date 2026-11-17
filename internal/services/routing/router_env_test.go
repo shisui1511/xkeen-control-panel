@@ -6,9 +6,11 @@ package routing
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -61,6 +63,9 @@ type rtOptions struct {
 	// selection — хуки выбора участника (CommitLive и AfterApply) зарегистрированы
 	// в слое, как это делает cmd/xcp/main.go.
 	selection bool
+	// subClient — запросы подписок идут обычным HTTP-клиентом без защиты от SSRF:
+	// подписку отдаёт локальный сервер сценария.
+	subClient bool
 }
 
 // rtOption меняет настройки окружения rtNewEnv.
@@ -77,6 +82,12 @@ func rtWithDeps(f func(*Deps)) rtOption {
 // и сверку после применения (сценарии 146-14).
 func rtWithSelection() rtOption {
 	return func(o *rtOptions) { o.selection = true }
+}
+
+// rtWithSubscriptionClient разрешает загрузку подписки с локального сервера
+// сценария (защита от SSRF у обычного клиента запрещает loopback).
+func rtWithSubscriptionClient() rtOption {
+	return func(o *rtOptions) { o.subClient = true }
 }
 
 // rtWithKernels задаёт установленные ядра окружения (по умолчанию оба).
@@ -165,7 +176,11 @@ func rtNewEnv(t *testing.T, opts ...rtOption) *rtEnv {
 	t.Cleanup(layer.Stop)
 
 	installed := func() configlayer.InstalledKernels { return o.installed }
-	src, err := sources.New(sources.Deps{DataDir: dir, Layer: layer, Installed: installed})
+	sdeps := sources.Deps{DataDir: dir, Layer: layer, Installed: installed}
+	if o.subClient {
+		sdeps.Client = func(timeout time.Duration) *http.Client { return &http.Client{Timeout: timeout} }
+	}
+	src, err := sources.New(sdeps)
 	if err != nil {
 		t.Fatalf("sources.New: %v", err)
 	}
@@ -238,9 +253,20 @@ func (e *rtEnv) addMyLinks(t *testing.T, names ...string) {
 }
 
 // addMyRaw добавляет в «Мои узлы» готовые ссылки (текст как у пользователя).
+// Строка http(s):// верхнего уровня распознаётся как URL подписки, поэтому
+// список с http-прокси подаётся base64-блоком, как его отдаёт подписка: внутри
+// блока http(s) — прокси-ссылка с именем из фрагмента.
 func (e *rtEnv) addMyRaw(t *testing.T, links ...string) {
 	t.Helper()
-	view, err := e.src.Preview(context.Background(), nodes.Input{Text: strings.Join(links, "\n")})
+	text := strings.Join(links, "\n")
+	for _, l := range links {
+		lower := strings.ToLower(l)
+		if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+			text = base64.StdEncoding.EncodeToString([]byte(text))
+			break
+		}
+	}
+	view, err := e.src.Preview(context.Background(), nodes.Input{Text: text})
 	if err != nil {
 		t.Fatalf("Preview: %v", err)
 	}
@@ -357,10 +383,14 @@ func (e *rtEnv) check(t *testing.T) []configlayer.BuildIssue {
 // сокет не трогаются. Процесс можно остановить и запустить снова в том же
 // каталоге: cache.db (store-selected) остаётся и восстанавливает прежний выбор
 // процесса — ровно как при перезапуске или переключении ядра на устройстве.
+// Процесс принадлежит тесту, создавшему ядро (owner): запущенный в подтесте
+// процесс останавливается в очистке owner, а не в конце подтеста, и следующий
+// подтест получает живое ядро.
 type rtMihomoCore struct {
-	dir  string
-	port int
-	svc  *services.MihomoService
+	dir   string
+	port  int
+	svc   *services.MihomoService
+	owner *testing.T
 
 	mu   sync.Mutex
 	proc *rtProc
@@ -371,7 +401,7 @@ func rtNewMihomoCore(t *testing.T) *rtMihomoCore {
 	t.Helper()
 	rtNeedBins(t, rtMihomoBin)
 	dir := rtWorkSubdir(t, "rm-")
-	return &rtMihomoCore{dir: dir, port: rtFreePort(t), svc: services.NewMihomoService(rtMihomoBin, "", dir)}
+	return &rtMihomoCore{dir: dir, port: rtFreePort(t), svc: services.NewMihomoService(rtMihomoBin, "", dir), owner: t}
 }
 
 // rtWithMihomoCore подключает отдельный процесс к Deps окружения: Clash API
@@ -470,11 +500,38 @@ func (c *rtMihomoCore) start(t *testing.T, e *rtEnv) {
 	}
 	rtCopyFiles(t, e.mihomoPath(proxyProviderDir), filepath.Join(c.dir, proxyProviderDir))
 	rtCopyFiles(t, e.mihomoPath(mihomoRuleProviderDir), filepath.Join(c.dir, mihomoRuleProviderDir))
-	p := rtStartMihomoCore(t, c.dir, c.port)
+	p := rtStartMihomoCoreOwned(t, c.owner, c.dir, c.port)
 	c.mu.Lock()
 	c.proc = p
 	c.mu.Unlock()
 	rtWaitCond(t, 30*time.Second, "Clash API отдельного процесса", c.svc.HasController)
+	// Сокет контроллера появляется раньше, чем ядро загрузило профиль: первый
+	// выбор сразу после запуска упирался в предел вызова. Ждём настоящий ответ
+	// отдельным клиентом без повторного использования соединений: клиент сервиса
+	// не получает залежавшегося соединения, которое пережило бы удаление сокета
+	// в сценариях отказа.
+	secret, _ := doc["secret"].(string)
+	probe := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{
+		DisableKeepAlives: true,
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", sock)
+		},
+	}}
+	rtWaitCond(t, 60*time.Second, "ответ Clash API отдельного процесса", func() bool {
+		req, err := http.NewRequest(http.MethodGet, "http://localhost/proxies", nil)
+		if err != nil {
+			return false
+		}
+		if secret != "" {
+			req.Header.Set("Authorization", "Bearer "+secret)
+		}
+		resp, err := probe.Do(req)
+		if err != nil {
+			return false
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	})
 }
 
 // rtWaitCond ждёт, пока условие станет истинным; не дождался — провал теста

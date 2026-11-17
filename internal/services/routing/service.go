@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/proxyping"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 )
@@ -40,6 +42,10 @@ type MihomoAPI interface {
 	SelectProxy(ctx context.Context, group, name string) error
 	// ProxyDelay измеряет задержку узла.
 	ProxyDelay(ctx context.Context, name, testURL string, timeout time.Duration) (int, error)
+	// ProviderProxyDelay измеряет задержку узла через его провайдер.
+	ProviderProxyDelay(ctx context.Context, provider, name, testURL string, timeout time.Duration) (int, error)
+	// ProxiesState читает текущий выбор и историю всех узлов одним запросом.
+	ProxiesState(ctx context.Context) (map[string]services.ClashProxyState, error)
 }
 
 // Deps — зависимости сервиса. Создаются в cmd/xcp/main.go.
@@ -61,9 +67,19 @@ type Deps struct {
 	KernelVersion func(kernel string) string
 	// Running сообщает, запущено ли ядро.
 	Running func(kernel string) bool
+	// KernelState подключает main.go; nil — ядра остановлены, активное неизвестно.
+	KernelState func() services.ActiveKernelState
+	// XrayBalancer подключает main.go; nil — API текущей цели недоступен.
+	XrayBalancer func(ctx context.Context, tag string) (target string, known bool, err error)
+	// InRestart подключает main.go; nil — перезапуск не известен.
+	InRestart func() bool
+	// Probe подключает main.go к общему раннеру; nil — прежняя проверка узлов.
+	Probe func(ctx context.Context, req proxyping.Request) map[string]proxyping.PingResult
 	// XrayAPIPort — порт API Xray из настроек панели: блок api панели слушает
 	// 127.0.0.1:<порт>. nil или значение не больше нуля — 10085.
 	XrayAPIPort func() int
+	// XrayBin — путь к бинарнику для горячей замены исходящих.
+	XrayBin func() string
 	// Mihomo — Clash API Mihomo.
 	Mihomo MihomoAPI
 	// Ping проверяет доступность узла (TLS-проверка, пока нет пинга через туннель).
@@ -114,10 +130,24 @@ type Service struct {
 	// друг друга. reconcilePending взводит markReconcile (сбой выбора в Mihomo),
 	// забирает SelectionWatcher через Swap(false). repickMu — один проход замены
 	// пропавшего узла за раз; repick — уведомления routing_repick по группам.
-	selMu            sync.Mutex
+	selMu      sync.Mutex
+	inflightMu sync.Mutex
+	// inflight — ID группы → вид идущей операции (inflightSelect, inflightConfirm).
+	inflight map[string]string
+	// targets — ID группы → участник, уже поставленный в Mihomo ранним PUT быстрого
+	// пути выбора и ещё не записанный в Live фоновым проходом (под inflightMu).
+	targets map[string]string
+	// xrun — один запуск выбора Xray за раз (G-150-3, D-17): независимые выборы
+	// собираются в пачку одного прохода xcp-groups. Порядок замков: ход выбора →
+	// applyMu → lifecycleMu.
+	xrun             xrayRunGate
 	reconcilePending atomic.Bool
 	repickMu         sync.Mutex
-	repick           repickNotes
+	repick           groupNotes
+	// selNotes — уведомления routing_select по группам (отказ фонового прохода
+	// выбора); selNoticeSeq — номер идентификатора, новый на каждый отказ (D-11).
+	selNotes     groupNotes
+	selNoticeSeq atomic.Uint64
 }
 
 // New создаёт сервис. Слой, сервис источников и источник «установленных ядер»
@@ -151,7 +181,8 @@ func New(d Deps) (*Service, error) {
 		d.Rand = rand.Reader
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Service{d: d, ctx: ctx, cancel: cancel, gens: map[string][]configlayer.GeneratedFile{}, provs: map[string][]byte{}}
+	s := &Service{d: d, ctx: ctx, cancel: cancel, gens: map[string][]configlayer.GeneratedFile{}, provs: map[string][]byte{},
+		repick: groupNotes{prefix: noticeRepickPrefix}, selNotes: groupNotes{prefix: noticeSelectPrefix}}
 	return s, nil
 }
 
@@ -171,7 +202,19 @@ func (s *Service) Generators() []configlayer.Generator {
 // ничего не делает. SelectionWatcher (146-14) создаётся и останавливается в
 // cmd/xcp/main.go.
 func (s *Service) Start() {
-	s.startOnce.Do(s.startDatWatcher)
+	s.startOnce.Do(func() {
+		s.startDatWatcher()
+		// Снимок старта: поздний запуск горутины не должен подхватить маркер
+		// уже начавшегося пользовательского выбора.
+		if st, err := s.d.Layer.ReadState(); err == nil {
+			for _, kernel := range readUnconfirmed(st.Live) {
+				if kernel == configlayer.KernelXray {
+					s.Go(func() { s.reconcileXray(s.ctx) })
+					break
+				}
+			}
+		}
+	})
 }
 
 // Stop останавливает фоновые задачи и ждёт их завершения. Идемпотентен.

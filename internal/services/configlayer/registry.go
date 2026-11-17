@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 )
 
 // Expectation — что должно быть видно в Mihomo после перезагрузки провайдера:
@@ -164,14 +165,66 @@ func (r *Registry) Has(id string) bool {
 // generator_failed с ID генератора. Результат отсортирован по ключу: сборка
 // детерминирована, иначе каждое «Применить» переписывало бы файлы.
 func (r *Registry) Build(in Input, installed InstalledKernels) ([]GeneratedFile, error) {
-	var out []GeneratedFile
-	owner := make(map[string]string)
-	var issues []BuildIssue
+	files, _, err := r.BuildTimed(in, installed)
+	return files, err
+}
+
+// GenTiming — время одного генератора в сборке (BuildTimed): ID генератора и
+// длительность его Generate.
+type GenTiming struct {
+	ID string
+	D  time.Duration
+}
+
+// BuildTimed — та же сборка, что Build (порядок, отбор и ошибки прежние), и время
+// каждого генератора в порядке регистрации. Время возвращается и при ошибке
+// сборки: по нему видно, какой генератор держал этап.
+func (r *Registry) BuildTimed(in Input, installed InstalledKernels) ([]GeneratedFile, []GenTiming, error) {
 	r.mu.RLock()
 	generators := append([]Generator(nil), r.generators...)
 	r.mu.RUnlock()
+	return buildGenerators(generators, in, installed, nil)
+}
+
+// BuildSubsetTimed — сборка BuildTimed только генераторами с ID из ids (порядок
+// регистрации, отбор файлов и ошибки прежние). Нужна запуску выбора: выбор меняет
+// файлы одного генератора, остальные от него не зависят. ID, которого нет в
+// реестре, — ошибка сборки generator_failed с этим ID.
+func (r *Registry) BuildSubsetTimed(in Input, installed InstalledKernels, ids []string) ([]GeneratedFile, []GenTiming, error) {
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	r.mu.RLock()
+	var generators []Generator
+	for _, g := range r.generators {
+		if want[g.ID()] {
+			generators = append(generators, g)
+			delete(want, g.ID())
+		}
+	}
+	r.mu.RUnlock()
+	var unknown []BuildIssue
+	for _, id := range ids {
+		if want[id] {
+			unknown = append(unknown, BuildIssue{Key: id, Code: IssueGeneratorFailed, Detail: id + ": генератор не зарегистрирован"})
+			delete(want, id)
+		}
+	}
+	return buildGenerators(generators, in, installed, unknown)
+}
+
+// buildGenerators — общая часть BuildTimed и BuildSubsetTimed: вызывает генераторы
+// по порядку, отбрасывает файлы неустановленных ядер и собирает проблемы (issues —
+// проблемы, найденные до вызова генераторов).
+func buildGenerators(generators []Generator, in Input, installed InstalledKernels, issues []BuildIssue) ([]GeneratedFile, []GenTiming, error) {
+	var out []GeneratedFile
+	owner := make(map[string]string)
+	timings := make([]GenTiming, 0, len(generators))
 	for _, g := range generators {
+		genStart := time.Now()
 		files, err := g.Generate(in, installed)
+		timings = append(timings, GenTiming{ID: g.ID(), D: time.Since(genStart)})
 		if err != nil {
 			issues = append(issues, BuildIssue{Key: g.ID(), Code: IssueGeneratorFailed, Detail: fmt.Sprintf("%s: %v", g.ID(), err)})
 			continue
@@ -190,8 +243,8 @@ func (r *Registry) Build(in Input, installed InstalledKernels) ([]GeneratedFile,
 		}
 	}
 	if len(issues) > 0 {
-		return nil, &BuildError{Issues: issues}
+		return nil, timings, &BuildError{Issues: issues}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
-	return out, nil
+	return out, timings, nil
 }

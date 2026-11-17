@@ -866,6 +866,24 @@ h2.card-title {
   pointer-events: none;
 }
 
+/* Кнопка, которая не нажимается, но остаётся в порядке фокуса и держит подсказку title
+   (aria-disabled): выглядит как .btn:disabled, но без pointer-events: none */
+.btn[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-secondary.btn[aria-disabled='true']:hover {
+  border-color: var(--border);
+  color: var(--fg-primary);
+  background: var(--surface-tint);
+}
+
+.btn-primary.btn[aria-disabled='true']:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
 .btn-primary {
   background: var(--accent);
   color: var(--btn-primary-text);

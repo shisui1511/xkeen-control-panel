@@ -245,14 +245,23 @@ func sourcesOf(list []sources.CatalogNode) []string {
 // узлов). Состав группы считает только Resolve: по именам для показа и движком Go,
 // а Mihomo фильтровал бы имена файла провайдера (после uniqueName) своим движком,
 // поэтому фильтры группы в профиль не переносятся, а пишется список точных имён.
-// ok=false — так выбрать нельзя: узел тех же источников вне списка носит имя
-// узла списка; тогда группа пишется копиями. Обратная кавычка в filter Mihomo
-// разделяет выражения и записывается кодом.
+// ok=false — так выбрать нельзя: разные узлы списка (разные Ref, обычно из
+// разных источников) носят одно имя, либо узел тех же источников вне списка
+// носит имя узла списка. Имя уникально только внутри провайдера источника, а
+// выбор, сверка и «Сейчас» идут по имени, поэтому группа пишется копиями с
+// различимыми именами (copyOf/freeName). Повтор одного Ref неоднозначностью не
+// считается. Обратная кавычка в filter Mihomo разделяет выражения и
+// записывается кодом.
 func (b *mihomoBuild) exactFilter(list []sources.CatalogNode) (filter string, ok bool) {
 	use := sourcesOf(list)
 	in := make(map[string]bool, len(list))
 	names := make(map[string]bool, len(list))
+	owner := make(map[string]string, len(list))
 	for _, n := range list {
+		if ref, seen := owner[n.MihomoName]; seen && ref != n.Ref {
+			return "", false
+		}
+		owner[n.MihomoName] = n.Ref
 		in[n.Ref] = true
 		names[n.MihomoName] = true
 	}
@@ -459,6 +468,22 @@ func (b *mihomoBuild) manualShape(g Group) *mihomoGroup {
 	}
 	filter, exact := b.exactFilter(base)
 	copyAll := len(base) > 0 && (!exact || (pIsNode && (len(tail) > 0 || (pIsBase && len(picks) > 0))))
+	if !copyAll && len(base) > 0 {
+		// Копия отдельного узла может получить имя узла провайдера из состава
+		// (одноимённые узлы разных источников): тогда в группе два участника с
+		// одним именем, и выбор по имени ставит не тот узел. Копии одни на узел
+		// (copyOf), поэтому ранний расчёт имени не меняет итог.
+		inBase := make(map[string]bool, len(base))
+		for _, n := range base {
+			inBase[n.MihomoName] = true
+		}
+		for _, n := range picks {
+			if name := b.copyOf(n); name != "" && inBase[name] {
+				copyAll = true
+				break
+			}
+		}
+	}
 
 	var copies []string
 	if copyAll {
@@ -560,7 +585,7 @@ func providersSection(srcs []string) *yaml.Node {
 	}
 	m := &yaml.Node{Kind: yaml.MappingNode}
 	for _, id := range srcs {
-		name := "xcp-" + id
+		name := providerName(id)
 		m.Content = append(m.Content, yKey(name), yMap(
 			"type", yStr("file"),
 			"path", yStr("./"+proxyProviderDir+"/"+name+".yaml"),
@@ -632,11 +657,14 @@ func (b *mihomoBuild) groupNode(name, typ string, hidden bool, proxies, use []st
 	return n
 }
 
+// providerName — имя провайдера профиля с узлами источника id.
+func providerName(id string) string { return "xcp-" + id }
+
 // uses приводит имена источников к именам провайдеров профиля.
 func uses(srcs []string) []string {
 	out := make([]string, 0, len(srcs))
 	for _, id := range srcs {
-		out = append(out, "xcp-"+id)
+		out = append(out, providerName(id))
 	}
 	return out
 }

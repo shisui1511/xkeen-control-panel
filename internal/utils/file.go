@@ -6,7 +6,26 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"time"
 )
+
+// Счётчики синхронных записей (AtomicWriteFile и обёртки над ним): число вызовов
+// fsync временного файла и их суммарное время. AtomicWriteFileNoSync и фоновые
+// fsync других пакетов сюда не входят.
+var (
+	syncCount atomic.Int64
+	syncNanos atomic.Int64
+)
+
+// SyncStats возвращает число fsync синхронных записей процесса и их суммарное
+// время с запуска. Значения накопительные и общие для процесса (без сброса):
+// разность снимков до и после отрезка показывает, сколько процесс за этот отрезок
+// ждал записи на носитель в своих синхронных записях. На каждую запись ничего не
+// журналируется — только два атомарных сложения.
+func SyncStats() (int64, time.Duration) {
+	return syncCount.Load(), time.Duration(syncNanos.Load())
+}
 
 // validatePathAllowed checks that path is within one of the allowed roots.
 // This is the canonical sanitization pattern recognized by static analysis tools (CWE-22).
@@ -108,7 +127,11 @@ func atomicWrite(path string, data []byte, perm os.FileMode, sync bool) error {
 
 	// Sync to disk
 	if sync {
-		if err := tmpFile.Sync(); err != nil {
+		syncStart := time.Now()
+		err := tmpFile.Sync()
+		syncNanos.Add(int64(time.Since(syncStart)))
+		syncCount.Add(1)
+		if err != nil {
 			tmpFile.Close()
 			return err
 		}

@@ -245,6 +245,9 @@ export interface TakeoverPreview {
 export interface SelectResult {
   member: string;
   kernels: Record<string, string>;
+  restart_reason?: 'no_api' | 'version' | 'hot_failed';
+  reverted?: boolean;
+  unconfirmed?: string[];
 }
 
 export interface ServiceView {
@@ -570,13 +573,6 @@ export function applyPreset(
   scope: TakeScope = 'all'
 ): Promise<DraftAck> {
   return editRouting<DraftAck>('presets/apply', { choice, take, scope });
-}
-
-/** Выбор участника ручной группы: Mihomo получает его сразу, Xray — перезапуском ядра. */
-export async function selectMember(group: string, member: string): Promise<SelectResult> {
-  const res = await post<SelectResult>(`${BASE}/select`, { group, member });
-  void loadRouting();
-  return res;
 }
 
 // --- Тексты ошибок ---

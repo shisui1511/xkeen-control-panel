@@ -7,6 +7,7 @@
     handleLayerError,
     driftCount,
     layerSnapshot,
+    selectBgReason,
     type LayerNotice
   } from '../../lib/configLayer';
   import { editorOpenRequest } from '../../stores';
@@ -146,8 +147,26 @@
         text: $t('cfg.routing.reconcile_failed', { group: p.group ?? '' })
       };
     }
+    // Отказ фонового прохода выбора при запущенном Mihomo: причина по классу, незнакомый — failed.
+    // Возврат не подтверждён (reverted = 'false') — без «Прежний узел возвращён» (D-16)
+    if (n.id.startsWith('routing_select:')) {
+      const reason = $t(`proxies.rt.select_bg_reason.${selectBgReason(p.reason)}`);
+      const key =
+        p.reverted === 'false' ? 'cfg.notice.routing_select_unknown' : 'cfg.notice.routing_select';
+      return {
+        notice: n,
+        tone: 'error',
+        text: $t(key, { group: p.group || p.gid || '', reason })
+      };
+    }
     if (n.id.startsWith('routing_repick:')) {
-      const key = p.answered === 'true' ? 'cfg.groups.repick_alive' : 'cfg.groups.repick_none';
+      // Замену поставить не удалось (возврат, неизвестный исход, отказ прохода): повтора не будет
+      const key =
+        p.failed === 'true'
+          ? 'cfg.groups.repick_failed'
+          : p.answered === 'true'
+            ? 'cfg.groups.repick_alive'
+            : 'cfg.groups.repick_none';
       let text = $t(key, { group: p.group ?? '', node: p.node ?? '' });
       // Mihomo не запущен: узлы проверялись без него, по доступности сервера (D-36)
       if (p.method === 'tls') text += ' ' + $t('cfg.groups.repick_method_tls');

@@ -7,8 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -59,11 +62,27 @@ const (
 	SourceApplied SourceKind = "applied"
 )
 
+// XrayValidateFunc — сокращённая проверка Xray запуска выбора: получает файлы
+// Xray плана (новое содержимое и прежнее с диска) и возвращает true, если
+// проверка пройдена; false — нужна полная проверка ValidateXray. bin — тот же
+// бинарник Xray, что у полной проверки конвейера; tmpBase — каталог для временных
+// файлов (<data_dir>/tmp, его подметает CleanupStale). Содержимое несёт учётные
+// данные узлов и не должно попадать в журнал.
+type XrayValidateFunc func(ctx context.Context, bin, tmpBase string, files []HotFile) bool
+
 // ApplyRequest — параметры одного запуска.
 type ApplyRequest struct {
-	Trigger Trigger
-	Source  SourceKind
-	Only    []string
+	// ReapplyKeys — повторная запись даже неизменившихся файлов для сверки рантайма.
+	ReapplyKeys []string
+	Trigger     Trigger
+	Source      SourceKind
+	Only        []string
+	// BuildOnly — ID генераторов, которыми собирается запуск (пусто — все). Только
+	// запуск выбора Xray: выбор меняет один файл исходящих групп, остальные файлы от
+	// него не зависят. План сужается до ключей файлов этих генераторов (их отпущенные
+	// файлы не забираются), сироты не собираются; проверка дрейфа и проверки до
+	// записи (Registry.Check) идут полностью, как без поля.
+	BuildOnly []string
 	// ApplySeq — номер запуска «Применить» из хуков BeforeApply (0 — хуки не
 	// вызывались); возвращается хукам AfterApply в AfterApplyInfo.
 	ApplySeq int64
@@ -123,6 +142,14 @@ type ApplyRequest struct {
 	// ядра на прежних файлах) и фиксации состояния. Паника хука откат не прерывает.
 	// nil — хука нет.
 	BeforeRollback func()
+	// XrayHot — горячая замена исходящих Xray до перезапуска; задаёт только
+	// RunLive выбора узла (TriggerSelect), nil — прежний путь.
+	XrayHot XrayHotFunc
+	// XrayValidate — сокращённая проверка Xray запуска выбора узла (TriggerSelect):
+	// true — изменения Xray плана проверены, полная ValidateXray не запускается;
+	// false, неприменимость или nil — обычная полная проверка («Применить» хука не
+	// задаёт и всегда идёт полной проверкой).
+	XrayValidate XrayValidateFunc
 	// ReleaseListener — запуск снимает слушатель :53 перехвата DNS (живые данные
 	// перехвата выключаются, DNS роутера уже у прошивки). Ручная правка файлов
 	// панели такой запуск не блокирует: пишутся только файлы, чьё содержимое
@@ -248,6 +275,9 @@ type StepView struct {
 	// Trigger — что запустило конвейер: по нему клиент отличает фоновое обновление
 	// источника (source_refresh) от «Применить».
 	Trigger Trigger `json:"trigger,omitempty"`
+	// DurationMS — длительность шага от первого перехода в running до итогового
+	// состояния, мс; 0 — шаг не шёл или короче 1 мс.
+	DurationMS int64 `json:"duration_ms,omitempty"`
 }
 
 // RestartView — итог шага «Перезапуск» по одному ядру.
@@ -361,6 +391,8 @@ type Pipeline struct {
 	// tail — итог запуска опубликован (finish), а замок применения держится до конца
 	// хвоста запуска; сбрасывает тот, кто взял замок следующим (TryBegin).
 	tail atomic.Bool
+	// held — замки TryBegin взяты и ещё не сняты (Busy).
+	held atomic.Bool
 	mu   sync.Mutex
 	view ApplyView
 	// commitLive — хуки фиксации живых данных (PipelineDeps.CommitLive) в порядке
@@ -369,6 +401,30 @@ type Pipeline struct {
 	// beforeRollback — хук ApplyRequest.BeforeRollback текущего запуска, под mu:
 	// взводится в begin, снимается первым вызовом fireBeforeRollback и в finish.
 	beforeRollback func()
+	// xrayHot — хук горячей замены текущего запуска, под mu; взводится в begin,
+	// снимается в finish.
+	xrayHot XrayHotFunc
+	// xrayShortValidated — проверка Xray текущего запуска была сокращённой (хук
+	// ApplyRequest.XrayValidate), каталог целиком не проверялся; под mu, сбрасывается
+	// в begin. Резервный перезапуск Xray загружает весь каталог, поэтому перед ним
+	// restartKernel выполняет полную проверку (CR-02).
+	xrayShortValidated bool
+	// stepStart — начало шага текущего запуска (первый переход в running), под mu;
+	// сбрасывается в begin.
+	stepStart map[StepID]time.Time
+}
+
+// xrayValidatedShort — проверка Xray текущего запуска была сокращённой.
+func (p *Pipeline) xrayValidatedShort() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.xrayShortValidated
+}
+
+func (p *Pipeline) currentXrayHot() XrayHotFunc {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.xrayHot
 }
 
 // fireBeforeRollback вызывает хук BeforeRollback текущего запуска не больше одного
@@ -461,6 +517,9 @@ func (p *Pipeline) begin(req ApplyRequest) {
 		},
 	}
 	p.beforeRollback = req.BeforeRollback
+	p.xrayHot = req.XrayHot
+	p.xrayShortValidated = false
+	p.stepStart = map[StepID]time.Time{}
 	p.mu.Unlock()
 }
 
@@ -473,10 +532,25 @@ func (p *Pipeline) setStep(id StepID, state StepState, note, msg string) {
 		p.mu.Unlock()
 		return
 	}
+	var dur int64
+	switch state {
+	case StepRunning:
+		// Повторный running (перезапуск после частичного сбоя) начало не сдвигает.
+		if _, ok := p.stepStart[id]; !ok {
+			if p.stepStart == nil {
+				p.stepStart = map[StepID]time.Time{}
+			}
+			p.stepStart[id] = p.d.Now()
+		}
+	case StepDone, StepFailed, StepSkipped, StepDeferred:
+		if start, ok := p.stepStart[id]; ok {
+			dur = p.d.Now().Sub(start).Milliseconds()
+		}
+	}
 	var sv StepView
 	for i := range p.view.Steps {
 		if p.view.Steps[i].ID == id {
-			p.view.Steps[i] = StepView{ID: id, State: state, NoteCode: note, Message: msg, Trigger: p.view.Trigger}
+			p.view.Steps[i] = StepView{ID: id, State: state, NoteCode: note, Message: msg, Trigger: p.view.Trigger, DurationMS: dur}
 			sv = p.view.Steps[i]
 		}
 	}
@@ -494,6 +568,7 @@ func (p *Pipeline) finish(res ResultView) ApplyView {
 	p.view.Result = &res
 	p.beforeRollback = nil
 	out := p.view.clone()
+	p.xrayHot = nil
 	p.mu.Unlock()
 	p.tail.Store(true)
 	p.d.Broker.Publish(Event{Type: EventApplyDone, Data: out})
@@ -562,7 +637,19 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 
 	tmpBase := filepath.Join(p.d.DataDir, "tmp")
 	p.setStep(StepValidateXray, StepRunning, "", "")
-	xr := ValidateXray(ctx, tmpBase, p.d.Roots, bins.Xray, plan, p.d.XrayEnv)
+	// Запуск выбора с хуком сокращённой проверки: принятые хуком изменения не
+	// проверяются второй раз; отказ или неприменимость хука ведут в тот же
+	// единственный вызов полной проверки, что у запусков без хука.
+	xr := ValidationResult{Kernel: KernelXray, OK: true}
+	if p.xrayValidatedByHook(ctx, req, bins.Xray, tmpBase, plan) {
+		// Каталог целиком не проверялся: перед резервным перезапуском Xray, который
+		// его загрузит, проверка выполняется полностью (restartKernel).
+		p.mu.Lock()
+		p.xrayShortValidated = true
+		p.mu.Unlock()
+	} else {
+		xr = ValidateXray(ctx, tmpBase, p.d.Roots, bins.Xray, plan, p.d.XrayEnv)
+	}
 	if res, failed := p.afterValidation(StepValidateXray, xr); failed {
 		return p.finish(res)
 	}
@@ -676,6 +763,16 @@ func runSections(snap State, req ApplyRequest) Sections {
 // проблемы сборки и проверок — *BuildError.
 func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledKernels) (Plan, Input, error) {
 	src := runSections(snap, *req)
+	// Составляющие этапа build запуска выбора (G-150-3, пункт 2): одна строка на
+	// запуск выбора в любом исходе — отрезки drift, generate, check, plan, routing и
+	// время каждого генератора. Другие триггеры строку не пишут: xcp.log лежит на
+	// флешке, а «Применить», предпросмотр и фоновые запуски замер не нужен.
+	timed := req.Trigger == TriggerSelect
+	var bt buildTimes
+	if timed {
+		defer bt.log(req.Trigger)
+	}
+	mark := time.Now()
 	// Дрейф проверяется здесь, под замками применения, а не только в StartApply:
 	// фоновые запуски (установка ядра, включение слоя) идут мимо кнопки и иначе
 	// молча перезаписали бы ручную правку (D-11). «Пересобрать» дрейф разрешает сам.
@@ -713,12 +810,25 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 			return Plan{}, Input{Sections: src}, &driftBlockedError{count: blocked}
 		}
 	}
+	bt.drift = bt.lap(&mark)
 	used := Input{Sections: src, Live: req.runLive(snap.Live), Mode: req.Source, Routing: routingFacts(p.d.Roots, snap.Routing)}
-	files, err := p.d.Registry.Build(used, installed)
+	var (
+		files []GeneratedFile
+		err   error
+	)
+	switch {
+	case len(req.BuildOnly) > 0:
+		files, bt.gens, err = p.d.Registry.BuildSubsetTimed(used, installed, req.BuildOnly)
+	case timed:
+		files, bt.gens, err = p.d.Registry.BuildTimed(used, installed)
+	default:
+		files, err = p.d.Registry.Build(used, installed)
+	}
 	if err == nil {
 		files = filesOfScope(files, req.Kernel)
 		err = CheckGenerated(files, p.d.ForeignOwned)
 	}
+	bt.generate = bt.lap(&mark)
 	if err == nil {
 		// Проверки до записи (пустая группа, висячая ссылка): при любом триггере,
 		// в том числе фоновом, иначе обновление источника обошло бы блокировку
@@ -727,11 +837,29 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 			err = &BuildError{Issues: issues}
 		}
 	}
+	bt.check = bt.lap(&mark)
 	var plan Plan
 	if err == nil {
 		only := make(map[string]bool, len(req.Only))
 		for _, k := range req.Only {
 			only[k] = true
+		}
+		if len(req.BuildOnly) > 0 {
+			// Сокращённая сборка: файлы остальных генераторов не собраны, поэтому план
+			// (запись, удаление, сироты) — только по ключам собранных файлов, иначе
+			// файлы других генераторов ушли бы в удаление. Отпущенный файл в only не
+			// попадает: имя в only его забирает («Пересобрать»), а полная сборка его
+			// пропускает.
+			for _, f := range files {
+				if e, ok := manifest[f.Key()]; ok && e.Status == StatusReleased && !only[f.Key()] {
+					continue
+				}
+				only[f.Key()] = true
+			}
+			if len(only) == 0 {
+				// Собранные файлы все отпущены: писать нечего (пустой only снял бы сужение).
+				only[""] = true
+			}
 		}
 		skipPlan := false
 		if listenerOnly {
@@ -748,12 +876,27 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 		if err == nil && !skipPlan {
 			// Записи манифеста неустановленного ядра не участвуют в плане: иначе при
 			// пустой генерации его файлы ушли бы в удаление. Они остаются нетронутыми.
-			plan, err = ComputePlan(p.d.Roots, files, manifest, only, p.d.ForeignOwned)
+			planManifest := manifest
+			if len(req.ReapplyKeys) > 0 {
+				planManifest = make(map[string]ManifestEntry, len(manifest))
+				for key, entry := range manifest {
+					planManifest[key] = entry
+				}
+				for _, key := range req.ReapplyKeys {
+					if entry, ok := planManifest[key]; ok && entry.Status == StatusManaged {
+						// Только расчёт плана: реальный манифест не меняется до commitState.
+						entry.Hash = ""
+						planManifest[key] = entry
+					}
+				}
+			}
+			plan, err = ComputePlan(p.d.Roots, files, planManifest, only, p.d.ForeignOwned)
 			// Каталог неустановленного ядра (и ядра вне области запуска) так же не
 			// трогается: его сирот не убираем.
 			plan.Orphans = orphansOfScope(plan.Orphans, installed, req.Kernel)
 		}
 	}
+	bt.plan = bt.lap(&mark)
 	if err == nil && !listenerOnly {
 		// Взятие и возврат маршрутизации — часть этого же плана: проверка ядрами
 		// идёт на итоговой раскладке, запись и откат общие.
@@ -763,6 +906,7 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 		// Секции Xray (взятие и возврат файлов, D-01) идут теми же операциями.
 		plan.Routing, err = p.planCores(src, snap.Cores, plan.Routing, installed, *req)
 	}
+	bt.routing = bt.lap(&mark)
 	if err == nil && req.Source == SourceDraft && len(req.Only) == 0 {
 		// Смена порта прозрачного входящего или tun — полный перезапуск вместо
 		// горячей перезагрузки Mihomo (D-16): правила XKeen пересобираются только им.
@@ -778,6 +922,34 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 		plan.FullRestart[KernelMihomo] = RestartReasonFirmwareDNS
 	}
 	return plan, used, err
+}
+
+// buildTimes — составляющие этапа build одного запуска (buildPlan): отрезки и время
+// генераторов. В строку попадают только числа и ID генераторов — идентификаторы
+// кода, без содержимого файлов, имён узлов и адресов.
+type buildTimes struct {
+	drift, generate, check, plan, routing time.Duration
+	gens                                  []GenTiming
+}
+
+// lap возвращает время от *mark до сейчас и сдвигает *mark.
+func (bt *buildTimes) lap(mark *time.Time) time.Duration {
+	now := time.Now()
+	d := now.Sub(*mark)
+	*mark = now
+	return d
+}
+
+// log пишет строку составляющих build; отрезки, до которых запуск не дошёл
+// (дрейф прервал сборку), — нули.
+func (bt *buildTimes) log(trigger Trigger) {
+	gens := make([]string, 0, len(bt.gens))
+	for _, g := range bt.gens {
+		gens = append(gens, g.ID+":"+strconv.FormatInt(g.D.Milliseconds(), 10))
+	}
+	log.Printf("configlayer: build trigger=%s drift=%d generate=%d check=%d plan=%d routing=%d gens=%s",
+		trigger, bt.drift.Milliseconds(), bt.generate.Milliseconds(), bt.check.Milliseconds(),
+		bt.plan.Milliseconds(), bt.routing.Milliseconds(), strings.Join(gens, ","))
 }
 
 // listenerFileKeys — ключи файлов, чьё содержимое в этом запуске меняют живые данные
@@ -1062,6 +1234,43 @@ func applyRestore(st *State, spec *RestoreSpec) error {
 		st.DraftRevision++
 	}
 	return nil
+}
+
+// xrayValidatedByHook исполняет сокращённую проверку Xray запуска
+// (ApplyRequest.XrayValidate). true — хук принял изменения Xray плана, полная
+// проверка не нужна. Хук зовётся только при установленном Xray, изменениях Xray в
+// плане, которые исчерпываются записями и удалениями файлов (без сирот и операций
+// маршрутизации над файлами Xray), и прочитанных прежних версиях этих файлов;
+// файлы с признаком Inert тоже передаются — полная проверка читает весь каталог.
+// Любой иной случай и отказ хука — false: запуск идёт полной проверкой.
+func (p *Pipeline) xrayValidatedByHook(ctx context.Context, req ApplyRequest, bin, tmpBase string, plan Plan) bool {
+	if req.XrayValidate == nil || bin == "" || !plan.Changes(KernelXray) || plan.Routing.hasDisk(KernelXray) {
+		return false
+	}
+	for _, o := range plan.Orphans {
+		if o.Kernel == KernelXray {
+			return false
+		}
+	}
+	var files []HotFile
+	for _, fp := range plan.Files {
+		if fp.Kernel != KernelXray || (fp.Action != ActionWrite && fp.Action != ActionDelete) {
+			continue
+		}
+		abs, err := p.d.Roots.Abs(KernelXray, fp.RelPath)
+		if err != nil {
+			return false
+		}
+		old, err := os.ReadFile(abs)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return false
+		}
+		files = append(files, HotFile{RelPath: fp.RelPath, Action: fp.Action, New: fp.Content, Old: old, OldExisted: err == nil})
+	}
+	// Как и полная проверка, процесс Xray не запускается во время операции XKeen
+	// над ядром.
+	defer services.AcquireKernelHelper(ctx)()
+	return req.XrayValidate(ctx, bin, tmpBase, files)
 }
 
 // afterValidation отражает итог проверки в шаге; failed=true — применение

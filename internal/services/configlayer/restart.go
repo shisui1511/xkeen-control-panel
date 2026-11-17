@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -39,6 +40,44 @@ type LifecycleLocker interface {
 	Unlock()
 }
 
+// HotFile — файл Xray в плане запуска и его прежняя версия (143 Q5).
+// Содержимое содержит учётные данные узлов и не должно попадать в журнал.
+type HotFile struct {
+	RelPath    string
+	Action     PlanAction
+	New        []byte
+	Old        []byte
+	OldExisted bool
+}
+
+// XrayHotFunc заменяет исходящие Xray под замком жизненного цикла (143 Q5).
+type XrayHotFunc func(ctx context.Context, files []HotFile) error
+
+// XrayHotError описывает отказ горячего пути. Partial означает, что состояние
+// ядра могло измениться: новое намерение доводится полным перезапуском (D-15).
+type XrayHotError struct {
+	Reason  string
+	Partial bool
+	Err     error
+}
+
+func (e *XrayHotError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("%s: %v", e.Reason, e.Err)
+	}
+	return e.Reason
+}
+
+func (e *XrayHotError) Unwrap() error { return e.Err }
+
+// Причины перехода от горячей замены Xray к обычному перезапуску.
+const (
+	HotReasonNoAPI         = "xray_hot_no_api"
+	HotReasonVersion       = "xray_hot_version"
+	HotReasonNotApplicable = "xray_hot_not_applicable"
+	HotReasonFailed        = "xray_hot_failed"
+)
+
 // Тайминги подтверждения перезапуска по процессу ядра (A2): xkeen -start может
 // идти больше минуты, а окно устойчивости ловит ядро, упавшее сразу после старта.
 var (
@@ -50,6 +89,16 @@ var (
 	// подтверждения процесса ядра, а не от начала применения.
 	RestartExpectTimeout = defaultRestartExpectTimeout(runtime.GOARCH)
 )
+
+// hotAliveWindow — окно проверки живости Xray после горячей замены: после него
+// делается второй снимок PID, и ядро, упавшее за это время после rmo/ado, не
+// выдаётся за применившее выбор (WR-03), а доводится перезапуском (D-15).
+// Значение — решение по плану 150-31 (владелец делегировал выбор, выбрано S300):
+// падение от самой замены приходит во время ado или сразу после него, а падение
+// на первом трафике короткое окно всё равно не ловит. Окно не короче 200 мс:
+// тесты hot_kill_* убивают Xray через 20–100 мс после строки журнала замены, и
+// более короткое окно перестало бы надёжно ловить такое падение.
+const hotAliveWindow = 300 * time.Millisecond
 
 // defaultRestartExpectTimeout — время ожидания API и провайдеров Mihomo после
 // рестарта для платформы. На MIPS (mips, mipsle) Mihomo с geodata и rule-провайдерами
@@ -116,6 +165,10 @@ const (
 	// NoteFullRestartFirmwareDNS — ядро перезапущено целиком: перехват DNS снял
 	// старое перенаправление XKeen (proxy_dns), горячая перезагрузка правил не пересобирает.
 	NoteFullRestartFirmwareDNS = "full_restart_firmware_dns"
+	// NoteXrayHotSwapped — исходящие Xray заменены без смены процесса.
+	NoteXrayHotSwapped = "xray_hot_swapped"
+	// NoteXrayHotFailed — после частичной замены Xray нужен перезапуск (D-15).
+	NoteXrayHotFailed = "xray_hot_failed_restarting"
 )
 
 // errInterrupted — запуск прерван отменой контекста (остановка панели). Откат и
@@ -276,7 +329,81 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 	// Признак плана читается после Preview: остановленное ядро не запускается
 	// (FND-05), как и без признака.
 	fullNote := fullRestartNote(plan.FullRestart[kernel])
+	note := fullNote
 	var hotErr error
+	// hotPartial — откат после отказа полной проверки перезапускает Xray на прежних
+	// файлах только при частичном сбое горячей замены.
+	hotPartial := false
+	if kernel == KernelXray && fullNote == "" {
+		if hot := p.currentXrayHot(); hot != nil {
+			prevPID := p.runningPID(KernelXray)
+			var files []HotFile
+			if prevPID <= 0 || set == nil {
+				hotErr = &XrayHotError{Reason: HotReasonNotApplicable}
+			} else {
+				for _, fp := range plan.Files {
+					if fp.Kernel != KernelXray || fp.Inert || (fp.Action != ActionWrite && fp.Action != ActionDelete) {
+						continue
+					}
+					old, existed, err := set.Read(KernelXray, fp.RelPath)
+					if err != nil {
+						hotErr = &XrayHotError{Reason: HotReasonNotApplicable, Err: err}
+						break
+					}
+					files = append(files, HotFile{RelPath: fp.RelPath, Action: fp.Action, New: fp.Content, Old: old, OldExisted: existed})
+				}
+			}
+			if hotErr == nil {
+				hotErr = hot(ctx, files)
+			}
+			if err := interrupted(ctx); err != nil {
+				return interruptedView(kernel), err
+			}
+			if hotErr == nil {
+				// Процесс не перезапускается, а хук уже сверил теги (lso или код
+				// ado), поэтому достаточно снимка «тот же процесс в работе» (замысел
+				// 150-01). Окно устойчивости RestartStableWindow — для xkeen -restart
+				// и перезагрузки профиля Mihomo; здесь оно добавляло к каждому
+				// горячему выбору не меньше 5 с. Вместо него — снимок сразу после
+				// хука и второй снимок через hotAliveWindow: ядро, упавшее в окне
+				// после замены, не выдаётся за применившее выбор (WR-03). Проверка
+				// идёт до ответа (D-11). Другой PID или остановленный процесс —
+				// частичный сбой и доводящий перезапуск (D-15).
+				pid := p.runningPID(KernelXray)
+				if pid == prevPID {
+					select {
+					case <-ctx.Done():
+					case <-time.After(hotAliveWindow):
+					}
+					if interrupted(ctx) == nil {
+						pid = p.runningPID(KernelXray)
+					}
+				}
+				if err := interrupted(ctx); err != nil {
+					return interruptedView(kernel), err
+				}
+				if pid == prevPID {
+					log.Printf("configlayer: горячая замена Xray: причина=%s файлов=%d PID=%d", NoteXrayHotSwapped, len(files), prevPID)
+					return RestartView{Kernel: kernel, Outcome: RestartOutcomeHotReloaded, NoteCode: NoteXrayHotSwapped}, nil
+				}
+				hotErr = &XrayHotError{Reason: HotReasonFailed, Partial: true, Err: fmt.Errorf("PID Xray после замены: был %d, стал %d", prevPID, pid)}
+			}
+			if err := interrupted(ctx); err != nil {
+				return interruptedView(kernel), err
+			}
+			note = HotReasonFailed
+			partial := true
+			var he *XrayHotError
+			if errors.As(hotErr, &he) {
+				note, partial = he.Reason, he.Partial
+			}
+			hotPartial = partial
+			if partial {
+				p.setStep(StepRestart, StepRunning, NoteXrayHotFailed, "")
+			}
+			log.Printf("configlayer: горячая замена Xray: причина=%s файлов=%d PID=%d", note, len(files), prevPID)
+		}
+	}
 	if kernel == KernelMihomo && fullNote == "" && p.d.Mihomo != nil && p.d.Mihomo.HasController() {
 		var targeted bool
 		if targeted, hotErr = p.hotReloadMihomo(ctx, plan, set); hotErr == nil {
@@ -294,7 +421,33 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 		p.setStep(StepRestart, StepRunning, NoteHotReloadFailed, "")
 		outcome = RestartOutcomeRestartedReload
 	}
+	// Сокращённая проверка Xray не видела каталог целиком, а xkeen -restart
+	// загружает его весь: до перезапуска каталог с планом проверяется полностью.
+	// Отказ — откат файлов; Xray перезапускается на прежних файлах, только если
+	// горячая замена успела его тронуть, иначе работающий процесс не трогаем.
+	if kernel == KernelXray && p.xrayValidatedShort() {
+		bins := p.binaries()
+		r := ValidateXray(ctx, filepath.Join(p.d.DataDir, "tmp"), p.d.Roots, bins.Xray, plan, p.d.XrayEnv)
+		if err := interrupted(ctx); err != nil {
+			return interruptedView(kernel), err
+		}
+		if !r.OK && !r.Skipped {
+			cause := fmt.Errorf("полная проверка Xray перед перезапуском: %s", r.Code)
+			if hotErr != nil {
+				cause = fmt.Errorf("перезагрузка конфигурации: %v; %w", hotErr, cause)
+			}
+			return p.rollbackKernel(ctx, kernel, set, cause, hotPartial)
+		}
+	}
 	applied, err := p.restartAndConfirm(ctx, kernel)
+	if err == nil && applied == services.ApplySavedKernelStopped && hotPartial && kernel == KernelXray {
+		// Xray работал до замены (Preview дал рестарт), а остановила его сама
+		// частично неудавшаяся горячая замена: Applier по свежему статусу видит
+		// «остановлен» и перезапуск откладывает, хотя выбор должен дойти до ядра
+		// (D-15). Доводим принудительным перезапуском, как при откате.
+		err = p.recoverKernel(ctx, kernel)
+		applied = services.ApplyRestarted
+	}
 	if err == nil && applied != services.ApplyRestarted {
 		// Applier по свежему статусу решил не перезапускать (ядро остановили между
 		// Preview и ApplyLocked): это не отказ ядра, откатывать файлы незачем.
@@ -316,7 +469,7 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 		}
 		return p.rollbackAndRestart(ctx, kernel, set, err)
 	}
-	return RestartView{Kernel: kernel, Outcome: outcome, NoteCode: fullNote}, nil
+	return RestartView{Kernel: kernel, Outcome: outcome, NoteCode: note}, nil
 }
 
 // fullRestartNote переводит причину полного перезапуска в код пояснения; пустая
@@ -527,6 +680,13 @@ func (p *Pipeline) checkExpect(ctx context.Context, plan Plan, wait bool) error 
 // повторного подъёма ядра: то, что вызывающий сделал в BeforeWrite (например,
 // DNS роутера), возвращается раньше медленного отката (RESEARCH Pitfall 2).
 func (p *Pipeline) rollbackAndRestart(ctx context.Context, kernel string, set *BackupSet, cause error) (RestartView, error) {
+	return p.rollbackKernel(ctx, kernel, set, cause, true)
+}
+
+// rollbackKernel — откат файлов панели; restart=false не перезапускает ядро (оно
+// не тронуто и работает на прежних файлах), restart=true поднимает его на прежних
+// файлах, как rollbackAndRestart.
+func (p *Pipeline) rollbackKernel(ctx context.Context, kernel string, set *BackupSet, cause error, restart bool) (RestartView, error) {
 	p.fireBeforeRollback()
 	p.setStep(StepRestart, StepRunning, NoteRestartFailedRolling, "")
 	view := RestartView{Kernel: kernel, Outcome: RestartOutcomeFailedRolledBack, NoteCode: NoteRestartFailedRolling}
@@ -543,6 +703,10 @@ func (p *Pipeline) rollbackAndRestart(ctx context.Context, kernel string, set *B
 		// Файлы на месте, не снялся только журнал: ядро поднимаем на прежних файлах.
 		re.Err = fmt.Errorf("%w; журнал отката не снят: %v", cause, rbErr)
 		cause = re.Err
+	}
+	if !restart {
+		re.Recovered = true
+		return view, re
 	}
 	if rerr := p.recoverKernel(ctx, kernel); rerr != nil {
 		re.Err = fmt.Errorf("%w; повторный рестарт на прежних файлах: %v", cause, rerr)
@@ -827,9 +991,11 @@ func (p *Pipeline) TryBegin(ctx context.Context, user bool) (release func(), err
 			}
 		}
 	}
+	p.held.Store(true)
 	var once sync.Once
 	return func() {
 		once.Do(func() {
+			p.held.Store(false)
 			if lifecycle != nil {
 				lifecycle.Unlock()
 			}
@@ -837,3 +1003,7 @@ func (p *Pipeline) TryBegin(ctx context.Context, user bool) (release func(), err
 		})
 	}, nil
 }
+
+// Busy — замки применения сейчас держит запуск (TryBegin без release). Только
+// подсказка для фоновой работы, которую можно пропустить: замок не берётся.
+func (p *Pipeline) Busy() bool { return p.held.Load() }

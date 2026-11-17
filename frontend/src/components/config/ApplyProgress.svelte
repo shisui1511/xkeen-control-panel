@@ -122,7 +122,7 @@
   // Способ перезапуска по факту (D-16): xkeen -restart у Xray, полный перезапуск или горячая
   // перезагрузка у Mihomo, «не нужен» — когда ядро не тронуто. Отказы и прерывание способа
   // не называют: там важен исход, а не способ
-  type RestartMethod = 'xkeen' | 'mihomo_full' | 'mihomo_hot' | 'none' | '';
+  type RestartMethod = 'xkeen' | 'mihomo_full' | 'mihomo_hot' | 'xray_hot' | 'none' | '';
   const FULL_RESTART_PREFIX = 'full_restart_';
 
   /** Причина полного перезапуска Mihomo из note_code (full_restart_tun | full_restart_port): tun | port. */
@@ -141,7 +141,7 @@
       case 'no_runtime_effect':
         return 'none';
       case 'hot_reloaded':
-        return 'mihomo_hot';
+        return row.kernel === 'xray' ? 'xray_hot' : 'mihomo_hot';
       case 'restarted':
       case 'restarted_after_reload_failed':
         if (row.kernel === 'xray') return 'xkeen';
@@ -157,14 +157,20 @@
     return $t('cfg.step_state.' + state);
   }
 
-  // Заметки фолбэка Mihomo (D-17) видны, только пока идёт перезапуск
-  const FALLBACK_NOTES = ['hot_reload_failed_restarting', 'restart_failed_rolling_back'];
+  // Заметки фолбэка видны, только пока идёт перезапуск
+  const FALLBACK_NOTES = [
+    'hot_reload_failed_restarting',
+    'restart_failed_rolling_back',
+    'xray_hot_failed_restarting'
+  ];
 
   function stepNote(step: LayerStep): string {
     const code = step.note_code;
     if (!code) return '';
     if (FALLBACK_NOTES.includes(code)) {
       if (step.state !== 'running') return '';
+      if (code === 'xray_hot_failed_restarting')
+        return $t('cfg.restart_note.xray_hot_failed_restarting');
       if (code === 'hot_reload_failed_restarting') return $t('cfg.restart_note.' + code);
       // Ядро известно, только когда его строка итога уже опубликована
       const failed = restartRows.find((r) => r.outcome.startsWith('failed_'));

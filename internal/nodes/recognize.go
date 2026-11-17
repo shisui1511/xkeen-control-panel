@@ -125,6 +125,24 @@ func Recognize(in Input) Recognition {
 	return res
 }
 
+// RecognizeNode распознаёт текст одного узла (правка в «Моих узлах», запись
+// источника): URL подписки здесь не бывает, поэтому одиночная строка http(s)://
+// — ссылка http-прокси, как внутри декодированного base64. Прочий текст идёт
+// общим путём Recognize.
+func RecognizeNode(text string) Recognition {
+	line := strings.TrimSpace(text)
+	lower := strings.ToLower(line)
+	isHTTP := strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+	if !isHTTP || strings.ContainsAny(line, "\r\n") || len(text) > MaxInputBytes {
+		return Recognize(Input{Text: text})
+	}
+	res := Recognition{URLs: []URLItem{}, Nodes: []Node{}, Errors: []LineError{}}
+	r := &recognizer{res: &res}
+	r.lineItem("", line, 1, 1)
+	res.Nodes, res.Collapsed = dedupeNodes(r.nodes)
+	return res
+}
+
 // recognizer накапливает результат по документам ввода.
 type recognizer struct {
 	res   *Recognition

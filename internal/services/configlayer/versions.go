@@ -31,9 +31,12 @@ const (
 	// Порог 1.8.10 (D-42, 146): у каждого balancer панели есть fallbackTag
 	// xcp-block, а fallbackTag появился в 1.8.10; общий минимум MinXrayVersion
 	// не меняется.
-	FeatureXrayAutoGroup        Feature = "xray_auto_group"
-	FeatureXrayFallbackGroup    Feature = "xray_fallback_group"
-	FeatureXrayHotSwapAPI       Feature = "xray_hot_swap_api"
+	FeatureXrayAutoGroup     Feature = "xray_auto_group"
+	FeatureXrayFallbackGroup Feature = "xray_fallback_group"
+	FeatureXrayHotSwapAPI    Feature = "xray_hot_swap_api"
+	// FeatureXrayListOutbounds — сверка исходящих после горячей замены через
+	// xray api lso (143 «Минимальные версии»).
+	FeatureXrayListOutbounds    Feature = "xray_list_outbounds"
 	FeatureMihomoUnixSocket     Feature = "mihomo_unix_socket"
 	FeatureMihomoInlineProvider Feature = "mihomo_inline_provider"
 	FeatureXKeenManagedInbounds Feature = "xkeen_managed_inbounds"
@@ -75,6 +78,7 @@ var featureThresholds = map[Feature]featureThreshold{
 	FeatureXrayAutoGroup:        {kernelXray, "1.8.10"},
 	FeatureXrayFallbackGroup:    {kernelXray, "1.8.10"},
 	FeatureXrayHotSwapAPI:       {kernelXray, "1.8.13"},
+	FeatureXrayListOutbounds:    {kernelXray, "25.6.7"},
 	FeatureMihomoUnixSocket:     {kernelMihomo, "1.18.4"},
 	FeatureMihomoInlineProvider: {kernelMihomo, "1.19.1"},
 	FeatureXKeenManagedInbounds: {kernelXKeen, "2.0"},

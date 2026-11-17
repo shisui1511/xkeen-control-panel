@@ -369,7 +369,9 @@
       "shared": false,
       "paths": [
         "internal/services/routing/**",
+        "internal/services/proxyping/**",
         "internal/handlers/routing.go",
+        "internal/handlers/proxies.go",
         "internal/handlers/route_tracer.go",
         "internal/handlers/rule_provider_inspect.go",
         "internal/handlers/user_rules.go",
@@ -742,6 +744,7 @@
         "go:TestRouterRoutingPresetsAndLists",
         "go:TestRouterRoutingProviderTargeted",
         "go:TestRouterRoutingSelectLive",
+        "go:TestRouterRoutingSelectScale",
         "go:TestRouterRoutingView",
         "go:TestRouterRoutingViewRules",
         "go:TestRouterRuleCondConflict",
@@ -751,6 +754,8 @@
         "go:TestRouterSchedulerBacksOffAfterSnapshotFailure",
         "go:TestRouterSchedulerFlagOffZeroRequests",
         "go:TestRouterSchedulerNetworkRetries",
+        "go:TestRouterSelectMihomoReconcile",
+        "go:TestRouterSelectXrayFaults",
         "go:TestRouterShareLinks",
         "go:TestRouterSourcesMyNodesFlow",
         "go:TestRouterSourcesSubscriptionFlow",
@@ -779,7 +784,8 @@
         "tests/router/config-presets.spec.ts",
         "tests/router/config-profiles.spec.ts",
         "tests/router/config-routing.spec.ts",
-        "tests/router/config-setup.spec.ts"
+        "tests/router/config-setup.spec.ts",
+        "tests/router/proxies-runtime.spec.ts"
       ]
     },
     "contract-routing": {

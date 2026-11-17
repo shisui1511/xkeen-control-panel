@@ -165,6 +165,8 @@ type Layer struct {
 	beforeApply []func(st StateView)
 	// dnsSeq — счётчик событий dns (PublishDNS).
 	dnsSeq atomic.Uint64
+	// proxiesSeq — счётчик событий страницы «Прокси» (PublishProxies).
+	proxiesSeq atomic.Uint64
 	// wizardSeq — счётчик событий wizard (PublishWizard).
 	wizardSeq atomic.Uint64
 	// applySeq — номер запуска, который получают хуки BeforeApply и AfterApply
@@ -777,6 +779,15 @@ func (l *Layer) PublishDNS() {
 	l.broker.Publish(Event{Type: EventDNS, Data: DNSEvent{Seq: l.dnsSeq.Add(1)}})
 }
 
+// PublishProxies сообщает клиентам об изменении рантайма, выбора или пинга.
+// Частоту ограничивает вызывающий; выключенный слой события не публикует.
+func (l *Layer) PublishProxies(kind string) {
+	if !l.Enabled() {
+		return
+	}
+	l.broker.Publish(Event{Type: EventProxies, Data: ProxiesEvent{Seq: l.proxiesSeq.Add(1), Kind: kind}})
+}
+
 // PublishRouting сообщает клиентам, что владение маршрутизацией или её дрейф
 // изменились (событие routing с текущей ревизией черновика). Выключенный слой
 // молчит.
@@ -990,6 +1001,8 @@ type StateView struct {
 	Draft         Sections
 	Applied       Sections
 	Live          Sections
+	// Routing — факты файлов маршрутизации, включая чужой api Xray.
+	Routing RoutingFacts
 }
 
 // ReadState возвращает глубокие копии черновика, применённого состояния и
@@ -1004,6 +1017,7 @@ func (l *Layer) ReadState() (StateView, error) {
 		Draft:         st.Draft,
 		Applied:       st.Applied,
 		Live:          st.Live,
+		Routing:       routingFacts(l.opts.Roots, st.Routing),
 	}, nil
 }
 
@@ -1556,10 +1570,15 @@ func (l *Layer) updateAutoTakenNotices(auto string, now RoutingState) {
 // коммита, уведомления (запуск мог восстановить файлы по журналу) и внеочередная
 // сверка.
 func (l *Layer) afterRun() {
+	l.publishRunEvents()
+	l.checkNow(true)
+}
+
+// publishRunEvents публикует события черновика и уведомлений после запуска.
+func (l *Layer) publishRunEvents() {
 	st := l.store.Snapshot()
 	l.broker.Publish(Event{Type: EventDraft, Data: l.store.draftEventOf(st)})
 	l.broker.Publish(Event{Type: EventNotices, Data: NoticesEvent{Notices: l.noticeViews(st)}})
-	l.checkNow(true)
 }
 
 // LiveRun — параметры фонового запуска конвейера в обход черновика (RunLive).
@@ -1573,6 +1592,21 @@ type LiveRun struct {
 	Overlay Sections
 	// Kernel ограничивает запуск одним ядром; пусто — все установленные.
 	Kernel string
+	// XrayHot — горячая замена исходящих при выборе узла (TriggerSelect).
+	XrayHot XrayHotFunc
+	// XrayValidate — сокращённая проверка Xray выбора узла (ApplyRequest.XrayValidate).
+	XrayValidate XrayValidateFunc
+	// ReapplyKeys повторно записывает файлы для сверки неизвестного рантайма.
+	ReapplyKeys []string
+	// BuildOnly — ID генераторов сокращённой сборки (ApplyRequest.BuildOnly);
+	// пусто — все генераторы.
+	BuildOnly []string
+	// Prepare вызывается под замками применения и жизненного цикла до сборки:
+	// вызывающий пишет здесь живые данные, которые должна увидеть сборка этого
+	// запуска (намерения выбора). Ошибка — конвейер не запускается, RunLive
+	// возвращает её, файлы и ядро не тронуты, afterRun и хуки после применения не
+	// вызываются. nil — шага нет.
+	Prepare func() error
 }
 
 // RunLive — запуск конвейера из применённого состояния с оверлеем живых данных
@@ -1584,6 +1618,19 @@ type LiveRun struct {
 // вызывающий сервис со своим wg. После успешного запуска слой зовёт хуки
 // AddAfterApply уже после снятия замка применения.
 func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
+	// Замер: ожидание замков, конвейер (Prepare и проход), хвост (у выбора
+	// синхронны только события и хуки после применения: в фоне идёт лишь сверка
+	// файлов checkNow) — одна строка журнала на вызов выбора, целые мс; её читают
+	// роутерные тесты масштаба выбора. Другие триггеры (обновление источников и geodata) строки не пишут: на роутере с частым
+	// обновлением это лишние записи на флешку в xcp.log.
+	var lockD, pipeD, afterD time.Duration
+	defer func() {
+		if run.Trigger != TriggerSelect {
+			return
+		}
+		log.Printf("configlayer: RunLive trigger=%s lock=%d pipeline=%d after=%d",
+			run.Trigger, lockD.Milliseconds(), pipeD.Milliseconds(), afterD.Milliseconds())
+	}()
 	if !l.Enabled() {
 		return ApplyView{}, ErrDisabled
 	}
@@ -1596,7 +1643,9 @@ func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 	if stopped {
 		return ApplyView{}, ErrStopped
 	}
+	start := time.Now()
 	release, err := l.pipeline.TryBegin(ctx, false)
+	lockD = time.Since(start)
 	if err != nil {
 		if l.ctx.Err() != nil {
 			return ApplyView{}, ErrStopped
@@ -1604,11 +1653,42 @@ func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 		return ApplyView{}, err
 	}
 	defer release()
-	req := ApplyRequest{Trigger: run.Trigger, Source: SourceApplied, LiveOverlay: run.Overlay, Kernel: run.Kernel}
+	start = time.Now()
+	if run.Prepare != nil {
+		if err := run.Prepare(); err != nil {
+			pipeD = time.Since(start)
+			release()
+			return ApplyView{}, err
+		}
+	}
+	req := ApplyRequest{Trigger: run.Trigger, Source: SourceApplied, LiveOverlay: run.Overlay, Kernel: run.Kernel, XrayHot: run.XrayHot, XrayValidate: run.XrayValidate, ReapplyKeys: run.ReapplyKeys, BuildOnly: run.BuildOnly}
 	view := l.runPipeline(req)
+	pipeD = time.Since(start)
 	release()
-	l.afterRun()
+	start = time.Now()
+	if run.Trigger == TriggerSelect {
+		// Ответ выбора не ждёт сверки файлов (150-24, F2): в фоне идёт только
+		// checkNow (сериализует checkMu; остановка слоя ждёт фоновые задачи, wg).
+		// События черновика и уведомлений публикуются здесь, синхронно: из фона
+		// они могли прийти позже SetNotices хвоста следующего запуска. Сверка
+		// пропускается, если конвейер уже занят следующей пачкой: посреди её
+		// записи она показала бы ложный дрейф, а итог сверит afterRun той пачки.
+		// Замок мог занять не выбор (например, исключительный доступ geodata):
+		// тогда afterRun никто не вызовет, поэтому пропущенная сверка
+		// перезапрашивается обычным запросом с дебаунсом.
+		l.publishRunEvents()
+		l.spawn(func() {
+			if l.pipeline.Busy() {
+				l.RequestCheck()
+				return
+			}
+			l.checkNow(true)
+		})
+	} else {
+		l.afterRun()
+	}
 	l.fireAfterApply(req, view)
+	afterD = time.Since(start)
 	if view.Result != nil && view.Result.Code == ResultDriftBlocked {
 		return view, ErrDriftBlocked
 	}

@@ -57,6 +57,12 @@ type MihomoService struct {
 	cachedClient *http.Client
 	cachedTarget string
 	cachedType   string
+
+	// provMu охраняет карту «узел провайдера → провайдер» для замера задержки
+	// узлов, которых нет в /proxies (providerOf).
+	provMu     sync.Mutex
+	provByName map[string]string
+	provAt     time.Time
 }
 
 func NewMihomoService(binary, xkeenPath, configDir string) *MihomoService {
@@ -665,6 +671,69 @@ func (s *MihomoService) UpdateProvider(ctx context.Context, providerType, name s
 	return nil
 }
 
+// ClashDelay — запись истории задержек, которую хранит ядро Mihomo.
+type ClashDelay struct {
+	Time  time.Time `json:"time"`
+	Delay int       `json:"delay"`
+}
+
+// ClashProxyState — состояние узла или группы в профиле Mihomo.
+type ClashProxyState struct {
+	Type    string       `json:"type"`
+	Now     string       `json:"now"`
+	History []ClashDelay `json:"history"`
+}
+
+// ProxiesState читает состояние всех прокси вместо ProxyNow на группу: группы и
+// узлы профиля — GET /proxies, узлы провайдеров — GET /providers/proxies (в
+// /proxies Mihomo их не перечисляет). Снимок даёт «Сейчас» авто-групп и историю
+// задержек ядра странице «Прокси»; имя из /proxies главнее одноимённого узла
+// провайдера.
+func (s *MihomoService) ProxiesState(ctx context.Context) (map[string]ClashProxyState, error) {
+	status, body, err := s.clashDo(ctx, http.MethodGet, "/proxies", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, newClashStatusError(status, body)
+	}
+	var doc struct {
+		Proxies map[string]ClashProxyState `json:"proxies"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return nil, fmt.Errorf("mihomo clash api: разбор ответа: %w", err)
+	}
+	if doc.Proxies == nil {
+		doc.Proxies = map[string]ClashProxyState{}
+	}
+	status, body, err = s.clashDo(ctx, http.MethodGet, "/providers/proxies", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, newClashStatusError(status, body)
+	}
+	var pdoc struct {
+		Providers map[string]struct {
+			Proxies []struct {
+				Name string `json:"name"`
+				ClashProxyState
+			} `json:"proxies"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(body, &pdoc); err != nil {
+		return nil, fmt.Errorf("mihomo clash api: разбор ответа провайдеров: %w", err)
+	}
+	for _, p := range pdoc.Providers {
+		for _, px := range p.Proxies {
+			if _, ok := doc.Proxies[px.Name]; px.Name != "" && !ok {
+				doc.Proxies[px.Name] = px.ClashProxyState
+			}
+		}
+	}
+	return doc.Proxies, nil
+}
+
 // ProxyNow возвращает выбранного участника группы: GET /proxies/{группа}, поле now.
 func (s *MihomoService) ProxyNow(ctx context.Context, group string) (string, error) {
 	status, body, err := s.clashDo(ctx, http.MethodGet, "/proxies/"+url.PathEscape(group), nil)
@@ -701,13 +770,96 @@ func (s *MihomoService) SelectProxy(ctx context.Context, group, name string) err
 }
 
 // ProxyDelay измеряет задержку узла или группы: GET /proxies/{имя}/delay с
-// адресом проверки и таймаутом в миллисекундах. Узел не ответил — ошибка с кодом
-// ответа Mihomo.
+// адресом проверки и таймаутом в миллисекундах. Узел провайдера Mihomo в
+// /proxies не ищет (404): тогда замер идёт через провайдер,
+// GET /providers/proxies/{провайдер}/{имя}/healthcheck. Узел не ответил — ошибка
+// с кодом ответа Mihomo.
 func (s *MihomoService) ProxyDelay(ctx context.Context, name, testURL string, timeout time.Duration) (int, error) {
 	q := url.Values{}
 	q.Set("url", testURL)
 	q.Set("timeout", fmt.Sprintf("%d", timeout.Milliseconds()))
-	status, body, err := s.clashDo(ctx, http.MethodGet, "/proxies/"+url.PathEscape(name)+"/delay?"+q.Encode(), nil)
+	delay, err := s.delayAt(ctx, "/proxies/"+url.PathEscape(name)+"/delay?"+q.Encode())
+	var st *ClashStatusError
+	if !errors.As(err, &st) || st.Status != http.StatusNotFound {
+		return delay, err
+	}
+	provider, perr := s.providerOf(ctx, name)
+	if perr != nil || provider == "" {
+		return delay, err
+	}
+	return s.delayAt(ctx, "/providers/proxies/"+url.PathEscape(provider)+"/"+url.PathEscape(name)+"/healthcheck?"+q.Encode())
+}
+
+// ProviderProxyDelay измеряет задержку узла известного провайдера:
+// GET /providers/proxies/{провайдер}/{имя}/healthcheck. Имя узла уникально
+// только внутри провайдера, поэтому узлы источников панели меряются через свой
+// провайдер, без поиска провайдера по имени (providerOf).
+func (s *MihomoService) ProviderProxyDelay(ctx context.Context, provider, name, testURL string, timeout time.Duration) (int, error) {
+	q := url.Values{}
+	q.Set("url", testURL)
+	q.Set("timeout", fmt.Sprintf("%d", timeout.Milliseconds()))
+	return s.delayAt(ctx, "/providers/proxies/"+url.PathEscape(provider)+"/"+url.PathEscape(name)+"/healthcheck?"+q.Encode())
+}
+
+// providerOfTTL — сколько карта узлов провайдеров считается свежей: пачка
+// пинга обходится одним чтением /providers/proxies, а новый набор провайдера
+// подхватывается промахом или по сроку.
+const providerOfTTL = 30 * time.Second
+
+// providerOf возвращает провайдер, в котором Mihomo держит узел name; пусто —
+// узла нет ни в одном провайдере или имя есть у нескольких провайдеров (какой
+// узел имелся в виду, по имени не понять). Промах или устаревшая карта
+// перечитывают GET /providers/proxies.
+func (s *MihomoService) providerOf(ctx context.Context, name string) (string, error) {
+	s.provMu.Lock()
+	defer s.provMu.Unlock()
+	if p, ok := s.provByName[name]; ok && time.Since(s.provAt) < providerOfTTL {
+		return p, nil
+	}
+	status, body, err := s.clashDo(ctx, http.MethodGet, "/providers/proxies", nil)
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusOK {
+		return "", newClashStatusError(status, body)
+	}
+	var doc struct {
+		Providers map[string]struct {
+			VehicleType string `json:"vehicleType"`
+			Proxies     []struct {
+				Name string `json:"name"`
+			} `json:"proxies"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return "", fmt.Errorf("mihomo clash api: разбор ответа провайдеров: %w", err)
+	}
+	m := map[string]string{}
+	for pn, p := range doc.Providers {
+		// Compatible — служебные провайдеры групп: их участники есть в /proxies.
+		if p.VehicleType == "Compatible" {
+			continue
+		}
+		for _, px := range p.Proxies {
+			if px.Name == "" {
+				continue
+			}
+			// Имя у нескольких провайдеров неоднозначно: пустое значение, а не
+			// первый провайдер случайного обхода карты.
+			if prev, dup := m[px.Name]; dup && prev != pn {
+				m[px.Name] = ""
+			} else if !dup {
+				m[px.Name] = pn
+			}
+		}
+	}
+	s.provByName, s.provAt = m, time.Now()
+	return m[name], nil
+}
+
+// delayAt выполняет запрос замера задержки по готовому пути и читает delay.
+func (s *MihomoService) delayAt(ctx context.Context, path string) (int, error) {
+	status, body, err := s.clashDo(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return 0, err
 	}

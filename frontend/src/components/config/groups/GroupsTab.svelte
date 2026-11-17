@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import { t, tp } from '../../../i18n';
+  import { motion } from '../../../lib/motion.svelte';
   import { showConfirm, showToast, activeKernelState } from '../../../stores';
   import EmptyState from '../../EmptyState.svelte';
   import Skeleton from '../../Skeleton.svelte';
@@ -33,6 +34,43 @@
   onMount(() => {
     void loadRouting();
     void loadSources();
+    // Ссылка «Открыть группу в «Конфигурации»» страницы «Прокси» (D-23): #/config/groups?group=<id>
+    const onHash = () => {
+      const id = groupFromHash();
+      if (id !== '') pendingGroup = id;
+    };
+    onHash();
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  });
+
+  function groupFromHash(): string {
+    const q = window.location.hash.split('?')[1] ?? '';
+    return new URLSearchParams(q).get('group') ?? '';
+  }
+
+  // Группа из адреса раскрывается, прокручивается в видимую область и получает фокус,
+  // как только список загружен
+  let pendingGroup = $state('');
+
+  async function revealGroup(id: string) {
+    expandedGroups.update((m) => ({ ...m, [id]: true }));
+    await tick();
+    const card = document.querySelector<HTMLElement>(
+      `[data-testid="group-card-${CSS.escape(id)}"]`
+    );
+    if (!card) return;
+    card.scrollIntoView({ block: 'start', behavior: motion.reduced ? 'auto' : 'smooth' });
+    card.querySelector<HTMLElement>('.gc-expand')?.focus({ preventScroll: true });
+  }
+
+  $effect(() => {
+    const id = pendingGroup;
+    if (id === '' || !showList) return;
+    untrack(() => {
+      pendingGroup = '';
+      if (groups.some((g) => g.id === id)) void revealGroup(id);
+    });
   });
 
   const loading = $derived(

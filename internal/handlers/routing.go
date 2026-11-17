@@ -8,6 +8,7 @@ import (
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/proxyping"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 )
 
@@ -100,6 +101,23 @@ func (a *API) writeRoutingError(w http.ResponseWriter, r *http.Request, err erro
 		JSONErrorCode(w, http.StatusConflict, "group_not_applied", a.t(r, "configlayer.routing.group_not_applied"))
 	case errors.Is(err, routing.ErrMemberInvalid):
 		JSONErrorCode(w, http.StatusBadRequest, "member_invalid", a.t(r, "configlayer.routing.member_invalid"))
+	case errors.Is(err, routing.ErrSelectBusy):
+		JSONErrorCode(w, http.StatusConflict, "select_busy", a.t(r, "configlayer.routing.select_busy"))
+	case errors.Is(err, routing.ErrKernelRestarting):
+		JSONErrorCode(w, http.StatusConflict, "kernel_restarting", a.t(r, "configlayer.routing.kernel_restarting"))
+	case errors.Is(err, routing.ErrPingUnavailable), errors.Is(err, proxyping.ErrStopped):
+		JSONErrorCode(w, http.StatusConflict, "ping_unavailable", a.t(r, "configlayer.routing.ping_unavailable"))
+	case errors.Is(err, proxyping.ErrBusy):
+		JSONErrorCode(w, http.StatusConflict, "ping_busy", a.t(r, "configlayer.routing.ping_busy"))
+	case errors.Is(err, routing.ErrGroupNoNodes):
+		JSONErrorCode(w, http.StatusConflict, "group_no_nodes", a.t(r, "configlayer.routing.group_no_nodes"))
+	case errors.Is(err, proxyping.ErrNoTargets):
+		// Пустая группа отсекается раньше (ErrGroupNoNodes): сюда приходит scope=all
+		JSONErrorCode(w, http.StatusConflict, "ping_no_targets", a.t(r, "configlayer.routing.ping_no_targets"))
+	case errors.Is(err, routing.ErrConfirmFailed):
+		JSONErrorCode(w, http.StatusConflict, "confirm_failed", a.t(r, "configlayer.routing.confirm_failed"))
+	case errors.Is(err, routing.ErrSelectionUnconfirmed):
+		JSONErrorCode(w, http.StatusConflict, "selection_unconfirmed", a.t(r, "configlayer.routing.selection_unconfirmed"))
 	case errors.Is(err, configlayer.ErrApplyBusy):
 		JSONErrorCode(w, http.StatusConflict, "apply_busy", a.t(r, "configlayer.routing.apply_busy"))
 	case errors.Is(err, configlayer.ErrDraftOpen):

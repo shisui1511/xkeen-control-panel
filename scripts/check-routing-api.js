@@ -9,13 +9,16 @@
  *    типов полей, встроенные структуры (Group в GroupView, Rule в RuleView)
  *    разворачиваются. Тот же файл читают роутерные проверки ответов панели и типы
  *    фронтенда.
- * 2. Проводка: каждый маршрут /api/configlayer/routing* из списка зарегистрирован в
+ * 2. Проводка: каждый маршрут /api/configlayer/routing* и proxies* из списка зарегистрирован в
  *    cmd/xcp/main.go через HandleProtected, у него есть обработчик в
- *    internal/handlers/routing.go, маршруты не входят в kernelGatedPrefixes;
+ *    internal/handlers/routing.go или proxies.go, маршруты не входят в kernelGatedPrefixes;
  *    генераторы и проверка сервиса маршрутизации регистрируются до
  *    configLayer.Start(), routingSvc.Start() идёт после него, шаг остановки — после
  *    шага остановки слоя (defer: сервис останавливается раньше слоя). Сервис
- *    маршрутизации создаётся только в main.go.
+ *    маршрутизации и раннер пинга создаются только в main.go. Раннер создаётся
+ *    после маршрутизации, уборка остатков пачек (SweepStaleAt) идёт до создания
+ *    слоя и маршрутизации, Start — после старта слоя;
+ *    шаг остановки proxy-ping идёт после routing и выполняется раньше него.
  * 3. Коды ошибок: каждый код из frontend/src/lib/routingErrorCodes.json встречается
  *    в internal/handlers/routing.go и имеет ключ configlayer.routing.<код> в обоих
  *    бэкенд-словарях.
@@ -64,6 +67,8 @@ const GO_FILES = [
   "internal/services/routing/validate.go",
   "internal/services/routing/presets.go",
   "internal/services/routing/selection.go",
+  "internal/services/routing/runtime.go",
+  "internal/services/proxyping/types.go",
   "internal/services/routing/lists_api.go",
   "internal/services/routing/lists/catalog.go",
   "internal/services/routing/lists/geodata.go",
@@ -103,6 +108,9 @@ for (const file of GO_FILES) {
       const e = line.match(/^\s*\*?(\w+)\s*(\/\/.*)?$/);
       if (e) embedded.push(e[1]);
     }
+    // Внутренние типы без JSON-полей (например, proxyping.Target) не являются
+    // DTO и не должны затенять одноимённые структуры контракта маршрутизации.
+    if (fields.length === 0 && embedded.length === 0) continue;
     structs.set(m[1], { fields, embedded });
   }
 }
@@ -208,26 +216,37 @@ const ROUTES = {
 };
 
 const MAIN = "cmd/xcp/main.go";
+const PROXY_ROUTES = {
+  "/api/configlayer/proxies": "ConfigProxies",
+  "/api/configlayer/proxies/now": "ConfigProxiesNow",
+  "/api/configlayer/proxies/results": "ConfigProxiesResults",
+  "/api/configlayer/proxies/ping": "ConfigProxiesPing",
+  "/api/configlayer/proxies/ping/cancel": "ConfigProxiesPingCancel",
+  "/api/configlayer/proxies/confirm": "ConfigProxiesConfirm",
+};
+const PROXY_HANDLERS = "internal/handlers/proxies.go";
 const HANDLERS = "internal/handlers/routing.go";
 const main = read(MAIN);
 const mainLines = main.split("\n");
 const handlers = read(HANDLERS);
 
-for (const [route, fn] of Object.entries(ROUTES)) {
+for (const [route, fn] of Object.entries({ ...ROUTES, ...PROXY_ROUTES })) {
+  const file = route in PROXY_ROUTES ? PROXY_HANDLERS : HANDLERS;
+  const source = file === HANDLERS ? handlers : read(file);
   const want = `srv.HandleProtected("${route}", api.${fn})`;
   if (!main.includes(want)) errors.push(`${MAIN}: нет ${want}`);
   if (
     !new RegExp(
       `func \\(a \\*API\\) ${fn}\\(w http\\.ResponseWriter, r \\*http\\.Request\\)`,
-    ).test(handlers)
+    ).test(source)
   ) {
-    errors.push(`${HANDLERS}: нет обработчика ${fn}`);
+    errors.push(`${file}: нет обработчика ${fn}`);
   }
 }
-// Любой маршрут /api/configlayer/routing* обязан идти через HandleProtected; маршруты,
+// Любой маршрут /api/configlayer/routing* или proxies* обязан идти через HandleProtected; маршруты,
 // добавленные следующими планами, этим же правилом охраняются.
 for (const m of main.matchAll(
-  /srv\.(Handle|HandlePublic)\("(\/api\/configlayer\/routing[^"]*)"/g,
+  /srv\.(Handle|HandlePublic)\("(\/api\/configlayer\/(?:routing|proxies)[^"]*)"/g,
 )) {
   errors.push(
     `${MAIN}: ${m[2]} зарегистрирован через ${m[1]}, нужен HandleProtected`,
@@ -235,9 +254,12 @@ for (const m of main.matchAll(
 }
 
 const gate = read("internal/handlers/kernel_gate.go");
-if (gate.includes("/api/configlayer/routing")) {
+if (
+  gate.includes("/api/configlayer/routing") ||
+  gate.includes("/api/configlayer/proxies")
+) {
   errors.push(
-    "internal/handlers/kernel_gate.go: маршруты маршрутизации не должны входить в kernelGatedPrefixes",
+    "internal/handlers/kernel_gate.go: маршруты маршрутизации и прокси не должны входить в kernelGatedPrefixes",
   );
 }
 
@@ -266,6 +288,12 @@ const need = {
   watcher: lineOf("routing.NewSelectionWatcher(", created),
   watcherStart: lineOf("selWatch.Start()", created),
   watcherStop: lineOf('defer stops.run("routing-selection"', created),
+  pingNew: lineOf("proxyping.New("),
+  pingSweep: lineOf("proxyping.SweepStaleAt("),
+  layerNew: lineOf("configlayer.New("),
+  pingStart: lineOf("pingRunner.Start()"),
+  pingSet: lineOf("api.SetPingRunner(pingRunner)"),
+  pingStop: lineOf('defer stops.run("proxy-ping", pingRunner.Stop)'),
 };
 for (const [k, v] of Object.entries(need)) {
   if (v === 0) errors.push(`${MAIN}: не найдено «${k}»`);
@@ -275,6 +303,33 @@ if (Object.values(need).every((v) => v > 0)) {
     if (!(need[a] < need[b])) errors.push(`${MAIN}: ${why}`);
   };
   order("new", "register", "routing.New( должен идти до configLayer.Register(");
+  order("new", "pingNew", "раннер пинга должен создаваться после routing.New(");
+  order(
+    "pingSweep",
+    "layerNew",
+    "SweepStaleAt должен идти до configlayer.New(: остатки убираются и без раннера",
+  );
+  order("pingSweep", "new", "SweepStaleAt должен идти до routing.New(");
+  order(
+    "layerStart",
+    "pingStart",
+    "pingRunner.Start() должен идти после configLayer.Start()",
+  );
+  order(
+    "pingStart",
+    "pingSet",
+    "api.SetPingRunner должен идти после pingRunner.Start()",
+  );
+  order(
+    "svcStop",
+    "pingStop",
+    "шаг остановки proxy-ping должен идти после routing",
+  );
+  order(
+    "watcherStop",
+    "pingStop",
+    "шаг остановки proxy-ping должен идти после routing-selection",
+  );
   order(
     "register",
     "layerStart",
@@ -349,6 +404,11 @@ for (const dir of ["internal/handlers"]) {
     if (/\brouting\.NewSelectionWatcher\(/.test(text)) {
       errors.push(
         `${dir}/${file}: наблюдатель выбора создаётся только в cmd/xcp/main.go`,
+      );
+    }
+    if (/\bproxyping\.New\(/.test(text)) {
+      errors.push(
+        `${dir}/${file}: раннер пинга создаётся только в cmd/xcp/main.go (без lazy-init в обработчиках)`,
       );
     }
   }
@@ -509,7 +569,9 @@ for (const code of issueCodes) {
     );
   for (const [file, dict] of feDicts) {
     if (!(`cfg.hint.${code}` in dict))
-      errors.push(`${file}: нет текста cfg.hint.${code} для кода проблемы ${code}`);
+      errors.push(
+        `${file}: нет текста cfg.hint.${code} для кода проблемы ${code}`,
+      );
   }
 }
 if (frontIssueCodes !== null && issueCodes.length > 0) {

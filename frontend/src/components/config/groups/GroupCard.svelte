@@ -1,18 +1,14 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { t, tp } from '../../../i18n';
-  import { showToast, activeKernelState } from '../../../stores';
   import Button from '../../Button.svelte';
-  import Select from '../../Select.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
-  import ImmediateMark from '../ImmediateMark.svelte';
   import { slide, easeOut, DURATION } from '../../../lib/motion.svelte';
-  import { applyRunning, handleLayerError } from '../../../lib/configLayer';
+  import { applyRunning } from '../../../lib/configLayer';
   import { configSubTabHash } from '../../../lib/configSubTab';
   import { sourcesView, type KernelName } from '../../../lib/configSources';
   import {
     previewGroup,
-    selectMember,
     routingErrorText,
     type GroupPreview,
     type GroupView,
@@ -106,83 +102,6 @@
     }
     return '?';
   });
-
-  // --- Строка «Сейчас» (D-38) ---
-  let selecting = $state(false);
-  // Показанный выбор: следует за ответом сервера, а на время запроса и после сбоя
-  // переопределяется присваиванием
-  let pick = $derived<string>(group.current);
-
-  const options = $derived.by(() => {
-    const list: { value: string; label: string; disabled?: boolean }[] = group.member_options.map(
-      (o: { member: string; label: string }) => ({
-        value: o.member,
-        label: o.label
-      })
-    );
-    if (!list.some((o: { value: string }) => o.value === group.current)) {
-      list.unshift({
-        value: group.current,
-        label: group.current === '' ? '—' : group.current_label || group.current,
-        disabled: group.current === ''
-      });
-    }
-    return list;
-  });
-  const notApplied = $derived(!group.applied || group.current === '');
-  const selectDisabled = $derived(selecting || $applyRunning || notApplied);
-  const selectTitle = $derived(
-    $applyRunning
-      ? $t('cfg.routing.apply_busy_hint')
-      : !group.applied
-        ? routingErrorText($t, 'group_not_applied')
-        : group.current === ''
-          ? $t('cfg.groups.current_empty')
-          : undefined
-  );
-  const hintXray = $derived(installed.xray === true);
-  // Ядро не запущено: выбор сохраняется в панели и ставится при запуске
-  const hintStopped = $derived(
-    (installed.xray === true || installed.mihomo === true) && $activeKernelState === 'none'
-  );
-
-  async function onPick(e: Event & { currentTarget: HTMLSelectElement }) {
-    const member = e.currentTarget.value;
-    if (member === group.current || selecting) return;
-    const label = options.find((o: { value: string }) => o.value === member)?.label ?? member;
-    selecting = true;
-    pick = member;
-    try {
-      const res = await selectMember(group.id, member);
-      // Выбор в панели записан, но ядро могло его не принять: «Выбрано» только без исхода failed
-      const failed = Object.entries(res?.kernels ?? {})
-        .filter(([, outcome]) => outcome === 'failed')
-        .map(([name]) => kernelLabel(name));
-      if (failed.length > 0) {
-        showToast(
-          'warning',
-          $t(
-            failed.length > 1 ? 'cfg.groups.select_partial_both' : 'cfg.groups.select_partial_one',
-            {
-              name: label,
-              kernels: failed.join(', ')
-            }
-          )
-        );
-      } else {
-        showToast('success', $t('cfg.groups.toast_selected', { name: label }));
-      }
-    } catch (err) {
-      pick = group.current;
-      const code = (err as { code?: unknown })?.code;
-      if (code === 'apply_busy') handleLayerError(err);
-      else if (code === 'group_not_applied' || code === 'member_invalid')
-        showToast('error', routingErrorText($t, code));
-      else showToast('error', $t('cfg.groups.select_failed', { name: label }));
-    } finally {
-      selecting = false;
-    }
-  }
 
   // --- Раскрытый состав выбранного ядра ---
   let preview = $state<GroupPreview | null>(null);
@@ -306,40 +225,16 @@
     {/if}
 
     {#if manual}
-      <div class="gc-current">
-        <div class="gc-current-head">
-          <label class="gc-current-label" for="{uid}-current">{$t('cfg.groups.current')}</label>
-          <!-- Выбор применяется сразу: Mihomo через Clash API, Xray перезапуском (D-14) -->
-          <ImmediateMark />
-        </div>
-        <div class="gc-current-row">
-          <Select
-            id="{uid}-current"
-            bind:value={pick}
-            {options}
-            disabled={selectDisabled}
-            title={selectTitle}
-            ariaLabel={$t('cfg.groups.current')}
-            wrapperClass="gc-select"
-            data-testid="group-current-{group.id}"
-            onchange={onPick}
-          />
-          {#if selecting}
-            <span class="spinner" aria-hidden="true" data-testid="group-selecting-{group.id}"
-            ></span>
-          {/if}
-        </div>
-        {#if hintXray}
-          <p class="gc-hint" data-testid="group-hint-xray-{group.id}">
-            {$t('cfg.groups.current_hint_xray')}
-          </p>
-        {/if}
-        {#if hintStopped}
-          <p class="gc-hint" data-testid="group-hint-stopped-{group.id}">
-            {$t('cfg.groups.current_hint_stopped')}
-          </p>
-        {/if}
-      </div>
+      <p class="gc-current" data-testid="group-now-{group.id}">
+        {group.current
+          ? $t('cfg.groups.now_text', { name: group.current_label || group.current })
+          : $t('cfg.groups.now_unknown')}
+        <a
+          class="gc-link"
+          href="#/proxies?group={group.id}"
+          data-testid="group-select-link-{group.id}">{$t('cfg.groups.select_on_proxies')}</a
+        >
+      </p>
     {:else if group.mode === 'fallback' && reserveName}
       <p class="gc-hint" data-testid="group-reserve-{group.id}">
         {$t('cfg.groups.reserve_line', { name: reserveName })}
@@ -524,42 +419,21 @@
     text-decoration: none;
   }
 
-  .gc-link:hover {
+  .gc-link:hover,
+  .gc-link:focus-visible {
     text-decoration: underline;
   }
 
   .gc-current {
     display: flex;
-    flex-direction: column;
-    gap: var(--spacing-1);
-    min-width: 0;
-  }
-
-  .gc-current-head {
-    display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: var(--spacing-1) var(--spacing-2);
     min-width: 0;
-  }
-
-  .gc-current-label {
-    font-size: var(--font-size-xs);
-    font-weight: 600;
+    margin: 0;
+    font-size: var(--font-size-sm);
     color: var(--fg-secondary);
-  }
-
-  .gc-current-row {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-2);
-    min-width: 0;
-    max-width: 420px;
-  }
-
-  .gc-current-row :global(.gc-select) {
-    flex: 1 1 auto;
-    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   /* Состав группы — строки на всю ширину карточки, отделены от шапки линией */
