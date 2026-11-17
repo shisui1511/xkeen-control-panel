@@ -669,6 +669,19 @@ func TestRouterSelectMihomoFirst(t *testing.T) {
 // уведомления routing_select: нет, Live и xcp-groups — цель; новый процесс после
 // сверки показывает цель.
 //
+// revert_unreachable (WR-03, план 150-35): дрейф управляемого файла Xray вне
+// xcp-groups, выбор быстрым путём, сразу — убранный сокет контроллера. Фоновый
+// проход отказывает, Live возвращается к прежнему узлу, а Mihomo выбор из Live не
+// принимает: маркер Mihomo у группы (D-16), уведомление routing_select: с
+// reason=rejected и reverted=false — «Прежний узел возвращён» было бы ложью.
+//
+// repick_fast_path (WR-01 ревью 2, план 150-35): дрейф управляемого файла Xray,
+// маркер повторного выбора у группы и настоящий repickOne (тот же вход, что
+// repickAll после «Применить»). Проход отказывает, поэтому замена не поставлена:
+// маркер повторного выбора остаётся для следующего применения, уведомления
+// routing_repick: нет, Live прежний. После снятия дрейфа повторный repickOne
+// ставит первый по порядку узел (оба узла — мёртвые адреса, никто не отвечает).
+//
 // Ядро стенда не трогается, метка ядра не нужна. Тест не ссылается на символы,
 // которых нет в продукте до исправления: проход mf-before собирает его с прежними
 // selection.go и selection_gate.go.
@@ -808,6 +821,243 @@ func TestRouterSelectMihomoFaults(t *testing.T) {
 		e.rtsReconcile(t, ctx)
 		rtsWaitNow(t, core, g.name, f.mihomoName[want], 10*time.Second)
 	})
+
+	// Файл дрейфа ищется один раз: после возврата байтов его состояние в снимке слоя
+	// становится ok только следующей проверкой файлов.
+	driftPath := ""
+	drift := func(t *testing.T) func() {
+		t.Helper()
+		if driftPath == "" {
+			driftPath = rtsXrayDriftFile(t, e)
+		}
+		return rtsDriftFile(t, driftPath)
+	}
+
+	t.Run("revert_unreachable", func(t *testing.T) {
+		sock := filepath.Join(core.dir, "c.sock")
+		f.settle(t)
+		livePrev := e.rtcSelection(t)[g.id]
+		curPrev := e.rtsCurrent(t, g.id)
+		restoreFile := drift(t)
+		executed, attempts, marker := false, 0, "none"
+		for attempts < 3 && !executed {
+			attempts++
+			f.settle(t)
+			want := f.other(t, g.id)
+			res, err := e.svc.Select(ctx, g.id, want)
+			rtsExpectFast(t, "выбор быстрым путём при дрейфе", res, err)
+			// Ответ пришёл после раннего PUT: контроллер убирается, пока фоновый
+			// проход ещё держит отметку группы и Mihomo по Live не поставлен.
+			if err := os.Remove(sock); err != nil {
+				t.Fatalf("сокет контроллера: %v", err)
+			}
+			f.settle(t)
+			marker = "none"
+			if k := readUnconfirmed(e.state(t).Live)[g.id]; k != "" {
+				marker = k
+			}
+			// Сценарий исполнен, только если хвост не дошёл до Mihomo до удаления
+			// сокета: ранний PUT прошёл, значит, отказ постановки по Live и маркер
+			// Mihomo у группы — следствие убранного сокета.
+			executed = marker == configlayer.KernelMihomo
+			if !executed {
+				// Хвост поставил Mihomo по Live до удаления сокета: контроллер
+				// возвращается, попытка повторяется.
+				core.stop()
+				core.start(t, e)
+				e.rtsReconcile(t, ctx)
+			}
+		}
+		var note configlayer.NoticeView
+		noted := false
+		for _, n := range e.layer.Snapshot().Notices {
+			if strings.HasPrefix(n.ID, noticeSelectPrefix+g.id+":") {
+				note, noted = n, true
+			}
+		}
+		reverted, reason := "none", "none"
+		if noted {
+			reverted, reason = note.Params["reverted"], note.Params["reason"]
+		}
+		t.Logf("wr03: executed=%t attempts=%d reverted=%s reason=%s marker=%s", executed, attempts, reverted, reason, marker)
+		if !executed {
+			t.Errorf("окно хвоста не поймано: за %d попыток Mihomo получил выбор из Live до удаления сокета контроллера", attempts)
+		} else {
+			if got := e.rtcSelection(t)[g.id]; got != livePrev {
+				t.Errorf("Live группы не вернулся к прежнему узлу после отказа прохода")
+			}
+			if !noted {
+				t.Errorf("WR-03: нет уведомления routing_select: группы после отказа фонового прохода")
+			} else {
+				if reason != selReasonRejected {
+					t.Errorf("WR-03: класс причины уведомления %q, ожидался %q (дрейф)", reason, selReasonRejected)
+				}
+				if reverted != "false" {
+					t.Errorf("WR-03: уведомление при невозвращённом выборе (маркер Mihomo, ядро на цели) несёт reverted=%q, ожидалось \"false\"", reverted)
+				}
+			}
+		}
+
+		// Файл возвращается, контроллер — новым процессом: сверка ставит прежний
+		// узел и снимает маркер.
+		restoreFile()
+		core.stop()
+		core.start(t, e)
+		e.rtsReconcile(t, ctx)
+		if name := f.mihomoName[curPrev]; name != "" {
+			rtsWaitNow(t, core, g.name, name, 10*time.Second)
+		}
+		if m := readUnconfirmed(e.state(t).Live); len(m) != 0 {
+			t.Errorf("после сверки остались маркеры selection_unconfirmed: %d", len(m))
+		}
+	})
+
+	t.Run("repick_fast_path", func(t *testing.T) {
+		f.settle(t)
+		// Ожидаемая замена — первый узел группы по порядку участников: проверка
+		// мёртвых узлов не отвечает, pickAlive оставляет первого (answered=false).
+		am, err := e.svc.appliedModelOf(e.state(t))
+		if err != nil {
+			t.Fatalf("repick_setup: применённая модель: %v", err)
+		}
+		grp, ok := am.group(g.id)
+		if !ok {
+			t.Fatalf("repick_setup: нет группы в применённой модели")
+		}
+		first := ""
+		for _, c := range am.candidates(grp) {
+			if strings.HasPrefix(c, memberNode) {
+				first = c
+				break
+			}
+		}
+		if first == "" || f.mihomoName[first] == "" {
+			t.Fatalf("repick_setup: у группы нет первого узла с именем в Mihomo")
+		}
+		display := map[string]string{}
+		for _, n := range e.catalog(t).Mihomo {
+			display[memberNode+n.Ref] = n.Display
+		}
+		// Текущий выбор — не первый по порядку: иначе повторному выбору нечего менять.
+		if e.rtcSelection(t)[g.id] == first {
+			res, err := e.svc.Select(ctx, g.id, f.other(t, g.id))
+			rtsExpectFast(t, "repick_setup: выбор второго узла", res, err)
+			f.settle(t)
+		}
+		livePrev := e.rtcSelection(t)[g.id]
+		if livePrev == first || livePrev == "" {
+			t.Fatalf("repick_setup: текущий выбор группы — первый узел или пуст")
+		}
+		if _, ok := e.rtsNotice(noticeRepickPrefix + g.id); ok {
+			t.Fatalf("repick_setup: уведомление routing_repick: группы уже есть до сценария")
+		}
+
+		restoreFile := drift(t)
+		if err := e.layer.UpdateLive(func(live configlayer.Sections) error {
+			return writeRepick(live, append(without(readRepick(live), g.id), g.id))
+		}); err != nil {
+			t.Fatalf("repick_setup: маркер повторного выбора: %v", err)
+		}
+		t.Cleanup(func() { e.svc.clearRepick(g.id) })
+
+		// Тот же вход, что repickAll после «Применить»: проход файла Xray отказывает
+		// (дрейф), замена не поставлена.
+		e.svc.repickOne(ctx, g.id)
+		markerKept := e.rtsHasRepick(t, g.id)
+		note, noticed := e.rtsNotice(noticeRepickPrefix + g.id)
+		if noticed && note.Params["node"] == display[livePrev] {
+			t.Fatalf("repick_setup: повторный выбор оставил текущий узел — замена не пробовалась")
+		}
+		if !markerKept {
+			t.Errorf("WR-01: маркер повторного выбора снят до исхода прохода: отказ прохода не оставил его для следующего применения")
+		}
+		if noticed {
+			t.Errorf("WR-01: замена объявлена до исхода прохода: уведомление routing_repick: при отказе прохода файла Xray")
+		}
+		f.settle(t)
+		liveKept := e.rtcSelection(t)[g.id] == livePrev
+		if !liveKept {
+			t.Errorf("Live группы после отказа повторного выбора не равен прежнему узлу")
+		}
+
+		// Без дрейфа повторный выбор ставит первый узел и снимает маркер.
+		restoreFile()
+		e.svc.repickOne(ctx, g.id)
+		f.settle(t)
+		_, noticed2 := e.rtsNotice(noticeRepickPrefix + g.id)
+		markerGone := !e.rtsHasRepick(t, g.id)
+		liveFirst := e.rtcSelection(t)[g.id] == first
+		secondOK := noticed2 && markerGone && liveFirst
+		t.Logf("wr01: marker_kept=%t repick_notice=%t live_prev=%t second_ok=%t", markerKept, noticed, liveKept, secondOK)
+		if !markerGone {
+			t.Errorf("повторный выбор без дрейфа не снял маркер повторного выбора")
+		}
+		if !noticed2 {
+			t.Errorf("повторный выбор без дрейфа не опубликовал уведомление routing_repick:")
+		}
+		if !liveFirst {
+			t.Errorf("Live группы после повторного выбора не равен первому узлу по порядку")
+		}
+		rtsWaitNow(t, core, g.name, f.mihomoName[first], 10*time.Second)
+	})
+}
+
+// rtsHasRepick — группа gid в маркере повторного выбора Live.
+func (e *rtEnv) rtsHasRepick(t *testing.T, gid string) bool {
+	t.Helper()
+	for _, id := range readRepick(e.state(t).Live) {
+		if id == gid {
+			return true
+		}
+	}
+	return false
+}
+
+// rtsXrayDriftFile — управляемый панелью файл Xray в каталоге теста вне xcp-groups
+// в состоянии ok (по снимку слоя): его правка — дрейф, на котором проход выбора
+// отказывает.
+func rtsXrayDriftFile(t *testing.T, e *rtEnv) string {
+	t.Helper()
+	for _, fv := range e.layer.Snapshot().Files {
+		if fv.Kernel != configlayer.KernelXray || fv.Owner != configlayer.OwnerPanel || fv.State != configlayer.StateOK ||
+			filepath.Dir(fv.Path) != e.xrayDir() || strings.Contains(filepath.Base(fv.Path), "xcp-groups") {
+			continue
+		}
+		if _, err := os.Stat(fv.Path); err == nil {
+			return fv.Path
+		}
+	}
+	t.Fatalf("нет управляемого файла Xray вне xcp-groups в состоянии ok")
+	return ""
+}
+
+// rtsDriftFile дописывает перевод строки в файл path (дрейф) и возвращает возврат
+// исходных байтов; возврат повторно не пишет и вызывается ещё и в t.Cleanup.
+func rtsDriftFile(t *testing.T, path string) func() {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("файл дрейфа: %v", err)
+	}
+	orig, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("файл дрейфа не читается: %v", err)
+	}
+	restored := false
+	restore := func() {
+		if restored {
+			return
+		}
+		restored = true
+		if err := os.WriteFile(path, orig, info.Mode().Perm()); err != nil {
+			t.Errorf("файл дрейфа не возвращён: %v", err)
+		}
+	}
+	t.Cleanup(restore)
+	if err := os.WriteFile(path, append(append([]byte(nil), orig...), '\n'), info.Mode().Perm()); err != nil {
+		t.Fatalf("дрейф файла Xray: %v", err)
+	}
+	return restore
 }
 
 // Связанные группы Mihomo (WR-03, WR-04): маркер сбоя выбора стоит только на группе со

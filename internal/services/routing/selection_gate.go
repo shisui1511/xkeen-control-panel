@@ -49,6 +49,10 @@ type xrayIntent struct {
 	// Вход: группа, участник и связная компонента группы.
 	gid, member string
 	comp        []string
+	// keepRepick — намерение повторного выбора (selectSync): Prepare не снимает
+	// маркер повторного выбора группы, его снимает repickOne после поставленного
+	// выбора (WR-01 ревью 2).
+	keepRepick bool
 	// Выход записи (Prepare): прежнее значение выбора, поставлен ли маркер
 	// неизвестного исхода на компоненту, записано ли намерение и ошибка до записи.
 	prev    string
@@ -358,7 +362,8 @@ func (s *Service) xrayValidateChanged(ctx context.Context, bin, tmpBase string, 
 // prepareXrayBatch пишет намерения пачки одной записью Live (под замками
 // применения и жизненного цикла, до сборки): выбор каждой группы, маркер
 // неизвестного исхода Xray на её компоненту при запущенном Xray и снятие группы
-// из повторного выбора — то же, что setSelection. Группа с маркером получает
+// из повторного выбора (кроме намерения самого повторного выбора, keepRepick) — то
+// же, что setSelection. Группа с маркером получает
 // ErrSelectionUnconfirmed и в запись не попадает. Компоненты записанных намерений
 // становятся группами коммита хода (xrayRunGate.commitComp).
 func (s *Service) prepareXrayBatch(b *xrayBatch) error {
@@ -393,7 +398,9 @@ func (s *Service) prepareXrayBatch(b *xrayBatch) error {
 				}
 				results[i].pending = true
 			}
-			repick = without(repick, in.gid)
+			if !in.keepRepick {
+				repick = without(repick, in.gid)
+			}
 			n++
 		}
 		if n == 0 {
@@ -458,6 +465,10 @@ type xrayStages struct {
 	// путях нули.
 	clash, tail time.Duration
 	answered    time.Time
+	// Части раннего PUT (разбор пробела 2): clashWait — ожидание selMu, clashPlan —
+	// чтение состояния и расчёт цели (mihomoEntryFor), clashPut — сам вызов Clash
+	// API; pre — от захвата компоненты до раннего PUT. clash остаётся целым полем.
+	clashWait, clashPlan, clashPut, pre time.Duration
 	// reput — код повтора PUT Mihomo хвостом быстрого пути: reputSkip (Live равен
 	// цели раннего PUT, повтора нет), reputDone (повтор выполнен); пусто — хвоста
 	// быстрого пути не было (в строке — reputNone).
@@ -556,9 +567,10 @@ func (st *xrayStages) log() {
 	if reput == "" {
 		reput = reputNone
 	}
-	log.Printf("[routing] выбор Xray: этапы group=%s batch=%d wait=%d model=%d live=%d build=%d validate_xray=%d validate_mihomo=%d write=%d restart=%d hot=%d other=%d markers=%d clash=%d tail=%d fsync=%d fsyncs=%d total=%d outcome=%s reput=%s",
+	log.Printf("[routing] выбор Xray: этапы group=%s batch=%d wait=%d model=%d live=%d build=%d validate_xray=%d validate_mihomo=%d write=%d restart=%d hot=%d other=%d markers=%d clash=%d tail=%d clash_wait=%d clash_plan=%d clash_put=%d pre=%d fsync=%d fsyncs=%d total=%d outcome=%s reput=%s",
 		st.gid, batch, wait.Milliseconds(), st.model.Milliseconds(), live.Milliseconds(),
 		build, valX, valM, write, restart, hot.Milliseconds(), other.Milliseconds(),
 		st.markers.Milliseconds(), st.clash.Milliseconds(), st.tail.Milliseconds(),
+		st.clashWait.Milliseconds(), st.clashPlan.Milliseconds(), st.clashPut.Milliseconds(), st.pre.Milliseconds(),
 		(syncD - st.syncD0).Milliseconds(), syncN-st.syncN0, total.Milliseconds(), st.outcome(), reput)
 }

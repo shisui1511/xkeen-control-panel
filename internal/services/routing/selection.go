@@ -71,6 +71,9 @@ const (
 	selReasonBusy     = "busy"
 	selReasonStopped  = "stopped"
 	selReasonFailed   = "failed"
+	// selReasonDisabled — слой «Конфигурация» выключен посреди выбора (не остановка
+	// панели).
+	selReasonDisabled = "disabled"
 )
 
 // Способ проверки в уведомлении routing_repick.
@@ -441,7 +444,9 @@ func without(ids []string, id string) []string {
 
 // setSelection записывает выбор группы и снимает с неё маркер повторного выбора:
 // ручной выбор пользователя не должен быть перекрыт заменой пропавшего узла.
-func (s *Service) setSelection(gid, member string, pending []string) error {
+// keepRepick — выбор ставит сам повторный выбор (selectSync): маркер снимет
+// repickOne после поставленного выбора, иначе он остаётся для следующего применения.
+func (s *Service) setSelection(gid, member string, pending []string, keepRepick bool) error {
 	return s.d.Layer.UpdateLive(func(live configlayer.Sections) error {
 		unconfirmed := readUnconfirmed(live)
 		if unconfirmed[gid] != "" {
@@ -458,7 +463,7 @@ func (s *Service) setSelection(gid, member string, pending []string) error {
 		if err := writeUnconfirmed(live, unconfirmed); err != nil {
 			return err
 		}
-		if ids := readRepick(live); len(ids) > 0 {
+		if ids := readRepick(live); len(ids) > 0 && !keepRepick {
 			return writeRepick(live, without(ids, gid))
 		}
 		return nil
@@ -529,7 +534,26 @@ func (s *Service) markReconcile() { s.reconcilePending.Store(true) }
 // выбор из Live. Ранний PUT не удался — прежний синхронный порядок; ядро могло
 // принять PUT после таймаута клиента, поэтому сверка Mihomo запрошена, а выходы,
 // где выбор не записан или возвращён, ставят Mihomo по Live (WR-02).
+//
+// Select — вход клика пользователя (обработчик): быстрый путь разрешён.
 func (s *Service) Select(ctx context.Context, groupID, member string) (SelectResult, error) {
+	return s.selectOpts(ctx, groupID, member, true)
+}
+
+// selectSync — служебный вход выбора без раннего ответа (WR-01 ревью 2): повторный
+// выбор (selectWithRetry) не получает ответ до прохода файла Xray, его итог — маркер
+// повторного выбора и уведомление routing_repick:, поэтому он ждёт исход прохода и
+// постановку Mihomo по Live. Маркер повторного выбора группы проход не снимает:
+// его снимает repickOne только после поставленного выбора.
+func (s *Service) selectSync(ctx context.Context, groupID, member string) (SelectResult, error) {
+	return s.selectOpts(ctx, groupID, member, false)
+}
+
+// selectOpts — тело выбора (Select, selectSync). fast — разрешён быстрый путь при
+// запущенном Mihomo и остановленном Xray (ранний PUT и фоновый хвост); false —
+// прежний синхронный порядок: проход файла Xray, затем Mihomo по Live, и маркер
+// повторного выбора группы остаётся за вызывающим (keepRepick).
+func (s *Service) selectOpts(ctx context.Context, groupID, member string, fast bool) (SelectResult, error) {
 	start := time.Now()
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
@@ -593,7 +617,7 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 		// Намерение пишется в Live под замками применения до сборки (Prepare), в
 		// одной пачке с выборами независимых групп, пришедшими за время идущего
 		// запуска (G-150-3).
-		in := &xrayIntent{gid: groupID, member: member, comp: comp}
+		in := &xrayIntent{gid: groupID, member: member, comp: comp, keepRepick: !fast}
 		stages := newXrayStages(groupID, start, model, in)
 		// earlyTried — ранний PUT отправлялся, но ответ ушёл синхронным путём: Mihomo
 		// мог принять цель (в том числе после таймаута клиента, WR-02). Выходы, где
@@ -609,10 +633,14 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 			s.selectMihomoLocked(context.WithoutCancel(ctx), groupID)
 			s.selMu.Unlock()
 		}
-		if mihomoManaged && s.d.Running(configlayer.KernelMihomo) && !s.d.Running(configlayer.KernelXray) {
+		if fast && mihomoManaged && s.d.Running(configlayer.KernelMihomo) && !s.d.Running(configlayer.KernelXray) {
 			clashStart := time.Now()
-			early := s.selectMihomoEarly(ctx, groupID, member)
+			// pre — от захвата компоненты до раннего PUT (повторное чтение состояния,
+			// проверка маркеров, событие начала).
+			stages.pre = clashStart.Sub(start) - model
+			early, et := s.selectMihomoEarly(ctx, groupID, member)
 			stages.clash = time.Since(clashStart)
+			stages.clashWait, stages.clashPlan, stages.clashPut = et.wait, et.plan, et.put
 			if early == selApplied {
 				// Цель видна виду «Прокси» до записи Live фоновым проходом; событие —
 				// вторая вкладка перечитывает вид и видит выбор (D-14).
@@ -697,7 +725,7 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 			return res, nil
 		}
 	} else {
-		if err := s.setSelection(groupID, member, nil); err != nil {
+		if err := s.setSelection(groupID, member, nil, !fast); err != nil {
 			return SelectResult{}, err
 		}
 	}
@@ -832,49 +860,68 @@ func (s *Service) mihomoEntryFor(st configlayer.StateView, installed configlayer
 	return nil, nil
 }
 
+// earlyTiming — части времени раннего PUT для строки этапов (разбор пробела 2):
+// wait — ожидание selMu; plan — под замком до вызова Clash API и после него
+// (чтение состояния, расчёт цели mihomoEntryFor); put — сам вызов SelectProxy (без
+// вызова — 0). Сумма — поле clash строки этапов без накладных расходов замера.
+type earlyTiming struct {
+	wait, plan, put time.Duration
+}
+
 // selectMihomoEarly — ранний PUT быстрого пути: ставит в запущенный Mihomo выбор,
 // который фоновый проход ещё запишет в Live. Под selMu, как сверка: сверка не
 // перетирает выбор между расчётом и вызовом. Не applied — вызывающий идёт прежним
-// синхронным порядком.
-func (s *Service) selectMihomoEarly(ctx context.Context, gid, member string) string {
+// синхронным порядком. Вместе с исходом — замер частей (earlyTiming); поведение
+// выбора замер не меняет.
+func (s *Service) selectMihomoEarly(ctx context.Context, gid, member string) (out string, tm earlyTiming) {
+	waitStart := time.Now()
 	s.selMu.Lock()
 	defer s.selMu.Unlock()
+	locked := time.Now()
+	tm.wait = locked.Sub(waitStart)
+	// plan — всё время под замком, кроме вызова Clash API; отложенный вызов идёт до
+	// снятия замка (порядок defer обратный).
+	defer func() { tm.plan = time.Since(locked) - tm.put }()
 	if !s.d.Running(configlayer.KernelMihomo) {
-		return selPendingStopped
+		return selPendingStopped, tm
 	}
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
-		return selFailed
+		return selFailed, tm
 	}
 	entry, err := s.mihomoEntryFor(st, s.d.Installed(), gid, member)
 	if err != nil {
-		return selFailed
+		return selFailed, tm
 	}
 	if entry == nil {
 		// Группа в профиле Mihomo не материализована: выбирать там нечего.
-		return selApplied
+		return selApplied, tm
 	}
 	if s.d.Mihomo == nil || !s.d.Mihomo.HasController() {
-		return selFailed
+		return selFailed, tm
 	}
 	cctx, cancel := context.WithTimeout(ctx, reconcileCallTimeout)
 	defer cancel()
-	if err := s.d.Mihomo.SelectProxy(cctx, entry.group, entry.want); err != nil {
+	putStart := time.Now()
+	err = s.d.Mihomo.SelectProxy(cctx, entry.group, entry.want)
+	tm.put = time.Since(putStart)
+	if err != nil {
 		// PUT мог дойти до ядра (принят после таймаута клиента, WR-02): сверка
 		// вернёт Mihomo к Live ближайшим циклом наблюдателя.
 		log.Printf("[routing] ранний выбор Mihomo не поставлен: группа=%s Clash API: %s", gid, clashErrClass(err))
 		s.markReconcile()
-		return selFailed
+		return selFailed, tm
 	}
-	return selApplied
+	return selApplied, tm
 }
 
 // selectMihomoFirstTail — фоновое продолжение быстрого пути после ответа: проход
 // файла Xray той же пачкой выбора (Prepare пишет намерение в Live под замками
 // применения, возврат неудачного прохода — settleXrayBatch под ходом, CR-01), снятие
-// цели вида, уведомление об отказе, затем Mihomo получает выбор из Live под selMu
-// (после возврата — прежний узел); успешный проход с Live, равным цели раннего
-// PUT, повтор не делает (earlyHolds, код reput в строке этапов). В конце, в любом
+// цели вида, затем Mihomo получает выбор из Live под selMu (после возврата — прежний
+// узел), затем уведомление об отказе с фактическим исходом возврата (reverted,
+// WR-03); успешный проход с Live, равным цели раннего PUT, повтор не делает
+// (earlyHolds, код reput в строке этапов). В конце, в любом
 // исходе, — снятие отметки компоненты, событие конца (D-14, D-17) и строка этапов.
 func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name string, release func()) {
 	tailStart := time.Now()
@@ -895,6 +942,10 @@ func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name
 	var failErr error
 	failCode := ""
 	passOK := false
+	// liveKept — Live группы прежний: выбор не записан или возвращён без сбоя
+	// записи. Признак reverted уведомления отказа (WR-03) истинен, только если ещё и
+	// Mihomo принял выбор из Live.
+	liveKept := true
 	switch {
 	case err != nil:
 		failErr = err
@@ -919,16 +970,16 @@ func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name
 		// Возврат уже выполнен под ходом (settleXrayBatch).
 		failErr, failCode = b.err, b.outcome
 		if in.restoreErr != nil {
+			// Возврат Live не записан: в Live остался отвергнутый выбор.
 			failErr, failCode = in.restoreErr, ""
+			liveKept = false
 		}
 	default:
 		// Неизвестный исход: маркер Xray поставлен под ходом, D-16 показывает
-		// «Повторить». Уведомление — только если маркер не записан.
+		// «Повторить». Уведомление — только если маркер не записан; Live несёт новый
+		// выбор, поэтому возвратом это не считается.
 		failErr = in.markErr
-	}
-	if failErr != nil || failCode != "" {
-		code, reason := selectFailClass(failErr, failCode)
-		s.noticeSelectFailed(in.gid, name, code, reason)
+		liveKept = false
 	}
 
 	// Mihomo получает выбор из Live под selMu. earlyHolds — проход успешен и выбор
@@ -945,29 +996,42 @@ func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name
 			earlyHolds = liveSelection(st.Live)[in.gid] == in.member
 		}
 	}
+	mihomoOK := true
 	if earlyHolds {
 		stages.reput = reputSkip
 	} else {
 		stages.reput = reputDone
-		if _, err := s.selectMihomoMarked(s.ctx, in.gid); err != nil {
+		out, err := s.selectMihomoMarked(s.ctx, in.gid)
+		mihomoOK = out != selFailed
+		if err != nil {
 			log.Printf("[routing] выбор группы %s: маркер Mihomo не записан: %v", in.gid, err)
 		}
 	}
 	s.selMu.Unlock()
+
+	// Уведомление отказа — после постановки Mihomo по Live (порядок «Live → Mihomo →
+	// уведомление»): признак reverted говорит, вернулся ли выбор на самом деле (WR-03).
+	// Ложь — возврат Live не записан, исход неизвестен или Mihomo не принял выбор из
+	// Live (маркер Mihomo, D-16): текст «Прежний узел возвращён» тогда был бы ложью.
+	if failErr != nil || failCode != "" {
+		code, reason := selectFailClass(failErr, failCode)
+		s.noticeSelectFailed(in.gid, name, code, reason, liveKept && mihomoOK)
+	}
 }
 
 // selectFailClass — код исхода и класс причины отказа фонового прохода для
 // уведомления routing_select: rejected — отказ проверки, сборки, записи, откат или
 // дрейф; busy — замок применения или операция с ядром; stopped — слой или сервис
-// остановлен; failed — прочее.
+// остановлен; disabled — слой выключен; failed — прочее.
 func selectFailClass(err error, outcome string) (code, reason string) {
 	switch {
 	case errors.Is(err, ErrApplyBusy):
 		return "apply_busy", selReasonBusy
 	case errors.Is(err, configlayer.ErrKernelBusy):
 		return "kernel_op_in_progress", selReasonBusy
-	case errors.Is(err, configlayer.ErrStopped), errors.Is(err, configlayer.ErrDisabled),
-		errors.Is(err, context.Canceled):
+	case errors.Is(err, configlayer.ErrDisabled):
+		return "disabled", selReasonDisabled
+	case errors.Is(err, configlayer.ErrStopped), errors.Is(err, context.Canceled):
 		return "stopped", selReasonStopped
 	case errors.Is(err, configlayer.ErrDriftBlocked):
 		return "drift_blocked", selReasonRejected
@@ -986,14 +1050,18 @@ func selectFailClass(err error, outcome string) (code, reason string) {
 // noticeSelectFailed публикует уведомление отказа фонового прохода группы gid с
 // новым идентификатором routing_select:<gid>:<n>: каждый отказ — новое уведомление
 // (D-11), прежнее уведомление группы заменяется. В параметрах — ID и имя группы, код
-// исхода и класс причины; имён узлов и адресов нет.
-func (s *Service) noticeSelectFailed(gid, name, code, reason string) {
+// исхода, класс причины и reverted ("true" — Live и Mihomo на прежнем выборе,
+// "false" — возврат не подтверждён, WR-03); имён узлов и адресов нет.
+func (s *Service) noticeSelectFailed(gid, name, code, reason string, reverted bool) {
 	n := s.selNoticeSeq.Add(1)
 	s.selNotes.put(s.d.Layer, gid, configlayer.NoticeView{
 		ID: noticeSelectPrefix + gid + ":" + strconv.FormatUint(n, 10), Kind: noticeWarning,
-		Params: map[string]string{"gid": gid, "group": name, "code": code, "reason": reason},
+		Params: map[string]string{
+			"gid": gid, "group": name, "code": code, "reason": reason,
+			"reverted": strconv.FormatBool(reverted),
+		},
 	})
-	log.Printf("[routing] выбор группы %s не записан в файл Xray: code=%s reason=%s", gid, code, reason)
+	log.Printf("[routing] выбор группы %s не записан в файл Xray: code=%s reason=%s reverted=%t", gid, code, reason, reverted)
 }
 
 func (s *Service) selectMihomoLocked(ctx context.Context, gid string) string {
@@ -1693,15 +1761,21 @@ func (s *Service) repickOne(ctx context.Context, gid string) {
 	})
 }
 
-// selectWithRetry ставит выбор; при идущем применении повторяет через 30 с, не
-// больше 5 раз. false — выбор не поставлен (маркер остаётся для следующего
-// применения) или группа больше не подлежит выбору (маркер снят).
+// selectWithRetry ставит выбор синхронным входом (selectSync, без раннего ответа:
+// WR-01 ревью 2); при идущем применении повторяет через 30 с, не больше 5 раз.
+// Поставленным выбор считается только без ошибки, без возврата (Reverted) и без
+// неизвестного исхода (Unconfirmed). false — выбор не поставлен (маркер остаётся для
+// следующего применения, уведомления routing_repick: нет) или группа больше не
+// подлежит выбору (маркер снят).
 func (s *Service) selectWithRetry(ctx context.Context, gid, member string) bool {
 	for attempt := 0; ; attempt++ {
-		_, err := s.Select(ctx, gid, member)
+		res, err := s.selectSync(ctx, gid, member)
 		switch {
-		case err == nil:
+		case err == nil && !res.Reverted && len(res.Unconfirmed) == 0:
 			return true
+		case err == nil:
+			// Возврат без ошибки прохода или неизвестный исход: выбор не поставлен.
+			return false
 		case errors.Is(err, ErrGroupNotApplied), errors.Is(err, ErrMemberInvalid):
 			s.clearRepick(gid)
 			return false
