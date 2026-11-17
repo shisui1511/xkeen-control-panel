@@ -1194,7 +1194,11 @@ func TestRouterSelectMihomoFirst(t *testing.T) {
 // отказывает, поэтому замена не поставлена: отказ окончательный (WR-04 ревью 4) —
 // маркер повторного выбора снят, иначе замена повторялась бы после каждого
 // успешного запуска; уведомление routing_repick: сообщает об отказе
-// (failed=true), Live и now процесса Mihomo прежние. После снятия дрейфа маркер
+// (failed=true), Live и now процесса Mihomo прежние. Следующее действие
+// пользователя — обычный выбор независимой группы (его AfterApply зовёт
+// repickAll) — и отдельный штатный repickAll без маркеров отвергнутую замену не
+// повторяют: маркер не возвращается, Live, now и уведомление об отказе прежние,
+// xcp-groups отдельным проходом не переписан. После снятия дрейфа маркер
 // ставится заново и подтверждается (IN-07 ревью 5), повторный repickOne ставит
 // первый по порядку узел и снимает этот маркер (оба узла — мёртвые адреса, никто
 // не отвечает).
@@ -1528,10 +1532,116 @@ func TestRouterSelectMihomoFaults(t *testing.T) {
 			t.Errorf("now группы в Mihomo после отказа повторного выбора не равен прежнему узлу (ошибка чтения: %t)", err != nil)
 		}
 
+		// Следующее действие пользователя (D-11, D-14): обычный выбор независимой
+		// группы после возврата файла. Его проход зовёт AfterApply, а тот — repickAll:
+		// отвергнутая замена первой группы не повторяется — маркер не возвращается,
+		// Live и now прежние, уведомление об отказе не заменено успехом.
+		liveRejected := e.rtcSelection(t)[g.id]
+		nowRejected, nowErr := core.svc.ProxyNow(ctx, g.name)
+		failedParams := map[string]string{}
+		for k, v := range note.Params {
+			failedParams[k] = v
+		}
+		restoreFile()
+		events, cancelEvents, err := e.layer.Subscribe()
+		if err != nil {
+			t.Fatalf("Subscribe: %v", err)
+		}
+		defer cancelEvents()
+		// Событие proxies вида structure публикует только конец AfterApply, то есть
+		// после repickAll, начатого выбором.
+		hookDone := make(chan struct{})
+		go func() {
+			for ev := range events {
+				if pe, ok := ev.Data.(configlayer.ProxiesEvent); ok && ev.Type == configlayer.EventProxies && pe.Kind == configlayer.ProxiesKindStructure {
+					close(hookDone)
+					return
+				}
+			}
+		}()
+		g2 := f.groups[1]
+		want2 := f.other(t, g2.id)
+		res, err := e.svc.Select(ctx, g2.id, want2)
+		rtsExpectFast(t, "выбор независимой группы после отказа замены", res, err)
+		f.settle(t)
+		hookSeen := false
+		select {
+		case <-hookDone:
+			hookSeen = true
+		case <-time.After(60 * time.Second):
+		}
+		cancelEvents()
+		// Проход замены, если он ещё идёт, доходит до конца.
+		rtWaitCond(t, 60*time.Second, "конец прохода замены после выбора", func() bool {
+			if !e.svc.repickMu.TryLock() {
+				return false
+			}
+			e.svc.repickMu.Unlock()
+			return true
+		})
+		if e.rtcSelection(t)[g2.id] != want2 {
+			t.Errorf("Live независимой группы не равен выбранному узлу")
+		}
+		rtsWaitNow(t, core, g2.name, f.mihomoName[want2], 10*time.Second)
+		// rejectedKept сверяет первую группу с состоянием после отказа.
+		rejectedKept := func(stage string) (markerBack, liveSame, nowSame, noteSame bool) {
+			t.Helper()
+			markerBack = e.rtsHasRepick(t, g.id)
+			liveSame = e.rtcSelection(t)[g.id] == liveRejected
+			now, err := core.svc.ProxyNow(ctx, g.name)
+			nowSame = nowErr == nil && err == nil && now == nowRejected
+			n, ok := e.rtsNotice(noticeRepickPrefix + g.id)
+			noteSame = ok && reflect.DeepEqual(n.Params, failedParams)
+			if markerBack {
+				t.Errorf("WR-04: %s вернул маркер повторного выбора отвергнутой группе", stage)
+			}
+			if !liveSame {
+				t.Errorf("WR-04: %s сменил Live группы с отвергнутой заменой", stage)
+			}
+			if !nowSame {
+				t.Errorf("WR-04: now группы с отвергнутой заменой в Mihomo после «%s» не равен прежнему (ошибка чтения: %t)", stage, nowErr != nil || err != nil)
+			}
+			if !noteSame {
+				t.Errorf("WR-04: %s заменил или снял уведомление об отказе замены (уведомление есть: %t, failed=%q)", stage, ok, n.Params["failed"])
+			}
+			return markerBack, liveSame, nowSame, noteSame
+		}
+		markerBack, liveSame, nowSame, noteSame := rejectedKept("выбор независимой группы")
+
+		// Штатный repickAll без маркеров: прохода и замены нет, настоящий xcp-groups
+		// не переписан (байты и время изменения прежние).
+		if ids := readRepick(e.state(t).Live); len(ids) != 0 {
+			t.Errorf("WR-04: перед отдельным repickAll в Live маркеры повторного выбора: %d", len(ids))
+		}
+		groupsPath := filepath.Join(e.xrayDir(), xrayGroupsFile)
+		groupsStat := func() ([]byte, time.Time) {
+			t.Helper()
+			info, err := os.Stat(groupsPath)
+			if err != nil {
+				t.Fatalf("xcp-groups: %v", err)
+			}
+			data, err := os.ReadFile(groupsPath)
+			if err != nil {
+				t.Fatalf("xcp-groups не читается: %v", err)
+			}
+			return data, info.ModTime()
+		}
+		bytesBefore, mtimeBefore := groupsStat()
+		e.svc.repickAll(ctx)
+		f.settle(t)
+		bytesAfter, mtimeAfter := groupsStat()
+		groupsSame := string(bytesBefore) == string(bytesAfter) && mtimeBefore.Equal(mtimeAfter)
+		if !groupsSame {
+			t.Errorf("WR-04: repickAll без маркеров переписал xcp-groups (байты прежние: %t)", string(bytesBefore) == string(bytesAfter))
+		}
+		rejectedKept("отдельный repickAll")
+		t.Logf("wr04-next: hook_seen=%t marker_back=%t live_kept=%t now_kept=%t failed_notice_kept=%t groups_untouched=%t",
+			hookSeen, markerBack, liveSame, nowSame, noteSame, groupsSame)
+
 		// Без дрейфа повторный выбор ставит первый узел и снимает маркер. Отказ уже
 		// снял маркер, поэтому он ставится заново и проверяется перед вызовом:
-		// markerGone ниже — переход «есть → снят», а не след отказной ветки.
-		restoreFile()
+		// markerGone ниже — переход «есть → снят», а не след отказной ветки. Файл
+		// возвращён перед выбором независимой группы.
 		mark("успешным проходом")
 		e.svc.repickOne(ctx, g.id)
 		f.settle(t)
