@@ -522,7 +522,8 @@ func rtsAddSubscription(t *testing.T, e *rtEnv, url string) []sources.CatalogNod
 	if err != nil || res.Subscriptions != 1 {
 		t.Fatalf("subscription_add: error=%t subscriptions=%d", err != nil, res.Subscriptions)
 	}
-	cat := e.catalog(t).Mihomo
+	full := e.catalog(t)
+	cat := full.Mihomo
 	var out []sources.CatalogNode
 	for _, n := range cat {
 		name := n.Display
@@ -542,7 +543,21 @@ func rtsAddSubscription(t *testing.T, e *rtEnv, url string) []sources.CatalogNod
 		}
 	}
 	if len(out) == 0 {
-		t.Fatal("subscription_prepare: exact_nodes=0")
+		foreign, foreignXray, renamed := 0, 0, 0
+		for _, n := range cat {
+			if n.Source != sources.MySourceID {
+				foreign++
+				if n.Display != n.MihomoName {
+					renamed++
+				}
+			}
+		}
+		for _, n := range full.Xray {
+			if n.Source != sources.MySourceID {
+				foreignXray++
+			}
+		}
+		t.Fatalf("subscription_prepare: exact_nodes=0 mihomo_foreign=%d renamed=%d xray_foreign=%d sources=%d", foreign, renamed, foreignXray, len(full.Sources))
 	}
 	return out
 }
