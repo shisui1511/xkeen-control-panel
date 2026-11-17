@@ -428,7 +428,8 @@
   function pingCovers(g: RuntimeGroup): boolean {
     if (!batch || batch.state !== 'running') return false;
     if (batch.scope === 'all') return true;
-    return batch.group === g.id || (batch.scope === 'repick' && !batch.group);
+    // У пачки repick группа есть всегда (proxyping.ScopeRepick)
+    return batch.group === g.id;
   }
 
   // --- История и диагностика узла ---

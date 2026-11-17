@@ -17,7 +17,7 @@ const (
 	MethodTLS            = "tls"
 	ScopeAll             = "all"
 	ScopeGroup           = "group"
-	ScopeRepick          = "repick"
+	ScopeRepick          = "repick" // пачка Probe: группа есть всегда (pickAlive задаёт Group)
 	StatusOK             = "ok"
 	StatusTimeout        = "timeout"
 	StatusError          = "error"
