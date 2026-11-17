@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -142,6 +143,9 @@ type appliedModel struct {
 	union     []sources.CatalogNode
 	byRef     map[string]sources.CatalogNode
 	installed configlayer.InstalledKernels
+	// xrayVer, mihomoVer — версии ядер, прочитанные до расчёта каталога: от них
+	// зависят версионные ворота узлов каталога и групп Mihomo (catalogInputSame).
+	xrayVer, mihomoVer string
 }
 
 // appliedModelOf читает группы и каталог узлов применённого состояния.
@@ -150,7 +154,8 @@ func (s *Service) appliedModelOf(st configlayer.StateView) (appliedModel, error)
 	if err != nil {
 		return appliedModel{}, err
 	}
-	m := appliedModel{groups: cfg, installed: s.d.Installed(), byRef: map[string]sources.CatalogNode{}}
+	m := appliedModel{groups: cfg, installed: s.d.Installed(), byRef: map[string]sources.CatalogNode{},
+		xrayVer: s.d.KernelVersion(configlayer.KernelXray), mihomoVer: s.d.KernelVersion(configlayer.KernelMihomo)}
 	if m.installed.Xray || m.installed.Mihomo {
 		cat, err := s.d.Sources.Catalog(appliedInput(st), m.installed)
 		if err != nil {
@@ -594,7 +599,10 @@ func (s *Service) selectOpts(ctx context.Context, groupID, member string, fast b
 		release()
 		s.d.Layer.PublishProxies(configlayer.ProxiesKindSelect)
 	}()
-	// Повторное чтение после захвата компоненты исключает устаревший маркер.
+	// Повторное чтение после захвата компоненты исключает устаревший маркер. Снимок
+	// модели остаётся для раннего PUT: при том же входе каталога цель считается по
+	// уже собранной модели (mihomoEntryFromModel).
+	modelSt := st
 	st, err = s.d.Layer.ReadState()
 	if err != nil {
 		return SelectResult{}, err
@@ -638,7 +646,7 @@ func (s *Service) selectOpts(ctx context.Context, groupID, member string, fast b
 			// pre — от захвата компоненты до раннего PUT (повторное чтение состояния,
 			// проверка маркеров, событие начала).
 			stages.pre = clashStart.Sub(start) - model
-			early, et := s.selectMihomoEarly(ctx, groupID, member)
+			early, et := s.selectMihomoEarly(ctx, groupID, member, am, modelSt)
 			stages.clash = time.Since(clashStart)
 			stages.clashWait, stages.clashPlan, stages.clashPut = et.wait, et.plan, et.put
 			if early == selApplied {
@@ -860,10 +868,79 @@ func (s *Service) mihomoEntryFor(st configlayer.StateView, installed configlayer
 	return nil, nil
 }
 
+// mihomoEntryFromModel — то же, что mihomoEntryFor, но по группам и каталогу
+// модели am, которую Select уже собрал (P1 разбора пробела 2): без второго
+// Sources.Catalog, разбора групп, копии Live и расчёта выбора всех групп. Условия
+// расчёта — как у mihomoBuildOf по снимку st; выбор группы gid — member, как в
+// копии Live у mihomoEntryFor, остальные группы на цель не влияют. Вызывающий
+// обязан убедиться, что вход каталога модели и снимка st один и тот же
+// (catalogInputSame), иначе цель могла бы прийти из устаревшего профиля.
+func (s *Service) mihomoEntryFromModel(am appliedModel, st configlayer.StateView, gid, member string) (*mihomoSelEntry, error) {
+	if !s.mihomoSelPossible(st.Applied, am.installed) {
+		return nil, nil
+	}
+	b := newMihomoBuild(mihomoBuild{groups: am.groups.Items, catalog: am.cat.Mihomo, groupsOK: true})
+	b.prepare()
+	for _, mg := range b.shapes {
+		if mg.g.ID != gid {
+			continue
+		}
+		if e, ok := b.selEntry(mg, member); ok {
+			return &e, nil
+		}
+	}
+	return nil, nil
+}
+
+// catalogInputSame сообщает, что вход каталога источников и расчёта профиля
+// Mihomo у снимка cur тот же, что у снимка prev, по которому собрана модель am:
+// те же установленные ядра и их версии (версионные ворота узлов каталога и групп
+// Mihomo), то же применённое состояние (группы, секции источников, взятая
+// маршрутизация) и тот же Live без ключей выбора групп (selection,
+// selection_unconfirmed, selection_repick): каталог читает из Live только снимки
+// подписок и кандидатов, а выбор групп в него не входит. Сравнение побайтное —
+// любое расхождение, даже равнозначное, означает «не тот же», и цель считается
+// прежним путём (mihomoEntryFor).
+func (s *Service) catalogInputSame(am appliedModel, prev, cur configlayer.StateView) bool {
+	if am.installed != s.d.Installed() ||
+		am.xrayVer != s.d.KernelVersion(configlayer.KernelXray) ||
+		am.mihomoVer != s.d.KernelVersion(configlayer.KernelMihomo) {
+		return false
+	}
+	return sectionsSame(prev.Applied, cur.Applied, nil) &&
+		sectionsSame(prev.Live, cur.Live, selectionLiveKeys)
+}
+
+// selectionLiveKeys — ключи Live, которые ведёт выбор групп; вход каталога и
+// профиля Mihomo от них не зависит.
+var selectionLiveKeys = map[string]bool{LiveKeySelection: true, LiveKeyUnconfirmed: true, LiveKeyRepick: true}
+
+// sectionsSame — побайтное равенство секций a и b, кроме ключей skip.
+func sectionsSame(a, b configlayer.Sections, skip map[string]bool) bool {
+	n := 0
+	for k, va := range a {
+		if skip[k] {
+			continue
+		}
+		vb, ok := b[k]
+		if !ok || !bytes.Equal(va, vb) {
+			return false
+		}
+		n++
+	}
+	for k := range b {
+		if !skip[k] {
+			n--
+		}
+	}
+	return n == 0
+}
+
 // earlyTiming — части времени раннего PUT для строки этапов (разбор пробела 2):
 // wait — ожидание selMu; plan — под замком до вызова Clash API и после него
-// (чтение состояния, расчёт цели mihomoEntryFor); put — сам вызов SelectProxy (без
-// вызова — 0). Сумма — поле clash строки этапов без накладных расходов замера.
+// (чтение состояния, расчёт цели mihomoEntryFromModel или mihomoEntryFor); put —
+// сам вызов SelectProxy (без вызова — 0). Сумма — поле clash строки этапов без
+// накладных расходов замера.
 type earlyTiming struct {
 	wait, plan, put time.Duration
 }
@@ -872,8 +949,11 @@ type earlyTiming struct {
 // который фоновый проход ещё запишет в Live. Под selMu, как сверка: сверка не
 // перетирает выбор между расчётом и вызовом. Не applied — вызывающий идёт прежним
 // синхронным порядком. Вместе с исходом — замер частей (earlyTiming); поведение
-// выбора замер не меняет.
-func (s *Service) selectMihomoEarly(ctx context.Context, gid, member string) (out string, tm earlyTiming) {
+// выбора замер не меняет. Цель считается по модели am, собранной Select по
+// снимку modelSt, если вход каталога со своим чтением тот же (catalogInputSame);
+// иначе — прежним расчётом по своему чтению (mihomoEntryFor). Цель в обоих
+// случаях одна и та же.
+func (s *Service) selectMihomoEarly(ctx context.Context, gid, member string, am appliedModel, modelSt configlayer.StateView) (out string, tm earlyTiming) {
 	waitStart := time.Now()
 	s.selMu.Lock()
 	defer s.selMu.Unlock()
@@ -889,7 +969,12 @@ func (s *Service) selectMihomoEarly(ctx context.Context, gid, member string) (ou
 	if err != nil {
 		return selFailed, tm
 	}
-	entry, err := s.mihomoEntryFor(st, s.d.Installed(), gid, member)
+	var entry *mihomoSelEntry
+	if s.catalogInputSame(am, modelSt, st) {
+		entry, err = s.mihomoEntryFromModel(am, st, gid, member)
+	} else {
+		entry, err = s.mihomoEntryFor(st, s.d.Installed(), gid, member)
+	}
 	if err != nil {
 		return selFailed, tm
 	}
@@ -1242,7 +1327,7 @@ type mihomoSelEntry struct {
 // как генератор (имена групп и копий узлов). nil — Mihomo не установлен,
 // маршрутизацией не управляет панель или группы ниже порога версии (D-45).
 func (s *Service) mihomoBuildOf(st configlayer.StateView, installed configlayer.InstalledKernels) (*mihomoBuild, error) {
-	if !installed.Mihomo || !configlayer.DesiredRouting(st.Applied).ManagedFor(configlayer.KernelMihomo) || !s.mihomoGroupsAvailable() {
+	if !s.mihomoSelPossible(st.Applied, installed) {
 		return nil, nil
 	}
 	groups, err := parseGroups(st.Applied[GroupsSection])
@@ -1256,6 +1341,12 @@ func (s *Service) mihomoBuildOf(st configlayer.StateView, installed configlayer.
 	b := newMihomoBuild(mihomoBuild{groups: groups.Items, catalog: cat.Mihomo, groupsOK: true})
 	b.prepare()
 	return b, nil
+}
+
+// mihomoSelPossible — выбор групп в профиле Mihomo есть: Mihomo установлен,
+// маршрутизацией Mihomo управляет панель и группы не ниже порога версии (D-45).
+func (s *Service) mihomoSelPossible(applied configlayer.Sections, installed configlayer.InstalledKernels) bool {
+	return installed.Mihomo && configlayer.DesiredRouting(applied).ManagedFor(configlayer.KernelMihomo) && s.mihomoGroupsAvailable()
 }
 
 // nodeNames — имя в профиле Mihomo для каждого узла состава группы. У выпущенной
@@ -1314,19 +1405,28 @@ func (s *Service) mihomoPlan(st configlayer.StateView, installed configlayer.Ins
 	live := liveSelection(st.Live)
 	var out []mihomoSelEntry
 	for _, mg := range b.shapes {
-		g := mg.g
-		if g.Mode != ModeManual {
-			continue
+		if e, ok := b.selEntry(mg, live[mg.g.ID]); ok {
+			out = append(out, e)
 		}
-		names := b.nodeNames(g)
-		pick := effectiveSelection(g, live[g.ID], func(m string) bool { return b.memberName(m, names) != "" },
-			nodeRefs(b.res[g.ID].Nodes)...)
-		if pick == "" {
-			continue
-		}
-		out = append(out, mihomoSelEntry{gid: g.ID, group: g.Name, want: b.memberName(pick, names)})
 	}
 	return out, nil
+}
+
+// selEntry — ожидаемый выбор материализованной группы mg при выборе sel в Live:
+// effectiveSelection по именам профиля Mihomo. false — группа не ручная или
+// допустимого участника нет (pick == "", защита).
+func (b *mihomoBuild) selEntry(mg *mihomoGroup, sel string) (mihomoSelEntry, bool) {
+	g := mg.g
+	if g.Mode != ModeManual {
+		return mihomoSelEntry{}, false
+	}
+	names := b.nodeNames(g)
+	pick := effectiveSelection(g, sel, func(m string) bool { return b.memberName(m, names) != "" },
+		nodeRefs(b.res[g.ID].Nodes)...)
+	if pick == "" {
+		return mihomoSelEntry{}, false
+	}
+	return mihomoSelEntry{gid: g.ID, group: g.Name, want: b.memberName(pick, names)}, true
 }
 
 // reconcileMihomo сверяет now ручных групп Mihomo с выбором из State.Live и
