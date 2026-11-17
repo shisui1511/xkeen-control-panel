@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -46,9 +47,10 @@ const (
 	rtFltKillPoll = 20 * time.Millisecond
 	// rtFltHotMark — строка журнала после горячей замены (routing/hotswap.go).
 	rtFltHotMark = "[routing] горячая замена Xray: тегов"
-	// rtFltNoAPIMark — строка конвейера о неприменимой горячей замене: порт API
-	// не отвечает (причина xray_hot_no_api).
-	rtFltNoAPIMark = "горячая замена Xray: причина=xray_hot_no_api"
+	// rtFltNoAPIReason — причина неприменимой горячей замены: порт API не отвечает.
+	rtFltNoAPIReason = "xray_hot_no_api"
+	// rtFltNoAPIMark — строка конвейера о неприменимой горячей замене (rtFltNoAPIReason).
+	rtFltNoAPIMark = "горячая замена Xray: причина=" + rtFltNoAPIReason
 	// rtFltRollingNote — пояснение шага restart при откате файлов
 	// (NoteRestartFailedRolling): событие уходит до отката и подъёма ядра.
 	rtFltRollingNote = "restart_failed_rolling_back"
@@ -152,8 +154,11 @@ func rtFltPortRules(rules []string, port string) []string {
 
 // rtFltBlockAPI закрывает порт API Xray на loopback: REJECT с tcp-reset во
 // входящей цепочке (без цели REJECT — DROP). unblock снимает правило (повторный
-// вызов безопасен); t.Cleanup снимает его при любом исходе.
-func rtFltBlockAPI(t *testing.T, port string) (unblock func()) {
+// вызов безопасен); t.Cleanup снимает его при любом исходе. Прошивка пересобирает
+// таблицу filter по своим событиям (NDM netfilter rewrite: обновление правил UPnP
+// после DHCP клиента и т. п.) и снимает чужое правило; ensure (без t.*) проверяет
+// правило и возвращает его, если оно пропало: true — правило возвращено.
+func rtFltBlockAPI(t *testing.T, port string) (unblock func(), ensure func() bool) {
 	t.Helper()
 	rule := []string{"INPUT", "-i", "lo", "-p", "tcp", "--dport", port, "-j", "REJECT", "--reject-with", "tcp-reset"}
 	if rtFltIptables(append([]string{"-I"}, rule...)...) != 0 {
@@ -179,8 +184,26 @@ func rtFltBlockAPI(t *testing.T, port string) (unblock func()) {
 			t.Error("правило iptables на порт API Xray не снято")
 		}
 	}
+	ensure = func() bool {
+		if rtFltIptables(append([]string{"-C"}, rule...)...) == 0 {
+			return false
+		}
+		return rtFltIptables(append([]string{"-I"}, rule...)...) == 0
+	}
 	t.Cleanup(unblock)
-	return unblock
+	return unblock, ensure
+}
+
+// rtFltHotReasonRe — строка конвейера с причиной исхода горячей замены Xray.
+var rtFltHotReasonRe = regexp.MustCompile(`configlayer: горячая замена Xray: причина=(\S+)`)
+
+// rtFltHotReasons — причины горячей замены Xray по порядку строк окна журнала.
+func rtFltHotReasons(window string) []string {
+	var out []string
+	for _, m := range rtFltHotReasonRe.FindAllStringSubmatch(window, -1) {
+		out = append(out, m[1])
+	}
+	return out
 }
 
 // rtFltSel — разобранный ответ POST routing/select: только коды и числа.
@@ -414,15 +437,23 @@ func (e *rtSrc) rtFltSelectOn(goCh, late <-chan struct{}, gid, member string) <-
 	return out
 }
 
-// rtFltRollback — итог наблюдения за потоком событий слоя. В режиме putOnDone:
-// чужой файл положен по концу шага restart первого прохода выбора (put) и PID Xray
-// в этот момент (putPID). Событие шага restart с пояснением
-// restart_failed_rolling_back пришло, и чужой файл снят по нему; итог этого
-// прохода — первое apply_done после события отката (код итога, откат файлов, исход
-// Xray): GET state к концу наблюдения может нести уже следующий проход.
+// rtFltHoldDone — что сделано по концу перезапуска прохода, держащего ход:
+// чужой файл положен (put), PID Xray после перезапуска (pid), правило блока порта
+// API пропало за время прохода и возвращено (blockRestored).
+type rtFltHoldDone struct {
+	put           bool
+	pid           int
+	blockRestored bool
+}
+
+// rtFltRollback — итог наблюдения за потоком событий слоя: действия по концу
+// перезапуска прохода-держателя (hold, если наблюдение шло с onHold). Событие шага
+// restart с пояснением restart_failed_rolling_back пришло, и чужой файл снят по
+// нему; итог этого прохода — первое apply_done после события отката (код итога,
+// откат файлов, исход Xray): GET state к концу наблюдения может нести уже
+// следующий проход.
 type rtFltRollback struct {
-	put     bool
-	putPID  int
+	hold    rtFltHoldDone
 	seen    bool
 	removed bool
 	// done — apply_done прохода с откатом пришло.
@@ -436,12 +467,12 @@ type rtFltRollback struct {
 // (подписка заведена). Горутина без t.*: на первое событие шага restart с
 // пояснением restart_failed_rolling_back сразу удаляет чужой файл — до отката
 // файлов и подъёма Xray на прежних; следующее apply_done — итог этого прохода.
-// putOnDone: первый итог шага restart прохода выбора (trigger select) — проход,
-// держащий ход; если это done (Xray перезапущен и подтверждён, каталог им уже
-// прочитан), горутина кладёт чужой файл и запоминает PID Xray. События отката до
+// onHold (не nil): первый итог шага restart прохода выбора (trigger select) —
+// проход, держащий ход; если это done (Xray перезапущен и подтверждён, каталог им
+// уже прочитан), горутина вызывает onHold и сохраняет его итог. События отката до
 // этого итога (откат самого держателя) файл не снимают. Итог — в канал после
 // закрытия потока по ctx.
-func (e *rtSrc) rtFltWatchRollback(ctx context.Context, putOnDone bool) <-chan rtFltRollback {
+func (e *rtSrc) rtFltWatchRollback(ctx context.Context, onHold func() rtFltHoldDone) <-chan rtFltRollback {
 	e.t.Helper()
 	const path = "/api/configlayer/events"
 	resp, err := e.p.Stream(ctx, path)
@@ -461,7 +492,7 @@ func (e *rtSrc) rtFltWatchRollback(ctx context.Context, putOnDone bool) <-chan r
 		sc := bufio.NewScanner(resp.Body)
 		sc.Buffer(make([]byte, 64<<10), 16<<20)
 		event, got := "", false
-		armed := !putOnDone
+		armed := onHold == nil
 		for sc.Scan() {
 			line := sc.Text()
 			if !got {
@@ -486,8 +517,7 @@ func (e *rtSrc) rtFltWatchRollback(ctx context.Context, putOnDone bool) <-chan r
 					if sv.Trigger == "select" && (sv.State == "done" || sv.State == "failed") {
 						armed = true
 						if sv.State == "done" {
-							res.put = rtFltPutBadBare()
-							res.putPID = rtFltXrayPID()
+							res.hold = onHold()
 						}
 					}
 				case sv.NoteCode == rtFltRollingNote:
@@ -671,7 +701,7 @@ func TestRouterSelectXrayFaults(t *testing.T) {
 		}
 		port := rtFltAPIPort(t)
 		before := rtFltFilterRules(t)
-		unblock := rtFltBlockAPI(t, port)
+		unblock, _ := rtFltBlockAPI(t, port)
 		t.Cleanup(func() {
 			if !rtFltDropBad() {
 				t.Error("очистка: чужой файл Xray не удалён")
@@ -754,7 +784,10 @@ func TestRouterSelectXrayFaults(t *testing.T) {
 	// (restart_failed_rolling_back) первой пачки; проход третьей группы проходит
 	// полную проверку, перезапускает Xray (причина no_api) и не несёт в xcp-groups и
 	// ядро отвергнутых выборов первых двух. Попадание доказывается после факта:
-	// строка no_api «Сбой» видна и файл положен по концу его перезапуска; строки
+	// строка no_api «Сбой» видна и файл положен по концу его перезапуска (правило
+	// блока порта API к этому моменту возвращается, если прошивка сняла его
+	// пересборкой таблицы filter); первые две причины горячей замены окна — проходы
+	// «Сбой» и первой пачки — no_api, иначе первая пачка дошла до API Xray; строки
 	// этапов «Пачка 1» и «Пачка 2» — пачка из двух (batch=2) с ожиданием хода
 	// (wait > 0), а других выборов, кроме «Сбой» и третьей группы, нет, значит, это
 	// одна пачка; строка этапов третьей группы — отдельная пачка (batch=1) с
@@ -840,7 +873,7 @@ func TestRouterSelectXrayFaults(t *testing.T) {
 			if rtFltXrayPID() == 0 {
 				t.Fatal("до выбора нет единственного процесса Xray")
 			}
-			unblock := rtFltBlockAPI(t, port)
+			unblock, ensureBlock := rtFltBlockAPI(t, port)
 
 			offset := rtRtLogOffset(t)
 			var (
@@ -852,8 +885,13 @@ func TestRouterSelectXrayFaults(t *testing.T) {
 			func() {
 				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
-				// Чужой файл кладётся по концу перезапуска «Сбой», снимается по откату первой пачки.
-				rolled := c.rtFltWatchRollback(ctx, true)
+				// По концу перезапуска «Сбой»: правило блока порта API на месте (прошивка
+				// могла снять его пересборкой таблицы filter), чужой файл положен, PID
+				// Xray запомнен; файл снимается по откату первой пачки.
+				rolled := c.rtFltWatchRollback(ctx, func() rtFltHoldDone {
+					restored := ensureBlock()
+					return rtFltHoldDone{blockRestored: restored, put: rtFltPutBadBare(), pid: rtFltXrayPID()}
+				})
 				holdCh := make(chan rtFltNext, 1)
 				// Ответ «Сбой»: ход уже передан первой пачке — выбор третьей группы уходит сразу.
 				holdOK := make(chan struct{})
@@ -927,10 +965,20 @@ func TestRouterSelectXrayFaults(t *testing.T) {
 			st, staged = stages[batch[2]]
 			before := next.sent && next.at.Before(results[0].done) && next.at.Before(results[1].done)
 			inWindow := staged && st.num("batch") == 1 && st.num("wait") > 0 && before
+			// Порт API закрыт для прохода «Сбой» и прохода первой пачки: первые две
+			// причины горячей замены окна — no_api. Прошивка снимает правило блока
+			// пересборкой таблицы filter в любой момент; тогда первая пачка доходит до
+			// API Xray, и сценарий CR-01 не исполнен.
+			reasons := rtFltHotReasons(window)
+			closed := len(reasons) >= 2 && reasons[0] == rtFltNoAPIReason && reasons[1] == rtFltNoAPIReason
 			switch {
-			case !holdSeen || !rb.put:
+			case !holdSeen || !rb.hold.put:
 				t.Logf("cr01-next: попытка %d мимо окна: проход «Сбой» не дошёл до конца перезапуска (hold_seen=%t put=%t hold=%s)",
-					attempts, holdSeen, rb.put, hold.s)
+					attempts, holdSeen, rb.hold.put, hold.s)
+			case !closed:
+				// lost_after — правило пропало и после конца перезапуска «Сбой».
+				t.Logf("cr01-next: попытка %d мимо окна: порт API открыт для прохода «Сбой» или первой пачки (причины=%s block_restored=%t lost_after=%t)",
+					attempts, strings.Join(reasons, ","), rb.hold.blockRestored, ensureBlock())
 			case !paired:
 				t.Logf("cr01-next: попытка %d мимо окна: первая пачка разошлась (staged12=%t/%t batch12=%d/%d wait12=%d/%d out12=%s/%s reverted12=%t/%t)",
 					attempts, staged12[0], staged12[1], pair[0].num("batch"), pair[1].num("batch"), pair[0].num("wait"), pair[1].num("wait"),
@@ -964,8 +1012,8 @@ func TestRouterSelectXrayFaults(t *testing.T) {
 
 			// Первая пачка: оба выбора возвращены, проход — отказ полной проверки с
 			// откатом без перезапуска (PID к ответам — PID после перезапуска «Сбой»).
-			pidSame := results[0].pid == rb.putPID && results[1].pid == rb.putPID
-			t.Logf("cr01: reverted=%t/%t pid_same=%t code=%s", results[0].s.reverted, results[1].s.reverted, pidSame, rb.code)
+			pidSame := results[0].pid == rb.hold.pid && results[1].pid == rb.hold.pid
+			t.Logf("cr01: reverted=%t/%t pid_same=%t code=%s block_restored=%t", results[0].s.reverted, results[1].s.reverted, pidSame, rb.code, rb.hold.blockRestored)
 			for i, r := range results {
 				if r.err != nil {
 					t.Errorf("CR-01: выбор в «%s»: %v", rtFltBatchName(i), r.err)
@@ -988,7 +1036,7 @@ func TestRouterSelectXrayFaults(t *testing.T) {
 				t.Error("CR-01: в журнале панели нет строки горячей замены с причиной no_api")
 			}
 			if !pidSame {
-				t.Errorf("CR-01: Xray перезапущен или остановлен при отказе полной проверки (PID к ответам прежний: %t/%t)", results[0].pid == rb.putPID, results[1].pid == rb.putPID)
+				t.Errorf("CR-01: Xray перезапущен или остановлен при отказе полной проверки (PID к ответам прежний: %t/%t)", results[0].pid == rb.hold.pid, results[1].pid == rb.hold.pid)
 			}
 
 			// Следующая пачка: API открыт, Xray поднят после прохода третьей группы.
@@ -999,7 +1047,7 @@ func TestRouterSelectXrayFaults(t *testing.T) {
 			if s3.unconfirmed > 0 || !(s3.xray == "applied" || (s3.xray == "restarted" && s3.reason == "no_api")) {
 				t.Errorf("CR-01: выбор B в «%s» следующей пачкой: %s, ожидалось restarted с причиной no_api или applied", third, s3)
 			}
-			if s3.xray == "restarted" && newPID == rb.putPID {
+			if s3.xray == "restarted" && newPID == rb.hold.pid {
 				t.Errorf("CR-01: исход restarted, но Xray работает с PID первой пачки: ядро не загрузило xcp-groups следующей пачки")
 			}
 			if c.rtFltCurrent(third) != nodeB {
@@ -1143,7 +1191,7 @@ func TestRouterSelectXrayFaults(t *testing.T) {
 			func() {
 				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
-				rolled := c.rtFltWatchRollback(ctx, false)
+				rolled := c.rtFltWatchRollback(ctx, nil)
 				killed := rtFltKillOnHot(ctx, rtRtLogOffset(t), pid)
 				s = c.rtFltSelect(gid, target)
 				cancel()
