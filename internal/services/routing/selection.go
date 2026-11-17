@@ -71,6 +71,9 @@ const (
 	selReasonBusy     = "busy"
 	selReasonStopped  = "stopped"
 	selReasonFailed   = "failed"
+	// selReasonDisabled — слой «Конфигурация» выключен посреди выбора (не остановка
+	// панели).
+	selReasonDisabled = "disabled"
 )
 
 // Способ проверки в уведомлении routing_repick.
@@ -894,9 +897,10 @@ func (s *Service) selectMihomoEarly(ctx context.Context, gid, member string) (ou
 // selectMihomoFirstTail — фоновое продолжение быстрого пути после ответа: проход
 // файла Xray той же пачкой выбора (Prepare пишет намерение в Live под замками
 // применения, возврат неудачного прохода — settleXrayBatch под ходом, CR-01), снятие
-// цели вида, уведомление об отказе, затем Mihomo получает выбор из Live под selMu
-// (после возврата — прежний узел); успешный проход с Live, равным цели раннего
-// PUT, повтор не делает (earlyHolds, код reput в строке этапов). В конце, в любом
+// цели вида, затем Mihomo получает выбор из Live под selMu (после возврата — прежний
+// узел), затем уведомление об отказе с фактическим исходом возврата (reverted,
+// WR-03); успешный проход с Live, равным цели раннего PUT, повтор не делает
+// (earlyHolds, код reput в строке этапов). В конце, в любом
 // исходе, — снятие отметки компоненты, событие конца (D-14, D-17) и строка этапов.
 func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name string, release func()) {
 	tailStart := time.Now()
@@ -917,6 +921,10 @@ func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name
 	var failErr error
 	failCode := ""
 	passOK := false
+	// liveKept — Live группы прежний: выбор не записан или возвращён без сбоя
+	// записи. Признак reverted уведомления отказа (WR-03) истинен, только если ещё и
+	// Mihomo принял выбор из Live.
+	liveKept := true
 	switch {
 	case err != nil:
 		failErr = err
@@ -941,16 +949,16 @@ func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name
 		// Возврат уже выполнен под ходом (settleXrayBatch).
 		failErr, failCode = b.err, b.outcome
 		if in.restoreErr != nil {
+			// Возврат Live не записан: в Live остался отвергнутый выбор.
 			failErr, failCode = in.restoreErr, ""
+			liveKept = false
 		}
 	default:
 		// Неизвестный исход: маркер Xray поставлен под ходом, D-16 показывает
-		// «Повторить». Уведомление — только если маркер не записан.
+		// «Повторить». Уведомление — только если маркер не записан; Live несёт новый
+		// выбор, поэтому возвратом это не считается.
 		failErr = in.markErr
-	}
-	if failErr != nil || failCode != "" {
-		code, reason := selectFailClass(failErr, failCode)
-		s.noticeSelectFailed(in.gid, name, code, reason)
+		liveKept = false
 	}
 
 	// Mihomo получает выбор из Live под selMu. earlyHolds — проход успешен и выбор
@@ -967,29 +975,42 @@ func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name
 			earlyHolds = liveSelection(st.Live)[in.gid] == in.member
 		}
 	}
+	mihomoOK := true
 	if earlyHolds {
 		stages.reput = reputSkip
 	} else {
 		stages.reput = reputDone
-		if _, err := s.selectMihomoMarked(s.ctx, in.gid); err != nil {
+		out, err := s.selectMihomoMarked(s.ctx, in.gid)
+		mihomoOK = out != selFailed
+		if err != nil {
 			log.Printf("[routing] выбор группы %s: маркер Mihomo не записан: %v", in.gid, err)
 		}
 	}
 	s.selMu.Unlock()
+
+	// Уведомление отказа — после постановки Mihomo по Live (порядок «Live → Mihomo →
+	// уведомление»): признак reverted говорит, вернулся ли выбор на самом деле (WR-03).
+	// Ложь — возврат Live не записан, исход неизвестен или Mihomo не принял выбор из
+	// Live (маркер Mihomo, D-16): текст «Прежний узел возвращён» тогда был бы ложью.
+	if failErr != nil || failCode != "" {
+		code, reason := selectFailClass(failErr, failCode)
+		s.noticeSelectFailed(in.gid, name, code, reason, liveKept && mihomoOK)
+	}
 }
 
 // selectFailClass — код исхода и класс причины отказа фонового прохода для
 // уведомления routing_select: rejected — отказ проверки, сборки, записи, откат или
 // дрейф; busy — замок применения или операция с ядром; stopped — слой или сервис
-// остановлен; failed — прочее.
+// остановлен; disabled — слой выключен; failed — прочее.
 func selectFailClass(err error, outcome string) (code, reason string) {
 	switch {
 	case errors.Is(err, ErrApplyBusy):
 		return "apply_busy", selReasonBusy
 	case errors.Is(err, configlayer.ErrKernelBusy):
 		return "kernel_op_in_progress", selReasonBusy
-	case errors.Is(err, configlayer.ErrStopped), errors.Is(err, configlayer.ErrDisabled),
-		errors.Is(err, context.Canceled):
+	case errors.Is(err, configlayer.ErrDisabled):
+		return "disabled", selReasonDisabled
+	case errors.Is(err, configlayer.ErrStopped), errors.Is(err, context.Canceled):
 		return "stopped", selReasonStopped
 	case errors.Is(err, configlayer.ErrDriftBlocked):
 		return "drift_blocked", selReasonRejected
@@ -1008,14 +1029,18 @@ func selectFailClass(err error, outcome string) (code, reason string) {
 // noticeSelectFailed публикует уведомление отказа фонового прохода группы gid с
 // новым идентификатором routing_select:<gid>:<n>: каждый отказ — новое уведомление
 // (D-11), прежнее уведомление группы заменяется. В параметрах — ID и имя группы, код
-// исхода и класс причины; имён узлов и адресов нет.
-func (s *Service) noticeSelectFailed(gid, name, code, reason string) {
+// исхода, класс причины и reverted ("true" — Live и Mihomo на прежнем выборе,
+// "false" — возврат не подтверждён, WR-03); имён узлов и адресов нет.
+func (s *Service) noticeSelectFailed(gid, name, code, reason string, reverted bool) {
 	n := s.selNoticeSeq.Add(1)
 	s.selNotes.put(s.d.Layer, gid, configlayer.NoticeView{
 		ID: noticeSelectPrefix + gid + ":" + strconv.FormatUint(n, 10), Kind: noticeWarning,
-		Params: map[string]string{"gid": gid, "group": name, "code": code, "reason": reason},
+		Params: map[string]string{
+			"gid": gid, "group": name, "code": code, "reason": reason,
+			"reverted": strconv.FormatBool(reverted),
+		},
 	})
-	log.Printf("[routing] выбор группы %s не записан в файл Xray: code=%s reason=%s", gid, code, reason)
+	log.Printf("[routing] выбор группы %s не записан в файл Xray: code=%s reason=%s reverted=%t", gid, code, reason, reverted)
 }
 
 func (s *Service) selectMihomoLocked(ctx context.Context, gid string) string {
