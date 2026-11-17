@@ -703,7 +703,8 @@ test(
 // (не xcp-groups) получает дописанный перевод строки — дрейф, на котором фоновый проход
 // отказывает (drift_blocked, класс rejected), выбор возвращается к прежнему узлу и сервер
 // публикует уведомление routing_select:<gid>:<n> с новым n на каждый отказ. Исходные байты
-// файла лежат в копии на роутере и возвращаются в finally теста. Ответы сети не подменяются.
+// файла лежат в копии на роутере, путь файла — рядом с копией; файл возвращается до снимка
+// слоя следующего прогона и в finally теста. Ответы сети не подменяются.
 
 const run = promisify(execFile);
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
@@ -711,6 +712,8 @@ const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const XRAY_FILE = /^\/opt\/etc\/xray\/configs\/[A-Za-z0-9._-]+$/;
 const XRAY_DIR_PREFIX = '/opt/etc/xray/configs/';
 const DRIFT_BAK = '/tmp/rtpx-drift.bak';
+/** Путь файла с дрейфом теста: пишется до правки файла, чтобы прерванный прогон знал, что вернуть. */
+const DRIFT_PATH = `${DRIFT_BAK}.path`;
 const REJECTED = /файл Xray не принят|the Xray file was rejected/;
 const RESTORED = /Прежний узел возвращён|previous node has been restored/;
 
@@ -764,23 +767,193 @@ function selectNoticeIds(s: LayerStateView, gid: string): string[] {
   return s.notices.filter((n) => n.id.startsWith(`routing_select:${gid}:`)).map((n) => n.id);
 }
 
+/** Состояние файла path в снимке слоя (нет файла — пустая строка). */
+function fileState(s: LayerStateView, path: string): string {
+  return s.files.find((x) => x.path === path)?.state ?? '';
+}
+
+/**
+ * Путь, который допустимо подставить в команду стенда: целиком по шаблону XRAY_FILE (тот же
+ * алфавит, ровно один уровень в каталоге конфигов Xray), не «.»/«..» и не файл xcp-groups.
+ */
+function isDriftPath(path: string): boolean {
+  if (!XRAY_FILE.test(path)) return false;
+  const base = path.slice(XRAY_DIR_PREFIX.length);
+  return base !== '.' && base !== '..' && !base.includes('xcp-groups');
+}
+
+/** Проверенный путь в одинарных кавычках для команды стенда; иной путь — ошибка до ssh. */
+function quotedDriftPath(path: string): string {
+  if (!isDriftPath(path)) throw new Error('фоновый отказ: путь файла Xray вне шаблона каталога');
+  return `'${path}'`;
+}
+
+/**
+ * Функция same команд стенда: побайтовое равенство двух обычных файлов (не ссылок). Есть cmp —
+ * сравнение им, нет — по md5sum. Непрочитанный файл, пустая или не шестнадцатеричная сумма в
+ * обоих путях дают «не равны».
+ */
+const SAME_SH = [
+  'same() {',
+  '  for x in "$1" "$2"; do [ -f "$x" ] && [ ! -L "$x" ] && [ -r "$x" ] || return 1; done',
+  '  if command -v cmp >/dev/null 2>&1; then cmp -s "$1" "$2"; return; fi',
+  '  s1=$(md5sum < "$1") && s2=$(md5sum < "$2") || return 1',
+  '  s1=${s1%% *}; s2=${s2%% *}',
+  '  for s in "$s1" "$s2"; do',
+  '    case "$s" in "" | *[!0-9a-fA-F]*) return 1 ;; esac',
+  '    [ "${#s}" = 32 ] || return 1',
+  '  done',
+  '  [ "$s1" = "$s2" ]',
+  '}'
+].join('\n');
+
+/**
+ * Команда дрейфа на стенде: сначала путь файла (атомарно, через временный файл и mv), затем
+ * копия исходных байтов (так же), затем дописанный перевод строки. Новые файлы — с umask 077.
+ * Остаток прошлого прогона (копия, путь, их временные файлы) — отказ 4 без записи. Параметры
+ * meta и append воспроизводят состояния прерванного прогона: без пути и без правки файла.
+ */
+function driftCmd(path: string, opts: { meta?: boolean; append?: boolean } = {}): string {
+  const { meta = true, append = true } = opts;
+  return [
+    'umask 077',
+    `f=${quotedDriftPath(path)}; b='${DRIFT_BAK}'; p='${DRIFT_PATH}'`,
+    '[ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ] || exit 4',
+    'for x in "$b" "$p" "$b.tmp" "$p.tmp"; do [ ! -e "$x" ] && [ ! -L "$x" ] || exit 4; done',
+    ...(meta
+      ? ['printf "%s" "$f" > "$p.tmp" && mv "$p.tmp" "$p" || { rm -f "$p.tmp"; exit 5; }']
+      : []),
+    'cp "$f" "$b.tmp" && mv "$b.tmp" "$b" || { rm -f "$b.tmp"; exit 5; }',
+    ...(append ? ['printf "\\n" >> "$f" || exit 5'] : []),
+    'exit 0'
+  ].join('\n');
+}
+
+/**
+ * Команда возврата на стенде. candidates — управляемые панелью файлы Xray (любое состояние, в
+ * том числе drift_modified), каждый проверен isDriftPath до подстановки. Содержимое .path —
+ * только данные: читается удалённым shell в переменную и сравнивается с кандидатами целиком,
+ * в команду не подставляется. Файл возвращается из копии, только если его байты равны копии
+ * или копии плюс ровно перевод строки; копия без .path — только при единственном таком файле.
+ * Коды: 0 — вернуто или нечего возвращать; 4 — отказ без записи файлов (ссылка, неверный
+ * путь, чужие байты, ноль или несколько совпадений), копия и путь остаются; 5 — сбой записи.
+ */
+function recoverCmd(candidates: string[]): string {
+  const list = candidates.map(quotedDriftPath);
+  const alts = list.length > 0 ? list.join(' | ') : "''";
+  const words = list.length > 0 ? list.join(' ') : "''";
+  return [
+    'umask 077',
+    `b='${DRIFT_BAK}'; p='${DRIFT_PATH}'; t='${DRIFT_BAK}.chk'`,
+    SAME_SH,
+    'valid() {',
+    `  case "$1" in '${XRAY_DIR_PREFIX}'*) ;; *) return 1 ;; esac`,
+    `  nm=\${1#'${XRAY_DIR_PREFIX}'}`,
+    '  case "$nm" in "" | . | .. | *[!A-Za-z0-9._-]* | *xcp-groups*) return 1 ;; esac',
+    `  case "$1" in ${alts}) ;; *) return 1 ;; esac`,
+    '  [ -f "$1" ] && [ ! -L "$1" ]',
+    '}',
+    'mine() { valid "$1" && { same "$b" "$1" || same "$t" "$1"; }; }',
+    'out() { rm -f "$t"; exit "$1"; }',
+    'for x in "$b" "$p" "$t"; do [ ! -L "$x" ] || exit 4; done',
+    // недописанные временные файлы своего же внесения дрейфа
+    'rm -f "$b.tmp" "$p.tmp" || exit 5',
+    'if [ ! -e "$b" ]; then',
+    // путь без копии: конфиг не трогается, удаляются только свои метаданные
+    '  [ ! -e "$p" ] || { [ -f "$p" ] || exit 4; rm -f "$p" || exit 5; }',
+    '  exit 0',
+    'fi',
+    '[ -f "$b" ] && [ -r "$b" ] || exit 4',
+    'rm -f "$t" && cp "$b" "$t" && printf "\\n" >> "$t" || out 5',
+    'if [ -e "$p" ]; then',
+    '  [ -f "$p" ] && [ -r "$p" ] || out 4',
+    // точка сохраняет хвостовые переводы строки: путь сравнивается побайтно
+    '  f=$(cat "$p" && printf .) || out 4',
+    '  f=${f%.}',
+    '  mine "$f" || out 4',
+    'else',
+    '  f=""; k=0',
+    `  for c in ${words}; do`,
+    '    if mine "$c"; then k=$((k + 1)); f=$c; fi',
+    '  done',
+    '  [ "$k" = 1 ] || out 4',
+    'fi',
+    'cp "$b" "$f" && same "$b" "$f" || out 5',
+    'rm -f "$b" "$p" || out 5',
+    'out 0'
+  ].join('\n');
+}
+
+/**
+ * Возврат файла прерванного прогона: до снимка слоя и выбора файла дрейфа, в finally теста.
+ * Реестр управляемых файлов читается отдельным запросом: состояние ok не требуется — файл
+ * прерванного прогона в drift_modified. Возвращает код команды стенда (см. recoverCmd).
+ */
+async function recoverDrift(page: Page): Promise<number> {
+  const res = await api(page, 'GET', '/api/configlayer/state');
+  expect(res.status, 'реестр файлов слоя для возврата прерванного прогона').toBe(200);
+  const files = (res.data?.files ?? []) as LayerStateView['files'];
+  const paths = files
+    .filter((x) => x.kernel === 'xray' && x.owner === 'panel' && x.state !== 'released')
+    .map((x) => x.path ?? '')
+    .filter(isDriftPath);
+  return standSh(recoverCmd([...new Set(paths)].sort()));
+}
+
+/** recoverDrift с ошибкой на любой код, кроме 0. */
+async function recoverStand(page: Page): Promise<void> {
+  const code = await recoverDrift(page);
+  if (code === 4) {
+    throw new Error(
+      'фоновый отказ: копия прерванного прогона не сопоставлена однозначно с файлом Xray — ' +
+        'чужие байты не перезаписаны, копия и путь оставлены (код 4)'
+    );
+  }
+  if (code !== 0) throw new Error(`фоновый отказ: файл Xray не возвращён (код ${code})`);
+}
+
+function errText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * body, затем back в любом случае. Сбой back не прячет сбой body и наоборот: при обоих —
+ * одна ошибка с обоими сообщениями; при одном — он сам.
+ */
+async function withStandReturn(
+  body: () => Promise<void>,
+  back: () => Promise<void>
+): Promise<void> {
+  let failed = false;
+  let failure: unknown;
+  try {
+    await body();
+  } catch (e) {
+    failed = true;
+    failure = e;
+  }
+  try {
+    await back();
+  } catch (e) {
+    throw new Error(
+      failed
+        ? `${errText(e)}\nисходный сбой сценария: ${errText(failure)}`
+        : `возврат стенда: ${errText(e)}`,
+      { cause: e }
+    );
+  }
+  if (failed) throw failure;
+}
+
 /**
  * Управляемый панелью файл Xray в каталоге конфигов, кроме xcp-groups, в состоянии ok (как
  * rtRtDriftFile Go-сценария). Путь проверяется шаблоном каталога Xray до подстановки в команду.
  */
 function driftFile(s: LayerStateView): string {
-  const f = s.files.find((x) => {
-    const p = x.path ?? '';
-    const base = p.slice(XRAY_DIR_PREFIX.length);
-    return (
-      x.kernel === 'xray' &&
-      x.owner === 'panel' &&
-      x.state === 'ok' &&
-      p.startsWith(XRAY_DIR_PREFIX) &&
-      !base.includes('/') &&
-      !base.includes('xcp-groups')
-    );
-  });
+  const f = s.files.find(
+    (x) =>
+      x.kernel === 'xray' && x.owner === 'panel' && x.state === 'ok' && isDriftPath(x.path ?? '')
+  );
   if (!f) {
     throw new Error('фоновый отказ: нет управляемого файла Xray вне xcp-groups в состоянии ok');
   }
@@ -828,26 +1001,25 @@ test(
     const inst = await installedKernels(page);
     test.skip(!inst.xray, 'Xray не установлен: фонового прохода файла Xray нет');
 
+    // (0) WR-01: файл прерванного прогона возвращается по пути из метаданных копии до снимка
+    // слоя и выбора файла дрейфа — иначе свой файл в drift_modified не выбирается и стенд
+    // остаётся с дрейфом. Чужие байты и неоднозначная старая копия — отказ без записи.
+    await recoverStand(page);
+
     // (1) файл дрейфа и исходное число расхождений
     const before = await layerState(page);
     expect(selectNoticeIds(before, proxyId), `уведомления выбора группы ${proxyId}`).toEqual([]);
     const path = driftFile(before);
-    // Копия от прерванного прогона: файл — она же плюс дописанный перевод строки (дрейф
-    // этого теста) — копия возвращается, и тест идёт дальше; иное содержимое — отказ (4):
-    // чужие байты не перезаписываются. Нет cmp — сравнение по md5sum (пустая сумма — отказ).
-    const sameCmd =
-      `if command -v cmp >/dev/null 2>&1; then cmp -s "$t" "$f"; ` +
-      `else s1=$(md5sum < "$t") && s2=$(md5sum < "$f") && [ -n "$s1" ] && [ "$s1" = "$s2" ]; fi`;
-    const driftCmd =
-      `f='${path}'; b=${DRIFT_BAK}; ` +
-      `if [ -e "$b" ]; then t="$b.chk"; cp "$b" "$t" && printf '\\n' >> "$t" && { ${sameCmd}; }; ` +
-      `r=$?; rm -f "$t"; [ "$r" = 0 ] || exit 4; cp -p "$b" "$f" && rm -f "$b" || exit 5; fi; ` +
-      `cp -p "$f" "$b" && printf '\\n' >> "$f"`;
-    const restoreCmd =
-      `f='${path}'; b=${DRIFT_BAK}; [ -e "$b" ] || exit 0; ` + `cp -p "$b" "$f" && rm -f "$b"`;
-    const restore = async (): Promise<void> => {
-      const code = await standSh(restoreCmd);
-      if (code !== 0) throw new Error(`фоновый отказ: файл Xray не возвращён (код ${code})`);
+    // возврат стенда — один помощник: файл из копии, затем исходное число расхождений
+    const returnStand = async (): Promise<void> => {
+      await recoverStand(page);
+      await expect
+        .poll(async () => (await layerState(page)).drift, {
+          message: 'число расхождений вернулось к исходному',
+          timeout: T.save,
+          intervals: [1000]
+        })
+        .toBe(before.drift);
     };
 
     // цель — узел Mihomo, отличный от текущего выбора группы
@@ -901,15 +1073,11 @@ test(
       return ids[0];
     };
 
-    let drifted = false;
-    try {
-      // (3) дрейф: копия исходных байтов с правами и дописанный перевод строки
-      drifted = true;
-      const code = await standSh(driftCmd);
-      if (code === 4) {
-        drifted = false;
-        throw new Error('фоновый отказ: на стенде осталась копия прерванного прогона');
-      }
+    // стенд возвращается и после падения: исходные байты файла Xray, копия и путь удалены,
+    // число расхождений исходное; сбой возврата виден вместе со сбоем сценария
+    await withStandReturn(async () => {
+      // (3) дрейф: путь файла и копия исходных байтов, затем дописанный перевод строки
+      const code = await standSh(driftCmd(path));
       if (code !== 0) throw new Error(`фоновый отказ: дрейф не внесён (код ${code})`);
 
       // (4) и (5) два отказа подряд: два тоста, идентификаторы уведомлений различаются (D-11)
@@ -937,15 +1105,7 @@ test(
       await expect(notice).toContainText(REJECTED);
 
       // (8) возврат файла: дрейф снят, уведомление ещё считается в бейдже
-      await restore();
-      drifted = false;
-      await expect
-        .poll(async () => (await layerState(page)).drift, {
-          message: 'число расхождений вернулось к исходному',
-          timeout: T.save,
-          intervals: [1000]
-        })
-        .toBe(before.drift);
+      await returnStand();
       await expect
         .poll(() => configBadge(page), {
           message: `бейдж .nav-badge-config с уведомлением группы ${proxyId}`,
@@ -975,10 +1135,7 @@ test(
           timeout: T.action
         })
         .toBe(badgeBefore);
-    } finally {
-      // стенд возвращается и после падения: исходные байты файла Xray, копия удалена
-      if (drifted) await restore();
-    }
+    }, returnStand);
     await guard.assertClean();
   }
 );
