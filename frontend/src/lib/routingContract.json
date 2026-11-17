@@ -395,7 +395,7 @@
   },
   "RuntimeMember": {
     "required": ["member", "kind", "name", "xray", "mihomo"],
-    "optional": ["ref", "group", "proto", "source"],
+    "optional": ["ref", "group", "proto", "source", "source_name"],
     "children": {}
   },
   "RuntimeNow": {

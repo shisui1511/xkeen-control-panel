@@ -75,8 +75,10 @@ type RuntimeMember struct {
 	Name   string `json:"name"`
 	Proto  string `json:"proto,omitempty"`
 	Source string `json:"source,omitempty"`
-	Xray   bool   `json:"xray"`
-	Mihomo bool   `json:"mihomo"`
+	// SourceName — имя источника узла: заголовок окна диагностики источника.
+	SourceName string `json:"source_name,omitempty"`
+	Xray       bool   `json:"xray"`
+	Mihomo     bool   `json:"mihomo"`
 }
 
 // runtimeSnapshot собирает все данные из одной версии состояния и каталога.
@@ -236,7 +238,8 @@ func runtimeRefs(list []sources.CatalogNode) map[string]bool {
 func runtimeNode(n sources.CatalogNode, xray, mihomo map[string]bool) RuntimeMember {
 	return RuntimeMember{
 		Member: memberNode + n.Ref, Kind: "node", Ref: n.Ref, Name: n.Display,
-		Proto: n.Node.Protocol, Source: n.Source, Xray: xray[n.Ref], Mihomo: mihomo[n.Ref],
+		Proto: n.Node.Protocol, Source: n.Source, SourceName: n.SourceName,
+		Xray: xray[n.Ref], Mihomo: mihomo[n.Ref],
 	}
 }
 

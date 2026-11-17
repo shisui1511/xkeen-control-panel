@@ -459,12 +459,14 @@
     kernel !== '' ? kernel : installed.xray || !installed.mihomo ? 'xray' : 'mihomo'
   );
 
-  // Диагностика узла — диагностика его источника (Open Question 1)
+  // Диагностика узла — диагностика его источника (Open Question 1): заголовок — имя
+  // источника, не узла. Группы source:<id> есть только у «Xray у пользователя»,
+  // поэтому имя приходит в самом участнике (source_name)
   function openDiagnostics(m: RuntimeMember) {
     if (!m.source) return;
     const src = m.source;
     const sourceGroup = view?.groups.find((g) => g.id === `source:${src}`);
-    diag = { sourceId: src, name: sourceGroup?.name || m.name };
+    diag = { sourceId: src, name: m.source_name || sourceGroup?.name || src };
   }
 
   // --- Раскрытие группы по адресу и по звену цепочки (D-10, D-12) ---

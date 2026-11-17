@@ -63,6 +63,8 @@ export interface RuntimeMember {
   name: string;
   proto?: string;
   source?: string;
+  /** Имя источника узла: заголовок окна диагностики источника. */
+  source_name?: string;
   xray: boolean;
   mihomo: boolean;
 }
