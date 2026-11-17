@@ -1106,9 +1106,10 @@ func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name
 	case stopping:
 		// Сервис останавливается: PUT отменённым контекстом не дойдёт до ядра, а
 		// маркер Mihomo на флешке заблокировал бы группу после запуска. Mihomo
-		// приводит к Live сверка (при следующем запуске — сверка старта).
+		// приводит к Live сверка старта наблюдателя (SelectionWatcher.tick: новый
+		// PID ставит pending); флаг reconcilePending живёт в памяти и пережил бы
+		// остановку только вместе с процессом, поэтому здесь он не взводится.
 		stages.reput = reputDone
-		s.markReconcile()
 	default:
 		stages.reput = reputDone
 		out, err := s.selectMihomoMarked(s.ctx, in.gid)
