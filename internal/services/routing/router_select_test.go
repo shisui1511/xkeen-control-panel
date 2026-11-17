@@ -397,7 +397,9 @@ func rtsWaitNow(t *testing.T, core *rtMihomoCore, group, want string, wait time.
 //
 // Подтесты на настоящей подписке стенда: duplicate_names — одноимённые узлы
 // разных источников в одной ручной группе различимы, выбор второго ставит в
-// Mihomo именно его и переживает внешний выбор и перезапуск (WR-02).
+// Mihomo именно его и переживает внешний выбор и перезапуск (WR-02);
+// ambiguous_now — «Сейчас» групп «авто» и «резерв» не угадывает узел по имени,
+// которое в профиле носят разные узлы, а различимое имя даёт верный Ref (WR-03).
 func TestRouterSelectMihomoReconcile(t *testing.T) {
 	routertest.Tier(t, routertest.Full, "реальная загрузка: настоящая подписка стенда для одноимённых узлов и провайдерного замера")
 	ctx := context.Background()
@@ -483,6 +485,7 @@ func TestRouterSelectMihomoReconcile(t *testing.T) {
 	// раз и при выборе одного подтеста.
 	dup := rtsNewDup(t)
 	t.Run("duplicate_names", func(t *testing.T) { rtsDuplicateNames(t, ctx, dup) })
+	t.Run("ambiguous_now", func(t *testing.T) { rtsAmbiguousNow(t, ctx, dup) })
 }
 
 // rtsExact — точное выражение include (режим regex) для имени узла.
@@ -691,6 +694,169 @@ func rtsDuplicateNames(t *testing.T, ctx context.Context, d *rtsDup) {
 	core.start(t, e)
 	e.rtsReconcileTagged(t, ctx, "WR-02:")
 	check(2)
+}
+
+// rtsNowFact — имя участника, которого настоящий Mihomo сейчас держит в группе
+// g: у «резерва» на скрытой группе основных узлов — её now.
+func rtsNowFact(states map[string]services.ClashProxyState, g Group) string {
+	name := states[g.Name].Now
+	if g.Mode == ModeFallback && name == hiddenName(g.ID) {
+		name = states[name].Now
+	}
+	return name
+}
+
+// rtsAmbiguousNow: группы «авто» и «резерв» с одноимёнными узлами A и B в
+// составе (копии), узкие группы только с узлом A, когда одноимённый B есть в
+// другом провайдере (имя профиля остаётся неоднозначным и после исправления
+// генератора), и положительный случай — узел C подписки с различимым именем.
+// RuntimeNow сверяется с now настоящего процесса: неоднозначное имя даёт
+// known=false и пустой ref, различимое — Ref своего узла и known=true; история
+// по неоднозначному имени узлу не приписывается. До исправления RuntimeNow
+// ставил known=true на последнем совпадении по порядку (WR-03 ревью 5).
+func rtsAmbiguousNow(t *testing.T, ctx context.Context, d *rtsDup) {
+	e, core, a, b := d.e, d.core, d.a, d.b
+	cat := e.catalog(t).Mihomo
+	var c sources.CatalogNode
+	for _, n := range d.subs {
+		same := 0
+		for _, o := range cat {
+			if o.MihomoName == n.MihomoName {
+				same++
+			}
+		}
+		if same == 1 {
+			c = n
+			break
+		}
+	}
+	if c.Ref == "" {
+		t.Fatal("WR-03: prepare distinct_node=false")
+	}
+	both := []string{a.Source, b.Source}
+	only := []string{a.Source}
+	exactA := []string{rtsExact(a.Display)}
+	specs := []Group{
+		{Name: "Одноимённые авто", Mode: ModeAuto, Regex: true, Sources: GroupSources{IDs: both}, Include: exactA},
+		{Name: "Одноимённые резерв", Mode: ModeFallback, Regex: true, Sources: GroupSources{IDs: both}, Include: exactA, Reserve: c.Ref},
+		{Name: "Узкое авто", Mode: ModeAuto, Regex: true, Sources: GroupSources{IDs: only}, Include: exactA},
+		{Name: "Узкий резерв", Mode: ModeFallback, Regex: true, Sources: GroupSources{IDs: only}, Include: exactA, Reserve: c.Ref},
+		{Name: "Различимое авто", Mode: ModeAuto, Regex: true, Sources: GroupSources{IDs: only}, Include: []string{rtsExact(c.Display)}},
+	}
+	const (
+		wideAuto = iota
+		wideFallback
+		narrowAuto
+		narrowFallback
+		distinct
+	)
+	for i := range specs {
+		_, saved, err := e.svc.SaveGroup(e.rev(t), specs[i])
+		if err != nil {
+			t.Fatalf("WR-03: prepare group=%d save_error=true", i)
+		}
+		specs[i] = saved
+	}
+	d.reapply(t)
+	am, err := e.svc.appliedModelOf(e.state(t))
+	if err != nil {
+		t.Fatal("WR-03: prepare model_error=true")
+	}
+	build := runtimeMihomo(am)
+	ambiguous := build.ambiguousNames()
+	copyA, copyB, copyC := build.copyName[a.Ref], build.copyName[b.Ref], build.copyName[c.Ref]
+	if !ambiguous[a.MihomoName] || ambiguous[c.MihomoName] || copyC == "" {
+		t.Fatalf("WR-03: prepare shared_name_ambiguous=%t distinct_name_ambiguous=%t reserve_copy=%t",
+			ambiguous[a.MihomoName], ambiguous[c.MihomoName], copyC != "")
+	}
+	// Участник группы по имени в профиле, независимо от расчёта RuntimeNow:
+	// одноимённые узлы в составе пишутся копиями, узкие группы берут узел A из
+	// провайдера подписки, «резерв» добавляет копию C.
+	owners := map[int]map[string]string{
+		wideAuto:       {copyA: a.Ref, copyB: b.Ref},
+		wideFallback:   {copyA: a.Ref, copyB: b.Ref, copyC: c.Ref},
+		narrowAuto:     {a.MihomoName: a.Ref},
+		narrowFallback: {a.MihomoName: a.Ref, copyC: c.Ref},
+		distinct:       {c.MihomoName: c.Ref},
+	}
+
+	// Факты ядра читаются до и после RuntimeNow: сравнение идёт, только если
+	// now всех групп не сменился между чтениями.
+	var states map[string]services.ClashProxyState
+	var got RuntimeNow
+	stable := false
+	for end := time.Now().Add(30 * time.Second); !stable && time.Now().Before(end); time.Sleep(500 * time.Millisecond) {
+		first, err1 := core.svc.ProxiesState(ctx)
+		rn, err2 := e.svc.RuntimeNow(ctx)
+		second, err3 := core.svc.ProxiesState(ctx)
+		if err1 != nil || err2 != nil || err3 != nil {
+			continue
+		}
+		stable = true
+		for _, g := range specs {
+			name := rtsNowFact(first, g)
+			if name == "" || name != rtsNowFact(second, g) {
+				stable = false
+			}
+			if _, ok := rn.Groups[g.ID]; !ok {
+				stable = false
+			}
+		}
+		states, got = second, rn
+	}
+	if !stable {
+		t.Fatal("WR-03: facts_stable=false")
+	}
+	if got.Kernel != configlayer.KernelMihomo {
+		t.Fatalf("WR-03: kernel_mihomo=%t", got.Kernel == configlayer.KernelMihomo)
+	}
+	// Узкое «авто» из одного узла держит именно его имя, различимое «авто» — C.
+	if rtsNowFact(states, specs[narrowAuto]) != a.MihomoName || rtsNowFact(states, specs[distinct]) != c.MihomoName {
+		t.Fatalf("WR-03: narrow_now_a=%t distinct_now_c=%t",
+			rtsNowFact(states, specs[narrowAuto]) == a.MihomoName, rtsNowFact(states, specs[distinct]) == c.MihomoName)
+	}
+	for i, g := range specs {
+		name := rtsNowFact(states, g)
+		owner, member := owners[i][name]
+		if !member {
+			t.Fatalf("WR-03: group=%d now_member=false", i)
+		}
+		wantKnown := !ambiguous[name]
+		wantRef := ""
+		if wantKnown {
+			wantRef = owner
+		}
+		now := got.Groups[g.ID]
+		if now.Known != wantKnown || now.Ref != wantRef {
+			t.Fatalf("WR-03: group=%d now_ambiguous=%t known=%t want_known=%t ref_set=%t ref_match=%t",
+				i, ambiguous[name], now.Known, wantKnown, now.Ref != "", now.Ref == wantRef)
+		}
+	}
+	// Отрицательный случай не зависит от выбора url-test: узкое «авто» держит
+	// неоднозначное имя A всегда; положительный — различимое имя C.
+	if n := got.Groups[specs[narrowAuto].ID]; n.Known || n.Ref != "" {
+		t.Fatalf("WR-03: narrow_known=%t narrow_ref_set=%t", n.Known, n.Ref != "")
+	}
+	if n := got.Groups[specs[distinct].ID]; !n.Known || n.Ref != c.Ref {
+		t.Fatalf("WR-03: distinct_known=%t distinct_ref_match=%t", n.Known, n.Ref == c.Ref)
+	}
+	// История по имени, которое в профиле носят разные узлы, узлу не
+	// приписывается: узел, у которого все имена неоднозначны, остаётся без неё.
+	for i, ref := range []string{a.Ref, b.Ref} {
+		names := []string{a.MihomoName, build.copyName[ref]}
+		if ref == b.Ref {
+			names[0] = b.MihomoName
+		}
+		all := true
+		for _, nm := range names {
+			if nm != "" && !ambiguous[nm] {
+				all = false
+			}
+		}
+		if _, has := got.History[ref]; all && has {
+			t.Fatalf("WR-03: history_node=%d ambiguous_history_attributed=true", i)
+		}
+	}
 }
 
 // rtsCurrent — current группы в виде «Прокси» (RuntimeView).

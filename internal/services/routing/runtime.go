@@ -428,15 +428,25 @@ func (s *Service) RuntimeNow(ctx context.Context) (RuntimeNow, error) {
 			if g.Mode == ModeFallback && name == hiddenName(g.ID) {
 				name = states[name].Now
 			}
+			// Цель известна, только если факт ядра различим: непустое имя
+			// совпало ровно с одним узлом (повтор резервного узла — тот же Ref),
+			// и в профиле это имя не носят разные узлы. Иначе «Сейчас» остаётся
+			// неизвестным (D-16, D-26), а не последним совпадением по порядку.
+			matched := map[string]bool{}
 			for _, n := range nodes {
 				if name != "" && name == names[n.Ref] {
-					now.Ref, now.Known = n.Ref, true
+					matched[n.Ref] = true
 				}
 				// История по имени, которое носят разные узлы, принадлежит
 				// неизвестно какому из них: такой узел остаётся без истории.
 				if h := states[names[n.Ref]].History; len(h) > 0 && !ambiguous[names[n.Ref]] {
 					last := h[len(h)-1]
 					out.History[n.Ref] = NowDelay{MS: last.Delay, At: last.Time}
+				}
+			}
+			if len(matched) == 1 && !ambiguous[name] {
+				for ref := range matched {
+					now.Ref, now.Known = ref, true
 				}
 			}
 		case configlayer.KernelXray:
