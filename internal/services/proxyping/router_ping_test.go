@@ -658,6 +658,12 @@ func pingSOCKS(t *testing.T, hung bool) *pingProxy {
 					return
 				}
 				defer up.Close()
+				// Соединение с целью закрывает и очистка теста: ReadAll(up) иначе
+				// ждёт цель, которой оборванный клиент не дослал запрос.
+				mu.Lock()
+				conns[up] = true
+				mu.Unlock()
+				defer func() { mu.Lock(); delete(conns, up); mu.Unlock() }()
 				current := p.current.Add(1)
 				for old := p.peak.Load(); current > old && !p.peak.CompareAndSwap(old, current); old = p.peak.Load() {
 				}
