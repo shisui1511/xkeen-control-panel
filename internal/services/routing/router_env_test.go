@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -62,6 +63,9 @@ type rtOptions struct {
 	// selection — хуки выбора участника (CommitLive и AfterApply) зарегистрированы
 	// в слое, как это делает cmd/xcp/main.go.
 	selection bool
+	// subClient — запросы подписок идут обычным HTTP-клиентом без защиты от SSRF:
+	// подписку отдаёт локальный сервер сценария.
+	subClient bool
 }
 
 // rtOption меняет настройки окружения rtNewEnv.
@@ -78,6 +82,12 @@ func rtWithDeps(f func(*Deps)) rtOption {
 // и сверку после применения (сценарии 146-14).
 func rtWithSelection() rtOption {
 	return func(o *rtOptions) { o.selection = true }
+}
+
+// rtWithSubscriptionClient разрешает загрузку подписки с локального сервера
+// сценария (защита от SSRF у обычного клиента запрещает loopback).
+func rtWithSubscriptionClient() rtOption {
+	return func(o *rtOptions) { o.subClient = true }
 }
 
 // rtWithKernels задаёт установленные ядра окружения (по умолчанию оба).
@@ -166,7 +176,11 @@ func rtNewEnv(t *testing.T, opts ...rtOption) *rtEnv {
 	t.Cleanup(layer.Stop)
 
 	installed := func() configlayer.InstalledKernels { return o.installed }
-	src, err := sources.New(sources.Deps{DataDir: dir, Layer: layer, Installed: installed})
+	sdeps := sources.Deps{DataDir: dir, Layer: layer, Installed: installed}
+	if o.subClient {
+		sdeps.Client = func(timeout time.Duration) *http.Client { return &http.Client{Timeout: timeout} }
+	}
+	src, err := sources.New(sdeps)
 	if err != nil {
 		t.Fatalf("sources.New: %v", err)
 	}

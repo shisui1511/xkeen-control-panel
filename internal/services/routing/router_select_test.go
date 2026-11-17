@@ -9,7 +9,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
-	"net"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -507,6 +507,13 @@ func rtsSubscription(t *testing.T, e *rtEnv) []sources.CatalogNode {
 	if url == "" {
 		t.Fatal("subscription_prepare: url=false")
 	}
+	return rtsAddSubscription(t, e, url)
+}
+
+// rtsAddSubscription добавляет подписку по адресу штатными предпросмотром и
+// «Добавить» и возвращает её точно выбираемые узлы Mihomo (см. rtsSubscription).
+func rtsAddSubscription(t *testing.T, e *rtEnv, url string) []sources.CatalogNode {
+	t.Helper()
 	view, err := e.src.Preview(context.Background(), nodes.Input{Text: url})
 	if err != nil || view.Token == "" || len(view.Subscriptions) != 1 || len(view.Errors) != 0 {
 		t.Fatalf("subscription_prepare: error=%t token=%t subscriptions=%d errors=%d", err != nil, view.Token != "", len(view.Subscriptions), len(view.Errors))
@@ -863,45 +870,38 @@ func rtsAmbiguousNow(t *testing.T, ctx context.Context, d *rtsDup) {
 	}
 }
 
-// rtsProviderPing: узел настоящей подписки, которого нет копией в профиле,
-// меряется через провайдер своего источника. Своё окружение и свой процесс
-// Mihomo; остальные группы ограничены «Моими узлами», а узкая «авто» выбирает
-// ровно этот узел подписки точным выражением, поэтому ни одна группа не пишет
-// его копию. PingRequest группы даёт метод mihomo и цели с провайдером
-// источника; настоящий раннер пинга (Clash API отдельного процесса, без подмены
-// замера, сети и результата) меряет их через ProviderProxyDelay. Диагностика —
-// только метод, статус, причина и коды пачки. Группа берёт несколько первых
-// пригодных по имени узлов, сервер которых принимает TCP-соединение: открытый
-// порт не делает узел живым прокси, поэтому проверка требует хотя бы один узел
-// с положительной задержкой, а остальные должны быть измерены тем же методом;
-// таких узлов нет — провал подготовки.
+// rtsProviderPing: узел подписки, которого нет копией в профиле, меряется через
+// провайдер своего источника. Подписку отдаёт локальный HTTP-сервер сценария
+// (ссылка на живой узел Xray на этом же устройстве), её загружают штатные
+// предпросмотр и «Добавить»; узлы настоящей подписки стенда живыми прокси не
+// бывают, и замер через них не отличил бы дефект пути от недоступного узла.
+// Остальные группы ограничены «Моими узлами», а узкая «авто» выбирает ровно этот
+// узел точным выражением, поэтому ни одна группа не пишет его копию.
+// PingRequest группы даёт метод mihomo и одну цель с провайдером источника;
+// настоящий раннер пинга (Clash API отдельного процесса, без подмены замера,
+// сети и результата) меряет её через ProviderProxyDelay. Диагностика — только
+// метод, статус, причина и коды пачки.
 func rtsProviderPing(t *testing.T) {
+	rtNeedBins(t, rtXrayBin)
+	nodePort, _ := rtStartNode(t)
+	probe := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	t.Cleanup(probe.Close)
+	subscription := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, "socks5://127.0.0.1:%d#pp-live\n", nodePort)
+	}))
+	t.Cleanup(subscription.Close)
+
 	core := rtNewMihomoCore(t)
-	e := rtNewEnv(t, rtWithKernels(rtMihomoOnly), rtWithMihomoCore(core), rtsRuntimeCore(core))
+	e := rtNewEnv(t, rtWithKernels(rtMihomoOnly), rtWithMihomoCore(core), rtsRuntimeCore(core), rtWithSubscriptionClient())
 	e.writeUserProfile(t)
 	// «Мои узлы» добавляются первыми: группы по умолчанию создаются при них, и
 	// их можно ограничить этим источником.
 	e.addMyLinks(t, "vless_reality")
-	subs := rtsSubscription(t, e)
-	const pingNodes = 6
-	var picked []sources.CatalogNode
-	for i, n := range subs {
-		if i == 30 || len(picked) == pingNodes {
-			break
-		}
-		conn, err := net.DialTimeout("tcp", net.JoinHostPort(n.Node.Host, strconv.Itoa(n.Node.Port)), 3*time.Second)
-		if err == nil {
-			_ = conn.Close()
-			picked = append(picked, n)
-		}
+	subs := rtsAddSubscription(t, e, subscription.URL)
+	if len(subs) != 1 {
+		t.Fatalf("provider_ping_prepare: subscription_nodes=%d", len(subs))
 	}
-	if len(picked) == 0 {
-		t.Fatal("provider_ping_prepare: reachable_node=false")
-	}
-	include := make([]string, 0, len(picked))
-	for _, n := range picked {
-		include = append(include, rtsExact(n.Display))
-	}
+	s := subs[0]
 	for _, g := range e.groups(t).Items {
 		g.Sources = GroupSources{IDs: []string{sources.MySourceID}}
 		if _, _, err := e.svc.SaveGroup(e.rev(t), g); err != nil {
@@ -910,10 +910,13 @@ func rtsProviderPing(t *testing.T) {
 	}
 	_, grp, err := e.svc.SaveGroup(e.rev(t), Group{
 		Name: "Провайдер", Mode: ModeAuto, Regex: true,
-		Sources: GroupSources{IDs: []string{picked[0].Source}}, Include: include,
+		Sources: GroupSources{IDs: []string{s.Source}}, Include: []string{rtsExact(s.Display)},
 	})
 	if err != nil {
 		t.Fatal("provider_ping_prepare: group_error=true")
+	}
+	if err := e.svcSaveProbe(probe.URL + "/probe"); err != nil {
+		t.Fatal("provider_ping_prepare: probe_error=true")
 	}
 	e.takeAndApply(t)
 	core.start(t, e)
@@ -922,26 +925,17 @@ func rtsProviderPing(t *testing.T) {
 	if err != nil {
 		t.Fatal("provider_ping_prepare: model_error=true")
 	}
-	for _, n := range picked {
-		if name := runtimeMihomo(am).copyName[n.Ref]; name != "" {
-			t.Fatal("provider_ping_prepare: node_copied=true")
-		}
+	if name := runtimeMihomo(am).copyName[s.Ref]; name != "" {
+		t.Fatal("provider_ping_prepare: node_copied=true")
 	}
 	req, err := e.svc.PingRequest(proxyping.ScopeGroup, grp.ID)
-	if err != nil || req.Method != proxyping.MethodMihomo || req.Kernel != configlayer.KernelMihomo || len(req.Targets) != len(picked) {
-		t.Fatalf("provider_ping_prepare: error=%t method=%q kernel=%q targets=%d want=%d", err != nil, req.Method, req.Kernel, len(req.Targets), len(picked))
+	if err != nil || req.Method != proxyping.MethodMihomo || req.Kernel != configlayer.KernelMihomo || len(req.Targets) != 1 {
+		t.Fatalf("provider_ping_prepare: error=%t method=%q kernel=%q targets=%d", err != nil, req.Method, req.Kernel, len(req.Targets))
 	}
-	byRef := map[string]sources.CatalogNode{}
-	for _, n := range picked {
-		byRef[n.Ref] = n
-	}
-	for i, target := range req.Targets {
-		n, known := byRef[target.Ref]
-		if !known || target.MihomoName != n.MihomoName || target.MihomoProvider == "" || target.MihomoProvider != providerName(n.Source) {
-			t.Fatalf("provider_ping_prepare: target=%d ref_known=%t name_match=%t provider_set=%t provider_match=%t",
-				i, known, known && target.MihomoName == n.MihomoName, target.MihomoProvider != "", known && target.MihomoProvider == providerName(n.Source))
-		}
-		delete(byRef, target.Ref)
+	target := req.Targets[0]
+	if target.Ref != s.Ref || target.MihomoName != s.MihomoName || target.MihomoProvider == "" || target.MihomoProvider != providerName(s.Source) {
+		t.Fatalf("provider_ping_prepare: ref_match=%t name_match=%t provider_set=%t provider_match=%t",
+			target.Ref == s.Ref, target.MihomoName == s.MihomoName, target.MihomoProvider != "", target.MihomoProvider == providerName(s.Source))
 	}
 
 	runner, err := proxyping.New(proxyping.Deps{
@@ -978,29 +972,16 @@ func rtsProviderPing(t *testing.T) {
 		}
 	}
 	b := snap.Batch
-	total := len(picked)
-	if b.State != proxyping.StateDone || b.Done != total || b.Total != total || b.Method != proxyping.MethodMihomo ||
+	if b.State != proxyping.StateDone || b.Done != 1 || b.Total != 1 || b.Method != proxyping.MethodMihomo ||
 		b.Kernel != configlayer.KernelMihomo || b.ReasonCode != "" || b.FallbackReason != "" {
-		t.Fatalf("provider_ping: state=%q done=%d total=%d want=%d method=%q kernel=%q reason_code=%q fallback_reason=%q",
-			b.State, b.Done, b.Total, total, b.Method, b.Kernel, b.ReasonCode, b.FallbackReason)
+		t.Fatalf("provider_ping: state=%q done=%d total=%d method=%q kernel=%q reason_code=%q fallback_reason=%q",
+			b.State, b.Done, b.Total, b.Method, b.Kernel, b.ReasonCode, b.FallbackReason)
 	}
-	var okNodes, wrongMethod, missing int
-	reasons := map[string]int{}
-	for _, n := range picked {
-		res, ok := snap.Results[n.Ref]
-		switch {
-		case !ok:
-			missing++
-		case res.Kernel != configlayer.KernelMihomo || res.Method != proxyping.MethodMihomo || res.At.IsZero():
-			wrongMethod++
-		case res.Status == proxyping.StatusOK && res.MS > 0 && res.Reason == "":
-			okNodes++
-		default:
-			reasons[res.Status+"/"+res.Reason]++
-		}
-	}
-	if okNodes == 0 || wrongMethod != 0 || missing != 0 {
-		t.Fatalf("provider_ping: nodes=%d ok=%d wrong_method=%d missing=%d not_ok=%v", total, okNodes, wrongMethod, missing, reasons)
+	res, ok := snap.Results[s.Ref]
+	if !ok || res.Kernel != configlayer.KernelMihomo || res.Method != proxyping.MethodMihomo || res.Status != proxyping.StatusOK ||
+		res.MS <= 0 || res.Reason != "" || res.At.IsZero() {
+		t.Fatalf("provider_ping: result=%t kernel=%q method=%q status=%q reason=%q ms_positive=%t at_set=%t",
+			ok, res.Kernel, res.Method, res.Status, res.Reason, res.MS > 0, !res.At.IsZero())
 	}
 }
 
