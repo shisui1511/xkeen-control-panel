@@ -557,7 +557,13 @@ func rtsAddSubscription(t *testing.T, e *rtEnv, url string) []sources.CatalogNod
 				foreignXray++
 			}
 		}
-		t.Fatalf("subscription_prepare: exact_nodes=0 mihomo_foreign=%d renamed=%d xray_foreign=%d sources=%d", foreign, renamed, foreignXray, len(full.Sources))
+		pk := view.Subscriptions[0].Kernels[configlayer.KernelMihomo]
+		kerr := ""
+		if pk.Error != nil {
+			kerr = pk.Error.Code
+		}
+		t.Fatalf("subscription_prepare: exact_nodes=0 mihomo_foreign=%d renamed=%d xray_foreign=%d sources=%d preview_count=%d stubs=%d skipped=%d error=%q",
+			foreign, renamed, foreignXray, len(full.Sources), pk.Count, pk.Stubs, pk.Skipped, kerr)
 	}
 	return out
 }
