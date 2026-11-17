@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -399,7 +400,9 @@ func rtsWaitNow(t *testing.T, core *rtMihomoCore, group, want string, wait time.
 // разных источников в одной ручной группе различимы, выбор второго ставит в
 // Mihomo именно его и переживает внешний выбор и перезапуск (WR-02);
 // ambiguous_now — «Сейчас» групп «авто» и «резерв» не угадывает узел по имени,
-// которое в профиле носят разные узлы, а различимое имя даёт верный Ref (WR-03).
+// которое в профиле носят разные узлы, а различимое имя даёт верный Ref (WR-03);
+// provider_ping — узел подписки без копии меряется через свой провайдер
+// настоящим раннером пинга (PingRequest → Runner → ProviderProxyDelay).
 func TestRouterSelectMihomoReconcile(t *testing.T) {
 	routertest.Tier(t, routertest.Full, "реальная загрузка: настоящая подписка стенда для одноимённых узлов и провайдерного замера")
 	ctx := context.Background()
@@ -486,6 +489,7 @@ func TestRouterSelectMihomoReconcile(t *testing.T) {
 	dup := rtsNewDup(t)
 	t.Run("duplicate_names", func(t *testing.T) { rtsDuplicateNames(t, ctx, dup) })
 	t.Run("ambiguous_now", func(t *testing.T) { rtsAmbiguousNow(t, ctx, dup) })
+	t.Run("provider_ping", rtsProviderPing)
 }
 
 // rtsExact — точное выражение include (режим regex) для имени узла.
@@ -856,6 +860,119 @@ func rtsAmbiguousNow(t *testing.T, ctx context.Context, d *rtsDup) {
 		if _, has := got.History[ref]; all && has {
 			t.Fatalf("WR-03: history_node=%d ambiguous_history_attributed=true", i)
 		}
+	}
+}
+
+// rtsProviderPing: узел настоящей подписки, которого нет копией в профиле,
+// меряется через провайдер своего источника. Своё окружение и свой процесс
+// Mihomo; остальные группы ограничены «Моими узлами», а узкая «авто» выбирает
+// ровно этот узел подписки точным выражением, поэтому ни одна группа не пишет
+// его копию. PingRequest группы даёт метод mihomo и одну цель с провайдером
+// источника; настоящий раннер пинга (Clash API отдельного процесса, без подмены
+// замера, сети и результата) меряет её через ProviderProxyDelay. Диагностика —
+// только метод, статус, причина и коды пачки. Узел выбирается среди первых
+// пригодных по имени, сервер которых принимает TCP-соединение; такого нет —
+// провал подготовки.
+func rtsProviderPing(t *testing.T) {
+	core := rtNewMihomoCore(t)
+	e := rtNewEnv(t, rtWithKernels(rtMihomoOnly), rtWithMihomoCore(core), rtsRuntimeCore(core))
+	e.writeUserProfile(t)
+	// «Мои узлы» добавляются первыми: группы по умолчанию создаются при них, и
+	// их можно ограничить этим источником.
+	e.addMyLinks(t, "vless_reality")
+	subs := rtsSubscription(t, e)
+	var s sources.CatalogNode
+	for i, n := range subs {
+		if i == 20 {
+			break
+		}
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(n.Node.Host, strconv.Itoa(n.Node.Port)), 3*time.Second)
+		if err == nil {
+			_ = conn.Close()
+			s = n
+			break
+		}
+	}
+	if s.Ref == "" {
+		t.Fatal("provider_ping_prepare: reachable_node=false")
+	}
+	for _, g := range e.groups(t).Items {
+		g.Sources = GroupSources{IDs: []string{sources.MySourceID}}
+		if _, _, err := e.svc.SaveGroup(e.rev(t), g); err != nil {
+			t.Fatal("provider_ping_prepare: restrict_error=true")
+		}
+	}
+	_, grp, err := e.svc.SaveGroup(e.rev(t), Group{
+		Name: "Провайдер", Mode: ModeAuto, Regex: true,
+		Sources: GroupSources{IDs: []string{s.Source}}, Include: []string{rtsExact(s.Display)},
+	})
+	if err != nil {
+		t.Fatal("provider_ping_prepare: group_error=true")
+	}
+	e.takeAndApply(t)
+	core.start(t, e)
+
+	am, err := e.svc.appliedModelOf(e.state(t))
+	if err != nil {
+		t.Fatal("provider_ping_prepare: model_error=true")
+	}
+	if name := runtimeMihomo(am).copyName[s.Ref]; name != "" {
+		t.Fatal("provider_ping_prepare: node_copied=true")
+	}
+	req, err := e.svc.PingRequest(proxyping.ScopeGroup, grp.ID)
+	if err != nil || req.Method != proxyping.MethodMihomo || req.Kernel != configlayer.KernelMihomo || len(req.Targets) != 1 {
+		t.Fatalf("provider_ping_prepare: error=%t method=%q kernel=%q targets=%d", err != nil, req.Method, req.Kernel, len(req.Targets))
+	}
+	target := req.Targets[0]
+	if target.Ref != s.Ref || target.MihomoName != s.MihomoName || target.MihomoProvider == "" || target.MihomoProvider != providerName(s.Source) {
+		t.Fatalf("provider_ping_prepare: ref_match=%t name_match=%t provider_set=%t provider_match=%t",
+			target.Ref == s.Ref, target.MihomoName == s.MihomoName, target.MihomoProvider != "", target.MihomoProvider == providerName(s.Source))
+	}
+
+	runner, err := proxyping.New(proxyping.Deps{
+		ActiveKernel: func() string {
+			v, err := e.svc.RuntimeView()
+			if err != nil {
+				return ""
+			}
+			return v.Kernel
+		},
+		Mihomo:       core.svc,
+		TLSPing:      rtTLSPing,
+		Fingerprints: e.svc.NodeFingerprints,
+		TmpRoot:      rtWorkSubdir(t, "pp-"),
+		Publish:      func(string) {},
+	})
+	if err != nil {
+		t.Fatal("provider_ping_prepare: runner_error=true")
+	}
+	runner.Start()
+	t.Cleanup(runner.Stop)
+	start, err := runner.Launch(req)
+	if err != nil || start.Joined {
+		t.Fatalf("provider_ping: launch_error=%t joined=%t", err != nil, start.Joined)
+	}
+	var snap proxyping.PingSnapshot
+	for end := time.Now().Add(req.Timeout + 60*time.Second); ; time.Sleep(250 * time.Millisecond) {
+		snap = runner.Snapshot()
+		if snap.Batch != nil && snap.Batch.ID == start.BatchID && snap.Batch.State != proxyping.StateRunning {
+			break
+		}
+		if time.Now().After(end) {
+			t.Fatal("provider_ping: batch_finished=false")
+		}
+	}
+	b := snap.Batch
+	if b.State != proxyping.StateDone || b.Done != 1 || b.Total != 1 || b.Method != proxyping.MethodMihomo ||
+		b.Kernel != configlayer.KernelMihomo || b.ReasonCode != "" || b.FallbackReason != "" {
+		t.Fatalf("provider_ping: state=%q done=%d total=%d method=%q kernel=%q reason_code=%q fallback_reason=%q",
+			b.State, b.Done, b.Total, b.Method, b.Kernel, b.ReasonCode, b.FallbackReason)
+	}
+	res, ok := snap.Results[s.Ref]
+	if !ok || res.Kernel != configlayer.KernelMihomo || res.Method != proxyping.MethodMihomo || res.Status != proxyping.StatusOK ||
+		res.MS <= 0 || res.Reason != "" || res.At.IsZero() {
+		t.Fatalf("provider_ping: result=%t kernel=%q method=%q status=%q reason=%q ms_positive=%t at_set=%t",
+			ok, res.Kernel, res.Method, res.Status, res.Reason, res.MS > 0, !res.At.IsZero())
 	}
 }
 
