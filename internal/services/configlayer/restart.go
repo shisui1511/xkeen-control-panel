@@ -90,10 +90,15 @@ var (
 	RestartExpectTimeout = defaultRestartExpectTimeout(runtime.GOARCH)
 )
 
-// hotAliveChecks — число повторных снимков PID (через RestartPollInterval) после
-// горячей замены Xray: ядро, упавшее в первые секунды, не считается применившим
-// выбор (WR-03). Подтверждение без окна устойчивости: 3 × 0,5 с вместо 5 с.
-const hotAliveChecks = 3
+// hotAliveWindow — окно проверки живости Xray после горячей замены: после него
+// делается второй снимок PID, и ядро, упавшее за это время после rmo/ado, не
+// выдаётся за применившее выбор (WR-03), а доводится перезапуском (D-15).
+// Значение — решение по плану 150-31 (владелец делегировал выбор, выбрано S300):
+// падение от самой замены приходит во время ado или сразу после него, а падение
+// на первом трафике короткое окно всё равно не ловит. Окно не короче 200 мс:
+// тесты hot_kill_* убивают Xray через 20–100 мс после строки журнала замены, и
+// более короткое окно перестало бы надёжно ловить такое падение.
+const hotAliveWindow = 300 * time.Millisecond
 
 // defaultRestartExpectTimeout — время ожидания API и провайдеров Mihomo после
 // рестарта для платформы. На MIPS (mips, mipsle) Mihomo с geodata и rule-провайдерами
@@ -359,21 +364,20 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 				// ado), поэтому достаточно снимка «тот же процесс в работе» (замысел
 				// 150-01). Окно устойчивости RestartStableWindow — для xkeen -restart
 				// и перезагрузки профиля Mihomo; здесь оно добавляло к каждому
-				// горячему выбору не меньше 5 с. Вместо него — короткий опрос
-				// (hotAliveChecks × RestartPollInterval): ядро, упавшее в первые
-				// секунды после замены, не выдаётся за применённое выбор (WR-03).
-				// Другой PID или остановленный процесс — частичный сбой и доводящий
-				// перезапуск (D-15).
+				// горячему выбору не меньше 5 с. Вместо него — снимок сразу после
+				// хука и второй снимок через hotAliveWindow: ядро, упавшее в окне
+				// после замены, не выдаётся за применившее выбор (WR-03). Проверка
+				// идёт до ответа (D-11). Другой PID или остановленный процесс —
+				// частичный сбой и доводящий перезапуск (D-15).
 				pid := p.runningPID(KernelXray)
-				for i := 0; i < hotAliveChecks && pid == prevPID; i++ {
+				if pid == prevPID {
 					select {
 					case <-ctx.Done():
-					case <-time.After(RestartPollInterval):
+					case <-time.After(hotAliveWindow):
 					}
-					if interrupted(ctx) != nil {
-						break
+					if interrupted(ctx) == nil {
+						pid = p.runningPID(KernelXray)
 					}
-					pid = p.runningPID(KernelXray)
 				}
 				if err := interrupted(ctx); err != nil {
 					return interruptedView(kernel), err
