@@ -101,7 +101,7 @@ export interface PingBatch {
   total: number;
   done: number;
   excluded: number;
-  fallback_reason?: 'no_xray_binary' | 'low_memory';
+  fallback_reason?: 'no_xray_binary' | 'low_memory' | 'xray_rejected';
   reason_code?: string;
   started_at: string;
   finished_at?: string;
