@@ -41,7 +41,8 @@ const (
 	rtFltAPIFile = "99_xcp-api.json"
 	// rtFltAttempts — попыток поймать окно подтверждения горячей замены.
 	rtFltAttempts = 3
-	// rtFltKillPoll — шаг чтения журнала панели горутиной убийства.
+	// rtFltKillPoll — шаг чтения журнала панели горутинами убийства и выбора по
+	// строке журнала.
 	rtFltKillPoll = 20 * time.Millisecond
 	// rtFltHotMark — строка журнала после горячей замены (routing/hotswap.go).
 	rtFltHotMark = "[routing] горячая замена Xray: тегов"
@@ -375,17 +376,59 @@ func rtFltKillOnHot(ctx context.Context, offset int64, pid int) <-chan rtFltKill
 	return out
 }
 
+// rtFltNext — итог выбора, отправленного по строке журнала: отправлен ли он,
+// моменты отправки и ответа, ответ.
+type rtFltNext struct {
+	sent     bool
+	at, done time.Time
+	s        rtFltSel
+	err      error
+}
+
+// rtFltSelectOnMark читает журнал панели с offset каждые rtFltKillPoll и при первой
+// строке mark сразу отправляет выбор member в группе gid (rtFltSelectBare).
+// Закрытый late до строки — окно прошло, выбор не отправляется. Горутина без t.*:
+// итог — через канал.
+func (e *rtSrc) rtFltSelectOnMark(offset int64, mark string, late <-chan struct{}, gid, member string) <-chan rtFltNext {
+	out := make(chan rtFltNext, 1)
+	go func() {
+		tick := time.NewTicker(rtFltKillPoll)
+		defer tick.Stop()
+		for !strings.Contains(rtFltLogSince(offset), mark) {
+			select {
+			case <-late:
+				out <- rtFltNext{}
+				return
+			case <-tick.C:
+			}
+		}
+		r := rtFltNext{sent: true, at: time.Now()}
+		r.s, r.err = e.rtFltSelectBare(gid, member)
+		r.done = time.Now()
+		out <- r
+	}()
+	return out
+}
+
 // rtFltRollback — итог наблюдения за потоком событий слоя: событие шага restart
-// с пояснением restart_failed_rolling_back пришло, и чужой файл снят по нему.
+// с пояснением restart_failed_rolling_back пришло, и чужой файл снят по нему;
+// итог этого прохода — первое apply_done после события отката (код итога, откат
+// файлов, исход Xray): GET state к концу наблюдения может нести уже следующий проход.
 type rtFltRollback struct {
 	seen    bool
 	removed bool
+	// done — apply_done прохода с откатом пришло.
+	done       bool
+	code       string
+	rolledBack bool
+	xray       string
 }
 
 // rtFltWatchRollback открывает поток событий слоя и ждёт его первого события
 // (подписка заведена). Горутина без t.*: на первое apply_step шага restart с
 // пояснением restart_failed_rolling_back сразу удаляет чужой файл — до отката
-// файлов и подъёма Xray на прежних. Итог — в канал после закрытия потока по ctx.
+// файлов и подъёма Xray на прежних; следующее apply_done — итог этого прохода.
+// Итог — в канал после закрытия потока по ctx.
 func (e *rtSrc) rtFltWatchRollback(ctx context.Context) <-chan rtFltRollback {
 	e.t.Helper()
 	const path = "/api/configlayer/events"
@@ -423,6 +466,28 @@ func (e *rtSrc) rtFltWatchRollback(ctx context.Context) <-chan rtFltRollback {
 				if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &sv) == nil && sv.ID == "restart" && sv.NoteCode == rtFltRollingNote {
 					res.seen = true
 					res.removed = rtFltDropBad()
+				}
+			case strings.HasPrefix(line, "data: ") && event == "apply_done" && res.seen && !res.done:
+				var av struct {
+					Restart []struct {
+						Kernel  string `json:"kernel"`
+						Outcome string `json:"outcome"`
+					} `json:"restart"`
+					Result *struct {
+						Code       string `json:"code"`
+						RolledBack bool   `json:"rolled_back"`
+					} `json:"result"`
+				}
+				if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &av) == nil {
+					res.done = true
+					if av.Result != nil {
+						res.code, res.rolledBack = av.Result.Code, av.Result.RolledBack
+					}
+					for _, r := range av.Restart {
+						if r.Kernel == "xray" {
+							res.xray = r.Outcome
+						}
+					}
 				}
 			case line == "":
 				event = ""
@@ -645,87 +710,57 @@ func TestRouterSelectXrayFaults(t *testing.T) {
 		obs[nodeB] = in
 	})
 
-	// CR-01, возврат пачки: порт API закрыт и чужой файл лежит, как в
-	// fallback_full_validation. Одновременные выборы узла B в двух независимых
-	// группах «Пачка» отвергаются полной проверкой перед перезапуском, и каждый
-	// получает reverted: Live и xcp-groups обеих групп возвращаются к узлу A, Xray
-	// работает с прежним PID. После снятия сбоев выбор третьей группы применяется
-	// горячей заменой и не несёт отвергнутых выборов первых двух.
+	// CR-01, возврат пачки и следующая пачка во время неудачного прохода: порт API
+	// закрыт и чужой файл лежит, как в fallback_full_validation. Одновременные
+	// выборы узла B в «Пачка 1» и «Пачка 2» отвергаются полной проверкой перед
+	// перезапуском и получают reverted: Live и xcp-groups обеих групп возвращаются
+	// к узлу A, Xray работает с прежним PID. Выбор B в «Пачка 3» отправляется по
+	// строке журнала неприменимой горячей замены (no_api) этого прохода: пачка
+	// первых двух уже запечатана и держит ход. Чужой файл снимается по событию
+	// отката (restart_failed_rolling_back) — до возврата выборов. Третья группа
+	// собирается следующей пачкой и ждёт ход, пока неудачный проход возвращает
+	// выборы (settleXrayBatch); её проход проходит полную проверку, перезапускает
+	// Xray (причина no_api) и не несёт в xcp-groups и ядро отвергнутых выборов
+	// первых двух. Попадание в окно доказывается после факта: строка этапов третьей
+	// группы — отдельная пачка (batch=1) с ожиданием хода (wait > 0), её выбор
+	// отправлен раньше обоих ответов первой пачки и не reverted; иначе попытка не
+	// засчитывается, стенд возвращается и попытка повторяется (до rtFltAttempts).
+	// Код до исправления e8f68073 сценарий не отличает: там окно гонки — время между
+	// снятием хода и возвратом выбора той же горутиной.
 	t.Run("fallback_batch_return", func(t *testing.T) {
 		c := e.with(t)
 		t.Cleanup(func() {
 			if !rtFltDropBad() {
 				t.Error("очистка: чужой файл Xray не удалён")
 			}
+			c.rtFltEnsureXray()
 			for i, id := range batch {
 				c.rtFltConfirmIfMarked(rtFltBatchName(i), id)
 			}
 		})
+		third := rtFltBatchName(2)
+		port := rtFltAPIPort(t)
 
-		// Исходный выбор — узел A в обеих группах, горячей заменой при открытом API.
+		// ready — исходный выбор узла A во всех трёх группах горячей заменой при
+		// открытом API: у третьей группы цель B отличается от текущего выбора.
 		prev := map[string]map[string]any{}
-		for i, id := range batch[:2] {
-			name := rtFltBatchName(i)
-			if c.rtFltCurrent(name) != nodeA {
-				if s := c.rtFltSelect(id, nodeA); s.status != http.StatusOK || s.xray != "applied" {
-					t.Fatalf("исходный выбор узла A в «%s»: %s", name, s)
+		ready := func() {
+			t.Helper()
+			for i, id := range batch {
+				name := rtFltBatchName(i)
+				if c.rtFltCurrent(name) != nodeA {
+					if s := c.rtFltSelect(id, nodeA); s.status != http.StatusOK || s.xray != "applied" {
+						t.Fatalf("исходный выбор узла A в «%s»: %s", name, s)
+					}
 				}
-			}
-			ob, ok := rtRtGroupOutbound(t, id)
-			if !ok || !reflect.DeepEqual(ob, obs[nodeA]) {
-				t.Fatalf("Xray: исходящий «%s» до сбоя не совпадает с узлом A (найден=%t)", name, ok)
-			}
-			prev[id] = ob
-		}
-
-		pid := rtFltXrayPID()
-		if pid == 0 {
-			t.Fatal("до выбора нет единственного процесса Xray")
-		}
-		unblock := rtFltBlockAPI(t, rtFltAPIPort(t))
-		rtFltPutBad(t)
-
-		offset := rtRtLogOffset(t)
-		type selRes struct {
-			s   rtFltSel
-			err error
-		}
-		var wg sync.WaitGroup
-		results := make([]selRes, 2)
-		start := make(chan struct{})
-		for i, id := range batch[:2] {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				<-start
-				results[i].s, results[i].err = c.rtFltSelectBare(id, nodeB)
-			}()
-		}
-		close(start)
-		wg.Wait()
-		code, rolledBack, xrayOut := c.rtFltApplyCode()
-		window := rtFltLogSince(offset)
-		pidSame := rtFltXrayPID() == pid
-		t.Logf("cr01: reverted=%t/%t pid_same=%t code=%s", results[0].s.reverted, results[1].s.reverted, pidSame, code)
-		for i, r := range results {
-			if r.err != nil {
-				t.Errorf("CR-01: выбор в «%s»: %v", rtFltBatchName(i), r.err)
-				continue
-			}
-			if r.s.status != http.StatusOK || !r.s.reverted {
-				t.Errorf("CR-01: выбор в «%s» при закрытом API и отвергаемом каталоге: %s, ожидалось 200 reverted", rtFltBatchName(i), r.s)
+				ob, ok := rtRtGroupOutbound(t, id)
+				if !ok || !reflect.DeepEqual(ob, obs[nodeA]) {
+					t.Fatalf("Xray: исходящий «%s» до сбоя не совпадает с узлом A (найден=%t)", name, ok)
+				}
+				prev[id] = ob
 			}
 		}
-		if code != "restart_failed" || !rolledBack || xrayOut != "failed_rolled_back" {
-			t.Errorf("CR-01: итог прохода code=%q rolled_back=%t xray=%q, ожидалось restart_failed с откатом и failed_rolled_back", code, rolledBack, xrayOut)
-		}
-		if !strings.Contains(window, rtFltNoAPIMark) {
-			t.Error("CR-01: в журнале панели нет строки горячей замены с причиной no_api")
-		}
-		if !pidSame {
-			t.Errorf("CR-01: Xray перезапущен или остановлен при отказе полной проверки (PID прежний=%t, процесс есть=%t)", pidSame, rtFltXrayPID() > 0)
-		}
-		// restored проверяет, что выбор и исходящий группы — прежние (узел A).
+		// restored проверяет, что выбор и исходящий групп первой пачки — прежние (узел A).
 		restored := func(label string) {
 			t.Helper()
 			for i, id := range batch[:2] {
@@ -741,30 +776,151 @@ func TestRouterSelectXrayFaults(t *testing.T) {
 				}
 			}
 		}
-		restored("CR-01")
 
-		// Сбои сняты: выбор третьей группы применяется и не несёт отвергнутых.
-		if !rtFltDropBad() {
-			t.Fatal("чужой файл Xray не удалён")
+		// selRes — ответ выбора первой пачки, момент ответа и PID Xray сразу после него.
+		type selRes struct {
+			s    rtFltSel
+			err  error
+			done time.Time
+			pid  int
 		}
-		unblock()
-		third := rtFltBatchName(2)
-		if s := c.rtFltSelect(batch[2], nodeB); s.status != http.StatusOK || s.xray != "applied" || s.reverted {
-			t.Fatalf("CR-01: выбор B в «%s» после снятия сбоев: %s, ожидалось applied", third, s)
+		var (
+			hit      bool
+			attempts int
+			results  [2]selRes
+			next     rtFltNext
+			st       rtRtStage
+		)
+		for attempts < rtFltAttempts && !hit {
+			attempts++
+			ready()
+			pid := rtFltXrayPID()
+			if pid == 0 {
+				t.Fatal("до выбора нет единственного процесса Xray")
+			}
+			unblock := rtFltBlockAPI(t, port)
+			rtFltPutBad(t)
+
+			offset := rtRtLogOffset(t)
+			var rb rtFltRollback
+			results, next, st = [2]selRes{}, rtFltNext{}, rtRtStage{}
+			func() {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				rolled := c.rtFltWatchRollback(ctx)
+				late := make(chan struct{})
+				nextCh := c.rtFltSelectOnMark(offset, rtFltNoAPIMark, late, batch[2], nodeB)
+				var wg sync.WaitGroup
+				start := make(chan struct{})
+				for i, id := range batch[:2] {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						<-start
+						r := &results[i]
+						r.s, r.err = c.rtFltSelectBare(id, nodeB)
+						r.done = time.Now()
+						r.pid = rtFltXrayPID()
+					}()
+				}
+				close(start)
+				wg.Wait()
+				close(late)
+				next = <-nextCh
+				cancel()
+				rb = <-rolled
+			}()
+			window := rtFltLogSince(offset)
+
+			// Попадание в окно — по строке этапов третьей группы и порядку отправки и ответов.
+			staged := false
+			if next.sent {
+				stages, _, _ := rtRtWaitStages(offset, []string{batch[2]}, 0, rtRtStagesWait("xray"))
+				st, staged = stages[batch[2]]
+			}
+			before := next.sent && next.at.Before(results[0].done) && next.at.Before(results[1].done)
+			inWindow := staged && st.num("batch") == 1 && st.num("wait") > 0 && before
+			if !inWindow || next.err != nil || next.s.status != http.StatusOK || next.s.reverted {
+				t.Logf("cr01-next: попытка %d мимо окна: sent=%t staged=%t batch3=%d wait3=%d before=%t status3=%d out3=%s reverted3=%t reverted12=%t/%t rollback_event=%t",
+					attempts, next.sent, staged, st.num("batch"), st.num("wait"), before, next.s.status, next.s.xray, next.s.reverted, results[0].s.reverted, results[1].s.reverted, rb.seen)
+				// Стенд возвращается: файл снят, API открыт, Xray работает, маркеров нет.
+				if !rtFltDropBad() {
+					t.Fatal("чужой файл Xray не удалён")
+				}
+				unblock()
+				c.rtFltEnsureXray()
+				for i, id := range batch {
+					c.rtFltConfirmIfMarked(rtFltBatchName(i), id)
+				}
+				c.rtRstIdle()
+				continue
+			}
+			hit = true
+
+			// Первая пачка: оба выбора возвращены, проход — отказ полной проверки с
+			// откатом без перезапуска (PID к ответам прежний).
+			pidSame := results[0].pid == pid && results[1].pid == pid
+			t.Logf("cr01: reverted=%t/%t pid_same=%t code=%s", results[0].s.reverted, results[1].s.reverted, pidSame, rb.code)
+			for i, r := range results {
+				if r.err != nil {
+					t.Errorf("CR-01: выбор в «%s»: %v", rtFltBatchName(i), r.err)
+					continue
+				}
+				if r.s.status != http.StatusOK || !r.s.reverted {
+					t.Errorf("CR-01: выбор в «%s» при закрытом API и отвергаемом каталоге: %s, ожидалось 200 reverted", rtFltBatchName(i), r.s)
+				}
+			}
+			switch {
+			case !rb.done:
+				t.Error("CR-01: в потоке событий слоя нет итога прохода с откатом (apply_done после restart_failed_rolling_back)")
+			case rb.code != "restart_failed" || !rb.rolledBack || rb.xray != "failed_rolled_back":
+				t.Errorf("CR-01: итог прохода code=%q rolled_back=%t xray=%q, ожидалось restart_failed с откатом и failed_rolled_back", rb.code, rb.rolledBack, rb.xray)
+			}
+			if !rb.removed {
+				t.Error("CR-01: чужой файл не снят по событию отката")
+			}
+			if !strings.Contains(window, rtFltNoAPIMark) {
+				t.Error("CR-01: в журнале панели нет строки горячей замены с причиной no_api")
+			}
+			if !pidSame {
+				t.Errorf("CR-01: Xray перезапущен или остановлен при отказе полной проверки (PID к ответам прежний: %t/%t)", results[0].pid == pid, results[1].pid == pid)
+			}
+
+			// Следующая пачка: API открыт, Xray поднят после прохода третьей группы.
+			unblock()
+			newPID := c.rtFltEnsureXray()
+			restored("CR-01, после следующей пачки")
+			s3 := next.s
+			if s3.unconfirmed > 0 || !(s3.xray == "applied" || (s3.xray == "restarted" && s3.reason == "no_api")) {
+				t.Errorf("CR-01: выбор B в «%s» следующей пачкой: %s, ожидалось restarted с причиной no_api или applied", third, s3)
+			}
+			if s3.xray == "restarted" && newPID == pid {
+				t.Errorf("CR-01: исход restarted, но Xray работает с прежним PID: ядро не загрузило xcp-groups следующей пачки")
+			}
+			if c.rtFltCurrent(third) != nodeB {
+				t.Errorf("CR-01: выбор «%s» в Live не узел B", third)
+			}
+			if cur, marked := c.rtFltRuntime(third); cur != nodeB || marked {
+				t.Errorf("CR-01: вид «Прокси» «%s»: выбор B=%t, маркер selection_unconfirmed=%t", third, cur == nodeB, marked)
+			}
+			ob, ok := rtRtGroupOutbound(t, batch[2])
+			if !ok || reflect.DeepEqual(ob, obs[nodeA]) || !rtRtMatchesNode(t, ob) {
+				t.Errorf("CR-01: исходящий «%s» не сменился на узел «Моих узлов», отличный от A (найден=%t)", third, ok)
+			}
+			if want, known := obs[nodeB]; known && !reflect.DeepEqual(ob, want) {
+				t.Errorf("CR-01: исходящий «%s» не совпадает с узлом B", third)
+			}
 		}
-		if rtFltXrayPID() != pid {
-			t.Errorf("CR-01: выбор в «%s» после снятия сбоев сменил PID Xray", third)
+		window, out3 := "missed", next.s.xray
+		if hit {
+			window = "hit"
 		}
-		restored("CR-01, после выбора третьей группы")
-		if c.rtFltCurrent(third) != nodeB {
-			t.Errorf("CR-01: выбор «%s» в Live не узел B", third)
+		if next.s.reason != "" {
+			out3 += ":" + next.s.reason
 		}
-		ob, ok := rtRtGroupOutbound(t, batch[2])
-		if !ok || reflect.DeepEqual(ob, obs[nodeA]) || !rtRtMatchesNode(t, ob) {
-			t.Errorf("CR-01: исходящий «%s» не сменился на узел «Моих узлов», отличный от A (найден=%t)", third, ok)
-		}
-		if want, known := obs[nodeB]; known && !reflect.DeepEqual(ob, want) {
-			t.Errorf("CR-01: исходящий «%s» не совпадает с узлом B", third)
+		t.Logf("cr01-next: window=%s attempts=%d wait3=%d out3=%s reverted12=%t/%t", window, attempts, st.num("wait"), out3, results[0].s.reverted, results[1].s.reverted)
+		if !hit {
+			t.Errorf("cr01-next: окно не поймано за %d попыток: выбор «%s» не собран следующей пачкой во время неудачного прохода первой", attempts, third)
 		}
 	})
 
