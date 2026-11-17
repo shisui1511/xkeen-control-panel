@@ -14,13 +14,18 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/proxyping"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
@@ -389,7 +394,12 @@ func rtsWaitNow(t *testing.T, core *rtMihomoCore, group, want string, wait time.
 // переживает переименование группы (D-14) и перезапуск процесса, выбор из cache.db
 // не задерживает сверку после «Применить» (D-39). Отдельный процесс Mihomo в
 // каталоге теста, ядро стенда не трогается.
+//
+// Подтесты на настоящей подписке стенда: duplicate_names — одноимённые узлы
+// разных источников в одной ручной группе различимы, выбор второго ставит в
+// Mihomo именно его и переживает внешний выбор и перезапуск (WR-02).
 func TestRouterSelectMihomoReconcile(t *testing.T) {
+	routertest.Tier(t, routertest.Full, "реальная загрузка: настоящая подписка стенда для одноимённых узлов и провайдерного замера")
 	ctx := context.Background()
 	core := rtNewMihomoCore(t)
 	e := rtNewEnv(t, rtWithKernels(rtMihomoOnly), rtWithMihomoCore(core), rtWithSelection())
@@ -466,6 +476,221 @@ func TestRouterSelectMihomoReconcile(t *testing.T) {
 	if _, ok := e.rtsNotice(noticeReconcilePrefix + grp.ID); ok {
 		t.Errorf("после успешной сверки осталось уведомление routing_reconcile")
 	}
+	// Процесс первой части больше не нужен: подтесты держат свои.
+	core.stop()
+
+	// Общая настоящая подготовка одноимённых узлов: подписка загружается один
+	// раз и при выборе одного подтеста.
+	dup := rtsNewDup(t)
+	t.Run("duplicate_names", func(t *testing.T) { rtsDuplicateNames(t, ctx, dup) })
+}
+
+// rtsExact — точное выражение include (режим regex) для имени узла.
+func rtsExact(name string) string { return "^" + regexp.QuoteMeta(name) + "$" }
+
+// rtsSubscription добавляет настоящую подписку стенда (XCP_RT_SUBSCRIPTION_URL)
+// штатными предпросмотром и «Добавить» и возвращает её узлы Mihomo, которые
+// выбираются по имени точно: имя для показа совпадает с именем в файле
+// провайдера, единственно в источнике и проходит проверку группы как точное
+// выражение include. URL, подписи и параметры узлов в диагностику не попадают;
+// подготовка без подходящих узлов — провал, а не пропуск.
+func rtsSubscription(t *testing.T, e *rtEnv) []sources.CatalogNode {
+	t.Helper()
+	url := strings.TrimSpace(os.Getenv("XCP_RT_SUBSCRIPTION_URL"))
+	if url == "" {
+		t.Fatal("subscription_prepare: url=false")
+	}
+	view, err := e.src.Preview(context.Background(), nodes.Input{Text: url})
+	if err != nil || view.Token == "" || len(view.Subscriptions) != 1 || len(view.Errors) != 0 {
+		t.Fatalf("subscription_prepare: error=%t token=%t subscriptions=%d errors=%d", err != nil, view.Token != "", len(view.Subscriptions), len(view.Errors))
+	}
+	res, err := e.src.Add(e.rev(t), view.Token)
+	if err != nil || res.Subscriptions != 1 {
+		t.Fatalf("subscription_add: error=%t subscriptions=%d", err != nil, res.Subscriptions)
+	}
+	cat := e.catalog(t).Mihomo
+	var out []sources.CatalogNode
+	for _, n := range cat {
+		name := n.Display
+		if n.Source == sources.MySourceID || n.MihomoName == "" || name != n.MihomoName ||
+			name != strings.TrimSpace(name) || strings.ContainsRune(name, '`') ||
+			utf8.RuneCountInString(name) > 128 || utf8.RuneCountInString(rtsExact(name)) > 256 {
+			continue
+		}
+		same := 0
+		for _, o := range cat {
+			if o.Source == n.Source && o.Display == name {
+				same++
+			}
+		}
+		if same == 1 {
+			out = append(out, n)
+		}
+	}
+	if len(out) == 0 {
+		t.Fatal("subscription_prepare: exact_nodes=0")
+	}
+	return out
+}
+
+// rtsRuntimeCore подключает активное ядро вида «Прокси» к отдельному процессу
+// теста: выбрано Mihomo, запущено — пока жив процесс. Так RuntimeView,
+// RuntimeNow и PingRequest читают факты именно этого процесса.
+func rtsRuntimeCore(core *rtMihomoCore) rtOption {
+	return rtWithDeps(func(d *Deps) {
+		d.KernelState = func() services.ActiveKernelState {
+			st := services.ActiveKernelState{Kernel: configlayer.KernelMihomo, Running: []string{}}
+			if core.pid() != 0 {
+				st.Running = append(st.Running, configlayer.KernelMihomo)
+			}
+			return st
+		}
+	})
+}
+
+// rtsDup — общая настоящая подготовка одноимённых узлов: узел A настоящей
+// подписки и узел B «Моих узлов» из share-ссылки с другими параметрами
+// подключения, сохранённый под тем же именем. Маршрутизация Mihomo взята и
+// применена, процесс запускает подтест после своего «Применить».
+type rtsDup struct {
+	e    *rtEnv
+	core *rtMihomoCore
+	a, b sources.CatalogNode
+	// subs — остальные узлы подписки, выбираемые по имени точно.
+	subs []sources.CatalogNode
+}
+
+// rtsNewDup готовит одноимённые узлы двух настоящих источников.
+func rtsNewDup(t *testing.T) *rtsDup {
+	t.Helper()
+	core := rtNewMihomoCore(t)
+	e := rtNewEnv(t, rtWithKernels(rtMihomoOnly), rtWithMihomoCore(core), rtsRuntimeCore(core), rtWithSelection())
+	e.writeUserProfile(t)
+	subs := rtsSubscription(t, e)
+	a := subs[0]
+	if _, err := e.src.SaveNode(e.rev(t), "", a.MihomoName, rtLink(t, "vless_reality")); err != nil {
+		t.Fatal("WR-02: save_node_error=true")
+	}
+	var b sources.CatalogNode
+	mine := 0
+	for _, n := range e.catalog(t).Mihomo {
+		if n.Source == sources.MySourceID {
+			b = n
+			mine++
+		}
+	}
+	if mine != 1 || a.Source == b.Source || a.Ref == b.Ref || a.MihomoName != b.MihomoName || a.Display != b.Display ||
+		proxyping.Fingerprint(a.Node) == proxyping.Fingerprint(b.Node) {
+		t.Fatalf("WR-02: prepare my_nodes=%d distinct_sources=%t distinct_refs=%t same_name=%t distinct_params=%t",
+			mine, a.Source != b.Source, a.Ref != b.Ref, a.MihomoName == b.MihomoName,
+			proxyping.Fingerprint(a.Node) != proxyping.Fingerprint(b.Node))
+	}
+	e.takeAndApply(t)
+	return &rtsDup{e: e, core: core, a: a, b: b, subs: subs[1:]}
+}
+
+// reapply применяет черновик и перезапускает отдельный процесс на новом
+// профиле, как «Применить» с перезапуском ядра.
+func (d *rtsDup) reapply(t *testing.T) {
+	t.Helper()
+	d.core.stop()
+	d.e.applyOK(t)
+	d.core.start(t, d.e)
+}
+
+// rtsReconcileTagged вызывает сверку Mihomo, пока Clash API нового процесса не
+// ответит; диагностика начинается меткой tag и не несёт данных узлов.
+func (e *rtEnv) rtsReconcileTagged(t *testing.T, ctx context.Context, tag string) {
+	t.Helper()
+	for end := time.Now().Add(40 * time.Second); e.svc.reconcileMihomo(ctx) != nil; time.Sleep(500 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatalf("%s reconcile_done=false", tag)
+		}
+	}
+}
+
+// rtsDuplicateNames: ручная группа из двух одноимённых узлов разных
+// источников. Имена в профиле различны (копии), выбор второго ставит в
+// настоящий Mihomo именно его копию, Live и вид несут его Ref, черновик не
+// меняется; после внешнего выбора первого и перезапуска процесса сверка из Live
+// снова ставит второй. До исправления exactFilter оба узла носили в группе одно
+// имя, и PUT по имени ставил первый (WR-02 ревью 5).
+func rtsDuplicateNames(t *testing.T, ctx context.Context, d *rtsDup) {
+	e, core, a, b := d.e, d.core, d.a, d.b
+	_, grp, err := e.svc.SaveGroup(e.rev(t), Group{
+		Name: "Совпавшие имена", Mode: ModeManual, Regex: true,
+		Sources: GroupSources{IDs: []string{a.Source, b.Source}},
+		Include: []string{rtsExact(a.Display)},
+	})
+	if err != nil {
+		t.Fatal("WR-02: save_group_error=true")
+	}
+	d.reapply(t)
+	am, err := e.svc.appliedModelOf(e.state(t))
+	if err != nil {
+		t.Fatal("WR-02: model_error=true")
+	}
+	refs := nodeRefs(Resolve(grp, am.cat.Mihomo, am.groups.Items).Nodes)
+	if len(refs) != 2 || !slices.Contains(refs, a.Ref) || !slices.Contains(refs, b.Ref) {
+		t.Fatalf("WR-02: composition=%d has_a=%t has_b=%t", len(refs), slices.Contains(refs, a.Ref), slices.Contains(refs, b.Ref))
+	}
+	// Та же таблица имён, по которой идут ранний PUT (selEntry) и сверка.
+	build := runtimeMihomo(am)
+	names := build.nodeNames(grp)
+	nameA, nameB := names[a.Ref], names[b.Ref]
+	if nameA == "" || nameB == "" || nameA == nameB || build.copyName[a.Ref] != nameA || build.copyName[b.Ref] != nameB {
+		t.Fatalf("WR-02: names_set=%t distinct=%t copies=%t", nameA != "" && nameB != "", nameA != nameB,
+			build.copyName[a.Ref] == nameA && build.copyName[b.Ref] == nameB)
+	}
+
+	before := e.state(t)
+	res, err := e.svc.Select(ctx, grp.ID, memberNode+b.Ref)
+	if err != nil || res.Kernels[configlayer.KernelMihomo] != selApplied || res.Reverted || len(res.Unconfirmed) != 0 {
+		t.Fatalf("WR-02: select_error=%t applied=%t reverted=%t unconfirmed=%d", err != nil,
+			res.Kernels[configlayer.KernelMihomo] == selApplied, res.Reverted, len(res.Unconfirmed))
+	}
+	check := func(stage int) {
+		t.Helper()
+		var now string
+		var nowErr error
+		for end := time.Now().Add(10 * time.Second); ; time.Sleep(200 * time.Millisecond) {
+			now, nowErr = core.svc.ProxyNow(ctx, grp.Name)
+			if (nowErr == nil && now == nameB) || time.Now().After(end) {
+				break
+			}
+		}
+		states, stateErr := core.svc.ProxiesState(ctx)
+		after := e.state(t)
+		view, viewErr := e.svc.RuntimeView()
+		current := ""
+		for _, g := range view.Groups {
+			if g.ID == grp.ID {
+				current = g.Current
+			}
+		}
+		live := liveSelection(after.Live)[grp.ID] == memberNode+b.Ref
+		draft := after.DraftRevision == before.DraftRevision && reflect.DeepEqual(after.Draft, before.Draft)
+		if nowErr != nil || stateErr != nil || viewErr != nil || now != nameB || states[grp.Name].Now != nameB ||
+			states[nameB].Type == "" || !live || current != memberNode+b.Ref || !draft {
+			t.Fatalf("WR-02: stage=%d read_error=%t now_b=%t now_a=%t state_b=%t copy_b=%t live_b=%t view_b=%t draft_same=%t",
+				stage, nowErr != nil || stateErr != nil || viewErr != nil, now == nameB, now == nameA,
+				states[grp.Name].Now == nameB, states[nameB].Type != "", live, current == memberNode+b.Ref, draft)
+		}
+	}
+	check(1)
+
+	// Внешний выбор первого узла, перезапуск процесса (cache.db возвращает его)
+	// и настоящая сверка из Live: снова второй.
+	if err := core.svc.SelectProxy(ctx, grp.Name, nameA); err != nil {
+		t.Fatal("WR-02: external_select_error=true")
+	}
+	if now, err := core.svc.ProxyNow(ctx, grp.Name); err != nil || now != nameA {
+		t.Fatalf("WR-02: external_now_a=%t read_error=%t", now == nameA, err != nil)
+	}
+	core.stop()
+	core.start(t, e)
+	e.rtsReconcileTagged(t, ctx, "WR-02:")
+	check(2)
 }
 
 // rtsCurrent — current группы в виде «Прокси» (RuntimeView).

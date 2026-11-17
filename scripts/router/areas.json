@@ -754,6 +754,7 @@
         "go:TestRouterSchedulerBacksOffAfterSnapshotFailure",
         "go:TestRouterSchedulerFlagOffZeroRequests",
         "go:TestRouterSchedulerNetworkRetries",
+        "go:TestRouterSelectMihomoReconcile",
         "go:TestRouterSelectXrayFaults",
         "go:TestRouterShareLinks",
         "go:TestRouterSourcesMyNodesFlow",
