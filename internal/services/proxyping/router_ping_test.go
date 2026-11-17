@@ -242,38 +242,79 @@ func TestRouterPingTempXray(t *testing.T) {
 		}
 	})
 
-	// WR-02 ревью 4: временный Xray куска выходит при старте (отверг конфиг) — пачка
-	// не валится: узлы куска проверяются по TLS с причиной xray_rejected, следующие
-	// куски (здесь по одному узлу) запускаются дальше.
+	// WR-02 ревью 4, истина 43: настоящий /opt/sbin/xray отвергает конфиг одного
+	// куска — пачка не валится. TLS с причиной xray_rejected получают только узлы
+	// этого куска, следующий исправный кусок меряется через туннель своего Xray,
+	// а узел без собираемого исходящего получает собственный отказ запуска.
 	t.Run("rejected_chunk_tls", func(t *testing.T) {
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 		t.Cleanup(server.Close)
 		_, port, _ := net.SplitHostPort(server.Listener.Addr().String())
-		n, _ := strconv.Atoi(port)
-		targets := pingTargets(n, 2)
-		fakeDir, err := os.MkdirTemp("/opt/tmp", "xcp-ping-fake-")
-		if err != nil {
-			t.Fatal("fake_dir")
+		tlsPort, _ := strconv.Atoi(port)
+		proxy := pingSOCKS(t, false)
+		// Кусок 1: родной SOCKS-outbound Xray проходит XrayOutbound (запретов
+		// панели в нём нет), но servers строкой вместо списка Xray не загружает —
+		// временный процесс выходит при старте. Host/Port ведут на живую TLS-цель
+		// запасного замера.
+		rejected := nodes.Node{Protocol: "socks", Host: "127.0.0.1", Port: tlsPort, Origin: nodes.OriginXrayJSON, Raw: map[string]any{"protocol": "socks", "settings": map[string]any{"servers": "rejected"}}}
+		// Кусок 3: ключ transport запрещён для Xray 26.x — исходящее не собирается
+		// и узел не попадает в конфиг процесса.
+		unbuilt := nodes.Node{Protocol: "socks", Host: "127.0.0.1", Port: tlsPort, Origin: nodes.OriginXrayJSON, Raw: map[string]any{"protocol": "socks", "transport": map[string]any{}}}
+		targets := []Target{
+			{Ref: "rt/0", Node: rejected, Xray: true, Fingerprint: Fingerprint(rejected)},
+			pingTargets(proxy.port, 1)[0],
+			{Ref: "rt/2", Node: unbuilt, Xray: true, Fingerprint: Fingerprint(unbuilt)},
 		}
-		t.Cleanup(func() { _ = os.RemoveAll(fakeDir) })
-		fake := filepath.Join(fakeDir, "xray")
-		if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
-			t.Fatal("fake_xray")
+		targets[1].Ref = "rt/1"
+		if !xrayEmits(targets[0]) || !xrayEmits(targets[1]) {
+			t.Fatal("outbound_not_built")
+		}
+		if xrayEmits(targets[2]) {
+			t.Fatal("forbidden_outbound_built")
 		}
 		r, _ := pingRunner(t, func(d *Deps) {
-			d.XrayBin = func() string { return fake }
 			d.Limits = func() Limits { return Limits{2, 1, 1, "test"} }
 		})
-		pingLaunch(t, r, targets, server.URL)
-		s := pingWaitBatch(t, r, StateDone, 40*time.Second)
-		if s.Batch.FallbackReason != FallbackXrayRejected || s.Batch.ReasonCode != "" || s.Batch.Done != len(targets) {
-			t.Fatalf("rejected_chunk: %+v", s.Batch)
+		if bin := r.d.XrayBin(); bin != "/opt/sbin/xray" {
+			t.Fatal("xray_binary_replaced")
 		}
-		for _, target := range targets {
-			if res, ok := s.Results[target.Ref]; !ok || res.Method != MethodTLS || res.Status != StatusOK {
-				t.Fatalf("not_tls_checked: %s %+v", target.Ref, res)
+		pingLaunch(t, r, targets, pingHTTP(t, 0))
+		s := pingWaitBatch(t, r, StateDone, 40*time.Second)
+		if s.Batch.FallbackReason != FallbackXrayRejected || s.Batch.ReasonCode != "" || s.Batch.Done != len(targets) || s.Batch.Total != len(targets) {
+			t.Fatalf("rejected_chunk: state=%s reason=%s fallback=%s done=%d total=%d", s.Batch.State, s.Batch.ReasonCode, s.Batch.FallbackReason, s.Batch.Done, s.Batch.Total)
+		}
+		want := []struct{ method, status, reason string }{
+			{MethodTLS, StatusOK, ""},
+			{MethodXray, StatusOK, ""},
+			{MethodXray, StatusError, ReasonStart},
+		}
+		for i, w := range want {
+			res, ok := s.Results[targets[i].Ref]
+			if !ok || res.Method != w.method || res.Status != w.status || res.Reason != w.reason || (w.status == StatusOK && res.MS <= 0) {
+				t.Fatalf("result_%d: method=%s status=%s reason=%s", i, res.Method, res.Status, res.Reason)
 			}
 		}
+		if proxy.total.Load() == 0 {
+			t.Fatal("healthy_chunk_not_tunnelled")
+		}
+		// Ни процессов, ни каталогов временных Xray после пачки: отвергнутые
+		// попытки и рабочий кусок убраны раннером.
+		routertest.WaitCond(t, 3*time.Second, "уборка временных процессов и каталогов", func() bool {
+			entries, err := os.ReadDir(r.d.TmpRoot)
+			if err != nil || len(entries) != 0 {
+				return false
+			}
+			procs, _ := filepath.Glob("/proc/[0-9]*/cmdline")
+			for _, path := range procs {
+				data, _ := os.ReadFile(path)
+				for _, arg := range strings.Split(string(data), "\x00") {
+					if strings.HasPrefix(arg, r.d.TmpRoot+"/") {
+						return false
+					}
+				}
+			}
+			return true
+		})
 	})
 
 	t.Run("tls_fallback", func(t *testing.T) {
