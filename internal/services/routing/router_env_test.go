@@ -506,12 +506,31 @@ func (c *rtMihomoCore) start(t *testing.T, e *rtEnv) {
 	c.mu.Unlock()
 	rtWaitCond(t, 30*time.Second, "Clash API отдельного процесса", c.svc.HasController)
 	// Сокет контроллера появляется раньше, чем ядро загрузило профиль: первый
-	// выбор сразу после запуска упирался в предел вызова. Ждём настоящий ответ.
+	// выбор сразу после запуска упирался в предел вызова. Ждём настоящий ответ
+	// отдельным клиентом без повторного использования соединений: клиент сервиса
+	// не получает залежавшегося соединения, которое пережило бы удаление сокета
+	// в сценариях отказа.
+	secret, _ := doc["secret"].(string)
+	probe := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{
+		DisableKeepAlives: true,
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", sock)
+		},
+	}}
 	rtWaitCond(t, 60*time.Second, "ответ Clash API отдельного процесса", func() bool {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		_, err := c.svc.ProxiesState(ctx)
-		return err == nil
+		req, err := http.NewRequest(http.MethodGet, "http://localhost/proxies", nil)
+		if err != nil {
+			return false
+		}
+		if secret != "" {
+			req.Header.Set("Authorization", "Bearer "+secret)
+		}
+		resp, err := probe.Do(req)
+		if err != nil {
+			return false
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
 	})
 }
 
