@@ -1082,9 +1082,17 @@ func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name
 		}
 	}
 	mihomoOK := true
-	if earlyHolds {
+	stopping := s.ctx.Err() != nil
+	switch {
+	case earlyHolds:
 		stages.reput = reputSkip
-	} else {
+	case stopping:
+		// Сервис останавливается: PUT отменённым контекстом не дойдёт до ядра, а
+		// маркер Mihomo на флешке заблокировал бы группу после запуска. Mihomo
+		// приводит к Live сверка (при следующем запуске — сверка старта).
+		stages.reput = reputDone
+		s.markReconcile()
+	default:
 		stages.reput = reputDone
 		out, err := s.selectMihomoMarked(s.ctx, in.gid)
 		mihomoOK = out != selFailed
@@ -1098,7 +1106,9 @@ func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name
 	// уведомление»): признак reverted говорит, вернулся ли выбор на самом деле (WR-03).
 	// Ложь — возврат Live не записан, исход неизвестен или Mihomo не принял выбор из
 	// Live (маркер Mihomo, D-16): текст «Прежний узел возвращён» тогда был бы ложью.
-	if failErr != nil || failCode != "" {
+	// При остановке уведомление reason=stopped не публикуется: исход доводит
+	// сверка после запуска, а не пользователь.
+	if (failErr != nil || failCode != "") && !stopping {
 		code, reason := selectFailClass(failErr, failCode)
 		s.noticeSelectFailed(in.gid, name, code, reason, liveKept && mihomoOK)
 	}
