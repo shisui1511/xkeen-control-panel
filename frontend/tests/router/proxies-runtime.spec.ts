@@ -832,8 +832,16 @@ test(
     const before = await layerState(page);
     expect(selectNoticeIds(before, proxyId), `уведомления выбора группы ${proxyId}`).toEqual([]);
     const path = driftFile(before);
+    // Копия от прерванного прогона: файл — она же плюс дописанный перевод строки (дрейф
+    // этого теста) — копия возвращается, и тест идёт дальше; иное содержимое — отказ (4):
+    // чужие байты не перезаписываются. Нет cmp — сравнение по md5sum (пустая сумма — отказ).
+    const sameCmd =
+      `if command -v cmp >/dev/null 2>&1; then cmp -s "$t" "$f"; ` +
+      `else s1=$(md5sum < "$t") && s2=$(md5sum < "$f") && [ -n "$s1" ] && [ "$s1" = "$s2" ]; fi`;
     const driftCmd =
-      `f='${path}'; b=${DRIFT_BAK}; [ ! -e "$b" ] || exit 4; ` +
+      `f='${path}'; b=${DRIFT_BAK}; ` +
+      `if [ -e "$b" ]; then t="$b.chk"; cp "$b" "$t" && printf '\\n' >> "$t" && { ${sameCmd}; }; ` +
+      `r=$?; rm -f "$t"; [ "$r" = 0 ] || exit 4; cp -p "$b" "$f" && rm -f "$b" || exit 5; fi; ` +
       `cp -p "$f" "$b" && printf '\\n' >> "$f"`;
     const restoreCmd =
       `f='${path}'; b=${DRIFT_BAK}; [ -e "$b" ] || exit 0; ` + `cp -p "$b" "$f" && rm -f "$b"`;
