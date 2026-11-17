@@ -17,6 +17,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/proxyping"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // Выбор участника ручной группы без черновика (D-36…D-39). Выбор хранится в
@@ -1010,7 +1011,7 @@ func (s *Service) selectMihomoEarly(ctx context.Context, gid, member string, am 
 	if err != nil {
 		// PUT мог дойти до ядра (принят после таймаута клиента, WR-02): сверка
 		// вернёт Mihomo к Live ближайшим циклом наблюдателя.
-		log.Printf("[routing] ранний выбор Mihomo не поставлен: группа=%s Clash API: %s", gid, clashErrClass(err))
+		log.Printf("[routing] ранний выбор Mihomo не поставлен: группа=%s Clash API: %s", utils.SanitizeLogInput(gid), clashErrClass(err))
 		s.markReconcile()
 		return selFailed, tm
 	}
@@ -1064,7 +1065,7 @@ func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name
 		// Маркер снят записью коммита прохода (CommitLive), без коммита — здесь.
 		if !b.markersCommitted {
 			if err := s.clearUnconfirmed(in.comp, configlayer.KernelXray); err != nil {
-				log.Printf("[routing] выбор группы %s: маркер Xray не снят: %v", in.gid, err)
+				log.Printf("[routing] выбор группы %s: маркер Xray не снят: %v", utils.SanitizeLogInput(in.gid), utils.SanitizeLogInput(err.Error()))
 			}
 		}
 		s.selNotes.drop(s.d.Layer, in.gid)
@@ -1115,7 +1116,7 @@ func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name
 		out, err := s.selectMihomoMarked(s.ctx, in.gid)
 		mihomoOK = out != selFailed
 		if err != nil {
-			log.Printf("[routing] выбор группы %s: маркер Mihomo не записан: %v", in.gid, err)
+			log.Printf("[routing] выбор группы %s: маркер Mihomo не записан: %v", utils.SanitizeLogInput(in.gid), utils.SanitizeLogInput(err.Error()))
 		}
 	}
 	s.selMu.Unlock()
@@ -1174,7 +1175,7 @@ func (s *Service) noticeSelectFailed(gid, name, code, reason string, reverted bo
 			"reverted": strconv.FormatBool(reverted),
 		},
 	})
-	log.Printf("[routing] выбор группы %s не записан в файл Xray: code=%s reason=%s reverted=%t", gid, code, reason, reverted)
+	log.Printf("[routing] выбор группы %s не записан в файл Xray: code=%s reason=%s reverted=%t", utils.SanitizeLogInput(gid), utils.SanitizeLogInput(code), utils.SanitizeLogInput(reason), reverted)
 }
 
 func (s *Service) selectMihomoLocked(ctx context.Context, gid string) string {
@@ -1183,13 +1184,13 @@ func (s *Service) selectMihomoLocked(ctx context.Context, gid string) string {
 	}
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
-		log.Printf("[routing] выбор Mihomo не поставлен: группа=%s состояние слоя не прочитано", gid)
+		log.Printf("[routing] выбор Mihomo не поставлен: группа=%s состояние слоя не прочитано", utils.SanitizeLogInput(gid))
 		s.markReconcile()
 		return selFailed
 	}
 	plan, err := s.mihomoPlan(st, s.d.Installed())
 	if err != nil {
-		log.Printf("[routing] выбор Mihomo не поставлен: группа=%s профиль не рассчитан", gid)
+		log.Printf("[routing] выбор Mihomo не поставлен: группа=%s профиль не рассчитан", utils.SanitizeLogInput(gid))
 		s.markReconcile()
 		return selFailed
 	}
@@ -1204,14 +1205,14 @@ func (s *Service) selectMihomoLocked(ctx context.Context, gid string) string {
 		return selApplied
 	}
 	if s.d.Mihomo == nil || !s.d.Mihomo.HasController() {
-		log.Printf("[routing] выбор Mihomo не поставлен: группа=%s нет контроллера Clash API", gid)
+		log.Printf("[routing] выбор Mihomo не поставлен: группа=%s нет контроллера Clash API", utils.SanitizeLogInput(gid))
 		s.markReconcile()
 		return selFailed
 	}
 	cctx, cancel := context.WithTimeout(ctx, reconcileCallTimeout)
 	defer cancel()
 	if err := s.d.Mihomo.SelectProxy(cctx, entry.group, entry.want); err != nil {
-		log.Printf("[routing] выбор Mihomo не поставлен: группа=%s Clash API: %s", gid, clashErrClass(err))
+		log.Printf("[routing] выбор Mihomo не поставлен: группа=%s Clash API: %s", utils.SanitizeLogInput(gid), clashErrClass(err))
 		s.markReconcile()
 		return selFailed
 	}

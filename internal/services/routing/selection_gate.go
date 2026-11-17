@@ -571,7 +571,7 @@ func (st *xrayStages) log() {
 		reput = reputNone
 	}
 	log.Printf("[routing] выбор Xray: этапы group=%s batch=%d wait=%d model=%d live=%d build=%d validate_xray=%d validate_mihomo=%d write=%d restart=%d hot=%d other=%d markers=%d clash=%d tail=%d clash_wait=%d clash_plan=%d clash_put=%d pre=%d fsync=%d fsyncs=%d total=%d outcome=%s reput=%s",
-		st.gid, batch, wait.Milliseconds(), st.model.Milliseconds(), live.Milliseconds(),
+		utils.SanitizeLogInput(st.gid), batch, wait.Milliseconds(), st.model.Milliseconds(), live.Milliseconds(),
 		build, valX, valM, write, restart, hot.Milliseconds(), other.Milliseconds(),
 		st.markers.Milliseconds(), st.clash.Milliseconds(), st.tail.Milliseconds(),
 		st.clashWait.Milliseconds(), st.clashPlan.Milliseconds(), st.clashPut.Milliseconds(), st.pre.Milliseconds(),

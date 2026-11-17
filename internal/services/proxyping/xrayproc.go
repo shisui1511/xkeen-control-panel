@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -189,12 +190,16 @@ func startTempAttempt(ctx context.Context, bin, root string, targets []Target) (
 	if err = privateJSON(filepath.Join(dir, "10_probe.json"), map[string]any{"inbounds": inbounds, "outbounds": outbounds, "routing": map[string]any{"rules": rules}}); err != nil {
 		return nil, err
 	}
-	log, err := os.OpenFile(filepath.Join(dir, "out.log"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	outLog, err := os.OpenFile(filepath.Join(dir, "out.log"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}
-	defer log.Close()
-	p.cmd = &exec.Cmd{Path: filepath.Join(dir, ProcName), Args: []string{ProcName, "run", "-confdir", dir}, Env: utils.XrayAssetEnv(os.Environ(), ""), SysProcAttr: &syscall.SysProcAttr{Setpgid: true}, Stdout: log, Stderr: log}
+	defer func() {
+		if cerr := outLog.Close(); cerr != nil {
+			log.Printf("[proxyping] закрытие out.log временного Xray: %v", cerr)
+		}
+	}()
+	p.cmd = &exec.Cmd{Path: filepath.Join(dir, ProcName), Args: []string{ProcName, "run", "-confdir", dir}, Env: utils.XrayAssetEnv(os.Environ(), ""), SysProcAttr: &syscall.SysProcAttr{Setpgid: true}, Stdout: outLog, Stderr: outLog}
 	for _, l := range listeners {
 		_ = l.Close()
 	}
