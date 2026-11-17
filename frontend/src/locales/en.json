@@ -9,7 +9,7 @@
   "proxies.rt.notice.manage_link": "Manage in panel",
   "proxies.rt.tls_reason.no_xray_binary": "Xray binary is missing: checks use TLS without a tunnel.",
   "proxies.rt.tls_reason.low_memory": "Not enough memory to check through Xray: checks use TLS without a tunnel.",
-  "proxies.rt.tls_reason.xray_rejected": "Xray did not accept the settings of some nodes: they were checked over TLS without a tunnel.",
+  "proxies.rt.tls_reason.xray_rejected": "The temporary Xray did not accept the check settings (node parameters or startup): the affected nodes were checked over TLS without a tunnel.",
   "proxies.rt.ping.all": "Check all",
   "proxies.rt.ping.group": "Check",
   "proxies.rt.ping.group_aria": "Check group {name}",

@@ -9,7 +9,7 @@
   "proxies.rt.notice.manage_link": "Управлять в панели",
   "proxies.rt.tls_reason.no_xray_binary": "Нет бинарника Xray: проверка идёт по TLS, без туннеля.",
   "proxies.rt.tls_reason.low_memory": "Не хватает памяти для проверки через Xray: проверка идёт по TLS, без туннеля.",
-  "proxies.rt.tls_reason.xray_rejected": "Xray не принял параметры части узлов: они проверены по TLS, без туннеля.",
+  "proxies.rt.tls_reason.xray_rejected": "Временный Xray не принял настройки проверки (параметры узла или запуск): затронутые узлы проверены по TLS, без туннеля.",
   "proxies.rt.ping.all": "Проверить все",
   "proxies.rt.ping.group": "Проверить",
   "proxies.rt.ping.group_aria": "Проверить группу {name}",
