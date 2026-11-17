@@ -849,6 +849,37 @@ var (
 	rtRtRunLiveRe = regexp.MustCompile(`configlayer: RunLive (trigger=select(?: \S+=\S*)*)`)
 )
 
+// rtRtSelectOK — успешные исходы выбора в поле outcome строки этапов.
+var rtRtSelectOK = map[string]bool{"applied": true, "restarted": true, "pending_stopped": true}
+
+// rtRtLogLines — строки журнала панели с offset; журнал, ротированный за время
+// окна, читается с начала нового файла.
+func rtRtLogLines(offset int64) []string {
+	text, err := rtReadLogFrom(rtRtLogPath(), offset)
+	if err != nil {
+		text, _ = rtReadLogFrom(rtRtLogPath(), 0)
+	}
+	return strings.Split(text, "\n")
+}
+
+// rtRtCountLines — число строк lines с подстрокой phrase и ID любой группы из
+// groups. В журнал теста попадает только число.
+func rtRtCountLines(lines, groups []string, phrase string) int {
+	n := 0
+	for _, l := range lines {
+		if !strings.Contains(l, phrase) {
+			continue
+		}
+		for _, g := range groups {
+			if strings.Contains(l, g) {
+				n++
+				break
+			}
+		}
+	}
+	return n
+}
+
 // rtRtParseStages разбирает окно журнала: строки этапов выбора Xray по порядку и
 // пары строк «configlayer: RunLive trigger=select».
 func rtRtParseStages(text string) (stages []rtRtStage, runlive []string) {
@@ -1886,6 +1917,11 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	} else {
 		guaranteed := false
 		var lastSpread, lastHold int64
+		// Окно журнала панели блока D-17 (все попытки): причина остаточного маркера
+		// (d17-marker:) и положительное свидетельство пробела 3 (d17-evidence:) —
+		// успешные хвосты быстрого пути по коду reput строк этапов ответов 200.
+		d17Offset := rtRtLogOffset(t)
+		var evFastOK, evSkip, evDone, evDoneOK int
 		for attempt := 1; attempt <= 3 && !guaranteed; attempt++ {
 			cur, opts, lbl := d17Groups()
 			// Цели «Выбор»: узлы с подписью, отличной от текущего выбора и от
@@ -1957,6 +1993,18 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 				if tg.Core == "mihomo" {
 					mihomoTotals = append(mihomoTotals, st.num("total"))
 					mihomoHTTP = append(mihomoHTTP, httpMS)
+					switch st.kv["reput"] {
+					case "skip":
+						evSkip++
+					case "done":
+						evDone++
+					}
+					if st.num("clash") > 0 && rtRtSelectOK[st.kv["outcome"]] {
+						evFastOK++
+						if st.kv["reput"] == "done" {
+							evDoneOK++
+						}
+					}
 				}
 			}
 			for _, rl := range runlive {
@@ -2094,6 +2142,16 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 					continue
 				}
 				if rg["switching"] != false || rg["unconfirmed"] != false {
+					if rg["unconfirmed"] != false {
+						// Причина остаточного маркера — по журналу панели блока: строки
+						// с ID группы о сбое Clash API, незаписанном маркере Mihomo и
+						// неснятом маркере Xray.
+						id, lines := ids[name], rtRtLogLines(d17Offset)
+						t.Logf("d17-marker: group=%s clash_fail=%d mihomo_mark_fail=%d xray_mark_left=%d", id,
+							rtRtCountLines(lines, []string{id}, "выбор Mihomo не поставлен"),
+							rtRtCountLines(lines, []string{id}, "маркер Mihomo не записан"),
+							rtRtCountLines(lines, []string{id}, "маркер Xray не снят"))
+					}
 					t.Errorf("D-17: группа %s после выборов switching=%v unconfirmed=%v", ids[name], rg["switching"], rg["unconfirmed"])
 				}
 			}
@@ -2132,6 +2190,31 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 		}
 		if !guaranteed {
 			t.Errorf("D-17: наложение не обеспечено: разброс отправки не меньше прохода (spread=%d мс, hold=%d мс, попыток 3)", lastSpread, lastHold)
+		}
+		if tg.Core == "mihomo" {
+			// Положительное свидетельство пробела 3 (истина 35): отсутствие ошибки
+			// D-17 в одном прогоне не отличает исправление от удачи. fast_ok — ответы
+			// 200 быстрого пути (clash > 0) с успешным исходом; reput=done у такого
+			// хвоста — повтор PUT подтверждённого значения, давший остаточный маркер.
+			var groups []string
+			for _, id := range ids {
+				groups = append(groups, id)
+			}
+			lines := rtRtLogLines(d17Offset)
+			putFail := rtRtCountLines(lines, groups, "выбор Mihomo не поставлен")
+			markFail := rtRtCountLines(lines, groups, "маркер Mihomo не записан")
+			evidence := "none"
+			switch {
+			case evDoneOK > 0:
+				evidence = "regressed"
+			case evFastOK > 0:
+				evidence = "fixed"
+			}
+			t.Logf("d17-evidence: core=%s fast_ok=%d reput_skip=%d reput_done=%d reput_done_ok=%d mihomo_put_fail=%d mihomo_mark_fail=%d evidence=%s",
+				tg.Core, evFastOK, evSkip, evDone, evDoneOK, putFail, markFail, evidence)
+			if evDoneOK > 0 {
+				t.Errorf("D-17: успешный хвост быстрого пути повторил PUT подтверждённого значения (%d строк): путь остаточного маркера (истина 35) исполнен снова", evDoneOK)
+			}
 		}
 	}
 	// Граница времени выбора на ядре mihomo (план 150-19): ответ после Clash API,

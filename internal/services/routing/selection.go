@@ -526,7 +526,9 @@ func (s *Service) markReconcile() { s.reconcilePending.Store(true) }
 // приходит сразу после Clash API, а xcp-groups дописывает фоновое продолжение той
 // же пачки выбора (selectMihomoFirstTail): отметка компоненты (D-17) держится до
 // его конца, возврат неудачного прохода — под ходом (CR-01), затем Mihomo получает
-// выбор из Live. Ранний PUT не удался — прежний синхронный порядок.
+// выбор из Live. Ранний PUT не удался — прежний синхронный порядок; ядро могло
+// принять PUT после таймаута клиента, поэтому сверка Mihomo запрошена, а выходы,
+// где выбор не записан или возвращён, ставят Mihomo по Live (WR-02).
 func (s *Service) Select(ctx context.Context, groupID, member string) (SelectResult, error) {
 	start := time.Now()
 	st, err := s.d.Layer.ReadState()
@@ -593,6 +595,20 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 		// запуска (G-150-3).
 		in := &xrayIntent{gid: groupID, member: member, comp: comp}
 		stages := newXrayStages(groupID, start, model, in)
+		// earlyTried — ранний PUT отправлялся, но ответ ушёл синхронным путём: Mihomo
+		// мог принять цель (в том числе после таймаута клиента, WR-02). Выходы, где
+		// выбор в Live не записан или возвращён, ставят Mihomo по Live контекстом без
+		// отмены запроса: обрыв соединения клиента не оставляет ядро на цели.
+		earlyTried := false
+		restoreMihomo := func() {
+			if !earlyTried {
+				return
+			}
+			// Сбой внутри сам взводит сверку (markReconcile).
+			s.selMu.Lock()
+			s.selectMihomoLocked(context.WithoutCancel(ctx), groupID)
+			s.selMu.Unlock()
+		}
 		if mihomoManaged && s.d.Running(configlayer.KernelMihomo) && !s.d.Running(configlayer.KernelXray) {
 			clashStart := time.Now()
 			early := s.selectMihomoEarly(ctx, groupID, member)
@@ -614,20 +630,25 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 				stages.answered = time.Time{}
 				s.clearInflightTarget(groupID)
 			}
-			// Ранний PUT не удался: прежний порядок, исходы и маркеры как раньше.
+			// Ранний PUT не удался (или сервис останавливается): прежний порядок,
+			// исходы и маркеры как раньше; сверка запрошена в selectMihomoEarly.
+			earlyTried = true
 		}
 		defer stages.log()
 		b, err := s.runXray(ctx, xrayRunSelect, in)
 		stages.b, stages.err = b, err
 		if err != nil {
+			restoreMihomo()
 			return SelectResult{}, err
 		}
 		if in.err != nil {
+			restoreMihomo()
 			return SelectResult{}, in.err
 		}
 		if !in.wrote {
 			// Выбор не записан (замок применения занят, слой остановлен): ни
-			// возврата, ни маркеров.
+			// возврата, ни маркеров; Mihomo после раннего PUT — по Live.
+			restoreMihomo()
 			if b.err != nil {
 				return SelectResult{}, b.err
 			}
@@ -658,13 +679,9 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 			res.Reverted = true
 			if mihomoManaged {
 				res.Kernels[configlayer.KernelMihomo] = selFailed
-				if stages.clash > 0 {
-					// Ранний PUT не подтвердился, но мог дойти до ядра: Mihomo получает
-					// возвращённый выбор из Live.
-					s.selMu.Lock()
-					s.selectMihomoLocked(ctx, groupID)
-					s.selMu.Unlock()
-				}
+				// Ранний PUT не подтвердился, но мог дойти до ядра: Mihomo получает
+				// возвращённый выбор из Live.
+				restoreMihomo()
 			}
 			return res, runErr
 		default:
@@ -843,7 +860,10 @@ func (s *Service) selectMihomoEarly(ctx context.Context, gid, member string) str
 	cctx, cancel := context.WithTimeout(ctx, reconcileCallTimeout)
 	defer cancel()
 	if err := s.d.Mihomo.SelectProxy(cctx, entry.group, entry.want); err != nil {
-		log.Printf("[routing] ранний выбор Mihomo не поставлен: Clash API: %s", clashErrClass(err))
+		// PUT мог дойти до ядра (принят после таймаута клиента, WR-02): сверка
+		// вернёт Mihomo к Live ближайшим циклом наблюдателя.
+		log.Printf("[routing] ранний выбор Mihomo не поставлен: группа=%s Clash API: %s", gid, clashErrClass(err))
+		s.markReconcile()
 		return selFailed
 	}
 	return selApplied
@@ -853,8 +873,9 @@ func (s *Service) selectMihomoEarly(ctx context.Context, gid, member string) str
 // файла Xray той же пачкой выбора (Prepare пишет намерение в Live под замками
 // применения, возврат неудачного прохода — settleXrayBatch под ходом, CR-01), снятие
 // цели вида, уведомление об отказе, затем Mihomo получает выбор из Live под selMu
-// (после возврата — прежний узел). В конце, в любом исходе, — снятие отметки
-// компоненты, событие конца (D-14, D-17) и строка этапов.
+// (после возврата — прежний узел); успешный проход с Live, равным цели раннего
+// PUT, повтор не делает (earlyHolds, код reput в строке этапов). В конце, в любом
+// исходе, — снятие отметки компоненты, событие конца (D-14, D-17) и строка этапов.
 func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name string, release func()) {
 	tailStart := time.Now()
 	defer func() {
@@ -873,6 +894,7 @@ func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name
 
 	var failErr error
 	failCode := ""
+	passOK := false
 	switch {
 	case err != nil:
 		failErr = err
@@ -885,6 +907,7 @@ func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name
 			failErr = ErrApplyBusy
 		}
 	case selectionOK(b.out) && b.err == nil:
+		passOK = true
 		// Маркер снят записью коммита прохода (CommitLive), без коммита — здесь.
 		if !b.markersCommitted {
 			if err := s.clearUnconfirmed(in.comp, configlayer.KernelXray); err != nil {
@@ -908,11 +931,27 @@ func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name
 		s.noticeSelectFailed(in.gid, name, code, reason)
 	}
 
-	// Mihomo получает выбор из Live: после возврата — прежний узел, после успеха —
-	// повтор на случай вмешательства. Сбой — маркер Mihomo (D-16).
+	// Mihomo получает выбор из Live под selMu. earlyHolds — проход успешен и выбор
+	// группы в Live равен цели раннего PUT: значение уже подтверждено ядром (ранний
+	// PUT ответил успехом под selMu), его повтор под остановкой носителя только
+	// ставил бы ложный маркер D-16 группе, которой ответили «применено» (истина 35).
+	// Вмешательство за время хвоста (новый процесс Mihomo, «Применить») доводит
+	// сверка: пропустив группу с идущим выбором, она запрашивает повтор. Возврат,
+	// неизвестный исход и Live ≠ цели — Mihomo по Live, сбой — маркер Mihomo (D-16).
 	s.selMu.Lock()
-	if _, err := s.selectMihomoMarked(s.ctx, in.gid); err != nil {
-		log.Printf("[routing] выбор группы %s: маркер Mihomo не записан: %v", in.gid, err)
+	earlyHolds := false
+	if passOK {
+		if st, err := s.d.Layer.ReadState(); err == nil {
+			earlyHolds = liveSelection(st.Live)[in.gid] == in.member
+		}
+	}
+	if earlyHolds {
+		stages.reput = reputSkip
+	} else {
+		stages.reput = reputDone
+		if _, err := s.selectMihomoMarked(s.ctx, in.gid); err != nil {
+			log.Printf("[routing] выбор группы %s: маркер Mihomo не записан: %v", in.gid, err)
+		}
 	}
 	s.selMu.Unlock()
 }
@@ -963,13 +1002,13 @@ func (s *Service) selectMihomoLocked(ctx context.Context, gid string) string {
 	}
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
-		log.Printf("[routing] выбор Mihomo не поставлен: состояние слоя не прочитано")
+		log.Printf("[routing] выбор Mihomo не поставлен: группа=%s состояние слоя не прочитано", gid)
 		s.markReconcile()
 		return selFailed
 	}
 	plan, err := s.mihomoPlan(st, s.d.Installed())
 	if err != nil {
-		log.Printf("[routing] выбор Mihomo не поставлен: профиль не рассчитан")
+		log.Printf("[routing] выбор Mihomo не поставлен: группа=%s профиль не рассчитан", gid)
 		s.markReconcile()
 		return selFailed
 	}
@@ -984,14 +1023,14 @@ func (s *Service) selectMihomoLocked(ctx context.Context, gid string) string {
 		return selApplied
 	}
 	if s.d.Mihomo == nil || !s.d.Mihomo.HasController() {
-		log.Printf("[routing] выбор Mihomo не поставлен: нет контроллера Clash API")
+		log.Printf("[routing] выбор Mihomo не поставлен: группа=%s нет контроллера Clash API", gid)
 		s.markReconcile()
 		return selFailed
 	}
 	cctx, cancel := context.WithTimeout(ctx, reconcileCallTimeout)
 	defer cancel()
 	if err := s.d.Mihomo.SelectProxy(cctx, entry.group, entry.want); err != nil {
-		log.Printf("[routing] выбор Mihomo не поставлен: Clash API: %s", clashErrClass(err))
+		log.Printf("[routing] выбор Mihomo не поставлен: группа=%s Clash API: %s", gid, clashErrClass(err))
 		s.markReconcile()
 		return selFailed
 	}
@@ -1283,8 +1322,11 @@ func (s *Service) reconcileMihomo(ctx context.Context) error {
 	// Группы с идущей операцией пропускаются: быстрый путь выбора уже поставил
 	// новый узел в Mihomo ранним PUT, а Live его запишет фоновый проход позже —
 	// сверка в этом окне вернула бы прежний узел. Выбор таких групп ставит владелец
-	// отметки по окончании прохода (под selMu, из Live); их маркеры и уведомления
-	// сверки остаются как есть.
+	// отметки по окончании прохода (под selMu, из Live; успешный быстрый путь
+	// повтор не делает, earlyHolds); их маркеры и уведомления сверки остаются как
+	// есть, а сверка запрашивает повтор: вмешательство за время прохода (новый
+	// процесс Mihomo, «Применить») доводит следующий цикл наблюдателя после снятия
+	// отметки.
 	busy := s.inflightKinds()
 	noted := map[string]bool{}
 	for _, n := range snap.Notices {
@@ -1294,6 +1336,7 @@ func (s *Service) reconcileMihomo(ctx context.Context) error {
 	}
 	for _, e := range plan {
 		if busy[e.gid] != "" {
+			s.markReconcile()
 			// Уведомление сверки группы сохраняется: набор заменяется целиком.
 			if noted[e.gid] {
 				failed = append(failed, e)
