@@ -964,6 +964,54 @@ function driftFile(s: LayerStateView): string {
   return path;
 }
 
+// Команды проверки состояний прерванного прогона: 0 — наблюдение подтверждено.
+/** Путь записан рядом с копией: обычный файл, побайтно равный пути файла с дрейфом. */
+function metaKeptCmd(path: string): string {
+  return [
+    `f=${quotedDriftPath(path)}; b='${DRIFT_BAK}'; p='${DRIFT_PATH}'`,
+    '[ -f "$b" ] && [ ! -L "$b" ] && [ -f "$p" ] && [ ! -L "$p" ] || exit 1',
+    'm=$(cat "$p" && printf .) || exit 1',
+    '[ "$m" = "$f." ]'
+  ].join('\n');
+}
+
+/** Ни копии, ни пути, ни их временных файлов. */
+const NO_LEFTOVERS_CMD = [
+  `b='${DRIFT_BAK}'; p='${DRIFT_PATH}'`,
+  'for x in "$b" "$p" "$b.chk" "$b.tmp" "$p.tmp"; do [ ! -e "$x" ] && [ ! -L "$x" ] || exit 1; done'
+].join('\n');
+
+/** Чужая правка: к файлу дописаны два перевода строки — не копия и не копия плюс один. */
+function foreignCmd(path: string): string {
+  return `f=${quotedDriftPath(path)}; [ -f "$f" ] && [ ! -L "$f" ] || exit 4; printf "\\n\\n" >> "$f"`;
+}
+
+/** Отказ ничего не записал: копия (и путь, если meta) на месте, файл — копия плюс два LF. */
+function foreignKeptCmd(path: string, meta: boolean): string {
+  return [
+    'umask 077',
+    `f=${quotedDriftPath(path)}; b='${DRIFT_BAK}'; p='${DRIFT_PATH}'; e='${DRIFT_BAK}.exp'`,
+    SAME_SH,
+    '[ -f "$b" ] || exit 1',
+    meta ? '[ -f "$p" ] || exit 1' : '[ ! -e "$p" ] || exit 1',
+    'rm -f "$e" && cp "$b" "$e" && printf "\\n\\n" >> "$e" || { rm -f "$e"; exit 5; }',
+    'same "$e" "$f"; r=$?; rm -f "$e"; exit "$r"'
+  ].join('\n');
+}
+
+/**
+ * Возврат известного исходника после сознательной чужой правки: копию сделал сам сценарий
+ * перед правкой, поэтому байты файла не сверяются. Копии нет — файл не трогается.
+ */
+function knownBackCmd(path: string): string {
+  return [
+    `f=${quotedDriftPath(path)}; b='${DRIFT_BAK}'; p='${DRIFT_PATH}'`,
+    '[ -e "$b" ] || { rm -f "$p"; exit 0; }',
+    '[ -f "$b" ] && [ ! -L "$b" ] && [ -f "$f" ] && [ ! -L "$f" ] || exit 4',
+    'cp "$b" "$f" && rm -f "$b" "$p"'
+  ].join('\n');
+}
+
 /** Число бейджа раздела «Конфигурация» по его aria-label (бейджа нет — 0). */
 async function configBadge(page: Page): Promise<number> {
   const badge = page.locator('.nav-badge-config');
@@ -1021,6 +1069,75 @@ test(
         })
         .toBe(before.drift);
     };
+
+    // (1а)–(1г) состояния прерванного прогона на настоящих файлах стенда: каждое заканчивается
+    // файлом в ok и исходным числом расхождений, проверяется тот же recoverDrift, что в (0)
+    const sh = async (cmd: string, what: string): Promise<void> => {
+      expect(await standSh(cmd), what).toBe(0);
+    };
+    const settled = async (what: string): Promise<void> => {
+      await expect
+        .poll(
+          async () => {
+            const s = await layerState(page);
+            return `${fileState(s, path)}/${s.drift}`;
+          },
+          { message: `${what}: файл в ok, число расхождений исходное`, timeout: T.save }
+        )
+        .toBe(`ok/${before.drift}`);
+    };
+    const driftSeen = async (what: string): Promise<void> => {
+      await expect
+        .poll(async () => fileState(await layerState(page), path), {
+          message: `${what}: слой видит дрейф файла`,
+          timeout: T.save
+        })
+        .toBe('drift_modified');
+    };
+    await withStandReturn(async () => {
+      // (1а) прерванный прогон: копия, путь и перевод строки — файл в drift_modified,
+      // возврат по сохранённому пути
+      await sh(driftCmd(path), '(1а) дрейф внесён');
+      await sh(metaKeptCmd(path), '(1а) путь записан рядом с копией');
+      await driftSeen('(1а)');
+      expect(await recoverDrift(page), '(1а) возврат по сохранённому пути').toBe(0);
+      await sh(NO_LEFTOVERS_CMD, '(1а) копия и путь удалены');
+      await settled('(1а)');
+
+      // (1б) файл уже с исходными байтами, копия и путь остались — остаток удаляется
+      await sh(driftCmd(path, { append: false }), '(1б) копия и путь без правки файла');
+      expect(await recoverDrift(page), '(1б) остаток при уже возвращённом файле').toBe(0);
+      await sh(NO_LEFTOVERS_CMD, '(1б) остаток удалён');
+      await settled('(1б)');
+
+      // (1в) старая копия без пути: единственный управляемый файл с её байтами плюс LF
+      await sh(driftCmd(path, { meta: false }), '(1в) старая копия без пути и дрейф');
+      await driftSeen('(1в)');
+      expect(await recoverDrift(page), '(1в) возврат по единственному совпадению').toBe(0);
+      await sh(NO_LEFTOVERS_CMD, '(1в) копия удалена');
+      await settled('(1в)');
+
+      // (1г) чужие байты: отказ 4 без записи — с путём и без него (ни одного совпадения);
+      // известный исходник возвращается в finally самого состояния
+      await withStandReturn(
+        async () => {
+          await sh(driftCmd(path, { append: false }), '(1г) копия и путь');
+          await sh(foreignCmd(path), '(1г) чужая правка файла');
+          expect(await recoverDrift(page), '(1г) отказ при чужих байтах').toBe(4);
+          await sh(foreignKeptCmd(path, true), '(1г) байты, копия и путь сохранены');
+          await sh(`rm -f '${DRIFT_PATH}'`, '(1г) путь убран: старая копия');
+          expect(await recoverDrift(page), '(1г) отказ без совпадений').toBe(4);
+          await sh(foreignKeptCmd(path, false), '(1г) байты и копия сохранены');
+        },
+        async () => {
+          const code = await standSh(knownBackCmd(path));
+          if (code !== 0) throw new Error(`(1г) известный исходник не возвращён (код ${code})`);
+        }
+      );
+      await settled('(1г)');
+    }, returnStand);
+    // снимок страницы — после возврата файла: бейдж и уведомления без следов (1а)–(1г)
+    await openProxies(page);
 
     // цель — узел Mihomo, отличный от текущего выбора группы
     const card = await cardOf(page, proxyId, true);
