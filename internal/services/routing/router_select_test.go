@@ -582,7 +582,7 @@ func TestRouterSelectMihomoFirst(t *testing.T) {
 		rtsExpectFast(t, label, res, err)
 	}
 
-	executed, attempts, livePrev, nowKept := false, 0, false, false
+	executed, attempts, livePrev, nowKept, repending := false, 0, false, false, false
 	var want1, want2 string
 	for attempts < 3 && !executed {
 		attempts++
@@ -602,9 +602,12 @@ func TestRouterSelectMihomoFirst(t *testing.T) {
 		expectFast("выбор группы 2", res, err)
 		markBefore := e.svc.inflightKinds()[g2.id] == inflightSelect
 		liveBefore := e.rtcSelection(t)[g2.id]
+		// Наблюдатель в тесте не работает: флаг повтора сверки читается напрямую.
+		e.svc.reconcilePending.Swap(false)
 		if err := e.svc.reconcileMihomo(ctx); err != nil {
 			t.Fatalf("попытка %d: сверка Mihomo: %v", attempts, err)
 		}
+		repending = e.svc.reconcilePending.Load()
 		now, err := core.svc.ProxyNow(ctx, g2.name)
 		if err != nil {
 			t.Fatalf("попытка %d: ProxyNow: %v", attempts, err)
@@ -617,8 +620,11 @@ func TestRouterSelectMihomoFirst(t *testing.T) {
 		if executed && !nowKept {
 			t.Errorf("попытка %d: сверка во время фонового прохода вернула в Mihomo прежний узел группы 2", attempts)
 		}
+		if executed && !repending {
+			t.Errorf("попытка %d: сверка пропустила группу с идущим выбором и не запросила повтор", attempts)
+		}
 	}
-	t.Logf("mihomo-reconcile-skip: executed=%t attempts=%d live_prev=%t now_kept=%t", executed, attempts, livePrev, nowKept)
+	t.Logf("mihomo-reconcile-skip: executed=%t attempts=%d live_prev=%t now_kept=%t repending=%t", executed, attempts, livePrev, nowKept, repending)
 	if !executed {
 		t.Errorf("окно сверки не поймано: за %d попыток фоновый проход группы 2 не ждал хода во время сверки", attempts)
 	}
@@ -656,6 +662,12 @@ func TestRouterSelectMihomoFirst(t *testing.T) {
 // Ранний PUT отказывает по сроку, синхронный путь не пишет выбор и отвечает
 // занятостью; Live и маркеры прежние, сверка Mihomo запрошена. После SIGCONT ядро,
 // принявшее PUT уже после таймаута клиента, сходится к Live.
+//
+// tail_reput_unreachable (пробел 3, D-17): сразу после ответа быстрого пути сокет
+// контроллера убирается, пока фоновый проход держит отметку группы. Успешный
+// хвост не повторяет PUT подтверждённого значения: маркера selection_unconfirmed и
+// уведомления routing_select: нет, Live и xcp-groups — цель; новый процесс после
+// сверки показывает цель.
 //
 // Ядро стенда не трогается, метка ядра не нужна. Тест не ссылается на символы,
 // которых нет в продукте до исправления: проход mf-before собирает его с прежними
@@ -737,6 +749,64 @@ func TestRouterSelectMihomoFaults(t *testing.T) {
 		if !converged {
 			t.Errorf("WR-02: now группы в Mihomo не сошёлся с Live после неудачного раннего PUT (early_applied_late=%t)", lateApplied)
 		}
+	})
+
+	t.Run("tail_reput_unreachable", func(t *testing.T) {
+		sock := filepath.Join(core.dir, "c.sock")
+		executed, attempts := false, 0
+		var want string
+		for attempts < 3 && !executed {
+			attempts++
+			f.settle(t)
+			want = f.other(t, g.id)
+			res, err := e.svc.Select(ctx, g.id, want)
+			rtsExpectFast(t, "выбор быстрым путём", res, err)
+			// Ответ пришёл после раннего PUT: контроллер убирается, пока фоновый
+			// проход файла Xray ещё держит отметку группы.
+			if err := os.Remove(sock); err != nil {
+				t.Fatalf("сокет контроллера: %v", err)
+			}
+			executed = e.svc.inflightKinds()[g.id] == inflightSelect
+			if !executed {
+				// Хвост закончился до удаления сокета: контроллер возвращается, выбор
+				// в Mihomo сверяется с Live, попытка повторяется.
+				core.stop()
+				core.start(t, e)
+				e.rtsReconcile(t, ctx)
+			}
+		}
+		marker := "none"
+		if executed {
+			f.settle(t)
+			if k := readUnconfirmed(e.state(t).Live)[g.id]; k != "" {
+				marker = k
+			}
+		}
+		t.Logf("tail-reput: executed=%t attempts=%d marker=%s", executed, attempts, marker)
+		if !executed {
+			t.Errorf("окно хвоста не поймано: за %d попыток фоновый проход закончился до удаления сокета контроллера", attempts)
+			return
+		}
+		if marker != "none" {
+			t.Errorf("D-17: после успешного выбора у группы маркер selection_unconfirmed=%s: хвост повторил PUT подтверждённого значения", marker)
+		}
+		for _, n := range e.layer.Snapshot().Notices {
+			if strings.HasPrefix(n.ID, noticeSelectPrefix) {
+				t.Errorf("после успешного выбора уведомление routing_select: (%s)", n.Params["code"])
+			}
+		}
+		if e.rtcSelection(t)[g.id] != want {
+			t.Errorf("Live группы не равен выбранному узлу")
+		}
+		if !rtsSameOutbound(rtsOutbound(t, e.xrayDir(), GroupTag(g.id)), rtsOutbound(t, e.xrayDir(), f.xrayTag[want])) {
+			t.Errorf("исходящий группы в xcp-groups не совпадает с выбранным узлом")
+		}
+
+		// Контроллер возвращается новым процессом: сверка ставит выбор из Live.
+		core.stop()
+		core.start(t, e)
+		e.rtsReconcile(t, ctx)
+		rtsWaitNow(t, core, g.name, f.mihomoName[want], 10*time.Second)
 	})
 }
 

@@ -458,8 +458,12 @@ type xrayStages struct {
 	// путях нули.
 	clash, tail time.Duration
 	answered    time.Time
-	in          *xrayIntent
-	b           *xrayBatch
+	// reput — код повтора PUT Mihomo хвостом быстрого пути: reputSkip (Live равен
+	// цели раннего PUT, повтора нет), reputDone (повтор выполнен); пусто — хвоста
+	// быстрого пути не было (в строке — reputNone).
+	reput string
+	in    *xrayIntent
+	b     *xrayBatch
 	// err — ошибка ожидания хода (runXray).
 	err error
 	// syncN0, syncD0 — снимок utils.SyncStats при создании замера (вход в Select):
@@ -469,6 +473,13 @@ type xrayStages struct {
 	syncN0 int64
 	syncD0 time.Duration
 }
+
+// Коды поля reput строки этапов: только коды, без имён узлов (T-150-41).
+const (
+	reputSkip = "skip"
+	reputDone = "done"
+	reputNone = "none"
+)
 
 // newXrayStages создаёт замер выбора группы gid со снимком счётчиков fsync.
 func newXrayStages(gid string, start time.Time, model time.Duration, in *xrayIntent) *xrayStages {
@@ -541,9 +552,13 @@ func (st *xrayStages) log() {
 	// fsync, fsyncs — ожидание записи на носитель синхронными записями панели
 	// (utils.AtomicWriteFile) от входа в Select до этой строки.
 	syncN, syncD := utils.SyncStats()
-	log.Printf("[routing] выбор Xray: этапы group=%s batch=%d wait=%d model=%d live=%d build=%d validate_xray=%d validate_mihomo=%d write=%d restart=%d hot=%d other=%d markers=%d clash=%d tail=%d fsync=%d fsyncs=%d total=%d outcome=%s",
+	reput := st.reput
+	if reput == "" {
+		reput = reputNone
+	}
+	log.Printf("[routing] выбор Xray: этапы group=%s batch=%d wait=%d model=%d live=%d build=%d validate_xray=%d validate_mihomo=%d write=%d restart=%d hot=%d other=%d markers=%d clash=%d tail=%d fsync=%d fsyncs=%d total=%d outcome=%s reput=%s",
 		st.gid, batch, wait.Milliseconds(), st.model.Milliseconds(), live.Milliseconds(),
 		build, valX, valM, write, restart, hot.Milliseconds(), other.Milliseconds(),
 		st.markers.Milliseconds(), st.clash.Milliseconds(), st.tail.Milliseconds(),
-		(syncD - st.syncD0).Milliseconds(), syncN-st.syncN0, total.Milliseconds(), st.outcome())
+		(syncD - st.syncD0).Milliseconds(), syncN-st.syncN0, total.Milliseconds(), st.outcome(), reput)
 }
