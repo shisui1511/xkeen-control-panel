@@ -908,7 +908,9 @@ func rtsProviderPing(t *testing.T) {
 	probe := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 	t.Cleanup(probe.Close)
 	subscription := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprintf(w, "socks5://127.0.0.1:%d#pp-live\n", nodePort)
+		// Адрес 127.0.0.1 продукт считает заглушкой провайдера (nodes.IsStub),
+		// поэтому узел назван по имени хоста того же устройства.
+		_, _ = fmt.Fprintf(w, "socks5://localhost:%d#pp-live\n", nodePort)
 	}))
 	t.Cleanup(subscription.Close)
 
