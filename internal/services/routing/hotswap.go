@@ -189,7 +189,10 @@ func hotCommand(ctx context.Context, bin, addr, op string, tail ...string) ([]by
 			code = exit.ExitCode()
 		}
 	}
-	log.Printf("[routing] Xray api %s: код %d", op, code)
+	// Журнал на флешке: успешный вызов (их по нескольку на выбор) строки не пишет.
+	if code != 0 {
+		log.Printf("[routing] Xray api %s: код %d", op, code)
+	}
 	return out, err
 }
 

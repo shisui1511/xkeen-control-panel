@@ -355,7 +355,10 @@ func (s *Service) xrayValidateChanged(ctx context.Context, bin, tmpBase string, 
 			code = exit.ExitCode()
 		}
 	}
-	log.Printf("[routing] проверка Xray выбора по изменённым исходящим: тегов %d, код %d", len(tags), code)
+	// Журнал на флешке: успешная проверка (одна на выбор) строки не пишет.
+	if code != 0 {
+		log.Printf("[routing] проверка Xray выбора по изменённым исходящим: тегов %d, код %d", len(tags), code)
+	}
 	return code == 0
 }
 
