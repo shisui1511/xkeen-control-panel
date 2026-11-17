@@ -621,17 +621,18 @@ func (s *Service) selectOpts(ctx context.Context, groupID, member string, fast b
 		configlayer.KernelXray: selNotInstalled, configlayer.KernelMihomo: selNotInstalled,
 	}}
 	mihomoManaged := am.installed.Mihomo && desired.ManagedFor(configlayer.KernelMihomo)
+	// earlyTried — ранний PUT отправлялся, но ответ ушёл синхронным путём: Mihomo
+	// мог принять цель (в том числе после таймаута клиента, WR-02). Выходы, где
+	// выбор в Live не записан или возвращён, и постановка выбора из Live после
+	// успешного прохода ставят Mihomo по Live контекстом без отмены запроса: обрыв
+	// соединения клиента не оставляет ядро на цели и не даёт группе ложный маркер.
+	earlyTried := false
 	if am.installed.Xray && desired.ManagedFor(configlayer.KernelXray) {
 		// Намерение пишется в Live под замками применения до сборки (Prepare), в
 		// одной пачке с выборами независимых групп, пришедшими за время идущего
 		// запуска (G-150-3).
 		in := &xrayIntent{gid: groupID, member: member, comp: comp, keepRepick: !fast}
 		stages := newXrayStages(groupID, start, model, in)
-		// earlyTried — ранний PUT отправлялся, но ответ ушёл синхронным путём: Mihomo
-		// мог принять цель (в том числе после таймаута клиента, WR-02). Выходы, где
-		// выбор в Live не записан или возвращён, ставят Mihomo по Live контекстом без
-		// отмены запроса: обрыв соединения клиента не оставляет ядро на цели.
-		earlyTried := false
 		restoreMihomo := func() {
 			if !earlyTried {
 				return
@@ -740,9 +741,16 @@ func (s *Service) selectOpts(ctx context.Context, groupID, member string, fast b
 	// Выбор записан в Live: прежнее уведомление об отказе группы снимается.
 	s.selNotes.drop(s.d.Layer, groupID)
 	if mihomoManaged {
-		// Маркер и ответ фиксируются под тем же замком, что фоновая сверка.
+		// Маркер и ответ фиксируются под тем же замком, что фоновая сверка. После
+		// неудачного раннего PUT ядро могло принять цель: Mihomo ставится по Live
+		// контекстом без отмены запроса (как restoreMihomo), иначе закрытая вкладка
+		// дала бы группе маркер и «Повторить» при доступном ядре.
+		mctx := ctx
+		if earlyTried {
+			mctx = context.WithoutCancel(ctx)
+		}
 		s.selMu.Lock()
-		out, err := s.selectMihomoMarked(ctx, groupID)
+		out, err := s.selectMihomoMarked(mctx, groupID)
 		s.selMu.Unlock()
 		res.Kernels[configlayer.KernelMihomo] = out
 		if out == selFailed {
