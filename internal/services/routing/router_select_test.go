@@ -489,6 +489,9 @@ func TestRouterSelectMihomoReconcile(t *testing.T) {
 	dup := rtsNewDup(t)
 	t.Run("duplicate_names", func(t *testing.T) { rtsDuplicateNames(t, ctx, dup) })
 	t.Run("ambiguous_now", func(t *testing.T) { rtsAmbiguousNow(t, ctx, dup) })
+	// Процесс с настоящей подпиской больше не нужен: на устройстве мало памяти,
+	// и следующему подтесту нужен свой процесс.
+	dup.core.stop()
 	t.Run("provider_ping", rtsProviderPing)
 }
 
