@@ -867,12 +867,14 @@ func rtsAmbiguousNow(t *testing.T, ctx context.Context, d *rtsDup) {
 // меряется через провайдер своего источника. Своё окружение и свой процесс
 // Mihomo; остальные группы ограничены «Моими узлами», а узкая «авто» выбирает
 // ровно этот узел подписки точным выражением, поэтому ни одна группа не пишет
-// его копию. PingRequest группы даёт метод mihomo и одну цель с провайдером
+// его копию. PingRequest группы даёт метод mihomo и цели с провайдером
 // источника; настоящий раннер пинга (Clash API отдельного процесса, без подмены
-// замера, сети и результата) меряет её через ProviderProxyDelay. Диагностика —
-// только метод, статус, причина и коды пачки. Узел выбирается среди первых
-// пригодных по имени, сервер которых принимает TCP-соединение; такого нет —
-// провал подготовки.
+// замера, сети и результата) меряет их через ProviderProxyDelay. Диагностика —
+// только метод, статус, причина и коды пачки. Группа берёт несколько первых
+// пригодных по имени узлов, сервер которых принимает TCP-соединение: открытый
+// порт не делает узел живым прокси, поэтому проверка требует хотя бы один узел
+// с положительной задержкой, а остальные должны быть измерены тем же методом;
+// таких узлов нет — провал подготовки.
 func rtsProviderPing(t *testing.T) {
 	core := rtNewMihomoCore(t)
 	e := rtNewEnv(t, rtWithKernels(rtMihomoOnly), rtWithMihomoCore(core), rtsRuntimeCore(core))
@@ -881,20 +883,24 @@ func rtsProviderPing(t *testing.T) {
 	// их можно ограничить этим источником.
 	e.addMyLinks(t, "vless_reality")
 	subs := rtsSubscription(t, e)
-	var s sources.CatalogNode
+	const pingNodes = 6
+	var picked []sources.CatalogNode
 	for i, n := range subs {
-		if i == 20 {
+		if i == 30 || len(picked) == pingNodes {
 			break
 		}
 		conn, err := net.DialTimeout("tcp", net.JoinHostPort(n.Node.Host, strconv.Itoa(n.Node.Port)), 3*time.Second)
 		if err == nil {
 			_ = conn.Close()
-			s = n
-			break
+			picked = append(picked, n)
 		}
 	}
-	if s.Ref == "" {
+	if len(picked) == 0 {
 		t.Fatal("provider_ping_prepare: reachable_node=false")
+	}
+	include := make([]string, 0, len(picked))
+	for _, n := range picked {
+		include = append(include, rtsExact(n.Display))
 	}
 	for _, g := range e.groups(t).Items {
 		g.Sources = GroupSources{IDs: []string{sources.MySourceID}}
@@ -904,7 +910,7 @@ func rtsProviderPing(t *testing.T) {
 	}
 	_, grp, err := e.svc.SaveGroup(e.rev(t), Group{
 		Name: "Провайдер", Mode: ModeAuto, Regex: true,
-		Sources: GroupSources{IDs: []string{s.Source}}, Include: []string{rtsExact(s.Display)},
+		Sources: GroupSources{IDs: []string{picked[0].Source}}, Include: include,
 	})
 	if err != nil {
 		t.Fatal("provider_ping_prepare: group_error=true")
@@ -916,17 +922,26 @@ func rtsProviderPing(t *testing.T) {
 	if err != nil {
 		t.Fatal("provider_ping_prepare: model_error=true")
 	}
-	if name := runtimeMihomo(am).copyName[s.Ref]; name != "" {
-		t.Fatal("provider_ping_prepare: node_copied=true")
+	for _, n := range picked {
+		if name := runtimeMihomo(am).copyName[n.Ref]; name != "" {
+			t.Fatal("provider_ping_prepare: node_copied=true")
+		}
 	}
 	req, err := e.svc.PingRequest(proxyping.ScopeGroup, grp.ID)
-	if err != nil || req.Method != proxyping.MethodMihomo || req.Kernel != configlayer.KernelMihomo || len(req.Targets) != 1 {
-		t.Fatalf("provider_ping_prepare: error=%t method=%q kernel=%q targets=%d", err != nil, req.Method, req.Kernel, len(req.Targets))
+	if err != nil || req.Method != proxyping.MethodMihomo || req.Kernel != configlayer.KernelMihomo || len(req.Targets) != len(picked) {
+		t.Fatalf("provider_ping_prepare: error=%t method=%q kernel=%q targets=%d want=%d", err != nil, req.Method, req.Kernel, len(req.Targets), len(picked))
 	}
-	target := req.Targets[0]
-	if target.Ref != s.Ref || target.MihomoName != s.MihomoName || target.MihomoProvider == "" || target.MihomoProvider != providerName(s.Source) {
-		t.Fatalf("provider_ping_prepare: ref_match=%t name_match=%t provider_set=%t provider_match=%t",
-			target.Ref == s.Ref, target.MihomoName == s.MihomoName, target.MihomoProvider != "", target.MihomoProvider == providerName(s.Source))
+	byRef := map[string]sources.CatalogNode{}
+	for _, n := range picked {
+		byRef[n.Ref] = n
+	}
+	for i, target := range req.Targets {
+		n, known := byRef[target.Ref]
+		if !known || target.MihomoName != n.MihomoName || target.MihomoProvider == "" || target.MihomoProvider != providerName(n.Source) {
+			t.Fatalf("provider_ping_prepare: target=%d ref_known=%t name_match=%t provider_set=%t provider_match=%t",
+				i, known, known && target.MihomoName == n.MihomoName, target.MihomoProvider != "", known && target.MihomoProvider == providerName(n.Source))
+		}
+		delete(byRef, target.Ref)
 	}
 
 	runner, err := proxyping.New(proxyping.Deps{
@@ -963,16 +978,29 @@ func rtsProviderPing(t *testing.T) {
 		}
 	}
 	b := snap.Batch
-	if b.State != proxyping.StateDone || b.Done != 1 || b.Total != 1 || b.Method != proxyping.MethodMihomo ||
+	total := len(picked)
+	if b.State != proxyping.StateDone || b.Done != total || b.Total != total || b.Method != proxyping.MethodMihomo ||
 		b.Kernel != configlayer.KernelMihomo || b.ReasonCode != "" || b.FallbackReason != "" {
-		t.Fatalf("provider_ping: state=%q done=%d total=%d method=%q kernel=%q reason_code=%q fallback_reason=%q",
-			b.State, b.Done, b.Total, b.Method, b.Kernel, b.ReasonCode, b.FallbackReason)
+		t.Fatalf("provider_ping: state=%q done=%d total=%d want=%d method=%q kernel=%q reason_code=%q fallback_reason=%q",
+			b.State, b.Done, b.Total, total, b.Method, b.Kernel, b.ReasonCode, b.FallbackReason)
 	}
-	res, ok := snap.Results[s.Ref]
-	if !ok || res.Kernel != configlayer.KernelMihomo || res.Method != proxyping.MethodMihomo || res.Status != proxyping.StatusOK ||
-		res.MS <= 0 || res.Reason != "" || res.At.IsZero() {
-		t.Fatalf("provider_ping: result=%t kernel=%q method=%q status=%q reason=%q ms_positive=%t at_set=%t",
-			ok, res.Kernel, res.Method, res.Status, res.Reason, res.MS > 0, !res.At.IsZero())
+	var okNodes, wrongMethod, missing int
+	reasons := map[string]int{}
+	for _, n := range picked {
+		res, ok := snap.Results[n.Ref]
+		switch {
+		case !ok:
+			missing++
+		case res.Kernel != configlayer.KernelMihomo || res.Method != proxyping.MethodMihomo || res.At.IsZero():
+			wrongMethod++
+		case res.Status == proxyping.StatusOK && res.MS > 0 && res.Reason == "":
+			okNodes++
+		default:
+			reasons[res.Status+"/"+res.Reason]++
+		}
+	}
+	if okNodes == 0 || wrongMethod != 0 || missing != 0 {
+		t.Fatalf("provider_ping: nodes=%d ok=%d wrong_method=%d missing=%d not_ok=%v", total, okNodes, wrongMethod, missing, reasons)
 	}
 }
 
