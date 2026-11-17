@@ -1505,7 +1505,8 @@ func TestRouterSelectMihomoFaults(t *testing.T) {
 			display[memberNode+n.Ref] = n.Display
 		}
 		// Текущий выбор — не первый по порядку: иначе повторному выбору нечего менять.
-		if e.rtcSelection(t)[g.id] == first {
+		// Пустой выбор (подтест идёт отдельным проходом, без предыдущих) ставится так же.
+		if cur := e.rtcSelection(t)[g.id]; cur == first || cur == "" {
 			res, err := e.svc.Select(ctx, g.id, f.other(t, g.id))
 			rtsExpectFast(t, "repick_setup: выбор второго узла", res, err)
 			f.settle(t)
