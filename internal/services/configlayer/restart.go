@@ -385,9 +385,8 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 				if pid == prevPID {
 					log.Printf("configlayer: горячая замена Xray: причина=%s файлов=%d PID=%d", NoteXrayHotSwapped, len(files), prevPID)
 					return RestartView{Kernel: kernel, Outcome: RestartOutcomeHotReloaded, NoteCode: NoteXrayHotSwapped}, nil
-				} else {
-					hotErr = &XrayHotError{Reason: HotReasonFailed, Partial: true, Err: fmt.Errorf("PID Xray после замены: был %d, стал %d", prevPID, pid)}
 				}
+				hotErr = &XrayHotError{Reason: HotReasonFailed, Partial: true, Err: fmt.Errorf("PID Xray после замены: был %d, стал %d", prevPID, pid)}
 			}
 			if err := interrupted(ctx); err != nil {
 				return interruptedView(kernel), err
