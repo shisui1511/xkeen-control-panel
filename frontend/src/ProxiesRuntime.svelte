@@ -286,7 +286,13 @@
     const gid = selectNoticeGid(n);
     const name = n.params?.group || view?.groups.find((g) => g.id === gid)?.name || gid;
     const reason = $t(`proxies.rt.select_bg_reason.${selectBgReason(n.params?.reason)}`);
-    showToast('error', $t('proxies.rt.toast.reverted_bg', { name, reason }));
+    // Возврат прежнего выбора не подтверждён (reverted = 'false'): «Прежний узел возвращён» не
+    // пишется (D-16). Без параметра — сервер его не шлёт — прежний текст о возврате
+    const key =
+      n.params?.reverted === 'false'
+        ? 'proxies.rt.toast.unconfirmed_bg'
+        : 'proxies.rt.toast.reverted_bg';
+    showToast('error', $t(key, { name, reason }));
   }
 
   $effect(() => {

@@ -1,9 +1,12 @@
 // e2e-pages: proxies config/groups
 // router-area: routing
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { test, expect, type Browser, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
-import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
+import { CORE_TAG, FULL_TAG, SLOW_ANNOTATION, TIER_FULL_ANNOTATION } from './lib/known';
 import {
   addToDraft,
   api,
@@ -55,6 +58,7 @@ interface RtGroup {
   id: string;
   mode: string;
   current: string;
+  switching?: boolean;
   members: RtMember[];
 }
 
@@ -651,6 +655,284 @@ test(
     const outerHead = page.getByTestId(`proxy-group-${outerId}`).locator('.pc-toggle').first();
     await expect(outerHead).toHaveAttribute('aria-expanded', 'true', { timeout: T.page });
     await expect(outerHead).toBeFocused({ timeout: T.action });
+    await guard.assertClean();
+  }
+);
+
+// --- Отказ фонового прохода выбора (150-29, D-11) ---
+// При запущенном Mihomo и остановленном Xray выбор узла применяется к Mihomo сразу, а файл
+// Xray пишется фоновым проходом. Сбой вносится на самом роутере: управляемый панелью файл Xray
+// (не xcp-groups) получает дописанный перевод строки — дрейф, на котором фоновый проход
+// отказывает (drift_blocked, класс rejected), выбор возвращается к прежнему узлу и сервер
+// публикует уведомление routing_select:<gid>:<n> с новым n на каждый отказ. Исходные байты
+// файла лежат в копии на роутере и возвращаются в finally теста. Ответы сети не подменяются.
+
+const run = promisify(execFile);
+const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+/** Файл в каталоге конфигов Xray: только такой путь подставляется в команду на стенде. */
+const XRAY_FILE = /^\/opt\/etc\/xray\/configs\/[A-Za-z0-9._-]+$/;
+const XRAY_DIR_PREFIX = '/opt/etc/xray/configs/';
+const DRIFT_BAK = '/tmp/rtpx-drift.bak';
+const REJECTED = /файл Xray не принят|the Xray file was rejected/;
+const RESTORED = /Прежний узел возвращён|previous node has been restored/;
+
+/**
+ * Команда на стенде arm64 через scripts/router/lib.sh из корня репозитория: алиас и доступы
+ * берутся только из локального файла целей. Возвращает код выхода; сбой подготовки — ошибка.
+ * Вывод ssh (в нём может быть алиас) в отчёт не попадает.
+ */
+async function standSh(remote: string): Promise<number> {
+  const code = await run(
+    'sh',
+    [
+      '-c',
+      '. scripts/router/lib.sh || exit 90; rt_load_targets || exit 91; rt_ssh arm64 "$1"',
+      'sh',
+      remote
+    ],
+    { cwd: REPO_ROOT, env: { ...process.env, ROUTERS: 'arm64' }, timeout: 60_000 }
+  ).then(
+    () => 0 as unknown,
+    (err: unknown) => (err as { code?: unknown } | null)?.code
+  );
+  if (code === 3) throw new Error('стенд arm64: нет связи по ssh');
+  if (code === 90 || code === 91) throw new Error('стенд arm64: файл целей не прочитан');
+  if (typeof code !== 'number') {
+    throw new Error('стенд arm64: команда не выполнена (таймаут или запуск sh)');
+  }
+  return code;
+}
+
+interface LayerStateView {
+  files: { kernel?: string; owner?: string; state?: string; path?: string }[];
+  notices: { id: string; params?: Record<string, string> }[];
+  drift: number;
+}
+
+/** Снимок слоя GET /api/configlayer/state: файлы, уведомления и число расхождений. */
+async function layerState(page: Page): Promise<LayerStateView> {
+  const res = await api(page, 'GET', '/api/configlayer/state');
+  expect(res.status, 'GET /api/configlayer/state').toBe(200);
+  const d = res.data ?? {};
+  return {
+    files: (d.files ?? []) as LayerStateView['files'],
+    notices: (d.notices ?? []) as LayerStateView['notices'],
+    drift: Number(d.drift_count ?? 0)
+  };
+}
+
+/** Идентификаторы уведомлений отказа выбора группы gid. */
+function selectNoticeIds(s: LayerStateView, gid: string): string[] {
+  return s.notices.filter((n) => n.id.startsWith(`routing_select:${gid}:`)).map((n) => n.id);
+}
+
+/**
+ * Управляемый панелью файл Xray в каталоге конфигов, кроме xcp-groups, в состоянии ok (как
+ * rtRtDriftFile Go-сценария). Путь проверяется шаблоном каталога Xray до подстановки в команду.
+ */
+function driftFile(s: LayerStateView): string {
+  const f = s.files.find((x) => {
+    const p = x.path ?? '';
+    const base = p.slice(XRAY_DIR_PREFIX.length);
+    return (
+      x.kernel === 'xray' &&
+      x.owner === 'panel' &&
+      x.state === 'ok' &&
+      p.startsWith(XRAY_DIR_PREFIX) &&
+      !base.includes('/') &&
+      !base.includes('xcp-groups')
+    );
+  });
+  if (!f) {
+    throw new Error('фоновый отказ: нет управляемого файла Xray вне xcp-groups в состоянии ok');
+  }
+  const path = f.path ?? '';
+  if (!XRAY_FILE.test(path)) {
+    throw new Error('фоновый отказ: путь файла Xray вне шаблона каталога');
+  }
+  return path;
+}
+
+/** Число бейджа раздела «Конфигурация» по его aria-label (бейджа нет — 0). */
+async function configBadge(page: Page): Promise<number> {
+  const badge = page.locator('.nav-badge-config');
+  if ((await badge.count()) === 0) return 0;
+  const label = (await badge.first().getAttribute('aria-label')) ?? '';
+  const m = /(\d+)\s*$/.exec(label);
+  return m ? Number(m[1]) : Number.NaN;
+}
+
+/** Конец переключения группы: switching в виде «Прокси» снят (фоновый проход закончен). */
+async function waitSettled(page: Page, gid: string): Promise<void> {
+  await expect
+    .poll(async () => (await runtimeGroup(page, gid)).switching === true, {
+      message: `группа ${gid} вышла из переключения`,
+      timeout: 90_000 * RT.slow,
+      intervals: [500]
+    })
+    .toBe(false);
+}
+
+test(
+  'proxies-runtime: отказ фонового прохода выбора — тост на каждый отказ, уведомление на «Конфигурации», без тоста при загрузке',
+  {
+    tag: [CORE_TAG, FULL_TAG],
+    annotation: {
+      type: TIER_FULL_ANNOTATION,
+      description: 'внесение сбоя: дрейф управляемого файла Xray через ssh стенда'
+    }
+  },
+  async ({ page }) => {
+    test.skip(RT.core !== 'mihomo', 'фоновый проход файла Xray идёт только при ядре Mihomo');
+    test.setTimeout(T.save * 8);
+    const guard = attachConsoleGuard(page);
+    await openProxies(page);
+    const inst = await installedKernels(page);
+    test.skip(!inst.xray, 'Xray не установлен: фонового прохода файла Xray нет');
+
+    // (1) файл дрейфа и исходное число расхождений
+    const before = await layerState(page);
+    expect(selectNoticeIds(before, proxyId), `уведомления выбора группы ${proxyId}`).toEqual([]);
+    const path = driftFile(before);
+    const driftCmd =
+      `f='${path}'; b=${DRIFT_BAK}; [ ! -e "$b" ] || exit 4; ` +
+      `cp -p "$f" "$b" && printf '\\n' >> "$f"`;
+    const restoreCmd =
+      `f='${path}'; b=${DRIFT_BAK}; [ -e "$b" ] || exit 0; ` + `cp -p "$b" "$f" && rm -f "$b"`;
+    const restore = async (): Promise<void> => {
+      const code = await standSh(restoreCmd);
+      if (code !== 0) throw new Error(`фоновый отказ: файл Xray не возвращён (код ${code})`);
+    };
+
+    // цель — узел Mihomo, отличный от текущего выбора группы
+    const card = await cardOf(page, proxyId, true);
+    const g = await runtimeGroup(page, proxyId);
+    const idx = indexOf(g, (m) => m.kind === 'node' && m.mihomo && m.member !== g.current);
+    expect(idx, `узел Mihomo вне текущего выбора в группе ${proxyId}`).toBeGreaterThanOrEqual(0);
+    const target = g.members[idx].member;
+    const tile = card.getByTestId(`proxy-node-${proxyId}-${idx}`);
+    await expect(tile).toHaveAttribute('aria-pressed', 'false', { timeout: T.action });
+
+    // (2) исходное число бейджа «Конфигурации»: снимок слоя страницы уже загружен
+    const badgeBefore = await configBadge(page);
+    expect(Number.isNaN(badgeBefore), 'число бейджа .nav-badge-config').toBe(false);
+
+    const errToast = page.locator('.toast.toast--error').filter({ hasText: 'RT Прокси' });
+    const failOnce = async (n: number): Promise<string> => {
+      await expect(errToast, `тост прошлого отказа группы ${proxyId} ушёл`).toHaveCount(0, {
+        timeout: T.action
+      });
+      await expect(tile).toHaveAttribute('aria-pressed', 'false', { timeout: T.action });
+      await expect(tile).not.toHaveAttribute('aria-disabled', 'true', { timeout: T.save });
+      const selectResp = page.waitForResponse(
+        (r) =>
+          r.request().method() === 'POST' && r.url().includes('/api/configlayer/routing/select'),
+        { timeout: T.save }
+      );
+      await tile.click();
+      expect((await selectResp).status(), `POST routing/select, отказ №${n}`).toBe(200);
+      // ровно один тост ошибки на новый идентификатор уведомления
+      await expect(errToast, `тост отказа №${n} группы ${proxyId}`).toHaveCount(1, {
+        timeout: T.save
+      });
+      await expect(errToast, `причина rejected в тосте №${n}`).toContainText(REJECTED);
+      await expect(errToast, `возврат прежнего узла в тосте №${n}`).toContainText(RESTORED);
+      await waitSettled(page, proxyId);
+      let ids: string[] = [];
+      await expect
+        .poll(
+          async () => {
+            ids = selectNoticeIds(await layerState(page), proxyId);
+            return ids.length;
+          },
+          { message: `уведомление выбора группы ${proxyId}, отказ №${n}`, timeout: T.action }
+        )
+        .toBe(1);
+      // выбор вернулся к прежнему узлу
+      expect((await runtimeGroup(page, proxyId)).current, `current группы ${proxyId}`).toBe(
+        g.current
+      );
+      return ids[0];
+    };
+
+    let drifted = false;
+    try {
+      // (3) дрейф: копия исходных байтов с правами и дописанный перевод строки
+      drifted = true;
+      const code = await standSh(driftCmd);
+      if (code === 4) {
+        drifted = false;
+        throw new Error('фоновый отказ: на стенде осталась копия прерванного прогона');
+      }
+      if (code !== 0) throw new Error(`фоновый отказ: дрейф не внесён (код ${code})`);
+
+      // (4) и (5) два отказа подряд: два тоста, идентификаторы уведомлений различаются (D-11)
+      const firstId = await failOnce(1);
+      const secondId = await failOnce(2);
+      expect(secondId, `D-11: новый идентификатор уведомления группы ${proxyId}`).not.toBe(firstId);
+      await expect(errToast).toHaveCount(0, { timeout: T.action });
+
+      // (6) загрузка «Прокси» при уже существующем уведомлении: тоста нет
+      await page.reload({ timeout: T.page, waitUntil: 'domcontentloaded' });
+      await expect(page.getByTestId('proxies-layer-page')).toBeVisible({ timeout: T.page });
+      await cardOf(page, proxyId);
+      await page.waitForTimeout(3000);
+      await expect(errToast, `тост при загрузке с уведомлением группы ${proxyId}`).toHaveCount(0);
+
+      // (7) «Конфигурация»: уведомление с группой и причиной
+      await page.goto('/#/config', { timeout: T.page, waitUntil: 'domcontentloaded' });
+      const notice = page
+        .getByTestId('config-notices')
+        .locator(`[data-notice^="routing_select:${proxyId}:"]`);
+      await expect(notice, `уведомление выбора группы ${proxyId}`).toHaveCount(1, {
+        timeout: T.page
+      });
+      await expect(notice).toContainText('RT Прокси');
+      await expect(notice).toContainText(REJECTED);
+
+      // (8) возврат файла: дрейф снят, уведомление ещё считается в бейдже
+      await restore();
+      drifted = false;
+      await expect
+        .poll(async () => (await layerState(page)).drift, {
+          message: 'число расхождений вернулось к исходному',
+          timeout: T.save,
+          intervals: [1000]
+        })
+        .toBe(before.drift);
+      await expect
+        .poll(() => configBadge(page), {
+          message: `бейдж .nav-badge-config с уведомлением группы ${proxyId}`,
+          timeout: T.action
+        })
+        .toBe(badgeBefore + 1);
+
+      // успешный выбор той же цели снимает уведомление группы и возвращает бейдж
+      const sel = await api(page, 'POST', '/api/configlayer/routing/select', {
+        group: proxyId,
+        member: target
+      });
+      expect(sel.status, 'выбор после возврата файла').toBe(200);
+      await waitSettled(page, proxyId);
+      await expect
+        .poll(async () => selectNoticeIds(await layerState(page), proxyId).length, {
+          message: `уведомление выбора группы ${proxyId} снято`,
+          timeout: T.save,
+          intervals: [1000]
+        })
+        .toBe(0);
+      expect((await runtimeGroup(page, proxyId)).current, `current группы ${proxyId}`).toBe(target);
+      await expect(notice).toHaveCount(0, { timeout: T.action });
+      await expect
+        .poll(() => configBadge(page), {
+          message: 'бейдж .nav-badge-config вернулся к исходному',
+          timeout: T.action
+        })
+        .toBe(badgeBefore);
+    } finally {
+      // стенд возвращается и после падения: исходные байты файла Xray, копия удалена
+      if (drifted) await restore();
+    }
     await guard.assertClean();
   }
 );
