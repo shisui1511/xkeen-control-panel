@@ -294,8 +294,8 @@ func (b *mihomoBuild) probeProvider(ref, name string) string {
 }
 
 // ambiguousNames — имена, которые в профиле носят разные узлы (одноимённые
-// узлы разных источников, копия с именем узла другого источника): факты Mihomo
-// по такому имени нельзя приписать одному узлу.
+// узлы разных источников, копия с именем узла другого источника) или узел и
+// группа профиля: факты Mihomo по такому имени нельзя приписать одному узлу.
 func (b *mihomoBuild) ambiguousNames() map[string]bool {
 	owner := map[string]string{}
 	out := map[string]bool{}
@@ -314,6 +314,15 @@ func (b *mihomoBuild) ambiguousNames() map[string]bool {
 	}
 	for ref, name := range b.copyName {
 		add(name, ref)
+	}
+	// В /proxies Mihomo лежат и группы профиля: узел провайдера с именем группы
+	// получил бы её историю. Имена групп отмечают совпавшее имя узла.
+	for _, g := range b.groups {
+		for _, name := range []string{g.Name, hiddenName(g.ID)} {
+			if _, taken := owner[name]; taken {
+				out[name] = true
+			}
+		}
 	}
 	return out
 }
