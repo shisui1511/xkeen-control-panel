@@ -505,6 +505,14 @@ func (c *rtMihomoCore) start(t *testing.T, e *rtEnv) {
 	c.proc = p
 	c.mu.Unlock()
 	rtWaitCond(t, 30*time.Second, "Clash API отдельного процесса", c.svc.HasController)
+	// Сокет контроллера появляется раньше, чем ядро загрузило профиль: первый
+	// выбор сразу после запуска упирался в предел вызова. Ждём настоящий ответ.
+	rtWaitCond(t, 60*time.Second, "ответ Clash API отдельного процесса", func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_, err := c.svc.ProxiesState(ctx)
+		return err == nil
+	})
 }
 
 // rtWaitCond ждёт, пока условие станет истинным; не дождался — провал теста
