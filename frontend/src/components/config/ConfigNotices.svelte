@@ -147,13 +147,16 @@
         text: $t('cfg.routing.reconcile_failed', { group: p.group ?? '' })
       };
     }
-    // Отказ фонового прохода выбора при запущенном Mihomo: причина по классу, незнакомый — failed
+    // Отказ фонового прохода выбора при запущенном Mihomo: причина по классу, незнакомый — failed.
+    // Возврат не подтверждён (reverted = 'false') — без «Прежний узел возвращён» (D-16)
     if (n.id.startsWith('routing_select:')) {
       const reason = $t(`proxies.rt.select_bg_reason.${selectBgReason(p.reason)}`);
+      const key =
+        p.reverted === 'false' ? 'cfg.notice.routing_select_unknown' : 'cfg.notice.routing_select';
       return {
         notice: n,
         tone: 'error',
-        text: $t('cfg.notice.routing_select', { group: p.group || p.gid || '', reason })
+        text: $t(key, { group: p.group || p.gid || '', reason })
       };
     }
     if (n.id.startsWith('routing_repick:')) {

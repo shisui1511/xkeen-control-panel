@@ -256,8 +256,11 @@ export function isKnownNoticeId(id: string): boolean {
   return NOTICE_IDS.includes(id) || NOTICE_PREFIXES.some((p) => id.startsWith(p));
 }
 
-/** Классы причины отказа фонового прохода выбора (params.reason уведомления выбора). */
-const SELECT_BG_REASONS = ['rejected', 'busy', 'stopped', 'failed'] as const;
+/**
+ * Классы причины отказа фонового прохода выбора (params.reason уведомления выбора): disabled —
+ * слой «Конфигурация» выключен.
+ */
+const SELECT_BG_REASONS = ['rejected', 'busy', 'stopped', 'failed', 'disabled'] as const;
 export type SelectBgReason = (typeof SELECT_BG_REASONS)[number];
 
 /** Класс причины из параметров уведомления: незнакомый или пустой — 'failed'. */
