@@ -489,8 +489,8 @@ const layerHandlers: Record<HandlerEvent, Set<(data?: unknown) => void>> = {
 /**
  * Подписка на событие SSE `sources`, `routing`, `geodata`, `dns`, `wizard`, `proxies` или `draft`;
  * возвращает функцию отписки. Данные proxies передаются обработчику без изменения снимка.
- * После восстановления связи подписчики geodata, dns, wizard и proxies
- * получают вызов без события: за время обрыва их события могли пройти мимо.
+ * При каждом открытии потока — первом и после обрыва — подписчики geodata, dns, wizard и
+ * proxies получают вызов без события: до подписки их события могли пройти мимо.
  */
 export function onLayerEvent(name: HandlerEvent, fn: (data?: unknown) => void): () => void {
   const set = layerHandlers[name];
@@ -649,14 +649,14 @@ function connect(): void {
     retryDelay = RETRY_MIN_MS;
     layerConnection.set('open');
     // Пока связи не было, события могли пройти мимо — читаем состояние целиком (D-06)
-    if (wasLost) {
-      void refetchLayerState();
-      // События менеджера баз, перехвата DNS, мастера и прокси тоже могли пройти мимо
-      notifyHandlers('geodata');
-      notifyHandlers('dns');
-      notifyHandlers('wizard');
-      notifyHandlers('proxies');
-    }
+    if (wasLost) void refetchLayerState();
+    // События менеджера баз, перехвата DNS, мастера и прокси до подписки не доставляются —
+    // ни после обрыва, ни до первого открытия потока: страница, прочитавшая данные раньше
+    // (например, пачку пинга, закончившуюся до подписки), перечитывает их
+    notifyHandlers('geodata');
+    notifyHandlers('dns');
+    notifyHandlers('wizard');
+    notifyHandlers('proxies');
   };
   es.onerror = () => {
     if (source !== es) return;

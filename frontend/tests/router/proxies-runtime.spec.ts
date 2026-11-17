@@ -516,10 +516,34 @@ test(
   async ({ page }) => {
     test.setTimeout(T.save * 4);
     const guard = attachConsoleGuard(page);
+    // Первое открытие потока событий слоя: события до подписки не доставляются, поэтому вид
+    // и результаты пинга, прочитанные страницей при загрузке, перечитываются после открытия.
+    // Иначе пачка, закончившаяся до подписки (поток открывается после чтения состояния слоя,
+    // на роутере — через секунды), оставалась бы «Проверяется 0 из 3». Считаются запросы
+    // результатов после ответа потока (открытие) — до первых вызовов api теста.
+    let streamOpen = false;
+    let resultsAfterOpen = 0;
+    page.on('response', (r) => {
+      if (r.url().includes('/api/configlayer/events')) streamOpen = true;
+    });
+    page.on('request', (r) => {
+      if (
+        streamOpen &&
+        r.method() === 'GET' &&
+        r.url().includes('/api/configlayer/proxies/results')
+      )
+        resultsAfterOpen++;
+    });
     await openProxies(page, `#/proxies?group=${proxyId}`);
     const card = await cardOf(page, proxyId, true);
     const status = page.getByTestId('proxies-ping-status');
     await expect(status).toHaveAttribute('aria-live', 'polite');
+    await expect
+      .poll(() => (streamOpen ? resultsAfterOpen : -1), {
+        message: 'перечитывание результатов пинга при первом открытии потока событий слоя',
+        timeout: T.page
+      })
+      .toBeGreaterThan(0);
 
     // «Проверить» группы: пачка проходит до итога «Проверено N …»
     const groupBatch = await startBatch(
