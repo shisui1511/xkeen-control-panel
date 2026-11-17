@@ -348,6 +348,18 @@ func (s *Service) inflightKinds() map[string]string {
 	return out
 }
 
+// selectionBlocked — выбор в группе groupID заблокирован маркером неизвестного
+// исхода: маркер Xray стоит на всей компоненте comp (общий файл групп), маркер
+// Mihomo — только на самой группе. Снимает его кнопка «Повторить».
+func selectionBlocked(unconfirmed map[string]string, comp []string, groupID string) bool {
+	for _, id := range comp {
+		if k := unconfirmed[id]; k == configlayer.KernelXray || (id == groupID && k != "") {
+			return true
+		}
+	}
+	return false
+}
+
 // clearUnconfirmed снимает маркер kernel с групп comp. Запись состояния идёт на
 // флешку, поэтому без маркера на comp ничего не пишется и не публикуется.
 func (s *Service) clearUnconfirmed(comp []string, kernel string) error {
@@ -611,11 +623,8 @@ func (s *Service) selectOpts(ctx context.Context, groupID, member string, fast b
 	// только на группу со сбоем: выбор в Mihomo у каждой группы свой. Связанная
 	// группа без своего маркера не показывает «Повторить», поэтому маркер Mihomo
 	// другой группы её выбор не блокирует.
-	unconfirmed := readUnconfirmed(st.Live)
-	for _, id := range comp {
-		if k := unconfirmed[id]; k == configlayer.KernelXray || (id == groupID && k != "") {
-			return SelectResult{}, ErrSelectionUnconfirmed
-		}
+	if selectionBlocked(readUnconfirmed(st.Live), comp, groupID) {
+		return SelectResult{}, ErrSelectionUnconfirmed
 	}
 	res := SelectResult{Member: member, Kernels: map[string]string{
 		configlayer.KernelXray: selNotInstalled, configlayer.KernelMihomo: selNotInstalled,
@@ -1834,6 +1843,11 @@ func (s *Service) repickOne(ctx context.Context, gid string) {
 		s.clearRepick(gid)
 		return
 	}
+	// Ручной выбор упёрся бы в тот же маркер неизвестного исхода: пачку замера не
+	// гоняем, маркер повторного выбора остаётся до «Повторить» и следующего запуска.
+	if selectionBlocked(readUnconfirmed(st.Live), linkedGroups(am.groups.Items, gid), gid) {
+		return
+	}
 	probe, err := parseProbe(st.Applied[ProbeSection], s.d.GOARCH)
 	if err != nil {
 		probe = defaultProbe(s.d.GOARCH)
@@ -1924,6 +1938,11 @@ func (s *Service) selectWithRetry(ctx context.Context, gid, member string) repic
 		switch {
 		case err == nil && !res.Reverted && len(res.Unconfirmed) == 0:
 			return repickSet
+		case err == nil && (ctx.Err() != nil || s.ctx.Err() != nil):
+			// Ядро остановлено посреди прохода: возврат или неизвестный исход
+			// вызваны остановкой, а не отказом. Маркер остаётся, уведомление
+			// в памяти при выходе всё равно пропало бы.
+			return repickLater
 		case err == nil:
 			// Возврат без ошибки прохода или неизвестный исход: выбор не поставлен.
 			return repickFailed
