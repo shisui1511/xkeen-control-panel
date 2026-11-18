@@ -280,26 +280,16 @@ func (a *API) isMihomoProfilePath(path string) bool {
 	return false
 }
 
-// lockMihomoFiles берёт замок записи файлов Mihomo (SubscriptionService.mihomoMu)
-// и возвращает функцию снятия. Для создания и копирования профиля: методы сервиса
-// профилей берут свой замок сами, поэтому здесь он не берётся.
+// lockMihomoFiles берёт общий замок записи файлов Mihomo и возвращает функцию снятия.
+// При создании и копировании профиля второй замок берут сами методы сервиса.
 func (a *API) lockMihomoFiles() func() {
-	if a.subscriptionSvc == nil {
-		return func() {}
-	}
-	a.subscriptionSvc.LockMihomo()
-	return a.subscriptionSvc.UnlockMihomo
+	return a.mihomoProfileSvc.LockFiles()
 }
 
-// lockProfileWrite берёт замок записи профиля: mihomoMu, затем замок сервиса
-// профилей (порядок всегда такой, обратный не встречается). lifecycleMu не берётся:
-// запись профиля ядро не перезапускает. Только для ConfigSave, который методов
-// сервиса не зовёт: они берут тот же замок сами, повторное взятие повисло бы.
+// lockProfileWrite берёт общий замок файлов Mihomo, затем замок сервиса профилей.
+// ConfigSave пишет файл напрямую, а методы сервиса профилей сами берут второй замок.
 func (a *API) lockProfileWrite() func() {
 	unlockFiles := a.lockMihomoFiles()
-	if a.mihomoProfileSvc == nil {
-		return unlockFiles
-	}
 	a.mihomoProfileSvc.LockWrite()
 	return func() {
 		a.mihomoProfileSvc.UnlockWrite()

@@ -143,7 +143,8 @@ type MihomoProfileService struct {
 	// управляет панель; пусто — не управляет. Читается при каждом вызове.
 	ReturnTarget func() string
 
-	mu sync.Mutex
+	filesMu sync.Mutex
+	mu      sync.Mutex
 }
 
 func NewMihomoProfileService(mihomoDir, dataDir string) *MihomoProfileService {
@@ -153,10 +154,15 @@ func NewMihomoProfileService(mihomoDir, dataDir string) *MihomoProfileService {
 	}
 }
 
+// LockFiles сериализует запись конфигурации Mihomo и возвращает функцию снятия замка.
+func (s *MihomoProfileService) LockFiles() func() {
+	s.filesMu.Lock()
+	return s.filesMu.Unlock
+}
+
 // LockWrite takes the profile write lock (s.mu) for a caller that writes a
-// profile file itself (ConfigSave). Lock order is always SubscriptionService
-// mihomoMu first, then this lock; the service methods take s.mu on their own,
-// so a caller that uses them must not call LockWrite.
+// profile file itself (ConfigSave). Take the file lock first. Service methods
+// take s.mu on their own, so callers of those methods should only use LockFiles.
 func (s *MihomoProfileService) LockWrite() { s.mu.Lock() }
 
 // UnlockWrite releases the lock taken by LockWrite.

@@ -23,24 +23,3 @@ func guardXrayRootName(path string) error {
 	}
 	return nil
 }
-
-// clientIDHitsStoplist — ID подписки от клиента дал бы файл со стоп-списочным
-// именем: сам `<id>.json` или любой файл, который панель построит для этого ID
-// (фрагмент, прежний фрагмент, фрагмент роутинга).
-func (s *SubscriptionService) clientIDHitsStoplist(id string) bool {
-	sub := &Subscription{ID: id}
-	names := []string{
-		id + ".json",
-		filepath.Base(s.getFragmentPath(sub)),
-		filepath.Base(s.getRoutingFragmentPath(sub)),
-	}
-	if legacy := s.legacyFragmentPath(sub); legacy != "" {
-		names = append(names, filepath.Base(legacy))
-	}
-	for _, name := range names {
-		if _, hit := utils.XKeenStoplistMatch(name); hit {
-			return true
-		}
-	}
-	return false
-}
