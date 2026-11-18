@@ -233,20 +233,9 @@ func (s *RouteTracerService) fetchKernelRules(ctx context.Context) ([]MihomoKern
 
 	// 1. Try Mihomo REST API /rules
 	if s.mihomoSvc != nil {
-		info, err := s.mihomoSvc.ParseControllerConfig()
-		if err == nil && (info.Type == "unix" || (info.Type == "tcp" && info.Target != "")) {
-			var reqURL string
-			if info.Type == "unix" {
-				reqURL = "http://localhost/rules"
-			} else {
-				target := info.Target
-				if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-					target = "http://" + target
-				}
-				reqURL = strings.TrimRight(target, "/") + "/rules"
-			}
-
-			req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+		info, err := s.mihomoSvc.UnixController()
+		if err == nil {
+			req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, mihomoControllerURL+"/rules", nil)
 			if reqErr == nil {
 				if info.Secret != "" {
 					req.Header.Set("Authorization", "Bearer "+info.Secret)
@@ -382,8 +371,8 @@ func (s *RouteTracerService) lookupSelectedProxy(ctx context.Context, groupName 
 		return groupName, "proxy"
 	}
 
-	info, err := s.mihomoSvc.ParseControllerConfig()
-	if err != nil || (info.Type != "unix" && (info.Type != "tcp" || info.Target == "")) {
+	info, err := s.mihomoSvc.UnixController()
+	if err != nil {
 		return groupName, "proxy"
 	}
 
@@ -399,16 +388,7 @@ func (s *RouteTracerService) lookupSelectedProxy(ctx context.Context, groupName 
 		}
 		visited[currentName] = true
 
-		var reqURL string
-		if info.Type == "unix" {
-			reqURL = "http://localhost/proxies/" + url.PathEscape(currentName)
-		} else {
-			target := info.Target
-			if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-				target = "http://" + target
-			}
-			reqURL = strings.TrimRight(target, "/") + "/proxies/" + url.PathEscape(currentName)
-		}
+		reqURL := mihomoControllerURL + "/proxies/" + url.PathEscape(currentName)
 
 		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 		if reqErr != nil {
@@ -464,19 +444,11 @@ func (s *RouteTracerService) fetchEmptyRuleSets(ctx context.Context) map[string]
 	if s.mihomoSvc == nil {
 		return empty
 	}
-	info, err := s.mihomoSvc.ParseControllerConfig()
-	if err != nil || (info.Type != "unix" && (info.Type != "tcp" || info.Target == "")) {
+	info, err := s.mihomoSvc.UnixController()
+	if err != nil {
 		return empty
 	}
-	reqURL := "http://localhost/providers/rules"
-	if info.Type == "tcp" {
-		target := info.Target
-		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-			target = "http://" + target
-		}
-		reqURL = strings.TrimRight(target, "/") + "/providers/rules"
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mihomoControllerURL+"/providers/rules", nil)
 	if err != nil {
 		return empty
 	}

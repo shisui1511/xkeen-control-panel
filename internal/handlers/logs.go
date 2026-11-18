@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -478,18 +477,17 @@ var validMihomoLogLevels = map[string]bool{
 	"silent": true, "error": true, "warning": true, "info": true, "debug": true,
 }
 
-// setMihomoLogLevel changes Mihomo's runtime log level through the actual
-// external-controller (TCP or unix socket) with the configured secret.
+// setMihomoLogLevel меняет уровень логов через Unix-контроллер профиля.
 func (a *API) setMihomoLogLevel(level string) error {
-	if a.cfg == nil && a.mihomoSvc == nil {
-		return errors.New("mihomo controller is not configured")
+	if a.mihomoSvc == nil || !a.mihomoSvc.HasController() {
+		return services.ErrMihomoNoSocket
 	}
 	payload, err := json.Marshal(map[string]string{"log-level": level})
 	if err != nil {
 		return err
 	}
-	client, baseURL := a.getMihomoHTTPClientAndBaseURL()
-	req, err := http.NewRequest(http.MethodPatch, baseURL+"/configs", bytes.NewReader(payload))
+	client := a.mihomoSvc.GetHTTPClient()
+	req, err := http.NewRequest(http.MethodPatch, "http://localhost/configs", bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}

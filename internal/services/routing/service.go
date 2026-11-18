@@ -34,7 +34,9 @@ const defaultWatchInterval = 60 * time.Second
 // MihomoAPI — часть Clash API Mihomo, которая нужна выбору участника и пингу
 // (используют 146-14 и 146-15).
 type MihomoAPI interface {
-	// HasController сообщает, настроен ли контроллер Mihomo.
+	// ParseControllerConfig читает тип контроллера активного профиля.
+	ParseControllerConfig() (services.ControllerInfo, error)
+	// HasController сообщает, настроен ли Unix-контроллер Mihomo.
 	HasController() bool
 	// ProxyNow возвращает выбранного участника группы.
 	ProxyNow(ctx context.Context, group string) (string, error)
