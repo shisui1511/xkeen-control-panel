@@ -361,7 +361,7 @@
     "children": {}
   },
   "RuntimeView": {
-    "required": ["kernel", "running", "state", "modes", "probe", "groups"],
+    "required": ["kernel", "running", "state", "no_socket", "modes", "probe", "groups"],
     "optional": [],
     "children": { "modes": "RuntimeModes", "probe": "ProbeConfig", "groups": "RuntimeGroup[]" }
   },

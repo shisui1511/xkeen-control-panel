@@ -19,7 +19,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
-var ErrMihomoAPINotConfigured = errors.New("Mihomo API URL is not configured")
+var ErrMihomoAPINotConfigured = errors.New("Mihomo Unix controller is not configured")
 
 // ErrMihomoNotRunning — контроллер Mihomo не принимает соединения (ядро
 // остановлено). Перезагружать провайдер некому: Mihomo сам скачает подписку
@@ -726,31 +726,11 @@ func (s *SubscriptionService) UnlockMihomo() {
 }
 
 func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) error {
-	var client *http.Client
-	var reqURL string
-
-	if s.mihomoSvc != nil {
-		info, err := s.mihomoSvc.ParseControllerConfig()
-		if err == nil && info.Type == "unix" && info.Target != "" {
-			client = s.mihomoSvc.GetHTTPClient()
-			reqURL = fmt.Sprintf("http://localhost/providers/proxies/%s", url.PathEscape(providerName))
-		} else if err == nil && info.Type == "tcp" && info.Target != "" {
-			client = s.mihomoSvc.GetHTTPClient()
-			t := info.Target
-			if !strings.HasPrefix(t, "http://") && !strings.HasPrefix(t, "https://") {
-				t = "http://" + t
-			}
-			reqURL = fmt.Sprintf("%s/providers/proxies/%s", strings.TrimRight(t, "/"), url.PathEscape(providerName))
-		}
+	if s.mihomoSvc == nil || !s.mihomoSvc.HasController() {
+		return ErrMihomoAPINotConfigured
 	}
-
-	if client == nil {
-		if s.mihomoAPIURL == "" {
-			return ErrMihomoAPINotConfigured
-		}
-		client = s.localHTTPClient
-		reqURL = fmt.Sprintf("%s/providers/proxies/%s", s.mihomoAPIURL, url.PathEscape(providerName))
-	}
+	client := s.mihomoSvc.GetHTTPClient()
+	reqURL := mihomoControllerURL + "/providers/proxies/" + url.PathEscape(providerName)
 
 	// PathEscape — защита в глубину: имя валидируется на уровне handler,
 	// но экранирование гарантирует, что спецсимволы не изменят путь/query

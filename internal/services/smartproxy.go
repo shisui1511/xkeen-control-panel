@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -42,14 +43,13 @@ type Profile struct {
 
 // SmartProxyService manages time-based proxy profiles
 type SmartProxyService struct {
-	dataDir    string
-	profiles   []Profile
-	mu         sync.RWMutex
-	mihomoURL  string
-	stopCh     chan struct{}
-	wg         sync.WaitGroup
-	httpClient *http.Client
-	mihomoSvc  *MihomoService
+	dataDir   string
+	profiles  []Profile
+	mu        sync.RWMutex
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	mihomoSvc *MihomoService
 }
 
 // ProfileStore is the on-disk format
@@ -57,20 +57,17 @@ type ProfileStore struct {
 	Profiles []Profile `json:"profiles"`
 }
 
-func NewSmartProxyService(dataDir, mihomoURL string) *SmartProxyService {
+func NewSmartProxyService(dataDir string, mihomo *MihomoService) *SmartProxyService {
+	ctx, cancel := context.WithCancel(context.Background())
 	svc := &SmartProxyService{
-		dataDir:    dataDir,
-		profiles:   []Profile{},
-		mihomoURL:  mihomoURL,
-		stopCh:     make(chan struct{}),
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		dataDir:   dataDir,
+		profiles:  []Profile{},
+		ctx:       ctx,
+		cancel:    cancel,
+		mihomoSvc: mihomo,
 	}
 	svc.load()
 	return svc
-}
-
-func (s *SmartProxyService) SetMihomoService(svc *MihomoService) {
-	s.mihomoSvc = svc
 }
 
 func (s *SmartProxyService) Start() {
@@ -79,7 +76,7 @@ func (s *SmartProxyService) Start() {
 }
 
 func (s *SmartProxyService) Stop() {
-	close(s.stopCh)
+	s.cancel()
 	s.wg.Wait()
 }
 
@@ -194,60 +191,79 @@ func (s *SmartProxyService) SetEnabled(id string, enabled bool) error {
 
 func (s *SmartProxyService) schedulerLoop() {
 	defer s.wg.Done()
+	if s.mihomoSvc == nil {
+		return
+	}
 
-	for {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("SmartProxy: schedulerLoop panic: %v — restarting in 5s", r)
-				}
-			}()
-
-			ticker := time.NewTicker(1 * time.Minute)
-			defer ticker.Stop()
-
-			// Run immediately on start
-			s.evaluateProfiles()
-
-			for {
-				select {
-				case <-ticker.C:
-					s.evaluateProfiles()
-				case <-s.stopCh:
-					return
-				}
-			}
-		}()
-
-		// Check if we should stop before restarting after a panic
+	for s.ctx.Err() == nil {
+		s.watchController()
 		select {
-		case <-s.stopCh:
+		case <-s.ctx.Done():
 			return
-		default:
+		case <-time.After(5 * time.Second):
 		}
-
-		time.Sleep(5 * time.Second)
 	}
 }
 
-func (s *SmartProxyService) evaluateProfiles() {
+func (s *SmartProxyService) watchController() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("SmartProxy: schedulerLoop panic: %v — restarting in 5s", r)
+		}
+	}()
+
+	for s.ctx.Err() == nil {
+		s.evaluateUntilControllerChange()
+	}
+}
+
+func (s *SmartProxyService) evaluateUntilControllerChange() {
+	ctx, cancel := s.mihomoSvc.ControllerContext(s.ctx)
+	defer cancel()
+	info, err := s.mihomoSvc.UnixController()
+	if err != nil {
+		<-ctx.Done()
+		return
+	}
+
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for ctx.Err() == nil {
+		s.evaluateProfiles(ctx, info)
+		select {
+		case <-ticker.C:
+			if info, err = s.mihomoSvc.UnixController(); err != nil {
+				<-ctx.Done()
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (s *SmartProxyService) evaluateProfiles(ctx context.Context, info ControllerInfo) {
 	s.mu.RLock()
 	profiles := make([]Profile, len(s.profiles))
 	copy(profiles, s.profiles)
 	s.mu.RUnlock()
 
 	for _, p := range profiles {
+		if ctx.Err() != nil {
+			return
+		}
 		if !p.Enabled {
 			continue
 		}
 
 		if p.Mode == ModeTimeBased {
-			s.evaluateTimeBased(&p)
+			s.evaluateTimeBased(ctx, info, &p)
 		}
 	}
 }
 
-func (s *SmartProxyService) evaluateTimeBased(p *Profile) {
+func (s *SmartProxyService) evaluateTimeBased(ctx context.Context, info ControllerInfo, p *Profile) {
 	now := time.Now()
 	day := int(now.Weekday())
 	hour := now.Hour()
@@ -256,50 +272,29 @@ func (s *SmartProxyService) evaluateTimeBased(p *Profile) {
 		return
 	}
 
-	if err := s.applyProfile(p); err != nil {
+	if err := s.applyProfile(ctx, info, p); err != nil && ctx.Err() == nil {
 		log.Printf("SmartProxy: failed to apply profile %s: %v", p.Name, err)
 	}
 }
 
-func (s *SmartProxyService) applyProxyToGroup(groupName, proxyName string) error {
-	client := s.httpClient
-	baseURL := strings.TrimRight(s.mihomoURL, "/")
-	var secret string
-
-	if s.mihomoSvc != nil {
-		info, err := s.mihomoSvc.ParseControllerConfig()
-		if err == nil && info.Type == "unix" && info.Target != "" {
-			client = s.mihomoSvc.GetHTTPClient()
-			baseURL = "http://localhost"
-			secret = info.Secret
-		} else if err == nil && info.Type == "tcp" && info.Target != "" {
-			client = s.mihomoSvc.GetHTTPClient()
-			t := info.Target
-			if !strings.HasPrefix(t, "http://") && !strings.HasPrefix(t, "https://") {
-				t = "http://" + t
-			}
-			baseURL = strings.TrimRight(t, "/")
-			secret = info.Secret
-		}
-	}
-
-	url := fmt.Sprintf("%s/proxies/%s", baseURL, url.PathEscape(groupName))
+func (s *SmartProxyService) applyProxyToGroup(ctx context.Context, info ControllerInfo, groupName, proxyName string) error {
+	reqURL := mihomoControllerURL + "/proxies/" + url.PathEscape(groupName)
 	bodyMap := map[string]string{"name": proxyName}
 	bodyBytes, err := json.Marshal(bodyMap)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequest("PUT", url, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, reqURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if secret != "" {
-		req.Header.Set("Authorization", "Bearer "+secret)
+	if info.Secret != "" {
+		req.Header.Set("Authorization", "Bearer "+info.Secret)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := s.mihomoSvc.httpClient(info.Target).Do(req)
 	if err != nil {
 		return err
 	}
@@ -326,7 +321,7 @@ func (s *SmartProxyService) updateProfileApplied(id string) {
 	}
 }
 
-func (s *SmartProxyService) applyProfile(p *Profile) error {
+func (s *SmartProxyService) applyProfile(ctx context.Context, info ControllerInfo, p *Profile) error {
 	// Don't re-apply if already applied in the last 5 minutes
 	if time.Now().Unix()-p.LastApplied < 300 {
 		return nil
@@ -337,7 +332,7 @@ func (s *SmartProxyService) applyProfile(p *Profile) error {
 		proxyName = p.CurrentProxy
 	}
 
-	if err := s.applyProxyToGroup(p.GroupName, proxyName); err != nil {
+	if err := s.applyProxyToGroup(ctx, info, p.GroupName, proxyName); err != nil {
 		return err
 	}
 

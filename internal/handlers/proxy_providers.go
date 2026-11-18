@@ -3,13 +3,11 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
@@ -73,22 +71,6 @@ func (a *API) ProxyProvidersRouter(w http.ResponseWriter, r *http.Request) {
 	a.errorResponse(w, "Not Found", http.StatusNotFound)
 }
 
-func (a *API) getMihomoHTTPClientAndBaseURL() (*http.Client, string) {
-	if a.mihomoSvc != nil {
-		info, err := a.mihomoSvc.ParseControllerConfig()
-		if err == nil && info.Type == "unix" && info.Target != "" {
-			return a.mihomoSvc.GetHTTPClient(), "http://localhost"
-		} else if err == nil && info.Type == "tcp" && info.Target != "" {
-			t := info.Target
-			if !strings.HasPrefix(t, "http://") && !strings.HasPrefix(t, "https://") {
-				t = "http://" + t
-			}
-			return a.mihomoSvc.GetHTTPClient(), strings.TrimRight(t, "/")
-		}
-	}
-	return &http.Client{Timeout: 3 * time.Second}, strings.TrimRight(a.cfg.MihomoAPIURL, "/")
-}
-
 func (a *API) ProxyProvidersList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
@@ -107,12 +89,11 @@ func (a *API) ProxyProvidersList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clashProviders := make(map[string]ClashProvider)
-	if running {
+	if running && a.mihomoSvc.HasController() {
 		// 2. Fetch providers from Clash API
 		secret := a.ResolveMihomoSecret()
-		client, baseURL := a.getMihomoHTTPClientAndBaseURL()
-
-		req, err := http.NewRequest(http.MethodGet, baseURL+"/providers/proxies", nil)
+		client := a.mihomoSvc.GetHTTPClient()
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "http://localhost/providers/proxies", nil)
 		if err != nil {
 			log.Printf("[ProxyProviders] Error creating request: %v", err)
 		} else {
@@ -136,8 +117,6 @@ func (a *API) ProxyProvidersList(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-	} else {
-		log.Printf("[ProxyProviders] Debug: Clash API unreachable (Mihomo is not running)")
 	}
 
 	// 3. Enrich subscriptions with Clash API state
@@ -222,11 +201,15 @@ func (a *API) ProxyProviderNodes(w http.ResponseWriter, r *http.Request, name st
 		return
 	}
 
+	if a.mihomoSvc == nil || !a.mihomoSvc.HasController() {
+		a.errorResponse(w, a.t(r, "mihomo.not_running"), http.StatusBadGateway)
+		return
+	}
 	secret := a.ResolveMihomoSecret()
-	client, baseURL := a.getMihomoHTTPClientAndBaseURL()
-	targetURL := fmt.Sprintf("%s/providers/proxies/%s", baseURL, url.PathEscape(name))
+	client := a.mihomoSvc.GetHTTPClient()
+	targetURL := "http://localhost/providers/proxies/" + url.PathEscape(name)
 
-	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, targetURL, nil)
 	if err != nil {
 		log.Printf("[ProxyProviders] Error creating request for nodes: %v", err)
 		a.errorResponse(w, a.t(r, "mihomo.not_running"), http.StatusBadGateway)

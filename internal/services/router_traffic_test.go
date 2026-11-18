@@ -514,6 +514,9 @@ func TestRouterTrafficSeparateCore(t *testing.T) {
 	if tg.Core == "xray" {
 		nodes = rtXrayNodes(t)
 	} else {
+		t.Run("mihomo-controller-profiles", func(t *testing.T) {
+			rtTrafficControllerProfiles(t, tg.WorkDir)
+		})
 		nodes = rtMihomoNodes(t)
 	}
 
@@ -638,6 +641,130 @@ func TestRouterTrafficSeparateCore(t *testing.T) {
 	routertest.Verdict(t, false, routertest.KnownMark{},
 		"ни один из %d узлов подписки не ответил через ядро %s (ядро запускалось и принимало соединения, выход цели в интернет есть): %s",
 		len(nodes), tg.Core, strings.Join(summaries, " | "))
+}
+
+// rtTrafficControllerProfiles keeps the quota collector running across two
+// profile changes of a separate, real Mihomo process.
+func rtTrafficControllerProfiles(t *testing.T, workDir string) {
+	t.Helper()
+	dir, err := os.MkdirTemp(workDir, "tc-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	tcpPort, socksPort := rtFreePort(t), rtFreePort(t)
+	for socksPort == tcpPort {
+		socksPort = rtFreePort(t)
+	}
+	socket := filepath.Join(dir, "m.sock")
+	if len(socket) >= 108 {
+		t.Fatal("путь сокета Mihomo длиннее предела Unix")
+	}
+	config := fmt.Sprintf("socks-port: %d\nrules: ['MATCH,DIRECT']\nexternal-controller: 127.0.0.1:%d\n", socksPort, tcpPort)
+	unixProfile := filepath.Join(dir, "unix.yaml")
+	tcpProfile := filepath.Join(dir, "tcp.yaml")
+	for path, data := range map[string]string{
+		unixProfile: config + fmt.Sprintf("external-controller-unix: %q\n", socket),
+		tcpProfile:  config,
+	} {
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var core *rtCoreProc
+	defer func() {
+		if core != nil {
+			core.Stop()
+		}
+	}()
+	mihomo := NewMihomoService(rtMihomoBin, "", dir)
+	activate := func(profile string) {
+		t.Helper()
+		if core != nil {
+			core.Stop()
+			_ = os.Remove(socket)
+		}
+		tmp := filepath.Join(dir, "next.yaml")
+		if err := os.Symlink(profile, tmp); err != nil {
+			t.Fatal(err)
+		}
+		active := filepath.Join(dir, "config.yaml")
+		if err := os.Rename(tmp, active); err != nil {
+			t.Fatal(err)
+		}
+		core, err = rtStartCore(func(string) string { return "" }, socksPort, rtMihomoBin, "-d", dir, "-f", active)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mihomo.NotifyControllerChanged()
+	}
+	activate(unixProfile)
+
+	quota := NewTrafficQuotaService(dir, "", mihomo)
+	quota.Start()
+	defer quota.Stop()
+	snapshots, unsub := quota.SubscribeConnections()
+	defer unsub()
+	waitSnapshot := func() {
+		t.Helper()
+		select {
+		case <-snapshots:
+		case <-time.After(wsReadDeadline):
+			t.Fatal("квоты не получили снимок подключений через Unix")
+		}
+	}
+	waitSnapshot()
+
+	activate(tcpProfile)
+	routertest.WaitCond(t, wsReadDeadline, "TCP-контроллер профиля слушает", func() bool {
+		return rtListeningPorts()[tcpPort]
+	})
+	first := rtTrafficControllerConnections(t, tcpPort)
+	if first != 0 {
+		t.Fatalf("к TCP-контроллеру уже есть подключения: %d", first)
+	}
+	if increased, last := routertest.Poll(6*time.Second, 200*time.Millisecond, func() (bool, string) {
+		n := rtTrafficControllerConnections(t, tcpPort)
+		return n > first, strconv.Itoa(n)
+	}); increased {
+		t.Fatalf("подключения к TCP-контроллеру появились: %s", last)
+	}
+	quota.mu.RLock()
+	suspended := quota.asleep
+	quota.mu.RUnlock()
+	if !suspended {
+		t.Fatal("сборщик не перешёл в ожидание контроллера")
+	}
+	// Прежний пустой снимок перехода в сон не засчитывается как возобновление.
+	for len(snapshots) > 0 {
+		<-snapshots
+	}
+	activate(unixProfile)
+	waitSnapshot()
+}
+
+func rtTrafficControllerConnections(t *testing.T, port int) int {
+	t.Helper()
+	suffix := fmt.Sprintf(":%04X", port)
+	count := 0
+	for _, path := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
+		raw, err := os.ReadFile(path)
+		if path == "/proc/net/tcp6" && os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(raw), "\n") {
+			fields := strings.Fields(line)
+			// Клиентская сторона. TIME_WAIT тоже считается после короткой пробы.
+			if len(fields) > 3 && strings.HasSuffix(fields[2], suffix) {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 // --- TPROXY ---

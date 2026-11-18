@@ -460,21 +460,20 @@ func main() {
 	kernelSvc.SetMihomoConfigDir(cfg.MihomoConfigDir)
 	api.SetKernelService(kernelSvc)
 	// После start/stop/restart/switch кэш статуса и активного ядра обновляются
-	// сразу, без ожидания. Хук однослотовый, поэтому оба сброса — в одной функции.
+	// сразу, без ожидания. Тот же сигнал обновляет потоки контроллера Mihomo.
 	api.XKeenService().SetLifecycleHook(func() {
 		xkeenStatusCache.Invalidate()
 		kernelSvc.InvalidateActiveState()
+		api.MihomoService().NotifyControllerChanged()
 	})
 
 	// Start background services
-	smartProxySvc := services.NewSmartProxyService(cfg.DataDir, cfg.MihomoAPIURL)
-	smartProxySvc.SetMihomoService(api.MihomoService())
+	smartProxySvc := services.NewSmartProxyService(cfg.DataDir, api.MihomoService())
 	smartProxySvc.Start()
 	api.SetSmartProxyService(smartProxySvc)
 	defer stops.run("smart-proxy", smartProxySvc.Stop)
 
-	trafficQuotaSvc := services.NewTrafficQuotaService(cfg.DataDir, cfg.MihomoAPIURL, cfg.MihomoSecret)
-	trafficQuotaSvc.SetMihomoService(api.MihomoService())
+	trafficQuotaSvc := services.NewTrafficQuotaService(cfg.DataDir, cfg.MihomoSecret, api.MihomoService())
 	// Живость ядра — по процессам, без определения версии: опрос квот не должен
 	// ждать конца операции XKeen (ProcessStates не запускает бинарники).
 	trafficQuotaSvc.SetKernelAliveCheck(func() bool {
@@ -486,9 +485,6 @@ func main() {
 		return false
 	})
 	trafficQuotaSvc.Start()
-	if xSvc := api.XKeenService(); xSvc != nil {
-		xSvc.SetKernelStartedHook(trafficQuotaSvc.NotifyKernelStarted)
-	}
 	api.SetTrafficQuotaService(trafficQuotaSvc)
 	// Финальная запись счётчиков трафика — со своим бюджетом (shutdownSteps.save).
 	defer stops.save("traffic-quota", trafficQuotaSvc.Stop)

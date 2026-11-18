@@ -29,6 +29,7 @@ export interface CapabilitiesData {
     process_running: boolean;
     api_reachable: boolean;
     api_authenticated: boolean;
+    no_socket?: boolean;
     api_url?: string;
     discovered_secret?: string;
     controller_type?: string;
