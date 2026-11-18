@@ -54,7 +54,7 @@ const SETUP_SH = 'scripts/setup.sh';
 const SESSION = 'scripts/router/session.mjs';
 
 const SCOPES = {
-  client: [UPDATE_GO, UPDATE_TEST],
+  client: [UPDATE_GO, SETUP_SH, UPDATE_TEST],
   publish: ['.github/scripts/auto_release.sh', '.github/workflows/build.yml', '.github/workflows/auto-release.yml'],
   notes: ['.github/scripts/gen_notes.py', '.github/workflows/release-notes.yml', '.github/scripts/prune_dev_releases.sh'],
   'stand-download': ['scripts/router/deploy.sh', 'scripts/router/run.sh', 'scripts/router/release-status.sh'],
@@ -209,6 +209,24 @@ function checkClient(source, contract) {
     if (!uc || !uc[0].includes('releasefeed.DownloadURL(') || !uc[0].includes('releasefeed.Repository()')) {
       fail(UPDATE_GO, 'UpdateCheck: download_url не из releasefeed.DownloadURL или нет release_repository');
     }
+  }
+
+  // Ручной установщик скачивается одним файлом и контракт прочитать не может: REPO — литерал,
+  // равный контракту; каждый адрес релизов (API, загрузка, .sha256) строится от ${REPO}.
+  const sh = need(SETUP_SH);
+  if (sh !== null) {
+    const repoLines = [...sh.matchAll(/^REPO=(.*)$/gm)];
+    const m = repoLines.length === 1 && repoLines[0][1].match(/^"([^"]*)"\s*$/);
+    if (!m) fail(SETUP_SH, 'нужна ровно одна строка REPO="owner/name"');
+    else if (source && m[1].toLowerCase() === source.toLowerCase()) fail(SETUP_SH, `REPO указывает на репозиторий кода ${source}`);
+    else if (contract && m[1] !== contract) fail(SETUP_SH, `REPO="${m[1]}" не совпадает с контрактом ${contract}`);
+    sh.split('\n').forEach((line, i) => {
+      if (/^\s*#/.test(line)) return;
+      for (const u of line.matchAll(/(?:api\.github\.com\/repos\/|github\.com\/)([^\s"']*?)\/releases/g)) {
+        if (u[1] !== '${REPO}') fail(`${SETUP_SH}:${i + 1}`, `адрес релизов не от \${REPO}: ${u[0]}`);
+      }
+    });
+    if (!/sha256sum/.test(sh) || !/gunzip/.test(sh)) fail(SETUP_SH, 'пропала проверка sha256 или распаковка .gz');
   }
 
   const t = need(UPDATE_TEST);

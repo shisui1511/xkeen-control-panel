@@ -1,6 +1,9 @@
 #!/bin/sh
 
-REPO="shisui1511/xkeen-control-panel"
+# Источник выпусков — отдельный репозиторий (internal/releasefeed/repository,
+# scripts/check-release-source.js сверяет строку): прежние установки читают
+# репозиторий кода и видят только совместимые выпуски. Запасного источника нет.
+REPO="shisui1511/xkeen-control-panel-releases"
 BINARY="xcp"
 INSTALL_DIR="${XCP_INSTALL_DIR:-/opt/etc/xcp}"
 BIN_PATH="${XCP_BIN_PATH:-/opt/sbin/xcp}"
@@ -281,6 +284,19 @@ pick_beta() {
   else
     echo "$beta"
   fi
+}
+
+# release_source_diag — диагностика источника выпусков, когда версия не
+# определилась: только имя репозитория и код ответа API канала (учётные данные
+# установщик не использует). 404 — источника или выпусков канала ещё нет.
+release_source_diag() {
+  local url code
+  url="https://api.github.com/repos/${REPO}/releases/latest"
+  [ "$CHANNEL" = "beta" ] && url="https://api.github.com/repos/${REPO}/releases?per_page=1"
+  code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 "$url" 2>/dev/null) || code=""
+  [ -n "$code" ] && [ "$code" != "000" ] || code="нет ответа"
+  error "Источник выпусков ${REPO}: ответ API ${code}"
+  log_install "Error: release source ${REPO} answered ${code}"
 }
 
 # Получить версию в зависимости от канала
@@ -801,11 +817,12 @@ install_binary() {
   mkdir -p "$(dirname "$BIN_PATH")"
   TEMP_BIN="/tmp/${BINARY}.new"
 
-  info "Определяем версию..."
+  info "Определяем версию (источник выпусков ${REPO})..."
   LATEST_VER=$(get_release_version)
   if [ -z "$LATEST_VER" ]; then
     error "Не удалось определить версию"
     log_install "Error: failed to detect version"
+    release_source_diag
     return 1
   fi
   info "Версия: $LATEST_VER"

@@ -452,7 +452,8 @@
       "paths": [
         "scripts/setup.sh",
         "internal/handlers/update*.go",
-        "internal/handlers/version.go"
+        "internal/handlers/version.go",
+        "internal/releasefeed/**"
       ],
       "canary": {
         "go": "TestRouterUpdateManualInstall",
