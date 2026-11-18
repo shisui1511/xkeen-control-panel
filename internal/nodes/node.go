@@ -75,9 +75,11 @@ type WireGuard struct {
 	PeerPublicKey string
 	PreSharedKey  string
 	Address       []string
+	DNS           []string
 	MTU           int
 	Reserved      []int
 	AllowedIPs    []string
+	KeepAlive     int
 	AWG           map[string]any
 	AWGVersion    string
 }
