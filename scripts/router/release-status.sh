@@ -10,7 +10,8 @@
 #   описание   непустое, не длиннее 140 символов; только фиксированные слова и
 #              числа (набор, архитектура, итог, ядро, счёт падений)
 #
-# Коммит тега определяется через GitHub API, статус ставится на него. Статус
+# Коммит тега сверяется с локальным тегом через GitHub API исходного репозитория.
+# Статус ставится на этот коммит в исходном репозитории. Статус
 # виден всем в публичном репозитории и читается автовыпуском: ссылка на отчёт
 # (target_url) не передаётся. Текст контекста и описания перед отправкой
 # проверяется check-leaks.sh --file; найденная строка стенда — отказ, сама
@@ -100,12 +101,25 @@ if [ "$LEAK_RC" -ne 0 ]; then
   exit 1
 fi
 
-SHA=$(gh api "repos/{owner}/{repo}/commits/$TAG" --jq .sha 2>/dev/null) || {
+SOURCE_REPO=$(sed -nE 's#^module github\.com/([A-Za-z0-9-]+/[A-Za-z0-9._-]+)$#\1#p' "$SCRIPT_DIR/../../go.mod")
+[ -n "$SOURCE_REPO" ] || {
+  echo "release-status: репозиторий кода не определён в go.mod" >&2
+  exit 1
+}
+LOCAL_SHA=$(git -C "$SCRIPT_DIR/../.." rev-parse --verify "refs/tags/$TAG^{commit}" 2>/dev/null) || {
+  echo "release-status: тег $TAG не найден локально (git fetch --tags)" >&2
+  exit 1
+}
+SHA=$(gh api "repos/$SOURCE_REPO/commits/$TAG" --jq .sha 2>/dev/null) || {
   echo "release-status: не удалось определить коммит тега $TAG" >&2
   exit 1
 }
 if ! printf '%s\n' "$SHA" | grep -Eq '^[0-9a-f]{40}$'; then
   echo "release-status: GitHub вернул неожиданный ответ для тега $TAG" >&2
+  exit 1
+fi
+if [ "$SHA" != "$LOCAL_SHA" ]; then
+  echo "release-status: коммит исходного тега $TAG расходится с локальным ($SHA != $LOCAL_SHA)" >&2
   exit 1
 fi
 
@@ -114,7 +128,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-if ! gh api -X POST "repos/{owner}/{repo}/statuses/$SHA" \
+if ! gh api -X POST "repos/$SOURCE_REPO/statuses/$SHA" \
   -f state="$STATE" -f context="$CTX" -f description="$DESC" --silent; then
   echo "release-status: не удалось отправить статус $CTX на коммит тега $TAG" >&2
   exit 1

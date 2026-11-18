@@ -153,8 +153,9 @@
 #
 # Окружение:
 #   ROUTERS=<id,id>      выбор целей (по умолчанию все из конфига)
-#   RELEASE=<тег>        ставить артефакт GitHub Release вместо сборки ветки (у набора delta —
-#                        обязателен, latest — новейший релиз). У наборов smoke, full и delta (контекст
+#   RELEASE=<тег|latest> ставить артефакт GitHub Release вместо сборки ветки (у набора delta —
+#                        обязателен). latest — новейший релиз из отдельного источника.
+#                        У наборов smoke, full и delta (контекст
 #                        stand/<arch>-full, описание «добор от <тег базы>: …») после прогона для каждой цели публикуется статус коммита тега
 #                        stand/<arch>-<smoke|full> (release-status.sh): success при нуле FAIL и
 #                        XPASS цели (по классам падений: красные new, flaky, xpass, не догнанный
@@ -318,6 +319,28 @@ rt_sha_core() {
 
 cd "$(rt_repo_root)"
 
+rt_latest_die() {
+  echo "router-test: RELEASE=latest: $*" >&2
+  exit 2
+}
+if [ "${RELEASE:-}" = latest ]; then
+  command -v gh >/dev/null 2>&1 || rt_latest_die "нужен gh"
+  SOURCE_REPO=$(sed -nE 's#^module github\.com/([A-Za-z0-9-]+/[A-Za-z0-9._-]+)$#\1#p' go.mod)
+  [ -n "$SOURCE_REPO" ] || rt_latest_die "репозиторий кода не определён в go.mod"
+  RELEASE_REPO=$(LC_ALL=C awk -v source="$SOURCE_REPO" '
+    NR == 1 && /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/ &&
+      tolower($0) != tolower(source) { repo = $0 }
+    END { if (NR != 1 || repo == "") exit 1; print repo }
+  ' internal/releasefeed/repository) || rt_latest_die "неверный источник в internal/releasefeed/repository"
+  RELEASE=$(gh release list --repo "$RELEASE_REPO" --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName') ||
+    rt_latest_die "gh release list не отработал"
+  printf '%s\n' "$RELEASE" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-z]+\.[0-9]+)?$' ||
+    rt_latest_die "новейший релиз не определён или имеет неверный тег"
+  TAG_REPO=$(git show "refs/tags/$RELEASE^{commit}:internal/releasefeed/repository" 2>/dev/null) ||
+    rt_latest_die "для тега $RELEASE нет локального контракта источника (git fetch --tags)"
+  [ "$TAG_REPO" = "$RELEASE_REPO" ] || rt_latest_die "источник в коммите тега $RELEASE отличается"
+fi
+
 # Начало прогона: время набора harness в summary.md
 RT_T0=$(date +%s)
 
@@ -469,11 +492,6 @@ rt_dl_die() {
 if [ "$SUITE" = delta ]; then
   [ -z "$RT_CORES_SET" ] || rt_dl_die "RT_CORES не применяется: добор идёт на обоих ядрах по составу"
   [ -n "${RELEASE:-}" ] || rt_dl_die "нужен RELEASE=<тег|latest>"
-  if [ "$RELEASE" = latest ]; then
-    command -v gh >/dev/null 2>&1 || rt_dl_die "RELEASE=latest: нужен gh"
-    RELEASE=$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null) || RELEASE=""
-    [ -n "$RELEASE" ] || rt_dl_die "RELEASE=latest: новейший релиз не определён (gh release list)"
-  fi
   printf '%s\n' "$RELEASE" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-z]+\.[0-9]+)?$' || rt_dl_die "RELEASE: ожидается vX.Y.Z или vX.Y.Z-<суффикс>.<N>"
   git rev-parse -q --verify "refs/tags/$RELEASE^{commit}" >/dev/null 2>&1 || rt_dl_die "тег $RELEASE не найден локально (git fetch --tags)"
   git merge-base --is-ancestor "$RELEASE" HEAD 2>/dev/null || rt_dl_die "тесты старше релиза: коммит $RELEASE не предок HEAD"
