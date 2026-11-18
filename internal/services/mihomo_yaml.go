@@ -21,47 +21,6 @@ import (
 
 var proxyNameRe = regexp.MustCompile(`^(\s*)-\s+name:\s*['"]?([^'"#\r\n]+?)['"]?\s*(?:#.*)?$`)
 
-func findTopLevelSection(lines []string, sectionName string) (start, end, baseIndent int) {
-	header := sectionName + ":"
-	start = -1
-	for i, line := range lines {
-		trimmed := strings.TrimRight(line, " \t\r")
-		if trimmed == header || strings.HasPrefix(trimmed, header+" ") || strings.HasPrefix(trimmed, header+"\t") {
-			if len(line) == len(strings.TrimLeft(line, " \t")) {
-				start = i
-				break
-			}
-		}
-	}
-	if start == -1 {
-		return -1, -1, 0
-	}
-
-	end = len(lines)
-	for i := start + 1; i < len(lines); i++ {
-		trimmed := strings.TrimSpace(lines[i])
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		raw := strings.TrimLeft(lines[i], " \t")
-		if len(lines[i]) == len(raw) && !strings.HasPrefix(raw, "- ") {
-			end = i
-			break
-		}
-	}
-
-	baseIndent = 2
-	for i := start + 1; i < end; i++ {
-		trimmed := strings.TrimLeft(lines[i], " \t")
-		if strings.HasPrefix(trimmed, "- ") {
-			baseIndent = len(lines[i]) - len(trimmed)
-			break
-		}
-	}
-
-	return start, end, baseIndent
-}
-
 type proxyBlock struct {
 	Name      string
 	StartLine int

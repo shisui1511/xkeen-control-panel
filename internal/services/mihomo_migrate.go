@@ -13,8 +13,6 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
-const DefaultMihomoSocketPath = "/opt/var/run/mihomo.sock"
-
 type MigrationPreview struct {
 	CurrentController string `json:"current_controller"`
 	CurrentType       string `json:"current_type"`

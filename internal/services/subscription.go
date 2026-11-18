@@ -386,9 +386,9 @@ type SubscriptionService struct {
 	mihomoConfigDir string // Mihomo config dir for proxy-provider files
 	subscriptions   []Subscription
 	mu              sync.RWMutex
-	mihomoMu        sync.Mutex // Mutex для синхронизации записи config.yaml Mihomo
-	ongoing         sync.Map   // Map of ID -> struct{}{} to track active refreshes
-	retries         sync.Map   // ID -> *retryState for exponential backoff
+	mihomoMu        *sync.Mutex // Общий замок записи config.yaml Mihomo
+	ongoing         sync.Map    // Map of ID -> struct{}{} to track active refreshes
+	retries         sync.Map    // ID -> *retryState for exponential backoff
 	fetchFlight     singleflightGroup
 	httpClient      *http.Client
 	applier         *KernelApplier       // рестарт ядра после записи фрагментов
@@ -417,6 +417,7 @@ func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *Subscri
 		dataDir:         dataDir,
 		configDir:       configDir,
 		mihomoConfigDir: mihomoConfigDir,
+		mihomoMu:        new(sync.Mutex),
 		httpClient:      utils.SafeHTTPClient(30 * time.Second),
 		localHTTPClient: &http.Client{Timeout: 10 * time.Second},
 		hwid:            LoadOrGenerateHWID(dataDir),
@@ -424,6 +425,11 @@ func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *Subscri
 	}
 	svc.load()
 	return svc
+}
+
+// ShareMihomoFilesLock подключает замок профилей до запуска обработчиков и планировщика.
+func (s *SubscriptionService) ShareMihomoFilesLock(profiles *MihomoProfileService) {
+	s.mihomoMu = &profiles.filesMu
 }
 
 func (s *SubscriptionService) SetPanelAddress(port int, https bool, loopbackPort int) {

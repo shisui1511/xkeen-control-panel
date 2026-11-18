@@ -350,7 +350,8 @@ func main() {
 	srv.HandleProtected("/api/xkeen/settings/save", api.XKeenSettingsSave)
 
 	// Mihomo profiles: profiles/<name>.yaml with config.yaml as a symlink
-	api.SetMihomoProfileService(services.NewMihomoProfileService(cfg.MihomoConfigDir, cfg.DataDir))
+	mihomoProfileSvc := services.NewMihomoProfileService(cfg.MihomoConfigDir, cfg.DataDir)
+	api.SetMihomoProfileService(mihomoProfileSvc)
 	srv.HandleProtected("/api/mihomo/profiles", api.MihomoProfiles)
 	srv.HandleProtected("/api/mihomo/profiles/preview", api.MihomoProfilePreview)
 	srv.HandleProtected("/api/mihomo/profiles/deps", api.MihomoProfileDeps)
@@ -594,6 +595,7 @@ func main() {
 
 	// Subscriptions + auto-refresh scheduler
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
+	subscriptionSvc.ShareMihomoFilesLock(mihomoProfileSvc)
 	subscriptionSvc.SetPanelAddress(cfg.Port, cfg.HTTPS.Enabled, cfg.LoopbackPort)
 	subscriptionSvc.SetKernelApplier(api.KernelApplier())
 	subscriptionSvc.SetMihomoService(api.MihomoService())
