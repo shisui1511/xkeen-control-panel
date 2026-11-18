@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // Маскирование для API, журналов и диагностики (D-33, D-34). Функции не
@@ -171,7 +171,7 @@ func Secrets(n Node) []string {
 // узлов (от шести символов) — сами и в percent-кодировании — заменяются на
 // MaskSecret, затем адреса http(s) — на MaskURL, затем userinfo любой ссылки
 // «схема://секрет@хост» (узел мог не разобраться, и его секретов нет в списке),
-// затем применяется общая очистка services.RedactSensitiveText (пары
+// затем применяется общая очистка utils.RedactSensitiveText (пары
 // password=/token=, ключи, LAN-адреса).
 func MaskText(text string, secrets []string) string {
 	text = maskEncodedLinks(text)
@@ -206,5 +206,5 @@ func MaskText(text string, secrets []string) string {
 	// После адресов http(s): их userinfo MaskURL уже убрал, а маска внутри
 	// userinfo сломала бы разбор адреса.
 	text = maskLinkUserinfo(text)
-	return services.RedactSensitiveText(text)
+	return utils.RedactSensitiveText(text)
 }
