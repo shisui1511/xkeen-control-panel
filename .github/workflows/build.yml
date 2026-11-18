@@ -184,6 +184,10 @@ jobs:
     name: Create Release
     needs: [prepare, build]
     runs-on: ubuntu-latest
+    # Запись релиза, ротация и редактирование тел используют одну очередь.
+    concurrency:
+      group: auto-release
+      queue: max
     steps:
       - uses: actions/checkout@v7
         with:
@@ -197,6 +201,7 @@ jobs:
       - name: Create stable release or release candidate
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           VERSION: ${{ needs.prepare.outputs.version }}
           PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
           MODE: ${{ needs.prepare.outputs.kind }}
@@ -215,37 +220,36 @@ jobs:
             exit 1
           fi
 
-          # Блок xcp-release первой строкой заметок уже при создании релиза: до прогона finalize
-          # в auto-release (до 3 ч) свежий пре-релиз при включённом стопе иначе читался бы
-          # панелями как hold:false. Аннотация тега нужна для urgent. Стоп не прочитан или
-          # команда упала — hold:true (gen_notes.py пишет его и при пустом блоке).
-          git fetch --force origin "refs/tags/${VERSION}:refs/tags/${VERSION}" 2>/dev/null || true
-          RELEASE_MARKER=$(bash .github/scripts/auto_release.sh marker "${VERSION}") || RELEASE_MARKER=""
-          echo "Блок xcp-release: ${RELEASE_MARKER:-нет, будет hold:true}"
-          export RELEASE_MARKER
+          source .github/scripts/auto_release.sh
+          init_release_source
+          sha=$(git rev-parse HEAD)
+          require_source_tag "$VERSION" "$sha"
+          RELEASE_HISTORY_HEAD=refs/remotes/origin/main
+          git merge-base --is-ancestor "$sha" "$RELEASE_HISTORY_HEAD"
+          require_release_access
+          collect_releases
+          collect_baseline
+          mirror_release_tag "$VERSION" "$sha"
 
-          python3 .github/scripts/gen_notes.py
+          if ! grep -qxF -- "$VERSION" <<<"$PUBLISHED_TAGS"; then
+            # Блок xcp-release нужен уже при создании релиза. При ошибке чтения
+            # стопа gen_notes.py оставит hold:true, срочность берётся из тега.
+            RELEASE_MARKER=$(release_marker "$VERSION") || RELEASE_MARKER=""
+            export RELEASE_MARKER
+            python3 .github/scripts/gen_notes.py
 
-          # Тег ставит auto-release (или человек) до сборки — релиз создаётся по нему,
-          # без --target. С --target на коммит, чьи workflow-файлы отличаются от main
-          # (beta/stable со старого коммита), GitHub отвечает GITHUB_TOKEN 403
-          # «Resource not accessible by integration» — так упал v0.29.0-rc.2.
-          TARGET="--target ${GITHUB_SHA}"
-          if git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null; then
-            TARGET="--verify-tag"
+            # shellcheck disable=SC2086 # PRERELEASE пустой для stable
+            GH_TOKEN="$RELEASE_TOKEN" gh release create "${VERSION}" \
+              --repo "$RELEASE_REPO" \
+              --verify-tag \
+              --title "${VERSION}" \
+              --notes-file /tmp/release-notes.md \
+              $PRERELEASE \
+              artifacts/xcp_*/xcp_"${VERSION}"_*
           fi
 
-          # shellcheck disable=SC2086 # PRERELEASE пустой для stable, TARGET — два слова
-          gh release create "${VERSION}" \
-            $TARGET \
-            --title "${VERSION}" \
-            --notes-file /tmp/release-notes.md \
-            $PRERELEASE \
-            artifacts/xcp_*/xcp_"${VERSION}"_*
-
-          # Пре-релизы не новее выпущенной версии устарели, включая осиротевшие теги
           if [ "$MODE" = stable ]; then
-            bash .github/scripts/prune_dev_releases.sh "${VERSION}"
+            RELEASE_HISTORY_HEAD="$RELEASE_HISTORY_HEAD" bash .github/scripts/prune_dev_releases.sh "$VERSION"
           fi
 
   cleanup:
