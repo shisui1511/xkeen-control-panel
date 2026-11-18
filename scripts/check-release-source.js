@@ -257,7 +257,11 @@ function isComment(line) {
 function contractVars(texts) {
   const vars = new Set();
   const re = new RegExp(`([A-Za-z_][A-Za-z0-9_]*)\\s*[:=]+[^\\n]*${escapeRe(CONTRACT)}`, 'g');
-  for (const text of texts) for (const m of text.matchAll(re)) vars.add(m[1]);
+  for (const text of texts) {
+    for (const m of text.matchAll(re)) {
+      if (m[0].split('=')[1] !== CONTRACT) vars.add(m[1]);
+    }
+  }
   return vars;
 }
 
@@ -286,7 +290,7 @@ function checkGhRelease(file, text, ctx) {
     const code = line.replace(/"(?:[^"\\]|\\.)*"/g, q => (q.includes('$(') ? q : '""'));
     for (const m of code.matchAll(/\bgh\s+release\s+([a-z-]+)/g)) {
       const sub = m[1];
-      const value = repoValue(code.slice(m.index));
+      const value = repoValue(line.slice(m.index));
       if (value === null) {
         fail(where, `gh release ${sub} без явного --repo`);
         continue;
