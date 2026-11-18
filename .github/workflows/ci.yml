@@ -323,3 +323,6 @@ jobs:
 
       - name: Check release versions in texts
         run: node scripts/check-release-versions.js
+
+      - name: Check stand release downloads
+        run: node scripts/check-release-source.js --scope stand-download

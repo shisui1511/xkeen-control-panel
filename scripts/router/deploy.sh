@@ -124,6 +124,30 @@ if [ "$RELEASE" = 1 ]; then
       exit 1
     fi
   fi
+  RELEASE_COMMIT=$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}") || {
+    echo "deploy: тег $RELEASE_TAG не найден локально (git fetch --tags)" >&2
+    exit 1
+  }
+  SOURCE_REPO=$(sed -nE 's#^module github\.com/([A-Za-z0-9-]+/[A-Za-z0-9._-]+)$#\1#p' go.mod)
+  [ -n "$SOURCE_REPO" ] || {
+    echo "deploy: репозиторий кода не определён в go.mod" >&2
+    exit 1
+  }
+  RELEASE_CONTRACT=internal/releasefeed/repository
+  # Источник закреплён коммитом тега. Отсутствие контракта означает совместимый старый выпуск.
+  RELEASE_ENTRY=$(git ls-tree "$RELEASE_COMMIT" -- "$RELEASE_CONTRACT") || exit 1
+  if [ -z "$RELEASE_ENTRY" ]; then
+    ASSET_REPO=$SOURCE_REPO
+  else
+    ASSET_REPO=$(git show "$RELEASE_COMMIT:$RELEASE_CONTRACT" | LC_ALL=C awk -v source="$SOURCE_REPO" '
+      NR == 1 && /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/ &&
+        tolower($0) != tolower(source) { repo = $0 }
+      END { if (NR != 1 || repo == "") exit 1; print repo }
+    ') || {
+      echo "deploy: неверный источник выпусков в $RELEASE_CONTRACT тега $RELEASE_TAG" >&2
+      exit 1
+    }
+  fi
   VERSION=$RELEASE_TAG
   REL_DIR="$(rt_repo_root)/build/router/release/$RELEASE_TAG"
   mkdir -p "$REL_DIR"
@@ -131,7 +155,7 @@ if [ "$RELEASE" = 1 ]; then
     echo "deploy: для --release нужен gh" >&2
     exit 1
   }
-  ASSETS=$(gh release view "$RELEASE_TAG" --json assets -q '.assets[].name')
+  ASSETS=$(gh release view "$RELEASE_TAG" --repo "$ASSET_REPO" --json assets -q '.assets[].name')
   for a in $ARCHES; do
     asset="xcp_${RELEASE_TAG}_${a}"
     printf '%s\n' "$ASSETS" | grep -qxF "$asset" || {
@@ -142,7 +166,7 @@ if [ "$RELEASE" = 1 ]; then
       echo "deploy: в релизе $RELEASE_TAG нет ассета $asset.sha256" >&2
       exit 1
     }
-    gh release download "$RELEASE_TAG" -p "$asset" -p "$asset.sha256" -D "$REL_DIR" --clobber
+    gh release download "$RELEASE_TAG" --repo "$ASSET_REPO" -p "$asset" -p "$asset.sha256" -D "$REL_DIR" --clobber
     # .sha256 хранит имя файла без каталога: сверяем внутри каталога загрузки.
     if ! (cd "$REL_DIR" && sha256sum -c "$asset.sha256"); then
       echo "deploy: sha256 ассета $asset не совпал — установка отменена" >&2
@@ -155,7 +179,7 @@ if [ "$RELEASE" = 1 ]; then
     printf '%s\n' "$REL_DIR/xcp_${RELEASE_TAG}_$1"
   }
   SETUP_SRC="$REL_DIR/setup.sh"
-  git show "$RELEASE_TAG:scripts/setup.sh" >"$SETUP_SRC" 2>/dev/null || : >"$SETUP_SRC"
+  git show "$RELEASE_COMMIT:scripts/setup.sh" >"$SETUP_SRC" 2>/dev/null || : >"$SETUP_SRC"
 else
   # Тег vX.Y.Z-beta.N на HEAD без правок version.sh отдаёт сам; явная XCP_VERSION (проход
   # план-сессии под номером вышедшего релиза) важнее тега.
