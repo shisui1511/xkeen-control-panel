@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 	"gopkg.in/yaml.v3"
 )
 
@@ -184,11 +185,11 @@ func (a *API) DiagnosticsDownload(w http.ResponseWriter, r *http.Request) {
 	var logPaths []string
 	seenLogs := make(map[string]bool)
 	addLog := func(p string) {
-		if p == "" {
+		if p == "" || utils.IsLegacyArchivePath(a.cfg.DataDir, p) {
 			return
 		}
 		clean, err := a.pathVal.Validate(p)
-		if err != nil {
+		if err != nil || utils.IsLegacyArchivePath(a.cfg.DataDir, clean) {
 			return
 		}
 		if !seenLogs[clean] {
@@ -250,12 +251,18 @@ func (a *API) DiagnosticsDownload(w http.ResponseWriter, r *http.Request) {
 			if walkErr != nil {
 				return nil
 			}
+			if utils.IsLegacyArchivePath(a.cfg.DataDir, path) {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
 			if d.IsDir() {
 				return nil
 			}
 
 			cleanPath, valErr := a.pathVal.Validate(path)
-			if valErr != nil {
+			if valErr != nil || utils.IsLegacyArchivePath(a.cfg.DataDir, cleanPath) {
 				return nil
 			}
 
@@ -300,8 +307,8 @@ func (a *API) DiagnosticsDownload(w http.ResponseWriter, r *http.Request) {
 	walkConfigDir(a.cfg.XRayConfigDir, "xray")
 
 	// 4. XCP Config
-	if a.cfg.ConfigPath != "" {
-		if cleanXcpPath, err := a.pathVal.Validate(a.cfg.ConfigPath); err == nil {
+	if a.cfg.ConfigPath != "" && !utils.IsLegacyArchivePath(a.cfg.DataDir, a.cfg.ConfigPath) {
+		if cleanXcpPath, err := a.pathVal.Validate(a.cfg.ConfigPath); err == nil && !utils.IsLegacyArchivePath(a.cfg.DataDir, cleanXcpPath) {
 			if _, statErr := os.Stat(cleanXcpPath); statErr == nil {
 				if xcpData, readErr := os.ReadFile(cleanXcpPath); readErr == nil {
 					sanitized, sanitizeErr := sanitizeJSON(xcpData)

@@ -31,6 +31,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services/cores"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/dnstakeover"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/geodata"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/legacyarchive"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/proxyping"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
@@ -179,6 +180,10 @@ func main() {
 		} else {
 			log.Printf("Failed to initialize log rotator for %s: %v", cfg.XCPLogPath, err)
 		}
+	}
+	legacyResult, err := legacyarchive.Run(cfg.DataDir)
+	if err != nil {
+		log.Printf("Архив старых данных: %s", legacyResult.Warning)
 	}
 	if appliedTZ != "" {
 		log.Printf("Timezone: applied system timezone %s", appliedTZ)
@@ -724,6 +729,12 @@ func main() {
 	if err != nil {
 		log.Printf("Слой конфигурации не создан, маршруты /api/configlayer/* отвечают 404: %v", err)
 	} else {
+		if legacyResult.Warning != "" {
+			const archiveNotice = "legacy_archive_failed"
+			configLayer.SetNotices(archiveNotice, []configlayer.NoticeView{{
+				ID: archiveNotice, Kind: "warning", Reason: legacyResult.Warning,
+			}})
+		}
 		// Сервис источников (фаза 145): создаётся только здесь. Генераторы, хук
 		// фиксации живых данных и колбэк «дрейф решён» регистрируются до Start слоя
 		// (после него слой их не принимает). Не создался или не подключился —
