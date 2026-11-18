@@ -1,9 +1,8 @@
 name: Release Notes
 
-# Перегенерация описаний уже опубликованных релизов текущим .github/scripts/gen_notes.py:
-# после правки генератора старые тела переписываются тем же форматом, что у новых.
+# Перегенерация описаний опубликованных релизов отдельного источника.
 # Шапка тела — блок xcp-release (его читают панели) и строка о регрессии красного пре-релиза,
-# обе пишет auto_release.sh finalize — остаётся как есть; тело без блока остаётся без блока.
+# обе пишет auto_release.sh finalize — остаётся как есть; если блок повреждён, действует hold:true.
 # Запуск только вручную; очередь общая с автовыпуском, чтобы не затереть блок, который finalize пишет в это же время.
 on:
   workflow_dispatch:
@@ -18,14 +17,15 @@ on:
         default: true
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: auto-release
-  cancel-in-progress: false
+  queue: max
 
 jobs:
   regenerate:
+    if: github.ref == 'refs/heads/main' || inputs.dry_run
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -35,42 +35,54 @@ jobs:
       - name: Regenerate release notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           TAGS: ${{ inputs.tags }}
           DRY_RUN: ${{ inputs.dry_run }}
           SOAK_HOURS: ${{ vars.RC_SOAK_HOURS || '24' }}
         run: |
-          set -euo pipefail
-          git fetch --force --tags origin
+          source .github/scripts/auto_release.sh
+          init_release_source
+          if [ "$DRY_RUN" != true ]; then
+            require_release_access
+          fi
           if [ -z "$TAGS" ]; then
-            TAGS=$(gh release list --limit 30 --exclude-drafts --json tagName --jq '.[].tagName')
+            TAGS=$(GH_TOKEN="$RELEASE_TOKEN" gh release list --repo "$RELEASE_REPO" \
+              --limit 30 --exclude-drafts --json tagName --jq '.[].tagName')
           fi
           marker_re='^<!-- xcp-release: \{"urgent":(true|false),"hold":(true|false)\} -->$'
           regression=$(sed -n "s/^REGRESSION_LINE='\(.*\)'$/\1/p" .github/scripts/auto_release.sh)
           changed=0
           for tag in $TAGS; do
-            if ! [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(beta|rc)\.[0-9]+)?$ ]]; then
-              echo "::warning::$tag — не тег релиза, пропущен"
+            if ! [[ "$tag" =~ $STABLE_RE || "$tag" =~ $PRE_RE ]]; then
+              echo "::warning::пропущен аргумент, который не является тегом выпуска"
               continue
             fi
-            if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-              echo "::warning::$tag — тега нет в репозитории, пропущен"
+            if ! sha=$(git rev-parse --verify "refs/tags/$tag^{commit}" 2>/dev/null) || ! release_commit "$sha"; then
+              echo "::warning::$tag — нет подтверждённого исходного тега новой эпохи"
               continue
             fi
-            mode=stable
-            [ "$(gh release view "$tag" --json isPrerelease --jq .isPrerelease)" = true ] && mode=beta
-            old=$(gh release view "$tag" --json body --jq .body | tr -d '\r')
+            require_source_tag "$tag" "$sha"
+            remote_sha=$(release_tag_sha "$tag")
+            if [ "$remote_sha" != "$sha" ]; then
+              echo "::warning::$tag — тег выпуска не соответствует исходному"
+              continue
+            fi
+            mode=$(GH_TOKEN="$RELEASE_TOKEN" gh release view "$tag" --repo "$RELEASE_REPO" --json isPrerelease \
+              --jq 'if .isPrerelease then "beta" else "stable" end')
+            old=$(GH_TOKEN="$RELEASE_TOKEN" gh release view "$tag" --repo "$RELEASE_REPO" --json body --jq .body | tr -d '\r')
             # Без конвейеров с head/grep -q: при pipefail ранний выход читателя роняет шаг (SIGPIPE)
             first=${old%%$'\n'*}
             rest=${old#*$'\n'}
             second=${rest%%$'\n'*}
             new=$(python3 .github/scripts/gen_notes.py "$tag" "$mode")
+            top='<!-- xcp-release: {"urgent":false,"hold":true} -->'
             if [[ $first =~ $marker_re ]]; then
               top="$first"
               if [ -n "$regression" ] && [ "$second" = "$regression" ]; then
                 top="$top"$'\n'"$regression"
               fi
-              new=$(printf '%s\n\n%s' "$top" "$new")
             fi
+            new=$(printf '%s\n\n%s' "$top" "$new")
             if [ "$new" = "$old" ]; then
               echo "= $tag ($mode): без изменений"
               continue
@@ -85,7 +97,7 @@ jobs:
             fi
             tmp=$(mktemp)
             printf '%s\n' "$new" > "$tmp"
-            gh release edit "$tag" --notes-file "$tmp" >/dev/null
+            GH_TOKEN="$RELEASE_TOKEN" gh release edit "$tag" --repo "$RELEASE_REPO" --notes-file "$tmp" >/dev/null
             rm -f "$tmp"
           done
           echo "Изменено тел: $changed (dry_run=$DRY_RUN)"

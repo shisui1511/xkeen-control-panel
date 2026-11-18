@@ -229,26 +229,28 @@ jobs:
           require_release_access
           collect_releases
           collect_baseline
-
-          # Блок xcp-release первой строкой заметок уже при создании релиза: до прогона finalize
-          # в auto-release (до 3 ч) свежий пре-релиз при включённом стопе иначе читался бы
-          # панелями как hold:false. Аннотация тега нужна для urgent. Стоп не прочитан или
-          # команда упала — hold:true (gen_notes.py пишет его и при пустом блоке).
-          RELEASE_MARKER=$(release_marker "$VERSION") || RELEASE_MARKER=""
-          echo "Блок xcp-release: ${RELEASE_MARKER:-нет, будет hold:true}"
-          export RELEASE_MARKER
-
-          python3 .github/scripts/gen_notes.py
-
           mirror_release_tag "$VERSION" "$sha"
-          # shellcheck disable=SC2086 # PRERELEASE пустой для stable
-          GH_TOKEN="$RELEASE_TOKEN" gh release create "${VERSION}" \
-            --repo "$RELEASE_REPO" \
-            --verify-tag \
-            --title "${VERSION}" \
-            --notes-file /tmp/release-notes.md \
-            $PRERELEASE \
-            artifacts/xcp_*/xcp_"${VERSION}"_*
+
+          if ! grep -qxF -- "$VERSION" <<<"$PUBLISHED_TAGS"; then
+            # Блок xcp-release нужен уже при создании релиза. При ошибке чтения
+            # стопа gen_notes.py оставит hold:true, срочность берётся из тега.
+            RELEASE_MARKER=$(release_marker "$VERSION") || RELEASE_MARKER=""
+            export RELEASE_MARKER
+            python3 .github/scripts/gen_notes.py
+
+            # shellcheck disable=SC2086 # PRERELEASE пустой для stable
+            GH_TOKEN="$RELEASE_TOKEN" gh release create "${VERSION}" \
+              --repo "$RELEASE_REPO" \
+              --verify-tag \
+              --title "${VERSION}" \
+              --notes-file /tmp/release-notes.md \
+              $PRERELEASE \
+              artifacts/xcp_*/xcp_"${VERSION}"_*
+          fi
+
+          if [ "$MODE" = stable ]; then
+            RELEASE_HISTORY_HEAD="$RELEASE_HISTORY_HEAD" bash .github/scripts/prune_dev_releases.sh "$VERSION"
+          fi
 
   cleanup:
     name: Cleanup artifacts

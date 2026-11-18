@@ -19,12 +19,12 @@
  *     ${REPO}; роутерный тест обновления читает релизы через releasefeed.APIReleasesURL;
  *   --scope publish — конвейер выпуска (.github/scripts/auto_release.sh, .github/workflows/build.yml,
  *     .github/workflows/auto-release.yml): контракт читается из файла и проверяется на пустоту;
- *     каждая команда gh release несёт явный --repo; изменяющие (create, edit, upload, delete)
- *     направлены в переменную, прочитанную из контракта, — публикация новой эпохи в репозиторий
- *     кода запрещена; глобальный GH_REPO не задаётся;
+ *     команды gh release получают --repo из контракта и отдельный токен. Только начальный
+ *     расчёт номера читает список выпусков репозитория кода; глобальный GH_REPO не задаётся;
+ *     перед create проверяется и переносится исходный тег, используется --verify-tag;
  *   --scope notes — заметки и ротация (.github/scripts/gen_notes.py, .github/workflows/release-notes.yml,
  *     .github/scripts/prune_dev_releases.sh): те же правила gh release; адреса ассетов в тексте
- *     заметок не строятся от GITHUB_REPOSITORY;
+ *     заметок строятся от контракта, а установщик ссылается на исходный тег;
  *   --scope stand-download — обвязка стенда (scripts/router/deploy.sh, run.sh, release-status.sh):
  *     gh release (view, download, list) с явным --repo, контракт читается; статусы stand/* пишутся
  *     в репозиторий кода, не в переменную контракта; проверка sha256 ассета в deploy.sh сохранена;
@@ -64,7 +64,9 @@ const SCOPES = {
 const LITERAL_ALLOWED = new Set([SETUP_SH, 'README.md']);
 
 const REPO_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/;
-const MUTATING = new Set(['create', 'edit', 'upload', 'delete', 'delete-asset']);
+const PUBLISHER = '.github/scripts/auto_release.sh';
+const BUILD_WORKFLOW = '.github/workflows/build.yml';
+const NOTES_GENERATOR = '.github/scripts/gen_notes.py';
 
 const problems = [];
 const fail = (where, msg) => problems.push(`${where}: ${msg}`);
@@ -257,56 +259,85 @@ function isComment(line) {
 function contractVars(texts) {
   const vars = new Set();
   const re = new RegExp(`([A-Za-z_][A-Za-z0-9_]*)\\s*[:=]+[^\\n]*${escapeRe(CONTRACT)}`, 'g');
+  const literalPath = new RegExp(`^[A-Za-z_][A-Za-z0-9_]*\\s*[:=]+\\s*["']?${escapeRe(CONTRACT)}$`);
   for (const text of texts) {
     for (const m of text.matchAll(re)) {
-      if (m[0].split('=')[1] !== CONTRACT) vars.add(m[1]);
+      if (!literalPath.test(m[0])) vars.add(m[1]);
     }
   }
   return vars;
 }
 
-function repoValue(line) {
-  const m = line.match(/(?:--repo|-R)(?:\s+|=)("[^"]*"|'[^']*'|\$\{\{[^}]*\}\}|\S+)/);
-  if (!m) return null;
-  return m[1].replace(/^["']|["']$/g, '');
+function repoValues(line) {
+  return [...line.matchAll(/(?:^|\s)(?:--repo|-R)(?:\s+|=)("[^"]*"|'[^']*'|\$\{\{[^}]*\}\}|\S+)/g)]
+    .map(m => m[1].replace(/^["']|["']$/g, ''));
 }
 
 function refersToVar(value, vars) {
   for (const v of vars) {
-    if (value === `$${v}` || value === `\${${v}}` || value.startsWith(`\${${v}:`) || value === `\${{ env.${v} }}`) return true;
+    if (value === `$${v}` || value === `\${${v}}` || value === `\${{ env.${v} }}`) return true;
   }
   return false;
 }
 
 function checkGhRelease(file, text, ctx) {
-  const { vars, source, mutatingToContract } = ctx;
+  const { vars, pipeline } = ctx;
+  const baseline = file === PUBLISHER && text.match(/^collect_baseline\(\) \{[^]*?^}/m);
+  const baselineStart = baseline ? lineOf(text, baseline.index) : 0;
+  const baselineEnd = baseline ? lineOf(text, baseline.index + baseline[0].length) : 0;
+  let legacyReads = 0;
+  let creates = 0;
   for (const { n, line } of logicalLines(text)) {
     if (isComment(line)) continue;
     const where = `${file}:${n}`;
     if (/(?:^|[\s;&|(])(?:export\s+)?GH_REPO\s*[:=]/.test(line) || /^\s*GH_REPO\s*:/.test(line)) {
       fail(where, 'глобальный GH_REPO — репозиторий задаётся явным --repo у каждой команды');
     }
-    // Текст в двойных кавычках без подстановки команды — сообщение, не вызов gh.
-    const code = line.replace(/"(?:[^"\\]|\\.)*"/g, q => (q.includes('$(') ? q : '""'));
+    // Убираем строки сообщений, сохраняя позиции команд в исходной строке.
+    const code = line.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, q =>
+      q.startsWith('"') && q.includes('$(') ? q : ' '.repeat(q.length));
     for (const m of code.matchAll(/\bgh\s+release\s+([a-z-]+)/g)) {
       const sub = m[1];
-      const value = repoValue(line.slice(m.index));
-      if (value === null) {
-        fail(where, `gh release ${sub} без явного --repo`);
+      const end = code.slice(m.index).search(/[;&|)]/);
+      const command = line.slice(m.index, end === -1 ? undefined : m.index + end);
+      const values = repoValues(command);
+      if (values.length !== 1) {
+        fail(where, `gh release ${sub} требует ровно один явный --repo`);
         continue;
       }
-      if (source && (value.toLowerCase() === source.toLowerCase() || /github\.repository|GITHUB_REPOSITORY/.test(value))) {
-        if (MUTATING.has(sub) && mutatingToContract) fail(where, `gh release ${sub} в репозиторий кода — публикация новой эпохи туда запрещена`);
+      if (!pipeline) continue;
+      const [value] = values;
+      const usesReleaseToken = /\bGH_TOKEN="\$\{?RELEASE_TOKEN\}?"\s*$/.test(line.slice(0, m.index));
+      if (sub === 'list' && n >= baselineStart && n <= baselineEnd &&
+          refersToVar(value, ['SOURCE_REPO']) && !usesReleaseToken) {
+        legacyReads++;
         continue;
       }
-      if (MUTATING.has(sub) && mutatingToContract && !refersToVar(value, vars)) {
+      if (!refersToVar(value, vars)) {
         fail(where, `gh release ${sub} --repo ${value}: не переменная, прочитанная из ${CONTRACT}`);
+      }
+      if (!usesReleaseToken) fail(where, `gh release ${sub}: требуется отдельный RELEASE_TOKEN`);
+      if (sub === 'create' || sub === 'new') {
+        creates++;
+        if (file !== BUILD_WORKFLOW || !/\s--verify-tag(?:\s|$)/.test(command) || /\s--target[=\s]/.test(command)) {
+          fail(where, 'создание релиза допустимо в build.yml только с --verify-tag');
+        }
       }
     }
   }
+  if (file === PUBLISHER && legacyReads !== 1) fail(file, 'нужно одно чтение совместимой истории в collect_baseline');
+  if (file === BUILD_WORKFLOW) {
+    if (creates !== 1) fail(file, 'нужна одна команда создания релиза');
+    if (!/require_source_tag "\$VERSION" "\$sha"[^]*require_release_access[^]*collect_baseline[^]*mirror_release_tag "\$VERSION" "\$sha"[^]*gh release create/.test(text)) {
+      fail(file, 'до создания релиза нужно проверить доступ и сверить скопированный исходный тег');
+    }
+  }
+
   // Python: subprocess-список ["gh", "release", "<sub>", …]
   for (const m of text.matchAll(/\[\s*["']gh["']\s*,\s*["']release["']\s*,\s*["']([a-z-]+)["']([^\]]*)\]/g)) {
-    if (!/["'](?:--repo|-R)["']/.test(m[2])) fail(`${file}:${lineOf(text, m.index)}`, `gh release ${m[1]} без явного --repo`);
+    if (pipeline || !/["'](?:--repo|-R)["']/.test(m[2])) {
+      fail(`${file}:${lineOf(text, m.index)}`, `gh release ${m[1]}: команды конвейера должны проходить проверку явной цели и токена`);
+    }
   }
 }
 
@@ -336,27 +367,33 @@ function checkLiteral(files, contract) {
   }
 }
 
-function checkPipelineScope(name, source, contract) {
+function checkPipelineScope(name, contract) {
   const files = SCOPES[name];
   const texts = files.map(need).filter(t => t !== null);
   if (texts.length !== files.length) return;
-  const vars = contractVars(texts);
-  checkContractRead(files, texts, vars, `scope ${name}`);
-  const mutatingToContract = name === 'publish' || name === 'notes';
-  files.forEach((f, i) => checkGhRelease(f, texts[i], { vars, source, mutatingToContract }));
+  const inputs = name === 'notes' ? [...texts, need(PUBLISHER) || ''] : texts;
+  const vars = contractVars(inputs);
+  checkContractRead(files, inputs, vars, `scope ${name}`);
+  const pipeline = name === 'publish' || name === 'notes';
+  files.forEach((f, i) => checkGhRelease(f, texts[i], { vars, pipeline }));
   checkLiteral(files, contract);
 
   if (name === 'notes') {
-    const py = '.github/scripts/gen_notes.py';
+    const py = NOTES_GENERATOR;
     const text = texts[files.indexOf(py)];
-    const envNames = new Set();
-    for (const m of text.matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*=\s*os\.environ(?:\[|\.get\()\s*["']GITHUB_REPOSITORY["']/g)) envNames.add(m[1]);
     text.split('\n').forEach((line, i) => {
-      if (!/releases\/(?:download|latest|tag)/.test(line)) return;
-      if (line.includes('GITHUB_REPOSITORY') || [...envNames].some(v => line.includes(`{${v}}`))) {
-        fail(`${py}:${i + 1}`, 'адрес ассетов в заметке строится от репозитория кода');
+      for (const url of line.matchAll(/(?:https:\/\/(?:api\.github\.com\/repos\/|github\.com\/))?([^\s"'()]+)\/releases\b/g)) {
+        if (url[1] !== '{release_repo}' || !vars.has('release_repo')) {
+          fail(`${py}:${i + 1}`, 'адрес релизов в заметке не из контракта');
+        }
+      }
+      if (line.includes('raw.githubusercontent.com/') && !line.includes('raw.githubusercontent.com/{source_repo}/{version}/scripts/setup.sh')) {
+        fail(`${py}:${i + 1}`, 'ссылка на установщик должна вести в исходный тег');
       }
     });
+    for (const expected of ['{release_repo}/releases/tag/{version}', '{release_repo}/releases/download/{version}/', '/opt/etc/xcp/legacy/']) {
+      if (!text.includes(expected)) fail(py, `в инструкции перехода отсутствует ${expected}`);
+    }
   }
 
   if (name === 'stand-download') {
@@ -466,7 +503,7 @@ const run = scope ? [scope] : Object.keys(SCOPES);
 for (const s of run) {
   if (s === 'client') checkClient(source, contract);
   else if (s === 'stand') checkStand(contract);
-  else checkPipelineScope(s, source, contract);
+  else checkPipelineScope(s, contract);
 }
 
 const label = scope ? `scope ${scope}` : 'полная проверка';
