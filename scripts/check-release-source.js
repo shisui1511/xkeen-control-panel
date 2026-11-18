@@ -408,7 +408,6 @@ function checkPipelineScope(name, contract) {
       if (!text.includes(expected)) fail(py, `в инструкции перехода отсутствует ${expected}`);
     }
   }
-
 }
 
 function checkStandDownloads(contract) {
@@ -417,9 +416,9 @@ function checkStandDownloads(contract) {
   if (texts.includes(null)) return;
   const [deploy, run, status] = texts.map(text => logicalLines(text)
     .filter(({ line }) => !isComment(line)).map(({ line }) => line).join('\n'));
-  checkGhRelease(DEPLOY, deploy, { standCommands: { view: 'ASSET_REPO', download: 'ASSET_REPO' } });
-  checkGhRelease(RUN, run, { standCommands: { list: 'RELEASE_REPO' } });
-  checkGhRelease(RELEASE_STATUS, status, { standCommands: {} });
+  checkGhRelease(DEPLOY, texts[0], { standCommands: { view: 'ASSET_REPO', download: 'ASSET_REPO' } });
+  checkGhRelease(RUN, texts[1], { standCommands: { list: 'RELEASE_REPO' } });
+  checkGhRelease(RELEASE_STATUS, texts[2], { standCommands: {} });
   checkLiteral(files, contract);
 
   for (const [i, text] of [deploy, run, status].entries()) {
@@ -504,7 +503,11 @@ function checkCaller(text, label, anchorRe, pick) {
     return;
   }
   const tryBlock = blockAt(block.body, tryAt);
-  const catchM = tryBlock && block.body.slice(tryBlock.end).match(/^\s*catch\s*(?:\([^)]*\))?\s*/);
+  if (!tryBlock || !/^\{\s*tag = latestReleaseTag\(\);\s*\}$/.test(tryBlock.body)) {
+    fail(where, `${label}: выбор тега должен целиком проходить через latestReleaseTag()`);
+    return;
+  }
+  const catchM = block.body.slice(tryBlock.end).match(/^\s*catch\s*(?:\([^)]*\))?\s*/);
   const catchBlock = catchM && blockAt(block.body, tryBlock.end + catchM[0].length - 1);
   if (!catchBlock) {
     fail(where, `${label}: нет обработки ошибки latestReleaseTag()`);
@@ -514,26 +517,53 @@ function checkCaller(text, label, anchorRe, pick) {
     fail(where, `${label}: запасной источник в обработке ошибки latestReleaseTag()`);
   }
   if (!/\berr\s*=(?!=)/.test(catchBlock.body)) fail(where, `${label}: ошибка latestReleaseTag() не превращается в отказ (err = …)`);
+  if (
+    !block.body.includes("if (tag === 'latest')") ||
+    !block.body.includes('if (!err && !RELEASE_TAG.test(tag))') ||
+    !block.body.includes('if (!err && !localTagExists(tag))') ||
+    !/if \(err\) \{[^]*?\breturn\b/.test(block.body)
+  ) {
+    fail(where, `${label}: нужны проверки формата и локального тега с остановкой при ошибке`);
+  }
 }
 
 function checkStand(contract) {
   const text = need(SESSION);
   if (text === null) return;
-  const fnM = text.match(/^function latestReleaseTag\(\)\s*/m);
+  const fnM = text.match(/^function latestReleaseTag\(\)\s*\{/m);
   if (!fnM) {
     fail(SESSION, 'нет помощника function latestReleaseTag()');
     return;
   }
   const fn = blockAt(text, fnM.index + fnM[0].length - 1);
   const where = `${SESSION}:${lineOf(text, fnM.index)}`;
-  if (!/['"]release['"]\s*,\s*['"]list['"]/.test(fn.body)) fail(where, 'latestReleaseTag: не gh release list');
-  if (!/['"]--repo['"]/.test(fn.body)) fail(where, 'latestReleaseTag: gh release list без явного --repo');
-  if (!text.includes(CONTRACT)) fail(SESSION, `источник выпусков не читается из ${CONTRACT}`);
-  if (!/\bthrow\b/.test(fn.body) && !/\bthrow\b/.test(text.slice(text.indexOf(CONTRACT) - 2000, text.indexOf(CONTRACT) + 2000))) {
-    fail(where, 'latestReleaseTag: нет отказа при пустом или неверном источнике');
+  if (!fn) {
+    fail(where, 'latestReleaseTag: границы помощника не определены');
+    return;
+  }
+  const list = fn.body.search(/execFileSync\(\s*'gh',\s*\[\s*'release',\s*'list',\s*'--repo',\s*releaseRepo,/);
+  if (list === -1) fail(where, 'latestReleaseTag: gh release list должен получать --repo из releaseRepo');
+  const beforeList = fn.body.slice(0, list === -1 ? fn.body.length : list);
+  if (
+    !beforeList.includes(`const contract = '${CONTRACT}';`) ||
+    !beforeList.includes("const releaseRepo = readFileSync(path.join(root, contract), 'utf8')") ||
+    !beforeList.includes("const sourceRepo = readFileSync(path.join(root, 'go.mod'), 'utf8')") ||
+    !beforeList.includes(`!${REPO_RE}.test(releaseRepo)`) ||
+    !beforeList.includes('releaseRepo.toLowerCase() === sourceRepo.toLowerCase()') ||
+    !/if \([^]*?\)\s*\{\s*throw new Error\(/.test(beforeList)
+  ) {
+    fail(where, 'latestReleaseTag: нужен отказ до запроса при пустом, неверном или совпадающем с go.mod источнике');
+  }
+  if (
+    !fn.body.includes('refs/tags/${tag}^{commit}:${contract}') ||
+    !fn.body.includes('if (tagRepo !== releaseRepo) throw') ||
+    /\bcatch\b/.test(fn.body)
+  ) {
+    fail(where, 'latestReleaseTag: требуется сверка контракта исходного тега без запасного источника');
   }
   // gh release list только внутри помощника
   const listRe = /['"]release['"]\s*,\s*['"]list['"]|exec\w*\(\s*[`'"]gh\s+release\s+list/g;
+  if ([...fn.body.matchAll(listRe)].length !== 1) fail(where, 'latestReleaseTag: нужна одна команда gh release list');
   for (const m of text.matchAll(listRe)) {
     if (m.index < fn.start || m.index >= fn.end) fail(`${SESSION}:${lineOf(text, m.index)}`, 'gh release list вне latestReleaseTag');
   }
