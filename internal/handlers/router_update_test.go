@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/releasefeed"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
@@ -170,7 +171,7 @@ func rtUpdSemver(a, b string) int {
 // rtUpdReleases читает список релизов; второе значение — причина недоступности
 // GitHub (лимит 403, сеть, 5xx), пустая при успехе.
 func rtUpdReleases() ([]rtUpdRelease, string) {
-	resp, err := utils.SafeHTTPClient(20 * time.Second).Get(githubAPIReleases + "?per_page=30")
+	resp, err := utils.SafeHTTPClient(20 * time.Second).Get(releasefeed.APIReleasesURL() + "?per_page=30")
 	if err != nil {
 		return nil, "GitHub недоступен: " + err.Error()
 	}

@@ -27,13 +27,13 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
+	"github.com/shisui1511/xkeen-control-panel/internal/releasefeed"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
-const (
-	githubAPIReleases = "https://api.github.com/repos/shisui1511/xkeen-control-panel/releases"
-	githubDownloadURL = "https://github.com/shisui1511/xkeen-control-panel/releases/download"
-)
+// Список релизов, тела и ассеты читаются только из источника выпусков
+// releasefeed (отдельный репозиторий): прежние сборки читают свой адрес и видят
+// только совместимые выпуски, запасного пути к репозиторию кода нет.
 
 type UpdateInfo struct {
 	CurrentVersion string        `json:"current_version"`
@@ -50,6 +50,9 @@ type UpdateInfo struct {
 	// снимает задержку Основного канала, стоп держит автоустановку.
 	Urgent bool `json:"urgent"`
 	Hold   bool `json:"hold"`
+	// ReleaseRepository — owner/name источника выпусков, из которого прочитаны
+	// релизы (диагностика: только имя репозитория, без учётных данных).
+	ReleaseRepository string `json:"release_repository"`
 	// AutoReleases — релизы канала новее текущей версии: из них планировщик
 	// выбирает кандидата автоустановки (он может быть старше LatestVersion).
 	AutoReleases []autoRelease `json:"-"`
@@ -164,6 +167,7 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 
 	info.CurrentVersion = currentVersion
 	info.Channel = channel
+	info.ReleaseRepository = releasefeed.Repository()
 	info.HasUpdate = updateAvailable(info.LatestVersion, currentVersion)
 	info.AutoReleases = channelReleasesAbove(releases, channel, currentVersion)
 	a.cfg.RLock()
@@ -176,7 +180,7 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 
 	if info.HasUpdate {
 		binaryName := fmt.Sprintf("xcp_v%s_%s", info.LatestVersion, releaseArch())
-		info.DownloadURL = fmt.Sprintf("%s/v%s/%s", githubDownloadURL, info.LatestVersion, binaryName)
+		info.DownloadURL = releasefeed.DownloadURL("v"+info.LatestVersion, binaryName)
 		info.DownloadSize = releaseAssetSize(releases, info.LatestVersion, binaryName)
 		info.Releases = releaseNotesBetween(releases, channel, currentVersion, info.LatestVersion)
 	}
@@ -451,8 +455,12 @@ func (a *API) performUpdate(channel, want string) {
 	setUpdateStep("downloading", 30, "downloading", map[string]string{"version": info.LatestVersion}, "Downloading update...")
 
 	arch := releaseArch()
-	downloadURL := fmt.Sprintf("%s/v%s/xcp_v%s_%s",
-		githubDownloadURL, info.LatestVersion, info.LatestVersion, arch)
+	binaryName := fmt.Sprintf("xcp_v%s_%s", info.LatestVersion, arch)
+	downloadURL := releasefeed.DownloadURL("v"+info.LatestVersion, binaryName)
+	if err := releasefeed.Check(); err != nil {
+		setUpdateStep("failed", 0, "download_failed", map[string]string{"detail": err.Error()}, "Download failed: "+err.Error())
+		return
+	}
 
 	// Download to the same directory as the binary to avoid cross-device rename
 	tempFile := filepath.Join(filepath.Dir(binPath), "xcp.new")
@@ -463,7 +471,6 @@ func (a *API) performUpdate(channel, want string) {
 
 	// Step 2b: Verify SHA-256 against the release's per-asset .sha256 file.
 	// Без подтверждённой контрольной суммы бинарник не устанавливается.
-	binaryName := fmt.Sprintf("xcp_v%s_%s", info.LatestVersion, arch)
 	if err := verifyChecksumFn(tempFile, binaryName, downloadURL+".sha256"); err != nil {
 		_ = os.Remove(tempFile)
 		setUpdateStep("failed", 0, "checksum_failed", map[string]string{"detail": err.Error()}, "Checksum verification failed: "+err.Error())
@@ -749,17 +756,22 @@ func fetchUpdateTarget(channel, want string) (*UpdateInfo, error) {
 	return nil, fmt.Errorf("release v%s not found for channel %s", want, channel)
 }
 
-// fetchReleases возвращает последние релизы: 30 хватает на описание изменений
-// при пропуске нескольких версий.
+// fetchReleases возвращает последние релизы источника выпусков: 30 хватает на
+// описание изменений при пропуске нескольких версий. Ошибка контракта или ответ
+// не 200 — ошибка с именем репозитория и кодом ответа; другой источник не
+// пробуется.
 func fetchReleases() ([]githubRelease, error) {
+	if err := releasefeed.Check(); err != nil {
+		return nil, err
+	}
 	client := utils.SafeHTTPClient(15 * time.Second)
-	resp, err := client.Get(githubAPIReleases + "?per_page=30")
+	resp, err := client.Get(releasefeed.APIReleasesURL() + "?per_page=30")
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GitHub API: %s", resp.Status)
+		return nil, fmt.Errorf("GitHub API %s: %s", releasefeed.Repository(), resp.Status)
 	}
 
 	var releases []githubRelease
@@ -964,12 +976,18 @@ func normalizeChannel(ch string) string {
 }
 
 func fetchChangelog(version string) (string, error) {
+	if err := releasefeed.Check(); err != nil {
+		return "", err
+	}
 	client := utils.SafeHTTPClient(15 * time.Second)
-	resp, err := client.Get(githubAPIReleases + "/tags/v" + version)
+	resp, err := client.Get(releasefeed.APIReleasesURL() + "/tags/v" + version)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GitHub API %s: %s", releasefeed.Repository(), resp.Status)
+	}
 
 	var release struct {
 		Body string `json:"body"`
