@@ -419,7 +419,7 @@ func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *Subscri
 		mihomoConfigDir: mihomoConfigDir,
 		httpClient:      utils.SafeHTTPClient(30 * time.Second),
 		localHTTPClient: &http.Client{Timeout: 10 * time.Second},
-		hwid:            loadOrGenerateHWID(dataDir),
+		hwid:            LoadOrGenerateHWID(dataDir),
 		deviceInfo:      NewDeviceInfo(),
 	}
 	svc.load()
