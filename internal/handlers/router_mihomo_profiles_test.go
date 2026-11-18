@@ -7,6 +7,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,8 +18,11 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 // Активация профилей Mihomo на настоящей панели устройства (PART-03, D-23).
@@ -378,6 +382,41 @@ func (e *rtSrc) rtOwnActivate(name string) map[string]any {
 	return r.object(e.t)
 }
 
+func rtOwnControllerProfile(t *testing.T, s *rtSwStand, name string, setController func(map[string]any)) []byte {
+	t.Helper()
+	var profile map[string]any
+	if err := yaml.Unmarshal(s.data, &profile); err != nil {
+		t.Fatal("исходный YAML профиля Mihomo не читается")
+	}
+	setController(profile)
+	data, err := yaml.Marshal(profile)
+	if err != nil {
+		t.Fatal("профиль Mihomo не сериализуется")
+	}
+	if err := os.WriteFile(s.profile(name), data, s.mode); err != nil {
+		t.Fatalf("запись профиля %s: %v", name, err)
+	}
+	return data
+}
+
+func (e *rtSrc) rtOwnExpectSocket(missing bool) {
+	e.t.Helper()
+	path := "/api/configlayer/proxies"
+	view := e.call(http.MethodGet, path, nil)
+	if view.Status != http.StatusOK || view.object(e.t)["no_socket"] != missing {
+		e.t.Errorf("GET %s: статус %d или неверный no_socket, ожидался %t", path, view.Status, missing)
+	}
+	caps := e.call(http.MethodGet, "/api/capabilities", nil)
+	if caps.Status != http.StatusOK {
+		e.t.Fatalf("GET capabilities: %d", caps.Status)
+	}
+	mihomo, _ := caps.object(e.t)["mihomo"].(map[string]any)
+	if mihomo["no_socket"] != missing || (missing && (mihomo["controller_type"] != "tcp" || mihomo["api_reachable"] != false)) {
+		e.t.Errorf("capabilities Mihomo: no_socket=%v, controller_type=%v, api_reachable=%v",
+			mihomo["no_socket"], mihomo["controller_type"], mihomo["api_reachable"])
+	}
+}
+
 // Трасса (D-06, D-08): Mihomo у панели → обычная активация rt-own-a идёт через
 // конвейер, панель отпускает Mihomo на свой профиль (ссылка на rt-own-a, файла xcp-main
 // нет, routing.mihomo.taken false) → смена на rt-own-b при открытом черновике идёт
@@ -391,11 +430,38 @@ func TestRouterProfileActivateOwnership(t *testing.T) {
 	e := rtNewSrc(t)
 	e.enableLayer()
 	e.rtRstIdle()
-	rtOwnPrepare(t, e, "rt-own-", rtOwnA, rtOwnB)
+	var restoreKernel bool
+	t.Cleanup(func() {
+		if !restoreKernel {
+			return
+		}
+		// rtSwStand уже вернул исходную ссылку. Ядро должно перечитать её содержимое.
+		res := e.callSlow(http.MethodPost, "/api/service/control?action=restart", nil)
+		if res.Status != http.StatusOK {
+			t.Errorf("перезапуск Mihomo после возврата исходного профиля: %d", res.Status)
+		}
+		rtPrfEnsureRunning(t)
+	})
+	s := rtOwnPrepare(t, e, "rt-own-", rtOwnA, rtOwnB)
+	tcpProfile := rtOwnControllerProfile(t, s, rtOwnA, func(profile map[string]any) {
+		delete(profile, "external-controller-unix")
+		profile["external-controller"] = fmt.Sprintf("127.0.0.1:%d", rtCoresLiveFreePort(t))
+	})
+	svc := services.NewMihomoService("", "", filepath.Dir(s.cfg))
+	// Если стенд сам использует профиль без сокета, профиль B всё равно
+	// должен обеспечить положительную проверку, а очистка перечитает исходный.
+	originalHasSocket := svc.HasController()
+	if !originalHasSocket {
+		rtOwnControllerProfile(t, s, rtOwnB, func(profile map[string]any) {
+			profile["external-controller-unix"] = services.DefaultMihomoSocketPath
+		})
+	}
 	m := rtCoresLiveMihomoTake(t, e, tg)
 	pid := rtRstKernelPID(t, tg.Core)
 
 	// Панель владеет Mihomo: активация идёт через конвейер.
+	e.rtOwnExpectSocket(false)
+	restoreKernel = tg.Core == "mihomo"
 	pid = rtSwExpectKernel(t, tg.Core, e.rtOwnActivate(rtOwnA), rtOwnA, pid)
 	m.taken = false
 	if !rtSwLinkOn(t, "profiles/"+rtOwnA+".yaml") {
@@ -407,12 +473,28 @@ func TestRouterProfileActivateOwnership(t *testing.T) {
 	if k, _ := e.rtSwRouting()["mihomo"].(map[string]any); k == nil || k["taken"] != false {
 		t.Errorf("после активации routing.mihomo: %v, ожидалось taken=false", e.rtSwRouting()["mihomo"])
 	}
+	if !bytes.Equal(tcpProfile, s.read(rtOwnA)) {
+		t.Error("активация изменила байты пользовательского TCP-профиля")
+	}
+	e.rtOwnExpectSocket(tg.Core == "mihomo")
+	if tg.Core == "mihomo" {
+		for _, path := range []string{"/api/mihomo/proxy/version", "/api/mihomo/connections/ws", "/api/traffic/ws"} {
+			r := e.call(http.MethodGet, path, nil)
+			e.rtRtExpect(path, r, http.StatusConflict, "no_socket")
+		}
+	}
 
 	// Смена своего профиля на другой при открытом черновике: черновик не касается.
 	rev, changes := e.rtOwnOpenDraft()
 	pid = rtSwExpectKernel(t, tg.Core, e.rtOwnActivate(rtOwnB), rtOwnB, pid)
 	if !rtSwLinkOn(t, "profiles/"+rtOwnB+".yaml") {
 		t.Fatalf("после смены config.yaml не указывает на %s", rtOwnB)
+	}
+	e.rtOwnExpectSocket(false)
+	if tg.Core == "mihomo" {
+		routertest.WaitCond(t, rtMprRestartWait, "ответ Mihomo через Unix после активации", func() bool {
+			return e.call(http.MethodGet, "/api/mihomo/proxy/version", nil).Status == http.StatusOK
+		})
 	}
 	if got := e.rtRtRevision(); got != rev {
 		t.Errorf("смена профиля: ревизия черновика %d -> %d", rev, got)
@@ -447,6 +529,9 @@ func TestRouterProfileActivateOwnership(t *testing.T) {
 	// Стенд к возврату: Mihomo отпущен на прежний профиль (rt-own-b).
 	rtSwExpectKernel(t, tg.Core, e.rtSwCall("release", ""), rtOwnB, pid)
 	m.taken = false
+	if originalHasSocket {
+		restoreKernel = false
+	}
 }
 
 const (

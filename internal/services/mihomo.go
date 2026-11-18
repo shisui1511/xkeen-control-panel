@@ -60,6 +60,10 @@ type MihomoService struct {
 	cachedClient *http.Client
 	cachedTarget string
 
+	controllerMu     sync.Mutex
+	controllerCtx    context.Context
+	controllerCancel context.CancelFunc
+
 	// provMu охраняет карту «узел провайдера → провайдер» для замера задержки
 	// узлов, которых нет в /proxies (providerOf).
 	provMu     sync.Mutex
@@ -206,6 +210,32 @@ func (s *MihomoService) UnixController() (ControllerInfo, error) {
 		return ControllerInfo{}, ErrMihomoNoSocket
 	}
 	return info, nil
+}
+
+// ControllerContext отменяется при следующем событии жизненного цикла ядра.
+// Подписка берётся до чтения профиля, чтобы не потерять переход между чтением и ожиданием.
+func (s *MihomoService) ControllerContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(parent)
+	s.controllerMu.Lock()
+	if s.controllerCtx == nil {
+		s.controllerCtx, s.controllerCancel = context.WithCancel(context.Background())
+	}
+	stop := context.AfterFunc(s.controllerCtx, cancel)
+	s.controllerMu.Unlock()
+	return ctx, func() {
+		stop()
+		cancel()
+	}
+}
+
+// NotifyControllerChanged будит все службы и отменяет текущие потоки старого профиля.
+func (s *MihomoService) NotifyControllerChanged() {
+	s.controllerMu.Lock()
+	defer s.controllerMu.Unlock()
+	if s.controllerCancel != nil {
+		s.controllerCancel()
+		s.controllerCtx, s.controllerCancel = nil, nil
+	}
 }
 
 // GetDialContext возвращает dialer для Unix-контроллера текущего профиля.
