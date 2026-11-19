@@ -28,7 +28,7 @@ type ConfigFileInfo struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 	Size int64  `json:"size"`
-	// Поля ниже заполняются только при scope=files и включённом слое (D-03, D-05).
+	// Поля ниже заполняются только при scope=files и подключённом слое (D-03, D-05).
 	// Owner — panel, xkeen или user.
 	Owner string `json:"owner,omitempty"`
 	// TakeKernel и TakeSections — ядро и секции, которые панель может взять из файла.
@@ -97,9 +97,9 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Владелец файлов — только для вкладки «Файлы» при включённом слое.
+	// Владелец файлов — только для вкладки «Файлы» и только при подключённом слое.
 	var owners *configlayer.FileOwnerIndex
-	if scoped && a.configLayer != nil && a.configLayer.Enabled() {
+	if scoped && a.configLayer != nil {
 		owners = a.configLayer.FileOwnerIndex()
 	}
 	// Файлы с именем не латиницей в корне каталога Xray (XKeen их может не
@@ -1045,80 +1045,10 @@ func (a *API) validateConfigContent(r *http.Request, cleanPath string, data []by
 	return msg
 }
 
-// ConfigSmartMergeRequest represents the payload for smart template merging.
-type ConfigSmartMergeRequest struct {
-	Type              string `json:"type"` // "mihomo" or "xray"
-	ExistingContent   string `json:"existing_content"`
-	TemplateContent   string `json:"template_content"`
-	TargetFile        string `json:"target_file,omitempty"`
-	ActiveOutboundTag string `json:"active_outbound_tag,omitempty"`
-	TemplateOwnsNodes bool   `json:"template_owns_nodes,omitempty"`
-}
-
-// ConfigSmartMerge handles smart merging of configuration templates without destroying user proxies or settings.
-func (a *API) ConfigSmartMerge(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
-		return
-	}
-	if a.legacyBlocked(w, r) {
-		return
-	}
-
-	var req ConfigSmartMergeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		a.errorResponse(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	var userRules []services.UserRule
-	if a.userRulesSvc != nil {
-		userRules = a.userRulesSvc.List()
-	}
-
-	var merged string
-	var stats services.MergeStats
-	var err error
-
-	if strings.EqualFold(req.Type, "xray") {
-		merged, stats, err = services.SmartMergeXray(req.ExistingContent, req.TemplateContent, req.TargetFile, req.ActiveOutboundTag, userRules)
-	} else {
-		merged, stats, err = services.SmartMergeMihomo(req.ExistingContent, req.TemplateContent, userRules, req.TemplateOwnsNodes)
-	}
-
-	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	kernelType := strings.ToLower(req.Type)
-	targetFile := req.TargetFile
-	if targetFile == "" {
-		if kernelType == "mihomo" {
-			targetFile = "config.yaml"
-		} else {
-			targetFile = "05_routing.json"
-		}
-	}
-	var kVer string
-	if a.kernelSvc != nil {
-		if k := a.kernelSvc.Get(kernelType); k != nil {
-			kVer = k.CurrentVersion
-		}
-	}
-	preflightRes := services.ValidateConfigContent(kernelType, targetFile, merged, kVer)
-
-	JSONSuccess(w, map[string]interface{}{
-		"content":  merged,
-		"stats":    stats,
-		"warnings": mapIssues(preflightRes.Warnings),
-	})
-}
-
 // rejectManagedPath отвечает 409 file_managed и возвращает true, если файл
-// управляется слоем «Конфигурация» (запись манифеста managed при включённом
-// флаге). Серверная защита обязательна: интерфейс лишь скрывает правку, а
-// вкладка с устаревшим состоянием иначе создала бы дрейф гонкой (D-12, T-144-38).
+// управляется слоем «Конфигурация» (запись манифеста managed). Серверная
+// защита обязательна: интерфейс лишь скрывает правку, а вкладка с устаревшим
+// состоянием иначе создала бы дрейф гонкой (D-12, T-144-38).
 // Путь уже прошёл PathValidator, IsManagedPath дополнительно разворачивает
 // симлинки каталога (T-144-39). Отпущенные и чужие файлы правятся как раньше.
 func (a *API) rejectManagedPath(w http.ResponseWriter, r *http.Request, cleanPath string) bool {

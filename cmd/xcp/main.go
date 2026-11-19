@@ -315,9 +315,6 @@ func main() {
 	// Public endpoints
 	srv.Handle("/api/version", api.Version)
 	srv.HandleProtected("/api/capabilities", api.Capabilities)
-	srv.Handle("/api/provider.yaml", api.MihomoProviderAdapter)
-	srv.Handle("/mihomo/provider.yaml", api.MihomoProviderRedirect)
-	srv.Handle("/mihomo/hwid/provider.yaml", api.MihomoProviderRedirect)
 
 	// Protected endpoints
 	srv.HandleProtected("/api/config/list", api.ConfigList)
@@ -329,22 +326,12 @@ func main() {
 	srv.HandleProtected("/api/config/rename", api.ConfigRename)
 	srv.HandleProtected("/api/config/validate", api.ConfigValidate)
 	srv.HandleProtected("/api/config/preflight", api.ConfigPreflight)
-	srv.HandleProtected("/api/config/smart-merge", api.ConfigSmartMerge)
-	srv.HandleProtected("/api/rules/custom", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			api.UserRulesList(w, r)
-		} else {
-			api.UserRulesSave(w, r)
-		}
-	})
 	srv.HandleProtected("/api/rules/test", api.RouteTest)
 	srv.HandleProtected("/api/rule-providers/info", api.RuleProvidersInfo)
 	srv.HandleProtected("/api/rule-providers/content", api.RuleProviderContent)
 	srv.HandleProtected("/api/rule-providers/check-url", api.RuleProviderCheckURL)
-	srv.HandleProtected("/api/config/mihomo-migrate-socket", api.MihomoMigrateSocket)
 	srv.HandleProtected("/api/settings", api.SettingsGet)
 	srv.HandleProtected("/api/settings/dev-mode", api.SettingsDevMode)
-	srv.HandleProtected("/api/settings/config-layer", api.SettingsConfigLayer)
 	srv.HandleProtected("/api/settings/session", api.SessionSettings)
 
 	// XKeen own settings: proxied/excluded ports, excluded IPs, xkeen.json
@@ -360,17 +347,15 @@ func main() {
 	srv.HandleProtected("/api/mihomo/profiles", api.MihomoProfiles)
 	srv.HandleProtected("/api/mihomo/profiles/preview", api.MihomoProfilePreview)
 	srv.HandleProtected("/api/mihomo/profiles/deps", api.MihomoProfileDeps)
-	for _, action := range []string{"create", "rename", "delete", "activate", "adopt"} {
+	for _, action := range []string{"create", "rename", "delete", "activate"} {
 		srv.HandleProtected("/api/mihomo/profiles/"+action, api.MihomoProfileAction)
 	}
 
 	// Xray access log by device
 	api.SetXrayAccessLogService(services.NewXrayAccessLogService(cfg.XRayConfigDir))
 	srv.HandleProtected("/api/xray/access-log", api.XrayAccessLog)
-	srv.HandleProtected("/api/xray/access-log/toggle", api.XrayAccessLogToggle)
 	srv.HandleProtected("/api/service/status", api.ServiceStatus)
 	srv.HandleProtected("/api/service/control", api.ServiceControl)
-	srv.HandleProtected("/api/service/dns-redirect", api.ServiceDNSRedirect)
 	srv.HandleProtected("/api/service/restart-log", api.ServiceRestartLog)
 	srv.HandleProtected("/api/service/watchdog/status", api.WatchdogStatus)
 	srv.HandleProtected("/api/service/watchdog/reset", api.WatchdogReset)
@@ -381,7 +366,6 @@ func main() {
 	srv.HandleProtected("/api/logs/clear", api.LogsClear)
 	srv.HandleProtected("/api/logs/download", api.LogsDownload)
 	srv.HandleProtected("/api/mihomo/status", api.MihomoStatus)
-	srv.HandleProtected("/api/mihomo/groups", api.MihomoGroups)
 	srv.HandleProtected("/api/mihomo/dns/query", api.MihomoDNSQuery)
 	srv.HandleProtected("/api/mihomo/cache/fakeip/flush", api.MihomoFlushFakeIP)
 	srv.HandleProtected("/api/mihomo/proxy/", api.MihomoProxy)
@@ -407,25 +391,6 @@ func main() {
 	srv.HandleProtected("/api/update/status", api.UpdateStatusEndpoint)
 	srv.HandleProtected("/api/update/events", api.UpdateEventsSSE)
 	srv.HandleProtected("/api/update/channel", api.UpdateChannelHandler)
-
-	// Subscription endpoints
-	srv.HandleProtected("/api/outbound/parse", api.OutboundParse)
-	srv.HandleProtected("/api/subscriptions", api.SubscriptionList)
-	srv.HandleProtected("/api/subscriptions/add", api.SubscriptionAdd)
-	srv.HandleProtected("/api/subscriptions/update", api.SubscriptionUpdate)
-	srv.HandleProtected("/api/subscriptions/delete", api.SubscriptionDelete)
-	srv.HandleProtected("/api/subscriptions/refresh", api.SubscriptionRefresh)
-	srv.HandleProtected("/api/subscriptions/refresh-all", api.SubscriptionRefreshAll)
-	srv.HandleProtected("/api/subscriptions/raw", api.SubscriptionRaw)
-	srv.HandleProtected("/api/subscriptions/parse-report", api.SubscriptionParseReport)
-	srv.HandleProtected("/api/subscriptions/nodes", api.SubscriptionNodes)
-	srv.HandleProtected("/api/subscriptions/health", api.SubscriptionHealth)
-	srv.HandleProtected("/api/subscriptions/active", api.SubscriptionSetActive)
-	srv.HandleProtected("/api/subscriptions/active/clear", api.SubscriptionClearActive)
-	srv.HandleProtected("/api/subscriptions/node-dialer-proxy", api.SubscriptionSetNodeDialerProxy)
-	srv.HandleProtected("/api/subscriptions/dialer-proxy-targets", api.SubscriptionDialerProxyTargets)
-	srv.HandleProtected("/api/proxy-providers", api.ProxyProvidersRouter)
-	srv.HandleProtected("/api/proxy-providers/", api.ProxyProvidersRouter)
 
 	// Network IP endpoint (Router WAN IP detection)
 	srv.HandleProtected("/api/network/ip", api.NetworkIP)
@@ -548,18 +513,6 @@ func main() {
 	srv.HandleProtected("/api/snapshots/upload", api.SnapshotUpload)
 	srv.HandleProtected("/api/snapshots/", api.SnapshotRouter)
 
-	// DAT Manager
-	datSvc := services.NewDATManagerService()
-	datSvc.SetBinaries(cfg.MihomoBinary, cfg.XrayBinary, cfg.XRayConfigDir)
-	api.SetDATManagerService(datSvc)
-
-	srv.HandleProtected("/api/dat/list", api.DATList)
-	srv.HandleProtected("/api/dat/tags", api.DATListTags)
-	srv.HandleProtected("/api/dat/update", api.DATUpdate)
-	srv.HandleProtected("/api/dat/rollback", api.DATRollback)
-	srv.HandleProtected("/api/dat/search", api.DATSearch)
-	srv.HandleProtected("/api/dat/lookup", api.DATLookup)
-
 	// Xkeen Console
 	consoleSvc := services.NewConsoleService(cfg.XKeenBinary)
 	api.SetConsoleService(consoleSvc)
@@ -576,12 +529,8 @@ func main() {
 	// Assets Service
 	srv.HandleProtected("/api/assets/definition", api.AssetsDefinition)
 
-	// User Custom Rules Service (TMPL-06, TMPL-07)
-	userRulesSvc := services.NewUserRulesService(cfg.DataDir)
-	api.SetUserRulesService(userRulesSvc)
-
 	// Route Tracer Service (ROUTE-04)
-	routeTracerSvc := services.NewRouteTracerService(userRulesSvc, api.MihomoService(), cfg.MihomoConfigDir)
+	routeTracerSvc := services.NewRouteTracerService(api.MihomoService(), cfg.MihomoConfigDir)
 	routeTracerSvc.SetRuleEvaluation(services.MihomoGeoTagLookup(cfg.MihomoConfigDir), cfg.MihomoBinary, filepath.Join(cfg.DataDir, "cache", "rulesets"))
 	api.SetRouteTracerService(routeTracerSvc)
 
@@ -592,53 +541,6 @@ func main() {
 	}
 	templateSvc := services.NewTemplateService(templatesFS, cfg.DataDir)
 	api.SetTemplateService(templateSvc)
-	srv.HandleProtected("/api/templates/list", api.TemplateList)
-
-	// Subscriptions + auto-refresh scheduler
-	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
-	subscriptionSvc.ShareMihomoFilesLock(mihomoProfileSvc)
-	subscriptionSvc.SetPanelAddress(cfg.Port, cfg.HTTPS.Enabled, cfg.LoopbackPort)
-	subscriptionSvc.SetKernelApplier(api.KernelApplier())
-	subscriptionSvc.SetMihomoService(api.MihomoService())
-	subscriptionSvc.SetMihomoAPI(cfg.MihomoAPIURL, cfg.MihomoSecret)
-	// Fallback-резолвер секрета Clash API: при пустом MihomoSecret в конфиге
-	// панели секрет читается из config.yaml Mihomo (как у остальных
-	// потребителей Clash API). Без него ручное и автоматическое обновление
-	// proxy-providers получает 401 на типовых развертываниях.
-	subscriptionSvc.SetMihomoSecretResolver(api.ResolveMihomoSecret)
-	api.SetSubscriptionService(subscriptionSvc)
-
-	// Привести блоки proxy-providers в config.yaml к текущему формату: без
-	// этого новые директивы блока доезжают до уже настроенных подписок только
-	// после ручного пересохранения.
-	subscriptionSvc.SyncMihomoProviderBlocks()
-
-	// Start subscription auto-refresh scheduler. It checks every 15 minutes
-	// and refreshes any subscription whose Interval has elapsed.
-	schedulerCtx, cancelScheduler := context.WithCancel(context.Background())
-	go subscriptionSvc.RunScheduler(schedulerCtx, 15*time.Minute)
-	defer cancelScheduler()
-
-	// Run orphaned subscriptions cleanup at startup and schedule it every 24 hours
-	go subscriptionSvc.CleanOrphanedSubscriptions()
-	go func() {
-		ticker := time.NewTicker(24 * time.Hour)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-schedulerCtx.Done():
-				return
-			case <-ticker.C:
-				subscriptionSvc.CleanOrphanedSubscriptions()
-			}
-		}
-	}()
-
-	// Subscription health checker (TCP-dial каждые 5 минут)
-	healthSvc := services.NewSubscriptionHealthService(cfg.DataDir, subscriptionSvc)
-	healthSvc.Start()
-	api.SetSubscriptionHealthService(healthSvc)
-	defer stops.run("subscription-health", healthSvc.Stop)
 
 	// Network Tools
 	networkSvc := services.NewNetworkToolsService(cfg.MihomoAPIURL)
@@ -646,7 +548,6 @@ func main() {
 	api.SetNetworkToolsService(networkSvc)
 
 	// Kernels
-	subscriptionSvc.SetKernelService(kernelSvc)
 	srv.HandleProtected("/api/kernels", api.KernelList)
 	srv.HandleProtected("/api/kernels/debug", api.KernelDebug)
 	srv.HandleProtected("/api/kernels/{name}/check", api.KernelCheck)
@@ -1155,7 +1056,6 @@ func main() {
 		stops.arm(shutdownDeadline, fatalf)
 		log.Printf("Received signal %s, shutting down...", sig)
 		stops.enter("http")
-		cancelScheduler()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownHTTPTimeout)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {

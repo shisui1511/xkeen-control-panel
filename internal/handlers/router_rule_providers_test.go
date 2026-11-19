@@ -103,7 +103,7 @@ func TestRouterRuleProvidersStopped(t *testing.T) {
 	}
 
 	// Без ядра и без сервиса Mihomo: список строится только по файлам.
-	svc := services.NewRouteTracerService(nil, nil, dir)
+	svc := services.NewRouteTracerService(nil, dir)
 	list, err := svc.ListRuleProviders()
 	if err != nil {
 		t.Fatalf("ListRuleProviders: %v", err)
@@ -304,7 +304,7 @@ func TestRouterRuleProviderCheckURL(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(profDir, "config.yaml"), []byte(profile), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tracer := services.NewRouteTracerService(nil, nil, profDir)
+	tracer := services.NewRouteTracerService(nil, profDir)
 
 	calls := 0
 	real := func(ctx context.Context, proxy, rawURL string) (int, error) {

@@ -35,7 +35,7 @@ type RouteTraceResult struct {
 	SelectedProxy string  `json:"selected_proxy"`
 	ProxyType     string  `json:"proxy_type"`
 	TraceTimeMs   float64 `json:"trace_time_ms"`
-	Source        string  `json:"source"` // "user_rule" | "kernel_rule" | "fallback"
+	Source        string  `json:"source"` // "kernel_rule" | "fallback"
 	RuleIndex     int     `json:"rule_index,omitempty"`
 	// Undetermined is set when a rule before the reported match could not be
 	// evaluated by the panel (e.g. an unreadable rule set). Mihomo may route
@@ -46,11 +46,10 @@ type RouteTraceResult struct {
 	UndeterminedReason string `json:"undetermined_reason,omitempty"`
 }
 
-// RouteTracerService evaluates targets against user custom rules and kernel routing rules.
+// RouteTracerService evaluates targets against kernel routing rules.
 type RouteTracerService struct {
-	userRulesSvc *UserRulesService
-	mihomoSvc    *MihomoService
-	configDir    string
+	mihomoSvc *MihomoService
+	configDir string
 
 	geo       GeoTagLookup
 	mihomoBin string
@@ -68,11 +67,10 @@ func (s *RouteTracerService) SetRuleEvaluation(geo GeoTagLookup, mihomoBin, cach
 }
 
 // NewRouteTracerService initializes RouteTracerService.
-func NewRouteTracerService(userRulesSvc *UserRulesService, mihomoSvc *MihomoService, configDir string) *RouteTracerService {
+func NewRouteTracerService(mihomoSvc *MihomoService, configDir string) *RouteTracerService {
 	return &RouteTracerService{
-		userRulesSvc: userRulesSvc,
-		mihomoSvc:    mihomoSvc,
-		configDir:    configDir,
+		mihomoSvc: mihomoSvc,
+		configDir: configDir,
 	}
 }
 
@@ -131,89 +129,6 @@ func normalizeTarget(raw string, defaultPort int) (host string, port int, isIP b
 	}
 
 	return strings.ToLower(host), port, isIP, parsedIP, nil
-}
-
-// matchUserRules tests the target against user custom rules in priority order.
-func matchUserRules(rules []UserRule, host string, port int, isIP bool, ip net.IP, defaultGroup string) *RouteTraceResult {
-	if defaultGroup == "" {
-		defaultGroup = "PROXY"
-	}
-
-	for _, r := range rules {
-		if !r.Enabled {
-			continue
-		}
-		val := strings.TrimSpace(r.Value)
-		if val == "" {
-			continue
-		}
-
-		matched := false
-		switch r.Type {
-		case "domain":
-			if strings.EqualFold(host, val) {
-				matched = true
-			}
-		case "domain_suffix", "suffix":
-			lowHost := strings.ToLower(host)
-			lowVal := strings.ToLower(strings.TrimPrefix(val, "."))
-			if lowHost == lowVal || strings.HasSuffix(lowHost, "."+lowVal) {
-				matched = true
-			}
-		case "domain_keyword", "keyword":
-			if strings.Contains(strings.ToLower(host), strings.ToLower(val)) {
-				matched = true
-			}
-		case "ip_cidr", "ip":
-			if isIP && ip != nil {
-				if strings.Contains(val, "/") {
-					if _, ipNet, err := net.ParseCIDR(val); err == nil && ipNet.Contains(ip) {
-						matched = true
-					}
-				} else {
-					ruleIP := net.ParseIP(val)
-					if ruleIP != nil && ruleIP.Equal(ip) {
-						matched = true
-					}
-				}
-			}
-		case "port":
-			if p, err := strconv.Atoi(val); err == nil && p == port {
-				matched = true
-			}
-		default:
-			// Fallback: suffix match
-			lowHost := strings.ToLower(host)
-			lowVal := strings.ToLower(strings.TrimPrefix(val, "."))
-			if lowHost == lowVal || strings.HasSuffix(lowHost, "."+lowVal) {
-				matched = true
-			}
-		}
-
-		if matched {
-			action := strings.ToUpper(r.Target)
-			group := action
-			if action == "PROXY" {
-				if r.Group != "" {
-					group = r.Group
-				} else {
-					group = defaultGroup
-				}
-			}
-
-			return &RouteTraceResult{
-				Target:       host,
-				Matched:      true,
-				RuleType:     r.Type,
-				RulePayload:  val,
-				TargetAction: action,
-				TargetGroup:  group,
-				Source:       "user_rule",
-			}
-		}
-	}
-
-	return nil
 }
 
 // MihomoKernelRule represents a parsed rule item from Mihomo API or config.yaml.
@@ -507,45 +422,36 @@ func (s *RouteTracerService) TraceRoute(ctx context.Context, rawTarget string, p
 	}
 
 	defaultGroup := "PROXY"
-	var userRules []UserRule
-	if s.userRulesSvc != nil {
-		userRules = s.userRulesSvc.List()
+
+	// 1. Check kernel rules
+	kRules, kDefGroup, _ := s.fetchKernelRules(ctx)
+	if kDefGroup != "" {
+		defaultGroup = kDefGroup
 	}
-
-	// 1. Check user custom rules first
-	res = matchUserRules(userRules, host, targetPort, isIP, ip, defaultGroup)
-
-	// 2. If no user rule matched, check kernel rules
-	if res == nil {
-		kRules, kDefGroup, _ := s.fetchKernelRules(ctx)
-		if kDefGroup != "" {
-			defaultGroup = kDefGroup
+	if len(kRules) > 0 {
+		ec := &ruleEvalContext{ctx: ctx, host: host, port: targetPort, isIP: isIP, ip: ip, geo: s.geo}
+		ec.sets = s.ruleSetStore()
+		if ec.sets != nil {
+			ec.sets.empty = s.fetchEmptyRuleSets(ctx)
 		}
-		if len(kRules) > 0 {
-			ec := &ruleEvalContext{ctx: ctx, host: host, port: targetPort, isIP: isIP, ip: ip, geo: s.geo}
-			ec.sets = s.ruleSetStore()
-			if ec.sets != nil {
-				ec.sets.empty = s.fetchEmptyRuleSets(ctx)
-			}
-			res = matchKernelRules(ec, kRules)
-			if res != nil && !res.Matched {
-				// Only undetermined rules and no certain match: keep the
-				// warning and fall back to the default group below.
-				pending := res
-				res = nil
-				defer func() {
-					if res != nil {
-						res.Undetermined = true
-						res.UndeterminedRule = pending.UndeterminedRule
-						res.UndeterminedGroup = pending.UndeterminedGroup
-						res.UndeterminedReason = pending.UndeterminedReason
-					}
-				}()
-			}
+		res = matchKernelRules(ec, kRules)
+		if res != nil && !res.Matched {
+			// Only undetermined rules and no certain match: keep the
+			// warning and fall back to the default group below.
+			pending := res
+			res = nil
+			defer func() {
+				if res != nil {
+					res.Undetermined = true
+					res.UndeterminedRule = pending.UndeterminedRule
+					res.UndeterminedGroup = pending.UndeterminedGroup
+					res.UndeterminedReason = pending.UndeterminedReason
+				}
+			}()
 		}
 	}
 
-	// 3. Fallback: MATCH -> defaultGroup
+	// 2. Fallback: MATCH -> defaultGroup
 	if res == nil {
 		res = &RouteTraceResult{
 			Target:       host,
@@ -558,7 +464,7 @@ func (s *RouteTracerService) TraceRoute(ctx context.Context, rawTarget string, p
 		}
 	}
 
-	// 4. Resolve selected proxy node and type
+	// 3. Resolve selected proxy node and type
 	selectedProxy, proxyType := s.lookupSelectedProxy(ctx, res.TargetGroup)
 	res.SelectedProxy = selectedProxy
 	res.ProxyType = proxyType
