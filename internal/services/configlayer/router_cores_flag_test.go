@@ -12,15 +12,25 @@ import (
 	"testing"
 )
 
-// Выключение флага слоя и дрейф секций Xray на устройстве (SEC-01, SEC-02;
+// Возврат взятых секций Xray и дрейф секций на устройстве (SEC-01, SEC-02;
 // D-04 из 144, D-05, D-07 из 146): настоящий слой, хранилище и `xray run -test`
 // роутера, окружение и генератор — из router_cores_takeover_test.go. Работающие
 // ядра стенда не трогаются (Applier не задан), ядро тест не читает и не
 // переключает — метка ядра не нужна.
 
-// TestRouterCoresDisableReturnsOriginals — выключение флага возвращает
-// исходные файлы всех взятых секций побайтно, файлы панели уходят в набор,
-// State.Cores пуст.
+// rtCoReleaseAll — черновик «Отпустить» для секций log и dns одной правкой.
+func rtCoReleaseAll(t *testing.T) map[string]json.RawMessage {
+	t.Helper()
+	return map[string]json.RawMessage{
+		SectionXrayLog: rtCoreSection(t, CoreSection{Managed: false}),
+		SectionXrayDNS: rtCoreSection(t, CoreSection{Managed: false}),
+	}
+}
+
+// TestRouterCoresDisableReturnsOriginals — «Отпустить» всех взятых секций одним
+// «Применить» возвращает исходные файлы побайтно, файлы панели уходят, State.Cores
+// пуст. Файл с тем же именем, который пользователь вернул сам, не перезаписывается:
+// возврат отказывает release_conflict, пока файл на месте.
 func TestRouterCoresDisableReturnsOriginals(t *testing.T) {
 	e := rtNewCoresEnv(t, map[string]string{
 		rtCoLogFile: `{"log": {"loglevel": "warning"}}` + "\n",
@@ -40,8 +50,10 @@ func TestRouterCoresDisableReturnsOriginals(t *testing.T) {
 		t.Fatalf("взято секций %d, ожидалось 2", got)
 	}
 
-	if err := e.layer.Disable(context.Background(), nil); err != nil {
-		t.Fatalf("Disable: %v", err)
+	e.editSections(t, rtCoReleaseAll(t))
+	res = e.apply(t)
+	if !res.OK || res.Code != ResultApplied {
+		t.Fatalf("«Отпустить» двух секций: %+v", res)
 	}
 	e.assertFileIs(t, rtCoLogFile)
 	e.assertFileIs(t, rtCoDNSFile)
@@ -49,10 +61,10 @@ func TestRouterCoresDisableReturnsOriginals(t *testing.T) {
 	e.assertAbsent(t, PanelXrayDNSFile)
 	st := e.layer.store.Snapshot()
 	if !st.Cores.isEmpty() {
-		t.Errorf("State.Cores не пуст после выключения: %+v", st.Cores)
+		t.Errorf("State.Cores не пуст после возврата: %+v", st.Cores)
 	}
 	if st.Journal != nil {
-		t.Errorf("журнал не снят после выключения: %+v", st.Journal)
+		t.Errorf("журнал не снят после возврата: %+v", st.Journal)
 	}
 
 	t.Run("уже вернул сам", func(t *testing.T) {
@@ -69,23 +81,45 @@ func TestRouterCoresDisableReturnsOriginals(t *testing.T) {
 			t.Fatalf("взятие: %+v", res)
 		}
 
-		// Пользователь вернул 02_dns.json сам, содержимое иное.
+		// Пользователь вернул 02_dns.json сам, содержимое иное: возврат не
+		// перезаписывает его и отказывает целиком, диск и владение прежние.
 		const own = `{"dns": {"servers": ["10.0.0.1"]}}` + "\n"
 		if err := os.WriteFile(e.path(rtCoDNSFile), []byte(own), 0o644); err != nil {
 			t.Fatal(err)
 		}
+		e.editSections(t, rtCoReleaseAll(t))
+		res = e.apply(t)
+		if res.OK || res.Code != ResultBuildFailed || !rtHasIssue(res, IssueReleaseConflict, ManifestKey(KernelXray, rtCoDNSFile), rtCoDNSFile) {
+			t.Fatalf("возврат при занятом имени: %+v, ожидался release_conflict по %s", res, rtCoDNSFile)
+		}
+		if got := hashOf(e.path(rtCoDNSFile)); got != HashContent([]byte(own)) {
+			t.Errorf("файл пользователя %s перезаписан возвратом", rtCoDNSFile)
+		}
+		e.assertAbsent(t, rtCoLogFile)
+		if _, err := os.Stat(e.path(PanelXrayLogFile)); err != nil {
+			t.Errorf("файл панели %s тронут отказанным возвратом: %v", PanelXrayLogFile, err)
+		}
+		if _, err := os.Stat(e.path(PanelXrayDNSFile)); err != nil {
+			t.Errorf("файл панели %s тронут отказанным возвратом: %v", PanelXrayDNSFile, err)
+		}
+		if st := e.layer.store.Snapshot(); len(st.Cores.Xray) != 2 || st.Journal != nil {
+			t.Errorf("отказ изменил владение: cores %+v, журнал %+v", st.Cores.Xray, st.Journal)
+		}
 
-		if err := e.layer.Disable(context.Background(), nil); err != nil {
-			t.Fatalf("Disable: %v", err)
+		// Пользователь убрал свой файл: тот же возврат проходит и возвращает оба исходных.
+		if err := os.Remove(e.path(rtCoDNSFile)); err != nil {
+			t.Fatal(err)
+		}
+		res = e.apply(t)
+		if !res.OK || res.Code != ResultApplied {
+			t.Fatalf("возврат после уборки своего файла: %+v", res)
 		}
 		e.assertFileIs(t, rtCoLogFile)
-		if got := hashOf(e.path(rtCoDNSFile)); got != HashContent([]byte(own)) {
-			t.Errorf("файл пользователя %s перезаписан выключением", rtCoDNSFile)
-		}
+		e.assertFileIs(t, rtCoDNSFile)
 		e.assertAbsent(t, PanelXrayLogFile)
 		e.assertAbsent(t, PanelXrayDNSFile)
-		if st := e.layer.store.Snapshot(); !st.Cores.isEmpty() {
-			t.Errorf("State.Cores не пуст после выключения: %+v", st.Cores)
+		if st := e.layer.store.Snapshot(); !st.Cores.isEmpty() || st.Journal != nil {
+			t.Errorf("после возврата: cores %+v, журнал %+v", st.Cores, st.Journal)
 		}
 	})
 }

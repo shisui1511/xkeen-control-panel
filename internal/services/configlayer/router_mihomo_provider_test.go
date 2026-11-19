@@ -73,7 +73,6 @@ func TestRouterTextRuleProvider(t *testing.T) {
 	layer, err := New(Options{
 		DataDir:       dir,
 		Roots:         roots,
-		Enabled:       func() bool { return true },
 		Binaries:      func() Binaries { return Binaries{Mihomo: rtMhBin} },
 		DriftInterval: time.Hour,
 		DebounceDelay: 20 * time.Millisecond,
