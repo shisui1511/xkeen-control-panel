@@ -1,4 +1,4 @@
-// e2e-pages: config/nodes settings
+// e2e-pages: config/nodes
 // router-area: profiles
 import { createHash } from 'node:crypto';
 import { test, expect, type Page } from '@playwright/test';
@@ -6,19 +6,19 @@ import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
 import {
   addToDraft,
-  api,
   installedKernels,
-  layerFlag,
   listSources,
   resetDraft,
+  waitApplyIdle,
   withPanel
 } from './lib/nodes-api';
 
-// Строки о зависимых профилях в диалогах удаления источника и выключения флага слоя (фаза
-// 147.1, план 23, D-05): профиль пользователя со ссылкой на proxy_providers/xcp-<id>.yaml
-// назван в абзаце диалога, действие не блокируется, файл профиля панель не правит. Ответы
-// сети не подменяются. Профиль и файл провайдера кладутся настоящими маршрутами файлов
-// конфига (файл провайдера нужен, чтобы mihomo -t принял профиль), убираются в afterAll.
+// Строка о зависимых профилях в диалоге удаления источника (фаза 147.1, план 23, D-05):
+// профиль пользователя со ссылкой на proxy_providers/xcp-<id>.yaml назван в абзаце диалога,
+// действие не блокируется, файл профиля панель не правит. Ответы сети не подменяются.
+// Профиль и файл провайдера кладутся настоящими маршрутами файлов конфига (файл провайдера
+// нужен, чтобы mihomo -t принял профиль), убираются в afterAll; черновик сбрасывается до и
+// после прогона.
 // Сбой чтения профилей не воспроизводится: подмена сети запрещена, поведение следует из
 // кода DependentProfilesNote.
 
@@ -27,22 +27,22 @@ const PROFILE = 'rt-dep-ui';
 const PROFILE_PATH = `${MIHOMO_DIR}/profiles/${PROFILE}.yaml`;
 // Адрес в зарезервированной зоне .invalid: имя не разрешается нигде
 const BAD_SUB = 'https://sub.invalid/feed';
-// Источник, которого в панели нет: нужен только имени файла провайдера для флага слоя
-const FLAG_ID = '0badc0de';
 
-const layer = layerFlag();
 const providers = new Set<string>();
 
 test.describe.configure({ mode: 'serial' });
 
-test.beforeAll(async ({ browser }) => layer.enable(browser));
+test.beforeAll(async ({ browser }) => {
+  await withPanel(browser, (page) => resetDraft(page));
+});
 
 test.afterAll(async ({ browser }) => {
   await withPanel(browser, async (page) => {
     await removeFile(page, PROFILE_PATH);
     for (const id of providers) await removeFile(page, providerPath(id));
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
   });
-  await layer.restore(browser);
 });
 
 const providerPath = (id: string): string => `${MIHOMO_DIR}/proxy_providers/xcp-${id}.yaml`;
@@ -153,38 +153,5 @@ test('profiles-deps: удаление источника называет про
   } finally {
     await resetDraft(page);
   }
-  await guard.assertClean();
-});
-
-test('profiles-deps: выключение флага называет профиль', async ({ page }) => {
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await startPage(page);
-  test.skip(!(await installedKernels(page)).mihomo, 'Mihomo не установлен на стенде');
-
-  const before = await installProfile(page, FLAG_ID);
-
-  await page.goto('/#/settings', { timeout: T.page, waitUntil: 'domcontentloaded' });
-  const row = page.getByTestId('config-layer-row');
-  await expect(row).toBeVisible({ timeout: T.page });
-  const toggle = row.getByRole('switch');
-  await expect(toggle).toBeChecked();
-  await row.locator('.toggle-slider').click();
-
-  const dialog = page.getByRole('dialog');
-  await expect(dialog).toBeVisible({ timeout: T.action });
-  const note = dialog.getByTestId('dep-profiles-note');
-  await expect(note).toBeVisible({ timeout: T.action });
-  await expect(note.locator('.mono', { hasText: PROFILE })).toHaveCount(1);
-  await expect(dialog.getByRole('button').last()).toBeEnabled();
-
-  // отмена: флаг остаётся включённым, профиль не менялся
-  await page.keyboard.press('Escape');
-  await expect(dialog).toHaveCount(0);
-  await expect(toggle).toBeChecked();
-  const settings = await api(page, 'GET', '/api/settings');
-  expect(settings.data?.config_layer, 'флаг слоя включён').toBe(true);
-  expect(md5((await readFile(page, PROFILE_PATH)) ?? ''), 'файл профиля не менялся').toBe(before);
-
   await guard.assertClean();
 });

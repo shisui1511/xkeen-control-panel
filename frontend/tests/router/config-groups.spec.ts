@@ -9,10 +9,11 @@ import {
   addToDraft,
   api,
   installedKernels,
-  layerFlag,
   nodeLink,
   randomPort,
-  resetDraft
+  resetDraft,
+  waitApplyIdle,
+  withPanel
 } from './lib/nodes-api';
 import {
   draftChanges,
@@ -25,20 +26,20 @@ import {
 // Вкладка «Группы» раздела «Конфигурация» на настоящей панели (фаза 146, план 19): карточки
 // групп со сводкой по ядрам, группы по умолчанию после первого источника, строка «Сейчас» ручной
 // группы со ссылкой на «Прокси», где участник выбирается плиткой без черновика и диалога (D-12,
-// фаза 150), и диалог группы. Ответы сети не
-// подменяются. Флаг слоя включается на время прогона и возвращается прежним, черновик
-// сбрасывается, взятая маршрутизация возвращается. В вывод не попадают имена узлов.
-
-const layer = layerFlag();
+// фаза 150), и диалог группы. Ответы сети не подменяются. Черновик сбрасывается до и после
+// прогона, взятая маршрутизация возвращается. В вывод не попадают имена узлов.
 
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
-  await layer.enable(browser);
+  await withPanel(browser, (page) => resetDraft(page));
 });
 
 test.afterAll(async ({ browser }) => {
-  await layer.restore(browser);
+  await withPanel(browser, async (page) => {
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
+  });
 });
 
 async function startPage(page: Page): Promise<void> {

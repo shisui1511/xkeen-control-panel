@@ -12,7 +12,6 @@ import {
   addToDraft,
   api,
   installedKernels,
-  layerFlag,
   nodeLink,
   randomPort,
   resetDraft,
@@ -28,17 +27,16 @@ import {
   type RoutingStand
 } from './lib/routing-api';
 
-// Страница «Прокси» при включённом слое «Конфигурация» на настоящей панели (фаза 150, план 12):
+// Страница «Прокси» со слоем «Конфигурация» на настоящей панели (фаза 150, план 12):
 // группы панели и строка «Сейчас», выбор узла плиткой без черновика с живым обновлением второй
 // вкладки, пинг группы и общей пачки с отменой, звено цепочки и адрес ?group=. Подготовка одна на
 // спек: три узла «Моих узлов» с портами, на которых сервер не слушает (замер падает предсказуемо;
 // узел TUIC — только для Mihomo), ручная группа «RT Прокси» и вложенная в «RT Внешняя», взятие
 // маршрутизации и «Применить». В конце стенд возвращается: группы и узлы удаляются, маршрутизация
-// отпускается, если не была взята, флаг слоя прежний. Ответы сети не подменяются. В сообщения
+// отпускается, если не была взята, черновик сбрасывается. Ответы сети не подменяются. В сообщения
 // провалов попадают только testId и коды, без имён узлов. Сценарий «proxies-runtime no-socket»
 // (151-09) в конце файла проверяет подсказку для своего профиля Mihomo без Unix-сокета.
 
-const layer = layerFlag();
 const PREFIX = 'RTPX-';
 
 const stand: RoutingStand = { groupIds: [], myBefore: [], wasManaged: false };
@@ -214,9 +212,9 @@ async function prepare(browser: Browser): Promise<void> {
 }
 
 test.beforeAll(async ({ browser }) => {
-  // флаг слоя, узлы, две группы, взятие маршрутизации и «Применить» с перезапуском ядра
+  // сброс черновика, узлы, две группы, взятие маршрутизации и «Применить» с перезапуском ядра
   test.setTimeout(T.save * 8);
-  await layer.enable(browser);
+  await withPanel(browser, (page) => resetDraft(page));
   await prepare(browser);
 });
 
@@ -228,7 +226,10 @@ test.afterAll(async ({ browser }) => {
       await withPanel(browser, (page) => restoreRouting(page, stand));
     }
   } finally {
-    await layer.restore(browser);
+    await withPanel(browser, async (page) => {
+      await waitApplyIdle(page, 'перед сбросом черновика');
+      await resetDraft(page);
+    });
   }
 });
 

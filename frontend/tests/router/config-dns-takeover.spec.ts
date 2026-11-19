@@ -21,10 +21,10 @@ import {
 import {
   addToDraft,
   api,
-  layerFlag,
   nodeLink,
   randomPort,
   resetDraft,
+  waitApplyIdle,
   withPanel
 } from './lib/nodes-api';
 
@@ -38,19 +38,20 @@ import {
 // перехвата возвращаются в afterAll. Тесты `dns-params:` (148-17) правят группу-цель и свои
 // локальные зоны в раскрытии «Параметры перехвата» — только черновик, сброс после каждого
 // теста. Тесты `dns-outcome:` (148-21) внутри `dns-flow` дают окну подтверждения истечь без
-// пользователя и проверяют строку исхода, уведомление слоя и однократный тост. Флаг слоя
-// включается на время прогона и возвращается прежним.
-
-const layer = layerFlag();
+// пользователя и проверяют строку исхода, уведомление слоя и однократный тост. Черновик
+// сбрасывается до и после прогона.
 
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
-  await layer.enable(browser);
+  await withPanel(browser, (page) => resetDraft(page));
 });
 
 test.afterAll(async ({ browser }) => {
-  await layer.restore(browser);
+  await withPanel(browser, async (page) => {
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
+  });
 });
 
 test.afterEach(async ({ browser }) => {
@@ -1174,7 +1175,7 @@ test.describe('dns-flow', () => {
   // однократный тост с переходом к карточке. Исход висит до следующего действия с карточкой
   // (его снимает включение в тесте сбоя пробы), поэтому проверки доступности идут следом.
   // Состояния с proxy_dns=on спек не готовит: команд стенда у Playwright нет, а старый
-  // маршрут при включённом слое закрыт (D-34); дрейф проверяет Go-сценарий бэкенда.
+  // маршрут закрыт (D-34); дрейф проверяет Go-сценарий бэкенда.
 
   test(
     'dns-outcome: откат без пользователя — строка в карточке, уведомление и один тост',
