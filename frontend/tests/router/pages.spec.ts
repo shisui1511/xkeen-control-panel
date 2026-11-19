@@ -183,6 +183,22 @@ async function mihomoGenReady(page: Page): Promise<void> {
     });
 }
 
+// Подсказка «У профиля нет доступа к API» (D-13) на «Прокси», «Подключениях» и в квотах видна
+// ровно тогда, когда сервер сообщает no_socket: профиль панели, остановленное ядро и Xray её
+// не дают. Признак читается из /api/capabilities после загрузки страницы.
+const NO_SOCKET_ROUTES = new Set(['proxies', 'connections', 'trafficquotas']);
+
+async function serverNoSocket(page: Page): Promise<boolean> {
+  return page.evaluate(async () => {
+    const res = await fetch('/api/capabilities', { credentials: 'same-origin' });
+    const body = (await res.json()) as {
+      data?: { mihomo?: { no_socket?: boolean } };
+      mihomo?: { no_socket?: boolean };
+    };
+    return (body.data ?? body).mihomo?.no_socket === true;
+  });
+}
+
 // Ожидание данных страницы перед axe: маршрут -> функция готовности
 const READY: Record<string, (page: Page) => Promise<void>> = {
   dat: datReady,
@@ -311,6 +327,13 @@ for (const route of routes()) {
               : (ALIAS[route] ?? `#/${route}`);
           if (!hash.startsWith(expected)) {
             problems.push(`маршрут: после перехода адрес ${hash}`);
+          }
+          if (NO_SOCKET_ROUTES.has(route)) {
+            const want = await serverNoSocket(page);
+            const shown = await page.getByTestId('mihomo-no-socket').count();
+            if (shown !== (want ? 1 : 0)) {
+              problems.push(`подсказка no_socket: на странице ${shown}, на сервере ${want}`);
+            }
           }
           const applied = await page.evaluate(() =>
             document.documentElement.getAttribute('data-theme')
