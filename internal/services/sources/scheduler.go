@@ -5,15 +5,10 @@ import (
 	"errors"
 	"log"
 	"time"
-
-	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
 
 // Start запускает фоновый цикл обновления подписок. Сервис создаётся один раз в
 // cmd/xcp/main.go, Start вызывается после запуска слоя; повторный вызов безопасен.
-// Цикл работает и при выключенном флаге (его включают без перезапуска), но на
-// каждом тике сначала спрашивает Layer.Enabled(): выключенный слой не даёт ни
-// запросов к провайдерам, ни чтения состояния.
 func (s *Service) Start() {
 	s.startOnce.Do(func() {
 		s.spawn(s.loop)
@@ -32,7 +27,7 @@ func (s *Service) Stop() {
 	s.wg.Wait()
 }
 
-// loop — цикл тиков: стартовые действия при включённом слое, затем проверка сроков
+// loop — цикл тиков: стартовые действия, затем проверка сроков
 // по тикеру TickInterval.
 func (s *Service) loop() {
 	s.ensureStartup(s.ctx)
@@ -48,12 +43,9 @@ func (s *Service) loop() {
 	}
 }
 
-// ensureStartup выполняет стартовые действия один раз, как только слой включён:
-// уборка снимков, уведомления по сохранённым статусам, отложенные записи.
+// ensureStartup выполняет стартовые действия один раз при запуске цикла: уборка
+// снимков, уведомления по сохранённым статусам, отложенные записи.
 func (s *Service) ensureStartup(ctx context.Context) {
-	if !s.d.Layer.Enabled() {
-		return
-	}
 	if !s.startupDone.CompareAndSwap(false, true) {
 		return
 	}
@@ -63,13 +55,8 @@ func (s *Service) ensureStartup(ctx context.Context) {
 }
 
 // tick обновляет применённые включённые подписки, у которых наступил срок.
-// Источники идут по одному. Выключенный слой — ничего не делает до чтения
-// состояния.
+// Источники идут по одному.
 func (s *Service) tick(ctx context.Context) {
-	if !s.d.Layer.Enabled() {
-		return
-	}
-	s.ensureStartup(ctx)
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
 		return
@@ -97,7 +84,7 @@ func (s *Service) tick(ctx context.Context) {
 		_, err = s.Refresh(ctx, id)
 		switch {
 		case err == nil, ctx.Err() != nil, errors.Is(err, ErrSourceDisabled), errors.Is(err, ErrSourceNotFound),
-			errors.Is(err, ErrSourceChanged), errors.Is(err, configlayer.ErrDisabled):
+			errors.Is(err, ErrSourceChanged):
 		default:
 			log.Printf("[sources] фоновое обновление источника %s не выполнено: %v", id, err)
 			s.backOff(id, now)
