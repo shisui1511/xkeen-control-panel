@@ -10,7 +10,6 @@ import { CORE_TAG, FULL_TAG, SLOW_ANNOTATION, TIER_FULL_ANNOTATION } from './lib
 import {
   addToDraft,
   api,
-  layerFlag,
   listSources,
   nodeLink,
   randomPort,
@@ -20,7 +19,7 @@ import {
 } from './lib/nodes-api';
 
 // Мастер первого запуска и карточка дашборда «Настроить VPN» на настоящей панели (фаза 149.1,
-// CFG-04): карточка вместо карточки Mihomo при флаге слоя, переход в мастер на первый
+// CFG-04): карточка вместо карточки Mihomo, переход в мастер на первый
 // невыполненный шаг, «Скрыть» навсегда, «Закрыть» без перехвата входа в раздел. Ответы сети
 // не подменяются, ссылки узлов — только из internal/nodes/testdata/links.
 //
@@ -28,11 +27,9 @@ import {
 // мастера не done, идёт при удержанном черновике (holdDraft) после сброса признака
 // (wizardReset) — пока черновик открыт, шаг 5 не выполнен, и наблюдатель сервера (период
 // tick_s ответа мастера) не может поставить «пройдено». Сроки ожиданий вида мастера — из
-// tick_s ответа панели (viewDeadline, doneDeadline), а не постоянные. Статус мастера, dev_mode, черновик и флаг слоя спек
+// tick_s ответа панели (viewDeadline, doneDeadline), а не постоянные. Статус мастера, dev_mode и черновик спек
 // возвращает в afterAll; фактический статус после прогона — строка вывода wizard-status:.
 // В сообщения проверок попадают только testId, статусы и счётчики.
-
-const layer = layerFlag();
 
 test.describe.configure({ mode: 'serial' });
 
@@ -839,8 +836,8 @@ let devWasOn: boolean | null = null;
 
 test.beforeAll(async ({ browser }) => {
   test.setTimeout(T.save * 4);
-  await layer.enable(browser);
   await withPanel(browser, async (page) => {
+    await resetDraft(page);
     const settings = await api(page, 'GET', '/api/settings');
     expect(settings.status, 'GET /api/settings').toBe(200);
     devWasOn = settings.data?.dev_mode === true;
@@ -880,7 +877,12 @@ test.afterAll(async ({ browser }) => {
   await attempt(async () => {
     if (devWasOn === false) await withPanel(browser, (page) => setDevMode(page, false));
   });
-  await attempt(() => layer.restore(browser));
+  await attempt(() =>
+    withPanel(browser, async (page) => {
+      await waitApplyIdle(page, 'перед сбросом черновика');
+      await resetDraft(page);
+    })
+  );
   if (snapLeft !== null) throw snapLeft;
   if (standLeft !== null) throw standLeft;
   if (errors.length > 0) throw errors[0];
@@ -898,7 +900,7 @@ test('config-setup dashboard-card vp:1280', async ({ page, browser }) => {
     await gotoHash(page, '#/dashboard');
     const card = page.getByTestId('setup-checklist-card');
     await expect(card).toBeVisible({ timeout: T.page });
-    // карточка Mihomo при флаге слоя не показывается
+    // карточка Mihomo вместо карточки мастера не показывается
     await expect(page.locator('.quickstart')).toHaveCount(0);
     await expect(card.locator('[data-testid^="setup-card-step-"]')).toHaveCount(6);
     for (let n = 1; n <= 6; n++) {
