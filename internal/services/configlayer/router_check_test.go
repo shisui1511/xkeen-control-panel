@@ -99,7 +99,6 @@ func rtNewCheckLayer(t *testing.T, register func(l *Layer)) (*Layer, string) {
 	layer, err := New(Options{
 		DataDir:       dir,
 		Roots:         roots,
-		Enabled:       func() bool { return true },
 		Binaries:      func() Binaries { return Binaries{Xray: rtRefreshXrayBin} },
 		DriftInterval: time.Hour,
 		DebounceDelay: 20 * time.Millisecond,

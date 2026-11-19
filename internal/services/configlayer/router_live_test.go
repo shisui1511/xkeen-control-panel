@@ -207,7 +207,6 @@ func TestRouterLiveLayer(t *testing.T) {
 	layer, err := New(Options{
 		DataDir: dir,
 		Roots:   Roots{Xray: filepath.Join(dir, "xray"), Mihomo: filepath.Join(dir, "mihomo")},
-		Enabled: func() bool { return true },
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -277,24 +276,6 @@ func TestRouterLiveLayer(t *testing.T) {
 	layer.Start()
 	if err := layer.RegisterGenerator(&rtProbeGen{}); !errors.Is(err, ErrAlreadyStarted) {
 		t.Errorf("регистрация после Start: %v", err)
-	}
-}
-
-func TestRouterLiveDisabled(t *testing.T) {
-	dir := rtLiveDir(t)
-	layer, err := New(Options{DataDir: dir, Enabled: func() bool { return false }})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer layer.Stop()
-	if err := layer.UpdateLive(func(Sections) error { return nil }); !errors.Is(err, ErrDisabled) {
-		t.Errorf("UpdateLive: %v", err)
-	}
-	if _, err := layer.ReadState(); !errors.Is(err, ErrDisabled) {
-		t.Errorf("ReadState: %v", err)
-	}
-	if _, err := layer.EditDraftBatch(0, nil, nil); !errors.Is(err, ErrDisabled) {
-		t.Errorf("EditDraftBatch: %v", err)
 	}
 }
 
