@@ -696,6 +696,7 @@ func main() {
 		LegacyStartup: legacyCleanup.Startup,
 		LegacyClean:   legacyCleanup.Clean,
 		LegacyNotices: legacyCleanup.Notices,
+		LegacyArchive: legacyCleanup,
 		KernelVersions: func() []configlayer.KernelVersionInput {
 			cfg.RLock()
 			xkeenBin := resolveBinaryPath(cfg.XKeenBinary)
@@ -1113,6 +1114,8 @@ func main() {
 	srv.HandleProtected("/api/configlayer/cores/fill", api.ConfigCoresFill)
 	srv.HandleProtected("/api/configlayer/dns", api.ConfigDNS)
 	srv.HandleProtected("/api/configlayer/dns/", api.ConfigDNSAction)
+	srv.HandleProtected("/api/configlayer/legacy", api.ConfigLayerLegacy)
+	srv.HandleProtected("/api/configlayer/legacy/close", api.LegacyClose)
 	srv.HandleProtected("/api/configlayer/legacy/clean", api.LegacyClean)
 	srv.HandleProtected("/api/configlayer/wizard", api.ConfigLayerWizard)
 	srv.HandleProtected("/api/configlayer/wizard/close", api.ConfigLayerWizardClose)

@@ -6,6 +6,29 @@ import (
 	"net/http"
 )
 
+// ConfigLayerLegacy обрабатывает GET /api/configlayer/legacy.
+func (a *API) ConfigLayerLegacy(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireLayer(w, r) {
+		return
+	}
+	JSONSuccess(w, a.configLayer.Legacy())
+}
+
+// LegacyClose обрабатывает POST /api/configlayer/legacy/close.
+func (a *API) LegacyClose(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) || !a.requireEmptyLegacyBody(w, r) {
+		return
+	}
+	summary, err := a.configLayer.MarkLegacyClosed()
+	if err != nil {
+		a.writeLayerError(w, r, err)
+		return
+	}
+	JSONSuccess(w, summary)
+}
+
 // LegacyClean обрабатывает POST /api/configlayer/legacy/clean.
 func (a *API) LegacyClean(w http.ResponseWriter, r *http.Request) {
 	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) || !a.requireEmptyLegacyBody(w, r) {

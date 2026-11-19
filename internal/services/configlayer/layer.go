@@ -101,6 +101,7 @@ type Options struct {
 	LegacyStartup  func(context.Context, LegacyRestart) error
 	LegacyClean    func(context.Context, LegacyRestart) error
 	LegacyNotices  func() []NoticeView
+	LegacyArchive  LegacyArchive
 	// Now — источник времени (nil — time.Now).
 	Now func() time.Time
 	// DriftInterval — период плановой сверки дрейфа (по умолчанию минута).
@@ -177,6 +178,8 @@ type Layer struct {
 	proxiesSeq atomic.Uint64
 	// wizardSeq — счётчик событий wizard (PublishWizard).
 	wizardSeq atomic.Uint64
+	legacyMu  sync.Mutex
+	legacySeq atomic.Uint64
 	// applySeq — номер запуска, который получают хуки BeforeApply и AfterApply
 	// одного «Применить».
 	applySeq atomic.Int64
@@ -439,6 +442,7 @@ func (l *Layer) checkNow(publish bool) FilesEvent {
 	}
 	if l.opts.LegacyNotices != nil && !l.pipeline.Busy() {
 		l.SetNotices(LegacyLeftoversNotice, l.opts.LegacyNotices())
+		l.retryLegacyURLCleanup()
 	}
 	ev := l.evaluate(l.store.Snapshot())
 	data, err := json.Marshal(ev)
@@ -587,6 +591,7 @@ func (l *Layer) Snapshot() SnapshotView {
 	sv.Cores = l.coresSnapshot(st, fe.Sections)
 	sv.Cores.Restart = l.restartNotes(st)
 	sv.Kernels, sv.Features = l.versions()
+	sv.Legacy = l.legacySummary(st.Legacy != nil)
 	return sv
 }
 

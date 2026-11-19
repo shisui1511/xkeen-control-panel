@@ -24,6 +24,8 @@ const (
 	EventDNS = "dns"
 	// EventWizard — признак мастера первого запуска изменился: счётчик событий.
 	EventWizard = "wizard"
+	// EventLegacy — признак закрытия окна старого слоя изменился.
+	EventLegacy = "legacy"
 	// EventProxies — выбор, состав групп или ход пинга изменились: клиент
 	// перечитывает страницу «Прокси»; данные в событие не входят (D-14).
 	EventProxies = "proxies"
@@ -99,6 +101,12 @@ type ProxiesEvent struct {
 // WizardEvent — данные события wizard: счётчик событий мастера. Само состояние
 // через шину не идёт: клиент по счётчику перечитывает GET /api/configlayer/wizard.
 type WizardEvent struct {
+	Seq uint64 `json:"seq"`
+}
+
+// LegacyEvent — данные события legacy: только счётчик, без адресов и путей;
+// клиент перечитывает окно отдельным защищённым запросом.
+type LegacyEvent struct {
 	Seq uint64 `json:"seq"`
 }
 
