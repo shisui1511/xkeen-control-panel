@@ -66,11 +66,9 @@ func rtNewSplitEnvKind(t *testing.T, plain bool) *rtTakeoverEnv {
 	dir := rtLiveDir(t)
 	roots, hashes, link := rtWriteTakeoverLayout(t, dir, plain)
 	e := &rtTakeoverEnv{gen: &rtTakeoverGen{}, roots: roots, hashes: hashes, link: link}
-	e.enabled.Store(true)
 	layer, err := New(Options{
 		DataDir:       dir,
 		Roots:         roots,
-		Enabled:       e.enabled.Load,
 		Binaries:      func() Binaries { return Binaries{Xray: rtRefreshXrayBin, Mihomo: rtMhBin} },
 		DriftInterval: time.Hour,
 		DebounceDelay: 20 * time.Millisecond,
