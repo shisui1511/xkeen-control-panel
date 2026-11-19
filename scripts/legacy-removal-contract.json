@@ -96,7 +96,8 @@
     "frontend/src/components/mihomo/MihomoProfilesCard.svelte",
     "frontend/src/components/subscriptions/NodeImporter.svelte",
     "frontend/src/components/rules/RuleModal.svelte",
-    "internal/services/configlayer/router_cores_flag_test.go"
+    "internal/services/configlayer/router_cores_flag_test.go",
+    "scripts/check-xray-protocols.js"
   ],
   "removed_routes": [
     "/api/subscriptions",
