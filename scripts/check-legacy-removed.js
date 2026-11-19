@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const contract = require('./legacy-removal-contract.json');
+const { removedRoutes, removedMatch, removedRegistrations } = require('./lib/removed-routes');
 
 const root = path.resolve(__dirname, '..');
 const retired = new Set(contract.retired_files);
@@ -19,6 +21,25 @@ const violations = [];
 const inspected = new Map();
 let checked = 0;
 let remaining = 0;
+let skipped = 0;
+// --ci: путей, игнорируемых git (локальная справка .claude/), в checkout CI нет по построению;
+// их проверка идёт только локально. Отслеживаемый или отсутствующий без игнора путь не пропускается.
+let ciMode = false;
+
+function ignoredByGit(file) {
+  try {
+    execFileSync('git', ['check-ignore', '-q', '--', file], { cwd: root, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function skipInCI(file) {
+  if (!ciMode || fs.existsSync(path.join(root, file)) || !ignoredByGit(file)) return false;
+  skipped++;
+  return true;
+}
 
 // Заменяем комментарии пробелами, сохраняя строки и границы токенов.
 // Строки нужны предикатам путей, отдельно от проверки структуры кода.
@@ -115,12 +136,18 @@ function checkAreas(file, raw) {
     violations.push(`${file}: отсутствует объект areas`);
     return;
   }
+  // Снятые сценарии (retired_tests области go-tests) не остаются ни в tests, ни в канарейках.
+  const retiredTests = new Set(contract.scopes['go-tests']?.retired_tests || []);
   const pending = [data];
   while (pending.length > 0) {
     const entry = pending.pop();
     if (typeof entry === 'string') {
       if (retired.has(entry) || retired.has('frontend/' + entry)) {
         violations.push(`${file}: карта содержит снятый путь ${entry}`);
+      }
+      const test = /^(?:go:)?(TestRouter\w+)$/.exec(entry);
+      if (test && retiredTests.has(test[1])) {
+        violations.push(`${file}: карта содержит снятый сценарий ${test[1]}`);
       }
     } else if (entry && typeof entry === 'object') {
       pending.push(...Object.values(entry));
@@ -176,6 +203,7 @@ function checkScope(scope, files) {
       checkRemoved(file);
       continue;
     }
+    if (skipInCI(file)) continue;
     checked++;
     if (neverInspect.has(file)) {
       // Собственный страж может входить в перечень поставляемых файлов,
@@ -202,6 +230,33 @@ function checkScope(scope, files) {
     if (scope.special === 'protected-legacy-routes-and-removed-registry' && rule.forbid) {
       checkPattern(rule.file, subject.code, '\\b(?:Handle|HandleFunc)\\s*\\(\\s*"/api/configlayer/legacy(?:/[^"]*)?"', false);
     }
+  }
+  if (scope.special === 'protected-legacy-routes-and-removed-registry') checkRemovedRoutes();
+}
+
+// Снятые маршруты (removed_routes) не регистрируются ни в main.go, ни в сервере и не держат
+// записей гейта ядра: такой путь отвечает обычным 404 общего обработчика неизвестных /api/….
+function checkRemovedRoutes() {
+  let list;
+  try {
+    list = removedRoutes();
+  } catch (err) {
+    violations.push(err.message);
+    return;
+  }
+  for (const file of ['cmd/xcp/main.go', 'internal/server/server.go']) {
+    const subject = inspect(file);
+    if (!subject) continue;
+    checked++;
+    violations.push(...removedRegistrations(file, subject.raw, list));
+  }
+  const gate = 'internal/handlers/kernel_gate.go';
+  const subject = inspect(gate);
+  if (!subject) return;
+  checked++;
+  for (const m of subject.code.matchAll(/"(\/api\/[^"]*)"/g)) {
+    const hit = removedMatch(m[1].replace(/\/$/, ''), list);
+    if (hit) violations.push(`${gate}: запись гейта ${m[1]} относится к снятому маршруту ${hit}`);
   }
 }
 
@@ -295,7 +350,9 @@ function checkArchive(files) {
   if (state) checkPattern(schema, state.unquoted, '^\\s*const\\s+SchemaVersion(?:\\s+int64)?\\s*=\\s*1\\s*$', true);
 }
 
-function main(args) {
+function main(argv) {
+  const args = argv.filter((arg) => arg !== '--ci');
+  ciMode = args.length !== argv.length;
   if (args.length === 0) {
     checkArchive(archiveFiles);
     for (const scope of Object.values(contract.scopes)) checkScope(scope, scope.files);
@@ -329,5 +386,8 @@ function main(args) {
 main(process.argv.slice(2));
 if (checked === 0) violations.push('не проверено ни одного пути');
 for (const violation of violations) console.error(`check-legacy-removed: ${violation}`);
-console.log(`check-legacy-removed: checked=${checked} violations=${violations.length} remaining=${remaining}`);
+console.log(
+  `check-legacy-removed: checked=${checked} violations=${violations.length} remaining=${remaining}` +
+    (ciMode ? ` skipped_ignored=${skipped}` : '')
+);
 if (violations.length > 0) process.exitCode = 1;

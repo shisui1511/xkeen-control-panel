@@ -89,7 +89,31 @@
     "frontend/src/lib/mihomoYaml.ts",
     "frontend/src/lib/portChecker.ts",
     "internal/handlers/template.go",
-    "frontend/src/components/config/dns/DnsFlagOffNote.svelte"
+    "frontend/src/components/config/dns/DnsFlagOffNote.svelte",
+    "internal/handlers/user_rules.go",
+    "frontend/src/components/editor/EditorSidebar.svelte",
+    "frontend/src/components/proxies/ProxyDiagnosticModal.svelte",
+    "frontend/src/components/mihomo/MihomoProfilesCard.svelte",
+    "frontend/src/components/subscriptions/NodeImporter.svelte",
+    "frontend/src/components/rules/RuleModal.svelte"
+  ],
+  "removed_routes": [
+    "/api/subscriptions",
+    "/api/proxy-providers",
+    "/api/provider.yaml",
+    "/mihomo/provider.yaml",
+    "/mihomo/hwid/provider.yaml",
+    "/api/config/smart-merge",
+    "/api/config/mihomo-migrate-socket",
+    "/api/rules/custom",
+    "/api/settings/config-layer",
+    "/api/service/dns-redirect",
+    "/api/xray/access-log/toggle",
+    "/api/mihomo/groups",
+    "/api/mihomo/profiles/adopt",
+    "/api/outbound/parse",
+    "/api/dat",
+    "/api/templates/list"
   ],
   "scopes": {
     "entry-routes": {
@@ -519,7 +543,13 @@
         "TestRouterGeodataFlagCron",
         "TestRouterLiveDisabled",
         "TestRouterSourceRefreshDisabled",
-        "TestRouterSchedulerFlagOffZeroRequests"
+        "TestRouterSchedulerFlagOffZeroRequests",
+        "TestRouterLegacyEntriesBlocked",
+        "TestRouterDNSLegacyEndpointBlocked",
+        "TestRouterDatLegacyFlag",
+        "TestRouterProviderAdapterUnderDiskLoad",
+        "TestRouterSubscriptionRefreshXrayOnly",
+        "TestRouterShareLinks"
       ],
       "keep_test_declarations": {
         "internal/services/geodata/router_remove_test.go": [
@@ -980,4 +1010,3 @@
     }
   }
 }
-
