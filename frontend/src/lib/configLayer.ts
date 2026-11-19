@@ -244,7 +244,10 @@ const NOTICE_IDS = [
   'schema_reset',
   'recovered_from_journal',
   'journal_recovery_failed',
-  'geodata_cron_two'
+  'geodata_cron_two',
+  // Следы старой панели в файлах ядер и сбой их однократной уборки на старте (фаза 151, D-04)
+  'legacy_leftovers',
+  'legacy_cleanup_failed'
 ];
 const NOTICE_PREFIXES = [
   'build_failed',
