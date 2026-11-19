@@ -323,3 +323,8 @@ jobs:
 
       - name: Check release sources
         run: node scripts/check-release-source.js
+
+      # Справка .claude/ в git не входит: --ci пропускает только игнорируемые пути,
+      # остальное — как локально.
+      - name: Check legacy layer removed
+        run: node scripts/check-legacy-removed.js --ci
