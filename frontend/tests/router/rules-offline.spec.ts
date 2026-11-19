@@ -45,19 +45,6 @@ async function mihomoApiUp(page: Page): Promise<boolean> {
   return Boolean((body.data ?? body).mihomo?.api_reachable);
 }
 
-/**
- * Флаг слоя «Конфигурация» на устройстве (чтение с сессией панели). Неудачный ответ или
- * конверт без булева config_layer — красный сценарий, а не «флаг выключен».
- */
-async function configLayerFlag(page: Page): Promise<boolean> {
-  const res = await page.request.get('/api/settings');
-  expect(res.status(), 'GET /api/settings').toBe(200);
-  const body = (await res.json()) as { data?: { config_layer?: unknown } };
-  const flag = body.data?.config_layer;
-  expect(typeof flag, 'config_layer в конверте data ответа /api/settings').toBe('boolean');
-  return flag === true;
-}
-
 /** Критичные и серьёзные нарушения axe (WCAG 2.0/2.1 A и AA) в рабочей области страницы. */
 async function axeSevere(page: Page): Promise<string[]> {
   // переход между вкладками идёт с затуханием: axe не должен видеть полупрозрачный кадр
@@ -85,15 +72,9 @@ test('rules-offline: при Xray вкладка Провайдеры', { tag: CO
 
   await expect(page.getByTestId('tab-diagnostic')).toBeDisabled();
   await expect(page.getByTestId('tab-all_rules')).toBeDisabled();
-  // D-16: при включённом слое старой вкладки «Исключения» нет (её адрес ведёт в «Конфигурацию»),
-  // без слоя она на месте. Оба режима проходит config-entries legacy-redirects.
-  const exceptions = page.getByTestId('tab-exceptions');
-  if (await configLayerFlag(page)) {
-    await expect(exceptions).toHaveCount(0);
-  } else {
-    await expect(exceptions).toBeVisible();
-    await expect(exceptions).toBeEnabled();
-  }
+  // Старой вкладки «Исключения» нет: её адрес ведёт в «Конфигурацию» (config-entries
+  // legacy-redirects)
+  await expect(page.getByTestId('tab-exceptions')).toHaveCount(0);
   await expect(page.getByTestId('rules-tabs-note')).toBeVisible();
   await expect(page.getByTestId('rules-offline-badge')).toBeVisible();
   await expect(page.getByTestId('rules-offline-note')).toBeVisible();
@@ -246,71 +227,31 @@ test(
   }
 );
 
-/**
- * Mihomo установлен на устройстве (чтение /api/capabilities). Сбой самой панели или ответ
- * без булева installed — красный сценарий, а не «Mihomo не установлен».
- */
-async function mihomoInstalled(page: Page): Promise<boolean> {
-  const res = await page.request.get('/api/capabilities');
-  expect(res.status(), 'GET /api/capabilities').toBe(200);
-  const body = (await res.json()) as {
-    data?: { kernels?: { mihomo?: { installed?: unknown } } };
-    kernels?: { mihomo?: { installed?: unknown } };
-  };
-  const installed = (body.data ?? body).kernels?.mihomo?.installed;
-  expect(typeof installed, 'kernels.mihomo.installed в ответе /api/capabilities').toBe('boolean');
-  return installed === true;
-}
-
 const CONFIG_TABS = ['nodes', 'groups', 'rules', 'lists', 'cores', 'files'];
 
-// CFG-01: плашка «Mihomo API оффлайн» пишет причину по состоянию ядер и не предлагает запуск
-// второго ядра; раздел «Конфигурация» открыт при любом ядре и плашкой не закрывается. При
-// включённом слое у «Прокси» своя страница (фаза 150): плашки нет при любом ядре.
+// CFG-01: у «Прокси» своя страница (фаза 150): плашки «Mihomo API оффлайн» нет ни при Xray, ни
+// при Mihomo, пункт меню на месте; раздел «Конфигурация» открыт при любом ядре и плашкой не
+// закрывается.
 test(`proxies offline reason core:${RT.core}`, { tag: CORE_TAG }, async ({ page }) => {
   const guard = attachConsoleGuard(page);
   await page.setViewportSize({ width: 1440, height: 900 });
-  // флаг читается до проверок плашки: при слое страница «Прокси» своя и плашки нет (150 F5)
-  const layer = await configLayerFlag(page);
   await page.goto('/#/proxies', { timeout: T.page, waitUntil: 'domcontentloaded' });
   await expect(page.locator('.main-content .page-header h1').first()).toBeVisible({
     timeout: T.page
   });
+  await expect(page.getByTestId('proxies-layer-page')).toBeVisible({ timeout: T.page });
+  await page.waitForLoadState('networkidle', { timeout: T.network }).catch(() => {});
+  await expect(page.locator('.api-offline')).toHaveCount(0);
+  await expect(page.locator('.sidebar-nav a[href="#/proxies"]')).toBeVisible({
+    timeout: T.action
+  });
 
-  if (layer) {
-    // при включённом слое плашки ApiOffline нет ни при Xray, ни при Mihomo; пункт меню на месте
-    await expect(page.getByTestId('proxies-layer-page')).toBeVisible({ timeout: T.page });
-    await page.waitForLoadState('networkidle', { timeout: T.network }).catch(() => {});
-    await expect(page.locator('.api-offline')).toHaveCount(0);
-    await expect(page.locator('.sidebar-nav a[href="#/proxies"]')).toBeVisible({
-      timeout: T.action
-    });
-  } else if (RT.core === 'xray') {
-    test.skip(!(await mihomoInstalled(page)), 'Mihomo не установлен: плашки нет по замыслу');
-    const banner = page.locator('.api-offline');
-    await expect(banner).toHaveAttribute('data-reason', 'xray', { timeout: T.page });
-    await expect(banner.getByTestId('api-offline-services')).toHaveAttribute('href', '#/services');
-    await expect(page.getByTestId('api-offline-start')).toHaveCount(0);
-    await expect(page.getByTestId('api-offline-restart')).toHaveCount(0);
-  } else {
-    // Mihomo активен: API отвечает, плашки нет (ждём ответа capabilities)
-    await page.waitForLoadState('networkidle', { timeout: T.network }).catch(() => {});
-    await expect(page.locator('.api-offline')).toHaveCount(0, { timeout: T.page });
+  await page.goto('/#/config/nodes', { timeout: T.page, waitUntil: 'domcontentloaded' });
+  for (const tab of CONFIG_TABS) {
+    await expect(page.getByTestId(`config-tab-${tab}`)).toBeVisible({ timeout: T.page });
   }
-
-  if (!layer) {
-    test.info().annotations.push({
-      type: 'skip-part',
-      description: 'флаг config_layer выключен на стенде: раздел #/config не проверен'
-    });
-  } else {
-    await page.goto('/#/config/nodes', { timeout: T.page, waitUntil: 'domcontentloaded' });
-    for (const tab of CONFIG_TABS) {
-      await expect(page.getByTestId(`config-tab-${tab}`)).toBeVisible({ timeout: T.page });
-    }
-    await expect(page.locator('.api-offline')).toHaveCount(0);
-    await expect(page.getByTestId('kernel-conflict-gate')).toHaveCount(0);
-  }
+  await expect(page.locator('.api-offline')).toHaveCount(0);
+  await expect(page.getByTestId('kernel-conflict-gate')).toHaveCount(0);
 
   await guard.assertClean();
 });
