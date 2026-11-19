@@ -15,7 +15,7 @@ import { FULL_TAG, TIER_FULL_ANNOTATION } from './lib/known';
 // каждый шаг раскрывается по очереди (нажатие заголовка — не изменяющее действие), и пункты 2
 // и 3 повторяются; сообщение провала называет номер шага. Внешние запросы автопроверки IP идут
 // под сборщиком консоли, как у бейджа IP на «Прокси» (pages.spec.ts).
-// Страница «Прокси» при слое (фаза 150) — отдельный срез, как мастер: корень proxies-layer-page,
+// Страница «Прокси» (фаза 150) — отдельный срез, как мастер: корень proxies-layer-page,
 // без полосы вкладок; первая карточка группы раскрывается нажатием на имя в шапке (не изменяющее
 // действие), и пункты 2 и 3 повторяются на раскрытой карточке.
 // Проверяет:
@@ -37,7 +37,7 @@ const TABS = ['nodes', 'groups', 'rules', 'lists', 'cores', 'files'] as const;
 // Страница мастера — не вкладка раздела: свой корень и без полосы вкладок
 const SETUP = 'setup';
 
-// Страница «Прокси» при слое: не вкладка раздела, свой адрес и корень
+// Страница «Прокси»: не вкладка раздела, свой адрес и корень
 const PROXIES = 'proxies';
 
 type TabName = (typeof TABS)[number] | typeof SETUP | typeof PROXIES;
@@ -50,13 +50,6 @@ const VIEWPORTS: Record<number, { width: number; height: number }> = {
   768: { width: 768, height: 1024 },
   1280: { width: 1280, height: 800 }
 };
-
-async function layerOn(page: Page): Promise<boolean> {
-  const res = await page.request.get('/api/settings');
-  if (!res.ok()) return false;
-  const body = (await res.json()) as { data?: { config_layer?: boolean } };
-  return body.data?.config_layer === true;
-}
 
 /**
  * Шаг 7 мастера в устойчивом виде (D-09): шаги 5 и 6 выполнены по ответу сервера — страница
@@ -242,12 +235,6 @@ async function layoutProblems(page: Page): Promise<string[]> {
 // ── Ярус gate: два среза (390 светлая и 1280 тёмная) ──
 for (const tab of TABS) {
   test(`config-visual tab:${tab} slices:gate`, async ({ page }) => {
-    if (!(await layerOn(page))) {
-      test.skip(
-        true,
-        'флаг config_layer выключен на этом устройстве: панель не открывает #/config'
-      );
-    }
     await checkTab(page, tab, 'light', 390);
     await checkTab(page, tab, 'dark', 1280);
   });
@@ -265,12 +252,6 @@ for (const tab of TABS) {
       }
     },
     async ({ page }) => {
-      if (!(await layerOn(page))) {
-        test.skip(
-          true,
-          'флаг config_layer выключен на этом устройстве: панель не открывает #/config'
-        );
-      }
       await checkTab(page, tab, 'dark', 390);
       await checkTab(page, tab, 'light', 768);
       await checkTab(page, tab, 'dark', 768);
@@ -281,9 +262,6 @@ for (const tab of TABS) {
 
 // ── Страница мастера #/config/setup (149 D-28): те же срезы gate и матрица full ──
 test('config-visual tab:setup slices:gate', async ({ page }) => {
-  if (!(await layerOn(page))) {
-    test.skip(true, 'флаг config_layer выключен на этом устройстве: панель не открывает #/config');
-  }
   await checkTab(page, SETUP, 'light', 390);
   await checkTab(page, SETUP, 'dark', 1280);
 });
@@ -298,12 +276,6 @@ test(
     }
   },
   async ({ page }) => {
-    if (!(await layerOn(page))) {
-      test.skip(
-        true,
-        'флаг config_layer выключен на этом устройстве: панель не открывает #/config'
-      );
-    }
     await checkTab(page, SETUP, 'dark', 390);
     await checkTab(page, SETUP, 'light', 768);
     await checkTab(page, SETUP, 'dark', 768);
@@ -311,11 +283,8 @@ test(
   }
 );
 
-// ── Страница «Прокси» при слое (фаза 150): те же срезы gate и матрица full ──
+// ── Страница «Прокси» (фаза 150): те же срезы gate и матрица full ──
 test('config-visual tab:proxies slices:gate', async ({ page }) => {
-  if (!(await layerOn(page))) {
-    test.skip(true, 'флаг config_layer выключен на этом устройстве: страница «Прокси» без слоя');
-  }
   await checkTab(page, PROXIES, 'light', 390);
   await checkTab(page, PROXIES, 'dark', 1280);
 });
@@ -330,9 +299,6 @@ test(
     }
   },
   async ({ page }) => {
-    if (!(await layerOn(page))) {
-      test.skip(true, 'флаг config_layer выключен на этом устройстве: страница «Прокси» без слоя');
-    }
     await checkTab(page, PROXIES, 'dark', 390);
     await checkTab(page, PROXIES, 'light', 768);
     await checkTab(page, PROXIES, 'dark', 768);

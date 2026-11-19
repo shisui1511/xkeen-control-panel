@@ -5,25 +5,26 @@ import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
 import { settleMotion } from './lib/motion';
-import { api, layerFlag, resetDraft } from './lib/nodes-api';
+import { api, resetDraft, waitApplyIdle, withPanel } from './lib/nodes-api';
 import { SLOW_ANNOTATION } from './lib/known';
 
 // Вкладка «Xray │ Mihomo» раздела «Конфигурация» на настоящей панели (фаза 147, план 09):
 // маршрут #/config/cores, переключатель ядра, строка состояния, пустое состояние
 // неустановленного ядра, вкладка на 390 px и проход axe в обеих темах. Ответы сети не
-// подменяются. Флаг слоя включается на время прогона и возвращается прежним. Ядро не
-// запускается, не останавливается и не меняется: вкладка только читает.
-
-const layer = layerFlag();
+// подменяются. Черновик сбрасывается до и после прогона. Ядро не запускается, не
+// останавливается и не меняется: вкладка только читает.
 
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
-  await layer.enable(browser);
+  await withPanel(browser, (page) => resetDraft(page));
 });
 
 test.afterAll(async ({ browser }) => {
-  await layer.restore(browser);
+  await withPanel(browser, async (page) => {
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
+  });
 });
 
 async function openConfig(page: Page, hash: string): Promise<void> {

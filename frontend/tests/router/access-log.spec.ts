@@ -5,16 +5,14 @@ import { test, expect, type Browser, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
 import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
-import { api, layerFlag, resetDraft, withPanel } from './lib/nodes-api';
+import { api, resetDraft, waitApplyIdle, withPanel } from './lib/nodes-api';
 
 // Блок access-лога Xray на «Логах» (фаза 147.1, план 20): секция у панели включается и выключается
 // кнопками с подтверждением и честным исходом, чужая секция берётся диалогом одним шагом (при
 // открытом черновике диалог блокирует взятие), путь вне разрешённых объясняется и ведёт к секции,
-// доступность в обеих темах и 390 px. Ответы сети не подменяются. Флаг слоя включается на время
-// прогона и возвращается прежним; секция «Лог» берётся через API и в afterAll возвращается:
-// файлы секции сверяются с исходными побайтно. Ядро не запускается и не останавливается.
-
-const layer = layerFlag();
+// доступность в обеих темах и 390 px. Ответы сети не подменяются. Черновик сбрасывается до и после
+// прогона; секция «Лог» берётся через API и в afterAll возвращается: файлы секции сверяются с
+// исходными побайтно. Ядро не запускается и не останавливается.
 
 test.describe.configure({ mode: 'serial' });
 
@@ -201,8 +199,8 @@ async function openDevices(page: Page): Promise<void> {
 }
 
 test.beforeAll(async ({ browser }) => {
-  await layer.enable(browser);
   await withPanel(browser, async (page) => {
+    await resetDraft(page);
     const s = await logSection(page);
     const files: Record<string, string | null> = {};
     for (const name of s.files) files[configPath(name)] = await readConfig(page, configPath(name));
@@ -213,7 +211,10 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(async ({ browser }: { browser: Browser }) => {
   await withPanel(browser, restoreLog);
-  await layer.restore(browser);
+  await withPanel(browser, async (page) => {
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
+  });
 });
 
 // --- Чужая секция и черновик ----------------------------------------------------------------
