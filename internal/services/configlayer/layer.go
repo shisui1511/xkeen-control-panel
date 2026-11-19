@@ -84,8 +84,6 @@ type Options struct {
 	Binaries func() Binaries
 	// XrayEnv — окружение запуска проверки Xray.
 	XrayEnv func(dir string) []string
-	// ForeignOwned — файл принадлежит старому слою (D-13).
-	ForeignOwned func(kernel, rel string) bool
 	// KernelVersions — сырые версии ядер и XKeen для строк версий и карты функций.
 	KernelVersions func() []KernelVersionInput
 	// Applier, ProcessStates, Mihomo, MihomoAPIReady, Lifecycle — зависимости шага
@@ -232,7 +230,6 @@ func New(opts Options) (*Layer, error) {
 		DataDir:        opts.DataDir,
 		Binaries:       opts.Binaries,
 		XrayEnv:        opts.XrayEnv,
-		ForeignOwned:   opts.ForeignOwned,
 		Now:            opts.Now,
 		Applier:        opts.Applier,
 		ProcessStates:  opts.ProcessStates,
@@ -517,7 +514,7 @@ func (l *Layer) evaluate(st State) FilesEvent {
 	sortFileViews(files)
 	// Расхождения маршрутизации входят в число дрейфа: «Применить» блокируется тем же
 	// механизмом (кроме запуска с желаемым managed=false, D-06, D-07).
-	rd := routingDrift(l.opts.Roots, st.Routing, l.installed(), "", l.opts.ForeignOwned)
+	rd := routingDrift(l.opts.Roots, st.Routing, l.installed(), "")
 	// То же для взятых секций Xray: чужой файл с их ключом входит в число дрейфа.
 	sd := sectionsDrift(l.opts.Roots, st.Cores, l.installed(), "")
 	return FilesEvent{Files: files, DriftCount: drift + len(rd) + len(sd), Routing: rd, Sections: sd}
@@ -829,7 +826,7 @@ func (l *Layer) RoutingPreview() (TakeoverPreview, error) {
 	var files []RoutingFile
 	if installed.Xray {
 		var err error
-		if files, _, err = ScanXrayRouting(l.opts.Roots.Xray, l.opts.ForeignOwned); err != nil {
+		if files, _, err = ScanXrayRouting(l.opts.Roots.Xray); err != nil {
 			return TakeoverPreview{}, err
 		}
 	}
@@ -871,14 +868,14 @@ func (l *Layer) ReclaimRouting(ctx context.Context, kernel string) error {
 		return err
 	}
 	st := l.store.Snapshot()
-	items := routingDrift(l.opts.Roots, st.Routing, l.installed(), kernel, l.opts.ForeignOwned)
+	items := routingDrift(l.opts.Roots, st.Routing, l.installed(), kernel)
 	if len(items) == 0 {
 		return ErrNothingToReclaim
 	}
 	ops := &RoutingOps{Next: st.Routing.clone()}
 	switch kernel {
 	case KernelXray:
-		files, _, err := ScanXrayRouting(l.opts.Roots.Xray, l.opts.ForeignOwned)
+		files, _, err := ScanXrayRouting(l.opts.Roots.Xray)
 		if err != nil {
 			return err
 		}

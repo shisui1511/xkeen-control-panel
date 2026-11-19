@@ -349,16 +349,15 @@ type ApplyView struct {
 
 // PipelineDeps — зависимости конвейера.
 type PipelineDeps struct {
-	Store        *Store
-	Broker       *Broker
-	Registry     *Registry
-	Roots        Roots
-	DataDir      string
-	Binaries     func() Binaries
-	XrayEnv      func(dir string) []string
-	ForeignOwned func(kernel, rel string) bool
-	WriteFile    func(path string, data []byte) error
-	Now          func() time.Time
+	Store     *Store
+	Broker    *Broker
+	Registry  *Registry
+	Roots     Roots
+	DataDir   string
+	Binaries  func() Binaries
+	XrayEnv   func(dir string) []string
+	WriteFile func(path string, data []byte) error
+	Now       func() time.Time
 
 	// Шаг перезапуска (144-07). Applier == nil — шаг пропускается.
 	Applier        KernelApplier
@@ -810,7 +809,7 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 		// маршрутизацию этого ядра; запуск, отпускающий ядро, — это и есть решение
 		// «Отпустить», дрейфом этого ядра он не блокируется (по ядрам, D-06 из 147.1).
 		if blocked == 0 {
-			if rd := routingDrift(p.d.Roots, snap.Routing, installed, req.Kernel, p.d.ForeignOwned); routingDriftBlocks(src, rd) {
+			if rd := routingDrift(p.d.Roots, snap.Routing, installed, req.Kernel); routingDriftBlocks(src, rd) {
 				blocked = len(rd)
 			}
 		}
@@ -846,7 +845,7 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 	}
 	if err == nil {
 		files = filesOfScope(files, req.Kernel)
-		err = CheckGenerated(files, p.d.ForeignOwned)
+		err = CheckGenerated(files)
 	}
 	bt.generate = bt.lap(&mark)
 	if err == nil {
@@ -910,7 +909,7 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 					}
 				}
 			}
-			plan, err = ComputePlan(p.d.Roots, files, planManifest, only, p.d.ForeignOwned)
+			plan, err = ComputePlan(p.d.Roots, files, planManifest, only)
 			// Каталог неустановленного ядра (и ядра вне области запуска) так же не
 			// трогается: его сирот не убираем.
 			plan.Orphans = orphansOfScope(plan.Orphans, installed, req.Kernel)

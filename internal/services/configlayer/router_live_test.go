@@ -288,7 +288,7 @@ func TestRouterInertPlan(t *testing.T) {
 		}
 	}
 	inert := GeneratedFile{Kernel: KernelMihomo, RelPath: "proxy_providers/xcp-x.yaml", Kind: KindMihomoProxyProvider, Content: []byte("proxies: []\n"), Inert: true}
-	plan, err := ComputePlan(roots, []GeneratedFile{inert}, map[string]ManifestEntry{}, nil, nil)
+	plan, err := ComputePlan(roots, []GeneratedFile{inert}, map[string]ManifestEntry{}, nil)
 	if err != nil {
 		t.Fatalf("ComputePlan: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestRouterInertPlan(t *testing.T) {
 	}
 
 	regular := GeneratedFile{Kernel: KernelMihomo, RelPath: "proxy_providers/xcp-y.yaml", Kind: KindMihomoProxyProvider, Content: []byte("proxies: []\n")}
-	plan, err = ComputePlan(roots, []GeneratedFile{inert, regular}, map[string]ManifestEntry{}, nil, nil)
+	plan, err = ComputePlan(roots, []GeneratedFile{inert, regular}, map[string]ManifestEntry{}, nil)
 	if err != nil {
 		t.Fatalf("ComputePlan: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestRouterInertPlan(t *testing.T) {
 	manifest := map[string]ManifestEntry{
 		inert.Key(): {Kernel: inert.Kernel, RelPath: inert.RelPath, Kind: inert.Kind, Hash: "h", Status: StatusManaged, Inert: true},
 	}
-	plan, err = ComputePlan(roots, nil, manifest, nil, nil)
+	plan, err = ComputePlan(roots, nil, manifest, nil)
 	if err != nil {
 		t.Fatalf("ComputePlan: %v", err)
 	}

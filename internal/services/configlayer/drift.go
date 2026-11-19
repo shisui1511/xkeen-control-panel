@@ -193,12 +193,10 @@ type OrphanFile struct {
 
 // ScanOrphans ищет сирот: файлы с именем панели в сканируемых каталогах,
 // которых нет в манифесте. Корень Xray сканируется на верхнем уровне, Mihomo —
-// только каталоги MihomoPanelDirs; корень Mihomo не сканируется (там лежит
-// config.yaml.xcp-link старого слоя). foreignOwned (может быть nil)
-// исключает файлы, принадлежащие старому слою (D-13). Отсутствующий каталог
+// только каталоги MihomoPanelDirs; корень Mihomo не сканируется. Отсутствующий каталог
 // ошибкой не считается. Сироты только находятся: перенос в резервную копию
 // делает конвейер (144-06).
-func ScanOrphans(roots Roots, m map[string]ManifestEntry, foreignOwned func(kernel, rel string) bool) ([]OrphanFile, error) {
+func ScanOrphans(roots Roots, m map[string]ManifestEntry) ([]OrphanFile, error) {
 	var out []OrphanFile
 	scan := func(kernel, dirAbs, relPrefix string) error {
 		entries, err := os.ReadDir(dirAbs)
@@ -218,9 +216,6 @@ func ScanOrphans(roots Roots, m map[string]ManifestEntry, foreignOwned func(kern
 			}
 			key := ManifestKey(kernel, rel)
 			if _, known := m[key]; known {
-				continue
-			}
-			if foreignOwned != nil && foreignOwned(kernel, rel) {
 				continue
 			}
 			out = append(out, OrphanFile{Key: key, Kernel: kernel, RelPath: rel, AbsPath: filepath.Join(dirAbs, de.Name())})
@@ -293,8 +288,7 @@ func mihomoPointsToPanel(root string) bool {
 // xrayForeignDrift находит чужие файлы routing, которые нельзя оставить молча:
 // появившиеся после взятия (их нет среди оставленных при взятии, в том числе
 // 05_routing.json, возвращённый XKeen) и любые, сортирующиеся после файла панели
-// (RouterConfig заменяется целиком, поэтому такой файл перекрывает панель). Файлы
-// старого слоя не учитываются: он переписывает их сам.
+// (RouterConfig заменяется целиком, поэтому такой файл перекрывает панель).
 func xrayForeignDrift(files []RoutingFile, st *XrayRoutingState) []RoutingDriftItem {
 	left := make(map[string]bool, len(st.Left))
 	for _, n := range st.Left {
@@ -302,7 +296,7 @@ func xrayForeignDrift(files []RoutingFile, st *XrayRoutingState) []RoutingDriftI
 	}
 	var out []RoutingDriftItem
 	for _, f := range files {
-		if !f.HasRouting || f.Legacy {
+		if !f.HasRouting {
 			continue
 		}
 		if !left[f.Name] || f.Name > PanelXrayRoutingFile {
@@ -318,10 +312,10 @@ func xrayForeignDrift(files []RoutingFile, st *XrayRoutingState) []RoutingDriftI
 // Xray взят, а в configs/ есть чужой routing — routing_foreign. Ядро вне
 // области scope или без бинарника не сверяется; нечитаемый каталог дрейфом не
 // считается.
-func routingDrift(roots Roots, st RoutingState, installed InstalledKernels, scope string, foreignOwned func(kernel, rel string) bool) []RoutingDriftItem {
+func routingDrift(roots Roots, st RoutingState, installed InstalledKernels, scope string) []RoutingDriftItem {
 	var out []RoutingDriftItem
 	if st.Xray != nil && kernelInScope(KernelXray, installed, scope) {
-		if files, _, err := ScanXrayRouting(roots.Xray, foreignOwned); err == nil {
+		if files, _, err := ScanXrayRouting(roots.Xray); err == nil {
 			out = append(out, xrayForeignDrift(files, st.Xray)...)
 		}
 	}
