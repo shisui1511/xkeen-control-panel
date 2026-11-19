@@ -10,10 +10,9 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 )
 
-// Маршруты источников (/api/configlayer/sources*) работают только при включённом
-// слое «Конфигурация»: при выключенном флаге они отвечают 404 config_layer_disabled,
-// как остальные маршруты слоя (FND-01). Все они регистрируются через
-// HandleProtected: без сессии 401, изменяющие — ещё и с X-CSRF-Token (403).
+// Маршруты источников (/api/configlayer/sources*) работают всегда, когда в main.go
+// созданы слой «Конфигурация» и сервис источников; иначе — 404 not_found. Все они
+// регистрируются через HandleProtected: без сессии 401, изменяющие — ещё и с X-CSRF-Token (403).
 // Ни один обработчик не пишет в журнал тела запросов и ответов: полный URL
 // подписки и учётные данные узлов отдают только reveal и nodes/raw (D-33, D-34).
 
@@ -33,14 +32,14 @@ func maskURLsInText(s string) string {
 	return urlInText.ReplaceAllString(s, "[url]")
 }
 
-// requireSources — requireLayer плюс наличие сервиса источников: без сервиса
-// (он не создался в main.go) маршруты отвечают так же, как при выключенном слое.
+// requireSources — requireConfigLayer плюс наличие сервиса источников: без сервиса
+// (он не создался в main.go) маршруты отвечают 404 not_found.
 func (a *API) requireSources(w http.ResponseWriter, r *http.Request) bool {
-	if !a.requireLayer(w, r) {
+	if !a.requireConfigLayer(w, r) {
 		return false
 	}
 	if a.sources == nil {
-		JSONErrorCode(w, http.StatusNotFound, "config_layer_disabled", a.t(r, "configlayer.disabled"))
+		JSONErrorCode(w, http.StatusNotFound, "not_found", a.t(r, "error.not_found"))
 		return false
 	}
 	return true

@@ -13,9 +13,8 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
-// Маршруты секций ядер (/api/configlayer/cores*) работают только при включённом
-// слое «Конфигурация» и созданном сервисе: иначе они отвечают 404
-// config_layer_disabled, как остальные маршруты слоя (FND-01). Все они
+// Маршруты секций ядер (/api/configlayer/cores*) работают всегда, когда в main.go
+// созданы слой «Конфигурация» и сервис секций; иначе — 404 not_found. Все они
 // регистрируются через HandleProtected: без сессии 401, изменяющие — ещё и с
 // X-CSRF-Token (403). Запись идёт в черновик, файлы меняет «Применить»; в ответах и
 // журнале нет значений секций и secret: параметры ошибок — только имена ключей,
@@ -59,14 +58,14 @@ var coresErrorStatus = map[string]int{
 	"xkeen_too_old":             http.StatusConflict,
 }
 
-// requireCores — requireLayer плюс наличие сервиса секций: без сервиса (он не
-// создался в main.go) маршруты отвечают так же, как при выключенном слое.
+// requireCores — requireConfigLayer плюс наличие сервиса секций: без сервиса (он
+// не создался в main.go) маршруты отвечают 404 not_found.
 func (a *API) requireCores(w http.ResponseWriter, r *http.Request) bool {
-	if !a.requireLayer(w, r) {
+	if !a.requireConfigLayer(w, r) {
 		return false
 	}
 	if a.cores == nil {
-		JSONErrorCode(w, http.StatusNotFound, "config_layer_disabled", a.t(r, "configlayer.disabled"))
+		JSONErrorCode(w, http.StatusNotFound, "not_found", a.t(r, "error.not_found"))
 		return false
 	}
 	return true

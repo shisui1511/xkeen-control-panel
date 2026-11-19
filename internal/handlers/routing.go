@@ -12,10 +12,9 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 )
 
-// Маршруты маршрутизации (/api/configlayer/routing*) работают только при
-// включённом слое «Конфигурация» и созданном сервисе: иначе они отвечают 404
-// config_layer_disabled, как остальные маршруты слоя (FND-01). Все они
-// регистрируются через HandleProtected: без сессии 401, изменяющие — ещё и с
+// Маршруты маршрутизации (/api/configlayer/routing*) работают всегда, когда в
+// main.go созданы слой «Конфигурация» и сервис маршрутизации; иначе — 404
+// not_found. Все они регистрируются через HandleProtected: без сессии 401, изменяющие — ещё и с
 // X-CSRF-Token (403). Ответы и журнал не содержат секретов узлов: представления
 // сервиса несут только имена и ссылки.
 
@@ -39,14 +38,14 @@ var genericInvalidReasons = map[string]bool{
 	"action_invalid": true,
 }
 
-// requireRouting — requireLayer плюс наличие сервиса маршрутизации: без сервиса
-// (он не создался в main.go) маршруты отвечают так же, как при выключенном слое.
+// requireRouting — requireConfigLayer плюс наличие сервиса маршрутизации: без
+// сервиса (он не создался в main.go) маршруты отвечают 404 not_found.
 func (a *API) requireRouting(w http.ResponseWriter, r *http.Request) bool {
-	if !a.requireLayer(w, r) {
+	if !a.requireConfigLayer(w, r) {
 		return false
 	}
 	if a.routing == nil {
-		JSONErrorCode(w, http.StatusNotFound, "config_layer_disabled", a.t(r, "configlayer.disabled"))
+		JSONErrorCode(w, http.StatusNotFound, "not_found", a.t(r, "error.not_found"))
 		return false
 	}
 	return true

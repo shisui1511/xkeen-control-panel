@@ -256,7 +256,7 @@ func (a *API) planMihomoTemplate(w http.ResponseWriter, r *http.Request, file st
 		JSONErrorCode(w, http.StatusBadRequest, "template_unknown", a.t(r, "profiles.err_template_unknown"))
 		return nil, false
 	}
-	if !a.requireLayer(w, r) {
+	if !a.requireConfigLayer(w, r) {
 		return nil, false
 	}
 	if a.sources == nil {

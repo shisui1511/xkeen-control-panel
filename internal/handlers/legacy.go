@@ -9,7 +9,7 @@ import (
 // ConfigLayerLegacy обрабатывает GET /api/configlayer/legacy.
 func (a *API) ConfigLayerLegacy(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if !a.requireMethod(w, r, http.MethodGet) || !a.requireLayer(w, r) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireConfigLayer(w, r) {
 		return
 	}
 	JSONSuccess(w, a.configLayer.Legacy())
@@ -18,7 +18,7 @@ func (a *API) ConfigLayerLegacy(w http.ResponseWriter, r *http.Request) {
 // LegacyClose обрабатывает POST /api/configlayer/legacy/close.
 func (a *API) LegacyClose(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) || !a.requireEmptyLegacyBody(w, r) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireConfigLayer(w, r) || !a.requireEmptyLegacyBody(w, r) {
 		return
 	}
 	summary, err := a.configLayer.MarkLegacyClosed()
@@ -31,7 +31,7 @@ func (a *API) LegacyClose(w http.ResponseWriter, r *http.Request) {
 
 // LegacyClean обрабатывает POST /api/configlayer/legacy/clean.
 func (a *API) LegacyClean(w http.ResponseWriter, r *http.Request) {
-	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) || !a.requireEmptyLegacyBody(w, r) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireConfigLayer(w, r) || !a.requireEmptyLegacyBody(w, r) {
 		return
 	}
 	if err := a.configLayer.CleanLegacy(); err != nil {
