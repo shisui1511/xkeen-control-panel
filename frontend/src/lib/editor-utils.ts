@@ -94,3 +94,40 @@ export function buildPathAtCursor(state: EditorState, pos: number, isYaml: boole
 
   return segments;
 }
+
+/**
+ * Заменяет комментарии JSONC пробелами, сохраняя переводы строк: длина результата
+ * равна длине исходного текста, поэтому позиции ошибок JSON-парсера указывают
+ * на исходный текст.
+ */
+export function blankJsonComments(text: string): string {
+  let out = '';
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      out += c;
+      if (c === '\\' && i + 1 < text.length) out += text[++i];
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      out += c;
+    } else if (c === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') {
+        out += text[i] === '\r' ? '\r' : ' ';
+        i++;
+      }
+      if (i < text.length) out += '\n';
+    } else if (c === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      const stop = end === -1 ? text.length : end + 2;
+      for (; i < stop; i++) out += text[i] === '\n' || text[i] === '\r' ? text[i] : ' ';
+      i--;
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}

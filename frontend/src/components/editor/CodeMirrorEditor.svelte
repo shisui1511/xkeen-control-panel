@@ -68,7 +68,7 @@
   import { xraySchema } from '../../schemas/xray';
   import { mihomoSchema } from '../../schemas/mihomo';
   import { localizeSchema } from '../../schemas/localize';
-  import { blankJsonComments } from '../../lib/constructors/xrayRouting';
+  import { blankJsonComments } from '../../lib/editor-utils';
   import { xraySnippetSource, mihomoSnippetSource } from '../../lib/snippets';
 
   const customHighlightStyle = HighlightStyle.define([
