@@ -21,7 +21,6 @@ type CapabilitiesResponse struct {
 	KernelConflict bool `json:"kernel_conflict"`
 	// RunningKernels — запущенные ядра в порядке [xray, mihomo].
 	RunningKernels []string `json:"running_kernels,omitempty"`
-	XKeenDNS       bool     `json:"xkeen_dns"`
 	// XKeenInstalled — бинарник XKeen найден (без него ядра не запустить)
 	XKeenInstalled bool   `json:"xkeen_installed"`
 	GlobalHwid     string `json:"global_hwid,omitempty"`
@@ -169,7 +168,6 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if a.xkeenSvc != nil {
-		resp.XKeenDNS = a.xkeenSvc.IsDNSProxyingEnabled()
 		resp.XKeenInstalled = a.xkeenSvc.Installed()
 	}
 

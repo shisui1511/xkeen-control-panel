@@ -22,7 +22,6 @@ export interface CapabilitiesData {
   kernel_conflict?: boolean;
   /** Запущенные ядра в порядке xray, mihomo. */
   running_kernels?: string[];
-  xkeen_dns?: boolean;
   xkeen_installed?: boolean;
   mihomo: {
     reachable: boolean;
