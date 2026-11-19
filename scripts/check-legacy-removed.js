@@ -9,7 +9,11 @@ const neverInspect = new Set(['scripts/check-legacy-removed.js', 'scripts/legacy
 const archiveFiles = [
   'internal/services/legacyarchive/archive.go',
   'internal/services/legacyarchive/marker.go',
-  'internal/services/legacyarchive/router_archive_test.go'
+  'internal/services/legacyarchive/router_archive_test.go',
+  'internal/services/legacyarchive/scan.go',
+  'internal/services/legacyarchive/clean.go',
+  'internal/services/legacyarchive/access.go',
+  'internal/handlers/router_legacy_test.go'
 ];
 const violations = [];
 const inspected = new Map();
@@ -235,6 +239,54 @@ function checkArchive(files) {
         if (!declarations(unquoted).has('TestRouterLegacyArchive')) {
           violations.push(`${file}: отсутствует TestRouterLegacyArchive`);
         }
+        break;
+      case 3:
+        // Сканер: только точные имена и признаки владения, закреплённый корень.
+        for (const pattern of [
+          '"04_outbounds\\.zz_xcp_default\\.json"',
+          '"04_outbounds\\.zz_xcp_selected\\.tail\\.json"',
+          '"# --- BEGIN USER RULES ---"',
+          '"# --- END USER RULES ---"',
+          '`"user_rule"`'
+        ]) checkPattern(file, code, pattern, true);
+        for (const pattern of ['\\bValidateUnder\\s*\\(', '\\bos\\.OpenRoot\\s*\\(', '\\.Readlink\\s*\\(']) {
+          checkPattern(file, unquoted, pattern, true);
+        }
+        for (const pattern of ['\\bfilepath\\.Glob\\s*\\(', '\\bfilepath\\.Match\\s*\\(', '\\bos\\.(?:Remove|Rename|WriteFile)\\s*\\(']) {
+          checkPattern(file, unquoted, pattern, false);
+        }
+        break;
+      case 4:
+        // Очистка: копия до правки, проверка обоими валидаторами, правки через os.Root.
+        for (const pattern of [
+          '\\bNewBackupSet\\s*\\(',
+          '\\bValidateXrayTree\\s*\\(',
+          '\\bValidateMihomoTree\\s*\\(',
+          '\\bappendKernelArchive\\s*\\(',
+          '\\.Rename\\s*\\(tmp,'
+        ]) checkPattern(file, unquoted, pattern, true);
+        for (const pattern of ['\\bos\\.(?:Remove|Rename|Chmod|Chown|Symlink)\\s*\\(', '\\bfilepath\\.Glob\\s*\\(', '\\blog\\.']) {
+          checkPattern(file, unquoted, pattern, false);
+        }
+        break;
+      case 5:
+        // Доступ к списку адресов: без журнала и без записи вне закреплённого каталога.
+        for (const pattern of ['\\bprivateFile\\s*\\(', '\\bremovePrivate\\s*\\(']) {
+          checkPattern(file, unquoted, pattern, true);
+        }
+        for (const pattern of ['\\blog\\.', '\\bfmt\\.', '\\bos\\.(?:Remove|ReadFile|Open)\\s*\\(']) {
+          checkPattern(file, unquoted, pattern, false);
+        }
+        break;
+      case 6:
+        // HTTP-контракт идёт через настоящую панель, без подмены API.
+        requireHeader(file, raw, '//go:build router');
+        requireHeader(file, raw, '// router-area:');
+        if (!declarations(unquoted).has('TestRouterLegacyAPI')) {
+          violations.push(`${file}: отсутствует TestRouterLegacyAPI`);
+        }
+        checkPattern(file, unquoted, '\\bhttptest\\.', false);
+        checkPattern(file, unquoted, '\\broutertest\\.NewPanel\\s*\\(', true);
         break;
     }
   }

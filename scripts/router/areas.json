@@ -124,7 +124,9 @@
         "internal/services/preflight_content.go",
         "internal/services/mihomo.go",
         "internal/services/setupwizard/**",
-        "internal/handlers/setup_wizard.go"
+        "internal/handlers/setup_wizard.go",
+        "internal/services/legacyarchive/**",
+        "internal/handlers/legacy.go"
       ],
       "canary": {
         "go": "TestRouterTakeoverApplyAndRelease",
@@ -330,6 +332,24 @@
             "go:TestRouterWizardAPI",
             "go:TestRouterWizardConflict",
             "tests/router/config-setup.spec.ts"
+          ]
+        },
+        "config-legacy": {
+          "title": "Уход со старого слоя: архив старых данных, следы в каталогах ядер, окно чистого старта",
+          "paths": [
+            "internal/services/legacyarchive/**",
+            "internal/services/configlayer/legacy.go",
+            "internal/services/configlayer/backup.go",
+            "internal/services/configlayer/validate.go",
+            "internal/services/configlayer/layer.go",
+            "internal/services/configlayer/types.go",
+            "internal/services/configlayer/view.go",
+            "internal/services/configlayer/events.go",
+            "internal/handlers/legacy.go"
+          ],
+          "tests": [
+            "go:TestRouterLegacyArchive",
+            "go:TestRouterLegacyAPI"
           ]
         }
       }
