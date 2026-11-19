@@ -7,6 +7,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -163,6 +164,28 @@ func rtLinkText(t *testing.T, name string) string {
 		t.Fatalf("данные ссылки %s: %v", name, err)
 	}
 	return strings.TrimSpace(string(data))
+}
+
+// rtReadLogFrom читает журнал с заданного смещения. Файл меньше смещения — ошибка
+// (журнал ротирован).
+func rtReadLogFrom(path string, offset int64) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if st.Size() < offset {
+		return "", io.ErrUnexpectedEOF
+	}
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return "", err
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, 8<<20))
+	return string(raw), err
 }
 
 // rtNoSecrets проверяет, что в теле нет ни одной из секретных строк. Сами строки
