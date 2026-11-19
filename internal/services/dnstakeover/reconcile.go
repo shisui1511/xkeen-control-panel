@@ -59,9 +59,6 @@ var (
 //
 // Команда сохранения конфигурации прошивки не вызывается (D-16).
 func (s *Service) reconcileOnStart(ctx context.Context) {
-	if !s.d.Layer.Enabled() {
-		return
-	}
 	if ok, _ := s.fw.Available(ctx); !ok {
 		return
 	}

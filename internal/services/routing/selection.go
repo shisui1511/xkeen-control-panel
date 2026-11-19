@@ -73,9 +73,6 @@ const (
 	selReasonBusy     = "busy"
 	selReasonStopped  = "stopped"
 	selReasonFailed   = "failed"
-	// selReasonDisabled — слой «Конфигурация» выключен посреди выбора (не остановка
-	// панели).
-	selReasonDisabled = "disabled"
 )
 
 // Способ проверки в уведомлении routing_repick.
@@ -1136,15 +1133,13 @@ func (s *Service) selectMihomoFirstTail(in *xrayIntent, stages *xrayStages, name
 // selectFailClass — код исхода и класс причины отказа фонового прохода для
 // уведомления routing_select: rejected — отказ проверки, сборки, записи, откат или
 // дрейф; busy — замок применения или операция с ядром; stopped — слой или сервис
-// остановлен; disabled — слой выключен; failed — прочее.
+// остановлен; failed — прочее.
 func selectFailClass(err error, outcome string) (code, reason string) {
 	switch {
 	case errors.Is(err, ErrApplyBusy):
 		return "apply_busy", selReasonBusy
 	case errors.Is(err, configlayer.ErrKernelBusy):
 		return "kernel_op_in_progress", selReasonBusy
-	case errors.Is(err, configlayer.ErrDisabled):
-		return "disabled", selReasonDisabled
 	case errors.Is(err, configlayer.ErrStopped), errors.Is(err, context.Canceled):
 		return "stopped", selReasonStopped
 	case errors.Is(err, configlayer.ErrDriftBlocked):
@@ -1481,9 +1476,6 @@ func (s *Service) reconcileMihomo(ctx context.Context) error {
 		return errReconcileRetry
 	}
 	snap := s.d.Layer.Snapshot()
-	if !snap.Enabled {
-		return nil
-	}
 	if mh := snap.Routing.Mihomo; mh == nil || !mh.Taken || len(mh.Drift) > 0 {
 		s.setReconcileNotices(nil)
 		return nil
