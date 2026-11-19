@@ -232,7 +232,6 @@ func rtLegacyDiagnosticsLeak(t *testing.T, p *routertest.Panel, urls []string) b
 func TestRouterLegacyAPI(t *testing.T) {
 	routertest.Slow(t, "два перезапуска панели init-скриптом: однократный архив на старте и сохранность закрытия окна")
 	e := rtNewSrc(t)
-	e.setLayer(true)
 	second := routertest.NewPanel(t)
 
 	t.Run("access", func(t *testing.T) {

@@ -334,7 +334,6 @@ func testLegacyXrayCleanup(t *testing.T, workDir string) {
 		}
 		layer, err := configlayer.New(configlayer.Options{
 			DataDir: c.DataDir, Roots: c.Roots, LegacyClean: c.Clean,
-			Enabled: func() bool { return true },
 		})
 		if err != nil {
 			t.Fatal("не удалось открыть слой конфигурации")
