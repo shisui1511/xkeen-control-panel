@@ -4,26 +4,27 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { api, layerFlag, randomPort, resetDraft } from './lib/nodes-api';
+import { api, randomPort, resetDraft, waitApplyIdle, withPanel } from './lib/nodes-api';
 import { SLOW_ANNOTATION } from './lib/known';
 
 // Формы секций Xray на настоящей панели (фаза 147, план 22): DNS, «Лог», «Политики» и
 // «Входящие» правятся полями без потери ключей, которых формы не знают; входящие, которые
 // читает XKeen, сохраняют тег и вид, а смена их порта объявляется до «Применить». Ответы сети
-// не подменяются. Флаг слоя включается на время прогона и возвращается прежним. Тесты форм
-// пишут только в черновик и сбрасывают его; DNS-тест дополнительно берёт секцию, применяет и
-// отпускает её, возвращая исходный файл.
-
-const layer = layerFlag();
+// не подменяются. Черновик сбрасывается до и после прогона. Тесты форм пишут только в
+// черновик и сбрасывают его; DNS-тест дополнительно берёт секцию, применяет и отпускает её,
+// возвращая исходный файл.
 
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
-  await layer.enable(browser);
+  await withPanel(browser, (page) => resetDraft(page));
 });
 
 test.afterAll(async ({ browser }) => {
-  await layer.restore(browser);
+  await withPanel(browser, async (page) => {
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
+  });
 });
 
 const XRAY_DIR = '/opt/etc/xray/configs';

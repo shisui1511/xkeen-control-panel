@@ -11,16 +11,15 @@ import {
   type DnsTargetPrep
 } from './lib/dns-target';
 import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
-import { api, layerFlag, resetDraft, withPanel } from './lib/nodes-api';
+import { api, resetDraft, waitApplyIdle, withPanel } from './lib/nodes-api';
 
 // Общий баннер окна подтверждения перехвата DNS на настоящей панели (фаза 148, DNSF-05,
 // D-05…D-08, D-25): перехват включается настоящим API службы, баннер виден на разных
 // страницах оболочки, «Оставить» и «Откатить сейчас» решают окно, решение в одной вкладке
 // снимает баннер в другой, вёрстка на 390 px под мобильной шапкой и над полосой черновика,
 // доступность в обеих темах. Ответы сети не подменяются. После каждого теста окно
-// закрывается и перехват выключается; флаг слоя возвращается прежним.
-
-const layer = layerFlag();
+// закрывается и перехват выключается; после прогона подготовка убирается и черновик
+// сбрасывается.
 
 test.describe.configure({ mode: 'serial' });
 
@@ -95,7 +94,6 @@ test.beforeAll(async ({ browser }) => {
   // Хук работает под собственным таймаутом: на чистом стенде ensureDnsTarget берёт
   // секцию и маршрутизацию, создаёт группу и применяет (перезапуск ядра, опрос до T.save * 3)
   test.setTimeout(T.save * 8);
-  await layer.enable(browser);
   await restoreAll(browser);
   await withPanel(browser, async (page) => {
     await ensureDnsTarget(page, target);
@@ -107,13 +105,15 @@ test.afterEach(async ({ browser }) => {
 });
 
 test.afterAll(async ({ browser }) => {
-  // Уборка: откат окна, выключение перехвата, возврат подготовки (снова применение) и флага слоя
+  // Уборка: откат окна, выключение перехвата, возврат подготовки (снова применение), сброс
+  // черновика после простоя конвейера
   test.setTimeout(T.save * 10);
   await restoreAll(browser);
   await withPanel(browser, async (page) => {
     await releaseDnsTarget(page, target);
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
   });
-  await layer.restore(browser);
 });
 
 /** Страница, на которой API панели доступно из браузера (сессия и токен CSRF). */

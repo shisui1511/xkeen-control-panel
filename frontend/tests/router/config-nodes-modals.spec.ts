@@ -9,29 +9,37 @@ import {
   addToDraft,
   api,
   installedKernels,
-  layerFlag,
   listSources,
   nodeLink,
   randomPort,
-  resetDraft
+  resetDraft,
+  waitApplyIdle,
+  withPanel
 } from './lib/nodes-api';
 
 // Модали вкладки «Узлы» настоящей панели (фаза 145, план 15): правка узла «Моих узлов» по
 // исходному тексту, настройки подписки, диагностика ответа провайдера по ядрам, удаление с
 // подтверждением. Ответы сети не подменяются: черновик наполняют настоящие маршруты
 // предпросмотра и добавления (данные — ссылки из internal/nodes/testdata/links, подписка —
-// адрес зарезервированной зоны .invalid, провайдера не затрагивает). Флаг слоя включается
-// на время прогона и возвращается прежним, черновик сбрасывается.
+// адрес зарезервированной зоны .invalid, провайдера не затрагивает). Черновик сбрасывается
+// до и после прогона.
 // Исключение — сценарий «notices: отказ провайдера по обоим ядрам»: он берёт настоящую
-// подписку стенда (D-36) и отправляет провайдеру фиксированный чужой HWID (решение
-// владельца 15.10.2026), поэтому идёт только на одной паре цель/ядро (REJECT_PAIR).
-
-const layer = layerFlag();
+// подписку стенда (XCP_RT_SUBSCRIPTION_URL из локального конфига целей) и отправляет
+// провайдеру фиксированный чужой HWID (решение владельца 15.10.2026), поэтому идёт только на
+// одной паре цель/ядро (REJECT_PAIR).
 
 test.describe.configure({ mode: 'serial' });
 
-test.beforeAll(async ({ browser }) => layer.enable(browser));
-test.afterAll(async ({ browser }) => layer.restore(browser));
+test.beforeAll(async ({ browser }) => {
+  await withPanel(browser, (page) => resetDraft(page));
+});
+
+test.afterAll(async ({ browser }) => {
+  await withPanel(browser, async (page) => {
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
+  });
+});
 
 async function openNodes(page: Page, width = 1440): Promise<void> {
   await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
@@ -812,16 +820,12 @@ test(
       'нужны оба ядра: уведомления приходят по одному на ядро'
     );
 
-    // адрес подписки старого слоя (D-36): только в переменной, в вывод не попадает
-    const old = await api(page, 'GET', '/api/subscriptions');
-    const oldRaw = old.data as unknown;
-    const oldList = (
-      Array.isArray(oldRaw)
-        ? oldRaw
-        : ((oldRaw as { subscriptions?: unknown[] } | null)?.subscriptions ?? [])
-    ) as { url?: string }[];
-    const subUrl = oldList.map((s) => s.url ?? '').find((u) => /^https?:\/\//.test(u));
-    test.skip(!subUrl, 'на стенде нет подписки старого слоя (D-36)');
+    // адрес настоящей подписки стенда: только в переменной, в вывод не попадает
+    const subUrl = process.env.XCP_RT_SUBSCRIPTION_URL ?? '';
+    test.skip(
+      !/^https?:\/\//.test(subUrl),
+      'адрес подписки стенда не задан (XCP_SUBSCRIPTION_URL в конфиге целей)'
+    );
 
     const before = new Set((await listSources(page)).map((s) => s.id));
     const preview = await api(page, 'POST', '/api/configlayer/sources/preview', {
