@@ -292,38 +292,6 @@ func (s *MihomoProfileService) listLocked() (*MihomoProfilesState, error) {
 	return state, nil
 }
 
-// Adopt converts a plain config.yaml into the profile layout: the file moves
-// to profiles/<name>.yaml and config.yaml becomes a symlink to it. The
-// running core keeps working since the content is unchanged.
-func (s *MihomoProfileService) Adopt(name string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if isReservedProfileName(name) {
-		return ErrProfileReserved
-	}
-	if _, err := s.activeProfile(); err == nil {
-		return nil
-	}
-	dst, err := s.profilePath(name)
-	if err != nil {
-		return err
-	}
-	if _, err := os.Stat(dst); err == nil {
-		return ErrProfileExists
-	}
-	data, err := os.ReadFile(s.configPath())
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(s.profilesDir(), 0o755); err != nil {
-		return err
-	}
-	if err := utils.AtomicWriteFile(dst, data, 0o600); err != nil {
-		return err
-	}
-	return s.pointConfigTo(name)
-}
-
 // Create adds a profile: an empty minimal config, a copy of the active
 // config (from == "") or a copy of another profile.
 func (s *MihomoProfileService) Create(name, from string, empty bool) error {
@@ -344,7 +312,7 @@ func (s *MihomoProfileService) Create(name, from string, empty bool) error {
 	case empty:
 		data = []byte(profileMinimalConfig)
 	case from == "":
-		// Follows the symlink, so this also works before adoption.
+		// Follows the symlink, so this also works for a plain config.yaml.
 		if data, err = os.ReadFile(s.configPath()); err != nil {
 			return err
 		}
