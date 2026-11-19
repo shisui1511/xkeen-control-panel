@@ -12,6 +12,10 @@
  *    входят в kernelGatedPrefixes; генераторы, хук фиксации и колбэк «дрейф решён»
  *    регистрируются до configLayer.Start(); Stop сервиса вызывается через defer
  *    раньше Stop слоя; установка ядра запускает и слой, и сервис источников.
+ * 3. Постоянный слой (фаза 151, CUT-01, CUT-02): api.SetConfigLayer(configLayer) идёт
+ *    сразу за configLayer.Start() и до sourcesSvc.Start(); среди опций слоя
+ *    (configlayer.Options) булевы предикаты без аргументов — только LAYER_BOOL_OPTIONS:
+ *    признака включения слоя нет, сервис источников всегда работает поверх слоя.
  *
  * Usage: node scripts/check-sources-api.js [--root <каталог>]
  */
@@ -162,6 +166,7 @@ const need = {
   committer: lineOf('sourcesSvc.CommitLive'),
   drift: lineOf('sourcesSvc.OnDriftResolved'),
   layerStart: lineOf('configLayer.Start()'),
+  setLayer: lineOf('api.SetConfigLayer(configLayer)'),
   svcStart: lineOf('sourcesSvc.Start()'),
   layerStop: lineOf('defer stops.run("config-layer", configLayer.Stop)'),
   svcStop: lineOf('defer stops.run("sources", sourcesSvc.Stop)')
@@ -178,7 +183,27 @@ if (Object.values(need).every((v) => v > 0)) {
   order('committer', 'layerStart', 'фиксатор sourcesSvc.CommitLive должен регистрироваться до configLayer.Start()');
   order('drift', 'layerStart', 'колбэк sourcesSvc.OnDriftResolved должен регистрироваться до configLayer.Start()');
   order('layerStart', 'svcStart', 'sourcesSvc.Start() должен идти после configLayer.Start()');
+  if (need.setLayer !== need.layerStart + 1) {
+    errors.push(`${MAIN}: api.SetConfigLayer(configLayer) должен идти сразу за configLayer.Start() — слой подключён всегда`);
+  }
+  order('setLayer', 'svcStart', 'api.SetConfigLayer(configLayer) должен идти до sourcesSvc.Start()');
   order('layerStop', 'svcStop', 'шаг остановки sources должен идти после шага config-layer (defer: сервис останавливается раньше слоя)');
+}
+
+// --- 3. Постоянный слой ------------------------------------------------------
+
+const LAYER_GO = 'internal/services/configlayer/layer.go';
+const LAYER_BOOL_OPTIONS = ['DevMode', 'MihomoAPIReady'];
+const options = /^type Options struct \{\n([\s\S]*?)^\}/m.exec(read(LAYER_GO));
+if (!options) {
+  errors.push(`${LAYER_GO}: не найдена структура Options`);
+} else {
+  const preds = [...options[1].matchAll(/^\t(\w+)\s+func\(\)\s+bool\s*$/gm)].map((m) => m[1]);
+  if (JSON.stringify([...preds].sort()) !== JSON.stringify([...LAYER_BOOL_OPTIONS].sort())) {
+    errors.push(
+      `${LAYER_GO}: булевы предикаты Options [${preds}], допустимы только [${LAYER_BOOL_OPTIONS}] — у постоянного слоя нет признака включения`
+    );
+  }
 }
 
 const kernel = read('internal/handlers/kernel.go');

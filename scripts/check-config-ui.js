@@ -10,7 +10,7 @@
  * 2. Событие sources: configLayer.ts слушает его в одном SSE-потоке и отдаёт
  *    onLayerEvent; configSources.ts подписывается; configLayer.ts не импортирует
  *    configSources.ts (нет цикла); configSources.ts не импортируется вне
- *    config-раздела (при выключенном флаге запросов источников нет).
+ *    config-раздела (запросы источников идут только из раздела «Конфигурация»).
  * 3. Уведомления: бейдж меню считается от badgeTotal (изменения + видимые
  *    уведомления); ConfigNotices не использует {@html}, ссылку кабинета проверяет
  *    через new URL по схемам http/https и ставит target=_blank с
@@ -39,8 +39,8 @@
  * 9. Менеджер geodata (план 146.1-07): интерфейсы configGeodata.ts совпадают по ключам с
  *    geodataContract.json; событие geodata слушается в одном SSE-потоке, клиент подписан
  *    на geodata и draft с дебаунсом 300 мс; configLayer.ts клиент не импортирует (нет
- *    цикла), а клиент не импортируется вне Config.svelte и components/config/ (при
- *    выключенном флаге запросов менеджера нет); у каждого кода из geodataErrorCodes.json
+ *    цикла), а клиент не импортируется вне Config.svelte и components/config/ (запросы
+ *    менеджера идут только из раздела); у каждого кода из geodataErrorCodes.json
  *    есть текст cfg.geo.err.<код> в ru и en, у ключей _one есть _few и _many; ключи D-35
  *    и D-36 на месте; у каждой причины сбоя (константы runReason*, removeReason*,
  *    jqReason*, Reason* пакета geodata и коды незавершённого удаления) есть текст
@@ -50,8 +50,8 @@
  *    в configLayer.ts (план 147-11) совпадают по ключам с
  *    coresContract.json; клиент подписан на draft и routing слоя (files и apply
  *    приходят в снимок) с дебаунсом 300 мс; configLayer.ts клиент не импортирует (нет
- *    цикла), а клиент не импортируется вне Config.svelte и components/config/ (при
- *    выключенном флаге запросов секций нет).
+ *    цикла), а клиент не импортируется вне Config.svelte, components/config/ и блока
+ *    access-лога на «Логах» (запросы секций идут только оттуда).
  *
  * 11. Перехват DNS (план 148-09): интерфейсы configDns.ts (Dns*) совпадают по ключам с
  *    dnsContract.json (DNS*); configLayer.ts слушает событие dns в одном SSE-потоке, знает
@@ -78,8 +78,9 @@
  *    (не-type импорт) подключают только Config.svelte, Dashboard.svelte,
  *    components/dashboard/SetupChecklistCard.svelte и components/config/**
  *    (константа WIZARD_CLIENT_EXTRA); в Dashboard.svelte прежней карточки <QuickstartCard
- *    нет, а <SetupChecklistCard рисуется всегда, когда сервер отвечает card_visible: её
- *    условие не зависит от флага слоя (фаза 151, CUT-01); в SetupChecklistCard и components/config/setup/
+ *    нет, а <SetupChecklistCard рисуется, когда сервер отвечает card_visible: ближайшее
+ *    условие — ровно $wizardView?.card_visible, а охватывающие условия читают только
+ *    допустимые имена SETUP_CARD_ROOTS (фаза 151, CUT-01); в SetupChecklistCard и components/config/setup/
  *    нет {@html}; configSubTab.ts экспортирует isConfigSetupHash, а CONFIG_SUBTABS не
  *    содержит setup; ключи входа в мастер и карточки есть в ru и en.
  *
@@ -89,16 +90,21 @@
  *    знает событие proxies (EVENT_NAMES и HandlerEvent), configProxies.ts подписан на него с
  *    дебаунсом PROXIES_DEBOUNCE_MS = 300 и второго EventSource не открывает; в Dashboard.svelte
  *    ближайшее условие {#if …}/{:else if …} перед ленивым импортом ProxiesRuntime.svelte —
- *    ровно currentTab === 'proxies' (страница групп без флага), прежняя страница Proxies
- *    напрямую не рисуется, а условие плашки ApiOffline исключает 'proxies' без флага; в
+ *    ровно currentTab === 'proxies' (страница групп панели — единственная), охватывающие
+ *    условия читают только PROXIES_PAGE_ROOTS, прежняя страница Proxies напрямую не
+ *    рисуется, а ближайшее условие плашки ApiOffline — только сравнения currentTab !== '…'
+ *    с 'proxies' среди них, охватывающие — только API_OFFLINE_ROOTS; в
  *    ProxiesRuntime.svelte и components/proxies/*.svelte нет {@html}, у ключей $tp этих
  *    файлов есть формы _one/_few/_many в ru и en.
  *
- * 16. Единственные входы без флага слоя (фаза 151, CUT-01, D-10, D-11): в Dashboard.svelte,
- *    Sidebar.svelte и BottomDock.svelte нет сторов флага слоя; в меню ровно один пункт
- *    #/config и нет ссылок на прежние адреса (#/editor, #/dat, #/constructor, #/mihomo-gen,
+ * 16. Постоянный слой и единственные входы (фаза 151, CUT-01, D-10, D-11): Dashboard.svelte
+ *    запускает поток слоя в onMount без условий (startConfigLayer, на выходе
+ *    stopConfigLayer); ни один .ts/.svelte клиента не читает поле config_layer настроек,
+ *    configLayer.ts не обращается к /api/settings; в меню ровно один пункт #/config и нет
+ *    ссылок на прежние адреса (#/editor, #/dat, #/constructor, #/mihomo-gen,
  *    #/subscriptions); в нижней панели нет вкладки editor; клиент не обращается к
- *    /api/settings/config-layer, а «Настройки» не держат переключатель слоя.
+ *    /api/settings/config-layer, «Настройки» не держат переключатель слоя, а карточка
+ *    диагностики слоя охвачена только условиями вкладки (DEV_DIAG_ROOTS).
  *
  * Usage: node scripts/check-config-ui.js [--root <каталог>]
  */
@@ -208,7 +214,7 @@ for (const [type, spec] of Object.entries(contract)) {
   }
 }
 
-// --- 2. Событие sources, цикл импортов, граница флага ------------------------
+// --- 2. Событие sources, цикл импортов, граница клиента ----------------------
 
 const layerTs = read(LAYER_TS);
 expect(
@@ -248,8 +254,8 @@ expect(
   `${SOURCES_TS}: открывает собственный поток событий`,
 );
 
-// Клиент источников подключают только компоненты раздела «Конфигурация»: иначе при
-// выключенном флаге слоя пошли бы запросы /api/configlayer/sources
+// Клиент источников подключают только компоненты раздела «Конфигурация»: запросы
+// /api/configlayer/sources идут только из раздела, а не из оболочки и других страниц
 // (import type стирается при сборке и запросов не делает)
 function walk(dir, out) {
   for (const ent of fs.readdirSync(path.join(root, dir), {
@@ -269,7 +275,7 @@ for (const file of walk(SRC, [])) {
     !file.startsWith(`${SRC}/components/config/`)
   ) {
     errors.push(
-      `${file}: импортирует configSources вне components/config/ (запросы источников при выключенном флаге)`,
+      `${file}: импортирует configSources вне components/config/ (запросы источников вне раздела «Конфигурация»)`,
     );
   }
 }
@@ -1101,8 +1107,8 @@ expect(
   `${ROUTING_TS}: нет loadRouting или адреса /api/configlayer/routing`,
 );
 
-// Клиент маршрутизации подключают только Config.svelte и components/config/: иначе при
-// выключенном флаге слоя пошли бы запросы /api/configlayer/routing (T-146-51)
+// Клиент маршрутизации подключают только Config.svelte и components/config/: запросы
+// /api/configlayer/routing идут только из раздела (T-146-51)
 for (const file of walk(SRC, [])) {
   if (file === ROUTING_TS) continue;
   const text = read(file);
@@ -1112,7 +1118,7 @@ for (const file of walk(SRC, [])) {
     !file.startsWith(`${SRC}/components/config/`)
   ) {
     errors.push(
-      `${file}: импортирует configRouting вне Config.svelte и components/config/ (запросы маршрутизации при выключенном флаге)`,
+      `${file}: импортирует configRouting вне Config.svelte и components/config/ (запросы маршрутизации вне раздела «Конфигурация»)`,
     );
   }
 }
@@ -1301,8 +1307,8 @@ for (const id of [
   expect(layerTs.includes(id), `${LAYER_TS}: нет идентификатора уведомления ${id}`);
 }
 
-// Клиент менеджера подключают только Config.svelte и components/config/: иначе при
-// выключенном флаге слоя пошли бы запросы /api/configlayer/geodata
+// Клиент менеджера подключают только Config.svelte и components/config/: запросы
+// /api/configlayer/geodata идут только из раздела
 for (const file of walk(SRC, [])) {
   if (file === GEODATA_TS) continue;
   const text = read(file);
@@ -1312,7 +1318,7 @@ for (const file of walk(SRC, [])) {
     !file.startsWith(`${SRC}/components/config/`)
   ) {
     errors.push(
-      `${file}: импортирует configGeodata вне Config.svelte и components/config/ (запросы менеджера при выключенном флаге)`,
+      `${file}: импортирует configGeodata вне Config.svelte и components/config/ (запросы менеджера вне раздела «Конфигурация»)`,
     );
   }
 }
@@ -1468,7 +1474,7 @@ expect(
   `${LAYER_TS}: LayerSnapshot не содержит поле cores: LayerCoresSnapshot`,
 );
 
-// События слоя и граница флага: клиент подписан на draft и routing (files и apply
+// События слоя и граница клиента: клиент подписан на draft и routing (files и apply
 // приходят в снимок слоя) с дебаунсом 300 мс, собственного потока нет; обратного импорта
 // нет, клиент подключают только Config.svelte и components/config/
 for (const ev of ["draft", "routing"]) {
@@ -1495,8 +1501,8 @@ expect(
   !/from '\.\/configCores'/.test(layerTs),
   `${LAYER_TS}: импортирует configCores (цикл импортов)`,
 );
-// Исключение: блок access-лога на «Логах» вызывает setAccessLog только при включённом слое
-// (при выключенном идёт прежний путь без запросов секций)
+// Исключение: блок access-лога на «Логах» пишет режим журнала через секции ядер
+// (setAccessLog), других запросов секций со страницы «Логи» нет
 const CORES_CLIENT_EXTRA = new Set([`${SRC}/components/logs/AccessLogControl.svelte`]);
 for (const file of walk(SRC, [])) {
   if (file === CORES_TS || CORES_CLIENT_EXTRA.has(file)) continue;
@@ -1507,7 +1513,7 @@ for (const file of walk(SRC, [])) {
     !file.startsWith(`${SRC}/components/config/`)
   ) {
     errors.push(
-      `${file}: импортирует configCores вне Config.svelte и components/config/ (запросы секций при выключенном флаге)`,
+      `${file}: импортирует configCores вне Config.svelte и components/config/ (запросы секций вне раздела «Конфигурация»)`,
     );
   }
 }
@@ -1677,7 +1683,7 @@ expect(
 );
 
 // Клиент перехвата подключают только раздел «Конфигурация», баннер окна, оболочка и
-// настройки: иначе при выключенном флаге слоя пошли бы запросы /api/configlayer/dns
+// настройки: запросы /api/configlayer/dns идут только из этих мест
 const DNS_CLIENT_EXTRA = new Set([
   `${SRC}/components/DnsConfirmBanner.svelte`,
   `${SRC}/Dashboard.svelte`,
@@ -1688,7 +1694,7 @@ for (const file of walk(SRC, [])) {
   if (file.startsWith(`${SRC}/components/config/`)) continue;
   if (/^\s*import(?!\s+type\b)[^;]*?from '[^']*\/configDns'/m.test(read(file))) {
     errors.push(
-      `${file}: импортирует configDns вне components/config/, DnsConfirmBanner, Dashboard и Settings (запросы перехвата при выключенном флаге)`,
+      `${file}: импортирует configDns вне components/config/, DnsConfirmBanner, Dashboard и Settings (запросы перехвата вне допустимых мест)`,
     );
   }
 }
@@ -1872,8 +1878,7 @@ const SETUP_DIR = `${SRC}/components/config/setup`;
 const SUBTAB_TS = `${SRC}/lib/configSubTab.ts`;
 
 // (1) Клиент мастера подключают только раздел, страница мастера, дашборд и карточка: на
-// дашборде нет клиентов источников и секций, а при выключенном флаге запросов нет
-// (T-149.1-23)
+// дашборде нет клиентов источников и секций (T-149.1-23)
 const WIZARD_CLIENT_EXTRA = new Set([
   `${SRC}/Config.svelte`,
   DASHBOARD,
@@ -1892,7 +1897,8 @@ for (const file of walk(SRC, [])) {
 }
 
 // (2) Карточка дашборда (149 D-27, фаза 151): прежней карточки Mihomo нет, «Настроить VPN»
-// ждёт только card_visible ответа сервера (без мигания) и не зависит от флага слоя
+// ждёт только card_visible ответа сервера (без мигания); слой постоянный, поэтому
+// охватывающие карточку условия читают только перечисленные ниже имена
 function conditionBefore(text, tag) {
   const at = text.indexOf(tag);
   if (at < 0) return null;
@@ -1904,8 +1910,64 @@ function conditionBefore(text, tag) {
   }
   return cond;
 }
-const FLAG_STORE_RE =
-  /\$?\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed)\b/;
+// Стек открытых блоков разметки перед tag: для {#if} — все условия ветвей до места
+// тега ({:else} не добавляет условия), для {#each}/{#await}/{#key} — без условий.
+function enclosingConditions(text, tag) {
+  const at = text.indexOf(tag);
+  if (at < 0) return null;
+  const stack = [];
+  for (const m of text
+    .slice(0, at)
+    .matchAll(/\{([#:/])(\w+)(?:\s([^}]*))?\}/g)) {
+    const [, sigil, kind, expr = ""] = m;
+    if (sigil === "#") {
+      stack.push(kind === "if" ? [expr.trim()] : []);
+    } else if (sigil === "/") {
+      stack.pop();
+    } else if (stack.length > 0 && kind === "else" && /^if\s/.test(expr)) {
+      stack[stack.length - 1].push(expr.replace(/^if\s+/, "").trim());
+    }
+  }
+  return stack.flat();
+}
+// Корневые имена выражения (без свойств после «.» и «?.», строк и литералов).
+function conditionRoots(cond) {
+  const bare = cond.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`/g, "''");
+  const roots = new Set();
+  for (const m of bare.matchAll(/(^|[^.\w$])(\$?[A-Za-z_]\w*)/g)) {
+    if (!/^(?:true|false|null|undefined|typeof)$/.test(m[2])) roots.add(m[2]);
+  }
+  return roots;
+}
+// Охватывающие tag условия file читают только имена из allowed; иначе — ошибка с
+// перечнем лишних имён (новый признак видимости требует правки контракта).
+function expectRootsWithin(file, text, tag, allowed, why) {
+  const conds = enclosingConditions(text, tag);
+  if (conds === null) {
+    errors.push(`${file}: нет ${tag} (${why})`);
+    return;
+  }
+  const extra = new Set();
+  for (const cond of conds) {
+    for (const name of conditionRoots(cond)) {
+      if (!allowed.has(name)) extra.add(name);
+    }
+  }
+  expect(
+    extra.size === 0,
+    `${file}: условия вокруг ${tag} читают ${[...extra].join(", ")} — допустимы только ${[...allowed].join(", ")} (${why})`,
+  );
+}
+const SETUP_CARD_ROOTS = new Set(["conflictGateActive", "currentTab", "$wizardView"]);
+const PROXIES_PAGE_ROOTS = new Set(["conflictGateActive", "currentTab"]);
+const API_OFFLINE_ROOTS = new Set([
+  "mihomoDependentTabs",
+  "currentTab",
+  "$capabilities",
+  "$isConflict",
+  "$isServiceRestarting",
+]);
+const DEV_DIAG_ROOTS = new Set(["activeTab"]);
 const dashText = stripCommentsForCalls(read(DASHBOARD));
 expect(
   !/<QuickstartCard\b/.test(dashText),
@@ -1918,14 +1980,17 @@ if (setupCond === null) {
   );
 } else {
   expect(
-    /\bcard_visible\b/.test(setupCond),
-    `${DASHBOARD}: ветка <SetupChecklistCard не ждёт card_visible ответа сервера (D-06, D-11, защита от мигания)`,
-  );
-  expect(
-    !FLAG_STORE_RE.test(setupCond),
-    `${DASHBOARD}: ветка <SetupChecklistCard зависит от флага слоя — карточка должна быть доступна всегда (CUT-01)`,
+    /^\s*\$wizardView\?\.card_visible\s*$/.test(setupCond),
+    `${DASHBOARD}: ветка <SetupChecklistCard не ровно $wizardView?.card_visible — карточка ждёт только ответа сервера (D-06, D-11, CUT-01)`,
   );
 }
+expectRootsWithin(
+  DASHBOARD,
+  dashText,
+  "<SetupChecklistCard",
+  SETUP_CARD_ROOTS,
+  "карточка доступна при постоянном слое, CUT-01",
+);
 
 // (3) Карточка и страница мастера — только текстовые узлы (T-149.1-22)
 const setupFiles = [SETUP_CARD];
@@ -1993,8 +2058,8 @@ const PROXY_ADAPTER_TS = `${SRC}/lib/proxyRuntimeAdapter.ts`;
 const PROXIES_PAGE = `${SRC}/ProxiesRuntime.svelte`;
 const PROXIES_DIR = `${SRC}/components/proxies`;
 
-// (а) Клиент «Прокси» и адаптер подключают только страница слоя и её компоненты: без
-// флага Dashboard рисует прежнюю страницу, и запросов /api/configlayer/proxies нет
+// (а) Клиент «Прокси» и адаптер подключают только страница слоя и её компоненты:
+// запросы /api/configlayer/proxies идут только со страницы «Прокси»
 // (import type стирается при сборке и запросов не делает)
 for (const file of walk(SRC, [])) {
   if (file === PROXIES_TS || file === PROXY_ADAPTER_TS || file === PROXIES_PAGE) continue;
@@ -2008,7 +2073,7 @@ for (const file of walk(SRC, [])) {
       ).test(text)
     ) {
       errors.push(
-        `${file}: импортирует ${mod} вне ProxiesRuntime.svelte и components/proxies/ (запросы страницы «Прокси» при выключенном флаге, 15. Страница «Прокси»)`,
+        `${file}: импортирует ${mod} вне ProxiesRuntime.svelte и components/proxies/ (запросы страницы «Прокси» вне её компонентов, 15. Страница «Прокси»)`,
       );
     }
   }
@@ -2039,8 +2104,9 @@ expect(
   `${PROXIES_TS}: открывает свой EventSource — события идут общим потоком слоя (T-150-29)`,
 );
 
-// (в) Выбор страницы в Dashboard: «Прокси» — всегда страница групп панели, без флага;
-// прежняя страница Proxies напрямую из оболочки не рисуется (фаза 151, CUT-01)
+// (в) Выбор страницы в Dashboard: «Прокси» — всегда страница групп панели, охваченная
+// только условиями вкладки и конфликта ядер; прежняя страница Proxies напрямую из
+// оболочки не рисуется (фаза 151, CUT-01)
 const proxiesCond = conditionBefore(dashText, "import('./ProxiesRuntime.svelte')");
 if (proxiesCond === null) {
   errors.push(
@@ -2052,34 +2118,57 @@ if (proxiesCond === null) {
     `${DASHBOARD}: ветка ProxiesRuntime не выбирается одной вкладкой currentTab === 'proxies' (CUT-01)`,
   );
 }
+expectRootsWithin(
+  DASHBOARD,
+  dashText,
+  "import('./ProxiesRuntime.svelte')",
+  PROXIES_PAGE_ROOTS,
+  "страница групп панели — единственная страница «Прокси», CUT-01",
+);
 expect(
   !/<Proxies\b/.test(dashText) && !dashText.includes("import('./Proxies.svelte')"),
   `${DASHBOARD}: оболочка рисует прежнюю страницу Proxies мимо ProxiesRuntime (CUT-01)`,
 );
 
 // (г) Плашка ApiOffline на «Прокси» не рисуется: страница объясняет состояние ядра своей
-// плашкой (D-01…D-03); условие не зависит от флага слоя
+// плашкой (D-01…D-03); ближайшее условие — только исключения вкладок, охватывающие —
+// только состояние ядра и вкладки
 const bannerCond = conditionBefore(dashText, "<ApiOffline");
 expect(
   bannerCond !== null &&
-    /currentTab\s*!==\s*'proxies'/.test(bannerCond) &&
-    !FLAG_STORE_RE.test(bannerCond),
-  `${DASHBOARD}: условие плашки ApiOffline не исключает «Прокси» без флага (currentTab !== 'proxies', 15. Страница «Прокси»)`,
+    /^\s*currentTab\s*!==\s*'[\w-]+'(?:\s*&&\s*currentTab\s*!==\s*'[\w-]+')*\s*$/.test(bannerCond) &&
+    /currentTab\s*!==\s*'proxies'/.test(bannerCond),
+  `${DASHBOARD}: условие плашки ApiOffline не сводится к исключениям вкладок с currentTab !== 'proxies' (15. Страница «Прокси»)`,
+);
+expectRootsWithin(
+  DASHBOARD,
+  dashText,
+  "<ApiOffline",
+  API_OFFLINE_ROOTS,
+  "плашка зависит только от ядра и вкладки, 15. Страница «Прокси»",
 );
 
-// (16) Единственные входы без флага слоя (фаза 151, CUT-01, D-10, D-11)
+// (16) Постоянный слой и единственные входы (фаза 151, CUT-01, D-10, D-11)
 const SIDEBAR = `${SRC}/components/Sidebar.svelte`;
 const DOCK = `${SRC}/components/BottomDock.svelte`;
 const sidebarText = stripCommentsForCalls(sidebar);
 const dockText = stripCommentsForCalls(read(DOCK));
-for (const [file, text] of [
-  [DASHBOARD, dashText],
-  [SIDEBAR, sidebarText],
-  [DOCK, dockText],
-]) {
+// Поток слоя оболочка открывает при монтировании без условий и закрывает при выходе
+expect(
+  /\bonMount\(\s*\(\)\s*=>\s*\{\s*startConfigLayer\(\);\s*return\s*\(\)\s*=>\s*stopConfigLayer\(\);?\s*\}\s*\)/.test(
+    dashText,
+  ),
+  `${DASHBOARD}: onMount не начинается безусловным startConfigLayer() с возвратом stopConfigLayer() — слой постоянный (CUT-01)`,
+);
+expect(
+  !/['"`]\/api\/settings['"`?]/.test(stripCommentsForCalls(layerTs)),
+  `${LAYER_TS}: клиент слоя читает /api/settings — состояние слоя не зависит от настроек панели (CUT-01)`,
+);
+for (const file of walk(SRC, [])) {
+  if (!/\.(?:ts|svelte)$/.test(file)) continue;
   expect(
-    !FLAG_STORE_RE.test(text),
-    `${file}: оболочка читает флаг слоя — слой доступен всегда (CUT-01)`,
+    !/\bconfig_layer\b/.test(stripCommentsForCalls(read(file))),
+    `${file}: читает поле config_layer настроек — у постоянного слоя его нет (CUT-01)`,
   );
 }
 expect(
@@ -2105,10 +2194,15 @@ expect(
   `${SRC}/Settings.svelte: переключатель слоя «Конфигурация» остался (D-09)`,
 );
 expect(
-  /<DevDiagnostics\s*\/>/.test(settingsText) &&
-    conditionBefore(settingsText, "<DevDiagnostics") !== null &&
-    !FLAG_STORE_RE.test(conditionBefore(settingsText, "<DevDiagnostics")),
-  `${SRC}/Settings.svelte: карточка диагностики слоя скрыта флагом или пропала (D-19)`,
+  /<DevDiagnostics\s*\/>/.test(settingsText),
+  `${SRC}/Settings.svelte: карточка диагностики слоя пропала (D-19)`,
+);
+expectRootsWithin(
+  `${SRC}/Settings.svelte`,
+  settingsText,
+  "<DevDiagnostics",
+  DEV_DIAG_ROOTS,
+  "карточка диагностики видна на своей вкладке без иных условий, D-19",
 );
 for (const file of walk(SRC, [])) {
   if (!/\.(?:ts|svelte)$/.test(file)) continue;
