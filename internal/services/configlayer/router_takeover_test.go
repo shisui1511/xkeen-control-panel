@@ -150,9 +150,7 @@ type rtTakeoverEnv struct {
 	rev    int64
 	hashes map[string]string
 	link   string
-	// enabled — флаг config_layer окружения; noMihomo скрывает бинарник Mihomo
-	// (ядро «ещё не установлено»).
-	enabled  atomic.Bool
+	// noMihomo скрывает бинарник Mihomo (ядро «ещё не установлено»).
 	noMihomo atomic.Bool
 }
 
@@ -210,12 +208,9 @@ func rtNewTakeoverEnvKind(t *testing.T, plain bool) *rtTakeoverEnv {
 	dir := rtLiveDir(t)
 	roots, hashes, link := rtWriteTakeoverLayout(t, dir, plain)
 	e := &rtTakeoverEnv{gen: &rtTakeoverGen{}, roots: roots, hashes: hashes, link: link}
-	e.enabled.Store(true)
-
 	layer, err := New(Options{
 		DataDir: dir,
 		Roots:   roots,
-		Enabled: e.enabled.Load,
 		Binaries: func() Binaries {
 			if e.noMihomo.Load() {
 				return Binaries{Xray: rtRefreshXrayBin}
