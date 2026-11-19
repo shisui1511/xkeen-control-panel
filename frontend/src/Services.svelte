@@ -50,15 +50,12 @@
     type KernelName
   } from './lib/serviceControl';
   import { kernelLabel } from './lib/kernelState';
-  import { editorHash } from './lib/editorRoute';
-  import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
+  import { constructorHash, editorHash } from './lib/editorRoute';
   import XKeenSettingsCard from './components/xkeen/XKeenSettingsCard.svelte';
   import XKeenInstallCard from './components/xkeen/XKeenInstallCard.svelte';
   import Icon from './lib/components/Icon.svelte';
 
   let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
-
-  let showMihomoMigrateModal = $state(false);
 
   interface Kernel extends KernelLike {
     name: string;
@@ -1354,7 +1351,7 @@
           {#if activeKernel === 'mihomo' && $capabilities?.mihomo?.is_insecure_lan}
             <button
               class="btn btn-warning-soft"
-              onclick={() => (showMihomoMigrateModal = true)}
+              onclick={() => (window.location.hash = constructorHash())}
               title={$t('mihomo.migrate_banner_body')}
             >
               ⚠ {$t('mihomo.controller_mode_insecure')}
@@ -1922,16 +1919,6 @@
     </Section>
   </div>
 </div>
-
-<MihomoSocketMigrateModal
-  bind:open={showMihomoMigrateModal}
-  onclose={() => (showMihomoMigrateModal = false)}
-  onsuccess={() => {
-    fetchStatus();
-    fetchKernels();
-    fetchCapabilities();
-  }}
-/>
 
 <style>
   .no-api-note {

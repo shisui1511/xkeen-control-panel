@@ -19,7 +19,7 @@
   } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { notifyApplyOutcome, type ApplyResult } from './lib/serviceApply';
-  import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
+  import { constructorHash } from './lib/editorRoute';
   import { capsuleConfigStore, updateCapsuleConfig } from './lib/capsuleSettings';
   import DevDiagnostics from './components/config/DevDiagnostics.svelte';
   import PingTargetSettingsCard from './components/PingTargetSettingsCard.svelte';
@@ -46,7 +46,6 @@
 
   let { onSwitchTab }: { onSwitchTab?: (tab: string) => void } = $props();
 
-  let showMihomoMigrateModal = $state(false);
   let checkingConnection = $state(false);
   let secretVisible = $state(false);
 
@@ -1404,7 +1403,7 @@
                   >
                   <button
                     class="btn btn-warning btn-sm"
-                    onclick={() => (showMihomoMigrateModal = true)}
+                    onclick={() => (window.location.hash = constructorHash())}
                   >
                     {$t('mihomo.migrate_btn')}
                   </button>
@@ -1756,12 +1755,6 @@
     {/if}
   </div>
 </div>
-
-<MihomoSocketMigrateModal
-  bind:open={showMihomoMigrateModal}
-  onclose={() => (showMihomoMigrateModal = false)}
-  onsuccess={recheckConnection}
-/>
 
 <style>
   /* Список разделов на телефоне: одна карточка, строки с иконкой, описанием
