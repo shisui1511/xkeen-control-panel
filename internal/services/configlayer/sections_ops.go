@@ -230,7 +230,7 @@ func (p *Pipeline) planCores(src Sections, actual CoresState, routing *RoutingOp
 	if kernelInScope(KernelXray, installed, req.Kernel) && (taking || releasing) {
 		var scans map[string]XraySectionScan
 		if taking {
-			files, err := ScanXrayKeyFiles(p.d.Roots.Xray, p.d.ForeignOwned)
+			files, err := ScanXrayKeyFiles(p.d.Roots.Xray)
 			if err != nil {
 				return nil, &BuildError{Issues: []BuildIssue{{Key: RoutingSection, Code: IssueRoutingScanFailed, Detail: err.Error()}}}
 			}

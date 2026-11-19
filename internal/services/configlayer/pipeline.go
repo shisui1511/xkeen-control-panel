@@ -817,7 +817,7 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 		// Чужой файл с ключом взятой секции блокирует запуск, который эту секцию
 		// держит (managed); запуск с managed=false — «Отпустить» — не блокируется.
 		if blocked == 0 {
-			if sd := sectionsDrift(p.d.Roots, snap.Cores, installed, req.Kernel, p.d.ForeignOwned); sectionDriftBlocks(src, sd) {
+			if sd := sectionsDrift(p.d.Roots, snap.Cores, installed, req.Kernel); sectionDriftBlocks(src, sd) {
 				blocked = len(sd)
 			}
 		}
@@ -932,7 +932,7 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 		// горячей перезагрузки Mihomo (D-16): правила XKeen пересобираются только им.
 		// Тот же расчёт, что и у объявления в снимке; на переходе владения
 		// сравнивается значение по ту сторону перехода (G-147-3).
-		base := restartBase(p.d.Roots, snap, src, installed, p.d.ForeignOwned)
+		base := restartBase(p.d.Roots, snap, src, installed)
 		plan.FullRestart = fullRestartOf(RestartReasons(snap.Applied, src, base))
 	}
 	if err == nil && req.ForceFullRestart {

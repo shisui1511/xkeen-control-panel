@@ -519,7 +519,7 @@ func (l *Layer) evaluate(st State) FilesEvent {
 	// механизмом (кроме запуска с желаемым managed=false, D-06, D-07).
 	rd := routingDrift(l.opts.Roots, st.Routing, l.installed(), "", l.opts.ForeignOwned)
 	// То же для взятых секций Xray: чужой файл с их ключом входит в число дрейфа.
-	sd := sectionsDrift(l.opts.Roots, st.Cores, l.installed(), "", l.opts.ForeignOwned)
+	sd := sectionsDrift(l.opts.Roots, st.Cores, l.installed(), "")
 	return FilesEvent{Files: files, DriftCount: drift + len(rd) + len(sd), Routing: rd, Sections: sd}
 }
 
@@ -582,7 +582,7 @@ func (l *Layer) Snapshot() SnapshotView {
 func (l *Layer) restartNotes(st State) []RestartNote {
 	installed := l.installed()
 	out := []RestartNote{}
-	base := restartBase(l.opts.Roots, st, st.Draft, installed, l.opts.ForeignOwned)
+	base := restartBase(l.opts.Roots, st, st.Draft, installed)
 	for _, n := range RestartReasons(st.Applied, st.Draft, base) {
 		if (n.Kernel == KernelXray && installed.Xray) || (n.Kernel == KernelMihomo && installed.Mihomo) {
 			out = append(out, n)

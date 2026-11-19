@@ -989,7 +989,7 @@ func xrayRootFacts(root string) (apiInbound bool, facts XrayScanFacts) {
 		return m.api, cloneXrayFacts(m.facts)
 	}
 	scanMemo.mu.Unlock()
-	files, err := ScanXrayKeyFiles(root, nil)
+	files, err := ScanXrayKeyFiles(root)
 	if err != nil {
 		return false, XrayScanFacts{}
 	}

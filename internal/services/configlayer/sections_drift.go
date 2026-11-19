@@ -18,14 +18,14 @@ var ErrUnknownSection = errors.New("неизвестная секция")
 // оставить молча: появившиеся после взятия (их нет среди оставленных при взятии,
 // например 02_dns.json, возвращённый XKeen) и, кроме «Входящих» (они объединяются
 // по тегам), сортирующиеся после файла панели секции (Xray заменяет объект
-// поздним файлом целиком). Файлы старого слоя не учитываются: он переписывает их
-// сам. Ядро вне области scope или без бинарника не сверяется; нечитаемый
-// каталог дрейфом не считается.
-func sectionsDrift(roots Roots, st CoresState, installed InstalledKernels, scope string, foreignOwned func(kernel, rel string) bool) []RoutingDriftItem {
+// поздним файлом целиком). Своими слой считает только файлы панели; любой другой
+// файл с ключом секции — пользовательский. Ядро вне области scope или без
+// бинарника не сверяется; нечитаемый каталог дрейфом не считается.
+func sectionsDrift(roots Roots, st CoresState, installed InstalledKernels, scope string) []RoutingDriftItem {
 	if st.isEmpty() || !kernelInScope(KernelXray, installed, scope) {
 		return nil
 	}
-	files, err := ScanXrayKeyFiles(roots.Xray, foreignOwned)
+	files, err := ScanXrayKeyFiles(roots.Xray)
 	if err != nil {
 		return nil
 	}
@@ -41,7 +41,7 @@ func sectionsDrift(roots Roots, st CoresState, installed InstalledKernels, scope
 		}
 		panelFile := PanelXraySectionFile(id)
 		for _, f := range files {
-			if f.Legacy || sectionKeyCount(f, id) == 0 {
+			if sectionKeyCount(f, id) == 0 {
 				continue
 			}
 			if !left[f.Name] || (id != xraySectionInbounds && f.Name > panelFile) {
@@ -81,9 +81,6 @@ func sectionDriftBlocks(src Sections, items []RoutingDriftItem) bool {
 // «Отпустить»). Нет дрейфа секции — ErrNothingToReclaim. Всё под журналом и
 // откатом, как взятие; занятое применение — ErrApplyBusy или ErrKernelBusy.
 func (l *Layer) ReclaimSection(ctx context.Context, id string) error {
-	if !l.Enabled() {
-		return ErrDisabled
-	}
 	if !knownXraySection(id) {
 		return fmt.Errorf("%w: %q", ErrUnknownSection, id)
 	}
@@ -97,7 +94,7 @@ func (l *Layer) ReclaimSection(ctx context.Context, id string) error {
 	}
 	st := l.store.Snapshot()
 	var items []RoutingDriftItem
-	for _, it := range sectionsDrift(l.opts.Roots, st.Cores, l.installed(), KernelXray, l.opts.ForeignOwned) {
+	for _, it := range sectionsDrift(l.opts.Roots, st.Cores, l.installed(), KernelXray) {
 		if it.Section == id {
 			items = append(items, it)
 		}
@@ -105,7 +102,7 @@ func (l *Layer) ReclaimSection(ctx context.Context, id string) error {
 	if len(items) == 0 {
 		return ErrNothingToReclaim
 	}
-	files, err := ScanXrayKeyFiles(l.opts.Roots.Xray, l.opts.ForeignOwned)
+	files, err := ScanXrayKeyFiles(l.opts.Roots.Xray)
 	if err != nil {
 		return err
 	}
@@ -116,7 +113,7 @@ func (l *Layer) ReclaimSection(ctx context.Context, id string) error {
 	// Сначала проверяются все файлы: смешанный отказывает без единого изменения.
 	for _, it := range items {
 		f, ok := byName[it.File]
-		if !ok || f.Broken || f.Symlink || f.Legacy || sectionKeyCount(f, id) != len(f.Keys) || !safeRoutingName(f.Name) {
+		if !ok || f.Broken || f.Symlink || sectionKeyCount(f, id) != len(f.Keys) || !safeRoutingName(f.Name) {
 			return &ForeignMixedError{File: it.File}
 		}
 	}
