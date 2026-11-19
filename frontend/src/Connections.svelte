@@ -21,6 +21,7 @@
   import Select from './components/Select.svelte';
   import SegmentedControl from './components/SegmentedControl.svelte';
   import LiveIndicator from './components/LiveIndicator.svelte';
+  import ProxyRuntimeNotice from './components/proxies/ProxyRuntimeNotice.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
   import DownloadIcon from './lib/components/icons/Download.svelte';
   import WarningIcon from './lib/components/icons/Warning.svelte';
@@ -690,6 +691,10 @@
       ctaText={$t('ds.empty.mihomo_missing_cta')}
       oncta={() => onSwitchTab('services')}
     />
+  {:else if $capabilities?.mihomo?.no_socket}
+    <!-- Свой профиль без external-controller-unix (D-13): поток не открывается, по TCP
+         панель к ядру не ходит — подсказка вместо «Mihomo недоступен» -->
+    <ProxyRuntimeNotice viewState="no_socket" />
   {:else if $capabilities !== null && !$capabilities.mihomo.reachable && !$canLaunchMihomo}
     <!-- Работает другое ядро или API запущенного Mihomo молчит: запуск не предлагается,
          действие — переход на «Службы» -->

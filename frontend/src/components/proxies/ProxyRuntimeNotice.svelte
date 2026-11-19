@@ -1,17 +1,27 @@
 <script lang="ts">
   // Плашка состояния ядра страницы «Прокси» при слое (D-01…D-03) и строка причины
   // запасного замера по TLS (D-07). Одновременно — не больше одной плашки, по
-  // приоритету «свой профиль» → «Xray у пользователя» → «остановлено».
+  // приоритету «нет сокета» → «свой профиль» → «Xray у пользователя» → «остановлено».
+  // «Нет сокета» (D-13, S3) — не плашка, а пустое состояние вместо содержимого страницы:
+  // его же показывают «Подключения» и квоты, поэтому вид один на три страницы.
   import { t } from '../../i18n';
   import { showToast } from '../../stores';
   import { serviceAction } from '../../lib/serviceControl';
   import Button from '../Button.svelte';
+  import EmptyState from '../EmptyState.svelte';
   import Icon from '../../lib/components/Icon.svelte';
+  import WarningIcon from '../../lib/components/icons/Warning.svelte';
 
-  type NoticeKind = 'user_profile' | 'user_managed' | 'stopped';
+  type NoticeKind = 'no_socket' | 'user_profile' | 'user_managed' | 'stopped';
+
+  // Профили Mihomo живут на вкладке ядер «Конфигурации» (карточка «Профили»)
+  const PROFILES_HASH = '#/config/cores';
 
   interface Props {
-    /** Состояние вида рантайма (RuntimeView.state); null — плашки нет. */
+    /**
+     * Состояние вида рантайма (RuntimeView.state) или no_socket — у работающего профиля
+     * пользователя нет external-controller-unix; null — плашки нет.
+     */
     viewState?: string | null;
     /** Причина замера по TLS последней пачки; без неё строки нет. */
     fallbackReason?: string;
@@ -21,7 +31,7 @@
 
   let { viewState = null, fallbackReason = '', onstarted }: Props = $props();
 
-  const PRIORITY: NoticeKind[] = ['user_profile', 'user_managed', 'stopped'];
+  const PRIORITY: NoticeKind[] = ['no_socket', 'user_profile', 'user_managed', 'stopped'];
   const kind = $derived(PRIORITY.find((k) => k === viewState) ?? null);
 
   let starting = $state(false);
@@ -47,7 +57,18 @@
   }
 </script>
 
-{#if kind}
+{#if kind === 'no_socket'}
+  <div data-testid="mihomo-no-socket">
+    <EmptyState
+      title={$t('proxies.rt.no_socket_title')}
+      description={$t('proxies.rt.no_socket_desc')}
+      icon={WarningIcon}
+      ctaText={$t('proxies.rt.no_socket_cta')}
+      ctaVariant="secondary"
+      oncta={() => (window.location.hash = PROFILES_HASH)}
+    />
+  </div>
+{:else if kind}
   <div
     class="alert prn-alert"
     class:alert-warning={kind !== 'stopped'}
