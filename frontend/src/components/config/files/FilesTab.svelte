@@ -124,7 +124,6 @@
 
 <section class="files-tab" data-testid="files-tab" hidden={!active}>
   <Editor
-    embedded
     {active}
     onactivefile={(p, f) => {
       activePath = p;
