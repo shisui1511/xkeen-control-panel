@@ -171,6 +171,17 @@ export interface LayerCoresSnapshot {
   restart: LayerRestartNote[];
 }
 
+/**
+ * Несекретная сводка окна чистого старта (фаза 151, D-06): ждёт ли окно закрытия, путь
+ * архива старых данных и доступен ли список адресов. Сами адреса в снимок не входят: их
+ * отдаёт только GET /api/configlayer/legacy (lib/configLegacy.ts).
+ */
+export interface LegacySummary {
+  pending: boolean;
+  archive_path?: string;
+  urls_available: boolean;
+}
+
 export interface LayerSnapshot {
   enabled: boolean;
   dev_mode: boolean;
@@ -190,6 +201,8 @@ export interface LayerSnapshot {
   cores: LayerCoresSnapshot;
   /** Кто держит общий замок (менеджер geodata); пусто — замок свободен или его держит «Применить». */
   busy_holder?: string;
+  /** Окно чистого старта: только признак и путь архива, без адресов подписок. */
+  legacy: LegacySummary;
 }
 
 export interface LayerDiff {
@@ -369,6 +382,19 @@ function normalizeCores(raw: unknown): LayerCoresSnapshot {
   return { xray, restart };
 }
 
+/** Сводка окна чистого старта: незнакомые поля отбрасываются, адреса сюда не попадают. */
+export function normalizeLegacySummary(raw: unknown): LegacySummary {
+  const l = isObject(raw) ? raw : {};
+  const out: LegacySummary = {
+    pending: l.pending === true,
+    urls_available: l.urls_available === true
+  };
+  if (typeof l.archive_path === 'string' && l.archive_path !== '') {
+    out.archive_path = l.archive_path;
+  }
+  return out;
+}
+
 /** Приводит данные snapshot к полной форме: null и пропущенные поля становятся пустыми. */
 function normalizeSnapshot(raw: Record<string, unknown>): LayerSnapshot {
   return {
@@ -385,6 +411,7 @@ function normalizeSnapshot(raw: Record<string, unknown>): LayerSnapshot {
     checks: asArray<BuildIssue>(raw.checks),
     routing: normalizeRouting(raw.routing),
     cores: normalizeCores(raw.cores),
+    legacy: normalizeLegacySummary(raw.legacy),
     ...(typeof raw.busy_holder === 'string' && raw.busy_holder !== ''
       ? { busy_holder: raw.busy_holder }
       : {})
@@ -466,16 +493,18 @@ const EVENT_NAMES = [
   'geodata',
   'dns',
   'wizard',
-  'proxies'
+  'proxies',
+  'legacy'
 ] as const;
 const RETRY_MIN_MS = 3000;
 const RETRY_MAX_MS = 30000;
 
-// Обработчики событий sources, routing, geodata, dns, wizard, proxies и draft: представления
+// Обработчики событий sources, routing, geodata, dns, wizard, proxies, legacy и draft: представления
 // перечитывают клиенты источников, маршрутизации, менеджера geodata, перехвата DNS и мастера
 // первого запуска (обработчики регистрируются при загрузке модулей клиентов; configLayer их
 // не импортирует — цикла нет). У каждого имени свой набор.
-type HandlerEvent = 'sources' | 'routing' | 'geodata' | 'dns' | 'wizard' | 'draft' | 'proxies';
+type HandlerEvent =
+  'sources' | 'routing' | 'geodata' | 'dns' | 'wizard' | 'draft' | 'proxies' | 'legacy';
 const layerHandlers: Record<HandlerEvent, Set<(data?: unknown) => void>> = {
   sources: new Set(),
   routing: new Set(),
@@ -483,11 +512,13 @@ const layerHandlers: Record<HandlerEvent, Set<(data?: unknown) => void>> = {
   dns: new Set(),
   wizard: new Set(),
   draft: new Set(),
-  proxies: new Set()
+  proxies: new Set(),
+  legacy: new Set()
 };
 
 /**
- * Подписка на событие SSE `sources`, `routing`, `geodata`, `dns`, `wizard`, `proxies` или `draft`;
+ * Подписка на событие SSE `sources`, `routing`, `geodata`, `dns`, `wizard`, `proxies`, `legacy`
+ * или `draft`;
  * возвращает функцию отписки. Данные proxies передаются обработчику без изменения снимка.
  * При каждом открытии потока — первом и после обрыва — подписчики geodata, dns, wizard и
  * proxies получают вызов без события: до подписки их события могли пройти мимо.
@@ -573,6 +604,13 @@ function applyEvent(name: string, data: unknown): void {
     // Событие несёт только счётчик службы мастера: снимок слоя не меняется, статус шагов
     // перечитывает клиент мастера по подписке
     notifyHandlers('wizard');
+    return;
+  }
+  if (name === 'legacy') {
+    // Окно чистого старта закрыто (в этой или другой вкладке): событие несёт только
+    // счётчик. Признак pending перечитывается снимком, открытое окно — своим клиентом
+    refreshSnapshotSoon();
+    notifyHandlers('legacy');
     return;
   }
   eventSeq++;

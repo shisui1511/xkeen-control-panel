@@ -25,7 +25,9 @@
     configLayerFlagKnown,
     configLayerFlagFailed
   } from './stores';
-  import { startConfigLayer, stopConfigLayer } from './lib/configLayer';
+  import { startConfigLayer, stopConfigLayer, layerSnapshot } from './lib/configLayer';
+  import { legacyClosedHere } from './lib/configLegacy';
+  import { isConfigSetupHash } from './lib/configSubTab';
   import { usePoller } from './lib/poller';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { isServiceRestarting } from './lib/serviceGrace';
@@ -53,6 +55,7 @@
   import SystemAboutModal from './components/dashboard/SystemAboutModal.svelte';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import UnsavedChangesModal from './components/UnsavedChangesModal.svelte';
+  import LegacyResetModal from './components/config/LegacyResetModal.svelte';
   import SystemStatusCapsule from './components/status/SystemStatusCapsule.svelte';
   import UpdateBanner from './components/dashboard/UpdateBanner.svelte';
   import { refreshUpdateState, detectPanelUpdate } from './lib/updateNotify';
@@ -928,6 +931,13 @@
     return () => stopWizard();
   });
 
+  // Окно чистого старта (фаза 151, D-06): после входа, пока сервер сообщает, что окно не
+  // закрыто. Признак несекретный и приходит в снимке слоя (событие legacy перечитывает его
+  // и в других вкладках); на странице мастера окно не показывается
+  const legacyWindowOpen = $derived(
+    $layerSnapshot?.legacy.pending === true && !$legacyClosedHere && !isConfigSetupHash(currentHash)
+  );
+
   // Флаг выключен — маршрута #/config нет, как до включения слоя
   $effect(() => {
     if ($configLayerFlagKnown && !$configLayerEnabled && currentTab === 'config') {
@@ -1625,6 +1635,9 @@
   onLeaveWithoutSaving={handleLeaveWithoutSaving}
   onStay={handleStay}
 />
+{#if legacyWindowOpen}
+  <LegacyResetModal />
+{/if}
 <SystemAboutModal
   open={showAboutModal}
   onclose={() => (showAboutModal = false)}
