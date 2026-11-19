@@ -1,6 +1,3 @@
-import { readable } from 'svelte/store';
-import { editorOpenRequest } from '../stores';
-
 // Адреса правки файлов и секций ядер (D-10, D-11). Файлы живут только во вкладке «Файлы»
 // раздела «Конфигурация», конструкторы заменила вкладка секций ядер «Xray │ Mihomo».
 
@@ -10,10 +7,7 @@ const CORES_HASH = '#/config/cores';
 // Предел длины пути из адреса: абсолютные пути панели много короче
 const MAX_PATH_LENGTH = 1024;
 
-/** Адрес вкладки «Файлы» как стор — для разметки (href). */
-export const editorHref = readable(FILES_HASH);
-
-/** Адрес вкладки «Файлы» для обработчиков событий. */
+/** Адрес вкладки «Файлы». */
 export function editorHash(): string {
   return FILES_HASH;
 }
@@ -67,13 +61,4 @@ export function legacyEditorFile(hash: string): string | null {
     file = params.get('file') ?? params.get('path');
   }
   return file !== null && isSafeEditorPath(file) ? file : null;
-}
-
-/**
- * Передаёт путь из прежнего адреса Редактора вкладке «Файлы»: встроенный Редактор
- * открывает его, когда вкладка показана. Без безопасного пути ничего не меняется.
- */
-export function requestLegacyEditorFile(hash: string): void {
-  const file = legacyEditorFile(hash);
-  if (file !== null) editorOpenRequest.set(file);
 }

@@ -77,24 +77,28 @@
  * 14. Мастер первого запуска (план 149.1-06, 149 D-27, B9): клиент configWizard.ts
  *    (не-type импорт) подключают только Config.svelte, Dashboard.svelte,
  *    components/dashboard/SetupChecklistCard.svelte и components/config/**
- *    (константа WIZARD_CLIENT_EXTRA); в Dashboard.svelte ближайшее условие
- *    {#if …}/{:else if …} перед <QuickstartCard содержит $configLayerFlagKnown и
- *    !$configLayerEnabled (при включённом слое старая карточка не рисуется ни при каком
- *    card_visible, D-06, D-11), а перед <SetupChecklistCard — $configLayerFlagKnown,
- *    $configLayerEnabled и card_visible; в SetupChecklistCard и components/config/setup/
+ *    (константа WIZARD_CLIENT_EXTRA); в Dashboard.svelte прежней карточки <QuickstartCard
+ *    нет, а <SetupChecklistCard рисуется всегда, когда сервер отвечает card_visible: её
+ *    условие не зависит от флага слоя (фаза 151, CUT-01); в SetupChecklistCard и components/config/setup/
  *    нет {@html}; configSubTab.ts экспортирует isConfigSetupHash, а CONFIG_SUBTABS не
  *    содержит setup; ключи входа в мастер и карточки есть в ru и en.
  *
- * 15. Страница «Прокси» при слое (план 150-10): не-type импорт клиента configProxies и
+ * 15. Страница «Прокси» (план 150-10, фаза 151): не-type импорт клиента configProxies и
  *    адаптера proxyRuntimeAdapter есть только в ProxiesRuntime.svelte, components/proxies/**
- *    и lib/proxyRuntimeAdapter.ts (при выключенном флаге запросов слоя нет); configLayer.ts
+ *    и lib/proxyRuntimeAdapter.ts; configLayer.ts
  *    знает событие proxies (EVENT_NAMES и HandlerEvent), configProxies.ts подписан на него с
  *    дебаунсом PROXIES_DEBOUNCE_MS = 300 и второго EventSource не открывает; в Dashboard.svelte
- *    ближайшее условие {#if …}/{:else if …} перед ленивым импортом ProxiesRuntime.svelte
- *    содержит $configLayerEnabled, прежняя страница рисуется только как <Proxies /> без
- *    пропов, а условие плашки ApiOffline упоминает 'proxies' и $configLayerEnabled; в
+ *    ближайшее условие {#if …}/{:else if …} перед ленивым импортом ProxiesRuntime.svelte —
+ *    ровно currentTab === 'proxies' (страница групп без флага), прежняя страница Proxies
+ *    напрямую не рисуется, а условие плашки ApiOffline исключает 'proxies' без флага; в
  *    ProxiesRuntime.svelte и components/proxies/*.svelte нет {@html}, у ключей $tp этих
  *    файлов есть формы _one/_few/_many в ru и en.
+ *
+ * 16. Единственные входы без флага слоя (фаза 151, CUT-01, D-10, D-11): в Dashboard.svelte,
+ *    Sidebar.svelte и BottomDock.svelte нет сторов флага слоя; в меню ровно один пункт
+ *    #/config и нет ссылок на прежние адреса (#/editor, #/dat, #/constructor, #/mihomo-gen,
+ *    #/subscriptions); в нижней панели нет вкладки editor; клиент не обращается к
+ *    /api/settings/config-layer, а «Настройки» не держат переключатель слоя.
  *
  * Usage: node scripts/check-config-ui.js [--root <каталог>]
  */
@@ -1657,10 +1661,8 @@ expect(
 );
 expect(!/EventSource/.test(dnsTs), `${DNS_TS}: открывает собственный поток событий`);
 expect(
-  /export async function loadDns\(/.test(dnsTs) &&
-    dnsTs.includes("/api/configlayer/dns") &&
-    /get\(configLayerEnabled\)/.test(dnsTs),
-  `${DNS_TS}: нет loadDns, адреса /api/configlayer/dns или проверки флага слоя`,
+  /export async function loadDns\(/.test(dnsTs) && dnsTs.includes("/api/configlayer/dns"),
+  `${DNS_TS}: нет loadDns или адреса /api/configlayer/dns`,
 );
 expect(
   /export const dnsTakeover\b/.test(dnsTs) &&
@@ -1889,9 +1891,8 @@ for (const file of walk(SRC, [])) {
   }
 }
 
-// (2) Ветки карточек дашборда: обе под известным флагом слоя (без мигания, B9); старая
-// карточка исключает включённый слой — иначе при card_visible=false (пройдено, скрыто,
-// загрузка) вернулась бы карточка Mihomo (149 D-27, D-06, D-11)
+// (2) Карточка дашборда (149 D-27, фаза 151): прежней карточки Mihomo нет, «Настроить VPN»
+// ждёт только card_visible ответа сервера (без мигания) и не зависит от флага слоя
 function conditionBefore(text, tag) {
   const at = text.indexOf(tag);
   if (at < 0) return null;
@@ -1903,22 +1904,13 @@ function conditionBefore(text, tag) {
   }
   return cond;
 }
+const FLAG_STORE_RE =
+  /\$?\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed)\b/;
 const dashText = stripCommentsForCalls(read(DASHBOARD));
-const quickCond = conditionBefore(dashText, "<QuickstartCard");
-if (quickCond === null) {
-  errors.push(
-    `${DASHBOARD}: нет условия {#if}/{:else if} перед <QuickstartCard (B9)`,
-  );
-} else {
-  expect(
-    /\$configLayerFlagKnown\b/.test(quickCond),
-    `${DASHBOARD}: ветка <QuickstartCard не ждёт $configLayerFlagKnown — старая карточка мигнёт до карточки слоя (B9)`,
-  );
-  expect(
-    /!\s*\$configLayerEnabled\b/.test(quickCond),
-    `${DASHBOARD}: ветка <QuickstartCard не исключает включённый слой (!$configLayerEnabled) — при флаге старая карточка вернётся (149 D-27, D-06, D-11)`,
-  );
-}
+expect(
+  !/<QuickstartCard\b/.test(dashText),
+  `${DASHBOARD}: прежняя карточка <QuickstartCard осталась (149 D-27)`,
+);
 const setupCond = conditionBefore(dashText, "<SetupChecklistCard");
 if (setupCond === null) {
   errors.push(
@@ -1926,17 +1918,12 @@ if (setupCond === null) {
   );
 } else {
   expect(
-    /\$configLayerFlagKnown\b/.test(setupCond),
-    `${DASHBOARD}: ветка <SetupChecklistCard не ждёт $configLayerFlagKnown (B9)`,
-  );
-  expect(
-    /(^|[^!\s])\s*\$configLayerEnabled\b/.test(setupCond) &&
-      !/!\s*\$configLayerEnabled\b/.test(setupCond),
-    `${DASHBOARD}: ветка <SetupChecklistCard не требует включённого слоя $configLayerEnabled (149 D-27)`,
-  );
-  expect(
     /\bcard_visible\b/.test(setupCond),
     `${DASHBOARD}: ветка <SetupChecklistCard не ждёт card_visible ответа сервера (D-06, D-11, защита от мигания)`,
+  );
+  expect(
+    !FLAG_STORE_RE.test(setupCond),
+    `${DASHBOARD}: ветка <SetupChecklistCard зависит от флага слоя — карточка должна быть доступна всегда (CUT-01)`,
   );
 }
 
@@ -2052,8 +2039,8 @@ expect(
   `${PROXIES_TS}: открывает свой EventSource — события идут общим потоком слоя (T-150-29)`,
 );
 
-// (в) Выбор страницы в Dashboard: страница слоя — только при включённом флаге, прежняя
-// страница — без пропов (веха M1, T-150-30)
+// (в) Выбор страницы в Dashboard: «Прокси» — всегда страница групп панели, без флага;
+// прежняя страница Proxies напрямую из оболочки не рисуется (фаза 151, CUT-01)
 const proxiesCond = conditionBefore(dashText, "import('./ProxiesRuntime.svelte')");
 if (proxiesCond === null) {
   errors.push(
@@ -2061,26 +2048,75 @@ if (proxiesCond === null) {
   );
 } else {
   expect(
-    /(^|[^!\s])\s*\$configLayerEnabled\b/.test(proxiesCond) &&
-      !/!\s*\$configLayerEnabled\b/.test(proxiesCond),
-    `${DASHBOARD}: ветка ProxiesRuntime не требует включённого слоя $configLayerEnabled — без флага страница слоя заменит прежнюю (T-150-30)`,
+    /^\s*currentTab\s*===\s*'proxies'\s*$/.test(proxiesCond),
+    `${DASHBOARD}: ветка ProxiesRuntime не выбирается одной вкладкой currentTab === 'proxies' (CUT-01)`,
   );
 }
-const oldProxiesTags = [...dashText.matchAll(/<Proxies\b[^>]*>/g)].map((m) => m[0]);
 expect(
-  oldProxiesTags.length > 0 && oldProxiesTags.every((tag) => /^<Proxies\s*\/>$/.test(tag)),
-  `${DASHBOARD}: прежняя страница рисуется не как <Proxies /> без пропов (веха M1, 15. Страница «Прокси»)`,
+  !/<Proxies\b/.test(dashText) && !dashText.includes("import('./Proxies.svelte')"),
+  `${DASHBOARD}: оболочка рисует прежнюю страницу Proxies мимо ProxiesRuntime (CUT-01)`,
 );
 
-// (г) Плашка ApiOffline на «Прокси» при слое не рисуется: страница объясняет состояние
-// ядра своей плашкой (D-01…D-03)
+// (г) Плашка ApiOffline на «Прокси» не рисуется: страница объясняет состояние ядра своей
+// плашкой (D-01…D-03); условие не зависит от флага слоя
 const bannerCond = conditionBefore(dashText, "<ApiOffline");
 expect(
   bannerCond !== null &&
-    /'proxies'/.test(bannerCond) &&
-    /\$configLayerEnabled\b/.test(bannerCond),
-  `${DASHBOARD}: условие плашки ApiOffline не исключает «Прокси» при слое ('proxies' и $configLayerEnabled, 15. Страница «Прокси»)`,
+    /currentTab\s*!==\s*'proxies'/.test(bannerCond) &&
+    !FLAG_STORE_RE.test(bannerCond),
+  `${DASHBOARD}: условие плашки ApiOffline не исключает «Прокси» без флага (currentTab !== 'proxies', 15. Страница «Прокси»)`,
 );
+
+// (16) Единственные входы без флага слоя (фаза 151, CUT-01, D-10, D-11)
+const SIDEBAR = `${SRC}/components/Sidebar.svelte`;
+const DOCK = `${SRC}/components/BottomDock.svelte`;
+const sidebarText = stripCommentsForCalls(sidebar);
+const dockText = stripCommentsForCalls(read(DOCK));
+for (const [file, text] of [
+  [DASHBOARD, dashText],
+  [SIDEBAR, sidebarText],
+  [DOCK, dockText],
+]) {
+  expect(
+    !FLAG_STORE_RE.test(text),
+    `${file}: оболочка читает флаг слоя — слой доступен всегда (CUT-01)`,
+  );
+}
+expect(
+  [...sidebarText.matchAll(/href="#\/config"/g)].length === 1,
+  `${SIDEBAR}: в меню не ровно один вход #/config (D-11)`,
+);
+expect(
+  !/href=\{?["'`]#\/(?:editor|dat|constructor|mihomo-gen|subscriptions)\b/.test(sidebarText) &&
+    !/\beditorHref\b|nav\.editor\b/.test(sidebarText),
+  `${SIDEBAR}: меню ведёт на прежний адрес настройки или пункт «Редактор» (D-10, D-11)`,
+);
+expect(
+  !/tab:\s*'(?:editor|dat)'/.test(dockText),
+  `${DOCK}: нижняя панель ведёт на прежний Редактор или DAT (D-11)`,
+);
+expect(
+  !/<MihomoSocketMigrateModal\b|<DATManager\b|<MihomoGenerator\b|<Editor\b/.test(dashText),
+  `${DASHBOARD}: оболочка рисует удалённый экран вместо раздела «Конфигурация» (D-09)`,
+);
+const settingsText = stripCommentsForCalls(read(`${SRC}/Settings.svelte`));
+expect(
+  !/config-layer-row|setConfigLayerEnabled|settings\.config_layer\b/.test(settingsText),
+  `${SRC}/Settings.svelte: переключатель слоя «Конфигурация» остался (D-09)`,
+);
+expect(
+  /<DevDiagnostics\s*\/>/.test(settingsText) &&
+    conditionBefore(settingsText, "<DevDiagnostics") !== null &&
+    !FLAG_STORE_RE.test(conditionBefore(settingsText, "<DevDiagnostics")),
+  `${SRC}/Settings.svelte: карточка диагностики слоя скрыта флагом или пропала (D-19)`,
+);
+for (const file of walk(SRC, [])) {
+  if (!/\.(?:ts|svelte)$/.test(file)) continue;
+  expect(
+    !read(file).includes("/api/settings/config-layer"),
+    `${file}: обращается к удалённому маршруту /api/settings/config-layer (CUT-01)`,
+  );
+}
 
 // (д) XSS (T-150-27): имена групп, узлов и причины замеров — только интерполяцией;
 // (е) ключи $tp страницы и компонентов «Прокси» — во всех трёх формах

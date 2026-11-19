@@ -1,15 +1,14 @@
 <script lang="ts">
   import { t } from '../../i18n';
-  import { configLayerEnabled } from '../../stores';
   import Button from '../Button.svelte';
   import Section from '../Section.svelte';
   import { layerSnapshot, applyRunning, diagAction, handleLayerError } from '../../lib/configLayer';
 
   type DiagAction = Parameters<typeof diagAction>[0];
 
-  // Карточка только в режиме разработчика и при включённом слое (D-19);
-  // сервер всё равно отвечает 403 dev_mode_required вне dev_mode (T-144-49)
-  const shown = $derived($configLayerEnabled && ($layerSnapshot?.dev_mode ?? false));
+  // Карточка только в режиме разработчика (D-19); сервер всё равно отвечает
+  // 403 dev_mode_required вне dev_mode (T-144-49)
+  const shown = $derived($layerSnapshot?.dev_mode ?? false);
 
   const ACTIONS: { action: DiagAction; key: string }[] = [
     { action: 'add', key: 'cfg.diag.add' },

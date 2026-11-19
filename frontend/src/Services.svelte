@@ -12,8 +12,7 @@
     activeKernelName,
     isConflict,
     lockNav,
-    mihomoOfflineReason,
-    configLayerEnabled
+    mihomoOfflineReason
   } from './stores';
   import { anyKernelInstalled } from './lib/navCaps';
   import { usePoller } from './lib/poller';
@@ -51,11 +50,10 @@
     type KernelName
   } from './lib/serviceControl';
   import { kernelLabel } from './lib/kernelState';
-  import { editorHash, editorHref } from './lib/editorRoute';
+  import { editorHash } from './lib/editorRoute';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import XKeenSettingsCard from './components/xkeen/XKeenSettingsCard.svelte';
   import XKeenInstallCard from './components/xkeen/XKeenInstallCard.svelte';
-  import MihomoProfilesCard from './components/mihomo/MihomoProfilesCard.svelte';
   import Icon from './lib/components/Icon.svelte';
 
   let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
@@ -1096,7 +1094,7 @@
                 {/if}
                 {#if ($capabilities?.mihomo?.process_running || mihomo?.process_status === 'running') && $capabilities?.mihomo?.reachable && !$capabilities?.mihomo?.api_reachable}
                   <a
-                    href={$editorHref}
+                    href={editorHash()}
                     class="badge badge--tag badge-warning mihomo-api-badge-link"
                     title={$t('svc.mihomo_api_unavailable_title')}
                     onclick={(e) => e.stopPropagation()}
@@ -1752,16 +1750,6 @@
         }}
       />
     {/key}
-
-    {#if $capabilities?.kernels?.mihomo?.installed && !$configLayerEnabled}
-      <MihomoProfilesCard
-        {onSwitchTab}
-        onactivated={() => {
-          fetchStatus();
-          fetchRestartLog();
-        }}
-      />
-    {/if}
   </div>
 
   <!-- Watchdog Card (WD-06, D-31) -->
