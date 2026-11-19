@@ -41,16 +41,32 @@ export interface LayerKernel {
 export type StepId = 'build' | 'validate_xray' | 'validate_mihomo' | 'write' | 'restart';
 export type StepState = 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'deferred';
 
-export type LayerTrigger =
-  | 'user'
-  | 'rebuild'
-  | 'kernel_installed'
-  | 'flag_on'
-  | 'flag_off'
-  | 'source_refresh'
-  | 'access_log'
-  | 'dns_takeover'
-  | 'dns_restore';
+const LAYER_TRIGGERS = [
+  'user',
+  'rebuild',
+  'kernel_installed',
+  'startup',
+  'source_refresh',
+  'select',
+  'dat_refresh',
+  'routing_reclaim',
+  'access_log',
+  'dns_takeover',
+  'dns_restore'
+] as const;
+
+export type LayerTrigger = (typeof LAYER_TRIGGERS)[number];
+
+/**
+ * Причина запуска из снимка или события. В журналах прошлых версий могут лежать снятые
+ * причины (например, включение и выключение прежнего флага слоя): незнакомая строка не
+ * ошибка, а «причина не указана».
+ */
+function asTrigger(raw: unknown): LayerTrigger | undefined {
+  return typeof raw === 'string' && (LAYER_TRIGGERS as readonly string[]).includes(raw)
+    ? (raw as LayerTrigger)
+    : undefined;
+}
 
 export interface LayerStep {
   id: StepId;
@@ -273,10 +289,10 @@ export function isKnownNoticeId(id: string): boolean {
 }
 
 /**
- * Классы причины отказа фонового прохода выбора (params.reason уведомления выбора): disabled —
- * слой «Конфигурация» выключен.
+ * Классы причины отказа фонового прохода выбора (params.reason уведомления выбора). Снятый
+ * класс прежних версий читается как незнакомый и показывается как 'failed'.
  */
-const SELECT_BG_REASONS = ['rejected', 'busy', 'stopped', 'failed', 'disabled'] as const;
+const SELECT_BG_REASONS = ['rejected', 'busy', 'stopped', 'failed'] as const;
 export type SelectBgReason = (typeof SELECT_BG_REASONS)[number];
 
 /** Класс причины из параметров уведомления: незнакомый или пустой — 'failed'. */
@@ -327,7 +343,8 @@ function normalizeApply(raw: unknown): LayerApply {
     running: a.running === true,
     steps: asArray<LayerStep>(a.steps)
   };
-  if (typeof a.trigger === 'string') apply.trigger = a.trigger as LayerApply['trigger'];
+  const trigger = asTrigger(a.trigger);
+  if (trigger) apply.trigger = trigger;
   if (Array.isArray(a.restart)) apply.restart = a.restart as LayerRestart[];
   if (isObject(a.result)) apply.result = a.result as unknown as LayerResult;
   return apply;
@@ -468,7 +485,7 @@ export function reduceLayerEvent(
         ? base.steps.map((s) => (s.id === step.id ? { ...s, ...step } : s))
         : [...base.steps, step];
       // Фоновое обновление источника (source_refresh) несёт trigger в данных шага
-      const trigger = step.trigger ?? base.trigger;
+      const trigger = asTrigger(step.trigger) ?? base.trigger;
       return { ...state, apply: { ...base, running: true, trigger, steps } };
     }
     case 'apply_done': {
