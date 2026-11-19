@@ -8,11 +8,8 @@
     mihomoApiAvailable,
     isConflict,
     isMihomo,
-    activeKernelName,
-    configLayerEnabled,
-    configLayerFlagKnown
+    activeKernelName
   } from '../stores';
-  import { editorHref } from '../lib/editorRoute';
   import { navBadgeCount, badgeTotal } from '../lib/configLayer';
   import { showMihomoNavFor, showProxiesNavFor } from '../lib/navCaps';
   import Skeleton from './Skeleton.svelte';
@@ -147,9 +144,8 @@
   // null — срез неизвестен (холодный первый вход), вместо групп рисуется скелетон.
   // В конфликте ядер группы Mihomo скрыты (нейтральные пункты и «Сервисы» остаются).
   const showMihomoNav = $derived($isConflict ? false : showMihomoNavFor($navCaps));
-  const showProxiesNav = $derived(
-    $isConflict ? false : showProxiesNavFor($navCaps, $configLayerFlagKnown && $configLayerEnabled)
-  );
+  // «Прокси» — страница групп панели для обоих ядер
+  const showProxiesNav = $derived($isConflict ? false : showProxiesNavFor($navCaps, true));
 
   // Same hoist for the "Mihomo API unreachable" nav-item badge (72-REVIEW WR-05)
   // — was copy-pasted verbatim at 3 call sites, risking condition drift.
@@ -269,27 +265,25 @@
       <Icon name="dashboard" size={16} />
       <span class="lbl">{$t('nav.dashboard')}</span>
     </a>
-    {#if $configLayerEnabled}
-      <a
-        href="#/config"
-        class="nav-item"
-        aria-current={currentTab === 'config' ? 'page' : undefined}
-        data-label={$t('nav.config')}
-        onclick={() => isSidebarOpen.set(false)}
-        title={$isSidebarCollapsed ? undefined : $t('nav.config')}
-      >
-        <Icon name="config" size={16} />
-        <span class="lbl">{$t('nav.config')}</span>
-        {#if $navBadgeCount}
-          <span
-            class="nav-badge-config"
-            class:dot={$isSidebarCollapsed}
-            role="img"
-            aria-label={$t('nav.config_badge_aria', { n: $badgeTotal })}>{$navBadgeCount}</span
-          >
-        {/if}
-      </a>
-    {/if}
+    <a
+      href="#/config"
+      class="nav-item"
+      aria-current={currentTab === 'config' ? 'page' : undefined}
+      data-label={$t('nav.config')}
+      onclick={() => isSidebarOpen.set(false)}
+      title={$isSidebarCollapsed ? undefined : $t('nav.config')}
+    >
+      <Icon name="config" size={16} />
+      <span class="lbl">{$t('nav.config')}</span>
+      {#if $navBadgeCount}
+        <span
+          class="nav-badge-config"
+          class:dot={$isSidebarCollapsed}
+          role="img"
+          aria-label={$t('nav.config_badge_aria', { n: $badgeTotal })}>{$navBadgeCount}</span
+        >
+      {/if}
+    </a>
   </details>
 
   <!-- Proxies & Subscriptions group -->
@@ -490,9 +484,9 @@
   </details>
 
   <!-- Tools group — placed ahead of System on purpose (confirmed with the
-       user, not guessed): Editor is the tool actually opened most often in
-       day-to-day work, so its group sits right after Observability instead
-       of behind the mostly set-once System group below. -->
+       user, not guessed): its tools are opened more often than the mostly
+       set-once System group below. Files live only in «Конфигурация → Файлы»
+       (D-11): the group has no separate Editor entry. -->
   <details class="nav-group" bind:open={groupOpen.tools}>
     <summary>
       <span class="group-ttl">
@@ -514,18 +508,6 @@
       <span class="nav-group-arrow" aria-hidden="true"><Icon name="chevron-right" size={14} /></span
       >
     </summary>
-    <!-- Editor first: confirmed as the most-opened item in this group. -->
-    <a
-      href={$editorHref}
-      class="nav-item"
-      aria-current={$editorHref === '#/editor' && currentTab === 'editor' ? 'page' : undefined}
-      data-label={$t('nav.editor')}
-      onclick={() => isSidebarOpen.set(false)}
-      title={$isSidebarCollapsed ? undefined : $t('nav.editor')}
-    >
-      <Icon name="editor" size={16} />
-      <span class="lbl">{$t('nav.editor')}</span>
-    </a>
     <a
       href="#/console"
       class="nav-item"
@@ -537,19 +519,6 @@
       <Icon name="console" size={16} />
       <span class="lbl">{$t('nav.console')}</span>
     </a>
-    {#if !$configLayerEnabled}
-      <a
-        href="#/dat"
-        class="nav-item"
-        aria-current={currentTab === 'dat' ? 'page' : undefined}
-        data-label={$t('nav.dat')}
-        onclick={() => isSidebarOpen.set(false)}
-        title={$isSidebarCollapsed ? undefined : $t('nav.dat')}
-      >
-        <Icon name="dat" size={16} />
-        <span class="lbl">{$t('nav.dat')}</span>
-      </a>
-    {/if}
   </details>
 
   <!-- System group — device state & configuration surface. Mostly set once

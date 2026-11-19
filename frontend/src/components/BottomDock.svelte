@@ -1,14 +1,6 @@
 <script lang="ts">
   import { t } from '../i18n';
-  import {
-    isSidebarOpen,
-    isConflict,
-    isMihomo,
-    mihomoApiAvailable,
-    navCaps,
-    configLayerFlagKnown,
-    configLayerEnabled
-  } from '../stores';
+  import { isSidebarOpen, isConflict, isMihomo, mihomoApiAvailable, navCaps } from '../stores';
   import { showProxiesNavFor } from '../lib/navCaps';
   import Icon from '../lib/components/Icon.svelte';
 
@@ -23,17 +15,16 @@
     onOpenMenu?: () => void;
   } = $props();
 
-  // При слое «Прокси» доступна обоим ядрам. Пока срез неизвестен, показываем «Редактор».
-  const showProxiesNav = $derived(
-    $isConflict ? false : showProxiesNavFor($navCaps, $configLayerFlagKnown && $configLayerEnabled)
-  );
+  // «Прокси» доступна обоим ядрам. Пока срез неизвестен или ядра в конфликте, на её месте —
+  // «Конфигурация» (единственный вход в настройку и файлы, D-11).
+  const showProxiesNav = $derived($isConflict ? false : showProxiesNavFor($navCaps, true));
   const showApiBadge = $derived($isMihomo && !$mihomoApiAvailable);
 
   const items = $derived([
     { tab: 'dashboard', icon: 'dashboard', label: $t('nav.dashboard') },
     showProxiesNav === true
       ? { tab: 'proxies', icon: 'proxies', label: $t('nav.proxies'), badge: showApiBadge }
-      : { tab: 'editor', icon: 'editor', label: $t('nav.editor') },
+      : { tab: 'config', icon: 'config', label: $t('nav.config') },
     { tab: 'logs', icon: 'logs', label: $t('nav.logs') },
     { tab: 'services', icon: 'services', label: $t('nav.services') }
   ]);
