@@ -65,6 +65,17 @@ func rtCronHasUG(content string) bool {
 	return false
 }
 
+// rtCronUGCount — число строк `xkeen -ug` в crontab.
+func rtCronUGCount(content string) int {
+	n := 0
+	for _, l := range strings.Split(content, "\n") {
+		if isUGLine(l) {
+			n++
+		}
+	}
+	return n
+}
+
 // rtCronSetup готовит сервис на настоящем crontab: прежнее содержимое возвращается
 // в t.Cleanup. Возвращает сервис и строку XKeen на время, далёкое от текущего часа
 // стенда (слот расписания в тесте не наступает).
@@ -121,8 +132,21 @@ func rtCronSnap(t *testing.T, svc *Service) View {
 	return v
 }
 
-// TestRouterGeodataCron — перенятие строки cron XKeen, возврат при выключении флага
-// и приостановка расписания панели (D-12, D-13, D-36).
+// rtCronSuspend ставит приостановку расписания панели так, как её приносит файл
+// состояния прежней версии (State.Suspended, D-36): флага слоя больше нет, и
+// приостановку снимают только явные действия владельца.
+func rtCronSuspend(t *testing.T, svc *Service) {
+	t.Helper()
+	svc.mu.Lock()
+	svc.st.Suspended = true
+	svc.mu.Unlock()
+	if v := rtCronSnap(t, svc); !v.Schedule.Suspended {
+		t.Fatalf("приостановка из состояния прежней версии не видна в снимке: %+v", v.Schedule)
+	}
+}
+
+// TestRouterGeodataCron — перенятие строки cron XKeen, «два расписания», возврат
+// строки XKeen и снятие приостановки прежней версии (D-12, D-13, D-36).
 func TestRouterGeodataCron(t *testing.T) {
 	svc, line := rtCronSetup(t)
 
@@ -152,27 +176,14 @@ func TestRouterGeodataCron(t *testing.T) {
 		t.Fatalf("после adopt: suspended=%v found=%v", v.Schedule.Suspended, v.Cron.Found)
 	}
 
-	// Выключение флага: строка вернулась дословно, расписание панели приостановлено.
-	if err := svc.OnFlagOff(); err != nil {
-		t.Fatalf("OnFlagOff: %v", err)
+	// Приостановка прежней версии при вернувшейся строке XKeen: «два расписания» не
+	// объявляются, повторное «Перенять» убирает строку и снимает приостановку.
+	rtCronSuspend(t, svc)
+	rtCronWrite(t, withLine(rtCronRead(t), line))
+	svc.syncCron(true)
+	if v := rtCronSnap(t, svc); v.Cron.Two {
+		t.Fatalf("при приостановленном расписании панели объявлены два расписания")
 	}
-	if got := rtCronRead(t); !rtCronHasLine(got, line) {
-		t.Fatalf("после OnFlagOff нет строки %q:\n%s", line, got)
-	}
-	if v := rtCronSnap(t, svc); !v.Schedule.Suspended {
-		t.Fatalf("после OnFlagOff расписание не приостановлено")
-	}
-
-	// Включение флага расписание само не запускает и строку не снимает.
-	svc.OnFlagOn()
-	if got := rtCronRead(t); !rtCronHasLine(got, line) {
-		t.Fatalf("после OnFlagOn строка исчезла:\n%s", got)
-	}
-	if v := rtCronSnap(t, svc); !v.Schedule.Suspended {
-		t.Fatalf("OnFlagOn снял приостановку расписания")
-	}
-
-	// Перенять снова: строки нет, приостановка снята.
 	if err := svc.CronAction(CronAdopt); err != nil {
 		t.Fatalf("повторный adopt: %v", err)
 	}
@@ -205,7 +216,7 @@ func TestRouterGeodataCron(t *testing.T) {
 		}
 	}
 	if !foundNotice {
-		t.Errorf("нет уведомления geodata_cron_two: уведомления %+v, cron %+v, enabled слоя %v", svc.d.Layer.Snapshot().Notices, rtCronSnap(t, svc).Cron, svc.d.Layer.Enabled())
+		t.Errorf("нет уведомления geodata_cron_two: уведомления %+v, cron %+v", svc.d.Layer.Snapshot().Notices, rtCronSnap(t, svc).Cron)
 	}
 
 	// «Убрать задачу cron»: строки нет, расписание панели осталось включённым.
@@ -235,8 +246,7 @@ func TestRouterGeodataCron(t *testing.T) {
 	}
 
 	// Выключение расписания в самой панели означает «без расписания»: crontab не
-	// трогается, строка XKeen не возвращается; выключение флага возвращает снятую
-	// строку дословно и при выключенном расписании панели.
+	// трогается, строка XKeen не возвращается.
 	if err := svc.CronAction(CronAdopt); err != nil {
 		t.Fatalf("adopt перед выключением расписания: %v", err)
 	}
@@ -249,13 +259,6 @@ func TestRouterGeodataCron(t *testing.T) {
 	if after := rtCronRead(t); after != before || rtCronHasUG(after) {
 		t.Fatalf("SetSchedule(enabled=false) изменил crontab:\n%s\n---\n%s", before, after)
 	}
-	if err := svc.OnFlagOff(); err != nil {
-		t.Fatalf("OnFlagOff при выключенном расписании панели: %v", err)
-	}
-	if got := rtCronRead(t); !rtCronHasLine(got, line) {
-		t.Fatalf("строка cron_taken не вернулась при выключенном расписании панели:\n%s", got)
-	}
-	svc.OnFlagOn()
 
 	// Расписание вне формата XKeen не перенимается.
 	nonstd := "*/30 * * * * /opt/sbin/xkeen -ug"
@@ -271,10 +274,16 @@ func TestRouterGeodataCron(t *testing.T) {
 		t.Fatalf("отказавший adopt изменил crontab:\n%s", got)
 	}
 
-	// Строки не было, а расписание панели включено: выключение флага ставит строку XKeen.
+	// «Отдать XKeen» при нестандартной строке: своя строка не дописывается.
 	if err := svc.CronAction(CronGive); err != nil {
-		t.Fatalf("give: %v", err)
+		t.Fatalf("give при нестандартной строке: %v", err)
 	}
+	if got := rtCronRead(t); !rtCronHasLine(got, nonstd) || rtCronUGCount(got) != 1 {
+		t.Fatalf("give при нестандартной строке изменил crontab:\n%s", got)
+	}
+
+	// Строки не было, а расписание панели включено: «Отдать XKeen» ставит строку по
+	// расписанию панели и выключает его.
 	rtCronWrite(t, withoutUGLines(rtCronRead(t)))
 	daily := Schedule{Enabled: true, Day: -1, Hour: (time.Now().Hour() + 10) % 24, Minute: 15}
 	if err := svc.SetSchedule(daily); err != nil {
@@ -283,14 +292,16 @@ func TestRouterGeodataCron(t *testing.T) {
 	if err := svc.SetSchedule(Schedule{Enabled: true, Day: 7, Hour: 1, Minute: 1}); lists.ErrorCode(err) != "schedule_invalid" {
 		t.Fatalf("SetSchedule с днём 7: %v, ожидался schedule_invalid", err)
 	}
-	if err := svc.OnFlagOff(); err != nil {
-		t.Fatalf("OnFlagOff без cron_taken: %v", err)
+	if err := svc.CronAction(CronGive); err != nil {
+		t.Fatalf("give без строки cron: %v", err)
 	}
 	wantLine := fmt.Sprintf("15 %d * * * /opt/sbin/xkeen -ug", daily.Hour)
 	if got := rtCronRead(t); !rtCronHasLine(got, wantLine) {
-		t.Fatalf("после OnFlagOff нет строки %q:\n%s", wantLine, got)
+		t.Fatalf("после give нет строки %q:\n%s", wantLine, got)
 	}
-	svc.OnFlagOn()
+	if v := rtCronSnap(t, svc); v.Schedule.Enabled {
+		t.Fatalf("после give расписание панели осталось включённым")
+	}
 }
 
 // TestRouterGeodataScheduleResume — приостановленное расписание панели возобновляется
@@ -305,12 +316,9 @@ func TestRouterGeodataScheduleResume(t *testing.T) {
 	}
 	suspend := func() {
 		t.Helper()
-		if err := svc.OnFlagOff(); err != nil {
-			t.Fatalf("OnFlagOff: %v", err)
-		}
-		svc.OnFlagOn()
-		if v := rtCronSnap(t, svc); !v.Schedule.Suspended || !v.Schedule.Enabled {
-			t.Fatalf("после выключения и включения флага: suspended=%v enabled=%v", v.Schedule.Suspended, v.Schedule.Enabled)
+		rtCronSuspend(t, svc)
+		if v := rtCronSnap(t, svc); !v.Schedule.Enabled {
+			t.Fatalf("приостановленное расписание панели выключено")
 		}
 	}
 
@@ -318,6 +326,7 @@ func TestRouterGeodataScheduleResume(t *testing.T) {
 		t.Fatalf("adopt: %v", err)
 	}
 	suspend()
+	rtCronWrite(t, withLine(rtCronRead(t), line))
 
 	// Стандартная строка на месте: сохранение приостановку не снимает.
 	if err := svc.SetSchedule(cur()); err != nil {
