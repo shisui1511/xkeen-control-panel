@@ -123,12 +123,6 @@ func TestRouterDNSStateView(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
 
-	// Слой выключен: маршрут отвечает 404, как остальные /api/configlayer/*.
-	e.setLayer(false)
-	if r := e.call(http.MethodGet, rtDNSBase, nil); r.Status != http.StatusNotFound {
-		t.Errorf("слой выключен: GET %s — %d %s, ожидалось 404", rtDNSBase, r.Status, r.Code)
-	}
-
 	e.enableLayer()
 	v := e.rtDNSView()
 	if got, _ := v["state"].(string); got != "off" {

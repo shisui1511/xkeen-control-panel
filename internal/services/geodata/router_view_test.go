@@ -79,7 +79,7 @@ func rtXKeenVersions() []configlayer.KernelVersionInput {
 	return []configlayer.KernelVersionInput{{Name: "xkeen", Installed: true, Version: rtXKeenNumber.FindString(first)}}
 }
 
-// rtGeoLayer создаёт включённый слой во временном каталоге dir и запускает его.
+// rtGeoLayer создаёт слой во временном каталоге dir и запускает его.
 func rtGeoLayer(t *testing.T, dir string) *configlayer.Layer {
 	t.Helper()
 	roots := configlayer.Roots{Xray: filepath.Join(dir, "xray"), Mihomo: filepath.Join(dir, "mihomo")}
@@ -91,7 +91,6 @@ func rtGeoLayer(t *testing.T, dir string) *configlayer.Layer {
 	layer, err := configlayer.New(configlayer.Options{
 		DataDir:        dir,
 		Roots:          roots,
-		Enabled:        func() bool { return true },
 		DriftInterval:  time.Hour,
 		DebounceDelay:  20 * time.Millisecond,
 		KernelVersions: rtXKeenVersions,
