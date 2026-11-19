@@ -128,10 +128,10 @@ func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
 
 	info := services.FindXrayAPIFragmentLegacy(a.cfg.XRayConfigDir)
 
-	// У блока api один владелец: при включённом слое блок, который ведёт панель
-	// (файл панели или маршрутизация Xray, взятая панелью), старый переключатель
-	// не трогает. Проверка идёт до любой записи.
-	if a.configLayer != nil && a.configLayer.Enabled() {
+	// У блока api один владелец: блок, который ведёт слой (файл панели или
+	// маршрутизация Xray, взятая панелью), переключатель мониторинга не трогает.
+	// Проверка идёт до любой записи.
+	if a.configLayer != nil {
 		panelFile := info.APIPresent && configlayer.IsPanelFileName(configlayer.KernelXray, filepath.Base(info.Path))
 		xrayTaken := false
 		if x := a.configLayer.Snapshot().Routing.Xray; x != nil && x.Taken {

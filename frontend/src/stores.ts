@@ -42,7 +42,6 @@ export interface CapabilitiesData {
     /** Адрес gRPC API Xray, которым пользуется панель (127.0.0.1:<порт>). */
     api_addr?: string;
   };
-  global_hwid?: string;
   /** Prediction of "will Apply restart this kernel" per kernel (button labels). */
   apply_restarts?: Record<string, boolean>;
 }
@@ -93,7 +92,7 @@ export const mihomoOfflineReason = derived(
 // --- Срез capabilities для бокового меню ---
 // Последний известный срез хранится в localStorage: первый кадр меню рисуется
 // по нему, а не по null, и после ответа сервера группы не мигают (D-16).
-// Хранится только toNavCaps-срез: без discovered_secret и global_hwid.
+// Хранится только toNavCaps-срез: без discovered_secret.
 export function readNavCaps(): NavCaps | null {
   try {
     return parseNavCaps(localStorage.getItem(NAV_CAPS_KEY));

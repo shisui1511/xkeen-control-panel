@@ -22,8 +22,7 @@ type CapabilitiesResponse struct {
 	// RunningKernels — запущенные ядра в порядке [xray, mihomo].
 	RunningKernels []string `json:"running_kernels,omitempty"`
 	// XKeenInstalled — бинарник XKeen найден (без него ядра не запустить)
-	XKeenInstalled bool   `json:"xkeen_installed"`
-	GlobalHwid     string `json:"global_hwid,omitempty"`
+	XKeenInstalled bool `json:"xkeen_installed"`
 	// ApplyRestarts — перезапустит ли применение конфигурации целевое ядро
 	// (по ключу xray/mihomo). Предсказание того же KernelApplier, что решает
 	// при apply: по нему UI подписывает кнопки «Применить».
@@ -169,10 +168,6 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 
 	if a.xkeenSvc != nil {
 		resp.XKeenInstalled = a.xkeenSvc.Installed()
-	}
-
-	if a.subscriptionSvc != nil {
-		resp.GlobalHwid = a.subscriptionSvc.GetHWID()
 	}
 
 	// Не кэшируем "рваное" состояние (процесс жив, но API не отвечает):
