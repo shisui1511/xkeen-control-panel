@@ -31,8 +31,7 @@ import (
 // Проверка API маршрутизации на настоящей панели устройства: маршруты
 // /api/configlayer/routing* вызываются по HTTPS с сессией, созданной на ПК
 // (routertest.Panel). Вердикт — коды и тела ответов панели, файлы ядер на диске
-// устройства и Clash API Mihomo через панель. Флаг слоя «Конфигурация» на время
-// проверки переключается и возвращается прежним, маршрутизация возвращается
+// устройства и Clash API Mihomo через панель. Маршрутизация возвращается
 // «Отпустить» + «Применить», черновик после сценария сбрасывается. В сообщения
 // попадают только коды и числа.
 
@@ -369,7 +368,7 @@ func (e *rtSrc) rtRtExpectReleased(tg routertest.Target, before rtRtDiskState) {
 	}
 }
 
-// Трасса: флаг → «Мои узлы» → группы по умолчанию → группа → take → «Применить» →
+// Трасса: «Мои узлы» → группы по умолчанию → группа → take → «Применить» →
 // маршрутизация активного ядра у панели → release → «Применить» → всё как было.
 // Метка ядра: тест читает активное ядро и меняет его маршрутизацию.
 func TestRouterRoutingAPIFlow(t *testing.T) {
@@ -385,7 +384,7 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 
 	// Маршрутизация и следы сценария убираются при любом исходе: release →
 	// «Применить», затем очистка узлов и секций. Cleanup регистрируется после
-	// enableLayer и потому идёт раньше сброса черновика и возврата флага.
+	// enableLayer и потому идёт раньше сброса черновика.
 	t.Cleanup(func() {
 		c := e.with(t)
 		if taken {
@@ -1376,7 +1375,7 @@ func (e *rtSrc) rtRtLongwaitPair(core, kind, gid, secondID string, check func(t 
 	return maxWait, secondWait
 }
 
-// Выбор участника ручной группы: флаг → два узла → ручная группа → take → «Применить»
+// Выбор участника ручной группы: два узла → ручная группа → take → «Применить»
 // → вид работающих прокси → POST select → «Сейчас» в представлении, now группы в
 // Mihomo или исходящий группы в Xray (горячая замена без смены PID Xray) → вид и
 // «Сейчас» страницы «Прокси» → пачка пинга с присоединением и отменой →
@@ -2487,18 +2486,6 @@ var rtRoutingRoutes = []struct{ method, path string }{
 	{http.MethodPost, "/api/configlayer/proxies/ping"},
 	{http.MethodPost, "/api/configlayer/proxies/ping/cancel"},
 	{http.MethodPost, "/api/configlayer/proxies/confirm"},
-}
-
-// Флаг слоя выключен: каждый маршрут маршрутизации отвечает 404 config_layer_disabled.
-func TestRouterRoutingFlagOff404(t *testing.T) {
-	e := rtNewSrc(t)
-	e.setLayer(false)
-	for _, rt := range rtRoutingRoutes {
-		r := e.call(rt.method, rt.path, rtBody(rt.method))
-		if r.Status != http.StatusNotFound || r.Code != "config_layer_disabled" {
-			t.Errorf("%s %s: статус %d, код %q; ожидалось 404 config_layer_disabled", rt.method, rt.path, r.Status, r.Code)
-		}
-	}
 }
 
 // Без сессии маршруты отвечают 401, изменяющие без X-CSRF-Token — 403; метод не из
