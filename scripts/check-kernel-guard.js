@@ -35,8 +35,6 @@ const ALLOWLIST = {
   "lib/navCaps.ts": "кэш capabilities для меню",
   // исход применения с сервера apply, а не capabilities
   "lib/serviceApply.ts": "ApplyResult с сервера apply",
-  // исход применения конструктора Mihomo, а не capabilities
-  "lib/constructors/mihomoApply.ts": "result.active_kernel исхода применения",
   // состояние перехвата DNS с сервера dns, а не capabilities
   "lib/configDns.ts": "DnsView.active_kernel из ответа /api/configlayer/dns",
 };
