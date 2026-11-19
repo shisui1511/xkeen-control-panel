@@ -6,26 +6,35 @@ import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
 import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
-import { addToDraft, api, layerFlag, nodeLink, randomPort, resetDraft } from './lib/nodes-api';
+import {
+  addToDraft,
+  api,
+  nodeLink,
+  randomPort,
+  resetDraft,
+  waitApplyIdle,
+  withPanel
+} from './lib/nodes-api';
 
 // Списки и пресеты на вкладке «Правила» на настоящей панели (фаза 146, план 22): выбор списка
 // для условия geosite из каталога роутера и сохранение правила со ссылкой «файл · тег»; пресет
 // на «Правилах» с планом «Будет создано» и «Уйдёт / Придёт»; взятие маршрутизации через
 // диалог пресета. Каталог и пресеты читаются настоящими маршрутами, ответы сети не
-// подменяются. Флаг слоя включается на время файла и возвращается прежним, черновик
-// сбрасывается до и после проверки. Ядро читает и меняет только «взятие с пресетом» (оно
-// размечено). В вывод не попадают имена узлов и групп.
-
-const layer = layerFlag();
+// подменяются. Черновик сбрасывается до и после проверки; после прогона — после простоя
+// конвейера. Ядро читает и меняет только «взятие с пресетом» (оно размечено). В вывод не
+// попадают имена узлов и групп.
 
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
-  await layer.enable(browser);
+  await withPanel(browser, (page) => resetDraft(page));
 });
 
 test.afterAll(async ({ browser }) => {
-  await layer.restore(browser);
+  await withPanel(browser, async (page) => {
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
+  });
 });
 
 /** Страница, на которой API панели доступно из браузера (сессия и токен CSRF). */

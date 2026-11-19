@@ -1,317 +1,168 @@
-// e2e-pages: config/files config/cores config/nodes config/rules config/setup dashboard editor constructor mihomo-gen proxies rules
+// e2e-pages: config/files config/cores config/nodes config/rules config/lists config/setup dashboard proxies rules
 // router-area: ui-shell
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { test, expect, type Browser, type Page } from '@playwright/test';
-import { attachConsoleGuard } from './lib/console';
+import { test, expect, type Page } from '@playwright/test';
+import { attachConsoleGuard, type ConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { api, layerFlag, switchLayer, waitApplyIdle, withPanel } from './lib/nodes-api';
+import { api, waitApplyIdle } from './lib/nodes-api';
 
-// Входы в настройку при включённом слое «Конфигурация» (фаза 149, D-01, D-16):
-// пункт «Редактор» и адрес #/editor перенаправляются во вкладку «Файлы»,
-// конструкторы и устаревшие вкладки («Провайдеры», «Исключения») скрыты и
-// перенаправлены в соответствующие подразделы «Конфигурации». Без флага вкладка
-// «Исключения» и её адрес прежние: legacy-redirects на время проверки выключает слой
-// и возвращает его, только если слой ничего не держит (иначе skip-part).
-// После цикла стенд сверяется со снимком. Ответы сети не подменяются.
+// Входы в настройку (фаза 151, D-09…D-11): экраны, писавшие конфиг ядра мимо слоя, удалены,
+// их прежние адреса по одной таблице ведут в подразделы «Конфигурации». Пункта «Редактор» в
+// меню нет; адрес #/editor ведёт во вкладку «Файлы» и открывает файл из адреса (запрос
+// ?file=/?path= или путь после #/editor/), небезопасный путь не открывается. Перенаправление
+// не зависит от порядка параметров запроса; на «Прокси» нет вкладки «Провайдеры», на
+// «Правилах» — вкладки «Исключения». Сценарии только читают: файлы открываются без правки,
+// черновик не трогается. Ответы сети не подменяются.
 
 import { SLOW_ANNOTATION } from './lib/known';
-
-const layer = layerFlag();
-
-/** Переключает флаг слоя настоящим маршрутом настроек (сессия и CSRF панели). */
-async function setLayer(browser: Browser, on: boolean): Promise<void> {
-  await withPanel(browser, (panel) => switchLayer(panel, on));
-}
-
-interface SideState {
-  routing: {
-    desired: boolean;
-    desired_xray: boolean;
-    desired_mihomo: boolean;
-    xray: boolean | null;
-    mihomo: boolean | null;
-    mihomo_active: string;
-  };
-  cores: string[];
-  files: string[];
-  drift_count: number;
-  running: { xray: boolean; mihomo: boolean };
-  dns: {
-    state: string;
-    desired: boolean;
-    window: boolean;
-    proxy_dns: boolean;
-    owner: string;
-  } | null;
-  geodata: {
-    enabled: boolean;
-    day: number;
-    hour: number;
-    minute: number;
-    suspended: boolean;
-    cron_found: boolean;
-    cron_adoptable: boolean;
-    cron_two: boolean;
-    cron_kept: boolean;
-    cron_taken: boolean;
-    cron_schedule: string | null;
-  } | null;
-}
-
-/** Только устойчивые поля настоящих снимков: без адресов, узлов и времени опроса. */
-async function layerSideState(page: Page): Promise<SideState> {
-  const state = await api(page, 'GET', '/api/configlayer/state');
-  expect(state.status, '/api/configlayer/state для снимка стенда').toBe(200);
-  const routing = state.data?.routing as {
-    desired: boolean;
-    desired_xray: boolean;
-    desired_mihomo: boolean;
-    xray: { taken: boolean } | null;
-    mihomo: { taken: boolean } | null;
-    mihomo_active: string;
-  };
-  const cores = state.data?.cores as { xray: Record<string, { taken: boolean; desired: boolean }> };
-  const files = state.data?.files as { key: string; state: string }[];
-  const sources = await api(page, 'GET', '/api/configlayer/sources');
-  expect(sources.status, '/api/configlayer/sources для снимка стенда').toBe(200);
-  const running = sources.data?.running as { xray: boolean; mihomo: boolean };
-  const dns = await api(page, 'GET', '/api/configlayer/dns');
-  let dnsState: SideState['dns'] = null;
-  if (!(dns.status === 404 && dns.data?.code === 'not_found')) {
-    expect(dns.status, '/api/configlayer/dns для снимка стенда').toBe(200);
-    const d = dns.data as {
-      state: string;
-      desired: boolean;
-      window?: unknown;
-      legacy: { proxy_dns: boolean };
-      owner: { kind: string };
-    };
-    dnsState = {
-      state: d.state,
-      desired: d.desired,
-      window: d.window != null,
-      proxy_dns: d.legacy.proxy_dns,
-      owner: d.owner.kind
-    };
-  }
-  const geo = await api(page, 'GET', '/api/configlayer/geodata');
-  let geoState: SideState['geodata'] = null;
-  if (!(geo.status === 404 && geo.data?.code === 'config_layer_disabled')) {
-    expect(geo.status, '/api/configlayer/geodata для снимка стенда').toBe(200);
-    const g = geo.data as {
-      schedule: { enabled: boolean; day: number; hour: number; minute: number; suspended: boolean };
-      cron: {
-        found: boolean;
-        adoptable: boolean;
-        two: boolean;
-        kept: boolean;
-        taken: boolean;
-        schedule?: string;
-      };
-    };
-    expect(typeof g.cron.taken, 'cron.taken в снимке стенда').toBe('boolean');
-    const { enabled, day, hour, minute, suspended } = g.schedule;
-    geoState = {
-      enabled,
-      day,
-      hour,
-      minute,
-      suspended,
-      cron_found: g.cron.found,
-      cron_adoptable: g.cron.adoptable,
-      cron_two: g.cron.two,
-      cron_kept: g.cron.kept,
-      cron_taken: g.cron.taken,
-      cron_schedule: g.cron.schedule ?? null
-    };
-  }
-  return {
-    routing: {
-      desired: routing.desired,
-      desired_xray: routing.desired_xray,
-      desired_mihomo: routing.desired_mihomo,
-      xray: routing.xray?.taken ?? null,
-      mihomo: routing.mihomo?.taken ?? null,
-      mihomo_active: routing.mihomo_active
-    },
-    cores: Object.entries(cores.xray)
-      .filter(([, v]) => v.taken || v.desired)
-      .map(([id]) => id)
-      .sort(),
-    files: files.map(({ key, state }) => `${key}:${state}`).sort(),
-    drift_count: Number(state.data?.drift_count),
-    running: { xray: running.xray, mihomo: running.mihomo },
-    dns: dnsState,
-    geodata: geoState
-  };
-}
-
-function sideStateTaken(s: SideState): string[] {
-  const reasons: string[] = [];
-  if (
-    s.routing.desired ||
-    s.routing.desired_xray ||
-    s.routing.desired_mihomo ||
-    s.routing.xray ||
-    s.routing.mihomo
-  )
-    reasons.push('маршрутизация у панели');
-  if (s.cores.length) reasons.push('взятые секции Xray');
-  if (s.drift_count > 0 || s.files.some((f) => !f.endsWith(':ok') && !f.endsWith(':released')))
-    reasons.push('файлы слоя не в покое');
-  if (s.dns && (s.dns.desired || s.dns.window || !['off', 'unavailable'].includes(s.dns.state)))
-    reasons.push('перехват DNS');
-  if (s.geodata && (s.geodata.enabled || s.geodata.suspended || s.geodata.cron_taken))
-    reasons.push('расписание баз или перенятый cron');
-  return reasons;
-}
-
-/** Перезагружает страницу и ждёт, что панель сама прочитала флаг слоя с ожидаемым значением. */
-async function reloadWithFlag(page: Page, on: boolean): Promise<void> {
-  const [res] = await Promise.all([
-    page.waitForResponse(
-      (r) => r.request().method() === 'GET' && new URL(r.url()).pathname === '/api/settings',
-      { timeout: T.page }
-    ),
-    page.reload({ timeout: T.page, waitUntil: 'domcontentloaded' })
-  ]);
-  expect(res.status(), 'GET /api/settings после перезагрузки').toBe(200);
-  const body = (await res.json()) as { data?: { config_layer?: unknown } };
-  expect(body.data?.config_layer, 'флаг слоя, прочитанный панелью').toBe(on);
-}
 
 test.describe.configure({ mode: 'serial' });
 
 const VP_DESKTOP = { width: 1280, height: 800 };
+const XRAY_CONFIGS = '/opt/etc/xray/configs';
 
-test.beforeAll(async ({ browser }) => {
-  await layer.enable(browser);
-});
+/**
+ * Полная загрузка панели с адреса (через about:blank, чтобы вкладки «Файлов» не остались от
+ * прошлого адреса). Сборщик консоли подключается до перехода; проверить его — до следующей
+ * загрузки.
+ */
+async function loadFresh(page: Page, hash: string): Promise<ConsoleGuard> {
+  await page.goto('about:blank');
+  const guard = attachConsoleGuard(page);
+  await page.goto(`/${hash}`, { timeout: T.page, waitUntil: 'domcontentloaded' });
+  return guard;
+}
 
-test.afterAll(async ({ browser }) => {
-  await layer.restore(browser);
-});
+/** Файлы каталога по API панели (ответ — массив или конверт data); только простые пути. */
+async function listFiles(page: Page, dir: string): Promise<{ name: string; path: string }[]> {
+  const res = await api(page, 'GET', `/api/config/list?dir=${encodeURIComponent(dir)}`);
+  expect(res.status, 'GET /api/config/list').toBe(200);
+  const arr: unknown = res.data;
+  if (!Array.isArray(arr)) return [];
+  return arr.filter(
+    (f): f is { name: string; path: string } =>
+      typeof f === 'object' &&
+      f !== null &&
+      typeof (f as { name?: unknown }).name === 'string' &&
+      typeof (f as { path?: unknown }).path === 'string' &&
+      /^\/[\w./-]+$/.test((f as { path: string }).path)
+  );
+}
+
+/** Прежний адрес Редактора привёл во вкладку «Файлы». */
+async function expectFilesTab(page: Page): Promise<void> {
+  await page.waitForURL((url) => url.hash === '#/config/files', { timeout: T.action });
+  await expect(page.getByTestId('files-tab')).toBeVisible({ timeout: T.page });
+}
 
 test('config-entries editor-redirect vp:1280', async ({ page }) => {
-  const guard = attachConsoleGuard(page);
   await page.setViewportSize(VP_DESKTOP);
 
+  // Пункта «Редактор» в меню нет: файлы живут только в «Конфигурация → Файлы» (D-11)
+  let guard = await loadFresh(page, '#/');
+  await page.waitForLoadState('networkidle');
+  const nav = page.locator('nav.sidebar-nav');
+  await expect(nav).toBeVisible({ timeout: T.page });
+  await expect(nav.locator('a[href="#/config/files"], a[href^="#/editor"]')).toHaveCount(0);
+
+  // Адрес #/editor без файла ведёт во вкладку «Файлы»
+  await page.goto('/#/editor', { timeout: T.page, waitUntil: 'domcontentloaded' });
+  await expectFilesTab(page);
+  const files = await listFiles(page, XRAY_CONFIGS);
+  await guard.assertClean();
+
+  // Небезопасный путь: перенаправление есть, файл не открывается
+  guard = await loadFresh(page, `#/editor?file=${encodeURIComponent('/opt/../etc/passwd')}`);
+  await expectFilesTab(page);
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('.editor-tab')).toHaveCount(0);
+  await guard.assertClean();
+
+  if (files.length === 0) {
+    test.info().annotations.push({
+      type: 'skip-part',
+      description: 'в каталоге конфигураций Xray нет файлов — открытие файла из адреса не проверено'
+    });
+    return;
+  }
+
+  // Путь файла в запросе (?file= и ?path=, с другими параметрами) и в адресе #/editor/<путь>
+  // открывает файл во вкладке «Файлы»; адрес после перенаправления — без пути
+  const variants = [
+    (p: string) => `#/editor?file=${encodeURIComponent(p)}`,
+    (p: string) => `#/editor?view=1&path=${encodeURIComponent(p)}`,
+    (p: string) => `#/editor/${encodeURIComponent(p)}`
+  ];
+  for (const [i, variant] of variants.entries()) {
+    const file = files[i % files.length];
+    guard = await loadFresh(page, variant(file.path));
+    await expectFilesTab(page);
+    await expect(
+      page.locator(`.editor-tab.active[data-path="${file.path}"]`),
+      `вариант адреса ${i + 1}: файл открыт во вкладке «Файлы»`
+    ).toBeVisible({ timeout: T.page });
+    await expect(page.getByTestId('files-tab').locator('.cm-content').first()).toBeVisible({
+      timeout: T.page
+    });
+    await guard.assertClean();
+  }
+});
+
+interface LegacyAddress {
+  /** Прежний адрес удалённого экрана или вкладки. */
+  from: string;
+  /** Подраздел «Конфигурации», куда он ведёт. */
+  target: string;
+  /** Вкладка подраздела, видимая после перехода. */
+  tab: string;
+}
+
+// Таблица прежних адресов D-10 с разными формами запроса: перенаправление решают путь и
+// значение параметра, порядок и лишние параметры на него не влияют
+const LEGACY: readonly LegacyAddress[] = [
+  { from: '#/constructor', target: '#/config/cores', tab: 'cores-tab' },
+  { from: '#/constructor?tab=routing', target: '#/config/cores', tab: 'cores-tab' },
+  { from: '#/mihomo-gen', target: '#/config/cores', tab: 'cores-tab' },
+  { from: '#/editor?tab=constructor', target: '#/config/cores', tab: 'cores-tab' },
+  { from: '#/editor?file=x&tab=constructor', target: '#/config/cores', tab: 'cores-tab' },
+  { from: '#/subscriptions', target: '#/config/nodes', tab: 'nodes-tab' },
+  { from: '#/subscriptions/rt-legacy-sub-1', target: '#/config/nodes', tab: 'nodes-tab' },
+  { from: '#/proxies?tab=providers', target: '#/config/nodes', tab: 'nodes-tab' },
+  { from: '#/proxies?view=list&tab=providers', target: '#/config/nodes', tab: 'nodes-tab' },
+  { from: '#/dat', target: '#/config/lists', tab: 'lists-tab' },
+  { from: '#/rules?tab=exceptions', target: '#/config/rules', tab: 'rules-tab' },
+  { from: '#/rules?q=1&tab=exceptions', target: '#/config/rules', tab: 'rules-tab' }
+];
+
+test('config-entries legacy-redirects vp:1280', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize(VP_DESKTOP);
   await page.goto('/#/', { timeout: T.page, waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('networkidle');
 
-  // Пункт меню «Редактор» имеет href="#/config/files" при включённом флаге
-  const editorNavItem = page.locator('nav.sidebar-nav a[href="#/config/files"]');
-  await expect(editorNavItem).toBeVisible({ timeout: T.action });
+  for (const { from, target, tab } of LEGACY) {
+    await page.goto(`/${from}`, { timeout: T.page, waitUntil: 'domcontentloaded' });
+    await page.waitForURL((url) => url.hash === target, { timeout: T.action });
+    await expect(page.getByTestId(tab), `${from} → ${target}`).toBeVisible({ timeout: T.page });
+  }
 
-  // Переход на #/editor перенаправляется на #/config/files и открывает files-tab
-  await page.goto('/#/editor', { timeout: T.page, waitUntil: 'domcontentloaded' });
-  await page.waitForURL((url) => url.hash.startsWith('#/config/files'), { timeout: T.action });
-  await expect(page.getByTestId('files-tab')).toBeVisible({ timeout: T.action });
+  // Действующие страницы с прежними вкладками остаются на месте и прежних вкладок не несут
+  await page.goto('/#/proxies', { timeout: T.page, waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await expect(page, '#/proxies не перенаправляется').toHaveURL(/#\/proxies$/);
+  await expect(
+    page.locator('.tabs-bar [data-value="providers"], .tabs [data-value="providers"]')
+  ).toHaveCount(0);
+
+  await page.goto('/#/rules', { timeout: T.page, waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await expect(page, '#/rules не перенаправляется').toHaveURL(/#\/rules$/);
+  await expect(page.getByTestId('tab-exceptions')).toHaveCount(0);
 
   await guard.assertClean();
 });
-
-test(
-  'config-entries legacy-redirects vp:1280',
-  {
-    annotation: {
-      type: SLOW_ANNOTATION,
-      description:
-        'цикл флага слоя: выключение переносит файлы и перезапускает ядро, включение пересобирает файлы и снова перезапускает ядро; ожидание простоя конвейера'
-    }
-  },
-  async ({ page, browser }) => {
-    // выключение слоя переносит файлы и перезапускает ядро, включение пересобирает их
-    test.setTimeout(T.save * 5);
-    const guard = attachConsoleGuard(page);
-    await page.setViewportSize(VP_DESKTOP);
-
-    // #/constructor ведёт на #/config/cores
-    await page.goto('/#/constructor', { timeout: T.page, waitUntil: 'domcontentloaded' });
-    await page.waitForURL((url) => url.hash.startsWith('#/config/cores'), { timeout: T.action });
-
-    // #/mihomo-gen ведёт на #/config/cores
-    await page.goto('/#/mihomo-gen', { timeout: T.page, waitUntil: 'domcontentloaded' });
-    await page.waitForURL((url) => url.hash.startsWith('#/config/cores'), { timeout: T.action });
-
-    // #/proxies?tab=providers ведёт на #/config/nodes
-    await page.goto('/#/proxies?tab=providers', { timeout: T.page, waitUntil: 'domcontentloaded' });
-    await page.waitForURL((url) => url.hash.startsWith('#/config/nodes'), { timeout: T.action });
-
-    // #/rules?tab=exceptions ведёт на #/config/rules
-    await page.goto('/#/rules?tab=exceptions', { timeout: T.page, waitUntil: 'domcontentloaded' });
-    await page.waitForURL((url) => url.hash.startsWith('#/config/rules'), { timeout: T.action });
-
-    // На #/proxies нет вкладки «Провайдеры»
-    await page.goto('/#/proxies', { timeout: T.page, waitUntil: 'domcontentloaded' });
-    await page.waitForLoadState('networkidle');
-    await expect(
-      page.locator('.tabs-bar [data-value="providers"], .tabs [data-value="providers"]')
-    ).toHaveCount(0);
-
-    // На #/rules нет вкладки tab-exceptions
-    await page.goto('/#/rules', { timeout: T.page, waitUntil: 'domcontentloaded' });
-    await page.waitForLoadState('networkidle');
-    await expect(page.getByTestId('tab-exceptions')).toHaveCount(0);
-
-    await guard.assertClean();
-
-    // Без флага всё по-старому (D-16): слой временно выключается настоящим маршрутом, вкладка
-    // «Исключения» на месте и её адрес не перенаправляется. Флаг возвращается в finally, затем
-    // повторно проверяются перенаправление и отсутствие вкладки. Черновик не применяется.
-    await waitApplyIdle(page, 'до снимка');
-    const before = await layerSideState(page);
-    const taken = sideStateTaken(before);
-    if (taken.length) {
-      test.info().annotations.push({
-        type: 'skip-part',
-        description: `слой держит: ${taken.join(', ')} — выключение флага необратимо, режим без флага не проверен`
-      });
-      return;
-    }
-    const exceptions = page.getByTestId('tab-exceptions');
-    try {
-      await setLayer(browser, false);
-      // сначала перезагрузка на #/rules: панель перечитывает флаг, иначе прежнее значение в
-      // памяти перенаправило бы адрес исключений
-      await reloadWithFlag(page, false);
-      const offGuard = attachConsoleGuard(page);
-      await page.goto('/#/rules?tab=exceptions', {
-        timeout: T.page,
-        waitUntil: 'domcontentloaded'
-      });
-      await page.waitForLoadState('networkidle');
-      await expect(exceptions).toBeVisible({ timeout: T.page });
-      await expect(exceptions).toBeEnabled();
-      await exceptions.click();
-      await expect(exceptions).toHaveAttribute('aria-selected', 'true');
-      await expect(page, 'адрес исключений без флага не перенаправляется').toHaveURL(
-        /#\/rules\?tab=exceptions$/
-      );
-      await offGuard.assertClean();
-    } finally {
-      await setLayer(browser, true);
-    }
-
-    // перезагрузка на #/rules?tab=exceptions: при включённом флаге адрес снова ведёт в «Конфигурацию»
-    await reloadWithFlag(page, true);
-    const onGuard = attachConsoleGuard(page);
-    await page.waitForURL((url) => url.hash.startsWith('#/config/rules'), { timeout: T.action });
-    await page.goto('/#/rules', { timeout: T.page, waitUntil: 'domcontentloaded' });
-    await page.waitForLoadState('networkidle');
-    await expect(exceptions).toHaveCount(0);
-    await onGuard.assertClean();
-    await expect
-      .poll(() => layerSideState(page), {
-        message: 'G149-06: стенд после цикла флага слоя',
-        timeout: T.save,
-        intervals: [2000]
-      })
-      .toEqual(before);
-  }
-);
 
 // --- Окно чистого старта и следы старой панели (фаза 151, D-04…D-06) ---
 // Состояние готовит настоящая панель: при остановленной панели кладётся реестр старых
@@ -327,7 +178,6 @@ const XCP_DATA = '/opt/etc/xcp';
 const XCP_INIT = '/opt/etc/init.d/S99xcp';
 const XCP_STATE = `${XCP_DATA}/config_layer_state.json`;
 const LEGACY_BACKUP = '/opt/tmp/xcp-e2e-legacy-reset';
-const XRAY_CONFIGS = '/opt/etc/xray/configs';
 // Файл выбора узла старой панели: панель узнаёт его по точному имени
 const LEFTOVER_FILE = `${XRAY_CONFIGS}/04_outbounds.zz_xcp_default.json`;
 const VP_PHONE = { width: 390, height: 844 };
@@ -501,6 +351,8 @@ test.describe('config-entries legacy-reset', () => {
       await page.setViewportSize(VP_DESKTOP);
       await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
       await openAt(page, '#/');
+      // Панель останавливается init-скриптом: конвейер применения не должен быть занят
+      await waitApplyIdle(page, 'до перезапусков панели');
       await backupLegacy();
       const win = page.getByTestId('legacy-reset-window');
       try {
