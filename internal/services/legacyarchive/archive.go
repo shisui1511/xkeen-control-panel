@@ -36,6 +36,27 @@ func Run(dataDir string) (Result, error) {
 }
 
 func run(dataDir string) (Result, error) {
+	return withData(dataDir, runLocked)
+}
+
+// Режимы общего замка DataDir. Чтение метаданных идёт без замка: маркер и
+// список заменяются атомарным переименованием. Короткие правки из обработчиков
+// не ждут очистку, которая держит замок на время проверки и перезапуска ядра.
+type lockMode int
+
+const (
+	lockWait lockMode = iota
+	lockTry
+	lockNone
+)
+
+var errBusy = errors.New("операция со старыми данными уже выполняется")
+
+func withData(dataDir string, action func(archiveDir) (Result, error)) (Result, error) {
+	return withDataMode(dataDir, lockWait, action)
+}
+
+func withDataMode(dataDir string, mode lockMode, action func(archiveDir) (Result, error)) (Result, error) {
 	if dataDir == "" {
 		return Result{}, errUnsafePath
 	}
@@ -78,10 +99,20 @@ func run(dataDir string) (Result, error) {
 	}
 	data := archiveDir{root, validator, pinned}
 	// Дескриптор каталога даёт общий замок без создания файлов при чистой установке.
-	if err := syscall.Flock(int(dir.Fd()), syscall.LOCK_EX); err != nil {
-		return Result{}, err
+	switch mode {
+	case lockWait:
+		if err := syscall.Flock(int(dir.Fd()), syscall.LOCK_EX); err != nil {
+			return Result{}, err
+		}
+	case lockTry:
+		if err := syscall.Flock(int(dir.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+			if errors.Is(err, syscall.EWOULDBLOCK) {
+				return Result{}, errBusy
+			}
+			return Result{}, err
+		}
 	}
-	return runLocked(data)
+	return action(data)
 }
 
 func runLocked(data archiveDir) (Result, error) {

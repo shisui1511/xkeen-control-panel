@@ -667,9 +667,20 @@ func main() {
 	// Слой «Конфигурация» (фаза 144): создаётся и запускается здесь, Stop — через
 	// defer. Замок жизненного цикла — тот же, что у KernelApplier и обработчиков.
 	// Не создался — слой не подключается, маршруты отвечают 404.
+	configRoots := configlayer.Roots{Xray: cfg.XRayConfigDir, Mihomo: cfg.MihomoConfigDir}
+	configBinaries := func() configlayer.Binaries {
+		return configlayer.Binaries{
+			Xray:   installedKernelBinary(kernelSvc, "xray"),
+			Mihomo: installedKernelBinary(kernelSvc, "mihomo"),
+		}
+	}
+	xrayEnv := func(dir string) []string { return utils.XrayAssetEnv(os.Environ(), dir) }
+	legacyCleanup := &legacyarchive.Cleanup{
+		DataDir: cfg.DataDir, Roots: configRoots, Binaries: configBinaries, XrayEnv: xrayEnv,
+	}
 	configLayer, err := configlayer.New(configlayer.Options{
 		DataDir: cfg.DataDir,
-		Roots:   configlayer.Roots{Xray: cfg.XRayConfigDir, Mihomo: cfg.MihomoConfigDir},
+		Roots:   configRoots,
 		Enabled: func() bool {
 			cfg.RLock()
 			defer cfg.RUnlock()
@@ -680,13 +691,11 @@ func main() {
 			defer cfg.RUnlock()
 			return cfg.DevMode
 		},
-		Binaries: func() configlayer.Binaries {
-			return configlayer.Binaries{
-				Xray:   installedKernelBinary(kernelSvc, "xray"),
-				Mihomo: installedKernelBinary(kernelSvc, "mihomo"),
-			}
-		},
-		XrayEnv: func(dir string) []string { return utils.XrayAssetEnv(os.Environ(), dir) },
+		Binaries:      configBinaries,
+		XrayEnv:       xrayEnv,
+		LegacyStartup: legacyCleanup.Startup,
+		LegacyClean:   legacyCleanup.Clean,
+		LegacyNotices: legacyCleanup.Notices,
 		KernelVersions: func() []configlayer.KernelVersionInput {
 			cfg.RLock()
 			xkeenBin := resolveBinaryPath(cfg.XKeenBinary)
@@ -1104,6 +1113,7 @@ func main() {
 	srv.HandleProtected("/api/configlayer/cores/fill", api.ConfigCoresFill)
 	srv.HandleProtected("/api/configlayer/dns", api.ConfigDNS)
 	srv.HandleProtected("/api/configlayer/dns/", api.ConfigDNSAction)
+	srv.HandleProtected("/api/configlayer/legacy/clean", api.LegacyClean)
 	srv.HandleProtected("/api/configlayer/wizard", api.ConfigLayerWizard)
 	srv.HandleProtected("/api/configlayer/wizard/close", api.ConfigLayerWizardClose)
 	srv.HandleProtected("/api/configlayer/wizard/hide", api.ConfigLayerWizardHide)

@@ -124,6 +124,19 @@ func (b *BackupSet) SaveAbs(absPath, key, kernel, rel, reason string) (BackupFil
 	return m, nil
 }
 
+// SaveContent сохраняет байты, прочитанные через закреплённый файловый корень.
+// Вызывающий проверяет идентичность исходника перед записью.
+func (b *BackupSet) SaveContent(kernel, rel, reason string, data []byte) error {
+	if err := b.writeCopy(kernel, rel, data); err != nil {
+		return err
+	}
+	b.Meta.Files = append(b.Meta.Files, BackupFileMeta{
+		Key: ManifestKey(kernel, rel), Kernel: kernel, RelPath: rel,
+		Existed: true, OldHash: HashContent(data), Reason: reason,
+	})
+	return nil
+}
+
 // Read возвращает прежнюю версию файла из набора копий. Отсутствующая запись
 // или Existed=false означают, что прежнего файла нет.
 func (b *BackupSet) Read(kernel, rel string) (data []byte, existed bool, err error) {

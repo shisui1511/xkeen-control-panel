@@ -64,6 +64,9 @@ func identityOf(info os.FileInfo) identity {
 type ownership struct {
 	ID           string `json:"id"`
 	ProviderName string `json:"provider_name,omitempty"`
+	XrayHash     string `json:"xray_hash,omitempty"`
+	TagPrefix    string `json:"tag_prefix,omitempty"`
+	RoutingMode  string `json:"routing_mode,omitempty"`
 }
 
 type registryData struct {
@@ -108,11 +111,17 @@ func (r *registryData) readRecord(dec *json.Decoder) error {
 	}
 	var owner ownership
 	var url string
+	fields := make(map[json.Token]bool)
+	unique := true
 	for dec.More() {
 		key, err := dec.Token()
 		if err != nil {
 			return err
 		}
+		if fields[key] {
+			unique = false
+		}
+		fields[key] = true
 		value, err := dec.Token()
 		if err != nil {
 			return err
@@ -125,6 +134,12 @@ func (r *registryData) readRecord(dec *json.Decoder) error {
 				owner.ProviderName = literal
 			case "url":
 				url = literal
+			case "last_hash":
+				owner.XrayHash = literal
+			case "tag_prefix":
+				owner.TagPrefix = literal
+			case "routing_mode":
+				owner.RoutingMode = literal
 			}
 		}
 		for depth := tokenDepth(value); depth > 0; {
@@ -145,7 +160,7 @@ func (r *registryData) readRecord(dec *json.Decoder) error {
 		r.seen[url] = true
 		r.urls = append(r.urls, url)
 	}
-	if registryName.MatchString(owner.ID) && (owner.ProviderName == "" || registryName.MatchString(owner.ProviderName)) {
+	if unique && registryName.MatchString(owner.ID) && (owner.ProviderName == "" || registryName.MatchString(owner.ProviderName)) {
 		r.owners = append(r.owners, owner)
 	}
 	return nil
@@ -163,8 +178,12 @@ func tokenDepth(token json.Token) int {
 }
 
 func (m *marker) result(dir string) Result {
+	var path string
+	if len(m.Files) != 0 {
+		path = filepath.Join(dir, m.Archive)
+	}
 	return Result{
-		ArchivePath:       filepath.Join(dir, m.Archive),
+		ArchivePath:       path,
 		Complete:          m.State == complete,
 		URLCount:          m.URLCount,
 		KernelCleanupDone: m.KernelCleanupDone,
@@ -386,7 +405,8 @@ func (d archiveDir) readMarker() (*marker, error) {
 		return nil, errMarker
 	}
 	if m.Archive != archiveName || m.CreatedAt.IsZero() || m.URLCount < 0 ||
-		len(m.Files) == 0 || (m.State != complete && (m.State != prepared || len(m.Sources) == 0)) {
+		(len(m.Files) == 0 && (m.State != complete || m.URLCount != 0)) ||
+		(m.State != complete && (m.State != prepared || len(m.Sources) == 0)) {
 		return nil, errMarker
 	}
 	return m, nil
@@ -538,6 +558,8 @@ func archiveWarning(err error) string {
 		return errRegistry.Error()
 	case errors.Is(err, errMarker):
 		return errMarker.Error()
+	case errors.Is(err, errBusy):
+		return errBusy.Error()
 	default:
 		return "ошибка файловой операции при архивации старых данных"
 	}

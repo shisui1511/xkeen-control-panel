@@ -62,9 +62,14 @@ const (
 
 // Виды уведомлений.
 const (
-	noticeWarning = "warning"
-	noticeError   = "error"
+	noticeWarning         = "warning"
+	noticeError           = "error"
+	LegacyLeftoversNotice = "legacy_leftovers"
 )
+
+// LegacyRestart перезапускает затронутое работающее ядро под замком
+// применения. При попытке перезапуска возвращает восстановление рантайма.
+type LegacyRestart func(context.Context, string) (restore func() error, err error)
 
 // Options — зависимости и настройки слоя. Слой создаётся один раз в main.go;
 // все функции-зависимости опрашиваются при каждом использовании, поэтому
@@ -93,6 +98,9 @@ type Options struct {
 	Mihomo         MihomoControl
 	MihomoAPIReady func() bool
 	Lifecycle      LifecycleLocker
+	LegacyStartup  func(context.Context, LegacyRestart) error
+	LegacyClean    func(context.Context, LegacyRestart) error
+	LegacyNotices  func() []NoticeView
 	// Now — источник времени (nil — time.Now).
 	Now func() time.Time
 	// DriftInterval — период плановой сверки дрейфа (по умолчанию минута).
@@ -317,9 +325,30 @@ func (l *Layer) Start() {
 			l.checkNow(false)
 		}
 		// Цикл работает и при выключенном флаге (его включают без перезапуска):
-		// выключенный слой сверку пропускает, не читая диск.
-		l.spawn(l.loop)
+		// выключенный слой сверку пропускает, не читая диск. Однократный шаг
+		// уборки следов старого слоя идёт в той же горутине до цикла: проверка
+		// ядром и перезапуск не задерживают старт HTTP-сервера.
+		l.spawn(func() {
+			l.legacyStartup()
+			l.loop()
+		})
 	})
+}
+
+// legacyStartup — восстановление прерванной очистки и однократное решение
+// D-03 под общим замком применения. Сбой — предупреждение без деталей файлов.
+func (l *Layer) legacyStartup() {
+	if l.opts.LegacyStartup == nil {
+		return
+	}
+	if err := l.runLegacyCleanup(l.opts.LegacyStartup, false); err != nil {
+		if l.ctx.Err() != nil {
+			return
+		}
+		const id = "legacy_cleanup_failed"
+		l.SetNotices(id, []NoticeView{{ID: id, Kind: noticeWarning, Reason: err.Error()}})
+	}
+	l.RequestCheck()
 }
 
 // loop — фоновая сверка дрейфа: по тикеру DriftInterval и по запросам
@@ -407,6 +436,9 @@ func (l *Layer) checkNow(publish bool) FilesEvent {
 		l.lastRoutingDrift = ""
 		l.mu.Unlock()
 		return FilesEvent{Files: []FileView{}}
+	}
+	if l.opts.LegacyNotices != nil && !l.pipeline.Busy() {
+		l.SetNotices(LegacyLeftoversNotice, l.opts.LegacyNotices())
 	}
 	ev := l.evaluate(l.store.Snapshot())
 	data, err := json.Marshal(ev)
@@ -1971,6 +2003,8 @@ func (l *Layer) Release(key string) (FilesEvent, error) {
 // уведомления и публикует событие notices.
 func (l *Layer) DismissNotice(id string) ([]NoticeView, error) {
 	switch {
+	case id == LegacyLeftoversNotice:
+		return nil, ErrUnknownNotice
 	case id == "schema_reset" || id == "recovered_from_journal" || id == "journal_recovery_failed":
 		if err := l.store.DismissNotice(id); err != nil {
 			return nil, err
@@ -1989,6 +2023,40 @@ func (l *Layer) DismissNotice(id string) ([]NoticeView, error) {
 	views := l.noticeViews(l.store.Snapshot())
 	l.broker.Publish(Event{Type: EventNotices, Data: NoticesEvent{Notices: views}})
 	return views, nil
+}
+
+// CleanLegacy сериализует очистку с применением черновика и операциями ядер.
+func (l *Layer) CleanLegacy() error {
+	if l.opts.LegacyClean == nil {
+		return ErrUnknownNotice
+	}
+	if err := l.runLegacyCleanup(l.opts.LegacyClean, true); err != nil {
+		l.RequestCheck()
+		return err
+	}
+	l.SetNotices("legacy_cleanup_failed", nil)
+	l.RequestCheck()
+	return nil
+}
+
+func (l *Layer) runLegacyCleanup(clean func(context.Context, LegacyRestart) error, user bool) error {
+	release, err := l.pipeline.TryBegin(l.ctx, user)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return clean(l.ctx, l.restartAfterLegacyCleanup)
+}
+
+func (l *Layer) restartAfterLegacyCleanup(ctx context.Context, kernel string) (func() error, error) {
+	if l.pipeline.d.Applier == nil {
+		return nil, nil
+	}
+	outcome, err := l.pipeline.restartAndConfirm(ctx, kernel)
+	if outcome != services.ApplyRestarted && outcome != services.ApplyRestartFailed {
+		return nil, err
+	}
+	return func() error { return l.pipeline.recoverKernel(context.WithoutCancel(ctx), kernel) }, err
 }
 
 // isBuildFailedID — идентификатор вида build_failed:<ядро> известного ядра.
