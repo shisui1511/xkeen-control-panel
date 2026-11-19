@@ -60,7 +60,7 @@ type CronView struct {
 	Adoptable bool `json:"adoptable"`
 	Two       bool `json:"two"`
 	Kept      bool `json:"kept"`
-	// Панель убрала строку cron XKeen при перенятии расписания (CronTaken): выключение флага слоя вернёт её.
+	// Панель убрала строку cron XKeen при перенятии расписания (CronTaken).
 	Taken    bool   `json:"taken"`
 	Schedule string `json:"schedule,omitempty"`
 }

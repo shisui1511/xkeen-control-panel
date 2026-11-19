@@ -554,7 +554,7 @@ func (s *Service) rollbackEnable(ctx context.Context, pl enablePlan, fail *Failu
 		} else if p.Snapshot != nil && s.ctx.Err() == nil {
 			// Откат не удался (не из-за остановки службы — тогда старт панели
 			// откатит снимок заново): снимок остаётся записью override и proxy_dns до
-			// включения (сверка на старте, выключение флага слоя), но проход
+			// включения (сверка на старте), но проход
 			// завершён — откатывать по нему на старте панели нельзя (CR-04).
 			p.Snapshot.InFlight = false
 		}
@@ -768,9 +768,6 @@ type disablePlan struct {
 	kernel         string
 	live           bool
 	overrideBefore bool
-	// lineOnly — перехвата нет, возвращать нужно только строку proxy_dns: шаги
-	// выключения (runDisable) пропускаются.
-	lineOnly bool
 }
 
 // Disable — выключение перехвата без окна подтверждения (D-08): предпроверки
@@ -780,8 +777,8 @@ type disablePlan struct {
 // 127.0.0.1:53). Сбой apply не мешает вернуть DNS прошивке. Сбой любого шага
 // оставляет перехват желаемым с причиной ожидания disable_failed: выключение
 // повторяется той же кнопкой. proxy_dns при выключении кнопкой не меняется: его
-// возвращают откат (D-33), выключение флага слоя (D-36) и пути, на которых
-// перехват становится нежелаемым без пользователя (releaseProxyLine).
+// возвращают откат (D-33) и пути, на которых перехват становится нежелаемым без
+// пользователя (releaseProxyLine).
 func (s *Service) Disable(ctx context.Context) error {
 	pl, err := s.disablePreflight(ctx)
 	if err != nil {
@@ -895,8 +892,7 @@ func (s *Service) runDisable(ctx context.Context, pl disablePlan) {
 	if err := s.update(func(p *persisted) {
 		if fail != nil {
 			// Выключение не удалось: перехват остаётся желаемым, иначе повторить его
-			// нельзя (not_enabled), выключение флага слоя сочтёт возврат ненужным, а
-			// override, включённый панелью, не снимет уже никто. override и proxy_dns
+			// нельзя (not_enabled), а override, включённый панелью, не снимет уже никто. override и proxy_dns
 			// до включения сохраняются для повтора.
 			p.Desired = true
 			if pl.kernel != "" {
