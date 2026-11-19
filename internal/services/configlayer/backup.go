@@ -26,13 +26,14 @@ const (
 	backupMetaName  = "meta.json"
 )
 
-// Причины, по которым файл попал в набор копий.
+// Причины, по которым файл попал в набор копий. В наборах прошлых версий может
+// лежать снятая причина flag_off: meta.json читается как есть, без проверки
+// причины.
 const (
 	ReasonOverwrite = "overwrite"
 	ReasonDelete    = "delete"
 	ReasonOrphan    = "orphan"
 	ReasonObsolete  = "obsolete"
-	ReasonFlagOff   = "flag_off"
 )
 
 // BackupFileMeta — запись о файле в наборе копий.

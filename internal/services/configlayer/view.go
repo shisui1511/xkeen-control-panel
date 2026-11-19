@@ -124,7 +124,6 @@ type LegacyView struct {
 
 // SnapshotView — состояние слоя целиком для GET-снимка и первого события SSE.
 type SnapshotView struct {
-	Enabled       bool                     `json:"enabled"`
 	DevMode       bool                     `json:"dev_mode"`
 	DraftRevision int64                    `json:"draft_revision"`
 	DraftChanges  int                      `json:"draft_changes"`

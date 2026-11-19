@@ -4,186 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
-	"sort"
-
-	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
-// Disable выключает слой (D-04): managed-файлы манифеста переносятся в набор
-// копий (причина flag_off) и удаляются из рабочих каталогов, released остаются на
-// месте и в манифесте, перезапускается только запущенное ядро с изменениями.
-// Сбой рестарта возвращает файлы и ошибку. Файл состояния и Applied сохраняются:
-// повторное включение собирает файлы из них.
-//
-// Если панель взяла маршрутизацию (State.Routing), выключение сначала возвращает
-// её (D-03): перенесённые файлы routing Xray из копий и прежнюю цель config.yaml
-// Mihomo, и только затем убирает файлы панели — в том же наборе копий и журнале.
-// Возврат делается для всех ядер из State.Routing, а не только установленных:
-// файлы должны вернуться и без бинарника. Файл, имя которого пользователь уже
-// занял (release_conflict), не перезаписывается — остальное продолжается.
-// Так же возвращаются взятые секции Xray (State.Cores, 147-14): их исходные файлы
-// кладутся обратно из копий побайтно, владение снимается.
-// После выключения каталоги ядер такие же, как до взятия (D-04 из 144).
-//
-// Disable берёт те же замки, что и применение: занятое применение — ErrApplyBusy
-// (ErrGeodataBusy, если замок держит менеджер geodata) или ErrKernelBusy, диск не трогается (Pitfall 12). Ключ config_layer в
-// config.json снимает commitFlag (nil — ничего не делать): он вызывается после
-// успешного переноса файлов, но до освобождения замков, поэтому между переносом
-// и снятием флага не успевает ни применение, ни фоновая сборка (D-04). Ошибка
-// commitFlag возвращается как есть; файлы к этому моменту уже перенесены, и
-// решение, вернуть ли их (Enable), остаётся за вызывающим.
-func (l *Layer) Disable(ctx context.Context, commitFlag func() error) error {
-	release, err := l.pipeline.TryBegin(ctx, true)
-	if err != nil {
-		return l.mapBusy(err)
-	}
-	defer release()
-
-	// Журнал прошлой неудавшейся записи не перезаписывается набором выключения.
-	if err := l.pipeline.recoverPendingJournal(); err != nil {
-		return err
-	}
-	st := l.store.Snapshot()
-	keys := make([]string, 0, len(st.Manifest))
-	for key, e := range st.Manifest {
-		if e.Status == StatusManaged {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
-
-	// Всё проверяется до первой операции с диском: имя панели и путь внутри корня.
-	var plan Plan
-	for _, key := range keys {
-		e := st.Manifest[key]
-		abs, err := l.opts.Roots.Abs(e.Kernel, e.RelPath)
-		if err != nil {
-			return fmt.Errorf("%s: %w", key, err)
-		}
-		if !IsPanelFileName(e.Kernel, e.RelPath) {
-			return fmt.Errorf("%s: %w", key, ErrInvalidPanelName)
-		}
-		plan.Files = append(plan.Files, FilePlan{
-			Key: key, Kernel: e.Kernel, RelPath: e.RelPath, AbsPath: abs, Action: ActionDelete, Kind: e.Kind,
-		})
-	}
-
-	// Возврат маршрутизации (D-03) считается из фактического владения и входит в
-	// тот же план: операции возврата выполняются раньше удаления файлов панели.
-	if !st.Routing.isEmpty() {
-		ops := computeRoutingOps(RoutingDesired{V: routingSectionVersion}, st.Routing, InstalledKernels{Xray: true, Mihomo: true}, "", routingScans{}, l.opts.Now())
-		plan.Routing = ops
-	}
-	// Взятые секции Xray (147-14, D-05) возвращаются в том же плане: исходные файлы
-	// из копий побайтно, владение секциями снимается целиком.
-	if !st.Cores.isEmpty() {
-		if plan.Routing == nil {
-			plan.Routing = &RoutingOps{Next: st.Routing.clone()}
-		}
-		release := map[string][]MovedFile{}
-		for _, id := range XraySectionIDs {
-			if cur := st.Cores.Xray[id]; cur != nil && len(cur.Moved) > 0 {
-				release[id] = append([]MovedFile(nil), cur.Moved...)
-			}
-		}
-		if len(release) > 0 {
-			plan.Routing.CoreRelease = release
-		}
-		plan.Routing.NextCores = &CoresState{}
-	}
-	l.dropReleaseConflicts(plan.Routing)
-
-	switch {
-	case len(plan.Files) > 0 || plan.Routing.hasXrayDisk() || plan.Routing.hasMihomoDisk():
-		if err := l.moveManagedToBackup(ctx, plan); err != nil {
-			return err
-		}
-	case plan.Routing != nil:
-		// Взятие без операций на диске (config.yaml уже указывал на профиль панели,
-		// переносить было нечего): возвращать нечего, достаточно снять владение.
-		err := l.store.Update(func(st *State) error {
-			st.Routing = plan.Routing.Next.clone()
-			if plan.Routing.NextCores != nil {
-				st.Cores = plan.Routing.NextCores.clone()
-			}
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-	}
-	if commitFlag != nil {
-		if err := commitFlag(); err != nil {
-			return err
-		}
-	}
-	l.mu.Lock()
-	hadFailed := len(l.failed) > 0
-	l.failed = make(map[string]NoticeView)
-	l.mu.Unlock()
-	if hadFailed {
-		l.broker.Publish(Event{Type: EventNotices, Data: NoticesEvent{Notices: l.noticeViews(l.store.Snapshot())}})
-	}
-	l.SetNotices(noticeRoutingAutoTakenPrefix, nil)
-	l.invalidateVersions()
-	l.checkNow(true)
-	return nil
-}
-
-// dropReleaseConflicts убирает из операций возврата файлы, чьё имя в каталоге
-// Xray уже занято (пользователь вернул файл сам, T-146-19): перезаписи нет, имя
-// попадает в лог без содержимого, остальное возвращается.
-func (l *Layer) dropReleaseConflicts(ops *RoutingOps) {
-	if ops == nil {
-		return
-	}
-	occupied := func(mf MovedFile) bool {
-		abs, err := l.opts.Roots.Abs(KernelXray, mf.Name)
-		if err != nil {
-			return false
-		}
-		if _, statErr := os.Lstat(abs); statErr == nil {
-			log.Printf("[configlayer] выключение слоя: файл %s уже лежит в каталоге Xray, не перезаписывается", utils.SanitizeLogInput(mf.Name))
-			return true
-		}
-		return false
-	}
-	if len(ops.XrayRelease) > 0 {
-		keep := ops.XrayRelease[:0:0]
-		for _, mf := range ops.XrayRelease {
-			if !occupied(mf) {
-				keep = append(keep, mf)
-			}
-		}
-		ops.XrayRelease = keep
-	}
-	for id, files := range ops.CoreRelease {
-		keep := files[:0:0]
-		for _, mf := range files {
-			if !occupied(mf) {
-				keep = append(keep, mf)
-			}
-		}
-		if len(keep) == 0 {
-			delete(ops.CoreRelease, id)
-			continue
-		}
-		ops.CoreRelease[id] = keep
-	}
-}
-
-// moveManagedToBackup копирует файлы плана в набор с триггером "flag_off", удаляет их из
-// рабочих каталогов (копирование и удаление, не rename: каталоги могут лежать на
-// разных файловых системах), перезапускает затронутые ядра и фиксирует манифест.
-// Любая неудача возвращает файлы из набора.
-func (l *Layer) moveManagedToBackup(ctx context.Context, plan Plan) error {
-	return l.commitDiskPlan(ctx, plan, TriggerFlagOff, ReasonFlagOff)
-}
-
-// commitDiskPlan выполняет план слоя вне конвейера «Применить» (выключение флага,
-// «вернуть» маршрутизацию): копии файлов плана и операций маршрутизации идут в один
+// commitDiskPlan выполняет план слоя вне конвейера «Применить» («вернуть»
+// маршрутизацию и секции): копии файлов плана и операций маршрутизации идут в один
 // набор и один журнал; сначала операции маршрутизации (возврат чужих файлов и
 // config.yaml раньше удаления файлов панели), затем удаления; затем перезапуск
 // затронутых ядер и фиксация манифеста, State.Routing и State.Cores (если план
@@ -263,8 +88,8 @@ func (l *Layer) commitDiskPlan(ctx context.Context, plan Plan, trigger Trigger, 
 		}
 		if plan.Routing != nil {
 			st.Routing = plan.Routing.Next.clone()
-			// Владение секциями (147-14): выключение флага снимает его целиком,
-			// «Вернуть файл панели» записывает новую копию в Moved — как commitState.
+			// Владение секциями (147-14): «Вернуть файл панели» записывает новую
+			// копию в Moved — как commitState.
 			if plan.Routing.NextCores != nil {
 				st.Cores = plan.Routing.NextCores.clone()
 			}
@@ -284,28 +109,4 @@ func (l *Layer) commitDiskPlan(ctx context.Context, plan Plan, trigger Trigger, 
 // ссылаются владение маршрутизацией и секциями.
 func protectedBackupDirs(st State) []string {
 	return append(st.Routing.backupDirs(), st.Cores.backupDirs()...)
-}
-
-// Enable запускает сборку файлов после включения слоя (D-04): в фоне, из
-// применённого состояния, черновик не трогается. Ключ config_layer в config.json
-// обработчик сохраняет раньше вызова Enable. Ошибка запуска только логируется:
-// результат запуска виден в событиях apply_*.
-func (l *Layer) Enable() {
-	if !l.Enabled() {
-		return
-	}
-	l.spawn(func() {
-		release, err := l.pipeline.TryBegin(l.ctx, false)
-		if err != nil {
-			log.Printf("[configlayer] сборка после включения слоя не запущена: %v", err)
-			return
-		}
-		defer release()
-		l.bootstrap()
-		req := ApplyRequest{Trigger: TriggerFlagOn, Source: SourceApplied}
-		view := l.runPipeline(req)
-		release()
-		l.afterRun()
-		l.fireAfterApply(req, view)
-	})
 }
