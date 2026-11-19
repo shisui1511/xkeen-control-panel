@@ -12,7 +12,7 @@ import {
   type DnsTargetPrep
 } from './lib/dns-target';
 import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
-import { api, layerFlag, randomPort, resetDraft, withPanel } from './lib/nodes-api';
+import { api, randomPort, resetDraft, waitApplyIdle, withPanel } from './lib/nodes-api';
 
 // Поля DNS через прокси формы DNS Mihomo на настоящей панели (фаза 148, DNSF-01):
 // порядок полей, проверка адреса слушателя и диапазона fake-ip, запись верных значений в
@@ -22,18 +22,19 @@ import { api, layerFlag, randomPort, resetDraft, withPanel } from './lib/nodes-a
 // стенда не меняется. Тесты `dns-forms-takeover:` (148-18, D-12, D-19, D-20) включают
 // перехват DNS на запущенном ядре настоящими маршрутами и проверяют закреплённые значения
 // форм DNS против файлов ядра; перехват, маршрутизация и DNS-секция возвращаются в afterAll.
-// Флаг слоя включается на время прогона и возвращается прежним.
-
-const layer = layerFlag();
+// Черновик сбрасывается до и после прогона.
 
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
-  await layer.enable(browser);
+  await withPanel(browser, (page) => resetDraft(page));
 });
 
 test.afterAll(async ({ browser }) => {
-  await layer.restore(browser);
+  await withPanel(browser, async (page) => {
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
+  });
 });
 
 test.afterEach(async ({ browser }) => {
