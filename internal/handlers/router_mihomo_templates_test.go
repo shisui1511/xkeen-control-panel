@@ -7,7 +7,6 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	xkeencontrolpanel "github.com/shisui1511/xkeen-control-panel"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
@@ -45,26 +45,23 @@ func rtTplRemoveProfiles() {
 	}
 }
 
-// rtTplContents читает содержимое шаблонов каталога панели (файл → текст).
+// rtTplContents читает содержимое шаблонов каталога панели (файл → текст). Отдельного
+// маршрута списка шаблонов у панели нет: каталог встроен в бинарник, и тест собирается
+// из того же дерева, что и развёрнутая панель, поэтому читает тот же встроенный каталог.
 func (e *rtSrc) rtTplContents() map[string]string {
 	e.t.Helper()
-	status, raw, err := e.p.Call(http.MethodGet, "/api/templates/list", nil)
-	if err != nil || status != http.StatusOK {
-		e.t.Fatalf("GET /api/templates/list: %d %v", status, err)
-	}
-	var list []struct {
-		Type     string `json:"type"`
-		Filename string `json:"filename"`
-		Content  string `json:"content"`
-	}
-	if err := json.Unmarshal(raw, &list); err != nil {
-		e.t.Fatalf("каталог шаблонов не разобран: %v", err)
+	templatesFS, err := xkeencontrolpanel.GetTemplatesFS()
+	if err != nil {
+		e.t.Fatalf("встроенный каталог шаблонов: %v", err)
 	}
 	out := map[string]string{}
-	for _, t := range list {
+	for _, t := range services.NewTemplateService(templatesFS, "").List() {
 		if t.Type == "mihomo" {
 			out[t.Filename] = t.Content
 		}
+	}
+	if len(out) == 0 {
+		e.t.Fatal("во встроенном каталоге нет шаблонов Mihomo")
 	}
 	return out
 }

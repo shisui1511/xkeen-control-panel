@@ -301,11 +301,12 @@ func TestRouterAccessLogEnable(t *testing.T) {
 	}
 	e.rtRtApplyOK("взятие секции log Xray")
 
-	// Старый маршрут при включённом слое не правит файл Xray в обход слоя (WR-03 ревью).
+	// Прежний переключатель снят: обычный 404 общего обработчика, файл Xray в обход слоя
+	// не правится (WR-03 ревью).
 	beforeToggle := rtCoresDirSums(t)
-	e.rtRtExpect("старый toggle при слое", e.call(http.MethodPost, "/api/xray/access-log/toggle", map[string]any{"enabled": true}), http.StatusConflict, "config_layer_enabled")
+	e.rtRtExpect("снятый toggle", e.call(http.MethodPost, "/api/xray/access-log/toggle", map[string]any{"enabled": true}), http.StatusNotFound, "")
 	if !maps.Equal(beforeToggle, rtCoresDirSums(t)) {
-		t.Error("старый toggle изменил файлы Xray при включённом слое")
+		t.Error("снятый toggle изменил файлы Xray")
 	}
 	sec := rtCoresSection(e.rtCoresView("xray"), "log")
 	form, _ := sec["form"].(map[string]any)
