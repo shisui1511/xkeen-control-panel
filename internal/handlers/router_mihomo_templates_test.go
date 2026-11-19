@@ -98,13 +98,13 @@ func rtTplHasKey(content, key string) bool {
 	return regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(key) + `:`).MatchString(content)
 }
 
-// rtTplPrepare включает слой, убирает узел прошлого прогона из «Моих узлов» и
+// rtTplPrepare сбрасывает черновик, убирает узел прошлого прогона из «Моих узлов» и
 // применяет узел из ссылки: файл провайдера xcp-my.yaml оказывается на диске.
 func (e *rtSrc) rtTplPrepare(link string) {
 	e.t.Helper()
-	e.enableLayer()
+	e.freshDraft()
 	// Узел «Моих узлов» из прогона не остаётся в применённом состоянии: уборка идёт
-	// до сброса черновика и возврата флага слоя.
+	// до сброса черновика.
 	// Уборка идёт в обратном порядке: сначала узел, затем сброс слоя, чтобы штатные группы
 	// «Прокси» и «Авто» не остались для следующих сценариев.
 	e.t.Cleanup(e.rtRtPurge)
@@ -374,7 +374,7 @@ func TestRouterProfileCopyPanel(t *testing.T) {
 		t.Skip("Mihomo не установлен на стенде")
 	}
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	rtCpRemove()
 	t.Cleanup(rtCpRemove)
@@ -743,7 +743,7 @@ func TestRouterCoresFill(t *testing.T) {
 	}
 	const file = "smart-antifilter.yaml"
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	tpl := e.rtTplContents()[file]
 	if !strings.Contains(tpl, "https://example.com") || !strings.Contains(tpl, "Mijia Cloud") {

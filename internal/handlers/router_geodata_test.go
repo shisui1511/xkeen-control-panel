@@ -251,7 +251,7 @@ func TestRouterGeodataAPI(t *testing.T) {
 	routertest.Tier(t, routertest.Full, "реальная загрузка: настоящий запуск xkeen -ug скачивает базы из интернета")
 	e := rtNewSrc(t)
 
-	e.enableLayer()
+	e.freshDraft()
 	// Запись в xkeen.json и «Обновить сейчас» идут под исключительным замком слоя:
 	// пока фоновая сборка не закончилась, они отвечают apply_busy.
 	e.rtRstIdle()

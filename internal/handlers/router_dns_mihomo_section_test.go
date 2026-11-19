@@ -24,7 +24,7 @@ import (
 // «Применить» (конвейер с проверкой ядром) → ключи dns.* в profiles/xcp-main.yaml
 // на диске устройства. Вердикт — файл профиля и, если Mihomo — активное ядро,
 // слушатель DNS ядра на выбранном порту. Стенд возвращается в t.Cleanup при любом
-// исходе: значение секции — прежнее, маршрутизация отпущена, флаг слоя прежний.
+// исходе: значение секции — прежнее, маршрутизация отпущена.
 
 // rtDNSMihomoProxyNS, rtDNSMihomoDefaultNS — серверы формы: публичный DoH по IP и
 // резолвер по IP (адреса конфигурации, не узлы подписки).
@@ -66,7 +66,7 @@ func rtDNSMihomoListening(addr string) bool {
 	return false
 }
 
-// Трасса: слой включён → маршрутизация Mihomo взята и применена → секция dns у
+// Трасса: маршрутизация Mihomo взята и применена → секция dns у
 // панели → save формы с полями DNSF-01 → «Применить» OK → в xcp-main.yaml dns.listen,
 // dns.proxy-server-nameserver, dns.default-nameserver, dns.fake-ip-range,
 // dns.fake-ip-filter равны сохранённым → вид секции показывает их в форме, а не в
@@ -76,7 +76,7 @@ func TestRouterDNSMihomoSection(t *testing.T) {
 	routertest.Slow(t, "«Применить» секции DNS Mihomo с перезапуском ядра")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	rtCoresLiveMihomoTake(t, e, tg)
 

@@ -284,7 +284,7 @@ func TestRouterAccessLogEnable(t *testing.T) {
 		t.Fatalf("неизвестное ядро цели %q", core)
 	}
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	if core == "xray" {
 		rtRstKernelPID(t, "xray")
@@ -447,7 +447,7 @@ func TestRouterAccessLogForeignTake(t *testing.T) {
 		t.Fatalf("неизвестное ядро цели %q", core)
 	}
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	if core == "xray" {
 		rtRstKernelPID(t, "xray")
@@ -628,7 +628,7 @@ func TestRouterAccessLogEmptyAccess(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
 	core := tg.Core
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	if core == "xray" {
 		rtRstKernelPID(t, "xray")

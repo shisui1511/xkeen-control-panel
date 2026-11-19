@@ -140,7 +140,7 @@ func TestRouterPanelProfileUnixSocket(t *testing.T) {
 		t.Skip("профиль панели создаётся для активного Mihomo")
 	}
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	// Взятие применяется здесь же; возврат («Отпустить» и «Применить») помощник
 	// регистрирует в t.Cleanup.

@@ -120,14 +120,14 @@ func TestRouterRoutingProviderTargeted(t *testing.T) {
 	routertest.Slow(t, "серия «Применить» с перезапуском Xray: провайдеры правил")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	e.rtRtPurge()
 	taken := false
 
 	// Маршрутизация и следы сценария убираются при любом исходе: release →
 	// «Применить», затем очистка узлов и секций. Cleanup регистрируется после
-	// enableLayer и потому идёт раньше сброса черновика и возврата флага.
+	// freshDraft и потому идёт раньше сброса черновика и возврата флага.
 	t.Cleanup(func() {
 		c := e.with(t)
 		if taken {

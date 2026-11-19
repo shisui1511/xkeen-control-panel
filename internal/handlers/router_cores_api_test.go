@@ -177,7 +177,7 @@ func TestRouterCoresAPIFlow(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
 
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 
 	t.Run("вид секций", func(t *testing.T) {

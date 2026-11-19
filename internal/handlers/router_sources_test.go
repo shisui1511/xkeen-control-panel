@@ -107,10 +107,9 @@ func (e *rtSrc) resetDraft() {
 	}
 }
 
-// enableLayer готовит постоянный слой к сценарию: черновик приводится к
-// применённому состоянию, сброс повторяется при выходе из теста. Флага слоя нет —
-// слой всегда включён; имя осталось у всех вызывающих сценариев.
-func (e *rtSrc) enableLayer() {
+// freshDraft готовит постоянный слой к сценарию: черновик приводится к
+// применённому состоянию, сброс повторяется при выходе из теста.
+func (e *rtSrc) freshDraft() {
 	e.t.Helper()
 	e.resetDraft()
 	e.t.Cleanup(func() { e.resetDraft() })
@@ -275,7 +274,7 @@ func rtBody(method string) any {
 // из контракта — 405.
 func TestRouterSourcesProtected(t *testing.T) {
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	for _, rt := range rtSourceRoutes {
 		var body []byte
 		if rt.method == http.MethodPost {
@@ -315,7 +314,7 @@ func TestRouterSourcesProtected(t *testing.T) {
 // остальные маршруты «Моих узлов» и коды ошибок.
 func TestRouterSourcesMyNodesFlow(t *testing.T) {
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	contract := rtLoadContract(t)
 	link := rtLinkText(t, "vless_ws")
 	secret := "11111111-1111-4111-8111-111111111111"
@@ -483,7 +482,7 @@ func TestRouterSourcesSubscriptionFlow(t *testing.T) {
 		t.Skip("нет XCP_RT_SUBSCRIPTION_URL: настоящая подписка не задана")
 	}
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	contract := rtLoadContract(t)
 	link := rtLinkText(t, "vless_ws")
 	secrets := []string{subURL, url.QueryEscape(subURL)}

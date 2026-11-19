@@ -352,7 +352,7 @@ func TestRouterWizardAPI(t *testing.T) {
 	// Шаг «запуск» и отметка «пройдено» зависят от запущенного ядра стенда.
 	routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 
 	start := rtWizardView(e)
 	t.Logf("статус мастера стенда до теста: %q, шагов выполнено %d", rtWizardStatus(start), rtWizardNum(start, "done_count"))
@@ -704,7 +704,7 @@ func TestRouterWizardConflict(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
 	routertest.Tier(t, routertest.Full, "внесение сбоя: второй процесс ядра рядом с активным — конфликт ядер (D-15)")
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 
 	core := tg.Core
 	other, otherBin := "mihomo", rtRpMihomoBin

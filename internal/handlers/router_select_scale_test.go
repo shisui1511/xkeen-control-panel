@@ -663,7 +663,7 @@ func TestRouterRoutingSelectScale(t *testing.T) {
 	}
 	t.Logf("select-fixes: %s", rtRtSelectFixes)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	e.rtRtPurge()
 	taken := false

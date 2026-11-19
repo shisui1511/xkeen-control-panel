@@ -82,7 +82,7 @@ func rtPrfRemoveTestProfiles(dir string) {
 func rtPrfPrepare(t *testing.T, kernel string) *rtPrfStand {
 	t.Helper()
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRtPurge()
 	s := &rtPrfStand{t: t, e: e, dir: rtRtMihomoDir}
 	cfg := s.configPath()
@@ -448,7 +448,7 @@ func TestRouterProfileActivateOwnership(t *testing.T) {
 	routertest.Slow(t, "активации профилей Mihomo с полным перезапуском и новым PID на каждом шаге")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	var restoreKernel bool
 	t.Cleanup(func() {
@@ -604,7 +604,7 @@ func TestRouterProfileNames(t *testing.T) {
 	routertest.Slow(t, "отпускание и возврат Mihomo с перезапуском ядра, проверки имён профилей")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	s := rtOwnPrepare(t, e, "rt-names-", rtNamesA, rtNamesB)
 	t.Cleanup(func() {
@@ -770,7 +770,7 @@ func rtPlainKept(s *rtSwStand) []string {
 	return files
 }
 
-// Перенос обычного config.yaml внутри активации (D-27): при включённом слое активация
+// Перенос обычного config.yaml внутри активации (D-27): активация
 // профиля на обычном файле XKeen одной операцией переносит файл в
 // profiles/config-xkeen.yaml (содержимое то же), config.yaml ведёт на выбранный профиль,
 // adopted называет копию; вернуться можно активацией config-xkeen; при занятом имени —
@@ -781,7 +781,7 @@ func TestRouterProfileActivatePlain(t *testing.T) {
 	routertest.Slow(t, "перенос обычного файла и активации профилей с перезапуском Mihomo")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	s := rtOwnPrepare(t, e, "rt-plain-", rtPlainA)
 	plain := append(append([]byte{}, s.data...), []byte("\n# rt-plain: прежний файл XKeen\n")...)

@@ -375,7 +375,7 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 	routertest.Slow(t, "серия «Применить» по API маршрутизации с перезапуском ядра")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	e.rtRtPurge()
 	contract := rtLoadContractFile(t, routertest.RoutingContractFile(t))
@@ -384,7 +384,7 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 
 	// Маршрутизация и следы сценария убираются при любом исходе: release →
 	// «Применить», затем очистка узлов и секций. Cleanup регистрируется после
-	// enableLayer и потому идёт раньше сброса черновика.
+	// freshDraft и потому идёт раньше сброса черновика.
 	t.Cleanup(func() {
 		c := e.with(t)
 		if taken {
@@ -1385,7 +1385,7 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	routertest.Slow(t, "серия «Применить» и переключение группы на живом ядре")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	e.rtRtPurge()
 	contract := rtLoadContractFile(t, routertest.RoutingContractFile(t))
@@ -2359,12 +2359,12 @@ func rtRtHasRulesFromPreset(view map[string]any) bool {
 // ядра нет: тест меняет только черновик и не читает активное ядро.
 func TestRouterRoutingPresetsAndLists(t *testing.T) {
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	e.rtRtPurge()
 	contract := rtLoadContractFile(t, routertest.RoutingContractFile(t))
 	// Черновик с пресетом и узлом не применяется: при выходе узлы и секции
-	// убираются из черновика, затем enableLayer сбрасывает его к применённому.
+	// убираются из черновика, затем freshDraft сбрасывает его к применённому.
 	t.Cleanup(func() { e.with(t).rtRtPurge() })
 	e.rtRstAddMyNode(rtRtUniqueLink(t))
 
@@ -2492,7 +2492,7 @@ var rtRoutingRoutes = []struct{ method, path string }{
 // контракта — 405. Ответы читаемых маршрутов совпадают с routingContract.json по ключам.
 func TestRouterRoutingProtected(t *testing.T) {
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	for _, rt := range rtRoutingRoutes {
 		var body []byte
 		if rt.method == http.MethodPost {
