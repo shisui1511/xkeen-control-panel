@@ -4,23 +4,25 @@ import { test, expect, type Browser, type Locator, type Page } from '@playwright
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
 import { FULL_TAG, TIER_FULL_ANNOTATION } from './lib/known';
-import { api, layerFlag, resetDraft, withPanel } from './lib/nodes-api';
+import { api, resetDraft, waitApplyIdle, withPanel } from './lib/nodes-api';
 
 // Верх вкладки «Списки» (менеджер geodata XKeen, фаза 146.1, план 12): «Обновить сейчас» с
 // настоящим xkeen -ug, живой вывод, расписание, задача cron XKeen, блок «Загрузка» и диалог
 // записи с diff. Ответы сети не подменяются. Спек изменяющий: расписание, gh_proxy и cron
-// возвращаются прежними в afterEach, флаг слоя — в afterAll. Ядро не читается и не меняется.
-
-const layer = layerFlag();
+// возвращаются прежними в afterEach, черновик сбрасывается до и после прогона. Ядро не
+// читается и не меняется.
 
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
-  await layer.enable(browser);
+  await withPanel(browser, (page) => resetDraft(page));
 });
 
 test.afterAll(async ({ browser }) => {
-  await layer.restore(browser);
+  await withPanel(browser, async (page) => {
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
+  });
 });
 
 const BASE = '/api/configlayer/geodata';
