@@ -518,7 +518,8 @@
         "TestRouterExclusiveFlagRecheck",
         "TestRouterGeodataFlagCron",
         "TestRouterLiveDisabled",
-        "TestRouterSourceRefreshDisabled"
+        "TestRouterSourceRefreshDisabled",
+        "TestRouterSchedulerFlagOffZeroRequests"
       ],
       "keep_test_declarations": {
         "internal/services/geodata/router_remove_test.go": [
@@ -656,7 +657,6 @@
           "TestRouterNoticesRebuildFromLive",
           "TestRouterRefreshMetaOnRejection",
           "TestRouterMaskReason",
-          "TestRouterSchedulerFlagOffZeroRequests",
           "TestRouterServiceStopWaits",
           "TestRouterRefreshChangedSetTracer",
           "TestRouterRefreshRenameOnlyXrayFileUntouched",
