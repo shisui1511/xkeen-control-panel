@@ -54,12 +54,12 @@ func (e *rtTakeoverEnv) restart(t *testing.T) *ResultView {
 	return layer.pipeline.Current().Result
 }
 
-// TestRouterDisableReleasesRouting — жизненный цикл владения маршрутизацией без
-// флага слоя: Start берёт маршрутизацию ядра, которого не было при «Применить»;
+// TestRouterRoutingReleaseLifecycle — жизненный цикл владения маршрутизацией:
+// Start берёт маршрутизацию ядра, которого не было при «Применить»;
 // «Отпустить» при занятом применении отказывает без записи; файл с тем же именем,
 // который пользователь вернул сам, не перезаписывается (release_conflict); после
 // уборки возврат проходит побайтно, а повторное взятие снова работает.
-func TestRouterDisableReleasesRouting(t *testing.T) {
+func TestRouterRoutingReleaseLifecycle(t *testing.T) {
 	e := rtNewTakeoverEnv(t)
 
 	// «Применить» при одном Xray: Mihomo не взят, config.yaml на прежнем профиле.

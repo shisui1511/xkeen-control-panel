@@ -95,7 +95,8 @@
     "frontend/src/components/proxies/ProxyDiagnosticModal.svelte",
     "frontend/src/components/mihomo/MihomoProfilesCard.svelte",
     "frontend/src/components/subscriptions/NodeImporter.svelte",
-    "frontend/src/components/rules/RuleModal.svelte"
+    "frontend/src/components/rules/RuleModal.svelte",
+    "internal/services/configlayer/router_cores_flag_test.go"
   ],
   "removed_routes": [
     "/api/subscriptions",
@@ -510,7 +511,7 @@
         "internal/services/configlayer/router_live_test.go",
         "internal/services/configlayer/router_check_test.go",
         "internal/services/configlayer/router_exclusive_test.go",
-        "internal/services/configlayer/router_cores_flag_test.go",
+        "internal/services/configlayer/router_cores_release_test.go",
         "internal/services/configlayer/router_mihomo_provider_test.go",
         "internal/services/configlayer/router_release_test.go",
         "internal/services/configlayer/router_restore_test.go",
@@ -549,7 +550,9 @@
         "TestRouterDatLegacyFlag",
         "TestRouterProviderAdapterUnderDiskLoad",
         "TestRouterSubscriptionRefreshXrayOnly",
-        "TestRouterShareLinks"
+        "TestRouterShareLinks",
+        "TestRouterCoresDisableReturnsOriginals",
+        "TestRouterDisableReleasesRouting"
       ],
       "keep_test_declarations": {
         "internal/services/geodata/router_remove_test.go": [
@@ -789,8 +792,8 @@
           "TestRouterExclusiveGeodata",
           "TestRouterSettleSection"
         ],
-        "internal/services/configlayer/router_cores_flag_test.go": [
-          "TestRouterCoresDisableReturnsOriginals",
+        "internal/services/configlayer/router_cores_release_test.go": [
+          "TestRouterCoresReleaseReturnsOriginals",
           "TestRouterCoresSectionDrift"
         ],
         "internal/services/configlayer/router_mihomo_provider_test.go": [
@@ -798,7 +801,7 @@
           "TestRouterMihomoProviderUpdateTargeted"
         ],
         "internal/services/configlayer/router_release_test.go": [
-          "TestRouterDisableReleasesRouting",
+          "TestRouterRoutingReleaseLifecycle",
           "TestRouterRoutingDrift",
           "TestRouterKernelInstalledAutoTake",
           "TestRouterApplyRightAfterDone"

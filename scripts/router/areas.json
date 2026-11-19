@@ -184,8 +184,8 @@
           "tests": [
             "go:TestRouterConfigFilesScope",
             "go:TestRouterProfileTargetKeepsXKeen",
-            "go:TestRouterDisableReleasesRouting",
-            "go:TestRouterCoresDisableReturnsOriginals",
+            "go:TestRouterRoutingReleaseLifecycle",
+            "go:TestRouterCoresReleaseReturnsOriginals",
             "go:TestRouterLayerRestore"
           ]
         },
@@ -224,7 +224,7 @@
             "internal/services/configlayer/types.go"
           ],
           "tests": [
-            "go:TestRouterCoresDisableReturnsOriginals",
+            "go:TestRouterCoresReleaseReturnsOriginals",
             "go:TestRouterCoresSectionDrift",
             "go:TestRouterCoresScanXray",
             "go:TestRouterCoresScanMihomoActive",
@@ -271,7 +271,7 @@
             "go:TestRouterTakeoverApplyAndRelease",
             "go:TestRouterTakeoverValidationFailKeepsAll",
             "go:TestRouterTakeoverScan",
-            "go:TestRouterDisableReleasesRouting",
+            "go:TestRouterRoutingReleaseLifecycle",
             "go:TestRouterRoutingDrift",
             "go:TestRouterKernelInstalledAutoTake",
             "go:TestRouterProfileSplitOps",
@@ -281,7 +281,7 @@
             "go:TestRouterMihomoSwitchDraftOpen",
             "go:TestRouterMihomoSwitchRollback",
             "go:TestRouterConfigApplyRestartsRunningKernel",
-            "go:TestRouterCoresDisableReturnsOriginals",
+            "go:TestRouterCoresReleaseReturnsOriginals",
             "go:TestRouterExclusiveFlagRecheck"
           ]
         },

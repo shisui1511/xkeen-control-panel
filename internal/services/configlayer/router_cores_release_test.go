@@ -27,11 +27,11 @@ func rtCoReleaseAll(t *testing.T) map[string]json.RawMessage {
 	}
 }
 
-// TestRouterCoresDisableReturnsOriginals — «Отпустить» всех взятых секций одним
+// TestRouterCoresReleaseReturnsOriginals — «Отпустить» всех взятых секций одним
 // «Применить» возвращает исходные файлы побайтно, файлы панели уходят, State.Cores
 // пуст. Файл с тем же именем, который пользователь вернул сам, не перезаписывается:
 // возврат отказывает release_conflict, пока файл на месте.
-func TestRouterCoresDisableReturnsOriginals(t *testing.T) {
+func TestRouterCoresReleaseReturnsOriginals(t *testing.T) {
 	e := rtNewCoresEnv(t, map[string]string{
 		rtCoLogFile: `{"log": {"loglevel": "warning"}}` + "\n",
 		rtCoDNSFile: rtCoDNSBody,
