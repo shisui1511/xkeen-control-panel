@@ -3,12 +3,12 @@
 // frontend/src/lib/dnsContract.json (сверку выполняет scripts/check-config-ui.js,
 // необязательные поля — `?`). Состояние перехвата, блокировки, апстримы и исходы считает
 // бэкенд: интерфейс только отражает пришедшее. Событие `dns` слоя несёт лишь счётчик, по
-// нему вид перечитывается. Запросы идут только при включённом флаге слоя «Конфигурация».
+// нему вид перечитывается.
 
 import { writable, derived, get, type Readable } from 'svelte/store';
 import { apiFetchJSON } from './api';
 import { onLayerEvent, post, applyDraftAck, layerSnapshot, type DraftAck } from './configLayer';
-import { configLayerEnabled, activeKernelState } from '../stores';
+import { activeKernelState } from '../stores';
 import { t } from '../i18n';
 import dnsErrorCodes from './dnsErrorCodes.json';
 
@@ -147,7 +147,7 @@ export interface DnsStarted {
 
 // --- Сторы ---
 
-/** Последнее состояние перехвата; null — ещё не пришло или флаг слоя выключен. */
+/** Последнее состояние перехвата; null — ещё не пришло. */
 export const dnsTakeover = writable<DnsView | null>(null);
 /** Первая загрузка состояния не удалась (прежний вид при сбое перечитывания остаётся). */
 export const dnsLoadError = writable(false);
@@ -218,9 +218,8 @@ function setView(raw: DnsView): DnsView {
   return view;
 }
 
-/** Читает состояние перехвата. Без включённого флага слоя запроса нет. */
+/** Читает состояние перехвата. */
 export async function loadDns(): Promise<void> {
-  if (!get(configLayerEnabled)) return;
   const mine = ++loadSeq;
   try {
     const raw = await apiFetchJSON<DnsView>(BASE);
@@ -304,7 +303,6 @@ const DNS_DEBOUNCE_MS = 300;
 let users = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let unsubs: Array<() => void> = [];
-let flagUnsub: (() => void) | null = null;
 
 function loadSoon(): void {
   if (timer !== null) clearTimeout(timer);
@@ -360,24 +358,13 @@ function resetState(): void {
 
 /**
  * Начинает слежение за состоянием перехвата (карточка, баннер). Вызовы считаются: слежение
- * идёт, пока есть хотя бы один пользователь. При выключенном флаге слоя запросов нет, вид
- * сбрасывается; включение флага сразу читает состояние.
+ * идёт, пока есть хотя бы один пользователь; первый сразу читает состояние.
  */
 export function startDns(): void {
   users++;
   if (users > 1) return;
-  let active = false;
-  flagUnsub = configLayerEnabled.subscribe((on) => {
-    if (on && !active) {
-      active = true;
-      subscribeAll();
-      void loadDns();
-    } else if (!on && active) {
-      active = false;
-      unsubscribeAll();
-      resetState();
-    }
-  });
+  subscribeAll();
+  void loadDns();
 }
 
 /** Снимает слежение одного пользователя; с последним — подписки и вид сбрасываются. */
@@ -385,8 +372,6 @@ export function stopDns(): void {
   if (users === 0) return;
   users--;
   if (users > 0) return;
-  flagUnsub?.();
-  flagUnsub = null;
   unsubscribeAll();
   resetState();
 }

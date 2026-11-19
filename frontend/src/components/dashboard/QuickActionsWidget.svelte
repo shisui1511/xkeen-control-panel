@@ -12,6 +12,10 @@
   import Card from '../Card.svelte';
   import Section from '../Section.svelte';
   import { summarizeGroupDelay } from '../../lib/groupDelay';
+  import { handleLayerError, post } from '../../lib/configLayer';
+  // Только типы: клиент источников с его сторами подключает раздел «Конфигурация»
+  import type { RefreshOutcome, SourcesView } from '../../lib/configSources';
+  import { refreshToast } from '../../lib/nodesView';
 
   let {
     onSwitchTab
@@ -35,18 +39,67 @@
     $mihomoApiReady ? null : (offlineTitle ?? ($isConflict ? $t('kernel.conflict_blocked') : null))
   );
 
+  // Итоги, после которых набор узлов ядер новый или прежний без ошибки
+  const REFRESH_OK = new Set(['unchanged', 'applied', 'pending_updated']);
+
+  /**
+   * «Обновить подписки»: каждая включённая подписка обновляется тем же маршрутом, что и
+   * «Обновить» на «Конфигурация → Узлы», по одной за раз (общий замок конвейера). Список
+   * берётся из представления источников (GET /api/configlayer/sources); вкладка «Узлы» и
+   * другие окна узнают об итоге из события sources.
+   * Занятый конвейер или конфликт черновика останавливают обход с тостом слоя.
+   */
   async function handleRefreshSubs() {
     if (isRefreshingSubs) return;
     isRefreshingSubs = true;
-    showToast('info', $t('dash.qa_refresh_subs_title') + '...');
     try {
-      // apiFetchJSON разбирает конверт ошибки, в том числе legacy_blocked при включённом слое:
-      // в тост попадает переведённый текст сервера, а не сырой JSON ответа.
-      await apiFetchJSON('/api/subscriptions/refresh-all', { method: 'POST' });
-      showToast('success', $t('dash.qa_refresh_subs_success'));
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', e?.message || $t('app.error'));
+      let view: SourcesView;
+      try {
+        view = await apiFetchJSON<SourcesView>('/api/configlayer/sources');
+      } catch (e: any) {
+        if (e?.status === 401) return;
+        showToast('error', e?.message || $t('cfg.nodes.refresh_failed'));
+        return;
+      }
+      const ids = (Array.isArray(view?.sources) ? view.sources : [])
+        .filter((s) => s.kind === 'subscription' && s.enabled)
+        .map((s) => s.id);
+      if (ids.length === 0) {
+        showToast('info', $t('dash.qa_refresh_subs_none'));
+        return;
+      }
+      showToast('info', $t('dash.qa_refresh_subs_title') + '...');
+      const outcomes: RefreshOutcome[] = [];
+      for (const id of ids) {
+        try {
+          outcomes.push(await post<RefreshOutcome>('/api/configlayer/sources/refresh', { id }));
+        } catch (e: any) {
+          if (e?.status === 401) return;
+          handleLayerError(e);
+          return;
+        }
+      }
+      if (outcomes.length === 1) {
+        const toast = refreshToast(outcomes[0]);
+        let message = $t(toast.key, toast.params);
+        if (toast.extra) message += `; ${$t(toast.extra.key, toast.extra.params)}`;
+        showToast(toast.kind, message);
+      } else {
+        const ok = outcomes.filter(
+          (o) => REFRESH_OK.has(o.outcome) && refreshToast(o).kind !== 'warning'
+        ).length;
+        const sum = (pick: (o: RefreshOutcome) => number) =>
+          String(outcomes.reduce((n, o) => n + (pick(o) || 0), 0));
+        showToast(
+          ok === outcomes.length ? 'success' : 'warning',
+          $t('dash.qa_refresh_subs_done', {
+            ok: String(ok),
+            total: String(outcomes.length),
+            a: sum((o) => o.added),
+            b: sum((o) => o.removed)
+          })
+        );
+      }
     } finally {
       isRefreshingSubs = false;
     }

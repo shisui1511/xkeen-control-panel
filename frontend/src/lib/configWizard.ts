@@ -3,12 +3,12 @@
 // признак автооткрытия и видимость карточки «Настроить VPN» считает сервер (служба
 // setupwizard): мастер и карточка дашборда только отражают пришедшее. Седьмой шаг
 // (проверка IP) клиентский и сюда не входит (D-05). Событие `wizard` слоя несёт лишь
-// счётчик, по нему вид перечитывается. Запросы идут только при включённом флаге слоя.
+// счётчик, по нему вид перечитывается.
 
 import { writable, get } from 'svelte/store';
 import { apiFetchJSON } from './api';
 import { onLayerEvent, post, layerSnapshot } from './configLayer';
-import { configLayerEnabled, activeKernelState, runningKernels } from '../stores';
+import { activeKernelState, runningKernels } from '../stores';
 
 // --- Типы контракта (поля как в JSON сервера) ---
 
@@ -81,7 +81,7 @@ export interface WizardView {
 // --- Сторы ---
 
 /**
- * Последний вид мастера; null — ответа ещё нет или флаг слоя выключен. Карточка дашборда и
+ * Последний вид мастера; null — ответа ещё нет. Карточка дашборда и
  * автооткрытие мастера ждут первого ответа и по null ничего не решают.
  */
 export const wizardView = writable<WizardView | null>(null);
@@ -123,9 +123,8 @@ function setView(raw: WizardView): WizardView {
   return view;
 }
 
-/** Читает статус мастера. Без включённого флага слоя запроса нет. */
+/** Читает статус мастера. */
 export async function loadWizard(): Promise<void> {
-  if (!get(configLayerEnabled)) return;
   const mine = ++loadSeq;
   try {
     const raw = await apiFetchJSON<WizardView>(BASE);
@@ -160,7 +159,6 @@ export const WIZARD_DEBOUNCE_MS = 300;
 let users = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let unsubs: Array<() => void> = [];
-let flagUnsub: (() => void) | null = null;
 
 function loadSoon(): void {
   if (timer !== null) clearTimeout(timer);
@@ -227,24 +225,14 @@ function resetState(): void {
 
 /**
  * Начинает слежение за статусом мастера (раздел, страница мастера, карточка дашборда).
- * Вызовы считаются: слежение идёт, пока есть хотя бы один пользователь. При выключенном
- * флаге слоя запросов нет, вид сбрасывается в null; включение флага сразу читает статус.
+ * Вызовы считаются: слежение идёт, пока есть хотя бы один пользователь; первый сразу
+ * читает статус.
  */
 export function startWizard(): void {
   users++;
   if (users > 1) return;
-  let active = false;
-  flagUnsub = configLayerEnabled.subscribe((on) => {
-    if (on && !active) {
-      active = true;
-      subscribeAll();
-      void loadWizard();
-    } else if (!on && active) {
-      active = false;
-      unsubscribeAll();
-      resetState();
-    }
-  });
+  subscribeAll();
+  void loadWizard();
 }
 
 /** Снимает слежение одного пользователя; с последним — подписки и вид сбрасываются. */
@@ -252,8 +240,6 @@ export function stopWizard(): void {
   if (users === 0) return;
   users--;
   if (users > 0) return;
-  flagUnsub?.();
-  flagUnsub = null;
   unsubscribeAll();
   resetState();
 }
