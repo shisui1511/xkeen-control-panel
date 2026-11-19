@@ -196,16 +196,6 @@ export async function apiFetchJSON<T = unknown>(
   return payload as T;
 }
 
-export interface UserRule {
-  id: string;
-  type: string; // 'domain' | 'domain_suffix' | 'domain_keyword' | 'ip_cidr' | 'port'
-  value: string;
-  target: string; // 'direct' | 'proxy' | 'reject'
-  group?: string;
-  comment?: string;
-  enabled: boolean;
-}
-
 export interface RuleProvider {
   name: string;
   behavior: string;
