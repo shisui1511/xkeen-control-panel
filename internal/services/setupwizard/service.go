@@ -876,14 +876,10 @@ func (s *Service) Reset() (View, error) {
 	return s.postView(status), nil
 }
 
-// mark ставит признак мастера; «не изменилось» — не ошибка. Выключенный слой —
-// ошибка сразу, до очереди. Запись — через очередь под tickMu, как и отметка done
-// наблюдателем (WR-03); ответ не ждёт носителя, замка хранилища и тика дольше
-// wizardWriteWait (G-149.1-6).
+// mark ставит признак мастера; «не изменилось» — не ошибка. Запись — через
+// очередь под tickMu, как и отметка done наблюдателем (WR-03); ответ не ждёт
+// носителя, замка хранилища и тика дольше wizardWriteWait (G-149.1-6).
 func (s *Service) mark(op writeOp) (View, error) {
-	if !s.d.Layer.Enabled() {
-		return View{}, configlayer.ErrDisabled
-	}
 	status, err := s.submitWrite(op)
 	if err != nil {
 		return View{}, err

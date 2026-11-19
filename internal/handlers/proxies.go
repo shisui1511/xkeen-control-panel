@@ -7,7 +7,8 @@ import (
 
 // Маршруты страницы «Прокси» при слое «Конфигурация» (фаза 150) читают
 // применённое состояние через сервис маршрутизации и защищены HandleProtected.
-// Флаг слоя проверяется на каждый запрос, независимо от активного ядра.
+// Работают сразу после старта, независимо от активного ядра: проверяется только
+// наличие созданных в main.go служб, без них — 404 not_found.
 func (a *API) requireProxies(w http.ResponseWriter, r *http.Request) bool {
 	return a.requireRouting(w, r)
 }
@@ -41,7 +42,7 @@ func (a *API) requirePing(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	if a.ping == nil {
-		JSONErrorCode(w, http.StatusNotFound, "config_layer_disabled", a.t(r, "configlayer.disabled"))
+		JSONErrorCode(w, http.StatusNotFound, "not_found", a.t(r, "error.not_found"))
 		return false
 	}
 	return true

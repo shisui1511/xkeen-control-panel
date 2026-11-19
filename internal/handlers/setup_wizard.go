@@ -7,8 +7,8 @@ import (
 )
 
 // Маршруты мастера первого запуска (фаза 149.1). Авторизацию и X-CSRF-Token
-// изменяющих запросов проверяет обёртка HandleProtected до обработчика; при
-// выключенном флаге слоя маршруты отвечают 404 config_layer_disabled.
+// изменяющих запросов проверяет обёртка HandleProtected до обработчика; маршруты
+// работают сразу после старта, пока в main.go созданы слой и служба мастера.
 
 // SetSetupWizardService подключает службу мастера первого запуска; создаётся,
 // запускается и останавливается в main.go.
@@ -16,10 +16,10 @@ func (a *API) SetSetupWizardService(s *setupwizard.Service) {
 	a.wizard = s
 }
 
-// requireWizard — requireLayer плюс подключённая служба мастера: без службы
+// requireWizard — requireConfigLayer плюс подключённая служба мастера: без службы
 // маршруты отвечают 404 not_found.
 func (a *API) requireWizard(w http.ResponseWriter, r *http.Request) bool {
-	if !a.requireLayer(w, r) {
+	if !a.requireConfigLayer(w, r) {
 		return false
 	}
 	if a.wizard == nil {
@@ -62,7 +62,7 @@ func (a *API) wizardReset() (setupwizard.View, error) { return a.wizard.Reset() 
 
 // wizardAction — общий путь POST-действий мастера: действие задаёт путь, тело
 // запроса не читается (свободных строк нет); успех — свежий вид, ошибка — по
-// таблице слоя (ErrDisabled → 404, ErrDevModeRequired → 403).
+// таблице слоя (ErrDevModeRequired → 403).
 func (a *API) wizardAction(w http.ResponseWriter, r *http.Request, act func() (setupwizard.View, error)) {
 	if !a.requireMethod(w, r, http.MethodPost) || !a.requireWizard(w, r) {
 		return
