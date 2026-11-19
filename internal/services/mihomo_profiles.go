@@ -627,18 +627,10 @@ type ActivationResult struct {
 	Adopted string `json:"adopted,omitempty"`
 }
 
-// Activate validates a profile, points config.yaml to it and restarts the
-// core when Mihomo is running. If the core does not come back healthy, the
-// previous profile is restored and the core restarted again. Обычный config.yaml
-// не принимается: ErrProfilesUnmanaged (см. ActivateAdopting).
-func (s *MihomoProfileService) Activate(name string) (*ActivationResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.activateLocked(name)
-}
-
-// activateLocked — активация, когда config.yaml уже ссылка на профиль. Вызывается
-// под s.mu.
+// activateLocked — активация, когда config.yaml уже ссылка на профиль: проверка
+// профиля, переключение config.yaml и перезапуск запущенного Mihomo; ядро не
+// вернулось здоровым — прежний профиль возвращается и ядро перезапускается снова.
+// Обычный config.yaml не принимается: ErrProfilesUnmanaged. Вызывается под s.mu.
 func (s *MihomoProfileService) activateLocked(name string) (*ActivationResult, error) {
 	path, err := s.profilePath(name)
 	if err != nil {
@@ -667,7 +659,7 @@ func (s *MihomoProfileService) activateLocked(name string) (*ActivationResult, e
 	return s.restartConfirmed(&ActivationResult{Active: name}, previous, undo)
 }
 
-// ActivateAdopting — Activate, который принимает и обычный config.yaml XKeen
+// ActivateAdopting — активация профиля, которая принимает и обычный config.yaml XKeen
 // (D-27): файл одной операцией переезжает в profiles/config-xkeen.yaml (содержимое
 // то же, при занятом имени — суффикс -2…-99), config.yaml становится ссылкой на
 // выбранный профиль. Не запустилось — возвращается всё: прежний обычный файл с теми же
