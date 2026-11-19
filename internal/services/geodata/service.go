@@ -335,9 +335,7 @@ func (s *Service) loop() {
 
 // tick — один такт цикла: правки файлов вне панели, возврат строки cron XKeen
 // (CronTwo, D-17) и уборка временных записей стандартных наборов после запусков по
-// cron или SSH. Запуски по расписанию ведёт отдельный планировщик (schedLoop). С выключенным флагом слоя xkeen.json в фоне не правится
-// (D-04 из 144): ожидания остаются в состоянии и доводятся первым тиком после
-// включения флага.
+// cron или SSH. Запуски по расписанию ведёт отдельный планировщик (schedLoop).
 //
 // Уборка правит xkeen.json, поэтому идёт под исключительным замком слоя (держатель
 // geodata_write; занято — тик пропускается до следующего такта) и только когда убирать
@@ -351,7 +349,7 @@ func (s *Service) tick() {
 	if s.pruneCleaned() {
 		s.changed()
 	}
-	if !s.d.Layer.Enabled() || !s.readyPending() {
+	if !s.readyPending() {
 		return
 	}
 	release, err := s.d.Layer.BeginExclusive(s.ctx, true, configlayer.HolderGeodataWrite)

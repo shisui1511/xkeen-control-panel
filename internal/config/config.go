@@ -71,10 +71,7 @@ type Config struct {
 	UpdateAutoInstall   bool   `json:"update_auto_install"`
 	UpdateInstallWindow string `json:"update_install_window"` // "HH:MM-HH:MM", местное время роутера
 	DevMode             bool   `json:"dev_mode"`
-	// ConfigLayer — флаг слоя «Конфигурация» (D-01): по умолчанию выключен, при
-	// выключенном флаге панель ведёт себя как прежде.
-	ConfigLayer bool   `json:"config_layer"`
-	ConfigPath  string `json:"-"`
+	ConfigPath          string `json:"-"`
 
 	// NeedsSave и Migrations — служебные поля, не сериализуются. Load()
 	// выставляет их, когда конфиг на диске содержит устаревшие ключи

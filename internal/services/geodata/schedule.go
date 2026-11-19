@@ -153,12 +153,6 @@ func parseSlot(v string) time.Time {
 	return t
 }
 
-// scheduleActive — расписание панели должно срабатывать: включено, не приостановлено
-// и слой «Конфигурация» включён.
-func (s *Service) scheduleActive(sch Schedule, suspended bool) bool {
-	return sch.Enabled && !suspended && s.d.Layer.Enabled()
-}
-
 // schedLoop — планировщик: засыпает до ближайшего события (слот, повтор, догон), но не
 // дольше schedMaxWait. Останавливается вместе с сервисом (контекст Stop).
 func (s *Service) schedLoop() {
