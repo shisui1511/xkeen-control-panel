@@ -899,12 +899,12 @@ func releaseConflicts(roots Roots, ops *RoutingOps) []BuildIssue {
 
 // planRouting считает операции маршрутизации для запуска. Запуск, ограниченный
 // ключами («Пересобрать»), и фоновые обновления данных состояние владения не
-// меняют: взятие и возврат идут при «Применить», установке ядра и включении слоя.
+// меняют: взятие и возврат идут при «Применить», установке ядра и старте слоя.
 func (p *Pipeline) planRouting(src Sections, actual RoutingState, installed InstalledKernels, req ApplyRequest) (*RoutingOps, error) {
 	if len(req.Only) > 0 {
 		return nil, nil
 	}
-	if req.Source != SourceDraft && req.Trigger != TriggerKernelInstalled && req.Trigger != TriggerFlagOn {
+	if req.Source != SourceDraft && req.Trigger != TriggerKernelInstalled && req.Trigger != TriggerStartup {
 		return nil, nil
 	}
 	desired := DesiredRouting(src)

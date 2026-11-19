@@ -18,8 +18,8 @@ const (
 	HolderGeodataWrite = "geodata_write"
 )
 
-// ErrGeodataBusy — замок применения держит менеджер geodata: «Применить», выключение
-// слоя и второе обновление баз по кнопке отказывают этой ошибкой вместо ErrApplyBusy.
+// ErrGeodataBusy — замок применения держит менеджер geodata: «Применить», операции
+// слоя по кнопке и второе обновление баз отказывают этой ошибкой вместо ErrApplyBusy.
 var ErrGeodataBusy = errors.New("geodata_busy")
 
 // BeginExclusive берёт тот же замок, что и «Применить» (applyMu, затем замок жизненного
@@ -28,17 +28,12 @@ var ErrGeodataBusy = errors.New("geodata_busy")
 // user=true — запуск по кнопке: занятый замок даёт отказ сразу (ErrGeodataBusy, если
 // замок держит менеджер geodata, иначе ErrApplyBusy или ErrKernelBusy). user=false —
 // фоновый запуск (шаг после «Применить»): ждёт конца идущего применения, ожидание
-// прерывается контекстом ctx и остановкой слоя. Флаг слоя проверяется и после
-// ожидания: выключение слоя, прошедшее за время ожидания фонового вызова, даёт
-// ErrDisabled (замок при этом сразу снимается, держатель не ставится).
+// прерывается контекстом ctx и остановкой слоя (ErrStopped).
 //
 // release снимает держателя и оба замка, затем публикует событие geodata; повторный
-// вызов безопасен. Слой выключен — ErrDisabled. Пустой holder отклоняется: по нему
-// остальные пути узнают причину занятости.
+// вызов безопасен. Пустой holder отклоняется: по нему остальные пути узнают причину
+// занятости.
 func (l *Layer) BeginExclusive(ctx context.Context, user bool, holder string) (release func(), err error) {
-	if !l.Enabled() {
-		return nil, ErrDisabled
-	}
 	if holder == "" {
 		return nil, errors.New("configlayer: не задан держатель исключительного замка")
 	}
@@ -58,10 +53,6 @@ func (l *Layer) BeginExclusive(ctx context.Context, user bool, holder string) (r
 			return nil, ErrStopped
 		}
 		return nil, l.mapBusy(err)
-	}
-	if !l.Enabled() {
-		unlock()
-		return nil, ErrDisabled
 	}
 	l.mu.Lock()
 	l.holder = holder
@@ -108,11 +99,8 @@ func (l *Layer) mapBusy(err error) error {
 }
 
 // PublishGeodata сообщает клиентам о состоянии менеджера geodata: счётчик событий и
-// держатель замка. Построчный вывод -ug по шине слоя не идёт. Выключенный слой молчит.
+// держатель замка. Построчный вывод -ug по шине слоя не идёт.
 func (l *Layer) PublishGeodata(seq uint64) {
-	if !l.Enabled() {
-		return
-	}
 	l.broker.Publish(Event{Type: EventGeodata, Data: GeodataEvent{Seq: seq, Holder: l.BusyHolder()}})
 }
 
@@ -133,9 +121,6 @@ func (l *Layer) FeatureAvailability(f Feature) Availability {
 // ревизия +1, событие draft и внеочередная проверка: клиент со старой ревизией получит
 // draft_conflict и перечитает состояние.
 func (l *Layer) SettleSection(section string, fn func(applied, draft json.RawMessage) (json.RawMessage, json.RawMessage, error)) error {
-	if !l.Enabled() {
-		return ErrDisabled
-	}
 	_, changed, err := l.store.SettleSection(section, fn)
 	if err != nil {
 		return err
