@@ -7,21 +7,16 @@
     mihomoApiState,
     mihomoOfflineReason,
     activeKernelName,
-    isConflict,
-    configLayerEnabled,
-    configLayerFlagKnown
+    isConflict
   } from './stores';
   import {
     apiFetch,
-    fetchCustomRules,
-    saveCustomRules,
     flushFakeIP,
     flushDNSCache,
     fetchRuleProviders,
     updateRuleProvider,
     fetchRuleProviderDetails,
     type RuleProviderDetails,
-    type UserRule,
     type RuleProvider
   } from './lib/api';
   import PageHeader from './PageHeader.svelte';
@@ -29,7 +24,6 @@
   import Button from './components/Button.svelte';
   import Skeleton from './components/Skeleton.svelte';
   import Icon from './lib/components/Icon.svelte';
-  import UserRulesTab from './components/rules/UserRulesTab.svelte';
   import RuleProvidersTab from './components/rules/RuleProvidersTab.svelte';
   import RouteDiagnosticTab from './components/rules/RouteDiagnosticTab.svelte';
   import AllKernelRulesTab, { type KernelRule } from './components/rules/AllKernelRulesTab.svelte';
@@ -40,10 +34,8 @@
 
   let { onSwitchTab = () => {} }: Props = $props();
 
-  const isLayerActive = $derived($configLayerFlagKnown && $configLayerEnabled);
-
   // Active tab state
-  type TabKey = 'exceptions' | 'providers' | 'diagnostic' | 'all_rules';
+  type TabKey = 'providers' | 'diagnostic' | 'all_rules';
 
   // Адрес #/rules?tab=providers (ссылка из «Профилей») открывает «Провайдеры» при любом ядре.
   function hashWantsProviders(): boolean {
@@ -51,15 +43,9 @@
     return new URLSearchParams(query).get('tab') === 'providers';
   }
 
-  let activeTab = $state<TabKey>(hashWantsProviders() ? 'providers' : 'exceptions');
+  let activeTab = $state<TabKey>('providers');
   // Вкладку выбрали руками или адресом: самовыбор «Провайдеров» по состоянию ядра её не меняет.
   let tabChosen = $state(hashWantsProviders());
-
-  $effect(() => {
-    if (isLayerActive && activeTab === 'exceptions') {
-      activeTab = 'providers';
-    }
-  });
 
   // Страница без API Mihomo (D-19): ядро остановлено, API не отвечает или работает Xray.
   // До первого ответа capabilities (unknown) причины нет — показывается скелетон.
@@ -78,10 +64,6 @@
     })
   );
 
-  // Custom Rules State
-  let customRules = $state<UserRule[]>([]);
-  let loadingCustom = $state(false);
-
   // Kernel Rules State
   let kernelRules = $state<KernelRule[]>([]);
   let loadingKernelRules = $state(false);
@@ -91,9 +73,6 @@
   let ruleProviderDetails = $state<Record<string, RuleProviderDetails>>({});
   let loadingProviders = $state(false);
 
-  // Proxy Groups State
-  let proxyGroups = $state<string[]>([]);
-
   // Fake-IP flushing state
   let flushingFakeIP = $state(false);
   let flushingDNS = $state(false);
@@ -101,8 +80,6 @@
   // Subtitle mapping based on active tab
   let currentSubtitle = $derived.by(() => {
     switch (activeTab) {
-      case 'exceptions':
-        return $t('rules.exceptions_subtitle');
       case 'providers':
         return $t('rules.providers_subtitle');
       case 'diagnostic':
@@ -116,9 +93,6 @@
 
   // Tab definitions
   let tabItems = $derived<TabItem[]>([
-    ...(isLayerActive
-      ? []
-      : [{ value: 'exceptions', label: $t('rules.tab_exceptions'), testId: 'tab-exceptions' }]),
     { value: 'providers', label: $t('rules.tab_providers'), testId: 'tab-providers' },
     {
       value: 'diagnostic',
@@ -133,36 +107,6 @@
       disabled: offline
     }
   ]);
-
-  async function loadCustomRules() {
-    loadingCustom = true;
-    try {
-      customRules = await fetchCustomRules();
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', e.message);
-    } finally {
-      loadingCustom = false;
-    }
-  }
-
-  async function handleSaveCustomRules(rules: UserRule[]) {
-    try {
-      const res = await saveCustomRules(rules);
-      customRules = rules;
-      if (!res.applied) {
-        showToast('warning', $t('rules.saved_but_not_applied'));
-      } else if (res.warning) {
-        showToast('warning', res.warning);
-      } else {
-        showToast('success', $t('rules.custom_saved'));
-      }
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', e.message);
-      throw e;
-    }
-  }
 
   async function loadKernelRules() {
     loadingKernelRules = true;
@@ -216,30 +160,6 @@
       ruleProviderDetails = {};
     } finally {
       loadingProviders = false;
-    }
-  }
-
-  async function loadProxyGroups() {
-    try {
-      const res = await apiFetch('/api/mihomo/proxy/proxies');
-      if (res.ok) {
-        const data = await res.json();
-        const proxies = data.proxies || {};
-        const groups: string[] = [];
-        for (const [name, info] of Object.entries(proxies) as [string, any][]) {
-          const type = (info.type || '').toLowerCase();
-          if (['selector', 'urltest', 'fallback', 'loadbalance', 'relay'].includes(type)) {
-            groups.push(name);
-          }
-        }
-        proxyGroups = groups.sort();
-      }
-    } catch {
-      // Fallback: extract groups from rules
-      const names = kernelRules
-        .map((r) => (r.proxy || '').trim())
-        .filter((p) => p && !['DIRECT', 'REJECT', 'PASS'].includes(p.toUpperCase()));
-      proxyGroups = Array.from(new Set(names)).sort();
     }
   }
 
@@ -305,10 +225,6 @@
     }
   }
 
-  onMount(() => {
-    loadCustomRules();
-  });
-
   // Данные ядра (правила, провайдеры, группы) читаются, когда API Mihomo отвечает:
   // при Xray, остановленном ядре или недоступном API запросы давали 409/502 и
   // ошибки в консоли браузера. Возврат API в строй перечитывает данные.
@@ -316,7 +232,7 @@
     if (!$mihomoApiReady) return;
     untrack(() => {
       loadProviders();
-      loadKernelRules().then(() => loadProxyGroups());
+      loadKernelRules();
     });
   });
 
@@ -394,13 +310,6 @@
   <div class="tab-content" role="tabpanel">
     {#if !stateKnown}
       <Skeleton type="card" height="280px" />
-    {:else if activeTab === 'exceptions'}
-      <UserRulesTab
-        rules={customRules}
-        groups={proxyGroups}
-        loading={loadingCustom}
-        onSave={handleSaveCustomRules}
-      />
     {:else if activeTab === 'providers'}
       <RuleProvidersTab
         providers={ruleProviders}

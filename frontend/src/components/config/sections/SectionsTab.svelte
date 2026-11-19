@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { t } from '../../../i18n';
-  import { activeKernelName, configLayerEnabled } from '../../../stores';
+  import { activeKernelName } from '../../../stores';
   import Button from '../../Button.svelte';
   import EmptyState from '../../EmptyState.svelte';
   import Skeleton from '../../Skeleton.svelte';
@@ -255,7 +255,7 @@
         <div class="cores-sections" data-testid="cores-sections-{k}">
           {#each ordered(view) as sec (sec.id)}
             <!-- Перехват DNS роутера: одна копия в DOM, в панели выбранного ядра перед DNS -->
-            {#if sec.id === 'dns' && k === kernel && $configLayerEnabled}
+            {#if sec.id === 'dns' && k === kernel}
               <DnsTakeoverCard currentKernel={k} onopenform={() => void openDnsForm(k)} />
             {/if}
             <SectionCard

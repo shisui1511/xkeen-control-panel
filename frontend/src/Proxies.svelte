@@ -8,13 +8,10 @@
     capabilities,
     fetchCapabilities,
     showToast,
-    devMode,
     showConfirm,
     mihomoApiReady,
     mihomoApiState,
-    isMihomo,
-    configLayerEnabled,
-    configLayerFlagKnown
+    isMihomo
   } from './stores';
   import { canLaunchMihomo, mihomoOfflineDesc } from './lib/mihomoOffline';
   import { apiFetch, apiFetchJSON } from './lib/api';
@@ -28,8 +25,6 @@
   import FloatingProgress from './components/FloatingProgress.svelte';
   import LatencyHistoryPopover from './components/LatencyHistoryPopover.svelte';
   import PageHeader from './PageHeader.svelte';
-  import Tabs from './components/Tabs.svelte';
-  import Button from './components/Button.svelte';
   import {
     BatchLatencyTester,
     type BatchProgressState,
@@ -66,12 +61,9 @@
     type QuickSelectNode
   } from './components/proxies/QuickSelectPopover.svelte';
 
-  // Subcomponents for proxies & providers (Plan 122-04 / ARCH-04)
+  // Subcomponents for proxies (Plan 122-04 / ARCH-04)
   import ProxyFilterBar from './components/proxies/ProxyFilterBar.svelte';
   import ProxyGroupCard from './components/proxies/ProxyGroupCard.svelte';
-  import ProvidersTab from './components/proxies/ProvidersTab.svelte';
-  import ProxyDiagnosticModal from './components/proxies/ProxyDiagnosticModal.svelte';
-  import { ProvidersState, type Subscription } from './components/proxies/providersState.svelte';
   import ClientExitIpBadge from './components/network/ClientExitIpBadge.svelte';
   import MihomoModeSwitch from './components/proxies/MihomoModeSwitch.svelte';
   import { fetchClientExitIP } from './lib/clientIp';
@@ -108,23 +100,6 @@
     icon?: string;
   }
 
-  const isLayerActive = $derived($configLayerFlagKnown && $configLayerEnabled);
-
-  // Active tab state: 'groups' | 'providers'
-  let activeTab = $state<'groups' | 'providers'>(
-    typeof window !== 'undefined' &&
-      (window.location.hash.includes('tab=providers') ||
-        window.location.search.includes('tab=providers'))
-      ? 'providers'
-      : 'groups'
-  );
-
-  $effect(() => {
-    if (isLayerActive && activeTab === 'providers') {
-      activeTab = 'groups';
-    }
-  });
-
   // Groups and Proxies states
   let groups = $state<ProxyGroup[]>([]);
   let proxies = $state<Record<string, Proxy>>({});
@@ -160,10 +135,8 @@
   let quickSelect = $state<{ groupName: string; anchor: HTMLElement } | null>(null);
 
   // Batch testing & latency history state
-  // proxiesPoller опрашивает прокси ядра и идёт только пока API Mihomo отвечает;
-  // providersPoller тянет подписки панели и работает и при остановленном ядре.
+  // proxiesPoller опрашивает прокси ядра и идёт только пока API Mihomo отвечает.
   let proxiesPoller = $state<PollerControls | null>(null);
-  let providersPoller = $state<PollerControls | null>(null);
   const batchTester = new BatchLatencyTester();
   let batchProgress = $state<BatchProgressState | null>(null);
   let activePopover = $state<{
@@ -172,17 +145,6 @@
     el: HTMLElement;
   } | null>(null);
   let popoverHoverTimeout: ReturnType<typeof setTimeout> | null = null;
-
-  // Subscription state managed via ProvidersState (Plan 122-04 / ARCH-04)
-  let providers = $state(new ProvidersState());
-
-  // Diagnostic states
-  let showDiagnosticModal = $state(false);
-  let diagnosticSub = $state<Subscription | null>(null);
-  let diagnosticTab = $state<'report' | 'headers' | 'raw'>('report');
-  let diagnosticLoading = $state(false);
-  let parseReportData = $state<any>(null);
-  let rawResponseData = $state<any>(null);
 
   // View mode state (D-17)
   const initialViewMode = readProxiesViewMode();
@@ -360,9 +322,7 @@
     return list;
   }
 
-  let observatoryStats = $derived(
-    computeObservatoryStats(proxies, providers.subNodes, providers.subHealth)
-  );
+  let observatoryStats = $derived(computeObservatoryStats(proxies));
 
   // Имена узлов, чьи поля измерения (delay/alive/history) сейчас защищены от
   // затирания ответом фонового опроса (G-90-7): сами тестируемые группы, все
@@ -884,76 +844,23 @@
     return id;
   }
 
-  async function openDiagnosticModal(sub: Subscription) {
-    diagnosticSub = sub;
-    showDiagnosticModal = true;
-    diagnosticTab = 'report';
-    diagnosticLoading = true;
-    parseReportData = null;
-    rawResponseData = null;
-
-    try {
-      const resReport = await apiFetch(`/api/subscriptions/parse-report?id=${sub.id}`);
-      if (resReport.ok) {
-        parseReportData = await resReport.json();
-      }
-      const resRaw = await apiFetch(`/api/subscriptions/raw?id=${sub.id}`);
-      if (resRaw.ok) {
-        rawResponseData = await resRaw.json();
-      }
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      // Ignored
-    } finally {
-      diagnosticLoading = false;
-    }
-  }
-
-  function closeDiagnosticModal() {
-    showDiagnosticModal = false;
-    diagnosticSub = null;
-  }
-
   onMount(() => {
-    const hash = window.location.hash;
-    if (hash.includes('tab=providers') || window.location.search.includes('tab=providers')) {
-      activeTab = 'providers';
-    }
-
     // Переход в up возобновляет опрос сразу (usePoller.enabledWhen), поэтому после
     // запуска ядра прямой fetchProxies() не нужен: при ещё не поднявшемся API он
     // давал бы лишний 502.
     proxiesPoller = usePoller(fetchProxies, 10000, { enabledWhen: mihomoApiReady });
-    providersPoller = usePoller(async (signal) => {
-      await providers.loadSubscriptions(signal, Object.keys(proxies).length > 0);
-      providers.checkAutoExpand();
-    }, 10000);
-
-    const handleHashChange = () => {
-      if (window.location.hash.includes('tab=providers')) {
-        activeTab = 'providers';
-      } else if (window.location.hash.includes('tab=groups')) {
-        activeTab = 'groups';
-      }
-      providers.checkAutoExpand();
-    };
-
-    window.addEventListener('hashchange', handleHashChange);
 
     return () => {
       proxiesPoller?.stop();
-      providersPoller?.stop();
       batchTester.cancel();
       if (popoverHoverTimeout) clearTimeout(popoverHoverTimeout);
       if (loadTimeoutId) clearTimeout(loadTimeoutId);
       pendingTimeouts.forEach(clearTimeout);
-      window.removeEventListener('hashchange', handleHashChange);
     };
   });
 
   onDestroy(() => {
     proxiesPoller?.stop();
-    providersPoller?.stop();
     batchTester.cancel();
     if (popoverHoverTimeout) clearTimeout(popoverHoverTimeout);
     if (loadTimeoutId) clearTimeout(loadTimeoutId);
@@ -963,260 +870,206 @@
 
 <div class="container" {@attach pullToRefresh(() => fetchProxies())}>
   <PageHeader title={$t('proxies.title')} subtitle={$t('proxies.subtitle')}>
-    {#if activeTab === 'groups'}
-      <ClientExitIpBadge />
-      {#if mihomoOffline}
-        <!-- No groups to filter, expand or refresh: the empty state below explains why. -->
-      {:else}
-        <MihomoModeSwitch onchanged={() => fetchProxies()} />
-        <ProxyFilterBar
-          bind:filterQuery
-          bind:viewMode={() => viewMode, setViewMode}
-          {loading}
-          onSearchInput={handleSearchInput}
-          onExpandAll={expandAll}
-          onCollapseAll={collapseAll}
-          onRefresh={() => fetchProxies()}
-        />
-      {/if}
+    <ClientExitIpBadge />
+    {#if mihomoOffline}
+      <!-- No groups to filter, expand or refresh: the empty state below explains why. -->
     {:else}
-      <Button
-        variant="secondary"
-        onclick={() => providers.refreshAll()}
-        disabled={providers.loading}
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
-        >
-        {$t('subscr.refresh_all')}
-      </Button>
-
-      <Button variant="primary" onclick={() => providers.openAddModal()}>
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"><path d="M12 5v14M5 12h14" /></svg
-        >
-        {$t('subscr.add')}
-      </Button>
+      <MihomoModeSwitch onchanged={() => fetchProxies()} />
+      <ProxyFilterBar
+        bind:filterQuery
+        bind:viewMode={() => viewMode, setViewMode}
+        {loading}
+        onSearchInput={handleSearchInput}
+        onExpandAll={expandAll}
+        onCollapseAll={collapseAll}
+        onRefresh={() => fetchProxies()}
+      />
     {/if}
   </PageHeader>
   {#if notice}{@render notice()}{/if}
 
-  {#if !isLayerActive}
-    <Tabs
-      bind:value={activeTab}
-      items={[
-        { value: 'groups', label: $t('proxies.tab_groups') },
-        { value: 'providers', label: $t('proxies.tab_providers') }
-      ]}
+  {#if $capabilities?.kernels?.mihomo?.installed === false}
+    <EmptyState
+      title={$t('ds.empty.mihomo_missing_title')}
+      description={$t('ds.empty.mihomo_missing_desc')}
+      icon={DownloadIcon}
+      ctaText={$t('ds.empty.mihomo_missing_cta')}
+      oncta={() => onSwitchTab('services')}
     />
-  {/if}
+  {:else if $capabilities !== null && !$capabilities.mihomo.reachable && !$canLaunchMihomo}
+    <!-- Работает другое ядро или API запущенного Mihomo молчит: запуск не предлагается,
+         действие — переход на «Службы» -->
+    <EmptyState
+      title={$t('ds.empty.mihomo_offline_title')}
+      description={$mihomoOfflineDesc}
+      icon={WarningIcon}
+      ctaText={$t('apioffline.services_link')}
+      oncta={() => onSwitchTab('services')}
+    />
+  {:else if $capabilities !== null && !$capabilities.mihomo.reachable}
+    <EmptyState
+      title={$t('ds.empty.mihomo_offline_title')}
+      description={$isMihomo
+        ? $t('ds.empty.mihomo_offline_desc_actionable')
+        : $t('ds.empty.mihomo_offline_desc')}
+      icon={PlayIcon}
+      ctaText={mihomoLaunching
+        ? $t('ds.empty.mihomo_offline_loading')
+        : $t('ds.empty.mihomo_offline_cta')}
+      ctaLoading={mihomoLaunching}
+      oncta={launchMihomo}
+    />
+  {:else if error}
+    <EmptyState
+      title={$t('ds.empty.error_title')}
+      description={error}
+      icon={WarningIcon}
+      ctaText={$t('app.refresh')}
+      oncta={fetchProxies}
+    />
+  {:else}
+    <!-- Observatory statistics -->
+    {#if groups.length > 0 && $capabilities?.mihomo?.reachable}
+      <ObservatoryPanel
+        stats={observatoryStats}
+        activeFilter={observatoryFilter}
+        onFilterChange={(f) => (observatoryFilter = f)}
+      />
+    {/if}
 
-  {#if activeTab === 'groups'}
-    {#if $capabilities?.kernels?.mihomo?.installed === false}
+    <!-- Groups Grid -->
+    {#if (loading || $mihomoApiState === 'unknown') && groups.length === 0}
+      <div class="group-grid">
+        {#each Array(4) as _, i (i)}
+          <div class="group-card skeleton-card">
+            <div class="gc-head">
+              <Skeleton width="120px" height="18px" />
+              <Skeleton width="60px" height="14px" style="margin-left: auto;" />
+            </div>
+            <div class="proxy-grid">
+              {#each Array(3) as _, j (j)}
+                <div class="proxy-card">
+                  <div class="p-header">
+                    <Skeleton width="70px" height="14px" />
+                    <Skeleton width="30px" height="10px" />
+                  </div>
+                  <div class="p-footer">
+                    <Skeleton width="40px" height="10px" />
+                  </div>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/each}
+      </div>
+    {:else if groups.length === 0}
       <EmptyState
-        title={$t('ds.empty.mihomo_missing_title')}
-        description={$t('ds.empty.mihomo_missing_desc')}
-        icon={DownloadIcon}
-        ctaText={$t('ds.empty.mihomo_missing_cta')}
-        oncta={() => onSwitchTab('services')}
-      />
-    {:else if $capabilities !== null && !$capabilities.mihomo.reachable && !$canLaunchMihomo}
-      <!-- Работает другое ядро или API запущенного Mihomo молчит: запуск не предлагается,
-           действие — переход на «Службы» -->
-      <EmptyState
-        title={$t('ds.empty.mihomo_offline_title')}
-        description={$mihomoOfflineDesc}
-        icon={WarningIcon}
-        ctaText={$t('apioffline.services_link')}
-        oncta={() => onSwitchTab('services')}
-      />
-    {:else if $capabilities !== null && !$capabilities.mihomo.reachable}
-      <EmptyState
-        title={$t('ds.empty.mihomo_offline_title')}
-        description={$isMihomo
-          ? $t('ds.empty.mihomo_offline_desc_actionable')
-          : $t('ds.empty.mihomo_offline_desc')}
-        icon={PlayIcon}
-        ctaText={mihomoLaunching
-          ? $t('ds.empty.mihomo_offline_loading')
-          : $t('ds.empty.mihomo_offline_cta')}
-        ctaLoading={mihomoLaunching}
-        oncta={launchMihomo}
-      />
-    {:else if error}
-      <EmptyState
-        title={$t('ds.empty.error_title')}
-        description={error}
+        title={$t('proxies.no_proxies')}
+        description={$t('proxies.no_proxies_desc')}
         icon={WarningIcon}
         ctaText={$t('app.refresh')}
         oncta={fetchProxies}
       />
+    {:else if (searchDebouncedQuery.trim() !== '' || observatoryFilter !== null) && groupSections.core.length + groupSections.service.length + groupSections.system.length === 0}
+      <div class="search-empty-state">
+        {searchDebouncedQuery.trim() !== ''
+          ? $t('proxies.search_no_matches')
+          : $t('proxies.filter_no_matches')}
+      </div>
     {:else}
-      <!-- Observatory statistics -->
-      {#if groups.length > 0 && $capabilities?.mihomo?.reachable}
-        <ObservatoryPanel
-          stats={observatoryStats}
-          activeFilter={observatoryFilter}
-          onFilterChange={(f) => (observatoryFilter = f)}
+      {#snippet renderGroup(group: ProxyGroup, role: GroupRole)}
+        <ProxyGroupCard
+          {group}
+          {role}
+          {groups}
+          {proxies}
+          isCollapsed={collapsedGroups.has(group.name)}
+          {viewMode}
+          searchQuery={searchDebouncedQuery}
+          isPinned={pinnedCoreGroups.includes(group.name)}
+          isAutoCore={role === 'core' && !pinnedCoreGroups.includes(group.name)}
+          testingGroup={testingGroupNames.has(group.name)}
+          {testingProxy}
+          {batchProgress}
+          groupFilter={groupFilters[group.name] ?? 'all'}
+          renderLimit={getRenderLimit(group.name)}
+          quickSelectGroupName={quickSelect?.groupName}
+          bind:cardEl={groupCardEls[group.name]}
+          onToggleCollapse={(name) => toggleCollapse(name)}
+          onTogglePin={() => (pinnedCoreGroups = togglePinnedCoreGroup(group.name))}
+          onSelectProxy={(gName, pName) => selectProxy(gName, pName)}
+          onTestGroupLatency={() => testGroupLatency(group)}
+          onTestProxyLatency={(pName) => testProxyLatency(pName)}
+          onOpenQuickSelect={(anchor, gName) => openQuickSelect(anchor, gName)}
+          onFocusGroupCard={(gName) => focusGroupCard(gName)}
+          onSetGroupFilter={(gName, filter) => (groupFilters[gName] = filter as any)}
+          onIncreaseRenderLimit={(gName, total) => increaseRenderLimit(gName, total)}
+          onBadgeMouseEnter={(e, name) => handleBadgeMouseEnter(e, name)}
+          onBadgeMouseLeave={() => handleBadgeMouseLeave()}
+          onBadgeClick={(e, name) => handleBadgeClick(e, name)}
+          {resolveNodeSnapshot}
+          {getLatencyClass}
+          {getLatencyText}
+          {getLatencyTitle}
+          {getFilteredNodes}
+          {getFilteredGroupNodes}
         />
-      {/if}
+      {/snippet}
 
-      <!-- Groups Grid -->
-      {#if (loading || $mihomoApiState === 'unknown') && groups.length === 0}
-        <div class="group-grid">
-          {#each Array(4) as _, i (i)}
-            <div class="group-card skeleton-card">
-              <div class="gc-head">
-                <Skeleton width="120px" height="18px" />
-                <Skeleton width="60px" height="14px" style="margin-left: auto;" />
-              </div>
-              <div class="proxy-grid">
-                {#each Array(3) as _, j (j)}
-                  <div class="proxy-card">
-                    <div class="p-header">
-                      <Skeleton width="70px" height="14px" />
-                      <Skeleton width="30px" height="10px" />
-                    </div>
-                    <div class="p-footer">
-                      <Skeleton width="40px" height="10px" />
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            </div>
+      <section class="proxy-section proxy-section-core">
+        <h2 class="proxy-section-title">
+          {$t('proxies.section_core')}
+          <span class="proxy-section-count">
+            {groupSections.core.length}
+            {$tp('proxies.groups', groupSections.core.length)} ({coreNodesCount}
+            {$tp('proxies.nodes', coreNodesCount)})
+          </span>
+        </h2>
+        <div class="group-grid core-grid" class:group-list={viewMode === 'list'}>
+          {#each groupSections.core as group (group.name)}
+            {@render renderGroup(group, 'core')}
           {/each}
         </div>
-      {:else if groups.length === 0}
-        <EmptyState
-          title={$t('proxies.no_proxies')}
-          description={$t('proxies.no_proxies_desc')}
-          icon={WarningIcon}
-          ctaText={$t('app.refresh')}
-          oncta={fetchProxies}
-        />
-      {:else if (searchDebouncedQuery.trim() !== '' || observatoryFilter !== null) && groupSections.core.length + groupSections.service.length + groupSections.system.length === 0}
-        <div class="search-empty-state">
-          {searchDebouncedQuery.trim() !== ''
-            ? $t('proxies.search_no_matches')
-            : $t('proxies.filter_no_matches')}
-        </div>
-      {:else}
-        {#snippet renderGroup(group: ProxyGroup, role: GroupRole)}
-          <ProxyGroupCard
-            {group}
-            {role}
-            {groups}
-            {proxies}
-            isCollapsed={collapsedGroups.has(group.name)}
-            {viewMode}
-            searchQuery={searchDebouncedQuery}
-            isPinned={pinnedCoreGroups.includes(group.name)}
-            isAutoCore={role === 'core' && !pinnedCoreGroups.includes(group.name)}
-            testingGroup={testingGroupNames.has(group.name)}
-            {testingProxy}
-            {batchProgress}
-            groupFilter={groupFilters[group.name] ?? 'all'}
-            renderLimit={getRenderLimit(group.name)}
-            quickSelectGroupName={quickSelect?.groupName}
-            bind:cardEl={groupCardEls[group.name]}
-            onToggleCollapse={(name) => toggleCollapse(name)}
-            onTogglePin={() => (pinnedCoreGroups = togglePinnedCoreGroup(group.name))}
-            onSelectProxy={(gName, pName) => selectProxy(gName, pName)}
-            onTestGroupLatency={() => testGroupLatency(group)}
-            onTestProxyLatency={(pName) => testProxyLatency(pName)}
-            onOpenQuickSelect={(anchor, gName) => openQuickSelect(anchor, gName)}
-            onFocusGroupCard={(gName) => focusGroupCard(gName)}
-            onSetGroupFilter={(gName, filter) => (groupFilters[gName] = filter as any)}
-            onIncreaseRenderLimit={(gName, total) => increaseRenderLimit(gName, total)}
-            onBadgeMouseEnter={(e, name) => handleBadgeMouseEnter(e, name)}
-            onBadgeMouseLeave={() => handleBadgeMouseLeave()}
-            onBadgeClick={(e, name) => handleBadgeClick(e, name)}
-            {resolveNodeSnapshot}
-            {getLatencyClass}
-            {getLatencyText}
-            {getLatencyTitle}
-            {getFilteredNodes}
-            {getFilteredGroupNodes}
-          />
-        {/snippet}
+      </section>
 
-        <section class="proxy-section proxy-section-core">
+      {#if groupSections.service.length > 0}
+        <section class="proxy-section proxy-section-service">
           <h2 class="proxy-section-title">
-            {$t('proxies.section_core')}
+            {$t('proxies.section_service')}
             <span class="proxy-section-count">
-              {groupSections.core.length}
-              {$tp('proxies.groups', groupSections.core.length)} ({coreNodesCount}
-              {$tp('proxies.nodes', coreNodesCount)})
+              {groupSections.service.length}
+              {$tp('proxies.groups', groupSections.service.length)} ({serviceNodesCount}
+              {$tp('proxies.nodes', serviceNodesCount)})
             </span>
           </h2>
-          <div class="group-grid core-grid" class:group-list={viewMode === 'list'}>
-            {#each groupSections.core as group (group.name)}
-              {@render renderGroup(group, 'core')}
+          <div class="group-grid" class:group-list={viewMode === 'list'}>
+            {#each groupSections.service as group (group.name)}
+              {@render renderGroup(group, 'service')}
             {/each}
           </div>
         </section>
+      {/if}
 
-        {#if groupSections.service.length > 0}
-          <section class="proxy-section proxy-section-service">
-            <h2 class="proxy-section-title">
-              {$t('proxies.section_service')}
-              <span class="proxy-section-count">
-                {groupSections.service.length}
-                {$tp('proxies.groups', groupSections.service.length)} ({serviceNodesCount}
-                {$tp('proxies.nodes', serviceNodesCount)})
-              </span>
-            </h2>
-            <div class="group-grid" class:group-list={viewMode === 'list'}>
-              {#each groupSections.service as group (group.name)}
-                {@render renderGroup(group, 'service')}
-              {/each}
-            </div>
-          </section>
-        {/if}
-
-        {#if groupSections.system.length > 0}
-          <section class="proxy-section proxy-section-system">
-            <h2 class="proxy-section-title">
-              {$t('proxies.section_system')}
-              <span class="proxy-section-count">
-                {groupSections.system.length}
-                {$tp('proxies.groups', groupSections.system.length)} ({systemNodesCount}
-                {$tp('proxies.nodes', systemNodesCount)})
-              </span>
-            </h2>
-            <div class="group-grid" class:group-list={viewMode === 'list'}>
-              {#each groupSections.system as group (group.name)}
-                {@render renderGroup(group, 'system')}
-              {/each}
-            </div>
-          </section>
-        {/if}
+      {#if groupSections.system.length > 0}
+        <section class="proxy-section proxy-section-system">
+          <h2 class="proxy-section-title">
+            {$t('proxies.section_system')}
+            <span class="proxy-section-count">
+              {groupSections.system.length}
+              {$tp('proxies.groups', groupSections.system.length)} ({systemNodesCount}
+              {$tp('proxies.nodes', systemNodesCount)})
+            </span>
+          </h2>
+          <div class="group-grid" class:group-list={viewMode === 'list'}>
+            {#each groupSections.system as group (group.name)}
+              {@render renderGroup(group, 'system')}
+            {/each}
+          </div>
+        </section>
       {/if}
     {/if}
-  {:else if activeTab === 'providers'}
-    <ProvidersTab bind:state={providers} onOpenDiagnostic={openDiagnosticModal} />
   {/if}
 </div>
-
-<ProxyDiagnosticModal
-  {diagnosticSub}
-  {diagnosticTab}
-  {diagnosticLoading}
-  {parseReportData}
-  {rawResponseData}
-  onclose={closeDiagnosticModal}
-  onTabChange={(tab) => (diagnosticTab = tab)}
-/>
 
 {#if batchProgress?.running}
   <FloatingProgress progress={batchProgress} onCancel={() => batchTester.cancel()} />
