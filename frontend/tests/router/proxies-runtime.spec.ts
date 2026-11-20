@@ -1470,7 +1470,8 @@ async function returnMihomoToPanel(page: Page): Promise<void> {
 /** Удаляет профили теста; strict — каждый обязан удалиться. */
 async function removeNoSocketProfiles(page: Page, strict: boolean): Promise<void> {
   for (const name of (await mihomoOwner(page)).users) {
-    if (!name.startsWith(NOSOCK_PREFIX)) continue;
+    // Профиль возврата остаётся на стенде: он цель возврата Mihomo, его удалить нельзя
+    if (!name.startsWith(NOSOCK_PREFIX) || name === NOSOCK_PARK) continue;
     const res = await api(page, 'POST', '/api/mihomo/profiles/delete', { name });
     if (strict) {
       expect(res.status, `удаление профиля ${name}: ${String(res.data?.code ?? '')}`).toBe(200);
@@ -1542,7 +1543,8 @@ test(
     test.skip(before.plain, 'config.yaml — обычный файл: переход его усыновит');
     // Профиль, на который Mihomo встанет перед возвратом панели: иначе целью возврата
     // останется профиль теста, и его нельзя удалить
-    // Своего профиля на стенде может не быть: тогда тест заводит такой сам и убирает в конце
+    // Своего профиля на стенде может не быть: тогда тест заводит такой сам и оставляет, потому
+    // что он становится целью возврата Mihomo
     let park = before.users.includes(before.returnTarget)
       ? before.returnTarget
       : (before.users[0] ?? '');
@@ -1647,7 +1649,8 @@ test(
         await expect(page.locator('.main-content .empty-state').first()).toBeVisible({
           timeout: T.page
         });
-        await expect(page.getByTestId('mihomo-no-socket')).toHaveCount(0);
+        // Признаки ядер страница берёт из capabilities, их опрос идёт раз в 10 с
+        await expect(page.getByTestId('mihomo-no-socket')).toHaveCount(0, { timeout: T.page });
         await guard.assertClean();
         const start = await api(page, 'POST', '/api/service/control?action=start');
         expect(start.status, 'запуск службы').toBe(200);
