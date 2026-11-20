@@ -2083,6 +2083,7 @@
   "cfg.notice.legacy_more": "and {n} more",
   "cfg.notice.legacy_clean": "Remove",
   "cfg.notice.legacy_backup": "A backup copy of each file is saved before editing.",
+  "cfg.notice.legacy_manual_only": "These files are not removed automatically (the reason is in the list): edit them in the “Files” section.",
   "cfg.notice.legacy_confirm_title": "Remove old panel traces?",
   "cfg.notice.legacy_confirm_text_one": "Old panel blocks will be cut out of {count} file; a backup copy is made first. If rules refer to node selection files, those are removed together with the blocks.",
   "cfg.notice.legacy_confirm_text_few": "Old panel blocks will be cut out of {count} files; a backup copy of each is made first. If rules refer to node selection files, those are removed together with the blocks.",

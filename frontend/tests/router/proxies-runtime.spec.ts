@@ -1510,6 +1510,24 @@ function noClientsCmd(port: number): string {
   );
 }
 
+/** Заголовок «Профили» после перехода из подсказки: ниже липкой полосы черновика, но не далеко. */
+async function expectProfilesTitleBelowDraftBar(page: Page, where: string): Promise<void> {
+  const titleTop = await page
+    .getByTestId('profiles-card')
+    .locator('.pc-title')
+    .evaluate((el) => el.getBoundingClientRect().top);
+  const barBottom = await page
+    .getByTestId('config-draftbar')
+    .evaluate((el) => el.getBoundingClientRect().bottom);
+  expect(titleTop, `${where}: заголовок «Профили» ниже полосы черновика`).toBeGreaterThanOrEqual(
+    barBottom
+  );
+  expect(
+    titleTop - barBottom,
+    `${where}: запас под полосой — шаг, а не лишний экран`
+  ).toBeLessThanOrEqual(40);
+}
+
 /**
  * Подсказка S3 на странице: заголовок и ссылка «Управлять в панели». На «Квотах» она — плашка
  * над работающей страницей, без заголовка-раздела.
@@ -1617,26 +1635,25 @@ test(
           .poll(() => page.evaluate(() => window.location.hash), { timeout: T.page })
           .toBe('#/config/cores?focus=profiles');
         await expect(page.getByTestId('profiles-card')).toBeVisible({ timeout: T.page });
-        // Заголовок карточки после прокрутки не под липкой полосой черновика
-        const titleTop = await page
-          .getByTestId('profiles-card')
-          .locator('.pc-title')
-          .evaluate((el) => el.getBoundingClientRect().top);
-        const barBottom = await page
-          .getByTestId('config-draftbar')
-          .evaluate((el) => el.getBoundingClientRect().bottom);
-        expect(titleTop, 'заголовок «Профили» ниже полосы черновика').toBeGreaterThanOrEqual(
-          barBottom
-        );
-        expect(
-          titleTop - barBottom,
-          'запас под полосой — шаг, а не лишний экран'
-        ).toBeLessThanOrEqual(40);
+        await expectProfilesTitleBelowDraftBar(page, 'десктоп');
         await expect(page.getByTestId(`profile-row-${NOSOCK_TCP}`)).toHaveAttribute(
           'data-active',
           'true',
           { timeout: T.page }
         );
+        // Телефон: подсказка на «Прокси», переход к «Профилям», заголовок так же ниже полосы
+        await page.setViewportSize({ width: 390, height: 844 });
+        await expectNoSocketHint(page, '#/proxies');
+        await page
+          .getByTestId('mihomo-no-socket')
+          .getByRole('link', { name: localeRe('proxies.rt.no_socket_cta') })
+          .click();
+        await expect
+          .poll(() => page.evaluate(() => window.location.hash), { timeout: T.page })
+          .toBe('#/config/cores?focus=profiles');
+        await expect(page.getByTestId('profiles-card')).toBeVisible({ timeout: T.page });
+        await expectProfilesTitleBelowDraftBar(page, 'телефон');
+        await page.setViewportSize({ width: 1280, height: 900 });
         await guard.assertClean();
         // Страницы постояли открытыми: за это время ни одного подключения по TCP
         expect(

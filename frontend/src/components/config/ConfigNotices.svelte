@@ -32,7 +32,10 @@
   type LegacyLeftovers = {
     rows: LegacyRow[];
     more: number;
+    /** Файлы, которые «Убрать» действительно изменит (без причины отказа). */
     count: number;
+    /** Файлы ядер есть, но все с отказом: убирать нечего, правка — вручную. */
+    manualOnly: boolean;
     filesLink: boolean;
   };
 
@@ -343,6 +346,8 @@
     const isDir = (file: string) => file === LEGACY_DIR || file.endsWith('/.');
     const kernelFiles = files.filter((f) => !isDir(f));
     const dirFindings = files.filter(isDir);
+    // Файл с причиной отказа сервер в план правок не берёт: «Убрать» его не изменит
+    const removable = kernelFiles.filter((f) => !blocked[f]).length;
     const describeRow = (file: string) => {
       const reason = blocked[file];
       if (isDir(file)) {
@@ -374,7 +379,8 @@
       legacy: {
         rows,
         more: Math.max(0, kernelFiles.length - LEGACY_ROWS),
-        count: kernelFiles.length,
+        count: removable,
+        manualOnly: kernelFiles.length > 0 && removable === 0,
         // «Файлы» показывают файлы ядер; архив там исключён, поэтому для сбоя только в архиве
         // ссылки нет
         filesLink: kernelFiles.length > 0 || dirFindings.some((f) => f !== LEGACY_DIR)
@@ -526,6 +532,8 @@
           </ul>
           {#if legacy.count > 0}
             <span class="legacy-note">{$t('cfg.notice.legacy_backup')}</span>
+          {:else if legacy.manualOnly}
+            <span class="legacy-note">{$t('cfg.notice.legacy_manual_only')}</span>
           {/if}
           {#if legacy.count > 0 || legacy.filesLink}
             <span class="legacy-actions">
