@@ -199,7 +199,6 @@ export interface LegacySummary {
 }
 
 export interface LayerSnapshot {
-  enabled: boolean;
   dev_mode: boolean;
   draft_revision: number;
   draft_changes: number;
@@ -420,7 +419,6 @@ export function normalizeLegacySummary(raw: unknown): LegacySummary {
 /** Приводит данные snapshot к полной форме: null и пропущенные поля становятся пустыми. */
 function normalizeSnapshot(raw: Record<string, unknown>): LayerSnapshot {
   return {
-    enabled: raw.enabled === true,
     dev_mode: raw.dev_mode === true,
     draft_revision: typeof raw.draft_revision === 'number' ? raw.draft_revision : 0,
     draft_changes: typeof raw.draft_changes === 'number' ? raw.draft_changes : 0,
