@@ -3,8 +3,8 @@
 [![CodeFactor](https://www.codefactor.io/repository/github/shisui1511/xkeen-control-panel/badge)](https://www.codefactor.io/repository/github/shisui1511/xkeen-control-panel)
 [![CI](https://github.com/shisui1511/xkeen-control-panel/actions/workflows/ci.yml/badge.svg)](https://github.com/shisui1511/xkeen-control-panel/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/shisui1511/xkeen-control-panel/actions/workflows/codeql.yml/badge.svg)](https://github.com/shisui1511/xkeen-control-panel/actions/workflows/codeql.yml)
-[![GitHub release (latest by date)](https://img.shields.io/github/v/release/shisui1511/xkeen-control-panel)](https://github.com/shisui1511/xkeen-control-panel/releases)
-[![Pre-release](https://img.shields.io/github/v/release/shisui1511/xkeen-control-panel?include_prereleases&label=pre-release)](https://github.com/shisui1511/xkeen-control-panel/releases)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/shisui1511/xkeen-control-panel-releases)](https://github.com/shisui1511/xkeen-control-panel-releases/releases)
+[![Pre-release](https://img.shields.io/github/v/release/shisui1511/xkeen-control-panel-releases?include_prereleases&label=pre-release)](https://github.com/shisui1511/xkeen-control-panel-releases/releases)
 [![GitHub license](https://img.shields.io/github/license/shisui1511/xkeen-control-panel)](https://github.com/shisui1511/xkeen-control-panel/blob/main/LICENSE)
 ![Platforms](https://img.shields.io/badge/arch-ARM64%20%7C%20MIPSLE-blue)
 
@@ -16,7 +16,7 @@
 - **Smart Proxy** — переключение прокси в группах Mihomo по расписанию (сетка дни × часы)
 - **Traffic Quotas** — учёт трафика по прокси и лимиты на день/неделю/месяц: уведомление, блокировка или перевод в DIRECT (Mihomo)
 - **Kernel Manager** — установка, обновление и откат Xray и Mihomo прямо из UI
-- **DAT Manager** — управление базами GeoIP и GeoSite: обновление, откат, поиск по тегам
+- **Конфигурация** — источники узлов, группы и правила маршрутизации, секции ядер, перехват DNS и базы GeoIP/GeoSite в одном разделе: панель собирает свои файлы ядер и применяет их одной кнопкой
 - **Console** — быстрые команды XKeen и интерактивный терминал с выводом в реальном времени
 - **PWA** — установка как приложения на телефон или компьютер (нужен HTTPS с доверенным сертификатом: по HTTP и с самоподписанным сертификатом браузер установку не предлагает)
 
@@ -43,15 +43,15 @@ curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/s
 
 # ARM64 (KN-2710, KN-1811, KN-1012)
 curl -fL -o /opt/sbin/xcp \
-  "https://github.com/shisui1511/xkeen-control-panel/releases/latest/download/xcp_{VERSION}_arm64"
+  "https://github.com/shisui1511/xkeen-control-panel-releases/releases/latest/download/xcp_{VERSION}_arm64"
 
 # MIPSLE (KN-1010, KN-1810, KN-1910)
 curl -fL -o /opt/sbin/xcp \
-  "https://github.com/shisui1511/xkeen-control-panel/releases/latest/download/xcp_{VERSION}_mipsle"
+  "https://github.com/shisui1511/xkeen-control-panel-releases/releases/latest/download/xcp_{VERSION}_mipsle"
 
 # MIPS (KN-2510, KN-2410, KN-2010)
 curl -fL -o /opt/sbin/xcp \
-  "https://github.com/shisui1511/xkeen-control-panel/releases/latest/download/xcp_{VERSION}_mips"
+  "https://github.com/shisui1511/xkeen-control-panel-releases/releases/latest/download/xcp_{VERSION}_mips"
 
 chmod +x /opt/sbin/xcp
 
@@ -108,6 +108,16 @@ Settings → Update → кнопка **"Проверить обновления"
 
 Панель сама скачает новый бинарник, сделает backup и перезапустится.
 Если что-то пойдёт не так — автоматический rollback.
+
+### Переход со старой версии панели
+
+Выпуски с единым разделом «Конфигурация» несовместимы с прежней панелью и публикуются отдельно — в репозитории [xkeen-control-panel-releases](https://github.com/shisui1511/xkeen-control-panel-releases/releases). Прежние установки видят только совместимые с ними версии, поэтому сами на новую не обновятся: переход делается вручную.
+
+1. Сохраните URL своих подписок.
+2. Установите панель заново скриптом установки (команды ниже).
+3. При первом запуске панель один раз сложит данные старой панели в архив `/opt/etc/xcp/legacy/` и покажет окно со списком старых URL подписок. Источники из них сама не создаёт — добавьте подписки в разделе «Конфигурация → Узлы».
+
+Настройки нового раздела «Конфигурация», если они уже были, сохраняются. Дальше обновления между совместимыми версиями идут как обычно.
 
 ### Через SSH
 
