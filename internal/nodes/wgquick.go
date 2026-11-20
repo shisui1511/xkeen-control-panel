@@ -21,7 +21,7 @@ var wgQuickClashKey = regexp.MustCompile(`(?m)^(?:proxies|proxy-providers):`)
 // ParseWgQuickConf разбирает один блок [Interface] с его секциями [Peer].
 // Для нескольких интерфейсов и диагностики по строкам используется ParseWG.
 func ParseWgQuickConf(content string) ([]Node, error) {
-	peers, err := parseWgQuickPeers(content, wgQuickOnly)
+	peers, err := parseWgQuickPeers(content)
 	if err != nil {
 		return nil, err
 	}
@@ -556,13 +556,9 @@ type parsedWgPeer struct {
 	comment      string
 }
 
-// ParseWgQuickPeers сохраняет исходные адреса пиров и AWG-опции для старого импорта.
-// Используется до удаления прежнего конвертера подписок.
-func ParseWgQuickPeers(content string) ([]WgQuickPeer, error) {
-	return parseWgQuickPeers(content, nil)
-}
-
-func parseWgQuickPeers(content string, ignoredInterfaceKeys map[string]bool) ([]WgQuickPeer, error) {
+// parseWgQuickPeers разбирает пиры wg-quick; ключи интерфейса из wgQuickOnly
+// к туннелю клиента не относятся и пропускаются.
+func parseWgQuickPeers(content string) ([]WgQuickPeer, error) {
 	scanner := bufio.NewScanner(strings.NewReader(content))
 	currentSection := "" // "interface", "peer"
 	var iface parsedWgInterface
@@ -625,7 +621,7 @@ func parseWgQuickPeers(content string, ignoredInterfaceKeys map[string]bool) ([]
 		lowerKey := strings.ToLower(key)
 
 		if currentSection == "interface" {
-			if ignoredInterfaceKeys[lowerKey] {
+			if wgQuickOnly[lowerKey] {
 				continue
 			}
 			lastComment = ""
