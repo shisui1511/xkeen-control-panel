@@ -2076,6 +2076,8 @@
   "cfg.notice.legacy_leftovers_many": "Старая панель оставила следы в {count} файлах ядер (список ниже). Панель сама файлы ядер не правит.",
   "cfg.notice.legacy_kind_rules": "блок «Свои правила»",
   "cfg.notice.legacy_kind_select": "файл выбора узла старой панели",
+  "cfg.notice.legacy_kind_dir": "блок каталога данных: проверка не удалась",
+  "cfg.notice.legacy_dir_only": "Старая панель оставила данные, которые панель не может проверить (список ниже). Сама панель их не правит и кнопки «Убрать» для них нет.",
   "cfg.notice.legacy_more": "и ещё {n}",
   "cfg.notice.legacy_clean": "Убрать",
   "cfg.notice.legacy_backup": "Перед правкой каждого файла сохраняется резервная копия.",

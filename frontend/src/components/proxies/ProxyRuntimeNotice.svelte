@@ -64,7 +64,7 @@
 </script>
 
 {#if kind === 'no_socket' && layout === 'inline'}
-  <div class="alert alert-warning prn-alert" data-testid="mihomo-no-socket">
+  <div class="alert alert-warning prn-alert prn-alert--inline" data-testid="mihomo-no-socket">
     <span class="icon-first-line prn-icon" aria-hidden="true">
       <Icon name="warning" size={16} />
     </span>
@@ -138,6 +138,11 @@
 {/if}
 
 <style>
+  /* Текст подсказки S3 — Body 14px, а не 13px базового .alert */
+  .prn-alert--inline {
+    font-size: var(--font-size-base);
+  }
+
   .prn-alert {
     margin-bottom: 0;
     padding: var(--spacing-4);

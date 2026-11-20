@@ -2076,6 +2076,8 @@
   "cfg.notice.legacy_leftovers_many": "The old panel left traces in {count} kernel files (listed below). The panel does not edit these files on its own.",
   "cfg.notice.legacy_kind_rules": "“Custom rules” block",
   "cfg.notice.legacy_kind_select": "old panel node selection file",
+  "cfg.notice.legacy_kind_dir": "data directory: the check failed",
+  "cfg.notice.legacy_dir_only": "The old panel left data the panel cannot check (listed below). The panel does not edit it, and there is no “Remove” button for it.",
   "cfg.notice.legacy_more": "and {n} more",
   "cfg.notice.legacy_clean": "Remove",
   "cfg.notice.legacy_backup": "A backup copy of each file is saved before editing.",

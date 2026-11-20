@@ -303,6 +303,7 @@
 
   // Файлы ядер, где старая панель оставляет блок «Свои правила»; прочие находки — её
   // собственные файлы выбора узла и фрагменты подписок в каталоге Xray
+  const LEGACY_DIR = 'legacy';
   const LEGACY_RULE_FILES = ['xray/05_routing.json', 'mihomo/config.yaml'];
 
   // Следы старой панели в файлах ядер (фаза 151, D-04, D-05). Сервер даёт только имена файлов
@@ -331,10 +332,17 @@
       const at = line.indexOf(' — ');
       if (at > 0) blocked[line.slice(0, at)] = line.slice(at + 3);
     }
-    const rows = files.slice(0, LEGACY_ROWS).map((file) => {
-      let what = LEGACY_RULE_FILES.includes(file)
-        ? $t('cfg.notice.legacy_kind_rules')
-        : $t('cfg.notice.legacy_kind_select');
+    // Сбой проверки каталога («legacy» или «<ядро>/.») — не файл ядра: «Убрать» его не уберёт,
+    // в счёт файлов он не входит; такие строки идут после файлов ядер
+    const isDir = (file: string) => file === LEGACY_DIR || file.endsWith('/.');
+    const kernelFiles = files.filter((f) => !isDir(f));
+    const listed = [...kernelFiles, ...files.filter(isDir)];
+    const rows = listed.slice(0, LEGACY_ROWS).map((file) => {
+      let what = isDir(file)
+        ? $t('cfg.notice.legacy_kind_dir')
+        : LEGACY_RULE_FILES.includes(file)
+          ? $t('cfg.notice.legacy_kind_rules')
+          : $t('cfg.notice.legacy_kind_select');
       const reason = blocked[file];
       if (reason) what += '; ' + $t('cfg.notice.legacy_blocked', { reason });
       return { file, what };
@@ -342,8 +350,15 @@
     return {
       notice: n,
       tone: 'warning',
-      text: $tp('cfg.notice.legacy_leftovers', files.length),
-      legacy: { rows, more: Math.max(0, files.length - LEGACY_ROWS), count: files.length }
+      text:
+        kernelFiles.length > 0
+          ? $tp('cfg.notice.legacy_leftovers', kernelFiles.length)
+          : $t('cfg.notice.legacy_dir_only'),
+      legacy: {
+        rows,
+        more: Math.max(0, listed.length - LEGACY_ROWS),
+        count: kernelFiles.length
+      }
     };
   }
 
@@ -489,17 +504,21 @@
               <li>{$t('cfg.notice.legacy_more', { n: legacy.more })}</li>
             {/if}
           </ul>
-          <span class="legacy-note">{$t('cfg.notice.legacy_backup')}</span>
+          {#if legacy.count > 0}
+            <span class="legacy-note">{$t('cfg.notice.legacy_backup')}</span>
+          {/if}
           <span class="legacy-actions">
-            <Button
-              variant="secondary"
-              class="tap-zone-44"
-              loading={cleaning}
-              testid="legacy-leftovers-clean"
-              onclick={() => void cleanLeftovers(legacy.count)}
-            >
-              {$t('cfg.notice.legacy_clean')}
-            </Button>
+            {#if legacy.count > 0}
+              <Button
+                variant="secondary"
+                class="tap-zone-44"
+                loading={cleaning}
+                testid="legacy-leftovers-clean"
+                onclick={() => void cleanLeftovers(legacy.count)}
+              >
+                {$t('cfg.notice.legacy_clean')}
+              </Button>
+            {/if}
             <a class="notice-link" href="#/config/files" data-testid="legacy-leftovers-files-link"
               >{$t('cfg.files.drift_notice_link')}</a
             >
