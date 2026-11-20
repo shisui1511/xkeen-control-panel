@@ -530,9 +530,9 @@ test.describe('config-entries legacy-reset', () => {
         await openAt(page, '#/config/nodes');
         await expect(notice).toBeVisible({ timeout: T.page });
         await notice.getByTestId('legacy-leftovers-clean').click();
-        const dialog = page.locator('.modal-backdrop:has(.confirm-modal-actions)');
+        const dialog = page.locator('[role="dialog"]:has(.confirm-actions)');
         await expect(dialog).toBeVisible({ timeout: T.action });
-        await dialog.locator('.confirm-modal-actions button').last().click();
+        await dialog.locator('.confirm-actions button').last().click();
         await expect(notice).toHaveCount(0, { timeout: T.save * 2 });
         expect(await standSh(`test ! -e ${LEFTOVER_FILE}`), 'файл выбора убран').toBe(0);
         await cleanGuard.assertClean();
