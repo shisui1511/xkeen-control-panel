@@ -84,6 +84,9 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
 	}
+	if a.rejectLegacyArchive(w, r, dir, cleanDir) {
+		return
+	}
 	// Вкладка «Файлы» видит только три каталога (D-04): данные панели, логи и
 	// бинарники сервер не отдаёт ей и по прямому запросу.
 	if scoped && !inFilesScope(cleanDir) {
@@ -146,6 +149,10 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 		cleanF, err := a.pathVal.Validate(f)
 		if err != nil {
 			restricted(f)
+			continue
+		}
+		// Ссылка из видимого каталога в архив прежних данных в списке не показывается.
+		if utils.IsLegacyArchivePath(a.cfg.DataDir, f) || utils.IsLegacyArchivePath(a.cfg.DataDir, cleanF) {
 			continue
 		}
 		// Explicit inline validation for CodeQL path sanitization
@@ -211,6 +218,9 @@ func (a *API) ConfigRead(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cleanPath, read = safe, a.configSvc.ReadValidated
+	}
+	if a.rejectLegacyArchive(w, r, path, cleanPath) {
+		return
 	}
 
 	data, err := read(cleanPath)
@@ -307,6 +317,9 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 	cleanPath, err := a.pathVal.Validate(path)
 	if err != nil {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+	if a.rejectLegacyArchive(w, r, path, cleanPath) {
 		return
 	}
 	// Файл панели под управлением слоя: отказ до чтения тела и до замков.
@@ -412,6 +425,9 @@ func (a *API) ConfigBackups(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
 	}
+	if a.rejectLegacyArchive(w, r, path, cleanPath) {
+		return
+	}
 
 	backups, err := a.configSvc.ListBackups(cleanPath)
 	if err != nil {
@@ -484,6 +500,9 @@ func (a *API) ConfigCreate(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
 	}
+	if a.rejectLegacyArchive(w, r, path, cleanPath) {
+		return
+	}
 
 	if a.rejectManagedPath(w, r, cleanPath) {
 		return
@@ -530,6 +549,9 @@ func (a *API) ConfigDelete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cleanPath, remove = safe, a.configSvc.DeleteValidated
+	}
+	if a.rejectLegacyArchive(w, r, path, cleanPath) {
+		return
 	}
 
 	if a.rejectManagedPath(w, r, cleanPath) {
@@ -578,6 +600,9 @@ func (a *API) ConfigRename(w http.ResponseWriter, r *http.Request) {
 	cleanNewPath, err := a.pathVal.Validate(newPath)
 	if err != nil {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+	if a.rejectLegacyArchive(w, r, oldPath, cleanOldPath, newPath, cleanNewPath) {
 		return
 	}
 
@@ -871,6 +896,9 @@ func (a *API) ConfigValidate(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
 	}
+	if a.rejectLegacyArchive(w, r, req.Path, cleanPath) {
+		return
+	}
 
 	// Explicit inline validation for CodeQL path sanitization
 	var pathAllowed bool
@@ -1043,6 +1071,20 @@ func (a *API) validateConfigContent(r *http.Request, cleanPath string, data []by
 		msg = err.Error()
 	}
 	return msg
+}
+
+// rejectLegacyArchive отвечает 403 path_not_allowed и возвращает true, если хотя
+// бы один из путей (исходный или развёрнутый PathValidator) лежит в каталоге
+// архива прежних данных. Архив с адресами прежних подписок выдаётся только окном
+// закрытия; общий файловый API его не читает, не правит и не копирует в backups/.
+func (a *API) rejectLegacyArchive(w http.ResponseWriter, r *http.Request, paths ...string) bool {
+	for _, p := range paths {
+		if utils.IsLegacyArchivePath(a.cfg.DataDir, p) {
+			a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+			return true
+		}
+	}
+	return false
 }
 
 // rejectManagedPath отвечает 409 file_managed и возвращает true, если файл

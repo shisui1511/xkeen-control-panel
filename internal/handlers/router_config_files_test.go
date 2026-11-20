@@ -93,6 +93,21 @@ func TestRouterConfigFilesScope(t *testing.T) {
 	if st, _ := e.rtFilesList("/opt/etc/xcp", false); st != http.StatusOK {
 		t.Errorf("список /opt/etc/xcp без scope: статус %d, ожидался 200", st)
 	}
+	// Архив прежних данных выдаёт только окно закрытия: общий файловый API на
+	// каталог legacy/ отвечает 403 и без scope, есть каталог на устройстве или нет.
+	legacyDir := "/opt/etc/xcp/legacy"
+	legacyFile := filepath.Join(legacyDir, "rt-legacy.json")
+	t.Cleanup(func() { _ = os.Remove(legacyFile) })
+	legacyQ := url.Values{"path": {legacyFile}}.Encode()
+	if st, _ := e.rtFilesList(legacyDir, false); st != http.StatusForbidden {
+		t.Errorf("список %s: статус %d, ожидался 403", legacyDir, st)
+	}
+	if r := e.call(http.MethodGet, "/api/config/read?"+legacyQ, nil); r.Status != http.StatusForbidden {
+		t.Errorf("чтение %s: статус %d, ожидался 403", legacyFile, r.Status)
+	}
+	if r := e.call(http.MethodPost, "/api/config/create?"+legacyQ, nil); r.Status != http.StatusForbidden {
+		t.Errorf("создание %s: статус %d, ожидался 403", legacyFile, r.Status)
+	}
 
 	st, items := e.rtFilesList(rtFilesXrayDir, true)
 	if st != http.StatusOK {
