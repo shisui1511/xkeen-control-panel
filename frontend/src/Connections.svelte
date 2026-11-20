@@ -641,6 +641,7 @@
       <button
         class="btn btn-secondary"
         onclick={() => (paused = !paused)}
+        disabled={$capabilities?.mihomo?.no_socket === true}
         title={paused ? $t('conn.resume') : $t('conn.pause')}
       >
         {#if paused}

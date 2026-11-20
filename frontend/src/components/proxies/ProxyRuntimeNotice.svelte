@@ -14,8 +14,9 @@
 
   type NoticeKind = 'no_socket' | 'user_profile' | 'user_managed' | 'stopped';
 
-  // Профили Mihomo живут на вкладке ядер «Конфигурации» (карточка «Профили»)
-  const PROFILES_HASH = '#/config/cores';
+  // Профили Mihomo живут на вкладке ядер «Конфигурации» (карточка «Профили»); focus —
+  // прокрутка к карточке
+  const PROFILES_HASH = '#/config/cores?focus=profiles';
 
   interface Props {
     /**
@@ -27,9 +28,14 @@
     fallbackReason?: string;
     /** Ядро запущено: страница перечитывает вид. */
     onstarted?: () => void;
+    /**
+     * inline — «нет сокета» плашкой над работающей страницей (квоты); по умолчанию —
+     * пустое состояние вместо содержимого (прокси, подключения).
+     */
+    layout?: 'page' | 'inline';
   }
 
-  let { viewState = null, fallbackReason = '', onstarted }: Props = $props();
+  let { viewState = null, fallbackReason = '', onstarted, layout = 'page' }: Props = $props();
 
   const PRIORITY: NoticeKind[] = ['no_socket', 'user_profile', 'user_managed', 'stopped'];
   const kind = $derived(PRIORITY.find((k) => k === viewState) ?? null);
@@ -57,15 +63,30 @@
   }
 </script>
 
-{#if kind === 'no_socket'}
+{#if kind === 'no_socket' && layout === 'inline'}
+  <div class="alert alert-warning prn-alert" data-testid="mihomo-no-socket">
+    <span class="icon-first-line prn-icon" aria-hidden="true">
+      <Icon name="warning" size={16} />
+    </span>
+    <div class="prn-body">
+      <span class="prn-text">
+        <strong>{$t('proxies.rt.no_socket_title')}.</strong>
+        {$t('proxies.rt.no_socket_desc')}
+        <a class="prn-link prn-link--plain" href={PROFILES_HASH}>{$t('proxies.rt.no_socket_cta')}</a
+        >
+      </span>
+    </div>
+  </div>
+{:else if kind === 'no_socket'}
   <div data-testid="mihomo-no-socket">
     <EmptyState
       title={$t('proxies.rt.no_socket_title')}
       description={$t('proxies.rt.no_socket_desc')}
       icon={WarningIcon}
+      tone="warning"
       ctaText={$t('proxies.rt.no_socket_cta')}
       ctaVariant="secondary"
-      oncta={() => (window.location.hash = PROFILES_HASH)}
+      ctaHref={PROFILES_HASH}
     />
   </div>
 {:else if kind}
@@ -155,6 +176,13 @@
     color: var(--accent);
     text-decoration: none;
     white-space: nowrap;
+  }
+
+  /* Ссылка в плашке неполадки: accent закрыт — цвет текста плашки, подчёркивание */
+  .prn-link--plain {
+    color: inherit;
+    font-weight: 600;
+    text-decoration: underline;
   }
 
   .prn-link:hover,

@@ -461,7 +461,7 @@
     <!-- Свой профиль Mihomo без external-controller-unix (D-13): счёт трафика стоит, пока
          профиль не получит сокет; квоты по-прежнему настраиваются -->
     {#if $capabilities?.mihomo?.no_socket}
-      <ProxyRuntimeNotice viewState="no_socket" />
+      <ProxyRuntimeNotice viewState="no_socket" layout="inline" />
     {/if}
 
     <!-- Alerts -->
