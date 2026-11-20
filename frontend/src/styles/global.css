@@ -3016,59 +3016,7 @@ pre.code-output {
   }
 }
 
-/* ------------ Fullscreen Editor Mode Layout (REQ-3) ------------- */
-.dashboard-layout.editor-active {
-  height: 100vh !important;
-  height: 100dvh !important;
-  max-height: 100vh !important;
-  max-height: 100dvh !important;
-  overflow: hidden !important;
-}
-
-.main-content.editor-active {
-  height: 100% !important;
-  max-height: 100% !important;
-  overflow: hidden !important;
-  display: flex !important;
-  flex-direction: column !important;
-}
-
-.main-content.editor-active > div {
-  flex: 1 !important;
-  height: 100% !important;
-  min-height: 0 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  overflow: hidden !important;
-}
-
-.editor-page-container {
-  width: 100% !important;
-  max-width: 100% !important;
-  margin: 0 !important;
-  flex: 1 !important;
-  height: 100% !important;
-  min-height: 0 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  overflow: hidden !important;
-  padding: var(--spacing-4) !important;
-  box-sizing: border-box !important;
-}
-
-.editor-page-container.constructor-mode {
-  height: auto !important;
-  min-height: 100% !important;
-  overflow: visible !important;
-  padding-bottom: 60px !important;
-}
-
-.editor-tabs {
-  flex: 0 0 auto !important;
-  align-self: flex-start !important;
-  width: fit-content !important;
-}
-
+/* ------------ Editor grid ------------- */
 .editor-grid {
   display: grid !important;
   gap: var(--spacing-3-5) !important;
@@ -3192,14 +3140,8 @@ pre.code-output {
 
 /* зона нажатия 44×44 без изменения визуального размера (§7 D-23) */
 @media (max-width: 768px), (pointer: coarse) {
-  .tap-zone-44,
-  .editor-page-container .page-header-actions .tabs-pill .tab-btn {
+  .tap-zone-44 {
     position: relative;
-  }
-
-  /* у общего .tabs overflow-y: hidden обрезал бы зону; в пилюле два пункта, прокрутки нет */
-  .editor-page-container .page-header-actions .tabs-pill {
-    overflow: visible;
   }
 
   .editor-cm-toolbar:not(.is-fullscreen) {
@@ -3207,8 +3149,7 @@ pre.code-output {
     right: 6px;
   }
 
-  .tap-zone-44::after,
-  .editor-page-container .page-header-actions .tabs-pill .tab-btn::after {
+  .tap-zone-44::after {
     content: '';
     position: absolute;
     left: 50%;
@@ -3668,18 +3609,6 @@ pre.code-output {
       animation: scroll-edge-fade linear both;
       animation-timeline: scroll(self inline);
     }
-  }
-
-  /* «Открыть в редакторе» и «Применить и перезапустить Mihomo» не помещались
-     в половину строки и обрезались: на телефоне — друг под другом */
-  .gen-embedded-actions {
-    flex-direction: column-reverse;
-  }
-
-  .gen-embedded-actions > .btn {
-    flex: none !important;
-    width: 100%;
-    min-height: 44px;
   }
 }
 

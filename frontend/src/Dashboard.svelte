@@ -1503,8 +1503,4 @@
     font-size: var(--font-size-base);
     color: var(--fg-primary);
   }
-
-  /* Fullscreen editor layout geometry (.dashboard-layout.editor-active,
-     .main-content.editor-active) lives solely in global.css to avoid
-     maintaining two out-of-sync copies of the same !important rules. */
 </style>
