@@ -1216,30 +1216,13 @@ function rerunNumber(dir) {
   return n;
 }
 
-// Новейший опубликованный релиз из отдельного источника. Исходный тег должен
-// принадлежать тому же источнику, чтобы вложенный прогон скачал именно этот релиз.
+// Новейший опубликованный (не draft) релиз GitHub; при сбое gh бросает.
 function latestReleaseTag() {
-  const contract = 'internal/releasefeed/repository';
-  const root = path.resolve(SCRIPT_DIR, '../..');
-  const sourceRepo = readFileSync(path.join(root, 'go.mod'), 'utf8').match(
-    /^module github\.com\/([A-Za-z0-9-]+\/[A-Za-z0-9._-]+)$/m
-  )?.[1];
-  const releaseRepo = readFileSync(path.join(root, contract), 'utf8').replace(/\n$/, '');
-  if (
-    !sourceRepo ||
-    !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/.test(releaseRepo) ||
-    releaseRepo.toLowerCase() === sourceRepo.toLowerCase()
-  ) {
-    throw new Error(`неверный источник выпусков в ${contract}`);
-  }
-
-  const tag = execFileSync(
+  return execFileSync(
     'gh',
     [
       'release',
       'list',
-      '--repo',
-      releaseRepo,
       '--exclude-drafts',
       '--limit',
       '1',
@@ -1250,14 +1233,6 @@ function latestReleaseTag() {
     ],
     { encoding: 'utf8', timeout: 30000 }
   ).trim();
-
-  if (RELEASE_TAG.test(tag) && localTagExists(tag)) {
-    const tagRepo = execFileSync('git', ['show', `refs/tags/${tag}^{commit}:${contract}`], {
-      encoding: 'utf8'
-    }).replace(/\n$/, '');
-    if (tagRepo !== releaseRepo) throw new Error(`источник в коммите тега ${tag} отличается`);
-  }
-  return tag;
 }
 
 // Ключ сборки: HEAD@<номер> всегда отличается от HEAD, поэтому смена номера вызывает деплой,
@@ -1867,7 +1842,7 @@ class Session {
       try {
         tag = latestReleaseTag();
       } catch (e) {
-        err = `не удалось определить новейший релиз: ${e.message.split('\n')[0]}`;
+        err = `gh release list не отработал: ${e.message.split('\n')[0]}`;
       }
     }
     if (!err && !RELEASE_TAG.test(tag)) {
@@ -2757,13 +2732,12 @@ class Session {
         try {
           tag = latestReleaseTag();
         } catch (e) {
-          err = `не удалось определить новейший релиз: ${e.message.split('\n')[0]}`;
+          err = `gh release list не отработал: ${e.message.split('\n')[0]}`;
         }
       }
       if (!err && !RELEASE_TAG.test(tag)) {
         err = `новейший релиз не определён или тег «${tag}» не похож на vX.Y.Z`;
       }
-      if (!err && !localTagExists(tag)) err = `тега ${tag} нет в локальном git (git fetch --tags)`;
       if (err) {
         this.say(`прогон набора ${p.suite} не начат: ${err}`);
         this.verdicts.push({
