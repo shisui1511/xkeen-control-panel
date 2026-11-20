@@ -642,7 +642,11 @@
         class="btn btn-secondary"
         onclick={() => (paused = !paused)}
         disabled={$capabilities?.mihomo?.no_socket === true}
-        title={paused ? $t('conn.resume') : $t('conn.pause')}
+        title={$capabilities?.mihomo?.no_socket === true
+          ? $t('proxies.rt.no_socket_title')
+          : paused
+            ? $t('conn.resume')
+            : $t('conn.pause')}
       >
         {#if paused}
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"

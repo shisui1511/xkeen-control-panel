@@ -29,7 +29,12 @@
   };
 
   type LegacyRow = { file: string; what: string };
-  type LegacyLeftovers = { rows: LegacyRow[]; more: number; count: number };
+  type LegacyLeftovers = {
+    rows: LegacyRow[];
+    more: number;
+    count: number;
+    filesLink: boolean;
+  };
 
   interface Props {
     /**
@@ -332,21 +337,33 @@
       const at = line.indexOf(' — ');
       if (at > 0) blocked[line.slice(0, at)] = line.slice(at + 3);
     }
-    // Сбой проверки каталога («legacy» или «<ядро>/.») — не файл ядра: «Убрать» его не уберёт,
-    // в счёт файлов он не входит; такие строки идут после файлов ядер
+    // Сбой проверки («legacy» — архив, «<ядро>/.» — каталог ядра) — не файл ядра: «Убрать»
+    // его не уберёт, в счёт файлов не входит; такие строки идут после файлов ядер и показываются
+    // все (их не больше трёх), а «и ещё n» считает только файлы ядер
     const isDir = (file: string) => file === LEGACY_DIR || file.endsWith('/.');
     const kernelFiles = files.filter((f) => !isDir(f));
-    const listed = [...kernelFiles, ...files.filter(isDir)];
-    const rows = listed.slice(0, LEGACY_ROWS).map((file) => {
-      let what = isDir(file)
-        ? $t('cfg.notice.legacy_kind_dir')
-        : LEGACY_RULE_FILES.includes(file)
-          ? $t('cfg.notice.legacy_kind_rules')
-          : $t('cfg.notice.legacy_kind_select');
+    const dirFindings = files.filter(isDir);
+    const describeRow = (file: string) => {
       const reason = blocked[file];
+      if (isDir(file)) {
+        const base =
+          file === LEGACY_DIR
+            ? $t('cfg.notice.legacy_kind_archive')
+            : $t('cfg.notice.legacy_kind_kernel_dir', {
+                kernel: KERNEL_LABELS[file.slice(0, -2)] ?? file.slice(0, -2)
+              });
+        return {
+          file: file === LEGACY_DIR ? file : file.slice(0, -1),
+          what: reason ? base + '; ' + $t('cfg.notice.legacy_dir_reason', { reason }) : base
+        };
+      }
+      let what = LEGACY_RULE_FILES.includes(file)
+        ? $t('cfg.notice.legacy_kind_rules')
+        : $t('cfg.notice.legacy_kind_select');
       if (reason) what += '; ' + $t('cfg.notice.legacy_blocked', { reason });
       return { file, what };
-    });
+    };
+    const rows = [...kernelFiles.slice(0, LEGACY_ROWS), ...dirFindings].map(describeRow);
     return {
       notice: n,
       tone: 'warning',
@@ -356,8 +373,11 @@
           : $t('cfg.notice.legacy_dir_only'),
       legacy: {
         rows,
-        more: Math.max(0, listed.length - LEGACY_ROWS),
-        count: kernelFiles.length
+        more: Math.max(0, kernelFiles.length - LEGACY_ROWS),
+        count: kernelFiles.length,
+        // «Файлы» показывают файлы ядер; архив там исключён, поэтому для сбоя только в архиве
+        // ссылки нет
+        filesLink: kernelFiles.length > 0 || dirFindings.some((f) => f !== LEGACY_DIR)
       }
     };
   }
@@ -519,9 +539,11 @@
                 {$t('cfg.notice.legacy_clean')}
               </Button>
             {/if}
-            <a class="notice-link" href="#/config/files" data-testid="legacy-leftovers-files-link"
-              >{$t('cfg.files.drift_notice_link')}</a
-            >
+            {#if legacy.filesLink}
+              <a class="notice-link" href="#/config/files" data-testid="legacy-leftovers-files-link"
+                >{$t('cfg.files.drift_notice_link')}</a
+              >
+            {/if}
           </span>
         </div>
       </div>
