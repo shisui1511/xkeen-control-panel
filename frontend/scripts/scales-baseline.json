@@ -50,7 +50,7 @@
     "components/settings/UpdatesPanel.svelte": 7,
     "components/status/SystemQuickMenu.svelte": 1,
     "components/status/SystemStatusCapsule.svelte": 3,
-    "styles/global.css": 28
+    "styles/global.css": 27
   },
   "radius": {
     "Logs.svelte": 1,
