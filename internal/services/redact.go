@@ -8,7 +8,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
-func StripANSI(s string) string { return utils.StripANSIForRedaction(s) }
+func StripANSI(s string) string { return utils.StripANSI(s) }
 
 func StripCarriageReturns(s string) string { return utils.StripCarriageReturns(s) }
 

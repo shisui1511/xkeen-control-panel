@@ -6,9 +6,6 @@ import (
 )
 
 var (
-	// redactionANSI matches ANSI escape sequences (colors, cursor movements)
-	redactionANSI = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\([a-zA-Z]`)
-
 	// urlTokenRegex matches sensitive URL query parameters
 	urlTokenRegex = regexp.MustCompile(`(?i)(token|secret|key|password|auth)=([^&\s]+)`)
 
@@ -39,11 +36,6 @@ var (
 	timestamp1970Regex = regexp.MustCompile(`\b1970[-/](?:01|1)[-/](?:01|1)`)
 )
 
-// StripANSI removes all ANSI escape sequences from input string.
-func StripANSIForRedaction(s string) string {
-	return redactionANSI.ReplaceAllString(s, "")
-}
-
 // StripCarriageReturns removes carriage returns (\r) often emitted by progress bars.
 func StripCarriageReturns(s string) string {
 	return strings.ReplaceAll(s, "\r", "")
@@ -57,7 +49,7 @@ func NormalizeTimestamps(s string) string {
 // RedactSensitiveText replaces passwords, tokens, Reality keys, LAN IPs and cleans control characters.
 func RedactSensitiveText(s string) string {
 	// 1. Strip ANSI and carriage returns
-	cleaned := StripANSIForRedaction(s)
+	cleaned := StripANSI(s)
 	cleaned = StripCarriageReturns(cleaned)
 	cleaned = NormalizeTimestamps(cleaned)
 
