@@ -689,6 +689,8 @@ func main() {
 			})
 			if srcErr != nil {
 				log.Printf("Сервис источников не подключён к слою, маршруты /api/configlayer/sources* отвечают 404: %v", srcErr)
+				// Контекст сервиса не должен остаться живым без владельца.
+				sourcesSvc.Stop()
 				sourcesSvc = nil
 			}
 		}
