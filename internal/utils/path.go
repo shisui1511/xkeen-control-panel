@@ -209,10 +209,8 @@ func IsLegacyArchivePath(dataDir, path string) bool {
 }
 
 func resolveArchiveAlias(path string) string {
-	// Путь уже очищен и абсолютен; «..» в нём означает неочищенный ввод, его не разворачиваем.
-	if strings.Contains(path, "..") {
-		return path
-	}
+	// Путь абсолютен: очистка с корневым префиксом сворачивает «..» и не меняет уже очищенный путь.
+	path = filepath.Clean("/" + path)
 	// EvalSymlinks не возвращает цель оборванной ссылки. При восстановлении
 	// снимка отсутствующая цель может появиться, поэтому разворачиваем её тоже.
 	for links := 0; links < 40; links++ {
