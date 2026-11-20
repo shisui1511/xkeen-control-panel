@@ -8,18 +8,16 @@ import { test, expect, type Locator, type Page, type Request } from '@playwright
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
 import { CORE_TAG, FULL_TAG, TIER_FULL_ANNOTATION } from './lib/known';
-import { api, layerFlag, resetDraft, withPanel } from './lib/nodes-api';
+import { api, resetDraft, waitApplyIdle, withPanel } from './lib/nodes-api';
 
 // Вкладка «Файлы» раздела «Конфигурация» на настоящей панели (фаза 149, CFG-03): встроенный
 // Редактор открывает файл по строке списка, на 390 px список выезжает листом слева кнопкой
-// «Файлы». Ответы сети не подменяются. Флаг слоя включается на время прогона и возвращается
-// прежним. Стенд меняется только временным файлом с префиксом FIXTURE_PREFIX в каталоге Xray
-// (пустой объект, ядро не перезапускается): файл создаётся через API панели до сценариев и
-// удаляется вместе с копиями после, остатки прерванных прогонов убираются по префиксу.
+// «Файлы». Ответы сети не подменяются. Черновик сбрасывается до и после прогона. Стенд
+// меняется только временным файлом с префиксом FIXTURE_PREFIX в каталоге Xray (пустой
+// объект, ядро не перезапускается): файл создаётся через API панели до сценариев и удаляется
+// вместе с копиями после, остатки прерванных прогонов убираются по префиксу.
 // Реальные конфиги стенда спек не открывает, кроме сценария истории файла панели (ниже):
 // он применяет секцию «Лог» Xray и возвращает её владельца, форму и файлы.
-
-const layer = layerFlag();
 
 test.describe.configure({ mode: 'serial' });
 
@@ -92,8 +90,8 @@ async function sweepFixtures(page: Page): Promise<void> {
 }
 
 test.beforeAll(async ({ browser }) => {
-  await layer.enable(browser);
   await withPanel(browser, async (page) => {
+    await resetDraft(page);
     await sweepFixtures(page);
     fixtureName = `${FIXTURE_PREFIX}${randomInt(100000, 1000000)}.json`;
     const q = encodeURIComponent(`${XRAY_DIR}/${fixtureName}`);
@@ -120,14 +118,17 @@ test.afterEach(async () => {
 });
 
 test.afterAll(async ({ browser }) => {
-  // Прерванный сценарий истории: секция «Лог» и её файлы — до возврата флага слоя
+  // Прерванный сценарий истории: секция «Лог» и её файлы — до сброса черновика
   const before = logBefore;
   if (before !== null) {
     await withPanel(browser, (page) => restoreLog(page, before));
     logBefore = null;
   }
-  await withPanel(browser, (page) => sweepFixtures(page));
-  await layer.restore(browser);
+  await withPanel(browser, async (page) => {
+    await sweepFixtures(page);
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
+  });
 });
 
 /** Открывает вкладку «Файлы» и ждёт загруженный список (без скелетона). */

@@ -4,10 +4,10 @@
   import Icon from '../../../lib/components/Icon.svelte';
   import { fetchDependentProfiles } from '../../../lib/configProfiles';
 
-  // Абзац в диалогах удаления источника и выключения флага слоя (D-05): какие профили
-  // пользователя ссылаются на файлы источников панели и потеряют узлы. Только чтение:
-  // действие диалога не блокируется ни ожиданием, ни ответом, ни сбоем чтения.
-  let { source, all = false }: { source?: string; all?: boolean } = $props();
+  // Абзац в диалоге удаления источника (D-05): какие профили пользователя ссылаются на
+  // файлы источника панели и потеряют узлы. Только чтение: действие диалога не
+  // блокируется ни ожиданием, ни ответом, ни сбоем чтения.
+  let { source }: { source: string } = $props();
 
   const SHOWN = 3;
   // Подстановка имён идёт токеном, чтобы вывести их моноширинными, а текст оставить из словаря
@@ -18,7 +18,7 @@
 
   onMount(() => {
     let live = true;
-    fetchDependentProfiles(all ? { all: true } : { source }).then(
+    fetchDependentProfiles({ source }).then(
       (list) => {
         if (live) names = list;
       },
@@ -32,9 +32,9 @@
   });
 
   const parts = $derived(
-    $t(all ? 'cfg.prof.dep_flag' : 'cfg.prof.dep_source', {
+    $t('cfg.prof.dep_source', {
       profiles: TOKEN,
-      id: source ?? ''
+      id: source
     }).split(TOKEN)
   );
   const shown = $derived(Array.isArray(names) ? names.slice(0, SHOWN) : []);

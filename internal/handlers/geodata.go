@@ -15,9 +15,9 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
 )
 
-// Маршруты менеджера geodata (/api/configlayer/geodata*) работают только при
-// включённом слое «Конфигурация» и созданном сервисе: иначе они отвечают 404
-// config_layer_disabled, как остальные маршруты слоя. Все они регистрируются через
+// Маршруты менеджера geodata (/api/configlayer/geodata*) работают всегда, когда в
+// main.go созданы слой «Конфигурация» и менеджер; иначе — 404 not_found. Все они
+// регистрируются через
 // HandleProtected: без сессии 401, изменяющие (только POST) — ещё и с X-CSRF-Token
 // (403). Они не входят в kernelGatedPrefixes: менеджер не обращается к ядру, а
 // запуск `xkeen -ug` идёт под замком применения слоя (geodata_busy / apply_busy).
@@ -78,14 +78,14 @@ var geodataInvalidReasonCode = map[string]string{
 	"drop_not_found":  "not_pending",
 }
 
-// requireGeodata — requireLayer плюс наличие менеджера: без сервиса (он не создался в
-// main.go) маршруты отвечают так же, как при выключенном слое.
+// requireGeodata — requireConfigLayer плюс наличие менеджера: без сервиса (он не
+// создался в main.go) маршруты отвечают 404 not_found.
 func (a *API) requireGeodata(w http.ResponseWriter, r *http.Request) bool {
-	if !a.requireLayer(w, r) {
+	if !a.requireConfigLayer(w, r) {
 		return false
 	}
 	if a.geodata == nil {
-		JSONErrorCode(w, http.StatusNotFound, "config_layer_disabled", a.t(r, "configlayer.disabled"))
+		JSONErrorCode(w, http.StatusNotFound, "not_found", a.t(r, "error.not_found"))
 		return false
 	}
 	return true
@@ -233,7 +233,7 @@ func (a *API) requireGeodataIndex(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	if a.geodataIndex == nil {
-		JSONErrorCode(w, http.StatusNotFound, "config_layer_disabled", a.t(r, "configlayer.disabled"))
+		JSONErrorCode(w, http.StatusNotFound, "not_found", a.t(r, "error.not_found"))
 		return false
 	}
 	return true

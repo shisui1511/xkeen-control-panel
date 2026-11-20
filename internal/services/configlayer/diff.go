@@ -30,9 +30,6 @@ type DiffView struct {
 // Truncated. Принимается только ключ манифеста; отпущенный файл не сверяется
 // (ErrFileReleased).
 func (l *Layer) Diff(key string) (DiffView, error) {
-	if !l.Enabled() {
-		return DiffView{}, ErrDisabled
-	}
 	st := l.store.Snapshot()
 	entry, ok := st.Manifest[key]
 	if !ok {

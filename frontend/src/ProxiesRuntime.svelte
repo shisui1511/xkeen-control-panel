@@ -1,12 +1,12 @@
 <script lang="ts">
-  // Страница «Прокси» при включённом слое «Конфигурация»: что выбрано сейчас в группах
-  // панели для обоих ядер. Без флага слоя Dashboard рисует прежний Proxies.svelte, и этот
-  // модуль вместе с клиентом configProxies.ts не загружается.
+  // Страница «Прокси»: что выбрано сейчас в группах панели для обоих ядер. Для своего
+  // профиля Mihomo (user_profile) внутри лениво грузится Proxies.svelte — страница
+  // Clash API запущенного профиля.
   import { onMount, tick, untrack } from 'svelte';
   import { writable } from 'svelte/store';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import { t } from './i18n';
-  import { activeKernelName, runningKernels, showToast } from './stores';
+  import { activeKernelName, capabilities, runningKernels, showToast } from './stores';
   import { usePoller } from './lib/poller';
   import { motion } from './lib/motion.svelte';
   import PageHeader from './PageHeader.svelte';
@@ -581,10 +581,13 @@
     };
   });
 
-  // Смена активного или запущенных ядер меняет режим страницы: перечитать вид
+  // Смена активного или запущенных ядер меняет режим страницы: перечитать вид. Признак
+  // «нет сокета» из capabilities тоже входит в ключ: профиль поправили и перезапустили
+  // Mihomo быстрее такта опроса — набор ядер тот же, а вид страницы другой
   let kernelSeen = '';
+  const capsNoSocket = $derived($capabilities?.mihomo?.no_socket === true);
   $effect(() => {
-    const key = `${$activeKernelName}|${$runningKernels.join(',')}`;
+    const key = `${$activeKernelName}|${$runningKernels.join(',')}|${capsNoSocket}`;
     if (kernelSeen === '') {
       kernelSeen = key;
       return;
@@ -607,6 +610,9 @@
   );
   // Режим Mihomo — только когда Mihomo работает на профиле панели (D-04)
   const showModeSwitch = $derived($activeKernelName === 'mihomo' && view?.modes.mihomo === 'panel');
+  // Свой профиль без external-controller-unix (D-13): прежней странице Clash API не к чему
+  // подключаться, вместо неё — подсказка S3. Остановленное ядро и профиль панели её не дают
+  const noSocket = $derived(view?.state === 'user_profile' && view.no_socket);
 </script>
 
 {#snippet userProfileNotice()}
@@ -616,7 +622,12 @@
 {/snippet}
 
 <div data-testid="proxies-layer-page">
-  {#if view?.state === 'user_profile'}
+  {#if noSocket}
+    <div class="container">
+      <PageHeader title={$t('proxies.title')} subtitle={$t('proxies.subtitle')} />
+      <ProxyRuntimeNotice viewState="no_socket" />
+    </div>
+  {:else if view?.state === 'user_profile'}
     <!-- D-02: свой профиль Mihomo — прежняя страница Clash API запущенного профиля:
          выбор сразу через API, State.Live не пишется -->
     {#await import('./Proxies.svelte')}

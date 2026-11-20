@@ -371,7 +371,7 @@ func TestRouterCoresRetakeBeforeApply(t *testing.T) {
 	routertest.Slow(t, "серия «Применить» с перезапусками ядра: отпускание и повторное взятие секций")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	switch tg.Core {
 	case "xray":

@@ -194,7 +194,7 @@ func firstCommon(a, b []string) string {
 
 // planCores дополняет операции маршрутизации операциями над секциями Xray:
 // условия запуска те же, что у planRouting (без req.Only; SourceDraft,
-// TriggerKernelInstalled или TriggerFlagOn). Секции Xray вне области запуска
+// TriggerKernelInstalled или TriggerStartup). Секции Xray вне области запуска
 // или при неустановленном ядре не трогаются. Проблемы взятия возвращаются
 // BuildError до записи. Если секции не меняются, возвращается routing как есть
 // (в том числе nil); иначе операции сливаются в routing, а при nil создаётся
@@ -203,7 +203,7 @@ func (p *Pipeline) planCores(src Sections, actual CoresState, routing *RoutingOp
 	if len(req.Only) > 0 {
 		return routing, nil
 	}
-	if req.Source != SourceDraft && req.Trigger != TriggerKernelInstalled && req.Trigger != TriggerFlagOn {
+	if req.Source != SourceDraft && req.Trigger != TriggerKernelInstalled && req.Trigger != TriggerStartup {
 		return routing, nil
 	}
 	desired := DesiredCores(src)
@@ -230,7 +230,7 @@ func (p *Pipeline) planCores(src Sections, actual CoresState, routing *RoutingOp
 	if kernelInScope(KernelXray, installed, req.Kernel) && (taking || releasing) {
 		var scans map[string]XraySectionScan
 		if taking {
-			files, err := ScanXrayKeyFiles(p.d.Roots.Xray, p.d.ForeignOwned)
+			files, err := ScanXrayKeyFiles(p.d.Roots.Xray)
 			if err != nil {
 				return nil, &BuildError{Issues: []BuildIssue{{Key: RoutingSection, Code: IssueRoutingScanFailed, Detail: err.Error()}}}
 			}

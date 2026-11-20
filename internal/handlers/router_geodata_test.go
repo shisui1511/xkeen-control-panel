@@ -24,9 +24,8 @@ import (
 
 // Проверка API менеджера geodata на настоящей панели устройства: маршруты
 // /api/configlayer/geodata* вызываются по HTTPS с сессией, созданной на ПК
-// (routertest.Panel). Вердикт — коды и тела ответов панели. Флаг слоя
-// «Конфигурация» на время проверки переключается и возвращается прежним, черновик
-// после сценария сбрасывается. В сообщения попадают только коды и числа.
+// (routertest.Panel). Вердикт — коды и тела ответов панели. Черновик слоя
+// «Конфигурация» после сценария сбрасывается. В сообщения попадают только коды и числа.
 
 const rtGeoBase = "/api/configlayer/geodata"
 
@@ -252,21 +251,9 @@ func TestRouterGeodataAPI(t *testing.T) {
 	routertest.Tier(t, routertest.Full, "реальная загрузка: настоящий запуск xkeen -ug скачивает базы из интернета")
 	e := rtNewSrc(t)
 
-	// Флаг слоя выключен: каждый маршрут менеджера отвечает 404 config_layer_disabled.
-	t.Run("flag_off", func(t *testing.T) {
-		e := &rtSrc{t: t, p: e.p}
-		e.setLayer(false)
-		for _, rt := range rtGeoRoutes {
-			r := e.call(rt.method, rt.path, rtBody(rt.method))
-			if r.Status != http.StatusNotFound || r.Code != "config_layer_disabled" {
-				t.Errorf("%s %s при выключенном слое: статус %d, код %q; ожидалось 404 config_layer_disabled", rt.method, rt.path, r.Status, r.Code)
-			}
-		}
-	})
-
-	e.enableLayer()
+	e.freshDraft()
 	// Запись в xkeen.json и «Обновить сейчас» идут под исключительным замком слоя:
-	// пока фоновая сборка после включения флага не закончилась, они отвечают apply_busy.
+	// пока фоновая сборка не закончилась, они отвечают apply_busy.
 	e.rtRstIdle()
 
 	// Снимок вкладки: ключи ответа совпадают с json-тегами geodata.View.

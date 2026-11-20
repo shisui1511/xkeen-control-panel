@@ -7,6 +7,7 @@
   import Connections from './icons/Connections.svelte';
   import Dat from './icons/Dat.svelte';
   import Console from './icons/Console.svelte';
+  import SystemChip from './icons/SystemChip.svelte';
   import Proxies from './icons/Proxies.svelte';
   import Rules from './icons/Rules.svelte';
   import Subscriptions from './icons/Subscriptions.svelte';
@@ -75,6 +76,8 @@
   <Dat {size} {color} class={className} />
 {:else if name === 'console'}
   <Console {size} {color} class={className} />
+{:else if name === 'system-chip'}
+  <SystemChip {size} {color} class={className} />
 {:else if name === 'proxies'}
   <Proxies {size} {color} class={className} />
 {:else if name === 'rules'}

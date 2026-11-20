@@ -158,7 +158,8 @@ type State struct {
 	// скрыт. Поле необязательное, схема прежняя (149 D-26: формат файла —
 	// публичный контракт до 1.0.0). Указатель и omitempty оставляют файл тех,
 	// кто мастер не трогал, прежним; сброс схемы даёт nil — мастер снова виден.
-	Wizard *WizardState `json:"wizard,omitempty"`
+	Wizard *WizardState      `json:"wizard,omitempty"`
+	Legacy *LegacyResetState `json:"legacy,omitempty"`
 }
 
 // emptyState — чистое состояние текущей схемы.
@@ -193,6 +194,10 @@ func (st State) clone() State {
 		w := *st.Wizard
 		out.Wizard = &w
 	}
+	if st.Legacy != nil {
+		legacy := *st.Legacy
+		out.Legacy = &legacy
+	}
 	return out
 }
 
@@ -214,5 +219,8 @@ func (st *State) normalize() {
 	// отбрасывается: мастер считается непройденным.
 	if st.Wizard != nil && !validWizardStatus(st.Wizard.Status) {
 		st.Wizard = nil
+	}
+	if st.Legacy != nil && st.Legacy.ClosedAt.IsZero() {
+		st.Legacy = nil
 	}
 }

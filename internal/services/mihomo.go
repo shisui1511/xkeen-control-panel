@@ -1,7 +1,6 @@
 package services
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -42,21 +41,28 @@ type ControllerInfo struct {
 	IsInsecure bool // true if TCP 0.0.0.0 or :port
 }
 
+// ErrMihomoNoSocket означает, что в профиле не настроен Unix-контроллер.
+var ErrMihomoNoSocket = errors.New("mihomo unix controller is not configured")
+
+const mihomoControllerURL = "http://localhost"
+
 type MihomoService struct {
 	BinaryPath string
 	XKeenPath  string
 	ConfigDir  string
 
-	ctrlCacheMu   sync.RWMutex
-	ctrlCache     ControllerInfo
-	ctrlModTime   time.Time
-	ctrlPath      string
-	ctrlCacheInit bool
+	ctrlCacheMu sync.RWMutex
+	ctrlCache   ControllerInfo
+	ctrlFile    os.FileInfo
+	ctrlPath    string
 
 	clientMu     sync.Mutex
 	cachedClient *http.Client
 	cachedTarget string
-	cachedType   string
+
+	controllerMu     sync.Mutex
+	controllerCtx    context.Context
+	controllerCancel context.CancelFunc
 
 	// provMu охраняет карту «узел провайдера → провайдер» для замера задержки
 	// узлов, которых нет в /proxies (providerOf).
@@ -105,7 +111,9 @@ func (s *MihomoService) ParseControllerConfig() (ControllerInfo, error) {
 	}
 
 	s.ctrlCacheMu.RLock()
-	if s.ctrlCacheInit && s.ctrlPath == configPath && fi.ModTime().Equal(s.ctrlModTime) {
+	// При активации симлинк может начать указывать на другой файл с тем же mtime.
+	if s.ctrlFile != nil && s.ctrlPath == configPath && os.SameFile(fi, s.ctrlFile) &&
+		fi.ModTime().Equal(s.ctrlFile.ModTime()) && fi.Size() == s.ctrlFile.Size() {
 		cached := s.ctrlCache
 		s.ctrlCacheMu.RUnlock()
 		return cached, nil
@@ -118,74 +126,40 @@ func (s *MihomoService) ParseControllerConfig() (ControllerInfo, error) {
 	}
 	defer file.Close()
 
-	var unixCtrl, tcpCtrl, secret string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		line = stripComment(line)
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		// Early stop: controllers are only declared in top-level config before huge sections
-		if strings.HasPrefix(line, "proxies:") || strings.HasPrefix(line, "proxy-providers:") ||
-			strings.HasPrefix(line, "rules:") || strings.HasPrefix(line, "rule-providers:") {
-			break
-		}
-
-		if strings.HasPrefix(line, "external-controller-unix:") {
-			val := strings.TrimPrefix(line, "external-controller-unix:")
-			unixCtrl = cleanYamlValue(val)
-			if unixCtrl != "" && !filepath.IsAbs(unixCtrl) {
-				unixCtrl = filepath.Clean(filepath.Join(s.ConfigDir, unixCtrl))
-			}
-		} else if strings.HasPrefix(line, "external-controller:") {
-			val := strings.TrimPrefix(line, "external-controller:")
-			tcpCtrl = cleanYamlValue(val)
-		} else if strings.HasPrefix(line, "external-controller-secret:") {
-			val := strings.TrimPrefix(line, "external-controller-secret:")
-			secret = cleanYamlValue(val)
-		} else if strings.HasPrefix(line, "secret:") {
-			val := strings.TrimPrefix(line, "secret:")
-			secret = cleanYamlValue(val)
-		}
+	fi, err = file.Stat()
+	if err != nil {
+		return ControllerInfo{Type: "none"}, fmt.Errorf("failed to stat config: %w", err)
 	}
-
-	if err := scanner.Err(); err != nil {
-		return ControllerInfo{Type: "none"}, fmt.Errorf("scanner error: %w", err)
+	var cfg struct {
+		Unix   string `yaml:"external-controller-unix"`
+		TCP    string `yaml:"external-controller"`
+		Secret string `yaml:"secret"`
+		Legacy string `yaml:"external-controller-secret"`
 	}
-
-	var res ControllerInfo
-	if unixCtrl != "" {
-		res = ControllerInfo{
-			Type:       "unix",
-			Target:     unixCtrl,
-			Secret:     secret,
-			IsInsecure: false,
+	// Ключи контроллера верхнего уровня могут стоять после правил и провайдеров.
+	if err := yaml.NewDecoder(file).Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
+		return ControllerInfo{Type: "none"}, fmt.Errorf("failed to parse config: %w", err)
+	}
+	res := ControllerInfo{Type: "none", Secret: cfg.Secret}
+	if res.Secret == "" {
+		res.Secret = cfg.Legacy
+	}
+	if unixCtrl := strings.TrimSpace(cfg.Unix); unixCtrl != "" {
+		res.Type = "unix"
+		res.Target = unixCtrl
+		if !filepath.IsAbs(unixCtrl) {
+			res.Target = filepath.Join(s.ConfigDir, unixCtrl)
 		}
-	} else if tcpCtrl != "" {
-		isInsecure := strings.HasPrefix(tcpCtrl, "0.0.0.0:") || strings.HasPrefix(tcpCtrl, ":") || tcpCtrl == "0.0.0.0"
-		res = ControllerInfo{
-			Type:       "tcp",
-			Target:     tcpCtrl,
-			Secret:     secret,
-			IsInsecure: isInsecure,
-		}
-	} else {
-		res = ControllerInfo{
-			Type:       "none",
-			Target:     "",
-			Secret:     secret,
-			IsInsecure: false,
-		}
+	} else if tcpCtrl := strings.TrimSpace(cfg.TCP); tcpCtrl != "" {
+		res.Type = "tcp"
+		res.Target = tcpCtrl
+		res.IsInsecure = strings.HasPrefix(tcpCtrl, "0.0.0.0:") || strings.HasPrefix(tcpCtrl, ":") || tcpCtrl == "0.0.0.0"
 	}
 
 	s.ctrlCacheMu.Lock()
 	s.ctrlCache = res
-	s.ctrlModTime = fi.ModTime()
+	s.ctrlFile = fi
 	s.ctrlPath = configPath
-	s.ctrlCacheInit = true
 	s.ctrlCacheMu.Unlock()
 
 	return res, nil
@@ -226,18 +200,61 @@ func (s *MihomoService) CleanupStaleSocket() error {
 	return nil
 }
 
-// GetDialContext returns a dialer function matching the configured controller type (unix or tcp).
-func (s *MihomoService) GetDialContext() func(ctx context.Context, network, addr string) (net.Conn, error) {
+// UnixController возвращает параметры единственного транспорта Clash API панели.
+func (s *MihomoService) UnixController() (ControllerInfo, error) {
 	info, err := s.ParseControllerConfig()
-	if err == nil && info.Type == "unix" && info.Target != "" {
-		return func(ctx context.Context, network, addr string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", info.Target)
-		}
+	if err != nil {
+		return ControllerInfo{}, err
 	}
-	return (&net.Dialer{
-		Timeout: 30 * time.Second,
-	}).DialContext
+	if info.Type != "unix" || info.Target == "" {
+		return ControllerInfo{}, ErrMihomoNoSocket
+	}
+	return info, nil
+}
+
+// ControllerContext отменяется при следующем событии жизненного цикла ядра.
+// Подписка берётся до чтения профиля, чтобы не потерять переход между чтением и ожиданием.
+func (s *MihomoService) ControllerContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(parent)
+	s.controllerMu.Lock()
+	if s.controllerCtx == nil {
+		s.controllerCtx, s.controllerCancel = context.WithCancel(context.Background())
+	}
+	stop := context.AfterFunc(s.controllerCtx, cancel)
+	s.controllerMu.Unlock()
+	return ctx, func() {
+		stop()
+		cancel()
+	}
+}
+
+// NotifyControllerChanged будит все службы и отменяет текущие потоки старого профиля.
+func (s *MihomoService) NotifyControllerChanged() {
+	s.controllerMu.Lock()
+	defer s.controllerMu.Unlock()
+	if s.controllerCancel != nil {
+		s.controllerCancel()
+		s.controllerCtx, s.controllerCancel = nil, nil
+	}
+}
+
+// GetDialContext возвращает dialer для Unix-контроллера текущего профиля.
+func (s *MihomoService) GetDialContext() func(ctx context.Context, network, addr string) (net.Conn, error) {
+	info, err := s.UnixController()
+	return unixControllerDialer(info.Target, err)
+}
+
+func unixControllerDialer(target string, err error) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, _, _ string) (net.Conn, error) {
+		if err != nil {
+			return nil, err
+		}
+		if target == "" {
+			return nil, ErrMihomoNoSocket
+		}
+		var d net.Dialer
+		return d.DialContext(ctx, "unix", target)
+	}
 }
 
 // GetHTTPTransport returns the shared *http.Transport for the Mihomo API — the
@@ -250,17 +267,21 @@ func (s *MihomoService) GetHTTPTransport() *http.Transport {
 // GetHTTPClient returns an *http.Client with 30s timeout using GetHTTPTransport.
 // It reuses the underlying client and connection pool unless the controller target or type changes.
 func (s *MihomoService) GetHTTPClient() *http.Client {
-	info, _ := s.ParseControllerConfig()
+	// Без подтверждённого сокета транспорт возвращает ошибку до dial.
+	info, _ := s.UnixController()
+	return s.httpClient(info.Target)
+}
 
+func (s *MihomoService) httpClient(target string) *http.Client {
 	s.clientMu.Lock()
 	defer s.clientMu.Unlock()
 
-	if s.cachedClient != nil && s.cachedTarget == info.Target && s.cachedType == info.Type {
+	if s.cachedClient != nil && s.cachedTarget == target {
 		return s.cachedClient
 	}
 
 	transport := &http.Transport{
-		DialContext:           s.GetDialContext(),
+		DialContext:           unixControllerDialer(target, nil),
 		ResponseHeaderTimeout: 30 * time.Second,
 		IdleConnTimeout:       30 * time.Second,
 		MaxIdleConns:          10,
@@ -275,29 +296,18 @@ func (s *MihomoService) GetHTTPClient() *http.Client {
 		Transport: transport,
 		Timeout:   30 * time.Second,
 	}
-	s.cachedTarget = info.Target
-	s.cachedType = info.Type
+	s.cachedTarget = target
 
 	return s.cachedClient
 }
 
 // ProbeAPI checks if Mihomo API is reachable and authenticated by requesting /version.
 func (s *MihomoService) ProbeAPI(secret string) (reachable bool, authenticated bool) {
-	info, err := s.ParseControllerConfig()
-	var reqURL string
-	if err == nil && info.Type == "unix" {
-		reqURL = "http://localhost/version"
-	} else if err == nil && info.Type == "tcp" && info.Target != "" {
-		target := info.Target
-		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-			target = "http://" + target
-		}
-		reqURL = strings.TrimRight(target, "/") + "/version"
-	} else {
+	info, err := s.UnixController()
+	if err != nil {
 		return false, false
 	}
-
-	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
+	req, err := http.NewRequest(http.MethodGet, mihomoControllerURL+"/version", nil)
 	if err != nil {
 		return false, false
 	}
@@ -306,7 +316,7 @@ func (s *MihomoService) ProbeAPI(secret string) (reachable bool, authenticated b
 	}
 
 	client := &http.Client{
-		Transport: s.GetHTTPTransport(),
+		Transport: s.httpClient(info.Target).Transport,
 		Timeout:   3 * time.Second,
 	}
 
@@ -323,31 +333,6 @@ func (s *MihomoService) ProbeAPI(secret string) (reachable bool, authenticated b
 		return true, false
 	}
 	return true, false
-}
-
-func stripComment(line string) string {
-	inDoubleQuotes := false
-	inSingleQuotes := false
-	for i, char := range line {
-		if char == '"' && (i == 0 || line[i-1] != '\\') {
-			inDoubleQuotes = !inDoubleQuotes
-		} else if char == '\'' && (i == 0 || line[i-1] != '\\') {
-			inSingleQuotes = !inSingleQuotes
-		} else if char == '#' && !inDoubleQuotes && !inSingleQuotes {
-			return line[:i]
-		}
-	}
-	return line
-}
-
-func cleanYamlValue(val string) string {
-	val = strings.TrimSpace(val)
-	if len(val) >= 2 {
-		if (val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'') {
-			val = val[1 : len(val)-1]
-		}
-	}
-	return val
 }
 
 // ValidateMihomoConfig inspects the Mihomo config.yaml and returns a PreflightResult
@@ -442,23 +427,11 @@ func (s *MihomoService) ValidateMihomoConfig() (PreflightResult, error) {
 
 // DNSQuery performs an interactive DNS resolution query via Mihomo Clash API /dns/query.
 func (s *MihomoService) DNSQuery(ctx context.Context, name string, qtype string) ([]byte, error) {
-	info, err := s.ParseControllerConfig()
+	info, err := s.UnixController()
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse controller config: %w", err)
+		return nil, err
 	}
-
-	var reqURL string
-	if info.Type == "unix" {
-		reqURL = "http://localhost/dns/query"
-	} else if info.Type == "tcp" && info.Target != "" {
-		target := info.Target
-		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-			target = "http://" + target
-		}
-		reqURL = strings.TrimRight(target, "/") + "/dns/query"
-	} else {
-		return nil, fmt.Errorf("mihomo controller is not configured")
-	}
+	reqURL := mihomoControllerURL + "/dns/query"
 
 	if qtype == "" {
 		qtype = "A"
@@ -473,7 +446,7 @@ func (s *MihomoService) DNSQuery(ctx context.Context, name string, qtype string)
 		req.Header.Set("Authorization", "Bearer "+info.Secret)
 	}
 
-	client := s.GetHTTPClient()
+	client := s.httpClient(info.Target)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -492,23 +465,11 @@ func (s *MihomoService) DNSQuery(ctx context.Context, name string, qtype string)
 
 // FlushFakeIPCache flushes the Fake-IP cache via Mihomo Clash API /cache/fakeip/flush.
 func (s *MihomoService) FlushFakeIPCache(ctx context.Context) error {
-	info, err := s.ParseControllerConfig()
+	info, err := s.UnixController()
 	if err != nil {
-		return fmt.Errorf("failed to parse controller config: %w", err)
+		return err
 	}
-
-	var reqURL string
-	if info.Type == "unix" {
-		reqURL = "http://localhost/cache/fakeip/flush"
-	} else if info.Type == "tcp" && info.Target != "" {
-		target := info.Target
-		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-			target = "http://" + target
-		}
-		reqURL = strings.TrimRight(target, "/") + "/cache/fakeip/flush"
-	} else {
-		return fmt.Errorf("mihomo controller is not configured")
-	}
+	reqURL := mihomoControllerURL + "/cache/fakeip/flush"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, nil)
 	if err != nil {
@@ -518,7 +479,7 @@ func (s *MihomoService) FlushFakeIPCache(ctx context.Context) error {
 		req.Header.Set("Authorization", "Bearer "+info.Secret)
 	}
 
-	client := s.GetHTTPClient()
+	client := s.httpClient(info.Target)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -532,36 +493,19 @@ func (s *MihomoService) FlushFakeIPCache(ctx context.Context) error {
 	return nil
 }
 
-// HasController сообщает, настроен ли у Mihomo внешний контроллер (Clash API):
-// external-controller или external-controller-unix в config.yaml. Без него ядро
-// работает, но API недоступен, и состояние ядра подтверждается только по процессу.
+// HasController сообщает, настроен ли Unix-контроллер Mihomo для Clash API панели.
 func (s *MihomoService) HasController() bool {
-	info, err := s.ParseControllerConfig()
-	if err != nil {
-		return false
-	}
-	return info.Type == "unix" || (info.Type == "tcp" && info.Target != "")
+	_, err := s.UnixController()
+	return err == nil
 }
 
 // ReloadConfig reloads Mihomo configuration at runtime via PUT /configs?force=true.
 func (s *MihomoService) ReloadConfig(configPath string) error {
-	info, err := s.ParseControllerConfig()
+	info, err := s.UnixController()
 	if err != nil {
-		return fmt.Errorf("failed to parse controller config: %w", err)
+		return err
 	}
-
-	var reqURL string
-	if info.Type == "unix" {
-		reqURL = "http://localhost/configs?force=true"
-	} else if info.Type == "tcp" && info.Target != "" {
-		target := info.Target
-		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-			target = "http://" + target
-		}
-		reqURL = strings.TrimRight(target, "/") + "/configs?force=true"
-	} else {
-		return fmt.Errorf("mihomo controller is not configured")
-	}
+	reqURL := mihomoControllerURL + "/configs?force=true"
 
 	payload := map[string]string{"path": configPath}
 	bodyBytes, err := json.Marshal(payload)
@@ -581,7 +525,7 @@ func (s *MihomoService) ReloadConfig(configPath string) error {
 		req.Header.Set("Authorization", "Bearer "+info.Secret)
 	}
 
-	client := s.GetHTTPClient()
+	client := s.httpClient(info.Target)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -618,15 +562,11 @@ func newClashStatusError(status int, body []byte) error {
 	return &ClashStatusError{Status: status, Body: text}
 }
 
-// clashDo выполняет запрос к Clash API (unix-сокет или контроллер из конфига,
-// секрет в заголовке). path уже содержит экранированные сегменты. body (если не
+// clashDo выполняет запрос к Clash API через Unix-сокет с секретом профиля.
+// path уже содержит экранированные сегменты. body (если не
 // nil) — готовый JSON. Возвращает код ответа и тело.
 func (s *MihomoService) clashDo(ctx context.Context, method, path string, body []byte) (int, []byte, error) {
-	info, err := s.ParseControllerConfig()
-	if err != nil {
-		return 0, nil, fmt.Errorf("failed to parse controller config: %w", err)
-	}
-	base, err := controllerBaseURL(info)
+	info, err := s.UnixController()
 	if err != nil {
 		return 0, nil, err
 	}
@@ -634,7 +574,7 @@ func (s *MihomoService) clashDo(ctx context.Context, method, path string, body [
 	if body != nil {
 		rd = bytes.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, base+path, rd)
+	req, err := http.NewRequestWithContext(ctx, method, mihomoControllerURL+path, rd)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -644,7 +584,7 @@ func (s *MihomoService) clashDo(ctx context.Context, method, path string, body [
 	if info.Secret != "" {
 		req.Header.Set("Authorization", "Bearer "+info.Secret)
 	}
-	resp, err := s.GetHTTPClient().Do(req)
+	resp, err := s.httpClient(info.Target).Do(req)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -885,21 +825,6 @@ const (
 	providerBodyMax = 16 << 20
 )
 
-// controllerBaseURL — базовый адрес Clash API по описанию контроллера.
-func controllerBaseURL(info ControllerInfo) (string, error) {
-	switch {
-	case info.Type == "unix":
-		return "http://localhost", nil
-	case info.Type == "tcp" && info.Target != "":
-		target := info.Target
-		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-			target = "http://" + target
-		}
-		return strings.TrimRight(target, "/"), nil
-	}
-	return "", fmt.Errorf("mihomo controller is not configured")
-}
-
 // providerGet выполняет GET к Clash API и возвращает код ответа и тело.
 func (s *MihomoService) providerGet(ctx context.Context, info ControllerInfo, reqURL string) (int, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
@@ -909,7 +834,7 @@ func (s *MihomoService) providerGet(ctx context.Context, info ControllerInfo, re
 	if info.Secret != "" {
 		req.Header.Set("Authorization", "Bearer "+info.Secret)
 	}
-	resp, err := s.GetHTTPClient().Do(req)
+	resp, err := s.httpClient(info.Target).Do(req)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -933,21 +858,17 @@ func (s *MihomoService) ProviderCount(ctx context.Context, providerType, name st
 	if providerType != "proxies" && providerType != "rules" {
 		return 0, fmt.Errorf("mihomo providers: неизвестный тип провайдера %q", providerType)
 	}
-	info, err := s.ParseControllerConfig()
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse controller config: %w", err)
-	}
-	base, err := controllerBaseURL(info)
+	info, err := s.UnixController()
 	if err != nil {
 		return 0, err
 	}
-	status, body, err := s.providerGet(ctx, info, base+"/providers/"+providerType+"/"+url.PathEscape(name))
+	status, body, err := s.providerGet(ctx, info, mihomoControllerURL+"/providers/"+providerType+"/"+url.PathEscape(name))
 	if err != nil {
 		return 0, err
 	}
 	if providerType == "rules" && (status == http.StatusNotFound || status == http.StatusMethodNotAllowed) {
 		// Точечного GET у rule-провайдера в Clash API может не быть: читаем список.
-		return s.ruleCountFromList(ctx, info, base, name)
+		return s.ruleCountFromList(ctx, info, name)
 	}
 	switch status {
 	case http.StatusOK:
@@ -978,8 +899,8 @@ func (s *MihomoService) ProviderCount(ctx context.Context, providerType, name st
 }
 
 // ruleCountFromList читает ruleCount провайдера из GET /providers/rules.
-func (s *MihomoService) ruleCountFromList(ctx context.Context, info ControllerInfo, base, name string) (int, error) {
-	status, body, err := s.providerGet(ctx, info, base+"/providers/rules")
+func (s *MihomoService) ruleCountFromList(ctx context.Context, info ControllerInfo, name string) (int, error) {
+	status, body, err := s.providerGet(ctx, info, mihomoControllerURL+"/providers/rules")
 	if err != nil {
 		return 0, err
 	}

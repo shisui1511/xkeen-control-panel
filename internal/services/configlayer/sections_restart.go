@@ -105,10 +105,10 @@ func RestartReasons(applied, draft Sections, base RestartBase) []RestartNote {
 // restartBase строит сторону перехода владения для снимка слоя и плана запуска.
 // st — состояние слоя (фактическое владение), draft — желаемое. Диск читается
 // только при переходе; любая ошибка чтения даёт «не прочиталось», а не отказ.
-func restartBase(roots Roots, st State, draft Sections, installed InstalledKernels, foreignOwned func(kernel, rel string) bool) RestartBase {
+func restartBase(roots Roots, st State, draft Sections, installed InstalledKernels) RestartBase {
 	var base RestartBase
 	if installed.Xray {
-		base.xray = xrayInboundsTransition(roots, st, draft, foreignOwned)
+		base.xray = xrayInboundsTransition(roots, st, draft)
 	}
 	if installed.Mihomo {
 		base.mihomo = mihomoRoutingTransition(roots, st, draft)
@@ -126,7 +126,7 @@ func restartBase(roots Roots, st State, draft Sections, installed InstalledKerne
 // управляется, запись есть: другая сторона — configs/ плюс копии из резервного
 // набора, то есть то, что вернётся на диск. nil — перехода нет, либо объявлять
 // нечего (значение секции панели пусто — будет пресет), и диск не читается.
-func xrayInboundsTransition(roots Roots, st State, draft Sections, foreignOwned func(kernel, rel string) bool) *xrayTransition {
+func xrayInboundsTransition(roots Roots, st State, draft Sections) *xrayTransition {
 	if roots.Xray == "" {
 		return nil
 	}
@@ -145,7 +145,7 @@ func xrayInboundsTransition(roots Roots, st State, draft Sections, foreignOwned 
 	if _, ok := inboundPorts(panel.Value); !panel.Managed || !ok {
 		return nil
 	}
-	files, err := ScanXrayKeyFiles(roots.Xray, foreignOwned)
+	files, err := ScanXrayKeyFiles(roots.Xray)
 	if err != nil {
 		tr.unread = true
 		return tr

@@ -7,6 +7,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,14 +18,17 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 // Активация профилей Mihomo на настоящей панели устройства (PART-03, D-23).
 // Вердикт — процессы ядра в /proc (pidof, независимо от панели), ссылка и файлы
-// профилей на диске и ответ панели. Слой «Конфигурация» на время сценариев
-// выключен (старая карточка профилей); флаг, ссылка config.yaml и профили
+// профилей на диске и ответ панели. Маршрутизация слоя «Конфигурация» на время
+// сценариев очищена, Mihomo у панели не взят; ссылка config.yaml и профили
 // возвращаются в t.Cleanup.
 
 const (
@@ -72,12 +76,14 @@ func rtPrfRemoveTestProfiles(dir string) {
 	}
 }
 
-// rtPrfPrepare выключает слой, снимает исходное состояние config.yaml, принимает
-// обычный файл как rt-pid-base (или берёт активный профиль) и создаёт rt-pid-a копией.
+// rtPrfPrepare очищает маршрутизацию слоя (Mihomo не у панели, активация идёт
+// обычным путём), снимает исходное состояние config.yaml, переводит обычный файл в
+// профиль rt-pid-base (или берёт активный профиль) и создаёт rt-pid-a копией.
 func rtPrfPrepare(t *testing.T, kernel string) *rtPrfStand {
 	t.Helper()
 	e := rtNewSrc(t)
-	e.setLayer(false)
+	e.freshDraft()
+	e.rtRtPurge()
 	s := &rtPrfStand{t: t, e: e, dir: rtRtMihomoDir}
 	cfg := s.configPath()
 
@@ -133,9 +139,27 @@ func rtPrfPrepare(t *testing.T, kernel string) *rtPrfStand {
 	if managed, _ := obj["managed"].(bool); managed {
 		s.base, _ = obj["active"].(string)
 	} else {
+		// Обычный файл становится профилем rt-pid-base с тем же содержимым, config.yaml —
+		// ссылкой на него; исходный вид возвращает t.Cleanup выше.
 		s.base = rtPrfBase
-		if r := e.call(http.MethodPost, "/api/mihomo/profiles/adopt", map[string]string{"name": rtPrfBase}); r.Status != http.StatusOK {
-			t.Fatalf("adopt %s: %d", rtPrfBase, r.Status)
+		cur, err := os.ReadFile(cfg)
+		if err != nil {
+			t.Fatalf("config.yaml Mihomo не читается: %v", err)
+		}
+		if err := os.MkdirAll(filepath.Join(s.dir, "profiles"), 0o755); err != nil {
+			t.Fatalf("каталог профилей Mihomo не создан: %v", err)
+		}
+		if err := os.WriteFile(s.profilePath(rtPrfBase), cur, 0o600); err != nil {
+			t.Fatalf("профиль %s не записан: %v", rtPrfBase, err)
+		}
+		tmp := cfg + ".rt-link"
+		_ = os.Remove(tmp)
+		if err := os.Symlink(s.profilePath(rtPrfBase), tmp); err != nil {
+			t.Fatalf("ссылка на %s: %v", rtPrfBase, err)
+		}
+		if err := os.Rename(tmp, cfg); err != nil {
+			_ = os.Remove(tmp)
+			t.Fatalf("config.yaml -> %s: %v", rtPrfBase, err)
 		}
 	}
 	if s.base == "" {
@@ -176,8 +200,8 @@ func TestRouterProfileActivatePID(t *testing.T) {
 		t.Fatalf("неизвестное ядро цели %q", kernel)
 	}
 	s := rtPrfPrepare(t, kernel)
-	// Включение слоя в подготовке запускает фоновую сборку, она может перезапустить
-	// ядро: PID берётся после неё, сравнение идёт только по самой активации.
+	// Очистка маршрутизации в подготовке может перезапустить ядро: PID берётся после
+	// неё, сравнение идёт только по самой активации.
 	pidBefore := rtRstKernelPID(t, kernel)
 
 	r := s.e.callSlow(http.MethodPost, "/api/mihomo/profiles/activate", map[string]string{"name": rtPrfA})
@@ -378,6 +402,41 @@ func (e *rtSrc) rtOwnActivate(name string) map[string]any {
 	return r.object(e.t)
 }
 
+func rtOwnControllerProfile(t *testing.T, s *rtSwStand, name string, setController func(map[string]any)) []byte {
+	t.Helper()
+	var profile map[string]any
+	if err := yaml.Unmarshal(s.data, &profile); err != nil {
+		t.Fatal("исходный YAML профиля Mihomo не читается")
+	}
+	setController(profile)
+	data, err := yaml.Marshal(profile)
+	if err != nil {
+		t.Fatal("профиль Mihomo не сериализуется")
+	}
+	if err := os.WriteFile(s.profile(name), data, s.mode); err != nil {
+		t.Fatalf("запись профиля %s: %v", name, err)
+	}
+	return data
+}
+
+func (e *rtSrc) rtOwnExpectSocket(missing bool) {
+	e.t.Helper()
+	path := "/api/configlayer/proxies"
+	view := e.call(http.MethodGet, path, nil)
+	if view.Status != http.StatusOK || view.object(e.t)["no_socket"] != missing {
+		e.t.Errorf("GET %s: статус %d или неверный no_socket, ожидался %t", path, view.Status, missing)
+	}
+	caps := e.call(http.MethodGet, "/api/capabilities", nil)
+	if caps.Status != http.StatusOK {
+		e.t.Fatalf("GET capabilities: %d", caps.Status)
+	}
+	mihomo, _ := caps.object(e.t)["mihomo"].(map[string]any)
+	if mihomo["no_socket"] != missing || (missing && (mihomo["controller_type"] != "tcp" || mihomo["api_reachable"] != false)) {
+		e.t.Errorf("capabilities Mihomo: no_socket=%v, controller_type=%v, api_reachable=%v",
+			mihomo["no_socket"], mihomo["controller_type"], mihomo["api_reachable"])
+	}
+}
+
 // Трасса (D-06, D-08): Mihomo у панели → обычная активация rt-own-a идёт через
 // конвейер, панель отпускает Mihomo на свой профиль (ссылка на rt-own-a, файла xcp-main
 // нет, routing.mihomo.taken false) → смена на rt-own-b при открытом черновике идёт
@@ -389,13 +448,40 @@ func TestRouterProfileActivateOwnership(t *testing.T) {
 	routertest.Slow(t, "активации профилей Mihomo с полным перезапуском и новым PID на каждом шаге")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
-	rtOwnPrepare(t, e, "rt-own-", rtOwnA, rtOwnB)
+	var restoreKernel bool
+	t.Cleanup(func() {
+		if !restoreKernel {
+			return
+		}
+		// rtSwStand уже вернул исходную ссылку. Ядро должно перечитать её содержимое.
+		res := e.callSlow(http.MethodPost, "/api/service/control?action=restart", nil)
+		if res.Status != http.StatusOK {
+			t.Errorf("перезапуск Mihomo после возврата исходного профиля: %d", res.Status)
+		}
+		rtPrfEnsureRunning(t)
+	})
+	s := rtOwnPrepare(t, e, "rt-own-", rtOwnA, rtOwnB)
+	tcpProfile := rtOwnControllerProfile(t, s, rtOwnA, func(profile map[string]any) {
+		delete(profile, "external-controller-unix")
+		profile["external-controller"] = fmt.Sprintf("127.0.0.1:%d", rtCoresLiveFreePort(t))
+	})
+	svc := services.NewMihomoService("", "", filepath.Dir(s.cfg))
+	// Если стенд сам использует профиль без сокета, профиль B всё равно
+	// должен обеспечить положительную проверку, а очистка перечитает исходный.
+	originalHasSocket := svc.HasController()
+	if !originalHasSocket {
+		rtOwnControllerProfile(t, s, rtOwnB, func(profile map[string]any) {
+			profile["external-controller-unix"] = services.DefaultMihomoSocketPath
+		})
+	}
 	m := rtCoresLiveMihomoTake(t, e, tg)
 	pid := rtRstKernelPID(t, tg.Core)
 
 	// Панель владеет Mihomo: активация идёт через конвейер.
+	e.rtOwnExpectSocket(false)
+	restoreKernel = tg.Core == "mihomo"
 	pid = rtSwExpectKernel(t, tg.Core, e.rtOwnActivate(rtOwnA), rtOwnA, pid)
 	m.taken = false
 	if !rtSwLinkOn(t, "profiles/"+rtOwnA+".yaml") {
@@ -407,12 +493,28 @@ func TestRouterProfileActivateOwnership(t *testing.T) {
 	if k, _ := e.rtSwRouting()["mihomo"].(map[string]any); k == nil || k["taken"] != false {
 		t.Errorf("после активации routing.mihomo: %v, ожидалось taken=false", e.rtSwRouting()["mihomo"])
 	}
+	if !bytes.Equal(tcpProfile, s.read(rtOwnA)) {
+		t.Error("активация изменила байты пользовательского TCP-профиля")
+	}
+	e.rtOwnExpectSocket(tg.Core == "mihomo")
+	if tg.Core == "mihomo" {
+		for _, path := range []string{"/api/mihomo/proxy/version", "/api/mihomo/connections/ws", "/api/traffic/ws"} {
+			r := e.call(http.MethodGet, path, nil)
+			e.rtRtExpect(path, r, http.StatusConflict, "no_socket")
+		}
+	}
 
 	// Смена своего профиля на другой при открытом черновике: черновик не касается.
 	rev, changes := e.rtOwnOpenDraft()
 	pid = rtSwExpectKernel(t, tg.Core, e.rtOwnActivate(rtOwnB), rtOwnB, pid)
 	if !rtSwLinkOn(t, "profiles/"+rtOwnB+".yaml") {
 		t.Fatalf("после смены config.yaml не указывает на %s", rtOwnB)
+	}
+	e.rtOwnExpectSocket(false)
+	if tg.Core == "mihomo" {
+		routertest.WaitCond(t, rtMprRestartWait, "ответ Mihomo через Unix после активации", func() bool {
+			return e.call(http.MethodGet, "/api/mihomo/proxy/version", nil).Status == http.StatusOK
+		})
 	}
 	if got := e.rtRtRevision(); got != rev {
 		t.Errorf("смена профиля: ревизия черновика %d -> %d", rev, got)
@@ -447,6 +549,9 @@ func TestRouterProfileActivateOwnership(t *testing.T) {
 	// Стенд к возврату: Mihomo отпущен на прежний профиль (rt-own-b).
 	rtSwExpectKernel(t, tg.Core, e.rtSwCall("release", ""), rtOwnB, pid)
 	m.taken = false
+	if originalHasSocket {
+		restoreKernel = false
+	}
 }
 
 const (
@@ -499,7 +604,7 @@ func TestRouterProfileNames(t *testing.T) {
 	routertest.Slow(t, "отпускание и возврат Mihomo с перезапуском ядра, проверки имён профилей")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	s := rtOwnPrepare(t, e, "rt-names-", rtNamesA, rtNamesB)
 	t.Cleanup(func() {
@@ -530,11 +635,6 @@ func TestRouterProfileNames(t *testing.T) {
 	e.rtRtExpect("delete XCP-rt", post("delete", map[string]any{"name": "XCP-rt"}), http.StatusBadRequest, "profile_reserved")
 	r := e.callSlow(http.MethodPost, rtPrfActivate, map[string]string{"name": "xcp-main"})
 	e.rtRtExpect("activate xcp-main", r, http.StatusBadRequest, "profile_reserved")
-	// adopt с именем панели отвергается так же, как create (T-147.1-27): перенос config.yaml
-	// в profiles/xcp-*.yaml отдал бы файл слою как сироту.
-	for _, name := range []string{"xcp-rt", "XCP-rt"} {
-		e.rtRtExpect("adopt "+name, post("adopt", map[string]any{"name": name}), http.StatusBadRequest, "profile_reserved")
-	}
 	// Имя обычного файла XKeen и имена с суффиксом .yaml/.yml сервер не принимает
 	// (WR-01 ревью): профиль profiles/config.yaml.yaml путался бы с обычным файлом.
 	for _, name := range []string{"config.yaml", rtNamesA + ".yaml", rtNamesA + ".YML"} {
@@ -670,19 +770,18 @@ func rtPlainKept(s *rtSwStand) []string {
 	return files
 }
 
-// Перенос обычного config.yaml внутри активации (D-27): при включённом слое активация
+// Перенос обычного config.yaml внутри активации (D-27): активация
 // профиля на обычном файле XKeen одной операцией переносит файл в
 // profiles/config-xkeen.yaml (содержимое то же), config.yaml ведёт на выбранный профиль,
 // adopted называет копию; вернуться можно активацией config-xkeen; при занятом имени —
 // суффикс -2. Отказ запуска (ветка mihomo, процесс гасится) возвращает обычный файл с
-// теми же байтами и правами и убирает копию. При выключенном слое активация на обычном
-// файле — 409, adopt работает. Метка ядра: сценарий читает активное ядро и проверяет его
-// процесс. Вид config.yaml и файлы config-xkeen* возвращает rtSwPrepare.
+// теми же байтами и правами и убирает копию. Метка ядра: сценарий читает активное ядро и
+// проверяет его процесс. Вид config.yaml и файлы config-xkeen* возвращает rtSwPrepare.
 func TestRouterProfileActivatePlain(t *testing.T) {
-	routertest.Slow(t, "adopt обычного файла и активации профилей с перезапуском Mihomo")
+	routertest.Slow(t, "перенос обычного файла и активации профилей с перезапуском Mihomo")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	s := rtOwnPrepare(t, e, "rt-plain-", rtPlainA)
 	plain := append(append([]byte{}, s.data...), []byte("\n# rt-plain: прежний файл XKeen\n")...)
@@ -793,28 +892,4 @@ func TestRouterProfileActivatePlain(t *testing.T) {
 		}
 		rtRstHoldPID(t, "mihomo", pidAfter)
 	}
-
-	// Слой выключен: активация на обычном файле отказывает, adopt работает (CUT-01).
-	e.setLayer(false)
-	rtPlainSet(t, s, plain)
-	r := e.callSlow(http.MethodPost, rtPrfActivate, map[string]string{"name": rtPlainA})
-	if r.Status != http.StatusConflict {
-		t.Errorf("активация на обычном файле при выключенном слое: %d %s, ожидался 409", r.Status, r.Code)
-	}
-	rtPlainExpectFile(t, s, "после отказа при выключенном слое", plain)
-	if a := e.call(http.MethodPost, "/api/mihomo/profiles/adopt", map[string]string{"name": "rt-plain-adopt"}); a.Status != http.StatusOK {
-		t.Fatalf("adopt при выключенном слое: %d %s", a.Status, a.Code)
-	}
-	if !rtSwLinkOn(t, "profiles/rt-plain-adopt.yaml") {
-		t.Error("после adopt config.yaml не указывает на rt-plain-adopt")
-	}
-	if got, err := os.ReadFile(s.profile("rt-plain-adopt")); err != nil || !bytes.Equal(got, plain) {
-		t.Errorf("adopt: содержимое профиля не совпадает с прежним config.yaml: %v", err)
-	}
-
-	// Слой возвращается включённым, как при снимке стенда: снимок файлов Xray и
-	// сброс черновика в очистке идут при включённом слое (файлы слоя, например
-	// диагностики, при выключении уходят из каталога).
-	e.setLayer(true)
-	e.rtRstIdle()
 }

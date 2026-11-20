@@ -5,7 +5,8 @@
   import Section from './components/Section.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import { t, currentLang } from './i18n';
-  import { showConfirm, showToast } from './stores';
+  import { capabilities, showConfirm, showToast } from './stores';
+  import ProxyRuntimeNotice from './components/proxies/ProxyRuntimeNotice.svelte';
   import { usePoller } from './lib/poller';
   import PageHeader from './PageHeader.svelte';
   import Icon from './lib/components/Icon.svelte';
@@ -457,6 +458,12 @@
   {/if}
 
   <div class="page-sections">
+    <!-- Свой профиль Mihomo без external-controller-unix (D-13): счёт трафика стоит, пока
+         профиль не получит сокет; квоты по-прежнему настраиваются -->
+    {#if $capabilities?.mihomo?.no_socket}
+      <ProxyRuntimeNotice viewState="no_socket" layout="inline" />
+    {/if}
+
     <!-- Alerts -->
     {#if alerts.length > 0}
       <Section title={$t('trafficquotas.alerts')}>

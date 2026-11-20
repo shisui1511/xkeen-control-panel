@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -27,23 +26,22 @@ func (a *API) SetXrayAccessLogService(svc *services.XrayAccessLogService) {
 	a.xrayAccessLogSvc = svc
 }
 
-// xrayAccessLogStatus builds the access log status. With the configuration layer
-// on, the value in force comes from the section service (the last file with
-// "log" as Xray merges them, or the panel section) and the owner of the section
-// is reported; the path is read only after ReadablePath inside StatusOf. With
-// the layer off the old single-file lookup is used.
+// xrayAccessLogStatus builds the access log status from the section service:
+// the value in force (the last file with "log" as Xray merges them, or the
+// panel section) and the owner of the section; the path is read only after
+// ReadablePath inside StatusOf.
 func (a *API) xrayAccessLogStatus() (*services.XrayAccessLogStatus, error) {
-	if a.cores != nil && a.configLayer != nil && a.configLayer.Enabled() {
-		view, err := a.cores.AccessLog()
-		if err != nil {
-			return nil, err
-		}
-		status := a.xrayAccessLogSvc.StatusOf("", view.Path)
-		status.Owner = view.Owner
-		status.WillWrite = view.WillWrite
-		return status, nil
+	if a.cores == nil {
+		return nil, errors.New("cores service unavailable")
 	}
-	return a.xrayAccessLogSvc.Status()
+	view, err := a.cores.AccessLog()
+	if err != nil {
+		return nil, err
+	}
+	status := a.xrayAccessLogSvc.StatusOf("", view.Path)
+	status.Owner = view.Owner
+	status.WillWrite = view.WillWrite
+	return status, nil
 }
 
 // XrayAccessLog handles GET /api/xray/access-log?ip=&dest=&outbound=&limit=:
@@ -55,6 +53,12 @@ func (a *API) XrayAccessLog(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.xrayAccessLogSvc == nil {
 		JSONError(w, http.StatusServiceUnavailable, "xray access log service unavailable")
+		return
+	}
+	// Без сервиса секций ядер (не создался в main.go) статус журнала взять неоткуда:
+	// ответ как у остальных маршрутов слоя — 404 not_found с переведённым текстом.
+	if a.cores == nil {
+		JSONErrorCode(w, http.StatusNotFound, "not_found", a.t(r, "error.not_found"))
 		return
 	}
 	status, err := a.xrayAccessLogStatus()
@@ -79,41 +83,4 @@ func (a *API) XrayAccessLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSONSuccess(w, map[string]interface{}{"status": status, "report": report})
-}
-
-// XrayAccessLogToggle handles POST /api/xray/access-log/toggle {"enabled": bool}.
-// The handler only writes the config; whether Xray is restarted is decided
-// by the apply action (POST /api/service/control?action=apply).
-func (a *API) XrayAccessLogToggle(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
-		return
-	}
-	if a.xrayAccessLogSvc == nil {
-		JSONError(w, http.StatusServiceUnavailable, "xray access log service unavailable")
-		return
-	}
-	var req struct {
-		Enabled bool `json:"enabled"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	// При включённом слое секцией log владеет слой: правка файла в обход него дала бы
-	// дрейф, который следующее «Применить» тихо перезапишет.
-	if a.configLayer != nil && a.configLayer.Enabled() {
-		JSONErrorCode(w, http.StatusConflict, "config_layer_enabled", a.t(r, "xray.access_log_layer_enabled"))
-		return
-	}
-	status, err := a.xrayAccessLogSvc.SetEnabled(req.Enabled)
-	if errors.Is(err, services.ErrXrayLogConfigNotFound) {
-		JSONError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	if err != nil {
-		JSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	JSONSuccess(w, map[string]interface{}{"status": status})
 }

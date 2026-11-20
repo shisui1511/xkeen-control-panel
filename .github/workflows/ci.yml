@@ -276,9 +276,6 @@ jobs:
       - name: Check kernel gate routes
         run: node scripts/check-kernel-routes.js
 
-      - name: Check Xray protocols
-        run: node scripts/check-xray-protocols.js
-
       - name: Check source error codes
         run: node scripts/check-source-error-codes.js
 
@@ -323,3 +320,8 @@ jobs:
 
       - name: Check release versions in texts
         run: node scripts/check-release-versions.js
+
+      # Справка .claude/ в git не входит: --ci пропускает только игнорируемые пути,
+      # остальное — как локально.
+      - name: Check legacy layer removed
+        run: node scripts/check-legacy-removed.js --ci

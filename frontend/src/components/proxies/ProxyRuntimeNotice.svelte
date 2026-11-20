@@ -1,27 +1,43 @@
 <script lang="ts">
   // Плашка состояния ядра страницы «Прокси» при слое (D-01…D-03) и строка причины
   // запасного замера по TLS (D-07). Одновременно — не больше одной плашки, по
-  // приоритету «свой профиль» → «Xray у пользователя» → «остановлено».
+  // приоритету «нет сокета» → «свой профиль» → «Xray у пользователя» → «остановлено».
+  // «Нет сокета» (D-13, S3) — не плашка, а пустое состояние вместо содержимого страницы:
+  // его же показывают «Подключения» и квоты, поэтому вид один на три страницы.
   import { t } from '../../i18n';
   import { showToast } from '../../stores';
   import { serviceAction } from '../../lib/serviceControl';
   import Button from '../Button.svelte';
+  import EmptyState from '../EmptyState.svelte';
   import Icon from '../../lib/components/Icon.svelte';
+  import WarningIcon from '../../lib/components/icons/Warning.svelte';
 
-  type NoticeKind = 'user_profile' | 'user_managed' | 'stopped';
+  type NoticeKind = 'no_socket' | 'user_profile' | 'user_managed' | 'stopped';
+
+  // Профили Mihomo живут на вкладке ядер «Конфигурации» (карточка «Профили»); focus —
+  // прокрутка к карточке
+  const PROFILES_HASH = '#/config/cores?focus=profiles';
 
   interface Props {
-    /** Состояние вида рантайма (RuntimeView.state); null — плашки нет. */
+    /**
+     * Состояние вида рантайма (RuntimeView.state) или no_socket — у работающего профиля
+     * пользователя нет external-controller-unix; null — плашки нет.
+     */
     viewState?: string | null;
     /** Причина замера по TLS последней пачки; без неё строки нет. */
     fallbackReason?: string;
     /** Ядро запущено: страница перечитывает вид. */
     onstarted?: () => void;
+    /**
+     * inline — «нет сокета» плашкой над работающей страницей (квоты); по умолчанию —
+     * пустое состояние вместо содержимого (прокси, подключения).
+     */
+    layout?: 'page' | 'inline';
   }
 
-  let { viewState = null, fallbackReason = '', onstarted }: Props = $props();
+  let { viewState = null, fallbackReason = '', onstarted, layout = 'page' }: Props = $props();
 
-  const PRIORITY: NoticeKind[] = ['user_profile', 'user_managed', 'stopped'];
+  const PRIORITY: NoticeKind[] = ['no_socket', 'user_profile', 'user_managed', 'stopped'];
   const kind = $derived(PRIORITY.find((k) => k === viewState) ?? null);
 
   let starting = $state(false);
@@ -47,7 +63,33 @@
   }
 </script>
 
-{#if kind}
+{#if kind === 'no_socket' && layout === 'inline'}
+  <div class="alert alert-warning prn-alert prn-alert--inline" data-testid="mihomo-no-socket">
+    <span class="icon-first-line prn-icon" aria-hidden="true">
+      <Icon name="warning" size={16} />
+    </span>
+    <div class="prn-body">
+      <span class="prn-text">
+        <strong class="prn-title">{$t('proxies.rt.no_socket_title')}</strong>
+        {$t('proxies.rt.no_socket_desc_inline')}
+        <a class="prn-link prn-link--plain" href={PROFILES_HASH}>{$t('proxies.rt.no_socket_cta')}</a
+        >
+      </span>
+    </div>
+  </div>
+{:else if kind === 'no_socket'}
+  <div data-testid="mihomo-no-socket">
+    <EmptyState
+      title={$t('proxies.rt.no_socket_title')}
+      description={$t('proxies.rt.no_socket_desc')}
+      icon={WarningIcon}
+      tone="warning"
+      ctaText={$t('proxies.rt.no_socket_cta')}
+      ctaVariant="secondary"
+      ctaHref={PROFILES_HASH}
+    />
+  </div>
+{:else if kind}
   <div
     class="alert prn-alert"
     class:alert-warning={kind !== 'stopped'}
@@ -96,6 +138,11 @@
 {/if}
 
 <style>
+  /* Текст подсказки S3 — Body 14px, а не 13px базового .alert */
+  .prn-alert--inline {
+    font-size: var(--font-size-base);
+  }
+
   .prn-alert {
     margin-bottom: 0;
     padding: var(--spacing-4);
@@ -130,10 +177,22 @@
     overflow-wrap: anywhere;
   }
 
+  .prn-title {
+    display: block;
+    font-weight: 600;
+  }
+
   .prn-link {
     color: var(--accent);
     text-decoration: none;
     white-space: nowrap;
+  }
+
+  /* Ссылка в плашке неполадки: accent закрыт — цвет текста плашки, подчёркивание */
+  .prn-link--plain {
+    color: inherit;
+    font-weight: 600;
+    text-decoration: underline;
   }
 
   .prn-link:hover,
@@ -163,6 +222,12 @@
       display: inline-flex;
       align-items: center;
       min-height: 44px;
+    }
+
+    /* Ссылка внутри абзаца строку не раздувает: встроенная ссылка в тексте — исключение WCAG 2.5.8 */
+    .prn-text .prn-link--plain {
+      display: inline;
+      min-height: 0;
     }
   }
 </style>

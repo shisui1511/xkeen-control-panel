@@ -29,12 +29,13 @@ const (
 )
 
 type RuntimeView struct {
-	Kernel  string         `json:"kernel"`
-	Running []string       `json:"running"`
-	State   string         `json:"state"`
-	Modes   RuntimeModes   `json:"modes"`
-	Probe   ProbeConfig    `json:"probe"`
-	Groups  []RuntimeGroup `json:"groups"`
+	Kernel   string         `json:"kernel"`
+	Running  []string       `json:"running"`
+	State    string         `json:"state"`
+	NoSocket bool           `json:"no_socket"`
+	Modes    RuntimeModes   `json:"modes"`
+	Probe    ProbeConfig    `json:"probe"`
+	Groups   []RuntimeGroup `json:"groups"`
 }
 
 type RuntimeModes struct {
@@ -140,6 +141,10 @@ func (s *Service) runtimeSnapshot() (RuntimeView, appliedModel, error) {
 		v.State = RuntimeStateConflict
 	case runtimeRunning(v, configlayer.KernelMihomo) && v.Modes.Mihomo == RuntimeModeUserProfile:
 		v.State = RuntimeStateUserProfile
+		if active.Kernel == configlayer.KernelMihomo && s.d.Mihomo != nil {
+			info, err := s.d.Mihomo.ParseControllerConfig()
+			v.NoSocket = err == nil && info.Type != "unix"
+		}
 	case runtimeRunning(v, configlayer.KernelXray) && v.Modes.Xray == RuntimeModeUserManaged:
 		v.State = RuntimeStateUserManaged
 	case len(v.Running) == 0:

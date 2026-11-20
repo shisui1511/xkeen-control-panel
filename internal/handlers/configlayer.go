@@ -18,27 +18,15 @@ const maxLayerBodyBytes = 1 << 20
 // layerSSEPing — период комментария ping в потоке событий слоя.
 const layerSSEPing = 20 * time.Second
 
-// requireLayer отвечает 404 config_layer_disabled, если слой не подключён или
-// флаг config_layer выключен: панель ведёт себя как до появления слоя (FND-01).
-func (a *API) requireLayer(w http.ResponseWriter, r *http.Request) bool {
-	if a.configLayer == nil || !a.configLayer.Enabled() {
-		JSONErrorCode(w, http.StatusNotFound, "config_layer_disabled", a.t(r, "configlayer.disabled"))
+// requireConfigLayer отвечает 404 not_found, если слой не создан в main.go
+// (configlayer.New не удался). Созданный слой работает всегда: отдельного
+// выключенного состояния у него нет. Авторизацию и X-CSRF-Token проверяет
+// обёртка HandleProtected раньше обработчика.
+func (a *API) requireConfigLayer(w http.ResponseWriter, r *http.Request) bool {
+	if a.configLayer == nil {
+		JSONErrorCode(w, http.StatusNotFound, "not_found", a.t(r, "error.not_found"))
 		return false
 	}
-	return true
-}
-
-// legacyBlocked закрывает старые входы настройки, которые пишут конфиг ядра мимо
-// слоя «Конфигурация» (D-17): при включённом флаге отвечает 409 legacy_blocked с
-// переведённым текстом до разбора тела и любой записи. Флаг читается на каждый
-// запрос: маршруты регистрируются безусловно, флаг меняется на ходу. Авторизация и
-// CSRF проверяются обёрткой HandleProtected раньше обработчика. Возвращает true,
-// если ответ уже записан.
-func (a *API) legacyBlocked(w http.ResponseWriter, r *http.Request) bool {
-	if a.configLayer == nil || !a.configLayer.Enabled() {
-		return false
-	}
-	JSONErrorCode(w, http.StatusConflict, "legacy_blocked", a.t(r, "configlayer.legacy_blocked"))
 	return true
 }
 
@@ -50,8 +38,6 @@ func (a *API) legacyBlocked(w http.ResponseWriter, r *http.Request) bool {
 // панели; адреса со схемой в нём заменены, других секретов нет, внутренние структуры не раскрываются.
 func (a *API) writeLayerError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, configlayer.ErrDisabled):
-		JSONErrorCode(w, http.StatusNotFound, "config_layer_disabled", a.t(r, "configlayer.disabled"))
 	case errors.Is(err, configlayer.ErrDraftConflict):
 		JSONErrorCode(w, http.StatusConflict, "draft_conflict", a.t(r, "configlayer.draft_conflict"))
 	case errors.Is(err, configlayer.ErrInvalidSection), errors.Is(err, configlayer.ErrUnknownDiagAction),
@@ -117,7 +103,7 @@ func (a *API) decodeLayerBodyLimit(w http.ResponseWriter, r *http.Request, dst a
 
 // ConfigLayerState — GET /api/configlayer/state: снимок состояния слоя.
 func (a *API) ConfigLayerState(w http.ResponseWriter, r *http.Request) {
-	if !a.requireMethod(w, r, http.MethodGet) || !a.requireLayer(w, r) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireConfigLayer(w, r) {
 		return
 	}
 	JSONSuccess(w, a.configLayer.Snapshot())
@@ -141,7 +127,7 @@ func writeLayerEvent(w http.ResponseWriter, flusher http.Flusher, name string, d
 // notices; раз в 20 с комментарий ping. Выход по закрытию соединения или по
 // остановке сервера, отписка в defer (D-06).
 func (a *API) ConfigLayerEvents(w http.ResponseWriter, r *http.Request) {
-	if !a.requireMethod(w, r, http.MethodGet) || !a.requireLayer(w, r) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireConfigLayer(w, r) {
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -197,7 +183,7 @@ func (a *API) ConfigLayerEvents(w http.ResponseWriter, r *http.Request) {
 
 // ConfigLayerDraft — POST /api/configlayer/draft {revision, section, value}.
 func (a *API) ConfigLayerDraft(w http.ResponseWriter, r *http.Request) {
-	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireConfigLayer(w, r) {
 		return
 	}
 	var req struct {
@@ -218,7 +204,7 @@ func (a *API) ConfigLayerDraft(w http.ResponseWriter, r *http.Request) {
 
 // ConfigLayerDraftReset — POST /api/configlayer/draft/reset {revision}.
 func (a *API) ConfigLayerDraftReset(w http.ResponseWriter, r *http.Request) {
-	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireConfigLayer(w, r) {
 		return
 	}
 	var req struct {
@@ -238,7 +224,7 @@ func (a *API) ConfigLayerDraftReset(w http.ResponseWriter, r *http.Request) {
 // ConfigLayerApply — POST /api/configlayer/apply: запускает применение черновика
 // и отвечает сразу {started:true}; итог приходит событием apply_done.
 func (a *API) ConfigLayerApply(w http.ResponseWriter, r *http.Request) {
-	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireConfigLayer(w, r) {
 		return
 	}
 	// Необязательное тело {revision}: ревизия черновика, которую показало окно
@@ -263,7 +249,7 @@ func (a *API) ConfigLayerApply(w http.ResponseWriter, r *http.Request) {
 // файлы ядер «было → станет» (D-09). Блокировки приходят полем blocked при 200.
 // Ответ несёт содержимое файлов ядер, поэтому не кэшируется.
 func (a *API) ConfigLayerApplyPreview(w http.ResponseWriter, r *http.Request) {
-	if !a.requireMethod(w, r, http.MethodGet) || !a.requireLayer(w, r) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireConfigLayer(w, r) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -278,7 +264,7 @@ func (a *API) ConfigLayerApplyPreview(w http.ResponseWriter, r *http.Request) {
 // ConfigLayerFilesRebuild — POST /api/configlayer/files/rebuild {keys} или {all}.
 // Файлы адресуются только ключами манифеста.
 func (a *API) ConfigLayerFilesRebuild(w http.ResponseWriter, r *http.Request) {
-	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireConfigLayer(w, r) {
 		return
 	}
 	var req struct {
@@ -297,7 +283,7 @@ func (a *API) ConfigLayerFilesRebuild(w http.ResponseWriter, r *http.Request) {
 
 // ConfigLayerFilesRelease — POST /api/configlayer/files/release {key}: «Принять правку».
 func (a *API) ConfigLayerFilesRelease(w http.ResponseWriter, r *http.Request) {
-	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireConfigLayer(w, r) {
 		return
 	}
 	var req struct {
@@ -317,7 +303,7 @@ func (a *API) ConfigLayerFilesRelease(w http.ResponseWriter, r *http.Request) {
 // ConfigLayerFilesDiff — GET /api/configlayer/files/diff?key=: ожидаемое и
 // фактическое содержимое файла. Принимается ключ манифеста, а не путь (T-144-33).
 func (a *API) ConfigLayerFilesDiff(w http.ResponseWriter, r *http.Request) {
-	if !a.requireMethod(w, r, http.MethodGet) || !a.requireLayer(w, r) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireConfigLayer(w, r) {
 		return
 	}
 	view, err := a.configLayer.Diff(r.URL.Query().Get("key"))
@@ -334,7 +320,7 @@ func (a *API) ConfigLayerFilesDiff(w http.ResponseWriter, r *http.Request) {
 // манифеста и идентификатор набора, не путь (T-144-33). Ответ несёт содержимое
 // файлов ядра, поэтому не кэшируется.
 func (a *API) ConfigLayerFilesApplies(w http.ResponseWriter, r *http.Request) {
-	if !a.requireMethod(w, r, http.MethodGet) || !a.requireLayer(w, r) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireConfigLayer(w, r) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -359,7 +345,7 @@ func (a *API) ConfigLayerFilesApplies(w http.ResponseWriter, r *http.Request) {
 
 // ConfigLayerNoticesDismiss — POST /api/configlayer/notices/dismiss {id}.
 func (a *API) ConfigLayerNoticesDismiss(w http.ResponseWriter, r *http.Request) {
-	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireConfigLayer(w, r) {
 		return
 	}
 	var req struct {
@@ -379,7 +365,7 @@ func (a *API) ConfigLayerNoticesDismiss(w http.ResponseWriter, r *http.Request) 
 // ConfigLayerDiag — POST /api/configlayer/diag {revision, action}: диагностика
 // в черновик, только в режиме разработчика (D-19).
 func (a *API) ConfigLayerDiag(w http.ResponseWriter, r *http.Request) {
-	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireConfigLayer(w, r) {
 		return
 	}
 	var req struct {

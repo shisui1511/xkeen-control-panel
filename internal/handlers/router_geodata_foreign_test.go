@@ -37,7 +37,7 @@ func rtForeignAPIHasPlace(places []any) bool {
 // пропадает.
 func TestRouterGeodataForeignUnreadableAPI(t *testing.T) {
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 
 	// Лежащий источник без пометки.
 	file, mode := "", ""

@@ -4,23 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
-	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
-
-type MihomoGroupsResponse struct {
-	Groups []string `json:"groups"`
-}
 
 func (a *API) MihomoStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -35,79 +25,7 @@ func (a *API) MihomoStatus(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(out))
 }
 
-func (a *API) MihomoGroups(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
-		return
-	}
-
-	reqPath := r.URL.Query().Get("path")
-	var targetPath string
-
-	if reqPath != "" {
-		cleanPath, err := a.pathVal.Validate(reqPath)
-		if err != nil {
-			a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
-			return
-		}
-		targetPath = cleanPath
-	} else {
-		configDir := a.cfg.MihomoConfigDir
-		if configDir == "" {
-			configDir = "/opt/etc/mihomo"
-		}
-		targetPath = filepath.Join(configDir, "config.yaml")
-		if _, err := os.Stat(targetPath); os.IsNotExist(err) {
-			altPath := filepath.Join(configDir, "config.yml")
-			if _, err := os.Stat(altPath); err == nil {
-				targetPath = altPath
-			}
-		}
-	}
-
-	cleanTarget, err := a.pathVal.Validate(targetPath)
-	if err != nil {
-		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
-		return
-	}
-
-	data, err := os.ReadFile(cleanTarget)
-	if err != nil {
-		if os.IsNotExist(err) {
-			a.jsonResponse(w, MihomoGroupsResponse{Groups: []string{}})
-			return
-		}
-		log.Printf("[MihomoGroups] failed to read config %s: %v", utils.SanitizeLogInput(cleanTarget), err)
-		a.jsonResponse(w, MihomoGroupsResponse{Groups: []string{}})
-		return
-	}
-
-	groups, err := services.ExtractProxyGroupNames(string(data))
-	if err != nil {
-		log.Printf("[MihomoGroups] failed to extract groups from %s: %v", utils.SanitizeLogInput(cleanTarget), err)
-		a.jsonResponse(w, MihomoGroupsResponse{Groups: []string{}})
-		return
-	}
-	if groups == nil {
-		groups = []string{}
-	}
-
-	a.jsonResponse(w, MihomoGroupsResponse{Groups: groups})
-}
-
 const mihomoProxyPrefix = "/api/mihomo/proxy"
-
-// fallbackMihomoTransport — общий транспорт для Clash API, когда адрес берётся
-// из cfg.MihomoAPIURL. Создавать его на каждый запрос нельзя: keep-alive
-// соединения старых транспортов не закрываются и копят дескрипторы.
-var fallbackMihomoTransport = &http.Transport{
-	DialContext: (&net.Dialer{
-		Timeout: 30 * time.Second,
-	}).DialContext,
-	ResponseHeaderTimeout: 30 * time.Second,
-	IdleConnTimeout:       90 * time.Second,
-	MaxIdleConnsPerHost:   4,
-}
 
 // kernelRestarting сообщает, что идёт перезапуск ядра, начатый панелью: окно
 // после XKeenService.Restart и SwitchKernel (InRestart). XKeen выполняет
@@ -116,6 +34,29 @@ var fallbackMihomoTransport = &http.Transport{
 // новый процесс не открыл API, запросы к нему не проходят.
 func (a *API) kernelRestarting() bool {
 	return a.xkeenSvc != nil && a.xkeenSvc.InRestart()
+}
+
+// mihomoProxyContext проверяет сокет до открытия потока и отменяет его при смене профиля.
+func (a *API) mihomoProxyContext(w http.ResponseWriter, r *http.Request) (services.ControllerInfo, context.Context, context.CancelFunc) {
+	if a.mihomoSvc == nil {
+		a.errorResponse(w, a.t(r, "mihomo.not_running"), http.StatusServiceUnavailable)
+		return services.ControllerInfo{}, nil, nil
+	}
+	ctx, cancel := a.mihomoSvc.ControllerContext(r.Context())
+	info, err := a.mihomoSvc.UnixController()
+	if err == nil {
+		return info, ctx, cancel
+	}
+	cancel()
+	switch {
+	case errors.Is(err, services.ErrMihomoNoSocket):
+		JSONErrorCode(w, http.StatusConflict, "no_socket", a.t(r, "mihomo.not_running"))
+	case a.kernelRestarting():
+		JSONErrorCode(w, http.StatusConflict, "kernel_restarting", a.t(r, "kernel.restarting"))
+	default:
+		a.errorResponse(w, a.t(r, "mihomo.not_running"), http.StatusBadGateway)
+	}
+	return services.ControllerInfo{}, nil, nil
 }
 
 func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +68,13 @@ func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	info, ctx, cancel := a.mihomoProxyContext(w, r)
+	if cancel == nil {
+		return
+	}
+	defer cancel()
+	r = r.WithContext(ctx)
 
 	if a.delayGuard != nil && (strings.Contains(r.URL.Path, "/delay") || strings.Contains(r.URL.Path, "/healthcheck")) {
 		release, err := a.delayGuard.Acquire(r.Context())
@@ -151,48 +99,14 @@ func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
 		defer release()
 	}
 
-	var target *url.URL
-	var secret string
-	var transport *http.Transport
-
-	if a.mihomoSvc != nil {
-		info, err := a.mihomoSvc.ParseControllerConfig()
-		if err == nil && info.Type == "unix" && info.Target != "" {
-			target, _ = url.Parse("http://localhost")
-			transport = a.mihomoSvc.GetHTTPTransport()
-			secret = info.Secret
-		} else if err == nil && info.Type == "tcp" && info.Target != "" {
-			tStr := info.Target
-			if !strings.HasPrefix(tStr, "http://") && !strings.HasPrefix(tStr, "https://") {
-				tStr = "http://" + tStr
-			}
-			target, _ = url.Parse(tStr)
-			transport = a.mihomoSvc.GetHTTPTransport()
-			secret = info.Secret
-		}
-	}
-
-	if target == nil {
-		var err error
-		target, err = url.Parse(a.cfg.MihomoAPIURL)
-		if err != nil {
-			a.errorResponse(w, a.t(r, "mihomo.api_error"), http.StatusInternalServerError)
-			return
-		}
-		transport = fallbackMihomoTransport
-	}
-
+	target := &url.URL{Scheme: "http", Host: "localhost"}
+	secret := info.Secret
 	if secret == "" {
 		secret = a.cfg.MihomoSecret
-		if secret == "" && a.mihomoSvc != nil {
-			if _, parsedSecret, err := a.mihomoSvc.ParseConfig(); err == nil && parsedSecret != "" {
-				secret = parsedSecret
-			}
-		}
 	}
 
 	proxy := &httputil.ReverseProxy{
-		Transport: transport,
+		Transport: a.mihomoSvc.GetHTTPTransport(),
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			// Ядро перезапускает сама панель: API недоступен штатно, это не сбой
 			// шлюза. Ответ сразу, без ожидания API: опросы страниц повторятся по
@@ -207,7 +121,7 @@ func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
 			// X-Forwarded-* is intentionally not propagated: Rewrite mode
 			// strips inbound X-Forwarded-* and we deliberately do not call
 			// pr.SetXForwarded() — the target is the local loopback Clash
-			// API, which neither needs nor trusts client-forwarding headers.
+			// API on the Unix socket, which ignores client-forwarding headers.
 			pr.SetURL(target)
 			pr.Out.Host = target.Host
 			if secret != "" {

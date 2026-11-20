@@ -8,9 +8,6 @@ import (
 	"context"
 	"net/http"
 	"os"
-	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -28,26 +25,16 @@ import (
 //     запуск ждёт (run.waiting_apply) и стартует после конца применения (D-29, D-11).
 //   - TestRouterGeodataCatchUp: слот прошёл, пока панель была остановлена init-скриптом, —
 //     запуск через 3 минуты после старта и ровно один за период (D-29, D-14).
-//   - TestRouterGeodataFlagCron: возврат cron XKeen и приостановка расписания при
-//     настоящем переключении флага слоя в панели (D-13, D-36).
 //
 // Сценарии обходят окно 05:20–05:45 по часам роутера (снимок стенда и cron XKeen) и
-// возвращают расписание панели, crontab и флаг слоя в исходное состояние.
+// возвращают расписание панели и crontab в исходное состояние.
 
 const (
 	// rtGeoCronFile — crontab root стенда (путь сервиса менеджера по умолчанию).
 	rtGeoCronFile = "/opt/var/spool/cron/crontabs/root"
 	// rtGeoRunLimit — предел ожидания конца настоящего запуска `xkeen -ug`.
 	rtGeoRunLimit = 20 * time.Minute
-	// rtGeoOwnLine — строка задачи XKeen, если в crontab стенда её нет (время задачи стенда).
-	rtGeoOwnLine = "30 5 * * * /opt/sbin/xkeen -ug"
 )
-
-// rtGeoCronXKeen — стандартная строка XKeen: минута, час и день недели.
-var rtGeoCronXKeen = regexp.MustCompile(`^\s*(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+([0-6*])\s+/opt/sbin/xkeen\s+-ug\s*$`)
-
-// rtGeoUGLine — любая действующая строка crontab с командой `xkeen -ug`.
-var rtGeoUGLine = regexp.MustCompile(`^\s*[^#\s].*/opt/sbin/xkeen\s+-ug(\s|$)`)
 
 // rtGeoSched — расписание панели из снимка.
 type rtGeoSched struct {
@@ -140,12 +127,6 @@ func (e *rtSrc) rtGeoSetSchedule(enabled bool, day, hour, minute int) {
 	}
 }
 
-// rtGeoCron вызывает действие над cron XKeen.
-func (e *rtSrc) rtGeoCron(action string) rtSrcResp {
-	e.t.Helper()
-	return e.call(http.MethodPost, rtGeoBase+"/cron", map[string]any{"action": action})
-}
-
 // rtGeoWaitIdle ждёт, пока менеджер не идёт и не ждёт «Применить» (три опроса подряд).
 func (e *rtSrc) rtGeoWaitIdle(limit time.Duration) {
 	e.t.Helper()
@@ -167,13 +148,13 @@ func (e *rtSrc) rtGeoWaitIdle(limit time.Duration) {
 
 // rtGeoKeepState запоминает расписание панели и crontab; в t.Cleanup возвращает
 // crontab дословно и расписание — прежними значениями. Расписание, которое панель сама
-// приостановила (флаг слоя выключали), сценарий не проверяет: слот такого расписания
+// приостановила (осталось от прежних версий панели), сценарий не проверяет: слот такого расписания
 // не срабатывает.
 func (e *rtSrc) rtGeoKeepState() rtGeoSched {
 	e.t.Helper()
 	orig := rtGeoSchedOf(e.t, e.rtGeoSnapshot())
 	if orig.suspended {
-		e.t.Skip("расписание панели приостановлено (флаг слоя выключали): слот не сработает до «Перенять расписание»")
+		e.t.Skip("расписание панели приостановлено (осталось от прежних версий панели): слот не сработает до «Перенять расписание»")
 	}
 	cron, readErr := os.ReadFile(rtGeoCronFile)
 	e.t.Cleanup(func() {
@@ -268,7 +249,7 @@ func TestRouterGeodataScheduleWaitsApply(t *testing.T) {
 	routertest.Tier(t, routertest.Full, "реальное время: слот расписания geodata наступает через 90 с и больше по часам роутера")
 	rtGeoNeedXKeen(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	e.rtGeoKeepState()
 	e.rtGeoNodeCleanup()
@@ -401,7 +382,7 @@ func TestRouterGeodataCatchUp(t *testing.T) {
 	rtGeoNeedXKeen(t)
 	routertest.RealTime(t, rtenv.GeodataCatchUp)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	e.rtGeoKeepState()
 	old := rtPanelCurrent(t, e.p)
@@ -494,183 +475,4 @@ func TestRouterGeodataCatchUp(t *testing.T) {
 			lastAt.Format(time.RFC3339), again.Format(time.RFC3339), rtGeoRun(after, "running"))
 	}
 	rtGeoSkipNetwork(t, snap)
-}
-
-// rtGeoCronLines возвращает строки crontab с командой `xkeen -ug` (комментарии не
-// считаются); нет файла — нет строк.
-func rtGeoCronLines(t *testing.T) []string {
-	t.Helper()
-	data, err := os.ReadFile(rtGeoCronFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		t.Fatalf("чтение crontab: %v", err)
-	}
-	var out []string
-	for _, l := range strings.Split(string(data), "\n") {
-		l = strings.TrimRight(l, "\r")
-		if rtGeoUGLine.MatchString(l) {
-			out = append(out, l)
-		}
-	}
-	return out
-}
-
-// TestRouterGeodataFlagCron: возврат cron XKeen и приостановка расписания при настоящем
-// переключении флага слоя в панели (D-13, D-36; проверяется и проводка
-// settings.go → OnFlagOff/OnFlagOn). Панель перенимает строку cron; выключение флага
-// возвращает строку в crontab дословно; включение оставляет расписание приостановленным —
-// само оно не запускается и строку не снимает, пока не нажато «Перенять расписание».
-func TestRouterGeodataFlagCron(t *testing.T) {
-	routertest.Tier(t, routertest.Full, "реальное время: ждёт тик сервиса 40 с, проверяя, что приостановленное расписание не запускается")
-	if _, err := os.Stat(filepath.Dir(rtGeoCronFile)); err != nil {
-		t.Skipf("каталога crontab нет: %v", err)
-	}
-	e := rtNewSrc(t)
-	e.enableLayer()
-	e.rtRstIdle()
-
-	origSnap := e.rtGeoSnapshot()
-	orig := rtGeoSchedOf(t, origSnap)
-	if orig.suspended {
-		t.Skip("расписание панели приостановлено (флаг слоя выключали): исходное владение строкой неизвестно")
-	}
-	rtGeoSkipWindowAt(t, orig.now, 10*time.Minute)
-	origCron, readErr := os.ReadFile(rtGeoCronFile)
-	origExisted := readErr == nil
-	cronFound := rtGeoSection(origSnap, "cron")["found"] == true
-	panelOwned := !cronFound && orig.enabled
-
-	// Возврат состояния: слой включён, строку получает XKeen, при исходном владении
-	// расписанием панель перенимает её снова, затем crontab и расписание — прежними.
-	t.Cleanup(func() {
-		e.setLayer(true)
-		e.rtRstIdle()
-		if r := e.rtGeoCron("give"); r.Status != http.StatusOK {
-			t.Errorf("возврат: cron give: %d %s", r.Status, r.Code)
-		}
-		if panelOwned {
-			if r := e.rtGeoCron("adopt"); r.Status != http.StatusOK {
-				t.Errorf("возврат: cron adopt: %d %s", r.Status, r.Code)
-			}
-		}
-		rtGeoRestoreCron(t, origCron, origExisted)
-		r := e.call(http.MethodPost, rtGeoBase+"/schedule", map[string]any{"enabled": orig.enabled, "day": orig.day, "hour": orig.hour, "minute": orig.minute})
-		if r.Status != http.StatusOK {
-			t.Errorf("возврат расписания: %d %s", r.Status, r.Code)
-		}
-	})
-
-	// Исходное владение панели: строки у XKeen нет, расписание ведёт панель — строка
-	// возвращается XKeen, чтобы дальше проверять перенятие.
-	if panelOwned {
-		if r := e.rtGeoCron("give"); r.Status != http.StatusOK {
-			t.Fatalf("cron give при исходном владении панели: %d %s", r.Status, r.Code)
-		}
-	}
-	lines := rtGeoCronLines(t)
-	if len(lines) == 0 {
-		cur, _ := os.ReadFile(rtGeoCronFile)
-		text := string(cur)
-		if text != "" && !strings.HasSuffix(text, "\n") {
-			text += "\n"
-		}
-		mode := os.FileMode(0o600)
-		if st, err := os.Stat(rtGeoCronFile); err == nil {
-			mode = st.Mode().Perm()
-		}
-		if err := os.WriteFile(rtGeoCronFile, []byte(text+rtGeoOwnLine+"\n"), mode); err != nil {
-			t.Fatalf("запись строки XKeen в crontab: %v", err)
-		}
-		lines = rtGeoCronLines(t)
-	}
-	if len(lines) == 0 {
-		t.Fatalf("строки xkeen -ug в crontab нет и дописать её не удалось")
-	}
-	line := lines[0]
-	m := rtGeoCronXKeen.FindStringSubmatch(line)
-	if m == nil {
-		t.Skip("строка xkeen -ug в crontab нестандартная: панель её не перенимает")
-	}
-	lineMinute, _ := strconv.Atoi(m[1])
-	lineHour, _ := strconv.Atoi(m[2])
-	lineDay := -1
-	if m[3] != "*" {
-		lineDay, _ = strconv.Atoi(m[3])
-	}
-	// Слот строки не должен наступить, пока расписание панели активно в сценарии.
-	now := rtGeoSchedOf(t, e.rtGeoSnapshot()).now
-	slotToday := time.Date(now.Year(), now.Month(), now.Day(), lineHour, lineMinute, 0, 0, now.Location())
-	if d := slotToday.Sub(now); d > -time.Minute && d < 10*time.Minute {
-		t.Skipf("слот строки XKeen (%02d:%02d) рядом с текущим временем: запуск по расписанию помешал бы сценарию", lineHour, lineMinute)
-	}
-
-	cronHas := func() bool {
-		for _, l := range rtGeoCronLines(t) {
-			if l == line {
-				return true
-			}
-		}
-		return false
-	}
-
-	// 1. Перенять: строки в файле нет, расписание панели — из строки.
-	if r := e.rtGeoCron("adopt"); r.Status != http.StatusOK {
-		t.Fatalf("cron adopt: %d %s", r.Status, r.Code)
-	}
-	if n := len(rtGeoCronLines(t)); n != 0 {
-		t.Errorf("после adopt в crontab осталось строк xkeen -ug: %d", n)
-	}
-	sch := rtGeoSchedOf(t, e.rtGeoSnapshot())
-	if !sch.enabled || sch.suspended || sch.hour != lineHour || sch.minute != lineMinute || sch.day != lineDay {
-		t.Errorf("после adopt расписание: enabled=%v suspended=%v %02d:%02d день %d; ожидалось из строки %02d:%02d день %d",
-			sch.enabled, sch.suspended, sch.hour, sch.minute, sch.day, lineHour, lineMinute, lineDay)
-	}
-
-	// 2. Выключение флага настоящим API панели: строка возвращается дословно.
-	e.setLayer(false)
-	if !cronHas() {
-		t.Errorf("после выключения флага в crontab нет строки %q дословно (строки xkeen -ug: %q)", line, rtGeoCronLines(t))
-	}
-
-	// 3. Включение флага: расписание приостановлено, строка у XKeen.
-	e.setLayer(true)
-	e.rtRstIdle()
-	snap := e.rtGeoSnapshot()
-	sch = rtGeoSchedOf(t, snap)
-	cron := rtGeoSection(snap, "cron")
-	if !sch.suspended {
-		t.Errorf("после включения флага schedule.suspended=false: расписание должно ждать «Перенять расписание»")
-	}
-	if sch.hasNext {
-		t.Errorf("после включения флага у приостановленного расписания есть schedule.next")
-	}
-	if cron["found"] != true || cron["adoptable"] != true {
-		t.Errorf("после включения флага cron: found=%v adoptable=%v; ожидалось true и true", cron["found"], cron["adoptable"])
-	}
-	lastRunBefore := rtGeoLastAt(t, snap)
-
-	// 4. Тик сервиса: приостановленное расписание само не запускается и строку не снимает.
-	time.Sleep(40 * time.Second)
-	snap = e.rtGeoSnapshot()
-	if !cronHas() {
-		t.Errorf("за 40 с приостановки строка %q исчезла из crontab: расписание само сняло строку", line)
-	}
-	if rtGeoRun(snap, "running") || !rtGeoLastAt(t, snap).Equal(lastRunBefore) {
-		t.Errorf("приостановленное расписание запустилось само: running=%v, last_run.at был %s, стал %s",
-			rtGeoRun(snap, "running"), lastRunBefore.Format(time.RFC3339), rtGeoLastAt(t, snap).Format(time.RFC3339))
-	}
-
-	// 5. «Перенять расписание»: строки нет, расписание активно.
-	if r := e.rtGeoCron("adopt"); r.Status != http.StatusOK {
-		t.Fatalf("cron adopt после включения флага: %d %s", r.Status, r.Code)
-	}
-	if n := len(rtGeoCronLines(t)); n != 0 {
-		t.Errorf("после повторного adopt в crontab осталось строк xkeen -ug: %d", n)
-	}
-	sch = rtGeoSchedOf(t, e.rtGeoSnapshot())
-	if sch.suspended || !sch.hasNext {
-		t.Errorf("после повторного adopt: suspended=%v, schedule.next есть=%v; ожидалось false и true", sch.suspended, sch.hasNext)
-	}
 }

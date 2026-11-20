@@ -331,7 +331,7 @@ func (w *datWatcher) recordLive(sigs, live map[string]string) {
 		l[LiveKeyGeodata] = raw
 		return nil
 	})
-	if err != nil && !errors.Is(err, configlayer.ErrDisabled) {
+	if err != nil {
 		log.Printf("[routing] сигнатуры dat не записаны: %v", err)
 	}
 }
@@ -364,7 +364,7 @@ func (w *datWatcher) runMihomo(ctx context.Context, sigs map[string]string) bool
 		Overlay: configlayer.Sections{LiveKeyGeodata: raw},
 	})
 	switch {
-	case ctx.Err() != nil, errors.Is(err, configlayer.ErrStopped), errors.Is(err, configlayer.ErrDisabled):
+	case ctx.Err() != nil, errors.Is(err, configlayer.ErrStopped):
 		return false
 	case err != nil:
 		w.backOff()
@@ -378,7 +378,7 @@ func (w *datWatcher) runMihomo(ctx context.Context, sigs map[string]string) bool
 		if err := l.UpdateLive(func(live configlayer.Sections) error {
 			live[LiveKeyGeodata] = raw
 			return nil
-		}); err != nil && !errors.Is(err, configlayer.ErrDisabled) {
+		}); err != nil {
 			log.Printf("[routing] сигнатуры dat не записаны: %v", err)
 		}
 		return true

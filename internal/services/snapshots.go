@@ -72,6 +72,9 @@ func (s *SnapshotService) snapshotsDir() string {
 }
 
 func (s *SnapshotService) ensureDir() error {
+	if utils.IsLegacyArchivePath(s.dataDir, s.snapshotsDir()) {
+		return fmt.Errorf("invalid snapshots directory")
+	}
 	return os.MkdirAll(s.snapshotsDir(), 0750)
 }
 
@@ -88,18 +91,24 @@ func (s *SnapshotService) Create(label string) (SnapshotMeta, error) {
 	id := time.Now().Format("20060102-150405")
 	baseID := id
 	for i := 1; ; i++ {
-		if _, err := os.Stat(filepath.Join(s.snapshotsDir(), id+".tar.gz")); os.IsNotExist(err) {
+		if _, err := os.Lstat(s.archivePath(id)); os.IsNotExist(err) {
 			break
 		}
 		id = fmt.Sprintf("%s-%d", baseID, i)
 	}
 	archivePath := filepath.Join(s.snapshotsDir(), id+".tar.gz")
 
-	f, err := os.Create(archivePath)
+	f, err := os.OpenFile(archivePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0666)
 	if err != nil {
 		return SnapshotMeta{}, fmt.Errorf("create archive: %w", err)
 	}
-	defer f.Close()
+	closed := false
+	defer func() {
+		// Аварийный путь: ошибка записи уже возвращена вызывающему, повторное закрытие её не меняет.
+		if !closed {
+			_ = f.Close()
+		}
+	}()
 
 	gw := gzip.NewWriter(f)
 	tw := tar.NewWriter(gw)
@@ -117,6 +126,12 @@ func (s *SnapshotService) Create(label string) (SnapshotMeta, error) {
 			}
 			if d.Type()&fs.ModeSymlink != 0 {
 				return nil // skip symlinks
+			}
+			if utils.IsLegacyArchivePath(s.dataDir, path) {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
 			}
 			if d.IsDir() {
 				if path == filepath.Join(s.dataDir, "snapshots") || path == filepath.Join(s.dataDir, "tmp") || path == filepath.Join(s.dataDir, "cache") {
@@ -178,6 +193,7 @@ func (s *SnapshotService) Create(label string) (SnapshotMeta, error) {
 		return SnapshotMeta{}, err
 	}
 	// Flush and stat to get size
+	closed = true
 	if err := f.Close(); err != nil {
 		os.Remove(archivePath)
 		return SnapshotMeta{}, fmt.Errorf("close archive: %w", err)
@@ -232,10 +248,11 @@ func (s *SnapshotService) List() ([]SnapshotMeta, error) {
 	}
 	var metas []SnapshotMeta
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+		path := filepath.Join(s.snapshotsDir(), e.Name())
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || utils.IsLegacyArchivePath(s.dataDir, path) {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(s.snapshotsDir(), e.Name()))
+		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
@@ -258,6 +275,9 @@ func (s *SnapshotService) ArchivePath(id string) (string, error) {
 		return "", fmt.Errorf("invalid snapshot id")
 	}
 	p := s.archivePath(id)
+	if utils.IsLegacyArchivePath(s.dataDir, p) {
+		return "", fmt.Errorf("snapshot not found")
+	}
 	if _, err := os.Stat(p); err != nil {
 		return "", fmt.Errorf("snapshot not found")
 	}
@@ -296,6 +316,9 @@ func (s *SnapshotService) Restore(id string) (skipped []string, err error) {
 
 	// 1. Create temporary restore directory
 	tmpParentDir := filepath.Join(s.dataDir, "tmp")
+	if utils.IsLegacyArchivePath(s.dataDir, tmpParentDir) {
+		return nil, fmt.Errorf("invalid snapshot restore directory")
+	}
 	if err := os.MkdirAll(tmpParentDir, 0750); err != nil {
 		return nil, fmt.Errorf("create temp parent dir: %w", err)
 	}
@@ -308,7 +331,9 @@ func (s *SnapshotService) Restore(id string) (skipped []string, err error) {
 	// Build map: base name → full path
 	dirMap := make(map[string]string)
 	for _, d := range s.configDirs {
-		dirMap[filepath.Base(d)] = filepath.Clean(d)
+		if !utils.IsLegacyArchivePath(s.dataDir, d) {
+			dirMap[filepath.Base(d)] = filepath.Clean(d)
+		}
 	}
 
 	// 3. Extract to tmpRestoreDir with Zip Slip check
@@ -335,6 +360,14 @@ func (s *SnapshotService) Restore(id string) (skipped []string, err error) {
 		cleanTmp := filepath.Clean(tmpRestoreDir)
 		if !strings.HasPrefix(cleanDest, cleanTmp+string(filepath.Separator)) && cleanDest != cleanTmp {
 			return nil, fmt.Errorf("invalid path in archive (Zip Slip prevention)")
+		}
+		rel, err := filepath.Rel(cleanTmp, cleanDest)
+		if err != nil {
+			return nil, err
+		}
+		base, rest, _ := strings.Cut(rel, string(filepath.Separator))
+		if target, ok := dirMap[base]; ok && utils.IsLegacyArchivePath(s.dataDir, filepath.Join(target, rest)) {
+			continue
 		}
 
 		if hdr.Typeflag == tar.TypeDir {
@@ -413,6 +446,12 @@ func (s *SnapshotService) Restore(id string) (skipped []string, err error) {
 				return err
 			}
 			targetPath := filepath.Join(targetDir, rel)
+			if utils.IsLegacyArchivePath(s.dataDir, targetPath) {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
 
 			// Safety: when writing to xcp/ (which is s.dataDir), do not overwrite or delete the snapshots/, tmp/, cache/ folders!
 			if name == filepath.Base(s.dataDir) {
@@ -485,18 +524,24 @@ func (s *SnapshotService) SaveUploaded(r io.Reader, filename string) (SnapshotMe
 	id := time.Now().Format("20060102-150405")
 	baseID := id
 	for i := 1; ; i++ {
-		if _, err := os.Stat(s.archivePath(id)); os.IsNotExist(err) {
+		if _, err := os.Lstat(s.archivePath(id)); os.IsNotExist(err) {
 			break
 		}
 		id = fmt.Sprintf("%s-%d", baseID, i)
 	}
 	archivePath := s.archivePath(id)
 
-	f, err := os.Create(archivePath)
+	f, err := os.OpenFile(archivePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0666)
 	if err != nil {
 		return SnapshotMeta{}, fmt.Errorf("create archive: %w", err)
 	}
-	defer f.Close()
+	closed := false
+	defer func() {
+		// Аварийный путь: ошибка записи уже возвращена вызывающему, повторное закрытие её не меняет.
+		if !closed {
+			_ = f.Close()
+		}
+	}()
 
 	// Limit to 15 MB
 	limitReader := io.LimitReader(r, 15*1024*1024)
@@ -513,6 +558,7 @@ func (s *SnapshotService) SaveUploaded(r io.Reader, filename string) (SnapshotMe
 		return SnapshotMeta{}, fmt.Errorf("uploaded file exceeds maximum size of 15 MB")
 	}
 
+	closed = true
 	if err := f.Close(); err != nil {
 		os.Remove(archivePath)
 		return SnapshotMeta{}, fmt.Errorf("close archive: %w", err)

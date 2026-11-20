@@ -18,14 +18,14 @@ import (
 )
 
 // Возврат DNS роутера прошивке, который не удался с первого раза, на настоящей
-// панели устройства: неудачное выключение повторяется (кнопкой и выключением флага
-// слоя), запись файлов без слушателя :53 не теряется из-за занятого замка
-// жизненного цикла, а откат «Применить» по пробе не оставляет окно, которое потом
-// включает слушатель :53 при снятом override. Отказ вызывается настоящим сбоем
-// устройства: правила iptables закрывают 127.0.0.1:53, и панель не получает ответа
-// прошивки, или идёт перезапуск ядра из API служб. Вердикт — вид службы, override
-// в рабочей конфигурации прошивки, слушатель панели в файлах ядра, строка proxy_dns,
-// владелец порта 53 по /proc. Стенд готовит и возвращает rtDNSPrepare.
+// панели устройства: неудачное выключение повторяется кнопкой, запись файлов без
+// слушателя :53 не теряется из-за занятого замка жизненного цикла, а откат
+// «Применить» по пробе не оставляет окно, которое потом включает слушатель :53 при
+// снятом override. Отказ вызывается настоящим сбоем устройства: правила iptables
+// закрывают 127.0.0.1:53, и панель не получает ответа прошивки, или идёт
+// перезапуск ядра из API служб. Вердикт — вид службы, override в рабочей
+// конфигурации прошивки, слушатель панели в файлах ядра, владелец порта 53 по
+// /proc. Стенд готовит и возвращает rtDNSPrepare.
 
 // rtDNSLoopbackRules — правила, закрывающие 127.0.0.1:53 для процессов роутера.
 var rtDNSLoopbackRules = [][]string{
@@ -194,70 +194,6 @@ func TestRouterDNSDisableRetry(t *testing.T) {
 		rtCoresLiveWaitStatus(t)
 		c.rtDNSExpectOff(c.rtDNSWaitDone(), kernel, overrideBefore)
 	})
-}
-
-// Трасса: подготовка → proxy_dns=on и действующий перехват XKeen с :53 → перехват
-// включён и подтверждён (строка off) → 127.0.0.1:53 закрыт → выключение флага слоя
-// не удаётся, флаг остаётся включённым → 127.0.0.1:53 открыт → повторное выключение
-// флага: 200, флаг снят, строка proxy_dns вернулась в on (D-36), override как до
-// включения, :53 у прошивки, слушателя панели нет, в файле состояния desired=false.
-// Слой включается обратно до возврата стенда. Метка ядра: возврат перезапускает
-// активное ядро.
-func TestRouterDNSFlagOffRetry(t *testing.T) {
-	routertest.Tier(t, routertest.Full, "внесение сбоя: закрытый порт 53 обрывает выключение флага слоя, затем повтор")
-	tg := routertest.CoreSpecific(t)
-	kernel := tg.Core
-	e := rtNewSrc(t)
-	rtDNSPrepare(t, e, kernel)
-	rtDNSRestoreProxyLine(t, e, rtDNSProxyOn(t))
-	t.Cleanup(func() {
-		c := e.with(t)
-		c.setLayer(true)
-		c.rtRstIdle()
-	})
-	rtDNSLegacyOn(t, e)
-	overrideBefore := rtDNSOverrideOn(t)
-	e.rtDNSRequireClosedDraft()
-	e.rtDNSEnableOK()
-	if rtDNSProxyOn(t) {
-		t.Fatal("после включения перехвата строка proxy_dns осталась on")
-	}
-
-	unblock := rtDNSBlockLoopback53(t)
-	r := e.callSlow(http.MethodPost, "/api/settings/config-layer", map[string]bool{"enabled": false})
-	unblock()
-	if r.Status == http.StatusOK {
-		t.Fatal("выключение флага слоя при закрытом 127.0.0.1:53 прошло: ожидался сбой возврата DNS прошивке")
-	}
-	if !e.layerFlag() {
-		t.Fatal("после неудачного выключения флаг слоя снят")
-	}
-
-	r = e.callSlow(http.MethodPost, "/api/settings/config-layer", map[string]bool{"enabled": false})
-	if r.Status != http.StatusOK {
-		t.Fatalf("повторное выключение флага слоя: %d %s %.300s", r.Status, r.Code, r.Detail)
-	}
-	if e.layerFlag() {
-		t.Fatal("после повторного выключения флаг слоя остался включён")
-	}
-	if !rtDNSProxyOn(t) {
-		t.Error("после повторного выключения флага строка proxy_dns не вернулась в on")
-	}
-	if got := rtDNSOverrideOn(t); got != overrideBefore {
-		t.Errorf("после повторного выключения флага override=%v, до включения был %v", got, overrideBefore)
-	}
-	if got := dnstakeover.PortOwner(); got.Kind != dnstakeover.OwnerFirmware {
-		t.Errorf("после повторного выключения флага порт 53 держит %q/%q, ожидалась прошивка", got.Kind, got.Kernel)
-	}
-	if !rtDNSResolves(dnstakeover.DefaultCheckName) {
-		t.Error("после повторного выключения флага прошивка не отвечает через 127.0.0.1:53")
-	}
-	if rtDNSKernelHasListener(kernel) {
-		t.Errorf("после повторного выключения флага в файлах %s остался слушатель :53", kernel)
-	}
-	if desired, window := rtDNSStateFile(t); desired || window {
-		t.Errorf("после повторного выключения флага в состоянии перехвата desired=%v, окно=%v", desired, window)
-	}
 }
 
 // rtDNSApplyReleaseWait — сколько ждать отката «Применить» по пробе при закрытом

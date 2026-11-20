@@ -13,80 +13,113 @@ import (
 	"time"
 )
 
-// Возврат маршрутизации при выключении флага, дрейф маршрутизации и автоматическое
-// взятие у позже установленного ядра на устройстве: окружение и раскладка каталогов
-// те же, что у сценариев взятия (router_takeover_test.go). Работающие ядра стенда не
-// трогаются, тест ядро не читает и не переключает — метка ядра не нужна.
+// Возврат маршрутизации обычным «Применить», взятие на старте слоя, дрейф
+// маршрутизации и автоматическое взятие у позже установленного ядра на устройстве:
+// окружение и раскладка каталогов те же, что у сценариев взятия
+// (router_takeover_test.go). Работающие ядра стенда не трогаются, тест ядро не
+// читает и не переключает — метка ядра не нужна.
 
-// flagOffSets возвращает наборы копий с триггером flag_off каталога данных окружения.
-func (e *rtTakeoverEnv) flagOffSets(t *testing.T) []*BackupSet {
+// restart останавливает слой окружения и поднимает новый на том же каталоге
+// данных, как перезапуск панели: генератор регистрируется заново, Start собирает
+// файлы из применённого состояния. Возвращает итог стартовой сборки.
+func (e *rtTakeoverEnv) restart(t *testing.T) *ResultView {
 	t.Helper()
-	metas, err := filepath.Glob(filepath.Join(filepath.Dir(e.roots.Xray), backupDirName, backupLayerName, backupSetPrefix+"*"))
+	e.layer.Stop()
+	layer, err := New(Options{
+		DataDir: filepath.Dir(e.roots.Xray),
+		Roots:   e.roots,
+		Binaries: func() Binaries {
+			if e.noMihomo.Load() {
+				return Binaries{Xray: rtRefreshXrayBin}
+			}
+			return Binaries{Xray: rtRefreshXrayBin, Mihomo: rtMhBin}
+		},
+		DriftInterval: time.Hour,
+		DebounceDelay: 20 * time.Millisecond,
+	})
 	if err != nil {
+		t.Fatalf("New после остановки: %v", err)
+	}
+	t.Cleanup(layer.Stop)
+	if err := layer.RegisterGenerator(e.gen); err != nil {
 		t.Fatal(err)
 	}
-	var out []*BackupSet
-	for _, dir := range metas {
-		set, err := LoadBackupSet(dir)
-		if err != nil {
-			continue
-		}
-		if set.Meta.Trigger == string(TriggerFlagOff) {
-			out = append(out, set)
-		}
-	}
-	return out
-}
-
-func (e *rtTakeoverEnv) disable(t *testing.T) error {
-	t.Helper()
-	return e.layer.Disable(e.layer.Context(), func() error {
-		e.enabled.Store(false)
-		return nil
+	layer.Start()
+	e.layer = layer
+	rtWaitFor(t, "стартовая сборка применённого состояния", func() bool {
+		v := layer.pipeline.Current()
+		return !v.Running && v.Trigger == TriggerStartup && v.Result != nil
 	})
+	e.rev = layer.store.Snapshot().DraftRevision
+	return layer.pipeline.Current().Result
 }
 
-// enableAndWaitTaken включает флаг и ждёт, пока фоновая сборка снова возьмёт
-// маршрутизацию обоих ядер и закончится: состояние фиксируется раньше итога
-// запуска (дальше уборка копий), и действие по кнопке до итога получило бы
-// ErrApplyBusy.
-func (e *rtTakeoverEnv) enableAndWaitTaken(t *testing.T) {
-	t.Helper()
-	e.enabled.Store(true)
-	e.layer.Enable()
-	rtWaitFor(t, "повторное взятие после включения флага", func() bool {
-		st := e.layer.store.Snapshot()
-		return st.Routing.Xray != nil && st.Routing.Mihomo != nil && st.Journal == nil && !e.layer.pipeline.Current().Running
-	})
-}
-
-func TestRouterDisableReleasesRouting(t *testing.T) {
+// TestRouterRoutingReleaseLifecycle — жизненный цикл владения маршрутизацией:
+// Start берёт маршрутизацию ядра, которого не было при «Применить»;
+// «Отпустить» при занятом применении отказывает без записи; файл с тем же именем,
+// который пользователь вернул сам, не перезаписывается (release_conflict); после
+// уборки возврат проходит побайтно, а повторное взятие снова работает.
+func TestRouterRoutingReleaseLifecycle(t *testing.T) {
 	e := rtNewTakeoverEnv(t)
 
+	// «Применить» при одном Xray: Mihomo не взят, config.yaml на прежнем профиле.
+	e.noMihomo.Store(true)
 	e.setManaged(t, true)
 	if res := e.apply(t); !res.OK || res.Code != ResultApplied {
-		t.Fatalf("взятие: %+v", res)
+		t.Fatalf("взятие при одном Xray: %+v", res)
 	}
 	if _, err := os.Lstat(e.xray(rtTkRoutingFile)); !os.IsNotExist(err) {
 		t.Fatalf("после взятия файл routing остался в configs/: %v", err)
 	}
-	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
+	if st := e.layer.store.Snapshot(); st.Routing.Xray == nil || st.Routing.Mihomo != nil {
+		t.Fatalf("State.Routing после взятия Xray: %+v", st.Routing)
+	}
+	e.assertConfigLink(t, e.link)
+	xrayRoute := hashOf(e.xray(rtTkPanelRoute))
+	xrayState, err := json.Marshal(e.layer.store.Snapshot().Routing.Xray)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	// Занятое применение: Disable отказывает, диск не тронут. Замок берётся как
-	// фоновым запуском: apply_done публикуется ещё под замком «Применить», и
-	// запуск по кнопке сразу после итога мог бы получить ErrApplyBusy сам.
+	// Перезапуск с установленным Mihomo: стартовая сборка применённого состояния
+	// (routing.managed) берёт и его, Xray остаётся как был.
+	e.noMihomo.Store(false)
+	if res := e.restart(t); !res.OK {
+		t.Fatalf("стартовая сборка: %+v", res)
+	}
+	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
+	if _, err := os.Lstat(e.mihomo(PanelMihomoProfile)); err != nil {
+		t.Errorf("профиль панели не записан на старте: %v", err)
+	}
+	st := e.layer.store.Snapshot()
+	if st.Routing.Mihomo == nil || st.Routing.Mihomo.PrevProfile != "profiles/user.yaml" {
+		t.Fatalf("State.Routing.Mihomo после старта: %+v", st.Routing.Mihomo)
+	}
+	if after, err := json.Marshal(st.Routing.Xray); err != nil || string(after) != string(xrayState) {
+		t.Errorf("State.Routing.Xray изменено стартом (%v):\n%s\n%s", err, xrayState, after)
+	}
+	if got := hashOf(e.xray(rtTkPanelRoute)); got != xrayRoute {
+		t.Errorf("файл routing панели изменён стартом: %q, ожидался %q", got, xrayRoute)
+	}
+	if st.Journal != nil {
+		t.Errorf("журнал не снят после старта: %+v", st.Journal)
+	}
+	if n := e.layer.Snapshot().DriftCount; n != 0 {
+		t.Errorf("дрейф после стартовой сборки: %d", n)
+	}
+
+	// Занятое применение: «Отпустить» по кнопке отказывает, диск не тронут. Замок
+	// берётся как фоновым запуском: apply_done публикуется ещё под замком
+	// «Применить», и запуск по кнопке сразу после итога ждал бы его сам.
+	e.setManaged(t, false)
 	release, err := e.layer.pipeline.TryBegin(e.layer.Context(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	flagCalled := false
-	err = e.layer.Disable(e.layer.Context(), func() error { flagCalled = true; return nil })
+	err = e.layer.StartApply(true)
 	release()
 	if !errors.Is(err, ErrApplyBusy) {
-		t.Fatalf("Disable при занятом применении: %v, ожидался ErrApplyBusy", err)
-	}
-	if flagCalled {
-		t.Error("флаг снят при занятом применении")
+		t.Fatalf("«Отпустить» при занятом применении: %v, ожидался ErrApplyBusy", err)
 	}
 	if _, err := os.Lstat(e.xray(rtTkPanelRoute)); err != nil {
 		t.Errorf("файл панели тронут при занятом применении: %v", err)
@@ -96,10 +129,34 @@ func TestRouterDisableReleasesRouting(t *testing.T) {
 	}
 	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
 
-	// Выключение: чужой routing вернулся побайтно, config.yaml на прежнем профиле,
-	// файлов панели нет, они в наборе flag_off.
-	if err := e.disable(t); err != nil {
-		t.Fatalf("Disable: %v", err)
+	// release_conflict: пользователь вернул файл с тем же именем сам — возврат его
+	// не перезаписывает и отказывает целиком, владение прежнее.
+	const own = `{"routing": {"rules": []}}` + "\n"
+	if err := os.WriteFile(e.xray(rtTkRoutingFile), []byte(own), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := e.apply(t)
+	if res.OK || res.Code != ResultBuildFailed || !rtHasIssue(res, IssueReleaseConflict, ManifestKey(KernelXray, rtTkRoutingFile), rtTkRoutingFile) {
+		t.Fatalf("возврат при занятом имени: %+v, ожидался release_conflict по %s", res, rtTkRoutingFile)
+	}
+	if got := hashOf(e.xray(rtTkRoutingFile)); got != HashContent([]byte(own)) {
+		t.Errorf("файл пользователя перезаписан при возврате: %q", got)
+	}
+	if _, err := os.Lstat(e.xray(rtTkPanelRoute)); err != nil {
+		t.Errorf("файл панели тронут отказанным возвратом: %v", err)
+	}
+	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
+	if st := e.layer.store.Snapshot(); st.Routing.Xray == nil || st.Routing.Mihomo == nil || st.Journal != nil {
+		t.Errorf("отказ изменил владение: routing %+v, журнал %+v", st.Routing, st.Journal)
+	}
+
+	// Пользователь убрал свой файл: возврат проходит, чужой routing вернулся
+	// побайтно, config.yaml на прежнем профиле, файлов панели нет.
+	if err := os.Remove(e.xray(rtTkRoutingFile)); err != nil {
+		t.Fatal(err)
+	}
+	if res := e.apply(t); !res.OK || res.Code != ResultApplied {
+		t.Fatalf("возврат после уборки своего файла: %+v", res)
 	}
 	if got := hashOf(e.xray(rtTkRoutingFile)); got != e.hashes[rtTkRoutingFile] {
 		t.Errorf("%s вернулся не побайтно: %q", rtTkRoutingFile, got)
@@ -107,8 +164,7 @@ func TestRouterDisableReleasesRouting(t *testing.T) {
 	e.assertUntouched(t)
 	e.assertConfigLink(t, e.link)
 	e.assertNoPanelFiles(t)
-
-	st := e.layer.store.Snapshot()
+	st = e.layer.store.Snapshot()
 	if !st.Routing.isEmpty() {
 		t.Errorf("State.Routing не очищено: %+v", st.Routing)
 	}
@@ -120,48 +176,19 @@ func TestRouterDisableReleasesRouting(t *testing.T) {
 			t.Errorf("в манифесте остался managed-файл %s", key)
 		}
 	}
-	sets := e.flagOffSets(t)
-	if len(sets) != 1 {
-		t.Fatalf("наборов flag_off: %d, ожидался 1", len(sets))
-	}
-	inSet := map[string]bool{}
-	for _, m := range sets[0].Meta.Files {
-		inSet[m.Key] = true
-	}
-	for _, key := range []string{ManifestKey(KernelXray, rtTkPanelRoute), ManifestKey(KernelXray, rtTkPanelTail), ManifestKey(KernelMihomo, PanelMihomoProfile)} {
-		if !inSet[key] {
-			t.Errorf("в наборе flag_off нет файла панели %s", key)
-		}
-	}
 
-	// Включение: применённое состояние с routing.managed собирает всё заново,
-	// включая взятие (TriggerFlagOn).
-	e.enableAndWaitTaken(t)
+	// Повторное взятие после возврата: тот же цикл снова уносит routing и
+	// переводит config.yaml на профиль панели.
+	e.setManaged(t, true)
+	if res := e.apply(t); !res.OK || res.Code != ResultApplied {
+		t.Fatalf("повторное взятие: %+v", res)
+	}
 	if _, err := os.Lstat(e.xray(rtTkRoutingFile)); !os.IsNotExist(err) {
 		t.Errorf("после повторного взятия %s остался в configs/: %v", rtTkRoutingFile, err)
 	}
 	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
 	if _, err := os.Lstat(e.xray(rtTkPanelRoute)); err != nil {
-		t.Errorf("файл routing панели не собран после включения: %v", err)
-	}
-
-	// release_conflict: пользователь вернул файл с тем же именем сам — выключение
-	// его не перезаписывает, остальное возвращается.
-	const own = `{"routing": {"rules": []}}` + "\n"
-	if err := os.WriteFile(e.xray(rtTkRoutingFile), []byte(own), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.disable(t); err != nil {
-		t.Fatalf("Disable при занятом имени: %v", err)
-	}
-	if got := hashOf(e.xray(rtTkRoutingFile)); got != HashContent([]byte(own)) {
-		t.Errorf("файл пользователя перезаписан при возврате: %q", got)
-	}
-	e.assertConfigLink(t, e.link)
-	e.assertNoPanelFiles(t)
-	e.assertUntouched(t)
-	if st := e.layer.store.Snapshot(); !st.Routing.isEmpty() || st.Journal != nil {
-		t.Errorf("состояние после второго выключения: routing %+v, журнал %+v", st.Routing, st.Journal)
+		t.Errorf("файл routing панели не собран повторным взятием: %v", err)
 	}
 }
 

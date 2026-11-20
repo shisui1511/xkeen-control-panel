@@ -174,3 +174,67 @@ func resolveExisting(absPath string) (string, error) {
 		cur = parent
 	}
 }
+
+// LegacyArchiveDirectory is the private archive directory in DataDir.
+const LegacyArchiveDirectory = "legacy"
+
+// IsLegacyArchivePath исключает каталог архива по исходному и разрешённому пути.
+// Это сохраняет исключение и для прямых обращений через файловые алиасы.
+func IsLegacyArchivePath(dataDir, path string) bool {
+	if dataDir == "" || path == "" {
+		return false
+	}
+	legacy, err := filepath.Abs(filepath.Join(dataDir, LegacyArchiveDirectory))
+	if err != nil {
+		return false
+	}
+	candidate, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	if withinDirectory(legacy, candidate) {
+		return true
+	}
+	if data, err := filepath.EvalSymlinks(filepath.Dir(legacy)); err == nil {
+		legacy = filepath.Join(data, LegacyArchiveDirectory)
+	}
+	if withinDirectory(legacy, candidate) {
+		return true
+	}
+	if resolved, err := filepath.EvalSymlinks(legacy); err == nil {
+		legacy = resolved
+	}
+	// Restore проверяет и пути будущих файлов под существующим алиасом.
+	return withinDirectory(legacy, resolveArchiveAlias(candidate))
+}
+
+func resolveArchiveAlias(path string) string {
+	// Путь абсолютен: очистка с корневым префиксом сворачивает «..» и не меняет уже очищенный путь.
+	path = filepath.Clean("/" + path)
+	// EvalSymlinks не возвращает цель оборванной ссылки. При восстановлении
+	// снимка отсутствующая цель может появиться, поэтому разворачиваем её тоже.
+	for links := 0; links < 40; links++ {
+		for parent := path; ; parent = filepath.Dir(parent) {
+			tail, _ := filepath.Rel(parent, path)
+			if resolved, err := filepath.EvalSymlinks(parent); err == nil {
+				return filepath.Join(resolved, tail)
+			}
+			if link, err := os.Readlink(parent); err == nil {
+				if !filepath.IsAbs(link) {
+					link = filepath.Join(filepath.Dir(parent), link)
+				}
+				path = filepath.Join(link, tail)
+				break
+			}
+			if parent == filepath.Dir(parent) {
+				return path
+			}
+		}
+	}
+	return path
+}
+
+func withinDirectory(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && filepath.IsLocal(rel)
+}

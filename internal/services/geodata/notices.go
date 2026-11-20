@@ -91,15 +91,11 @@ func buildNotices(st State, now time.Time) []configlayer.NoticeView {
 }
 
 // rebuildNotices пересобирает весь набор уведомлений раздела и передаёт его слою:
-// набор с префиксом geodata_ целиком принадлежит этому сервису. Выключенный слой не
-// трогается (его уведомления никто не читает; включение вызовет пересборку).
+// набор с префиксом geodata_ целиком принадлежит этому сервису.
 func (s *Service) rebuildNotices() {
 	// Сборки идут по очереди: последняя всегда видит самое свежее состояние.
 	s.nmu.Lock()
 	defer s.nmu.Unlock()
-	if !s.d.Layer.Enabled() {
-		return
-	}
 	s.mu.Lock()
 	st := s.st.clone()
 	s.mu.Unlock()

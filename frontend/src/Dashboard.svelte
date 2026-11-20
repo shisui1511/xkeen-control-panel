@@ -10,8 +10,6 @@
     capabilities,
     fetchCapabilities,
     showToast,
-    mihomoApiAvailable,
-    mihomoApiReady,
     mihomoApiState,
     mihomoOfflineReason,
     panelUnreachable,
@@ -20,12 +18,11 @@
     isMihomo,
     activeKernelName,
     runningKernels,
-    fetchSettingsFlags,
-    configLayerEnabled,
-    configLayerFlagKnown,
-    configLayerFlagFailed
+    editorOpenRequest
   } from './stores';
-  import { startConfigLayer, stopConfigLayer } from './lib/configLayer';
+  import { startConfigLayer, stopConfigLayer, layerSnapshot } from './lib/configLayer';
+  import { legacyClosedHere } from './lib/configLegacy';
+  import { isConfigSetupHash } from './lib/configSubTab';
   import { usePoller } from './lib/poller';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { isServiceRestarting } from './lib/serviceGrace';
@@ -51,8 +48,8 @@
   import QuickActionsWidget from './components/dashboard/QuickActionsWidget.svelte';
   import SystemInfoWidget from './components/dashboard/SystemInfoWidget.svelte';
   import SystemAboutModal from './components/dashboard/SystemAboutModal.svelte';
-  import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import UnsavedChangesModal from './components/UnsavedChangesModal.svelte';
+  import LegacyResetModal from './components/config/LegacyResetModal.svelte';
   import SystemStatusCapsule from './components/status/SystemStatusCapsule.svelte';
   import UpdateBanner from './components/dashboard/UpdateBanner.svelte';
   import { refreshUpdateState, detectPanelUpdate } from './lib/updateNotify';
@@ -67,10 +64,10 @@
   import { anyKernelInstalled } from './lib/navCaps';
   import { capsuleConfigStore } from './lib/capsuleSettings';
   import { tabFromHash, legacyRedirectHash } from './lib/tabFromHash';
+  import { constructorHash, editorHash, legacyEditorFile } from './lib/editorRoute';
   import { swipeToDismiss, pullToRefresh } from './lib/gestures';
   import DashboardPulse from './components/dashboard/DashboardPulse.svelte';
   import DashboardProblems from './components/dashboard/DashboardProblems.svelte';
-  import QuickstartCard from './components/dashboard/QuickstartCard.svelte';
   import SetupChecklistCard from './components/dashboard/SetupChecklistCard.svelte';
   import { startWizard, stopWizard, wizardView } from './lib/configWizard';
   import { currentTheme, schemeOf, toggleThemeScheme } from './lib/theme';
@@ -84,7 +81,6 @@
   let version = $state($t('app.loading'));
   let panelVersion = $state($t('app.loading'));
   let loading = $state(false);
-  let showMihomoMigrateModal = $state(false);
   let showAboutModal = $state(false);
   let showUnsavedModal = $state(false);
   let pendingTargetTab = $state<string | null>(null);
@@ -96,20 +92,6 @@
   let currentTab = $state(tabFromHash(initialHash));
   let currentHash = $state(initialHash);
 
-  function checkIsConstructorHash(hash: string): boolean {
-    if (!hash) return false;
-    const cleanHash = hash.replace(/^#\/?/, '');
-    const [path, query] = cleanHash.split('?');
-    if (path === 'constructor' || path === 'mihomo-gen') return true;
-    if (path === 'editor' && query) {
-      const params = new URLSearchParams(query);
-      if (params.get('tab') === 'constructor') return true;
-    }
-    return false;
-  }
-
-  const isConstructorMode = $derived(checkIsConstructorHash(currentHash));
-  const isEditorFullscreen = $derived(currentTab === 'editor' && !isConstructorMode);
   const mihomoDependentTabs = [
     'proxies',
     'connections',
@@ -118,9 +100,7 @@
     'smartproxy',
     'trafficquotas'
   ];
-  // В конфликте ядер (оба процесса запущены) вкладки ядер и режим конструктора закрыты
-  // заглушкой под баннером; обычный редактор — правка файлов, данные — не гейтится.
-  const conflictGatedTabs = [...mihomoDependentTabs, 'dat'];
+  // В конфликте ядер (оба процесса запущены) вкладки ядер закрыты заглушкой под баннером
   // Причина плашки «Mihomo API оффлайн» по состоянию ядер (todo mihomo-offline-banner-reason):
   // при активном Xray страница просто показывает данные другого ядра — запуск Mihomo
   // не предлагается (он столкнул бы два ядра, FND-05)
@@ -128,10 +108,7 @@
     $activeKernelName === 'xray' ? 'xray' : ($mihomoOfflineReason ?? 'api_down')
   );
   const apiOfflineCanStart = $derived($runningKernels.length === 0);
-  const conflictGateActive = $derived(
-    $conflictVisible &&
-      (conflictGatedTabs.includes(currentTab) || (currentTab === 'editor' && isConstructorMode))
-  );
+  const conflictGateActive = $derived($conflictVisible && mihomoDependentTabs.includes(currentTab));
   let pwaInstallPrompt = $state<any>(null);
 
   // Mobile drawer modal gate (D-10): drawer behaves as an accessible modal dialog
@@ -295,13 +272,6 @@
 
   let systemStats = $state<SystemStats | null>(null);
   let loadHistory = $state<number[]>([]);
-  // Подписка есть, если заведена в панели либо объявлена в config.yaml как HTTP
-  // proxy-provider ядра. coreProviderPresent при падении API не сбрасывается:
-  // быстрый старт не мигает.
-  let panelSubsPresent = $state(false);
-  let coreProviderPresent = $state(false);
-  const hasSubscription = $derived(panelSubsPresent || coreProviderPresent);
-  let subsSummaryLoaded = $state(false);
   let statsLastFetched = $state('');
 
   // Шаг «Настройте» определяется по preflight активного ядра. Запрос не чаще
@@ -373,45 +343,6 @@
   const isSSLExpiring = $derived(
     systemStats !== null && systemStats.ssl_cert_days >= 0 && systemStats.ssl_cert_days < 7
   );
-
-  async function fetchSubscriptionSummary(signal?: AbortSignal) {
-    try {
-      const res = await apiFetch('/api/subscriptions', { signal });
-      if (res.ok) {
-        const envelope = await res.json();
-        const rawList = Array.isArray(envelope) ? envelope : (envelope?.data ?? []);
-        panelSubsPresent = Array.isArray(rawList) && rawList.length > 0;
-      }
-    } catch (e: any) {
-      if (e?.name === 'AbortError') return;
-      if (e?.status === 401) return;
-      console.error('fetchSubscriptionSummary failed:', e);
-    } finally {
-      subsSummaryLoaded = true;
-    }
-  }
-
-  /**
-   * A subscription may be declared directly in config.yaml as an HTTP
-   * proxy-provider (not managed by the panel); it counts for the quick start.
-   * Polled only while the Mihomo API answers (enabledWhen: mihomoApiReady).
-   */
-  async function refreshCoreProxyProvider(signal?: AbortSignal) {
-    try {
-      const res = await apiFetch('/api/mihomo/proxy/providers/proxies', { signal });
-      if (!res.ok) return;
-      const data = await res.json();
-      coreProviderPresent = Object.values(data?.providers ?? {}).some(
-        (p: any) =>
-          String(p?.vehicleType).toUpperCase() === 'HTTP' &&
-          Array.isArray(p?.proxies) &&
-          p.proxies.length > 0
-      );
-    } catch (e: any) {
-      if (e?.name === 'AbortError') return;
-      if (e?.status === 401) return;
-    }
-  }
 
   // WR-04: a plain "running"/"запущен" substring match also matches its own
   // negation ("not running" / "не запущен"), misreporting a stopped service
@@ -559,17 +490,6 @@
     serviceStatus.xkeen === 'loading' ? undefined : serviceStatus.xkeen === 'running'
   );
 
-  // Quickstart checklist reactive state
-  const quickstartDoneCount = $derived(
-    [
-      true, // шаг 1 всегда выполнен, пока карточка видна (только при активном Mihomo)
-      hasSubscription,
-      $mihomoApiAvailable,
-      serviceStatus.mihomo === 'running'
-    ].filter(Boolean).length
-  );
-  const allQuickstartComplete = $derived(quickstartDoneCount === 4);
-
   async function fetchVersion() {
     try {
       const data = await apiFetchJSON<{ version: string; panel_version: string }>('/api/version');
@@ -614,12 +534,20 @@
     }
   }
 
-  // Устаревшие адреса подписок переводятся на вкладку провайдеров прокси.
-  // Возвращает true, если хэш был переписан (вкладку выставит следующий hashchange).
+  // Прежние адреса настройки ведут в подразделы «Конфигурации» по одной таблице (D-10).
+  // Единственная точка перенаправления: и первый вход, и каждый hashchange. Адрес
+  // заменяется без записи в историю, «Назад» не возвращает на перенаправление. Путь файла
+  // из прежнего адреса Редактора открывается во вкладке «Файлы». Возвращает true, если
+  // хэш был переписан (вкладку выставит следующий hashchange).
   function applyLegacyRedirect(): boolean {
-    const redirect = legacyRedirectHash(window.location.hash);
+    const hash = window.location.hash;
+    const redirect = legacyRedirectHash(hash);
     if (redirect === null) return false;
-    window.location.hash = redirect;
+    if (redirect === editorHash()) {
+      const file = legacyEditorFile(hash);
+      if (file !== null) editorOpenRequest.set(file);
+    }
+    window.location.replace(redirect);
     return true;
   }
 
@@ -814,6 +742,12 @@
     };
   }
 
+  // Сокет управления Mihomo настраивается в профиле ядра: карточка «Профили» вкладки
+  // секций ядер раздела «Конфигурация»
+  function openCoreProfiles() {
+    window.location.hash = constructorHash();
+  }
+
   function switchTab(tab: string) {
     lastChunkErrorTab = null;
     window.location.hash = '#/' + tab;
@@ -913,69 +847,28 @@
     return 'warning'; // unknown
   }
 
-  // Слой «Конфигурация» (D-02, D-06): одно SSE-соединение на вкладку живёт, пока включён флаг
-  $effect(() => {
-    if (!$configLayerEnabled) return;
+  // Слой «Конфигурация» (D-02, D-06): одно SSE-соединение на вкладку на всё время работы
+  // оболочки
+  onMount(() => {
     startConfigLayer();
     return () => stopConfigLayer();
   });
 
-  // Мастер первого запуска (фаза 149.1): статус шагов для карточки «Настроить VPN». Клиент
-  // мастера сам следит за флагом слоя: запросы идут только при включённом флаге, выключение
-  // сбрасывает вид в null (как в Config.svelte, без записи состояния в $effect)
+  // Мастер первого запуска (фаза 149.1): статус шагов для карточки «Настроить VPN»
   onMount(() => {
     startWizard();
     return () => stopWizard();
   });
 
-  // Флаг выключен — маршрута #/config нет, как до включения слоя
-  $effect(() => {
-    if ($configLayerFlagKnown && !$configLayerEnabled && currentTab === 'config') {
-      window.location.hash = '#/dashboard';
-    }
-  });
-
-  // Флаг включён — страницы DAT нет, её заменила вкладка «Списки» раздела «Конфигурация»;
-  // старый адрес ведёт на вкладку (без записи в историю). Пока флаг неизвестен, страница
-  // показывается как раньше
-  $effect(() => {
-    if ($configLayerFlagKnown && $configLayerEnabled && currentTab === 'dat') {
-      window.location.replace('#/config/lists');
-    }
-  });
-
-  // Флаг включён — старые входы в настройку перенаправляются в единый раздел «Конфигурация» (D-01, D-16)
-  $effect(() => {
-    if (!$configLayerFlagKnown || !$configLayerEnabled) return;
-    if (isConstructorMode) {
-      window.location.replace('#/config/cores');
-      return;
-    }
-    if (currentTab === 'editor') {
-      window.location.replace('#/config/files');
-      return;
-    }
-    if (currentTab === 'proxies') {
-      const q = currentHash.split('?')[1] || '';
-      const params = new URLSearchParams(q);
-      if (params.get('tab') === 'providers') {
-        window.location.replace('#/config/nodes');
-        return;
-      }
-    }
-    if (currentTab === 'rules') {
-      const q = currentHash.split('?')[1] || '';
-      const params = new URLSearchParams(q);
-      if (params.get('tab') === 'exceptions') {
-        window.location.replace('#/config/rules');
-        return;
-      }
-    }
-  });
+  // Окно чистого старта (фаза 151, D-06): после входа, пока сервер сообщает, что окно не
+  // закрыто. Признак несекретный и приходит в снимке слоя (событие legacy перечитывает его
+  // и в других вкладках); на странице мастера окно не показывается
+  const legacyWindowOpen = $derived(
+    $layerSnapshot?.legacy.pending === true && !$legacyClosedHere && !isConfigSetupHash(currentHash)
+  );
 
   onMount(() => {
     fetchVersion();
-    void fetchSettingsFlags();
 
     applyLegacyRedirect();
     currentHash = window.location.hash;
@@ -997,11 +890,6 @@
     usePoller((signal) => fetchLiveStatus(signal), 10000);
     usePoller((signal) => fetchSystemStats(signal), 5000);
     usePoller((signal) => fetchCapabilities(signal), 10000);
-    usePoller((signal) => fetchSubscriptionSummary(signal), 30000);
-    // Проверка proxy-provider ядра идёт только пока API Mihomo отвечает
-    usePoller((signal) => refreshCoreProxyProvider(signal), 30000, {
-      enabledWhen: mihomoApiReady
-    });
     // Результат фоновой проверки обновлений: бэкенд проверяет раз в 6 ч
     usePoller((signal) => refreshUpdateState(signal), 30 * 60 * 1000);
     const handleBeforeInstallPrompt = (e: Event) => {
@@ -1034,7 +922,7 @@
   });
 </script>
 
-<div class="dashboard-layout" class:editor-active={isEditorFullscreen}>
+<div class="dashboard-layout">
   <!-- Mobile header bar -->
   <header class="mobile-header" inert={drawerIsModal}>
     <button
@@ -1104,12 +992,7 @@
   </div>
 
   <!-- Main content area -->
-  <div
-    class="main-content"
-    class:editor-active={isEditorFullscreen}
-    class:rail={$isSidebarCollapsed}
-    inert={drawerIsModal}
-  >
+  <div class="main-content" class:rail={$isSidebarCollapsed} inert={drawerIsModal}>
     <!-- Mihomo offline warning banner / Restarting notice -->
     <!-- Mihomo не установлен — страницы сами говорят об этом пустым состоянием со ссылкой на «Сервисы»;
          красный баннер «API офлайн» с таймером повтора в этом случае только пугает -->
@@ -1119,9 +1002,9 @@
           <span class="spinner"></span>
           <span>{$t('service.restarting_wait')}</span>
         </div>
-      {:else if currentTab !== 'rules' && !(currentTab === 'proxies' && $configLayerFlagKnown && $configLayerEnabled)}
+      {:else if currentTab !== 'rules' && currentTab !== 'proxies'}
         <!-- «Правила» работают без API Mihomo: вместо баннера — пометка на самой странице (D-19).
-             «Прокси» при слое сама объясняет состояние ядра плашкой (D-01…D-03) -->
+             «Прокси» сама объясняет состояние ядра плашкой (D-01…D-03) -->
         <div class="shell-banner-slot">
           <ApiOffline
             reason={apiOfflineReason}
@@ -1160,11 +1043,8 @@
       <KernelConflictBanner />
     {/if}
 
-    <!-- Окно подтверждения перехвата DNS: на всех страницах, пока бэкенд сообщает окно;
-         при выключенном слое «Конфигурация» баннера и запросов перехвата нет. -->
-    {#if $configLayerEnabled}
-      <DnsConfirmBanner />
-    {/if}
+    <!-- Окно подтверждения перехвата DNS: на всех страницах, пока бэкенд сообщает окно -->
+    <DnsConfirmBanner />
 
     {#key chunkReloadKey}
       {#if conflictGateActive}
@@ -1212,20 +1092,11 @@
             onSwitchTab={switchTab}
           />
 
-          <!-- Чек-лист первого запуска. Обе ветки ждут известного флага слоя (иначе одна карточка
-               мигнула бы до другой). Флаг включён — карточка «Настроить VPN» для любого ядра по
-               ответу сервера: до первого ответа, при сбое запроса, после «пройдено» и «Скрыть»
-               card_visible нет, и не рисуется ничего. Прежняя карточка Mihomo — только при
-               выключенном флаге (до 151); она ждёт первого опроса статуса и подписок, иначе
-               мигнул бы «не сделано» на значениях по умолчанию -->
-          {#if $configLayerFlagKnown && $configLayerEnabled && $wizardView?.card_visible}
+          <!-- Чек-лист первого запуска (149 D-27): карточка «Настроить VPN» для любого ядра по
+               ответу сервера. До первого ответа, при сбое запроса, после «пройдено» и «Скрыть»
+               card_visible нет, и не рисуется ничего -->
+          {#if $wizardView?.card_visible}
             <SetupChecklistCard />
-          {:else if $configLayerFlagKnown && !$configLayerEnabled && $isMihomo && !statusLoading && subsSummaryLoaded && !allQuickstartComplete}
-            <QuickstartCard
-              {hasSubscription}
-              mihomoRunning={serviceStatus.mihomo === 'running'}
-              onSwitchTab={switchTab}
-            />
           {/if}
 
           <UpdateBanner />
@@ -1246,7 +1117,7 @@
             {pulseCoversStep}
             onResetWatchdog={handleResetWatchdog}
             onRestartXkeen={restartXkeen}
-            onMigrateMihomo={() => (showMihomoMigrateModal = true)}
+            onMigrateMihomo={openCoreProfiles}
             onSwitchTab={switchTab}
           />
 
@@ -1278,7 +1149,7 @@
                       staleLabel={staleBadgeText}
                       staleTitle={staleBadgeTitle}
                       onRefresh={fetchLiveStatus}
-                      onShowMihomoMigrateModal={() => (showMihomoMigrateModal = true)}
+                      onShowMihomoMigrateModal={openCoreProfiles}
                     />
                   </Section>
                 </div>
@@ -1316,28 +1187,6 @@
             </div>
           </div>
         </div>
-      {:else if currentTab === 'editor' && !($configLayerFlagKnown && $configLayerEnabled)}
-        {#await import('./Editor.svelte')}
-          <Skeleton type="card" height="100%" />
-        {:then { default: Editor }}
-          <div
-            style={isEditorFullscreen
-              ? 'flex: 1; display: flex; flex-direction: column; min-height: 0; height: 100%;'
-              : 'flex: 1; display: flex; flex-direction: column; min-height: 100%;'}
-            in:pageIn={{ y: 0 }}
-          >
-            <Editor onSwitchTab={switchTab} />
-          </div>
-        {:catch err}
-          <div {@attach reportChunkErrorAttachment(err)}>
-            <EmptyState
-              title={$t('app.chunk_load_failed')}
-              description=""
-              ctaText={$t('app.retry')}
-              oncta={retryChunkLoad}
-            />
-          </div>
-        {/await}
       {:else if currentTab === 'logs'}
         {#await import('./Logs.svelte')}
           <Skeleton type="card" height="60vh" />
@@ -1356,53 +1205,23 @@
           </div>
         {/await}
       {:else if currentTab === 'proxies'}
-        <!-- Пока флаг слоя неизвестен — заглушка: прежняя страница не начинает опросы Clash API;
-             флаг не прочитан — «Повторить», как на вкладке «Конфигурация» -->
-        {#if !$configLayerFlagKnown && $configLayerFlagFailed}
-          <EmptyState
-            title={$t('cfg.flag_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={() => void fetchSettingsFlags()}
-          />
-        {:else if !$configLayerFlagKnown}
+        <!-- Страница групп панели для обоих ядер (фаза 150) -->
+        {#await import('./ProxiesRuntime.svelte')}
           <Skeleton type="card" height="60vh" />
-        {:else if $configLayerEnabled}
-          <!-- Слой включён: страница групп панели для обоих ядер (фаза 150) -->
-          {#await import('./ProxiesRuntime.svelte')}
-            <Skeleton type="card" height="60vh" />
-          {:then { default: ProxiesRuntime }}
-            <div in:pageIn>
-              <ProxiesRuntime />
-            </div>
-          {:catch err}
-            <div {@attach reportChunkErrorAttachment(err)}>
-              <EmptyState
-                title={$t('app.chunk_load_failed')}
-                description=""
-                ctaText={$t('app.retry')}
-                oncta={retryChunkLoad}
-              />
-            </div>
-          {/await}
-        {:else}
-          {#await import('./Proxies.svelte')}
-            <Skeleton type="card" height="60vh" />
-          {:then { default: Proxies }}
-            <div in:pageIn>
-              <Proxies />
-            </div>
-          {:catch err}
-            <div {@attach reportChunkErrorAttachment(err)}>
-              <EmptyState
-                title={$t('app.chunk_load_failed')}
-                description=""
-                ctaText={$t('app.retry')}
-                oncta={retryChunkLoad}
-              />
-            </div>
-          {/await}
-        {/if}
+        {:then { default: ProxiesRuntime }}
+          <div in:pageIn>
+            <ProxiesRuntime />
+          </div>
+        {:catch err}
+          <div {@attach reportChunkErrorAttachment(err)}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryChunkLoad}
+            />
+          </div>
+        {/await}
       {:else if currentTab === 'connections'}
         {#await import('./Connections.svelte')}
           <Skeleton type="card" height="60vh" />
@@ -1505,40 +1324,6 @@
             />
           </div>
         {/await}
-      {:else if currentTab === 'dat' && !($configLayerFlagKnown && $configLayerEnabled)}
-        {#await import('./DATManager.svelte')}
-          <Skeleton type="card" height="60vh" />
-        {:then { default: DATManager }}
-          <div in:pageIn>
-            <DATManager onSwitchTab={switchTab} />
-          </div>
-        {:catch err}
-          <div {@attach reportChunkErrorAttachment(err)}>
-            <EmptyState
-              title={$t('app.chunk_load_failed')}
-              description=""
-              ctaText={$t('app.retry')}
-              oncta={retryChunkLoad}
-            />
-          </div>
-        {/await}
-      {:else if currentTab === 'mihomo-gen'}
-        {#await import('./MihomoGenerator.svelte')}
-          <Skeleton type="card" height="60vh" />
-        {:then { default: MihomoGenerator }}
-          <div in:pageIn>
-            <MihomoGenerator onSwitchTab={switchTab} />
-          </div>
-        {:catch err}
-          <div {@attach reportChunkErrorAttachment(err)}>
-            <EmptyState
-              title={$t('app.chunk_load_failed')}
-              description=""
-              ctaText={$t('app.retry')}
-              oncta={retryChunkLoad}
-            />
-          </div>
-        {/await}
       {:else if currentTab === 'console'}
         {#await import('./Console.svelte')}
           <Skeleton type="card" height="60vh" />
@@ -1557,33 +1342,22 @@
           </div>
         {/await}
       {:else if currentTab === 'config'}
-        {#if !$configLayerFlagKnown && $configLayerFlagFailed}
-          <EmptyState
-            title={$t('cfg.flag_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={() => void fetchSettingsFlags()}
-          />
-        {:else if !$configLayerFlagKnown}
+        {#await import('./Config.svelte')}
           <Skeleton type="card" height="60vh" />
-        {:else if $configLayerEnabled}
-          {#await import('./Config.svelte')}
-            <Skeleton type="card" height="60vh" />
-          {:then { default: Config }}
-            <div in:pageIn>
-              <Config onSwitchTab={switchTab} />
-            </div>
-          {:catch err}
-            <div {@attach reportChunkErrorAttachment(err)}>
-              <EmptyState
-                title={$t('app.chunk_load_failed')}
-                description=""
-                ctaText={$t('app.retry')}
-                oncta={retryChunkLoad}
-              />
-            </div>
-          {/await}
-        {/if}
+        {:then { default: Config }}
+          <div in:pageIn>
+            <Config onSwitchTab={switchTab} />
+          </div>
+        {:catch err}
+          <div {@attach reportChunkErrorAttachment(err)}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryChunkLoad}
+            />
+          </div>
+        {/await}
       {:else if currentTab === 'settings'}
         {#await import('./Settings.svelte')}
           <Skeleton type="card" height="60vh" />
@@ -1612,11 +1386,6 @@
 </div>
 
 <ConfirmDialog />
-<MihomoSocketMigrateModal
-  bind:open={showMihomoMigrateModal}
-  onclose={() => (showMihomoMigrateModal = false)}
-  onsuccess={handleRefresh}
-/>
 <UnsavedChangesModal
   open={showUnsavedModal}
   dirtySources={dirtySourceNames}
@@ -1625,6 +1394,9 @@
   onLeaveWithoutSaving={handleLeaveWithoutSaving}
   onStay={handleStay}
 />
+{#if legacyWindowOpen}
+  <LegacyResetModal />
+{/if}
 <SystemAboutModal
   open={showAboutModal}
   onclose={() => (showAboutModal = false)}
@@ -1731,8 +1503,4 @@
     font-size: var(--font-size-base);
     color: var(--fg-primary);
   }
-
-  /* Fullscreen editor layout geometry (.dashboard-layout.editor-active,
-     .main-content.editor-active) lives solely in global.css to avoid
-     maintaining two out-of-sync copies of the same !important rules. */
 </style>

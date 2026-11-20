@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -483,53 +482,4 @@ func (a *API) ServiceRestartLog(w http.ResponseWriter, r *http.Request) {
 		entries[i], entries[j] = entries[j], entries[i]
 	}
 	a.jsonResponse(w, entries)
-}
-
-func (a *API) ServiceDNSRedirect(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
-		return
-	}
-	// D-34: при включённом слое DNS роутера ведёт перехват слоя; старый
-	// переключатель отказывает до любого действия — без замка жизненного цикла и
-	// без перезапуска XKeen (остановленное ядро не запускается).
-	if a.configLayer != nil && a.configLayer.Enabled() {
-		JSONErrorCode(w, http.StatusConflict, "legacy_blocked", a.t(r, "configlayer.dns.legacy_blocked"))
-		return
-	}
-
-	var req struct {
-		Enabled *bool `json:"enabled"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		a.errorResponse(w, a.t(r, "error.invalid_json"), http.StatusBadRequest)
-		return
-	}
-	if req.Enabled == nil {
-		a.errorResponse(w, a.t(r, "error.bad_request"), http.StatusBadRequest)
-		return
-	}
-
-	// SetDNSProxying перезапускает XKeen (и откатывает при потере DNS): под
-	// общим замком жизненного цикла.
-	if !a.tryLifecycleLock(w, r) {
-		return
-	}
-	defer a.lifecycleMu.Unlock()
-
-	out, err := a.xkeenSvc.SetDNSProxying(*req.Enabled)
-	if errors.Is(err, services.ErrDNSRolledBack) {
-		// Redirection was undone because the router stopped resolving names.
-		a.ClearCapabilitiesCache()
-		a.errorResponse(w, a.t(r, "dns.redirect_rolled_back"), http.StatusConflict)
-		return
-	}
-	if err != nil {
-		a.errorResponse(w, out, http.StatusInternalServerError)
-		return
-	}
-
-	a.ClearCapabilitiesCache()
-
-	w.Write([]byte(out))
 }

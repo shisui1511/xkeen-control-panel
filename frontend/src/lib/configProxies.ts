@@ -21,6 +21,7 @@ export interface RuntimeView {
   kernel: RuntimeKernel;
   running: ProxyKernel[];
   state: 'panel' | 'stopped' | 'user_profile' | 'user_managed' | 'conflict';
+  no_socket: boolean;
   modes: RuntimeModes;
   probe: ProbeConfig;
   groups: RuntimeGroup[];
@@ -162,6 +163,7 @@ function normalizeView(v: RuntimeView): RuntimeView {
   return {
     ...v,
     running: v.running ?? [],
+    no_socket: v.no_socket ?? false,
     groups: (v.groups ?? []).map((g) => ({
       ...g,
       chain: g.chain ?? [],

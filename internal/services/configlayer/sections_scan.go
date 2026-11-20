@@ -74,8 +74,6 @@ type XrayKeyFile struct {
 	Values map[string]json.RawMessage
 	// Comments — в файле есть комментарии JSONC (D-02): при переносе они пропадут.
 	Comments bool
-	// Legacy — файл старого слоя: он переписывается старым слоем и не переносится.
-	Legacy bool
 	// Symlink — файл — симлинк: содержимое лежит вне configs/, не переносится.
 	Symlink bool
 	// Broken — файл не разобрался (в том числе JSONC с висячей запятой, слишком
@@ -86,9 +84,9 @@ type XrayKeyFile struct {
 }
 
 // ScanXrayKeyFiles сканирует верхний уровень каталога конфигураций Xray: *.json
-// без подкаталогов, .obsolete и файлов панели, по возрастанию имени. foreignOwned
-// (может быть nil) отмечает файлы старого слоя. Каталога нет — пустой результат.
-func ScanXrayKeyFiles(root string, foreignOwned func(kernel, rel string) bool) ([]XrayKeyFile, error) {
+// без подкаталогов, .obsolete и файлов панели, по возрастанию имени. Каталога
+// нет — пустой результат.
+func ScanXrayKeyFiles(root string) ([]XrayKeyFile, error) {
 	if root == "" {
 		return nil, nil
 	}
@@ -117,7 +115,6 @@ func ScanXrayKeyFiles(root string, foreignOwned func(kernel, rel string) bool) (
 			f = parseXrayKeyFile(name, data)
 		}
 		f.Symlink = e.Type()&fs.ModeSymlink != 0
-		f.Legacy = foreignOwned != nil && foreignOwned(KernelXray, name)
 		files = append(files, f)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
@@ -125,7 +122,7 @@ func ScanXrayKeyFiles(root string, foreignOwned func(kernel, rel string) bool) (
 }
 
 // parseXrayKeyFile разбирает содержимое одного файла configs/ по ключам верхнего
-// уровня: Hash, Comments, Keys, Values и Broken. Legacy и Symlink ставит вызывающий.
+// уровня: Hash, Comments, Keys, Values и Broken. Symlink ставит вызывающий.
 func parseXrayKeyFile(name string, data []byte) XrayKeyFile {
 	f := XrayKeyFile{Name: name, Hash: HashContent(data)}
 	text := string(data)
@@ -219,8 +216,8 @@ type XraySectionScan struct {
 	ID string
 	// Files — файлы с ключом секции, по возрастанию имени.
 	Files []string
-	// Pure — «чистые» файлы: все ключи принадлежат секции, файл разобран, не
-	// симлинк и не старого слоя; только они переносятся в резервный набор.
+	// Pure — «чистые» файлы: все ключи принадлежат секции, файл разобран и не
+	// симлинк; только они переносятся в резервный набор.
 	Pure []string
 	// Mixed — остальные файлы с ключом секции: остаются на месте.
 	Mixed []string
@@ -237,7 +234,7 @@ type XraySectionScan struct {
 	Owner string
 	// Sources — {имя, md5} всех файлов из Files.
 	Sources []SourceFile
-	// InboundsMixed — для inbounds: среди файлов есть смешанный не-Legacy файл,
+	// InboundsMixed — для inbounds: среди файлов есть смешанный файл,
 	// «Входящие» не берутся (D-25).
 	InboundsMixed bool
 	// ForceProxyTags — для inbounds: теги force-proxy* (D-12).
@@ -289,12 +286,12 @@ func scanXraySection(id string, files []XrayKeyFile) XraySectionScan {
 		members = append(members, f)
 		s.Files = append(s.Files, f.Name)
 		s.Sources = append(s.Sources, SourceFile{Name: f.Name, Hash: f.Hash})
-		pure := n == len(f.Keys) && !f.Broken && !f.Legacy && !f.Symlink
+		pure := n == len(f.Keys) && !f.Broken && !f.Symlink
 		if pure {
 			s.Pure = append(s.Pure, f.Name)
 		} else {
 			s.Mixed = append(s.Mixed, f.Name)
-			if id == xraySectionInbounds && !f.Legacy {
+			if id == xraySectionInbounds {
 				s.InboundsMixed = true
 			}
 		}
@@ -493,7 +490,7 @@ func IsTransparentInbound(raw json.RawMessage) (mode string, ok bool) {
 
 // XrayScanFacts — факты о чужих файлах для генераторов Input.Routing.
 type XrayScanFacts struct {
-	// ForeignAPI — в каком-либо файле (в том числе старого слоя) есть ключ api.
+	// ForeignAPI — в каком-либо чужом файле есть ключ api.
 	ForeignAPI bool
 	// Observatory — есть ключ observatory или burstObservatory.
 	Observatory bool
@@ -611,7 +608,7 @@ func (l *Layer) ScanXraySections() (map[string]XraySectionScan, []XrayKeyFile, e
 	if l.opts.Roots.Xray == "" {
 		return map[string]XraySectionScan{}, nil, nil
 	}
-	files, err := ScanXrayKeyFiles(l.opts.Roots.Xray, l.opts.ForeignOwned)
+	files, err := ScanXrayKeyFiles(l.opts.Roots.Xray)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -58,7 +58,7 @@ const (
 func TestRouterDraftEditWithDirtyDisk(t *testing.T) {
 	routertest.Tier(t, routertest.Full, "нагрузка на диск: грязные страницы носителя при правке черновика")
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	// Включение слоя запускает фоновую сборку; её запись состояния держит замок
 	// состояния, и правка ждала бы её, а не носитель.
 	rtWaitApplyIdle(t, e)

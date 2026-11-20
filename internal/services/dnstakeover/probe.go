@@ -24,7 +24,7 @@ import (
 const (
 	// LoopbackDNS — адрес DNS роутера для проб.
 	LoopbackDNS = "127.0.0.1:53"
-	// probeAttempt — предел одной попытки (как у SetDNSProxying).
+	// probeAttempt — предел одной попытки.
 	probeAttempt = 3 * time.Second
 	// probePause — пауза между попытками.
 	probePause = time.Second

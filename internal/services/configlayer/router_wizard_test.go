@@ -19,12 +19,11 @@ import (
 // событий и перечитывание файла состояния новым слоем. Ядра не запускаются.
 
 // rtNewWizardLayer — слой на каталоге dir; останавливается по окончании теста.
-func rtNewWizardLayer(t *testing.T, dir string, enabled, dev bool) *Layer {
+func rtNewWizardLayer(t *testing.T, dir string, dev bool) *Layer {
 	t.Helper()
 	layer, err := New(Options{
 		DataDir: dir,
 		Roots:   Roots{Xray: filepath.Join(dir, "xray"), Mihomo: filepath.Join(dir, "mihomo")},
-		Enabled: func() bool { return enabled },
 		DevMode: func() bool { return dev },
 	})
 	if err != nil {
@@ -88,7 +87,7 @@ func rtWizardMark(t *testing.T, layer *Layer, status WizardStatus, want bool) {
 func TestRouterWizardState(t *testing.T) {
 	t.Run("monotonic", func(t *testing.T) {
 		dir := rtLiveDir(t)
-		layer := rtNewWizardLayer(t, dir, true, false)
+		layer := rtNewWizardLayer(t, dir, false)
 		events := rtWizardSubscribe(t, layer)
 
 		if s := layer.WizardStatus(); s != "" {
@@ -143,11 +142,11 @@ func TestRouterWizardState(t *testing.T) {
 
 	t.Run("persisted", func(t *testing.T) {
 		dir := rtLiveDir(t)
-		layer := rtNewWizardLayer(t, dir, true, false)
+		layer := rtNewWizardLayer(t, dir, false)
 		rtWizardMark(t, layer, WizardDone, true)
 		layer.Stop()
 
-		again := rtNewWizardLayer(t, dir, true, false)
+		again := rtNewWizardLayer(t, dir, false)
 		if s := again.WizardStatus(); s != WizardDone {
 			t.Errorf("статус после нового слоя %q, ожидался done", s)
 		}
@@ -156,7 +155,7 @@ func TestRouterWizardState(t *testing.T) {
 
 	t.Run("file_without_field", func(t *testing.T) {
 		dir := rtLiveDir(t)
-		layer := rtNewWizardLayer(t, dir, true, false)
+		layer := rtNewWizardLayer(t, dir, false)
 		if _, err := layer.EditDraft(0, "other", rtRaw(`{"a":1}`)); err != nil {
 			t.Fatalf("EditDraft: %v", err)
 		}
@@ -169,7 +168,7 @@ func TestRouterWizardState(t *testing.T) {
 			t.Fatalf("файл состояния: %v", err)
 		}
 
-		again := rtNewWizardLayer(t, dir, true, false)
+		again := rtNewWizardLayer(t, dir, false)
 		if s := again.WizardStatus(); s != "" {
 			t.Errorf("статус файла без признака %q, ожидался пустой", s)
 		}
@@ -201,14 +200,14 @@ func TestRouterWizardState(t *testing.T) {
 
 	t.Run("garbage_status", func(t *testing.T) {
 		dir := rtLiveDir(t)
-		layer := rtNewWizardLayer(t, dir, true, false)
+		layer := rtNewWizardLayer(t, dir, false)
 		rtWizardMark(t, layer, WizardDone, true)
 		layer.Stop()
 		rtWizardRewrite(t, dir, func(raw map[string]json.RawMessage) {
 			raw["wizard"] = rtRaw(`{"status":"bogus","at":"2026-01-01T00:00:00Z"}`)
 		})
 
-		again := rtNewWizardLayer(t, dir, true, false)
+		again := rtNewWizardLayer(t, dir, false)
 		if s := again.WizardStatus(); s != "" {
 			t.Errorf("мусорный статус прочитан как %q, ожидался пустой", s)
 		}
@@ -220,14 +219,14 @@ func TestRouterWizardState(t *testing.T) {
 
 	t.Run("schema_reset", func(t *testing.T) {
 		dir := rtLiveDir(t)
-		layer := rtNewWizardLayer(t, dir, true, false)
+		layer := rtNewWizardLayer(t, dir, false)
 		rtWizardMark(t, layer, WizardHidden, true)
 		layer.Stop()
 		rtWizardRewrite(t, dir, func(raw map[string]json.RawMessage) {
 			raw["schema_version"] = rtRaw(`999`)
 		})
 
-		again := rtNewWizardLayer(t, dir, true, false)
+		again := rtNewWizardLayer(t, dir, false)
 		if s := again.WizardStatus(); s != "" {
 			t.Errorf("статус после сброса схемы %q, ожидался пустой (мастер снова виден)", s)
 		}
@@ -241,7 +240,7 @@ func TestRouterWizardState(t *testing.T) {
 
 	t.Run("reset_dev_only", func(t *testing.T) {
 		dir := rtLiveDir(t)
-		layer := rtNewWizardLayer(t, dir, true, false)
+		layer := rtNewWizardLayer(t, dir, false)
 		rtWizardMark(t, layer, WizardDone, true)
 		if err := layer.ResetWizard(); !errors.Is(err, ErrDevModeRequired) {
 			t.Errorf("сброс без режима разработчика: %v, ожидалась ErrDevModeRequired", err)
@@ -251,7 +250,7 @@ func TestRouterWizardState(t *testing.T) {
 		}
 		layer.Stop()
 
-		dev := rtNewWizardLayer(t, dir, true, true)
+		dev := rtNewWizardLayer(t, dir, true)
 		events := rtWizardSubscribe(t, dev)
 		if err := dev.ResetWizard(); err != nil {
 			t.Fatalf("сброс в режиме разработчика: %v", err)
@@ -273,23 +272,13 @@ func TestRouterWizardState(t *testing.T) {
 			t.Error("событие wizard при сбросе без признака")
 		}
 
-		off := rtNewWizardLayer(t, rtLiveDir(t), false, true)
-		if _, err := off.MarkWizard(WizardClosed); !errors.Is(err, ErrDisabled) {
-			t.Errorf("MarkWizard выключенного слоя: %v, ожидалась ErrDisabled", err)
-		}
-		if err := off.ResetWizard(); !errors.Is(err, ErrDisabled) {
-			t.Errorf("ResetWizard выключенного слоя: %v, ожидалась ErrDisabled", err)
-		}
-		if f := off.WizardFacts(WizardProbe{}); f.Enabled {
-			t.Error("факты выключенного слоя с Enabled")
-		}
 	})
 
 	t.Run("facts_empty", func(t *testing.T) {
 		dir := rtLiveDir(t)
-		layer := rtNewWizardLayer(t, dir, true, false)
+		layer := rtNewWizardLayer(t, dir, false)
 		f := layer.WizardFacts(WizardProbe{})
-		if !f.Enabled || !f.Empty || !f.AppliedEmpty || f.DraftChanges != 0 || f.RoutingAny || f.XrayTaken != 0 || f.ApplyRunning {
+		if !f.Empty || !f.AppliedEmpty || f.DraftChanges != 0 || f.RoutingAny || f.XrayTaken != 0 || f.ApplyRunning {
 			t.Errorf("факты пустого слоя: %+v", f)
 		}
 

@@ -6,16 +6,14 @@ import { attachConsoleGuard } from './lib/console';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { T } from './lib/env';
-import { api, layerFlag } from './lib/nodes-api';
+import { api, resetDraft, waitApplyIdle, withPanel } from './lib/nodes-api';
 
 // Плашка профиля Mihomo над секциями ядра (фаза 147, план 20): владелец профиля, «Управлять
 // в панели» через диалог взятия маршрутизации со строкой о переносе секций, причина
 // выключенного блока api Xray ниже минимальной версии, доступность и 390 px. Ответы сети не
-// подменяются. Флаг слоя включается на время прогона и возвращается прежним; сами тесты
-// только открывают вкладку и диалог и закрывают его «Отменой» — в черновик и на диск не
-// пишут. Ядро не запускается, не останавливается и не меняется.
-
-const layer = layerFlag();
+// подменяются. Черновик сбрасывается до и после прогона; сами тесты только открывают вкладку
+// и диалог и закрывают его «Отменой» — в черновик и на диск не пишут. Ядро не запускается, не
+// останавливается и не меняется.
 
 const LOCALES = ['ru', 'en'].map((lang) =>
   fileURLToPath(new URL(`../../src/locales/${lang}.json`, import.meta.url))
@@ -31,11 +29,14 @@ function texts(key: string): string[] {
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
-  await layer.enable(browser);
+  await withPanel(browser, (page) => resetDraft(page));
 });
 
 test.afterAll(async ({ browser }) => {
-  await layer.restore(browser);
+  await withPanel(browser, async (page) => {
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
+  });
 });
 
 async function openConfig(page: Page, hash: string): Promise<void> {

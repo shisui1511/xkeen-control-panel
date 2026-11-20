@@ -12,7 +12,7 @@ import (
 )
 
 // isMihomoAwg31Supported checks if Mihomo core version supports AmneziaWG 3.1 options.
-// Minimum required version is 1.19.30 (ported from frontend/src/lib/awgFields.ts).
+// Minimum required version is 1.19.30.
 func isMihomoAwg31Supported(version string) bool {
 	if version == "" {
 		return false
@@ -832,7 +832,7 @@ func validateAmneziaWgOptions(data map[string]interface{}, res *PreflightResult,
 
 			// H uniqueness check — flag exact duplicates AND overlapping
 			// intervals [min,max] (an overlap makes packet classification
-			// ambiguous). Mirrors rangesOverlap() in ProxyForm.svelte.
+			// ambiguous).
 			hasHUniqueViol := false
 			for i := 0; i < len(parsedH); i++ {
 				for j := i + 1; j < len(parsedH); j++ {

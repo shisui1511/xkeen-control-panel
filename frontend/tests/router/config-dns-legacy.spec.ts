@@ -1,48 +1,36 @@
+// e2e-pages: config/cores
 // router-area: dns
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
 import { ensureDnsTarget, releaseDnsTarget } from './lib/dns-target';
 import { CORE_TAG, SLOW_ANNOTATION, knownFailure } from './lib/known';
-import {
-  api,
-  installedKernels,
-  resetDraft,
-  switchLayer,
-  withPanel,
-  type Installed
-} from './lib/nodes-api';
+import { api, installedKernels, resetDraft, withPanel, type Installed } from './lib/nodes-api';
 
-// Стык со старым перенаправлением DNS XKeen (фаза 148, D-34): при включённом слое
-// «Конфигурация» старого переключателя «Перенаправление DNS» нет в DNS-секциях
-// конструкторов Xray и Mihomo; при выключенном слое он показан по прежнему условию
-// (xkeen_dns === false и есть серверы у Xray, DNS включён у Mihomo). Спек меняет флаг слоя
-// настоящим маршрутом и возвращает его прежним в afterAll; правки конструкторов остаются
-// в браузере и на роутер не пишутся. Ответы сети не подменяются.
+// Стык со старым перенаправлением DNS XKeen (фаза 148, D-33…D-35). Старого переключателя
+// «Перенаправление DNS» в панели нет: прежний адрес конструктора #/constructor ведёт на вкладку
+// секций ядер, и в DNS-карточке ядра нет ни блока, ни заглушки вместо него.
 //
-// D-36: подтверждение выключения флага слоя при включённом перехвате DNS получает абзац о
-// возврате DNS прошивке; без перехвата абзаца нет. Диалог отменяется — флаг не меняется.
-// Перехват включается настоящими маршрутами службы; если стенд к нему не готов, секция DNS
-// активного ядра берётся панелью и создаётся группа-цель «Прокси» (участник DIRECT). В
-// afterAll перехват выключается, подготовка убирается, затем флаг слоя возвращается.
+// Настоящий proxy_dns прошивки читается из вида перехвата (GET /api/configlayer/dns, поле
+// legacy.proxy_dns): карточка перехвата показывает строку «будет выключено» при выключенном
+// перехвате и предупреждение «Выключить старое перенаправление» при включённом перехвате ровно
+// тогда, когда proxy_dns включён. Включение перехвата выключает proxy_dns в той же транзакции:
+// после включения предупреждения нет. Перехват включается настоящими маршрутами службы; если
+// стенд к нему не готов, секция DNS активного ядра берётся панелью и создаётся группа-цель
+// «Прокси» (участник DIRECT). В afterAll перехват выключается и подготовка убирается. Ответы
+// сети не подменяются.
 
 const KERNELS = ['xray', 'mihomo'] as const;
 type Kernel = (typeof KERNELS)[number];
 
 const LEGACY = 'dns-legacy-redirect';
 
-let layerWasOn = false;
 let installed: Installed = { xray: false, mihomo: false };
 
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
   await withPanel(browser, async (page) => {
-    const settings = await api(page, 'GET', '/api/settings');
-    expect(settings.status, 'GET /api/settings').toBe(200);
-    layerWasOn = settings.data?.config_layer === true;
-    // Установленные ядра читаются через слой: на время чтения он включён
-    await setLayer(page, true);
     installed = await installedKernels(page);
   });
 });
@@ -50,32 +38,10 @@ test.beforeAll(async ({ browser }) => {
 test.afterAll(async ({ browser }) => {
   await withPanel(browser, async (page) => {
     if (prep.enabled || prep.groupId || prep.routingTaken || prep.sectionKernel) {
-      await setLayer(page, true);
       await cleanupTakeover(page);
     }
-    await setLayer(page, layerWasOn);
   });
 });
-
-/**
- * Включает или выключает слой «Конфигурация» настоящим маршрутом настроек. Переключение —
- * общим switchLayer: выключение ждёт простоя конвейера, занятый запрос повторяется, включение
- * ждёт фоновую сборку.
- */
-async function setLayer(page: Page, on: boolean): Promise<void> {
-  const settings = await api(page, 'GET', '/api/settings');
-  expect(settings.status, 'GET /api/settings').toBe(200);
-  if ((settings.data?.config_layer === true) === on) return;
-  await switchLayer(page, on);
-}
-
-/** Признак xkeen_dns из настоящих capabilities панели. */
-async function xkeenDns(page: Page): Promise<boolean | undefined> {
-  const res = await api(page, 'GET', '/api/capabilities');
-  expect(res.status, 'GET /api/capabilities').toBe(200);
-  const v = res.data?.xkeen_dns;
-  return typeof v === 'boolean' ? v : undefined;
-}
 
 /** Страница, на которой API панели доступно из браузера (сессия и токен CSRF). */
 async function startPage(page: Page): Promise<void> {
@@ -83,43 +49,9 @@ async function startPage(page: Page): Promise<void> {
   await page.locator('.main-content').first().waitFor({ state: 'visible', timeout: T.page });
 }
 
-/** Открывает конструктор, выбирает ядро и его DNS-секцию; секция отрисована. */
-async function openConstructorDns(page: Page, kernel: Kernel): Promise<void> {
-  await page.goto('/#/constructor', { timeout: T.page, waitUntil: 'domcontentloaded' });
-  const workspace = page.locator('.main-content');
-  const tab = workspace.getByRole('button', {
-    name: kernel === 'xray' ? 'Xray' : 'Mihomo',
-    exact: true
-  });
-  await expect(tab).toBeVisible({ timeout: T.page });
-  if ((await tab.getAttribute('aria-pressed')) !== 'true') {
-    await tab.click();
-    await expect(tab).toHaveAttribute('aria-pressed', 'true');
-  }
-  if (kernel === 'xray') {
-    const tabs = page.getByTestId('xray-section-tabs');
-    await expect(tabs).toBeVisible({ timeout: T.page });
-    await tabs.locator('button[data-tab="dns"]').click();
-    await expect(page.getByTestId('xray-section-dns')).toBeVisible({ timeout: T.action });
-    await expect(page.locator('#dns-query-strategy')).toBeVisible();
-  } else {
-    await expect(workspace.locator('.loading-state-block')).toHaveCount(0, { timeout: T.page });
-    await workspace
-      .locator('.sec-tabs .sec-tab', { hasText: /^\s*DNS/ })
-      .first()
-      .click();
-    const section = page.getByTestId('mihomo-section-dns');
-    await expect(section).toBeVisible({ timeout: T.action });
-    // Блок старого перенаправления живёт внутри включённого DNS: включение только в браузере
-    const enable = section.locator('.toggle-row input[type="checkbox"]');
-    if (!(await enable.isChecked())) await enable.check();
-    await expect(page.locator('#mihomo-dns-enhanced-mode')).toBeVisible({ timeout: T.action });
-  }
-}
-
 /**
- * При включённом слое старых конструкторов нет: #/constructor ведёт на вкладку секций ядер
- * «Xray │ Mihomo» (constructorHash в lib/editorRoute.ts). Открывается карточка DNS ядра.
+ * Старых конструкторов нет: прежний адрес #/constructor ведёт на вкладку секций ядер
+ * «Xray │ Mihomo» (таблица адресов D-10). Открывается карточка DNS ядра.
  */
 async function openCoresDns(page: Page, kernel: Kernel): Promise<void> {
   await page.goto('/#/constructor', { timeout: T.page, waitUntil: 'domcontentloaded' });
@@ -143,29 +75,15 @@ async function openCoresDns(page: Page, kernel: Kernel): Promise<void> {
   await expect(body.getByTestId(`section-form-${kernel}-dns`)).toBeVisible({ timeout: T.action });
 }
 
-/** У Xray блок показывается только при серверах DNS: без них в браузер добавляется один. */
-async function ensureXrayServer(page: Page): Promise<void> {
-  const section = page.getByTestId('xray-section-dns');
-  const rows = section.locator('.dns-servers-list .item-row');
-  if ((await rows.count()) > 0) return;
-  await section.locator('.add-btn').first().click();
-  await page.locator('#xray-new-dns-address').fill('9.9.9.9');
-  await section.locator('.form-actions .btn-primary').first().click();
-  await expect(rows).toHaveCount(1, { timeout: T.action });
-}
-
 for (const kernel of KERNELS) {
-  test(`dns-legacy: слой включён — старого переключателя нет (${kernel})`, async ({ page }) => {
+  test(`dns-legacy: старого переключателя нет (${kernel})`, async ({ page }) => {
     const guard = attachConsoleGuard(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     test.skip(!installed[kernel], `${kernel} не установлен на стенде`);
     await startPage(page);
-    await setLayer(page, true);
-    // Флаг слоя панель читает при загрузке: страница перечитывается
-    await page.reload({ waitUntil: 'domcontentloaded' });
 
     await openCoresDns(page, kernel);
-    // Ни блока, ни заглушки вместо него (D-34) — при любом значении xkeen_dns
+    // Ни блока, ни заглушки вместо него (D-34)
     await expect(page.getByTestId(LEGACY)).toHaveCount(0);
     await expect(
       page.getByRole('button', { name: /^(Включить перехват DNS|Enable DNS Interception)$/ })
@@ -173,32 +91,10 @@ for (const kernel of KERNELS) {
 
     await guard.assertClean();
   });
-
-  test(`dns-legacy: слой выключен — переключатель по прежнему условию (${kernel})`, async ({
-    page
-  }) => {
-    const guard = attachConsoleGuard(page);
-    await page.setViewportSize({ width: 1440, height: 900 });
-    test.skip(!installed[kernel], `${kernel} не установлен на стенде`);
-    await startPage(page);
-    await setLayer(page, false);
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    const dnsRedirected = await xkeenDns(page);
-
-    await openConstructorDns(page, kernel);
-    if (kernel === 'xray') await ensureXrayServer(page);
-    // Прежнее условие показа: XKeen не перенаправляет DNS в ядро
-    await expect(page.getByTestId(LEGACY)).toHaveCount(dnsRedirected === false ? 1 : 0, {
-      timeout: T.action
-    });
-
-    await guard.assertClean();
-  });
 }
 
-// --- D-36: подтверждение выключения флага слоя при перехвате ---
+// --- D-33, D-35: настоящий proxy_dns и предупреждение «Выключить старое перенаправление» ---
 
-const FLAG_NOTE = /Перехват DNS будет выключен|DNS interception will be disabled/;
 const ACTIVE_STATES = ['on', 'window', 'waiting'];
 
 /** Что спек сам поменял на стенде ради перехвата (убирается в afterAll). */
@@ -211,6 +107,7 @@ interface DnsBrief {
   blocks: string[];
   failure: string;
   unavailableReason: string;
+  proxyDns: boolean;
 }
 
 /** Состояние перехвата по настоящему API службы. */
@@ -225,7 +122,8 @@ async function dnsView(page: Page): Promise<DnsBrief> {
     activeKernel: String(d.active_kernel ?? ''),
     blocks: (d.blocks ?? []) as string[],
     failure: failure?.code ?? '',
-    unavailableReason: String(d.unavailable_reason ?? '')
+    unavailableReason: String(d.unavailable_reason ?? ''),
+    proxyDns: (d.legacy as { proxy_dns?: boolean } | undefined)?.proxy_dns === true
   };
 }
 
@@ -272,7 +170,7 @@ async function enableTakeover(page: Page): Promise<string | null> {
   return null;
 }
 
-/** Выключает перехват и убирает подготовку стенда (флаг слоя включён). */
+/** Выключает перехват и убирает подготовку стенда. */
 async function cleanupTakeover(page: Page): Promise<void> {
   if (prep.enabled) {
     const res = await api(page, 'POST', '/api/configlayer/dns/disable', {});
@@ -285,48 +183,57 @@ async function cleanupTakeover(page: Page): Promise<void> {
   prep.enabled = false;
 }
 
-/** Открывает Настройки и снимает флаг слоя: диалог подтверждения на экране. */
-async function openFlagOffDialog(page: Page): Promise<{ dialog: Locator; toggle: Locator }> {
-  await page.goto('/#/settings', { timeout: T.page, waitUntil: 'domcontentloaded' });
-  const row = page.getByTestId('config-layer-row');
-  await expect(row).toBeVisible({ timeout: T.page });
-  const toggle = row.getByRole('switch');
-  await expect(toggle).toBeChecked();
-  await row.locator('.toggle-slider').click();
-  const dialog = page.getByRole('dialog');
-  await expect(dialog).toBeVisible({ timeout: T.action });
-  return { dialog, toggle };
+/** Открывает карточку перехвата на вкладке секций активного ядра; вид загрузился. */
+async function openTakeoverCard(page: Page, kernel: Kernel): Promise<Locator> {
+  await page.goto('/#/config/cores', { timeout: T.page, waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('cores-tab')).toBeVisible({ timeout: T.page });
+  await page.getByTestId(`kernel-switch-${kernel}`).click();
+  await expect(page.getByTestId(`cores-panel-${kernel}`)).toBeVisible({ timeout: T.page });
+  await expect(page.getByTestId('dns-state')).toBeVisible({ timeout: T.page });
+  return page.getByTestId('dns-takeover-card');
 }
 
-/** Отмена диалога: флаг слоя остаётся включённым. */
-async function cancelFlagOff(page: Page, dialog: Locator, toggle: Locator): Promise<void> {
-  await page.keyboard.press('Escape');
-  await expect(dialog).toHaveCount(0);
-  await expect(toggle).toBeChecked();
-  const settings = await api(page, 'GET', '/api/settings');
-  expect(settings.data?.config_layer, 'флаг слоя включён').toBe(true);
+/**
+ * Строки стыка в карточке соответствуют настоящему proxy_dns из вида перехвата: «будет
+ * выключено» — перехват выключен и proxy_dns включён; предупреждение с кнопкой — перехват
+ * включён (или ждёт подтверждения) и proxy_dns включён; иначе ни того, ни другого.
+ */
+async function expectLegacyNotes(card: Locator, v: DnsBrief): Promise<void> {
+  const willOff = v.state === 'off' && v.proxyDns;
+  const drift = (v.state === 'on' || v.state === 'window') && v.proxyDns;
+  await expect(card.getByTestId('dns-legacy-note')).toHaveCount(willOff ? 1 : 0, {
+    timeout: T.action
+  });
+  await expect(card.getByTestId('dns-legacy-drift')).toHaveCount(drift ? 1 : 0, {
+    timeout: T.action
+  });
+  await expect(card.getByTestId('dns-legacy-off')).toHaveCount(drift ? 1 : 0);
 }
-
-test('dns-legacy: без перехвата абзаца о DNS в выключении флага нет', async ({ page }) => {
-  const guard = attachConsoleGuard(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await startPage(page);
-  await setLayer(page, true);
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  const v = await dnsView(page);
-  test.skip(takeoverActive(v), `перехват на стенде уже в состоянии ${v.state}`);
-
-  const { dialog, toggle } = await openFlagOffDialog(page);
-  // Решение об абзаце принято до показа диалога: прежний вид без строки о перехвате
-  await expect(dialog.getByTestId('dns-flag-off-note')).toHaveCount(0);
-  await expect(dialog).not.toContainText(FLAG_NOTE);
-  await cancelFlagOff(page, dialog, toggle);
-
-  await guard.assertClean();
-});
 
 test(
-  'dns-legacy: абзац о перехвате при выключении флага',
+  'dns-legacy: строки стыка следуют настоящему proxy_dns',
+  { tag: CORE_TAG },
+  async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await startPage(page);
+    const v = await dnsView(page);
+    test.skip(v.state === 'unavailable', `перехват недоступен на стенде: ${v.unavailableReason}`);
+    test.skip(
+      v.activeKernel !== 'xray' && v.activeKernel !== 'mihomo',
+      `активное ядро стенда: ${v.activeKernel || 'нет'}`
+    );
+    test.skip(v.state === 'applying', 'перехват в переходном состоянии');
+
+    const card = await openTakeoverCard(page, v.activeKernel as Kernel);
+    await expectLegacyNotes(card, await dnsView(page));
+
+    await guard.assertClean();
+  }
+);
+
+test(
+  'dns-legacy: включение перехвата выключает proxy_dns без предупреждения',
   {
     tag: CORE_TAG,
     annotation: {
@@ -340,20 +247,17 @@ test(
     const guard = attachConsoleGuard(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     await startPage(page);
-    await setLayer(page, true);
-    await page.reload({ waitUntil: 'domcontentloaded' });
     const skip = await enableTakeover(page);
     test.skip(skip !== null, skip ?? '');
 
-    const { dialog, toggle } = await openFlagOffDialog(page);
-    const note = dialog.getByTestId('dns-flag-off-note');
-    await expect(note).toBeVisible({ timeout: T.action });
-    await expect(note).toHaveClass(/warning-text/);
-    await expect(note).toContainText(FLAG_NOTE);
-    // Действие не блокируется: кнопка подтверждения доступна
-    await expect(dialog.getByRole('button').last()).toBeEnabled();
-    await cancelFlagOff(page, dialog, toggle);
-    expect(takeoverActive(await dnsView(page)), 'перехват остался включённым').toBe(true);
+    const v = await dnsView(page);
+    expect(takeoverActive(v), 'перехват включён').toBe(true);
+    // Транзакция включения выключила proxy_dns (D-33): дрейфа и предупреждения нет. Перехват,
+    // включённый на стенде до спека, мог получить proxy_dns мимо панели — тогда строки стыка
+    // проверяются по фактическому значению
+    if (prep.enabled) expect(v.proxyDns, 'proxy_dns после включения перехвата').toBe(false);
+    const card = await openTakeoverCard(page, v.activeKernel as Kernel);
+    await expectLegacyNotes(card, v);
 
     await guard.assertClean();
   }

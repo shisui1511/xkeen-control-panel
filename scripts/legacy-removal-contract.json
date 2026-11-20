@@ -1,0 +1,1088 @@
+{
+  "version": 1,
+  "comment_policy": "Удалять HTML/block/line комментарии перед code-предикатами; строковые литералы сохранять. raw_required проверяет шапки до удаления комментариев. Ограничения считаются отдельно по каждому переданному пути; пустой/неизвестный список — ошибка.",
+  "retired_files": [
+    "internal/handlers/subscription.go",
+    "internal/handlers/proxy_providers.go",
+    "internal/handlers/outbound.go",
+    "internal/handlers/mihomo_migrate.go",
+    "internal/handlers/dat.go",
+    "internal/services/subscription_health.go",
+    "internal/services/subscription_scheduler.go",
+    "internal/services/subscription_provider.go",
+    "internal/services/subscription_selection.go",
+    "internal/services/node_metadata.go",
+    "internal/services/subscription_converter.go",
+    "internal/services/subscription_parser.go",
+    "internal/services/subscription_singbox.go",
+    "internal/services/subscription_storage.go",
+    "internal/services/subscription_stub.go",
+    "internal/services/subscription_wgquick.go",
+    "internal/services/subscription_wireguard.go",
+    "internal/services/subscription_dialect.go",
+    "internal/services/mihomo_yaml.go",
+    "internal/services/user_rules.go",
+    "internal/services/smart_merge.go",
+    "internal/services/mihomo_migrate.go",
+    "internal/services/dat.go",
+    "internal/services/subscription.go",
+    "frontend/src/Constructor.svelte",
+    "frontend/src/MihomoGenerator.svelte",
+    "frontend/src/XrayRoutingConstructor.svelte",
+    "frontend/src/DATManager.svelte",
+    "frontend/src/components/mihomo/MihomoSocketMigrateModal.svelte",
+    "frontend/src/components/dashboard/QuickstartCard.svelte",
+    "frontend/src/components/proxies/ProvidersTab.svelte",
+    "frontend/src/components/proxies/providersState.svelte.ts",
+    "frontend/src/components/rules/UserRulesTab.svelte",
+    "frontend/src/components/editor/TemplatesModal.svelte",
+    "frontend/src/components/awg/AwgDiffCard.svelte",
+    "frontend/src/components/mihomo/GroupForm.svelte",
+    "frontend/src/components/mihomo/MihomoContext.svelte.ts",
+    "frontend/src/components/mihomo/MihomoSectionDns.svelte",
+    "frontend/src/components/mihomo/MihomoSectionGroups.svelte",
+    "frontend/src/components/mihomo/MihomoSectionListeners.svelte",
+    "frontend/src/components/mihomo/MihomoSectionProxies.svelte",
+    "frontend/src/components/mihomo/MihomoSectionRules.svelte",
+    "frontend/src/components/mihomo/MihomoSectionRulesets.svelte",
+    "frontend/src/components/mihomo/MihomoSectionTun.svelte",
+    "frontend/src/components/xray/XrayBalancersEditor.svelte",
+    "frontend/src/components/xray/XrayContext.svelte.ts",
+    "frontend/src/components/xray/XrayOutboundForm.svelte",
+    "frontend/src/components/xray/XrayRuleEditor.svelte",
+    "frontend/src/components/xray/XrayRuleForm.svelte",
+    "frontend/src/components/xray/XraySectionDns.svelte",
+    "frontend/src/components/xray/XraySectionInbounds.svelte",
+    "frontend/src/components/xray/XraySectionLog.svelte",
+    "frontend/src/components/xray/XraySectionOutbounds.svelte",
+    "frontend/src/components/xray/XraySectionPolicy.svelte",
+    "frontend/src/lib/xrayMerge.ts",
+    "frontend/src/lib/constructors/geodata.ts",
+    "frontend/src/lib/constructors/mihomoApply.ts",
+    "frontend/src/lib/constructors/nodeParser.ts",
+    "frontend/src/lib/constructors/xrayOutboundForm.ts",
+    "frontend/src/lib/constructors/xrayOutbounds.ts",
+    "frontend/src/lib/constructors/xrayRouting.ts",
+    "frontend/src/lib/constructors/presets/mihomoPresets.ts",
+    "frontend/src/lib/constructors/presets/xrayPresets.ts",
+    "internal/handlers/router_subscription_provider_io_test.go",
+    "internal/handlers/router_subscription_refresh_test.go",
+    "internal/handlers/router_dat_legacy_test.go",
+    "internal/handlers/router_legacy_blocked_test.go",
+    "internal/handlers/router_dns_legacy_endpoint_test.go",
+    "internal/services/router_links_test.go",
+    "frontend/tests/router/subscription.spec.ts",
+    "frontend/tests/router/mihomo-undo-profile.spec.ts",
+    "frontend/src/components/ConstructorMobileNav.svelte",
+    "frontend/src/components/ConstructorPreview.svelte",
+    "frontend/src/components/GeoScanModal.svelte",
+    "frontend/src/components/ResizableSplitter.svelte",
+    "frontend/src/components/ScenarioChips.svelte",
+    "frontend/src/components/mihomo/ProxyForm.svelte",
+    "frontend/src/components/mihomo/RuleForm.svelte",
+    "frontend/src/components/subscriptions/NodeList.svelte",
+    "frontend/src/components/subscriptions/SubscriptionFormModal.svelte",
+    "frontend/src/components/subscriptions/SubscriptionList.svelte",
+    "frontend/src/components/xray/XraySectionRouting.svelte",
+    "frontend/src/lib/awgFields.ts",
+    "frontend/src/lib/awgPresets.ts",
+    "frontend/src/lib/mihomoYaml.ts",
+    "frontend/src/lib/portChecker.ts",
+    "internal/handlers/template.go",
+    "frontend/src/components/config/dns/DnsFlagOffNote.svelte",
+    "internal/handlers/user_rules.go",
+    "frontend/src/components/editor/EditorSidebar.svelte",
+    "frontend/src/components/proxies/ProxyDiagnosticModal.svelte",
+    "frontend/src/components/mihomo/MihomoProfilesCard.svelte",
+    "frontend/src/components/subscriptions/NodeImporter.svelte",
+    "frontend/src/components/rules/RuleModal.svelte",
+    "internal/services/configlayer/router_cores_flag_test.go",
+    "scripts/check-xray-protocols.js"
+  ],
+  "removed_routes": [
+    "/api/subscriptions",
+    "/api/proxy-providers",
+    "/api/provider.yaml",
+    "/mihomo/provider.yaml",
+    "/mihomo/hwid/provider.yaml",
+    "/api/config/smart-merge",
+    "/api/config/mihomo-migrate-socket",
+    "/api/rules/custom",
+    "/api/settings/config-layer",
+    "/api/service/dns-redirect",
+    "/api/xray/access-log/toggle",
+    "/api/mihomo/groups",
+    "/api/mihomo/profiles/adopt",
+    "/api/outbound/parse",
+    "/api/dat",
+    "/api/templates/list"
+  ],
+  "scopes": {
+    "entry-routes": {
+      "files": [
+        "frontend/src/lib/tabFromHash.ts",
+        "frontend/src/lib/editorRoute.ts",
+        "frontend/src/Dashboard.svelte",
+        "frontend/src/components/Sidebar.svelte",
+        "frontend/src/components/BottomDock.svelte"
+      ],
+      "forbid": [
+        "\\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed|isLayerActive)\\b|\\b(?:Layer|layer|l|configLayer)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff|ReleaseForFlagOff)\\b|config_layer_disabled|legacy_blocked|import\\s+[\\s\\S]{0,150}(?:Constructor|MihomoGenerator|DATManager|MihomoSocketMigrateModal)|<QuickstartCard\\b"
+      ],
+      "required": [
+        {
+          "file": "frontend/src/lib/tabFromHash.ts",
+          "pattern": "legacyRedirectHash"
+        },
+        {
+          "file": "frontend/src/lib/tabFromHash.ts",
+          "pattern": "#/config/nodes"
+        },
+        {
+          "file": "frontend/src/lib/tabFromHash.ts",
+          "pattern": "#/config/cores"
+        },
+        {
+          "file": "frontend/src/lib/tabFromHash.ts",
+          "pattern": "#/config/files"
+        },
+        {
+          "file": "frontend/src/lib/tabFromHash.ts",
+          "pattern": "#/config/lists"
+        },
+        {
+          "file": "frontend/src/lib/tabFromHash.ts",
+          "pattern": "#/config/rules"
+        },
+        {
+          "file": "frontend/src/Dashboard.svelte",
+          "pattern": "SetupChecklistCard"
+        },
+        {
+          "file": "frontend/src/Dashboard.svelte",
+          "pattern": "ProxiesRuntime"
+        }
+      ],
+      "raw_required": [],
+      "special": "exactly-one-dashboard-legacyRedirectHash-call"
+    },
+    "ui-permanent": {
+      "files": [
+        "frontend/src/stores.ts",
+        "frontend/src/Settings.svelte",
+        "frontend/src/Services.svelte",
+        "frontend/src/components/config/DevDiagnostics.svelte",
+        "scripts/check-config-ui.js"
+      ],
+      "forbid": [
+        "\\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed|isLayerActive)\\b|\\b(?:Layer|layer|l|configLayer)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff|ReleaseForFlagOff)\\b|config_layer_disabled|legacy_blocked"
+      ],
+      "required": [
+        {
+          "file": "frontend/src/Settings.svelte",
+          "pattern": "dev_mode"
+        }
+      ],
+      "raw_required": [],
+      "exclude_forbid": [
+        "scripts/check-config-ui.js"
+      ]
+    },
+    "editor-files": {
+      "files": [
+        "frontend/src/Editor.svelte",
+        "frontend/src/components/editor/EditorTabs.svelte",
+        "frontend/src/components/editor/EditorToolbar.svelte",
+        "frontend/src/components/editor/FileTree.svelte",
+        "frontend/src/lib/editorRoute.ts"
+      ],
+      "forbid": [
+        "\\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed|isLayerActive)\\b|\\b(?:Layer|layer|l|configLayer)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff|ReleaseForFlagOff)\\b|config_layer_disabled|legacy_blocked|\\b(?:MihomoGenerator|TemplatesModal|ConfigSmartMerge|applyTemplate)\\b|/api/config/smart-merge"
+      ],
+      "required": [
+        {
+          "file": "frontend/src/Editor.svelte",
+          "pattern": "EditorToolbar"
+        },
+        {
+          "file": "frontend/src/Editor.svelte",
+          "pattern": "FileTree"
+        }
+      ],
+      "raw_required": []
+    },
+    "runtime-pages": {
+      "files": [
+        "frontend/src/Proxies.svelte",
+        "frontend/src/Rules.svelte",
+        "frontend/src/lib/api.ts",
+        "frontend/src/components/logs/AccessLogControl.svelte",
+        "frontend/src/components/config/sections/SectionsTab.svelte"
+      ],
+      "forbid": [
+        "\\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed|isLayerActive)\\b|\\b(?:Layer|layer|l|configLayer)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff|ReleaseForFlagOff)\\b|config_layer_disabled|legacy_blocked|\\b(?:ProvidersTab|providersState|UserRulesTab|loadCustomRules|handleSaveCustomRules)\\b|/api/rules/custom|/api/service/dns-redirect"
+      ],
+      "required": [
+        {
+          "file": "frontend/src/Proxies.svelte",
+          "pattern": "(?:async\\s+)?function\\s+fetchProxies"
+        },
+        {
+          "file": "frontend/src/Proxies.svelte",
+          "pattern": "(?:async\\s+)?function\\s+selectProxy"
+        },
+        {
+          "file": "frontend/src/Rules.svelte",
+          "pattern": "(?:async\\s+)?function\\s+loadKernelRules"
+        },
+        {
+          "file": "frontend/src/Rules.svelte",
+          "pattern": "(?:async\\s+)?function\\s+loadProviders"
+        }
+      ],
+      "raw_required": []
+    },
+    "dns-wizard-clients": {
+      "files": [
+        "frontend/src/lib/configDns.ts",
+        "frontend/src/lib/configWizard.ts",
+        "frontend/src/components/dashboard/QuickActionsWidget.svelte",
+        "frontend/src/components/config/dns/DnsFlagOffNote.svelte"
+      ],
+      "forbid": [
+        "\\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed|isLayerActive)\\b|\\b(?:Layer|layer|l|configLayer)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff|ReleaseForFlagOff)\\b|config_layer_disabled|legacy_blocked|\\bDnsFlagOffNote\\b|/api/subscriptions/refresh-all"
+      ],
+      "required": [
+        {
+          "file": "frontend/src/lib/configDns.ts",
+          "pattern": "function\\s+legacyOffDns"
+        },
+        {
+          "file": "frontend/src/lib/configWizard.ts",
+          "pattern": "function\\s+loadWizard"
+        },
+        {
+          "file": "frontend/src/lib/configWizard.ts",
+          "pattern": "function\\s+closeWizard"
+        },
+        {
+          "file": "frontend/src/components/dashboard/QuickActionsWidget.svelte",
+          "pattern": "/api/configlayer/sources/refresh"
+        }
+      ],
+      "raw_required": []
+    },
+    "layer-start": {
+      "files": [
+        "internal/services/configlayer/layer.go",
+        "internal/services/configlayer/flag.go",
+        "internal/services/configlayer/pipeline.go",
+        "internal/services/configlayer/backup.go",
+        "cmd/xcp/main.go"
+      ],
+      "forbid": [
+        "\\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed|isLayerActive)\\b|\\b(?:Layer|layer|l|configLayer)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff|ReleaseForFlagOff)\\b|config_layer_disabled|legacy_blocked"
+      ],
+      "required": [
+        {
+          "file": "internal/services/configlayer/layer.go",
+          "pattern": "func\\s+\\(l\\s+\\*Layer\\)\\s+Start"
+        },
+        {
+          "file": "internal/services/configlayer/layer.go",
+          "pattern": "SourceApplied"
+        },
+        {
+          "file": "internal/services/configlayer/pipeline.go",
+          "pattern": "TryBegin"
+        }
+      ],
+      "raw_required": [],
+      "special": "Start-block-requires-startOnce-bootstrap-SourceApplied-without-Draft"
+    },
+    "layer-views": {
+      "files": [
+        "internal/services/configlayer/exclusive.go",
+        "internal/services/configlayer/preview.go",
+        "internal/services/configlayer/diff.go",
+        "internal/services/configlayer/files_owner.go",
+        "internal/services/configlayer/wizard.go"
+      ],
+      "forbid": [
+        "\\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed|isLayerActive)\\b|\\b(?:Layer|layer|l|configLayer)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff|ReleaseForFlagOff)\\b|config_layer_disabled|legacy_blocked"
+      ],
+      "required": [],
+      "raw_required": []
+    },
+    "layer-sections": {
+      "files": [
+        "internal/services/configlayer/sections_drift.go",
+        "internal/services/configlayer/sections_ops.go",
+        "internal/services/configlayer/sections_scan.go",
+        "internal/services/configlayer/takeover.go",
+        "internal/services/configlayer/applies.go"
+      ],
+      "forbid": [
+        "\\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed|isLayerActive)\\b|\\b(?:Layer|layer|l|configLayer)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff|ReleaseForFlagOff)\\b|config_layer_disabled|legacy_blocked"
+      ],
+      "required": [],
+      "raw_required": []
+    },
+    "handlers-model": {
+      "files": [
+        "internal/handlers/configlayer.go",
+        "internal/handlers/sources.go",
+        "internal/handlers/routing.go",
+        "internal/handlers/cores.go",
+        "internal/handlers/geodata.go"
+      ],
+      "forbid": [
+        "\\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed|isLayerActive)\\b|\\b(?:Layer|layer|l|configLayer)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff|ReleaseForFlagOff)\\b|config_layer_disabled|legacy_blocked"
+      ],
+      "required": [],
+      "raw_required": []
+    },
+    "handlers-runtime": {
+      "files": [
+        "internal/handlers/setup_wizard.go",
+        "internal/handlers/proxies.go",
+        "internal/handlers/dns_takeover.go",
+        "internal/services/setupwizard/service.go",
+        "internal/services/setupwizard/watch.go"
+      ],
+      "forbid": [
+        "\\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed|isLayerActive)\\b|\\b(?:Layer|layer|l|configLayer)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff|ReleaseForFlagOff)\\b|config_layer_disabled|legacy_blocked"
+      ],
+      "required": [],
+      "raw_required": []
+    },
+    "sources-watch": {
+      "files": [
+        "internal/services/sources/service.go",
+        "internal/services/sources/notices.go",
+        "internal/services/sources/refresh.go",
+        "internal/services/sources/scheduler.go",
+        "internal/services/routing/watcher.go"
+      ],
+      "forbid": [
+        "\\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed|isLayerActive)\\b|\\b(?:Layer|layer|l|configLayer)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff|ReleaseForFlagOff)\\b|config_layer_disabled|legacy_blocked"
+      ],
+      "required": [],
+      "raw_required": []
+    },
+    "dns-bridge": {
+      "files": [
+        "internal/services/dnstakeover/legacy.go",
+        "internal/services/dnstakeover/guard.go",
+        "internal/services/dnstakeover/reconcile.go",
+        "internal/services/routing/selection.go",
+        "internal/services/xkeen.go"
+      ],
+      "forbid": [
+        "\\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed|isLayerActive)\\b|\\b(?:Layer|layer|l|configLayer)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff|ReleaseForFlagOff)\\b|config_layer_disabled|legacy_blocked|\\b(?:SetDNSProxying|IsDNSProxyingEnabled|flagOffPlan|claimFlagOffWindow|closeFlagOffWindow|flagOffFailed)\\b"
+      ],
+      "required": [
+        {
+          "file": "internal/services/dnstakeover/legacy.go",
+          "pattern": "func\\s+\\([^)]*\\)\\s+LegacyOff"
+        },
+        {
+          "file": "internal/services/dnstakeover/legacy.go",
+          "pattern": "(?:returnProxyLine|restoreProxyLine)"
+        }
+      ],
+      "raw_required": []
+    },
+    "config-geodata": {
+      "files": [
+        "internal/config/config.go",
+        "internal/services/geodata/flag.go",
+        "internal/services/geodata/service.go",
+        "internal/services/geodata/schedule.go",
+        "internal/services/geodata/notices.go"
+      ],
+      "forbid": [
+        "\\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed|isLayerActive)\\b|\\b(?:Layer|layer|l|configLayer)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff|ReleaseForFlagOff)\\b|config_layer_disabled|legacy_blocked|\\bConfigLayer\\s+bool\\b|\\b(?:OnFlagOn|OnFlagOff)\\b"
+      ],
+      "required": [],
+      "raw_required": []
+    },
+    "settings-capabilities": {
+      "files": [
+        "internal/handlers/settings.go",
+        "internal/handlers/service.go",
+        "internal/handlers/capabilities.go",
+        "frontend/src/stores.ts",
+        "internal/services/geodata/remove.go"
+      ],
+      "forbid": [
+        "\\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed|isLayerActive)\\b|\\b(?:Layer|layer|l|configLayer)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff|ReleaseForFlagOff)\\b|config_layer_disabled|legacy_blocked|\\b(?:SettingsConfigLayer|ServiceDNSRedirect|XKeenDNS)\\b|[\"']xkeen_dns[\"']|[\"']config_layer[\"']"
+      ],
+      "required": [],
+      "raw_required": []
+    },
+    "removed-routes": {
+      "files": [
+        "cmd/xcp/main.go",
+        "internal/handlers/config.go",
+        "internal/handlers/system.go",
+        "internal/services/route_tracer.go",
+        "internal/server/server.go"
+      ],
+      "forbid": [
+        "\\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed|isLayerActive)\\b|\\b(?:Layer|layer|l|configLayer)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff|ReleaseForFlagOff)\\b|config_layer_disabled|legacy_blocked|\\b(?:NewSubscriptionService|ConfigSmartMerge|ServiceDNSRedirect|SettingsConfigLayer|MihomoMigrateSocket|matchUserRules)\\b|/api/(?:subscriptions|proxy-providers|provider\\.yaml|config/smart-merge|rules/custom|settings/config-layer|service/dns-redirect|dat/|templates/list)"
+      ],
+      "required": [
+        {
+          "file": "internal/server/server.go",
+          "pattern": "/api/version"
+        }
+      ],
+      "raw_required": []
+    },
+    "profile-actions": {
+      "files": [
+        "internal/handlers/template.go",
+        "internal/handlers/mihomo_profiles.go",
+        "internal/services/mihomo_profiles.go",
+        "internal/handlers/mihomo.go",
+        "internal/handlers/xray_access_log.go"
+      ],
+      "forbid": [
+        "\\b(?:configLayerEnabled|configLayerFlagKnown|configLayerFlagFailed|isLayerActive)\\b|\\b(?:Layer|layer|l|configLayer)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff|ReleaseForFlagOff)\\b|config_layer_disabled|legacy_blocked|\\b(?:TemplateList|MihomoGroups|ExtractProxyGroupNames|MihomoProfileAdopt|MihomoSocketMigrate)\\b|case\\s+[\"']adopt[\"']|/api/xray/access-log/toggle"
+      ],
+      "required": [
+        {
+          "file": "internal/handlers/mihomo_profiles.go",
+          "pattern": "MihomoProfileAction"
+        }
+      ],
+      "raw_required": []
+    },
+    "go-tests": {
+      "files": [
+        "internal/handlers/router_subscription_provider_io_test.go",
+        "internal/handlers/router_subscription_refresh_test.go",
+        "internal/handlers/router_dat_legacy_test.go",
+        "internal/handlers/router_legacy_blocked_test.go",
+        "internal/handlers/router_dns_legacy_endpoint_test.go",
+        "internal/services/router_links_test.go",
+        "internal/services/geodata/router_remove_test.go",
+        "internal/services/geodata/router_clock_test.go",
+        "internal/services/geodata/router_cron_test.go",
+        "internal/handlers/router_sources_test.go",
+        "internal/handlers/router_geodata_test.go",
+        "internal/handlers/router_mihomo_profiles_test.go",
+        "internal/handlers/router_geodata_schedule_test.go",
+        "internal/handlers/router_routing_test.go",
+        "internal/handlers/router_cores_api_test.go",
+        "internal/handlers/router_dns_state_test.go",
+        "internal/handlers/router_dns_retry_test.go",
+        "internal/services/geodata/router_view_test.go",
+        "internal/handlers/router_xray_access_log_test.go",
+        "internal/handlers/router_dns_legacy_test.go",
+        "internal/handlers/router_wizard_test.go",
+        "internal/handlers/router_configlayer_restart_test.go",
+        "internal/services/sources/router_subscription_logic_test.go",
+        "internal/services/sources/router_diag_test.go",
+        "internal/services/sources/router_blobs_test.go",
+        "internal/services/routing/router_model_test.go",
+        "internal/services/routing/router_dns_mihomo_test.go",
+        "internal/services/routing/router_xray_test.go",
+        "internal/services/routing/router_presets_test.go",
+        "internal/services/routing/router_view_test.go",
+        "internal/services/sources/router_refresh_test.go",
+        "internal/services/routing/router_geodata_cascade_test.go",
+        "internal/services/routing/router_mihomo_compose_test.go",
+        "internal/services/routing/router_select_test.go",
+        "internal/services/routing/router_mihomo_split_test.go",
+        "internal/services/routing/router_cascade_test.go",
+        "internal/services/routing/router_env_test.go",
+        "internal/services/routing/router_mihomo_test.go",
+        "internal/services/routing/router_mihomo_listregex_test.go",
+        "internal/services/sources/router_generate_test.go",
+        "internal/services/sources/router_env_test.go",
+        "internal/services/routing/router_mihomo_manual_test.go",
+        "internal/services/cores/router_service_test.go",
+        "internal/services/sources/router_view_test.go",
+        "internal/services/sources/router_subscription_test.go",
+        "internal/services/routing/router_dns_xray_test.go",
+        "internal/services/sources/router_isolation_test.go",
+        "internal/services/configlayer/router_section_live_test.go",
+        "internal/services/configlayer/router_live_test.go",
+        "internal/services/configlayer/router_check_test.go",
+        "internal/services/configlayer/router_exclusive_test.go",
+        "internal/services/configlayer/router_cores_release_test.go",
+        "internal/services/configlayer/router_mihomo_provider_test.go",
+        "internal/services/configlayer/router_release_test.go",
+        "internal/services/configlayer/router_restore_test.go",
+        "internal/services/configlayer/router_refresh_test.go",
+        "internal/services/routing/router_mihomo_traffic_test.go",
+        "internal/services/configlayer/router_takeover_test.go",
+        "internal/services/configlayer/router_notices_test.go",
+        "internal/services/configlayer/router_cores_takeover_test.go",
+        "internal/services/configlayer/router_profile_split_test.go",
+        "internal/services/configlayer/router_wizard_test.go",
+        "internal/services/routing/router_watch_test.go"
+      ],
+      "forbid": [
+        "\\b(?:layerFlag|switchLayer|setLayer)\\s*\\(|/api/settings/config-layer|\\b(?:Layer|layer|l|configLayer|cl)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff)\\b|config_layer_disabled|legacy_blocked",
+        "\\bEnabled\\s*:\\s*func\\s*\\("
+      ],
+      "required": [],
+      "raw_required": [
+        "//go:build router",
+        "// router-area:"
+      ],
+      "special": "keep-test-declarations-except-explicit-retired-tests",
+      "retired_tests": [
+        "TestRouterDNSFlagOff",
+        "TestRouterWizardFlagOff404",
+        "TestRouterSourcesFlagOff404",
+        "TestRouterRoutingFlagOff404",
+        "TestRouterDNSFlagOffRetry",
+        "TestRouterExclusiveFlagRecheck",
+        "TestRouterGeodataFlagCron",
+        "TestRouterLiveDisabled",
+        "TestRouterSourceRefreshDisabled",
+        "TestRouterSchedulerFlagOffZeroRequests",
+        "TestRouterLegacyEntriesBlocked",
+        "TestRouterDNSLegacyEndpointBlocked",
+        "TestRouterDatLegacyFlag",
+        "TestRouterProviderAdapterUnderDiskLoad",
+        "TestRouterSubscriptionRefreshXrayOnly",
+        "TestRouterShareLinks",
+        "TestRouterCoresDisableReturnsOriginals",
+        "TestRouterDisableReleasesRouting",
+        "TestRouterAccessLogLegacyEmptySection"
+      ],
+      "keep_test_declarations": {
+        "internal/services/geodata/router_remove_test.go": [
+          "TestRouterGeodataRemoveAfterApply",
+          "TestRouterGeodataForeignRefs",
+          "TestRouterGeodataRemoveRoots"
+        ],
+        "internal/services/geodata/router_clock_test.go": [
+          "TestRouterGeodataClockSync"
+        ],
+        "internal/services/geodata/router_cron_test.go": [
+          "TestRouterGeodataCron",
+          "TestRouterGeodataScheduleResume"
+        ],
+        "internal/handlers/router_sources_test.go": [
+          "TestRouterSourcesProtected",
+          "TestRouterSourcesMyNodesFlow",
+          "TestRouterSourcesSubscriptionFlow"
+        ],
+        "internal/handlers/router_geodata_test.go": [
+          "TestRouterGeodataAPI"
+        ],
+        "internal/handlers/router_mihomo_profiles_test.go": [
+          "TestRouterProfileActivatePID",
+          "TestRouterProfileActivateRollback",
+          "TestRouterProfileActivateOwnership",
+          "TestRouterProfileNames",
+          "TestRouterProfileActivatePlain"
+        ],
+        "internal/handlers/router_geodata_schedule_test.go": [
+          "TestRouterGeodataScheduleWaitsApply",
+          "TestRouterGeodataCatchUp"
+        ],
+        "internal/handlers/router_routing_test.go": [
+          "TestRouterRoutingAPIFlow",
+          "TestRouterRoutingSelectLive",
+          "TestRouterRoutingPresetsAndLists",
+          "TestRouterRoutingProtected"
+        ],
+        "internal/handlers/router_cores_api_test.go": [
+          "TestRouterCoresAPIFlow"
+        ],
+        "internal/handlers/router_dns_state_test.go": [
+          "TestRouterDNSStateView",
+          "TestRouterDNSCheck",
+          "TestRouterDNSParamsCheck"
+        ],
+        "internal/handlers/router_dns_retry_test.go": [
+          "TestRouterDNSDisableRetry",
+          "TestRouterDNSApplyReleaseWindow",
+          "TestRouterDNSEnablePanelRestart"
+        ],
+        "internal/services/geodata/router_view_test.go": [
+          "TestRouterGeodataRunNow",
+          "TestRouterGeodataView",
+          "TestRouterGeodataOutsideGone"
+        ],
+        "internal/handlers/router_xray_access_log_test.go": [
+          "TestRouterAccessLogEnable",
+          "TestRouterAccessLogForeignTake",
+          "TestRouterAccessLogEmptyAccess"
+        ],
+        "internal/handlers/router_dns_legacy_test.go": [
+          "TestRouterDNSLegacyProxyDNS"
+        ],
+        "internal/handlers/router_wizard_test.go": [
+          "TestRouterWizardAPI",
+          "TestRouterWizardConflict"
+        ],
+        "internal/handlers/router_configlayer_restart_test.go": [
+          "TestRouterConfigApplyRestartsRunningKernel"
+        ],
+        "internal/services/sources/router_subscription_logic_test.go": [
+          "TestRouterUsableCountCollapsesDuplicates",
+          "TestRouterClassifyTransportErrors",
+          "TestRouterEvaluateBody",
+          "TestRouterFetchRequestHeaders",
+          "TestRouterReadBodyLimit",
+          "TestRouterParseMeta",
+          "TestRouterExpiredWarning",
+          "TestRouterBlobStore",
+          "TestRouterGenerateSubscriptionPerKernel",
+          "TestRouterCommitLive",
+          "TestRouterPreviewDupSubscription"
+        ],
+        "internal/services/sources/router_diag_test.go": [
+          "TestRouterDiagMaskedAndCapped",
+          "TestRouterDiagBase64BodyMasked",
+          "TestRouterDiagLazyDir",
+          "TestRouterDiagGCUnknownSources",
+          "TestRouterPreviewWritesDiagPerKernel",
+          "TestRouterDiagMasksSkippedStructuralSecrets"
+        ],
+        "internal/services/sources/router_blobs_test.go": [
+          "TestRouterGCKeepsInflightCandidate",
+          "TestRouterGCKeepRules",
+          "TestRouterBlobsHoldReleaseRace",
+          "TestRouterBlobsPutHeldIntegrity",
+          "TestRouterGenerateMissingBlobIsError",
+          "TestRouterCommitLiveRemovedSourceDropsLive"
+        ],
+        "internal/services/routing/router_model_test.go": [
+          "TestRouterGroupsDefaultsAndResolve",
+          "TestRouterGroupEmptyBlocksApply",
+          "TestRouterRulesModel",
+          "TestRouterRuleCondConflict"
+        ],
+        "internal/services/routing/router_dns_mihomo_test.go": [
+          "TestRouterDNSMihomoPaths"
+        ],
+        "internal/services/routing/router_xray_test.go": [
+          "TestRouterXrayGroupsMaterialize",
+          "TestRouterXrayBalancerFailClosed",
+          "TestRouterXrayRulesTraffic",
+          "TestRouterXrayRulesTranslate"
+        ],
+        "internal/services/routing/router_presets_test.go": [
+          "TestRouterPresetsCompose",
+          "TestRouterPresetsTakeWithPreset",
+          "TestRouterPresetsValidByKernels"
+        ],
+        "internal/services/routing/router_view_test.go": [
+          "TestRouterRoutingView",
+          "TestRouterRoutingViewRules"
+        ],
+        "internal/services/sources/router_refresh_test.go": [
+          "TestRouterSchedulerDue",
+          "TestRouterSchedulerNetworkRetries",
+          "TestRouterSchedulerBacksOffAfterSnapshotFailure",
+          "TestRouterRefreshDisabledAndUnknown",
+          "TestRouterRefreshSingleflight",
+          "TestRouterRefreshOutcomeJSONKeys",
+          "TestRouterSchedulerAddressChangeAfterApply",
+          "TestRouterNoticesRebuildFromLive",
+          "TestRouterRefreshMetaOnRejection",
+          "TestRouterMaskReason",
+          "TestRouterServiceStopWaits",
+          "TestRouterRefreshChangedSetTracer",
+          "TestRouterRefreshRenameOnlyXrayFileUntouched",
+          "TestRouterRefreshDeferredOnDrift",
+          "TestRouterRefreshUnchangedDropsStalePending",
+          "TestRouterRefreshRetriesWhenChangedDuringFetch",
+          "TestRouterOnKernelInstalledBuildsFiles"
+        ],
+        "internal/services/routing/router_geodata_cascade_test.go": [
+          "TestRouterGeodataCascade"
+        ],
+        "internal/services/routing/router_mihomo_compose_test.go": [
+          "TestRouterMihomoGroupComposition"
+        ],
+        "internal/services/routing/router_select_test.go": [
+          "TestRouterSelectXray",
+          "TestRouterSelectOutsideComposition",
+          "TestRouterSelectMihomoReconcile",
+          "TestRouterSelectMihomoFirst",
+          "TestRouterSelectMihomoFaults",
+          "TestRouterSelectMihomoLinked",
+          "TestRouterSelectRepick",
+          "TestRouterSelectMihomoStart"
+        ],
+        "internal/services/routing/router_mihomo_split_test.go": [
+          "TestRouterMihomoSplitGenerators",
+          "TestRouterMihomoSplitChecks"
+        ],
+        "internal/services/routing/router_cascade_test.go": [
+          "TestRouterCascadeGroup",
+          "TestRouterCascadeSourceAndNode",
+          "TestRouterRulesLint",
+          "TestRouterCascadeServiceGroupEmpty"
+        ],
+        "internal/services/routing/router_env_test.go": [],
+        "internal/services/routing/router_mihomo_test.go": [
+          "TestRouterMihomoGroupsMaterialize",
+          "TestRouterMihomoRulesAndLists"
+        ],
+        "internal/services/routing/router_mihomo_listregex_test.go": [
+          "TestRouterMihomoListRegexComma"
+        ],
+        "internal/services/sources/router_generate_test.go": [
+          "TestRouterGenerateOnlyCapableKernel",
+          "TestRouterGenerateDisabledSource",
+          "TestRouterGenerateMihomoNames",
+          "TestRouterGenerateInstalledOnly",
+          "TestRouterGenerateMemo"
+        ],
+        "internal/services/sources/router_env_test.go": [],
+        "internal/services/routing/router_mihomo_manual_test.go": [
+          "TestRouterMihomoManualFailClosed",
+          "TestRouterMihomoManualDefaultNode"
+        ],
+        "internal/services/cores/router_service_test.go": [
+          "TestRouterCoresServiceFlow"
+        ],
+        "internal/services/sources/router_view_test.go": [
+          "TestRouterViewTracer",
+          "TestRouterViewOrderAndEmpty",
+          "TestRouterViewDefaultKernel",
+          "TestRouterManageUpdate",
+          "TestRouterManageUpdateMySource",
+          "TestRouterManageDeleteAndReveal",
+          "TestRouterViewDupAndKernelState",
+          "TestRouterDiagnosticsView",
+          "TestRouterViewNetworkRetryFollowsScheduler",
+          "TestRouterViewSkippedNotSummedAcrossKernels"
+        ],
+        "internal/services/sources/router_subscription_test.go": [
+          "TestRouterSubscriptionTracer",
+          "TestRouterSubscriptionAddDespiteError",
+          "TestRouterSubscriptionNotInstalledKernelAndJSONKeys",
+          "TestRouterSubscriptionDNSFailed",
+          "TestRouterErrPrivateNetwork",
+          "TestRouterServiceNewCreatesNoDirs",
+          "TestRouterLoadOrGenerateHWIDShared"
+        ],
+        "internal/services/routing/router_dns_xray_test.go": [
+          "TestRouterDNSXrayPaths"
+        ],
+        "internal/services/sources/router_isolation_test.go": [
+          "TestRouterIsolationOnlyPanelFiles",
+          "TestRouterIsolationInactiveKernelDir",
+          "TestRouterIsolationSwitchKernelKeepsBoth",
+          "TestRouterIsolationGeneratorPathsTable"
+        ],
+        "internal/services/configlayer/router_section_live_test.go": [
+          "TestRouterSectionLive"
+        ],
+        "internal/services/configlayer/router_live_test.go": [
+          "TestRouterLiveStore",
+          "TestRouterLiveLayer",
+          "TestRouterInertPlan"
+        ],
+        "internal/services/configlayer/router_check_test.go": [
+          "TestRouterCheckerBlocksApply"
+        ],
+        "internal/services/configlayer/router_exclusive_test.go": [
+          "TestRouterExclusiveGeodata",
+          "TestRouterSettleSection"
+        ],
+        "internal/services/configlayer/router_cores_release_test.go": [
+          "TestRouterCoresReleaseReturnsOriginals",
+          "TestRouterCoresSectionDrift"
+        ],
+        "internal/services/configlayer/router_mihomo_provider_test.go": [
+          "TestRouterTextRuleProvider",
+          "TestRouterMihomoProviderUpdateTargeted"
+        ],
+        "internal/services/configlayer/router_release_test.go": [
+          "TestRouterRoutingReleaseLifecycle",
+          "TestRouterRoutingDrift",
+          "TestRouterKernelInstalledAutoTake",
+          "TestRouterApplyRightAfterDone"
+        ],
+        "internal/services/configlayer/router_restore_test.go": [
+          "TestRouterLayerRestore",
+          "TestRouterLayerSectionLiveHooks",
+          "TestRouterApplyRevisionSnapshot"
+        ],
+        "internal/services/configlayer/router_refresh_test.go": [
+          "TestRouterSourceRefresh"
+        ],
+        "internal/services/routing/router_mihomo_traffic_test.go": [
+          "TestRouterMihomoFailClosed",
+          "TestRouterMihomoRulesTraffic"
+        ],
+        "internal/services/configlayer/router_takeover_test.go": [
+          "TestRouterTakeoverApplyAndRelease",
+          "TestRouterTakeoverValidationFailKeepsAll",
+          "TestRouterTakeoverScan"
+        ],
+        "internal/services/configlayer/router_notices_test.go": [
+          "TestRouterSourceNotices",
+          "TestRouterPublishSources",
+          "TestRouterFeatureThresholdsNodes"
+        ],
+        "internal/services/configlayer/router_cores_takeover_test.go": [
+          "TestRouterCoresTakeoverApplyAndRelease",
+          "TestRouterCoresTakeoverGuards"
+        ],
+        "internal/services/configlayer/router_profile_split_test.go": [
+          "TestRouterProfileSplitOps",
+          "TestRouterProfileTargetRelease",
+          "TestRouterProfileTargetKeepsXKeen"
+        ],
+        "internal/services/configlayer/router_wizard_test.go": [
+          "TestRouterWizardState"
+        ],
+        "internal/services/routing/router_watch_test.go": [
+          "TestRouterListNotFoundBlocksApply",
+          "TestRouterDatWatchRebuild"
+        ]
+      },
+      "inspection_rules": [
+        {
+          "file": "internal/services/configlayer/layer.go",
+          "forbid": "\\bEnabled\\s+func\\s*\\(|\\bfunc\\s+\\(l\\s+\\*Layer\\)\\s+Enabled\\s*\\("
+        },
+        {
+          "file": "internal/services/configlayer/layer.go",
+          "pattern": "SourceApplied"
+        }
+      ],
+      "inspection_explanation": "Каждый существующий сценарий проверяется вместе с реально потребляемым интерфейсом Layer; флаговый Options.Enabled и метод Layer.Enabled запрещены. Срез 12 и его хвост 37 завершаются до этих задач, поэтому общий интерфейс уже постоянен.",
+      "retired_tests_must_be_absent": true
+    },
+    "pw-tests": {
+      "files": [
+        "frontend/tests/router/subscription.spec.ts",
+        "frontend/tests/router/mihomo-undo-profile.spec.ts",
+        "frontend/tests/router/config-setup.spec.ts",
+        "frontend/tests/router/config-dns-legacy.spec.ts",
+        "frontend/tests/router/config-lists.spec.ts",
+        "frontend/tests/router/config-nodes.spec.ts",
+        "frontend/tests/router/access-log.spec.ts",
+        "frontend/tests/router/pages.spec.ts",
+        "frontend/tests/router/config-visual.spec.ts",
+        "frontend/tests/router/config-cores.spec.ts",
+        "frontend/tests/router/config-entries.spec.ts",
+        "frontend/tests/router/config-cores-mihomo.spec.ts",
+        "frontend/tests/router/config-presets.spec.ts",
+        "frontend/tests/router/rules-offline.spec.ts",
+        "frontend/tests/router/config-cores-forms.spec.ts",
+        "frontend/tests/router/config-rules.spec.ts",
+        "frontend/tests/router/config-dns-forms.spec.ts",
+        "frontend/tests/router/config-cascade.spec.ts",
+        "frontend/tests/router/service-control.spec.ts",
+        "frontend/tests/router/config-profiles.spec.ts",
+        "frontend/tests/router/config-cores-profile.spec.ts",
+        "frontend/tests/router/config-nodes-list.spec.ts",
+        "frontend/tests/router/config-cores-xray.spec.ts",
+        "frontend/tests/router/config-dns-banner.spec.ts",
+        "frontend/tests/router/config-nodes-modals.spec.ts",
+        "frontend/tests/router/config-profiles-deps.spec.ts",
+        "frontend/tests/router/proxies-runtime.spec.ts",
+        "frontend/tests/router/config-dns-takeover.spec.ts",
+        "frontend/tests/router/config-groups.spec.ts",
+        "frontend/tests/router/config-routing.spec.ts",
+        "frontend/tests/router/config-dialog-touch.spec.ts",
+        "frontend/tests/router/config-files.spec.ts",
+        "frontend/tests/router/config-lists-actions.spec.ts"
+      ],
+      "forbid": [
+        "\\b(?:layerFlag|switchLayer|setLayer)\\s*\\(|/api/settings/config-layer|\\b(?:Layer|layer|l|configLayer|cl)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff)\\b|config_layer_disabled|legacy_blocked"
+      ],
+      "required": [],
+      "raw_required": [
+        "// router-area:"
+      ]
+    },
+    "api-fields-helper": {
+      "files": [
+        "internal/handlers/base.go",
+        "internal/handlers/xray.go",
+        "internal/handlers/smartproxy.go",
+        "internal/handlers/traffic.go",
+        "frontend/tests/router/lib/nodes-api.ts"
+      ],
+      "forbid": [
+        "\\b(?:layerFlag|switchLayer|setLayer)\\s*\\(|/api/settings/config-layer|\\b(?:Layer|layer|l|configLayer|cl)\\.(?:Enabled|Enable|Disable)\\s*\\(|\\b(?:TriggerFlagOn|TriggerFlagOff|ReasonFlagOff)\\b|config_layer_disabled|legacy_blocked|\\b(?:SubscriptionService|SubscriptionHealthService|UserRulesService|DATService)\\b"
+      ],
+      "required": [
+        {
+          "file": "internal/handlers/base.go",
+          "pattern": "SetConfigLayer"
+        }
+      ],
+      "raw_required": []
+    },
+    "contract-guards": {
+      "files": [
+        "scripts/check-config-ui.js",
+        "scripts/check-routing-api.js",
+        "scripts/check-sources-api.js",
+        "scripts/check-cores-api.js",
+        "scripts/check-geodata-api.js"
+      ],
+      "forbid": [
+        "\\bconfigLayerEnabled\\b|config_layer_disabled|legacy_blocked"
+      ],
+      "required": [],
+      "raw_required": []
+    },
+    "route-guards": {
+      "files": [
+        "scripts/check-legacy-removed.js",
+        "scripts/check-api-routes.js",
+        "scripts/check-kernel-routes.js",
+        "scripts/router/areas.json",
+        ".github/workflows/ci.yml"
+      ],
+      "forbid": [],
+      "required": [],
+      "raw_required": [],
+      "special": "protected-legacy-routes-and-removed-registry",
+      "inspection_rules": [
+        {
+          "file": "cmd/xcp/main.go",
+          "pattern": "HandleProtected\\(\\s*\"/api/configlayer/legacy\""
+        },
+        {
+          "file": "cmd/xcp/main.go",
+          "pattern": "HandleProtected\\(\\s*\"/api/configlayer/legacy/close\""
+        },
+        {
+          "file": "cmd/xcp/main.go",
+          "pattern": "HandleProtected\\(\\s*\"/api/configlayer/legacy/clean\""
+        },
+        {
+          "file": "cmd/xcp/main.go",
+          "forbid": "/api/(?:subscriptions|proxy-providers|provider\\.yaml|config/smart-merge|rules/custom|settings/config-layer|service/dns-redirect|dat/|templates/list)"
+        }
+      ]
+    },
+    "docs-current": {
+      "files": [
+        ".claude/docs/api.md",
+        ".claude/docs/architecture.md",
+        ".claude/docs/build.md",
+        "README.md"
+      ],
+      "forbid": [
+        "\\bSmartMerge\\b|\\bSubscriptionService\\b|config_layer_disabled|legacy_blocked|/api/subscriptions|/api/service/dns-redirect|/api/config/smart-merge",
+        "за флагом `config_layer`|флаг `config_layer`|\\brequireLayer\\b|\\bForeignOwned\\b|\\bReleaseForFlagOff\\b|\\bSettingsConfigLayer\\b|\\bLayer\\.Disable\\b|\\bSetDNSProxying\\b|/api/settings/config-layer|xkeen-control-panel-releases"
+      ],
+      "required": [
+        {
+          "file": ".claude/docs/api.md",
+          "pattern": "/api/configlayer/legacy"
+        },
+        {
+          "file": ".claude/docs/architecture.md",
+          "pattern": "legacyarchive"
+        },
+        {
+          "file": ".claude/docs/api.md",
+          "pattern": "/api/configlayer/legacy/close"
+        },
+        {
+          "file": ".claude/docs/api.md",
+          "pattern": "/api/configlayer/legacy/clean"
+        },
+        {
+          "file": ".claude/docs/api.md",
+          "pattern": "`no_socket`"
+        },
+        {
+          "file": ".claude/docs/api.md",
+          "pattern": "removed_routes"
+        },
+        {
+          "file": ".claude/docs/architecture.md",
+          "pattern": "IsLegacyArchivePath"
+        },
+        {
+          "file": ".claude/docs/architecture.md",
+          "pattern": "SchemaVersion"
+        },
+        {
+          "file": ".claude/docs/build.md",
+          "pattern": "/opt/etc/xcp/legacy/"
+        },
+        {
+          "file": "README.md",
+          "pattern": "/opt/etc/xcp/legacy/"
+        }
+      ],
+      "raw_required": []
+    },
+    "shared-moved": {
+      "files": [
+        "internal/services/hwid.go",
+        "internal/services/xray_api_block.go",
+        "internal/services/mihomo_const.go",
+        "internal/services/mihomo_geotag.go",
+        "internal/services/mihomo_profile_template.go"
+      ],
+      "forbid": [
+        "\\bSmartMerge\\b|\\bSubscriptionService\\b|\\bSubscriptionConfig\\b|\\bconfigLayerEnabled\\b|\\b(?:Layer|layer|configLayer)\\.Enabled\\s*\\("
+      ],
+      "required": [
+        {
+          "file": "internal/services/hwid.go",
+          "pattern": "^func LoadOrGenerateHWID\\("
+        },
+        {
+          "file": "internal/services/xray_api_block.go",
+          "pattern": "^func ProvisionXrayAPIBlock\\("
+        },
+        {
+          "file": "internal/services/xray_api_block.go",
+          "pattern": "^func DeprovisionXrayAPIBlock\\("
+        },
+        {
+          "file": "internal/services/xray_api_block.go",
+          "pattern": "^func CheckPortAvailable\\("
+        },
+        {
+          "file": "internal/services/mihomo_const.go",
+          "pattern": "^const DefaultMihomoSocketPath\\b"
+        },
+        {
+          "file": "internal/services/mihomo_geotag.go",
+          "pattern": "^func MihomoGeoTagLookup\\("
+        },
+        {
+          "file": "internal/services/mihomo_profile_template.go",
+          "pattern": "^func RenderMihomoTemplate\\("
+        },
+        {
+          "file": "internal/services/mihomo_profile_template.go",
+          "pattern": "^var ProfileTemplateFiles\\b"
+        }
+      ],
+      "raw_required": []
+    },
+    "areas-ci": {
+      "files": [
+        "scripts/router/areas.json",
+        ".github/workflows/ci.yml"
+      ],
+      "forbid": [],
+      "required": [
+        {
+          "file": ".github/workflows/ci.yml",
+          "pattern": "check-legacy-removed\\.js"
+        }
+      ],
+      "raw_required": [],
+      "special": "areas-json-has-no-retired-files"
+    }
+  }
+}

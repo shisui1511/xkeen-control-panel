@@ -23,9 +23,8 @@ import (
 // Проверка API секций ядер на настоящей панели устройства: маршруты
 // /api/configlayer/cores* вызываются по HTTPS с сессией, созданной на ПК
 // (routertest.Panel). Вердикт — коды и тела ответов панели и файлы ядер на диске
-// устройства. Флаг слоя «Конфигурация» на время проверки переключается и
-// возвращается прежним, всё взятое возвращается «Отпустить» + «Применить»,
-// черновик после сценария сбрасывается. В сообщения попадают только коды, имена
+// устройства. Всё взятое возвращается «Отпустить» + «Применить», черновик после
+// сценария сбрасывается. В сообщения попадают только коды, имена
 // секций и числа.
 
 const rtCoresBase = "/api/configlayer/cores"
@@ -168,7 +167,7 @@ func (e *rtSrc) rtCoresRelease(section string) {
 	e.rtRtApplyOK("очистка: возврат секции " + section)
 }
 
-// Трасса: слой выключен → 404; слой включён → вид секций Xray и Mihomo; неизвестное
+// Трасса: вид секций Xray и Mihomo; неизвестное
 // ядро → 400; запросы без сессии и без CSRF отклоняются; взятие dns с согласием →
 // «Применить» → файл панели, Редактор отказывает (file_managed); «Отпустить» →
 // «Применить» → исходные файлы побайтно; блок api Xray при взятой маршрутизации.
@@ -178,14 +177,7 @@ func TestRouterCoresAPIFlow(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
 
-	t.Run("слой выключен", func(t *testing.T) {
-		c := e.with(t)
-		c.setLayer(false)
-		r := c.call(http.MethodGet, rtCoresBase+"?kernel=xray", nil)
-		c.rtRtExpect("GET cores при выключенном слое", r, http.StatusNotFound, "config_layer_disabled")
-	})
-
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 
 	t.Run("вид секций", func(t *testing.T) {

@@ -230,7 +230,7 @@ function requestIssues(code) {
 
 // Импорты спека read (CR-02). Модули lib/, которые целиком только читают стенд.
 const READ_LIB_MODULES = new Set(['console', 'env', 'known', 'pages', 'regex', 'motion']);
-// Читающие имена nodes-api: resetDraft, addToDraft, layerFlag меняют стенд и сюда не входят.
+// Читающие имена nodes-api: resetDraft, addToDraft, waitApplyIdle меняют стенд или ждут его и сюда не входят.
 const READ_NODES_API = new Set([
   'nodeLink',
   'randomPort',
@@ -452,7 +452,7 @@ const samples = [
   [READ + "import { resetDraft } from './lib/nodes-api';\n", 1],
   [READ + "import { listSources } from './lib/nodes-api';\n", 0],
   [READ + "import * as nodes from './lib/nodes-api';\n", 1],
-  [READ + "import { layerFlag as lf, withPanel } from './lib/nodes-api.ts';\n", 1],
+  [READ + "import { addToDraft as add, withPanel } from './lib/nodes-api.ts';\n", 1],
   [READ + "import { ensureDnsTarget } from './lib/dns-target';\n", 1],
   [READ + "import { attachConsoleGuard } from './lib/console';\nimport { RT, T } from './lib/env';\n", 0],
   [READ + "import { type SourceInfo, nodeLink } from './lib/nodes-api';\nimport type { Installed } from './lib/nodes-api';\n", 0],

@@ -13,18 +13,12 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
-// Чтение access-лога Xray идёт только по пути внутри /opt/var/log. Вердикт —
-// статус и отчёт сервиса на настоящем файле устройства, эталонных данных нет.
+// Чтение access-лога Xray идёт только по пути внутри /opt/var/log. Путь берётся
+// так же, как в обработчике: действующее значение секции log передаётся в
+// StatusOf. Вердикт — статус и отчёт сервиса на настоящем файле устройства,
+// эталонных данных нет.
 
 const rtGuardLine = "2026/09/24 03:59:04 from 192.0.2.10:52344 accepted tcp:example.org:443 [tproxy-in >> proxy]\n"
-
-func rtGuardWriteConfig(t *testing.T, dir, access string) {
-	t.Helper()
-	body := `{"log": {"access": "` + access + `"}}`
-	if err := os.WriteFile(filepath.Join(dir, "01_log.json"), []byte(body), 0o644); err != nil {
-		t.Fatalf("запись конфига: %v", err)
-	}
-}
 
 func TestRouterAccessLogPathGuard(t *testing.T) {
 	tg := routertest.Current(t)
@@ -59,12 +53,8 @@ func TestRouterAccessLogPathGuard(t *testing.T) {
 	}
 
 	t.Run("inside", func(t *testing.T) {
-		rtGuardWriteConfig(t, confDir, insidePath)
 		svc := newSvc(true)
-		st, err := svc.Status()
-		if err != nil {
-			t.Fatalf("Status: %v", err)
-		}
+		st := svc.StatusOf("", insidePath)
 		if !st.Enabled || st.PathDenied || st.FileSize <= 0 {
 			t.Fatalf("путь внутри /opt/var/log: enabled=%v denied=%v size=%d", st.Enabled, st.PathDenied, st.FileSize)
 		}
@@ -78,12 +68,8 @@ func TestRouterAccessLogPathGuard(t *testing.T) {
 	})
 
 	t.Run("outside_root", func(t *testing.T) {
-		rtGuardWriteConfig(t, confDir, outsidePath)
 		svc := newSvc(true)
-		st, err := svc.Status()
-		if err != nil {
-			t.Fatalf("Status: %v", err)
-		}
+		st := svc.StatusOf("", outsidePath)
 		if !st.Enabled || !st.PathDenied || st.FileSize != 0 {
 			t.Fatalf("путь вне /opt/var/log: enabled=%v denied=%v size=%d", st.Enabled, st.PathDenied, st.FileSize)
 		}
@@ -100,36 +86,24 @@ func TestRouterAccessLogPathGuard(t *testing.T) {
 	})
 
 	t.Run("traversal", func(t *testing.T) {
-		rtGuardWriteConfig(t, confDir, logDir+"/../../../etc/passwd")
-		st, err := newSvc(true).Status()
-		if err != nil {
-			t.Fatalf("Status: %v", err)
-		}
+		st := newSvc(true).StatusOf("", logDir+"/../../../etc/passwd")
 		if !st.PathDenied || st.FileSize != 0 {
 			t.Fatalf("переход вверх: denied=%v size=%d", st.PathDenied, st.FileSize)
 		}
 	})
 
 	t.Run("none", func(t *testing.T) {
-		rtGuardWriteConfig(t, confDir, "none")
-		st, err := newSvc(true).Status()
-		if err != nil {
-			t.Fatalf("Status: %v", err)
-		}
+		st := newSvc(true).StatusOf("", "none")
 		if st.Enabled || st.PathDenied {
 			t.Fatalf("access none: enabled=%v denied=%v", st.Enabled, st.PathDenied)
 		}
 		if st.WillWrite != DefaultXrayAccessLog {
-			t.Fatalf("will_write при выключенном флаге: %q", st.WillWrite)
+			t.Fatalf("will_write при выключенном журнале: %q", st.WillWrite)
 		}
 	})
 
 	t.Run("nil_validator", func(t *testing.T) {
-		rtGuardWriteConfig(t, confDir, insidePath)
-		st, err := newSvc(false).Status()
-		if err != nil {
-			t.Fatalf("Status: %v", err)
-		}
+		st := newSvc(false).StatusOf("", insidePath)
 		if !st.PathDenied || st.FileSize != 0 {
 			t.Fatalf("без валидатора: denied=%v size=%d", st.PathDenied, st.FileSize)
 		}

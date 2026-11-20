@@ -30,51 +30,47 @@ type API struct {
 	cfg *config.Config
 	// logsRescanInterval — период проверки новых файлов в запасном потоке
 	// логов; ноль — defaultLogsRescanInterval
-	logsRescanInterval    time.Duration
-	srv                   *server.Server
-	xkeenSvc              *services.XKeenService
-	mihomoSvc             *services.MihomoService
-	configSvc             *services.ConfigService
-	subscriptionSvc       *services.SubscriptionService
-	subscriptionHealthSvc *services.SubscriptionHealthService
-	kernelSvc             *services.KernelService
-	kernelApplier         *services.KernelApplier
-	kernelSwitcher        *services.KernelSwitcher
-	networkSvc            *services.NetworkToolsService
-	smartProxySvc         *services.SmartProxyService
-	xkeenSettingsSvc      *services.XKeenSettingsService
-	mihomoProfileSvc      *services.MihomoProfileService
-	xrayAccessLogSvc      *services.XrayAccessLogService
-	trafficQuotaSvc       *services.TrafficQuotaService
-	watchdogSvc           *services.WatchdogService
-	xkeenStatus           *services.XKeenStatusCache
-	updateScheduler       *UpdateScheduler
-	xrayGRPCSvc           *services.XrayGRPCService
-	datSvc                *services.DATManagerService
-	snapshotSvc           *services.SnapshotService
-	consoleSvc            *services.ConsoleService
-	ptySvc                *services.PTYService
-	xkeenInstaller        *services.XKeenInstaller
-	templateSvc           *services.TemplateService
-	logDispatcher         *services.LogDispatcher
-	userRulesSvc          *services.UserRulesService
-	routeTracerSvc        *services.RouteTracerService
-	clientResolver        *services.ClientResolver
-	assetsSvc             *assets.AssetsService
-	pathVal               *utils.PathValidator
-	xrayNames             *utils.RootNameValidator // имена не латиницей в корне каталога Xray
-	delayGuard            *DelayGuard
-	configValCache        bool
-	configValCacheTime    time.Time
-	configValCacheMutex   sync.Mutex
-	capsCache             interface{}
-	capsCacheTime         time.Time
-	capsCacheMutex        sync.Mutex
-	sslDaysCache          int
-	sslDaysCacheTime      time.Time
-	sslDaysCacheMutex     sync.Mutex
-	lastRestartLogger     time.Time
-	restartLoggerMutex    sync.Mutex
+	logsRescanInterval  time.Duration
+	srv                 *server.Server
+	xkeenSvc            *services.XKeenService
+	mihomoSvc           *services.MihomoService
+	configSvc           *services.ConfigService
+	kernelSvc           *services.KernelService
+	kernelApplier       *services.KernelApplier
+	kernelSwitcher      *services.KernelSwitcher
+	networkSvc          *services.NetworkToolsService
+	smartProxySvc       *services.SmartProxyService
+	xkeenSettingsSvc    *services.XKeenSettingsService
+	mihomoProfileSvc    *services.MihomoProfileService
+	xrayAccessLogSvc    *services.XrayAccessLogService
+	trafficQuotaSvc     *services.TrafficQuotaService
+	watchdogSvc         *services.WatchdogService
+	xkeenStatus         *services.XKeenStatusCache
+	updateScheduler     *UpdateScheduler
+	xrayGRPCSvc         *services.XrayGRPCService
+	snapshotSvc         *services.SnapshotService
+	consoleSvc          *services.ConsoleService
+	ptySvc              *services.PTYService
+	xkeenInstaller      *services.XKeenInstaller
+	templateSvc         *services.TemplateService
+	logDispatcher       *services.LogDispatcher
+	routeTracerSvc      *services.RouteTracerService
+	clientResolver      *services.ClientResolver
+	assetsSvc           *assets.AssetsService
+	pathVal             *utils.PathValidator
+	xrayNames           *utils.RootNameValidator // имена не латиницей в корне каталога Xray
+	delayGuard          *DelayGuard
+	configValCache      bool
+	configValCacheTime  time.Time
+	configValCacheMutex sync.Mutex
+	capsCache           interface{}
+	capsCacheTime       time.Time
+	capsCacheMutex      sync.Mutex
+	sslDaysCache        int
+	sslDaysCacheTime    time.Time
+	sslDaysCacheMutex   sync.Mutex
+	lastRestartLogger   time.Time
+	restartLoggerMutex  sync.Mutex
 
 	// lifecycleMu — одна операция жизненного цикла ядра за раз. Один замок на все
 	// пути «перезапустить ядро»: ServiceControl (start, stop, restart,
@@ -108,8 +104,6 @@ type API struct {
 	geodata *geodata.Service
 	// geodataIndex — индекс dat-файлов каталога XKeen для инспектора тегов и поиска.
 	geodataIndex *lists.Index
-	// configLayerMu сериализует переключения флага слоя целиком (SettingsConfigLayer).
-	configLayerMu sync.Mutex
 }
 
 func NewAPI(cfg *config.Config, srv *server.Server) *API {
@@ -120,7 +114,7 @@ func NewAPI(cfg *config.Config, srv *server.Server) *API {
 		srv:            srv,
 		xkeenSvc:       services.NewXKeenService(cfg.XKeenBinary, cfg.DataDir),
 		mihomoSvc:      services.NewMihomoService(cfg.MihomoBinary, cfg.XKeenBinary, cfg.MihomoConfigDir),
-		configSvc:      services.NewConfigService(cfg.XRayConfigDir, cfg.AllowedRoots),
+		configSvc:      services.NewConfigService(cfg.XRayConfigDir, cfg.AllowedRoots, cfg.DataDir),
 		clientResolver: services.NewClientResolver(),
 		assetsSvc:      assetsSvc,
 		pathVal:        pathVal,
@@ -230,10 +224,6 @@ func (a *API) XrayGRPCService() *services.XrayGRPCService {
 	return a.xrayGRPCSvc
 }
 
-func (a *API) SetDATManagerService(svc *services.DATManagerService) {
-	a.datSvc = svc
-}
-
 func (a *API) SetSnapshotService(svc *services.SnapshotService) {
 	a.snapshotSvc = svc
 }
@@ -260,14 +250,6 @@ func (a *API) SetLogDispatcher(svc *services.LogDispatcher) {
 
 func (a *API) LogDispatcher() *services.LogDispatcher {
 	return a.logDispatcher
-}
-
-func (a *API) SetUserRulesService(svc *services.UserRulesService) {
-	a.userRulesSvc = svc
-}
-
-func (a *API) UserRulesService() *services.UserRulesService {
-	return a.userRulesSvc
 }
 
 func (a *API) SetRouteTracerService(svc *services.RouteTracerService) {
@@ -418,14 +400,6 @@ func (a *API) KernelService() *services.KernelService {
 	return a.kernelSvc
 }
 
-func (a *API) SetSubscriptionService(svc *services.SubscriptionService) {
-	a.subscriptionSvc = svc
-}
-
-func (a *API) SetSubscriptionHealthService(svc *services.SubscriptionHealthService) {
-	a.subscriptionHealthSvc = svc
-}
-
 func (a *API) SetNetworkToolsService(svc *services.NetworkToolsService) {
 	a.networkSvc = svc
 }
@@ -442,8 +416,7 @@ func (a *API) ClearCapabilitiesCache() {
 
 // ResolveMihomoSecret возвращает секрет Clash API: сначала из конфига панели,
 // при его отсутствии — fallback на secret из config.yaml Mihomo (ParseConfig).
-// Используется всеми потребителями Clash API, включая SubscriptionService
-// (через SetMihomoSecretResolver в main.go).
+// Используется всеми потребителями Clash API.
 func (a *API) ResolveMihomoSecret() string {
 	secret := a.cfg.MihomoSecret
 	if secret == "" && a.mihomoSvc != nil {

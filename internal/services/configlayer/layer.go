@@ -21,7 +21,6 @@ import (
 
 // Ошибки действий слоя.
 var (
-	ErrDisabled        = errors.New("слой конфигурации выключен")
 	ErrDriftBlocked    = errors.New("есть файлы с расхождением: решите их судьбу перед применением")
 	ErrUnknownKey      = errors.New("неизвестный ключ файла")
 	ErrDevModeRequired = errors.New("действие доступно только в режиме разработчика")
@@ -62,28 +61,29 @@ const (
 
 // Виды уведомлений.
 const (
-	noticeWarning = "warning"
-	noticeError   = "error"
+	noticeWarning         = "warning"
+	noticeError           = "error"
+	LegacyLeftoversNotice = "legacy_leftovers"
 )
+
+// LegacyRestart перезапускает затронутое работающее ядро под замком
+// применения. При попытке перезапуска возвращает восстановление рантайма.
+type LegacyRestart func(context.Context, string) (restore func() error, err error)
 
 // Options — зависимости и настройки слоя. Слой создаётся один раз в main.go;
 // все функции-зависимости опрашиваются при каждом использовании, поэтому
-// переключение флага и dev_mode не требует перезапуска.
+// переключение dev_mode не требует перезапуска.
 type Options struct {
 	// DataDir — каталог данных панели (файл состояния, копии, tmp).
 	DataDir string
 	// Roots — каталоги конфигураций Xray и Mihomo.
 	Roots Roots
-	// Enabled — включён ли слой (флаг config_layer, D-01).
-	Enabled func() bool
 	// DevMode — включён ли режим разработчика (диагностика, D-19).
 	DevMode func() bool
 	// Binaries — пути бинарников ядер; пустой путь — ядро не установлено.
 	Binaries func() Binaries
 	// XrayEnv — окружение запуска проверки Xray.
 	XrayEnv func(dir string) []string
-	// ForeignOwned — файл принадлежит старому слою (D-13).
-	ForeignOwned func(kernel, rel string) bool
 	// KernelVersions — сырые версии ядер и XKeen для строк версий и карты функций.
 	KernelVersions func() []KernelVersionInput
 	// Applier, ProcessStates, Mihomo, MihomoAPIReady, Lifecycle — зависимости шага
@@ -93,6 +93,10 @@ type Options struct {
 	Mihomo         MihomoControl
 	MihomoAPIReady func() bool
 	Lifecycle      LifecycleLocker
+	LegacyStartup  func(context.Context, LegacyRestart) error
+	LegacyClean    func(context.Context, LegacyRestart) error
+	LegacyNotices  func() []NoticeView
+	LegacyArchive  LegacyArchive
 	// Now — источник времени (nil — time.Now).
 	Now func() time.Time
 	// DriftInterval — период плановой сверки дрейфа (по умолчанию минута).
@@ -169,6 +173,8 @@ type Layer struct {
 	proxiesSeq atomic.Uint64
 	// wizardSeq — счётчик событий wizard (PublishWizard).
 	wizardSeq atomic.Uint64
+	legacyMu  sync.Mutex
+	legacySeq atomic.Uint64
 	// applySeq — номер запуска, который получают хуки BeforeApply и AfterApply
 	// одного «Применить».
 	applySeq atomic.Int64
@@ -203,8 +209,7 @@ func New(opts Options) (*Layer, error) {
 		opts.DebounceDelay = defaultDebounceDelay
 	}
 	broker := NewBroker()
-	// Файл состояния читается лениво, при первом обращении включённого слоя:
-	// выключенный слой ничего не читает и не пишет (FND-01).
+	// Файл состояния читается в Start (или при первом обращении, если оно раньше).
 	store := NewStore(opts.DataDir, broker)
 	// Описатели секций, формат которых знает сам слой (секции ядер, владение
 	// маршрутизацией, перехват DNS, диагностика); остальные — через Register.
@@ -225,9 +230,7 @@ func New(opts Options) (*Layer, error) {
 		DataDir:        opts.DataDir,
 		Binaries:       opts.Binaries,
 		XrayEnv:        opts.XrayEnv,
-		ForeignOwned:   opts.ForeignOwned,
 		Now:            opts.Now,
-		Enabled:        opts.Enabled,
 		Applier:        opts.Applier,
 		ProcessStates:  opts.ProcessStates,
 		Mihomo:         opts.Mihomo,
@@ -249,11 +252,6 @@ func New(opts Options) (*Layer, error) {
 		extNotices: make(map[string][]NoticeView),
 		dismissed:  make(map[string]bool),
 	}, nil
-}
-
-// Enabled — включён ли слой (опрашивается при каждом вызове).
-func (l *Layer) Enabled() bool {
-	return l.opts.Enabled != nil && l.opts.Enabled()
 }
 
 func (l *Layer) devMode() bool {
@@ -301,25 +299,54 @@ func (l *Layer) bootstrap() {
 	}
 }
 
-// Start запускает слой. Включённый слой сначала загружает состояние, откатывает
-// прерванную запись и убирает хвосты, затем берёт базовую сверку; выключенный
-// ничего не читает и не пишет. Повторный вызов безопасен.
+// Start запускает слой (CUT-01): загружает состояние, откатывает прерванную
+// запись по журналу и убирает хвосты (bootstrap), берёт базовую сверку. Затем в
+// фоне, после однократной уборки следов старого слоя, применённое состояние
+// собирается в файлы тем же конвейером под общим замком применения (runStartup):
+// черновик не применяется, номер схемы и содержимое состояния не меняются,
+// намеренно остановленное ядро не запускается. Повторный вызов ничего не делает:
+// второй сборки, второго bootstrap и второго цикла сверки нет.
 func (l *Layer) Start() {
 	l.startOnce.Do(func() {
 		l.mu.Lock()
 		l.started = true
 		l.mu.Unlock()
-		if l.Enabled() {
-			if err := l.store.Load(); err != nil {
-				log.Printf("[configlayer] состояние слоя не загружено: %v", err)
-			}
-			l.bootstrap()
-			l.checkNow(false)
+		// Состояние не прочиталось (сбой чтения носителя) — сборки на старте нет:
+		// пустой снимок вместо применённого состояния убрал бы файлы панели.
+		loaded := true
+		if err := l.store.Load(); err != nil {
+			loaded = false
+			log.Printf("[configlayer] состояние слоя не загружено: %v", err)
 		}
-		// Цикл работает и при выключенном флаге (его включают без перезапуска):
-		// выключенный слой сверку пропускает, не читая диск.
-		l.spawn(l.loop)
+		l.bootstrap()
+		l.checkNow(false)
+		req := ApplyRequest{Trigger: TriggerStartup, Source: SourceApplied}
+		// Уборка следов старого слоя, сборка и цикл сверки идут в одной горутине:
+		// проверка ядром и перезапуск не задерживают старт HTTP-сервера.
+		l.spawn(func() {
+			l.legacyStartup()
+			if loaded {
+				l.runStartup(req)
+			}
+			l.loop()
+		})
 	})
+}
+
+// legacyStartup — восстановление прерванной очистки и однократное решение
+// D-03 под общим замком применения. Сбой — предупреждение без деталей файлов.
+func (l *Layer) legacyStartup() {
+	if l.opts.LegacyStartup == nil {
+		return
+	}
+	if err := l.runLegacyCleanup(l.opts.LegacyStartup, false); err != nil {
+		if l.ctx.Err() != nil {
+			return
+		}
+		const id = "legacy_cleanup_failed"
+		l.SetNotices(id, []NoticeView{{ID: id, Kind: noticeWarning, Reason: err.Error()}})
+	}
+	l.RequestCheck()
 }
 
 // loop — фоновая сверка дрейфа: по тикеру DriftInterval и по запросам
@@ -360,8 +387,8 @@ func (l *Layer) RequestCheck() {
 }
 
 // Context — контекст жизни слоя: отменяется только Stop. Длинные операции
-// (выключение слоя) выполняются под ним, а не под таймаутом: срок задают
-// таймауты самих ядер, а истёкший дедлайн не должен выглядеть остановкой панели.
+// выполняются под ним, а не под таймаутом: срок задают таймауты самих ядер, а
+// истёкший дедлайн не должен выглядеть остановкой панели.
 func (l *Layer) Context() context.Context { return l.ctx }
 
 // Stop останавливает слой: отменяет контекст, дожидается всех горутин и
@@ -395,18 +422,13 @@ func (l *Layer) Subscribe() (<-chan Event, func(), error) {
 // --- сверка и снимок ---
 
 // checkNow сверяет манифест с диском и публикует событие files при изменении
-// результата (D-09). publish=false только запоминает базу (старт слоя). Выключенный
-// слой диск не читает и сбрасывает базу.
+// результата (D-09). publish=false только запоминает базу (старт слоя).
 func (l *Layer) checkNow(publish bool) FilesEvent {
 	l.checkMu.Lock()
 	defer l.checkMu.Unlock()
-	if !l.Enabled() {
-		l.mu.Lock()
-		l.lastFiles = nil
-		l.lastDrift = 0
-		l.lastRoutingDrift = ""
-		l.mu.Unlock()
-		return FilesEvent{Files: []FileView{}}
+	if l.opts.LegacyNotices != nil && !l.pipeline.Busy() {
+		l.SetNotices(LegacyLeftoversNotice, l.opts.LegacyNotices())
+		l.retryLegacyURLCleanup()
 	}
 	ev := l.evaluate(l.store.Snapshot())
 	data, err := json.Marshal(ev)
@@ -492,9 +514,9 @@ func (l *Layer) evaluate(st State) FilesEvent {
 	sortFileViews(files)
 	// Расхождения маршрутизации входят в число дрейфа: «Применить» блокируется тем же
 	// механизмом (кроме запуска с желаемым managed=false, D-06, D-07).
-	rd := routingDrift(l.opts.Roots, st.Routing, l.installed(), "", l.opts.ForeignOwned)
+	rd := routingDrift(l.opts.Roots, st.Routing, l.installed(), "")
 	// То же для взятых секций Xray: чужой файл с их ключом входит в число дрейфа.
-	sd := sectionsDrift(l.opts.Roots, st.Cores, l.installed(), "", l.opts.ForeignOwned)
+	sd := sectionsDrift(l.opts.Roots, st.Cores, l.installed(), "")
 	return FilesEvent{Files: files, DriftCount: drift + len(rd) + len(sd), Routing: rd, Sections: sd}
 }
 
@@ -524,15 +546,10 @@ func (l *Layer) mihomoConfigAlias() (path, resolved string) {
 	return abs, target
 }
 
-// Snapshot — состояние слоя целиком. Выключенный слой диск и ядра не опрашивает.
+// Snapshot — состояние слоя целиком.
 func (l *Layer) Snapshot() SnapshotView {
-	enabled := l.Enabled()
-	st := emptyState()
-	if enabled {
-		st = l.store.Snapshot()
-	}
+	st := l.store.Snapshot()
 	sv := SnapshotView{
-		Enabled:       enabled,
 		DevMode:       l.devMode(),
 		DraftRevision: st.DraftRevision,
 		DraftChanges:  l.store.changeCount(st),
@@ -545,9 +562,6 @@ func (l *Layer) Snapshot() SnapshotView {
 		Cores:         CoresSnapshot{Xray: map[string]CoreSectionSnap{}, Restart: []RestartNote{}},
 		BusyHolder:    l.BusyHolder(),
 	}
-	if !sv.Enabled {
-		return sv
-	}
 	sv.Checks = l.cachedChecks(st)
 	fe := l.evaluate(st)
 	sv.Files, sv.DriftCount = fe.Files, fe.DriftCount
@@ -555,6 +569,7 @@ func (l *Layer) Snapshot() SnapshotView {
 	sv.Cores = l.coresSnapshot(st, fe.Sections)
 	sv.Cores.Restart = l.restartNotes(st)
 	sv.Kernels, sv.Features = l.versions()
+	sv.Legacy = l.legacySummary(st.Legacy != nil)
 	return sv
 }
 
@@ -564,7 +579,7 @@ func (l *Layer) Snapshot() SnapshotView {
 func (l *Layer) restartNotes(st State) []RestartNote {
 	installed := l.installed()
 	out := []RestartNote{}
-	base := restartBase(l.opts.Roots, st, st.Draft, installed, l.opts.ForeignOwned)
+	base := restartBase(l.opts.Roots, st, st.Draft, installed)
 	for _, n := range RestartReasons(st.Applied, st.Draft, base) {
 		if (n.Kernel == KernelXray && installed.Xray) || (n.Kernel == KernelMihomo && installed.Mihomo) {
 			out = append(out, n)
@@ -737,12 +752,8 @@ func (l *Layer) SetNotices(prefix string, notices []NoticeView) {
 	l.publishNotices()
 }
 
-// publishNotices рассылает текущие уведомления событием notices (выключенный слой
-// диск не читает и событий не шлёт).
+// publishNotices рассылает текущие уведомления событием notices.
 func (l *Layer) publishNotices() {
-	if !l.Enabled() {
-		return
-	}
 	l.broker.Publish(Event{Type: EventNotices, Data: NoticesEvent{Notices: l.noticeViews(l.store.Snapshot())}})
 }
 
@@ -761,40 +772,26 @@ func (l *Layer) isExtNoticeID(id string) bool {
 }
 
 // PublishSources сообщает клиентам, что представление источников изменилось
-// (событие sources с текущей ревизией черновика). Выключенный слой молчит.
+// (событие sources с текущей ревизией черновика).
 func (l *Layer) PublishSources() {
-	if !l.Enabled() {
-		return
-	}
 	l.broker.Publish(Event{Type: EventSources, Data: SourcesEvent{Revision: l.store.Snapshot().DraftRevision}})
 }
 
 // PublishDNS сообщает клиентам, что состояние перехвата DNS изменилось (событие
 // dns со сквозным счётчиком): клиент по нему перечитывает состояние службы.
-// Выключенный слой молчит.
 func (l *Layer) PublishDNS() {
-	if !l.Enabled() {
-		return
-	}
 	l.broker.Publish(Event{Type: EventDNS, Data: DNSEvent{Seq: l.dnsSeq.Add(1)}})
 }
 
 // PublishProxies сообщает клиентам об изменении рантайма, выбора или пинга.
-// Частоту ограничивает вызывающий; выключенный слой события не публикует.
+// Частоту ограничивает вызывающий.
 func (l *Layer) PublishProxies(kind string) {
-	if !l.Enabled() {
-		return
-	}
 	l.broker.Publish(Event{Type: EventProxies, Data: ProxiesEvent{Seq: l.proxiesSeq.Add(1), Kind: kind}})
 }
 
 // PublishRouting сообщает клиентам, что владение маршрутизацией или её дрейф
-// изменились (событие routing с текущей ревизией черновика). Выключенный слой
-// молчит.
+// изменились (событие routing с текущей ревизией черновика).
 func (l *Layer) PublishRouting() {
-	if !l.Enabled() {
-		return
-	}
 	l.broker.Publish(Event{Type: EventRouting, Data: RoutingEvent{Revision: l.store.Snapshot().DraftRevision}})
 }
 
@@ -825,14 +822,11 @@ func (e *ForeignMixedError) Is(target error) bool { return target == ErrForeignM
 // уйдут в копии, какие останутся, предупреждения D-44 и прежний профиль Mihomo с
 // портами по текущему диску. Неустановленное ядро — nil. Диск не меняется.
 func (l *Layer) RoutingPreview() (TakeoverPreview, error) {
-	if !l.Enabled() {
-		return TakeoverPreview{}, ErrDisabled
-	}
 	installed := l.installed()
 	var files []RoutingFile
 	if installed.Xray {
 		var err error
-		if files, _, err = ScanXrayRouting(l.opts.Roots.Xray, l.opts.ForeignOwned); err != nil {
+		if files, _, err = ScanXrayRouting(l.opts.Roots.Xray); err != nil {
 			return TakeoverPreview{}, err
 		}
 	}
@@ -862,9 +856,6 @@ func (l *Layer) RoutingPreview() (TakeoverPreview, error) {
 // ErrNothingToReclaim. Всё под журналом и откатом, как взятие; занятое применение —
 // ErrApplyBusy или ErrKernelBusy.
 func (l *Layer) ReclaimRouting(ctx context.Context, kernel string) error {
-	if !l.Enabled() {
-		return ErrDisabled
-	}
 	if kernel != KernelXray && kernel != KernelMihomo {
 		return fmt.Errorf("%w: %q", ErrUnknownKernel, kernel)
 	}
@@ -877,14 +868,14 @@ func (l *Layer) ReclaimRouting(ctx context.Context, kernel string) error {
 		return err
 	}
 	st := l.store.Snapshot()
-	items := routingDrift(l.opts.Roots, st.Routing, l.installed(), kernel, l.opts.ForeignOwned)
+	items := routingDrift(l.opts.Roots, st.Routing, l.installed(), kernel)
 	if len(items) == 0 {
 		return ErrNothingToReclaim
 	}
 	ops := &RoutingOps{Next: st.Routing.clone()}
 	switch kernel {
 	case KernelXray:
-		files, _, err := ScanXrayRouting(l.opts.Roots.Xray, l.opts.ForeignOwned)
+		files, _, err := ScanXrayRouting(l.opts.Roots.Xray)
 		if err != nil {
 			return err
 		}
@@ -937,9 +928,6 @@ const noticeRoutingAutoTakenPrefix = "routing_auto_taken:"
 
 // EditDraft правит секцию черновика с проверкой ревизии (D-05).
 func (l *Layer) EditDraft(rev int64, section string, value json.RawMessage) (DraftEvent, error) {
-	if !l.Enabled() {
-		return DraftEvent{}, ErrDisabled
-	}
 	ev, err := l.store.EditDraft(rev, section, value)
 	if err == nil {
 		l.RequestCheck()
@@ -952,9 +940,6 @@ func (l *Layer) EditDraft(rev int64, section string, value json.RawMessage) (Dra
 // без записи, успех — ревизия +1 и одно событие draft. Значение nil или JSON
 // null удаляет секцию.
 func (l *Layer) EditDraftBatch(rev int64, sections map[string]json.RawMessage, live func(live Sections) error) (DraftEvent, error) {
-	if !l.Enabled() {
-		return DraftEvent{}, ErrDisabled
-	}
 	ev, err := l.store.EditDraftBatch(rev, sections, live)
 	if err == nil {
 		l.RequestCheck()
@@ -966,9 +951,6 @@ func (l *Layer) EditDraftBatch(rev int64, sections map[string]json.RawMessage, l
 // отдельно от черновика: ревизия не растёт, события конвейера не публикуются.
 // fn получает глубокую копию Live; ошибка fn или записи — ничего не меняется.
 func (l *Layer) UpdateLive(fn func(live Sections) error) error {
-	if !l.Enabled() {
-		return ErrDisabled
-	}
 	return l.store.Update(func(st *State) error {
 		if st.Live == nil {
 			st.Live = Sections{}
@@ -982,9 +964,6 @@ func (l *Layer) UpdateLive(fn func(live Sections) error) error {
 // считал живые данные, не изменилась, пока шёл долгий запрос. Draft и Applied в
 // view — только для чтения (их изменения не сохраняются), Live — копия под запись.
 func (l *Layer) UpdateLiveWith(fn func(view StateView) error) error {
-	if !l.Enabled() {
-		return ErrDisabled
-	}
 	return l.store.Update(func(st *State) error {
 		if st.Live == nil {
 			st.Live = Sections{}
@@ -1008,9 +987,6 @@ type StateView struct {
 // ReadState возвращает глубокие копии черновика, применённого состояния и
 // живых данных: изменение результата состояние слоя не меняет.
 func (l *Layer) ReadState() (StateView, error) {
-	if !l.Enabled() {
-		return StateView{}, ErrDisabled
-	}
 	st := l.store.Snapshot()
 	return StateView{
 		DraftRevision: st.DraftRevision,
@@ -1283,9 +1259,6 @@ func (l *Layer) Register(h Hooks) error {
 
 // ResetDraft сбрасывает черновик к применённому состоянию.
 func (l *Layer) ResetDraft(rev int64) (DraftEvent, error) {
-	if !l.Enabled() {
-		return DraftEvent{}, ErrDisabled
-	}
 	ev, err := l.store.ResetDraft(rev)
 	if err == nil {
 		l.RequestCheck()
@@ -1296,9 +1269,6 @@ func (l *Layer) ResetDraft(rev int64) (DraftEvent, error) {
 // Diag выполняет диагностическое действие над секцией diag черновика (D-19).
 // Только в режиме разработчика; ревизия проверяется как у обычной правки.
 func (l *Layer) Diag(rev int64, action string) (DraftEvent, error) {
-	if !l.Enabled() {
-		return DraftEvent{}, ErrDisabled
-	}
 	if !l.devMode() {
 		return DraftEvent{}, ErrDevModeRequired
 	}
@@ -1327,9 +1297,6 @@ func (l *Layer) StartApply(user bool) error {
 // конвейер (D-09). Правка черновика после подтверждения остаётся в общем
 // черновике неприменённой (D-12, D-13).
 func (l *Layer) StartApplyAt(user bool, rev int64) error {
-	if !l.Enabled() {
-		return ErrDisabled
-	}
 	// Проверки до записи: пустая группа или висячая ссылка не дают начать
 	// применение (GRP-05, SRC-07). Это ранний отказ без замка; решающая проверка —
 	// по закреплённому снимку ниже. Фоновые запуски проверяет сам конвейер.
@@ -1393,9 +1360,6 @@ func (l *Layer) StartApplyAt(user bool, rev int64) error {
 // применённому состоянию: желание не остаётся висеть. Дрейф — ErrDriftBlocked.
 // Вызов синхронный; после снятия замка идут afterRun и хуки AddAfterApply.
 func (l *Layer) ApplyEdit(ctx context.Context, edit func(st StateView) (map[string]json.RawMessage, error)) (ApplyView, error) {
-	if !l.Enabled() {
-		return ApplyView{}, ErrDisabled
-	}
 	l.mu.Lock()
 	stopped := l.stopped
 	l.mu.Unlock()
@@ -1466,11 +1430,8 @@ func (l *Layer) discardEdit(rev int64, before Sections, edited map[string]json.R
 }
 
 // MihomoTaken — панель владеет маршрутизацией Mihomo по State.Routing (фактическое
-// владение, не желаемое). Слой выключен — false.
+// владение, не желаемое).
 func (l *Layer) MihomoTaken() bool {
-	if !l.Enabled() {
-		return false
-	}
 	return l.store.Snapshot().Routing.Mihomo != nil
 }
 
@@ -1478,9 +1439,6 @@ func (l *Layer) MihomoTaken() bool {
 // панель Mihomo не владеет или прежнего профиля нет; "config.yaml" — прежний обычный
 // файл; иначе имя профиля без каталога profiles/ и суффикса .yaml.
 func (l *Layer) MihomoReturnTarget() string {
-	if !l.Enabled() {
-		return ""
-	}
 	m := l.store.Snapshot().Routing.Mihomo
 	if m == nil || m.PrevProfile == "" {
 		return ""
@@ -1631,9 +1589,6 @@ func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 		log.Printf("configlayer: RunLive trigger=%s lock=%d pipeline=%d after=%d",
 			run.Trigger, lockD.Milliseconds(), pipeD.Milliseconds(), afterD.Milliseconds())
 	}()
-	if !l.Enabled() {
-		return ApplyView{}, ErrDisabled
-	}
 	if run.Trigger == "" {
 		return ApplyView{}, errors.New("configlayer: не задан триггер запуска")
 	}
@@ -1744,9 +1699,6 @@ type SectionLiveRun struct {
 // State.Live той же записью; запуск допустим и только с ними, без секций. Вызов
 // синхронный; после снятия замка идут afterRun и хуки AddAfterApply.
 func (l *Layer) RunSectionLive(ctx context.Context, run SectionLiveRun) (ApplyView, error) {
-	if !l.Enabled() {
-		return ApplyView{}, ErrDisabled
-	}
 	if run.Trigger == "" {
 		return ApplyView{}, errors.New("configlayer: не задан триггер запуска")
 	}
@@ -1824,9 +1776,6 @@ type RestoreRun struct {
 // Нерешённый дрейф — ErrDriftBlocked. Вызов синхронный; после снятия замка идут
 // afterRun и хуки AddAfterApply.
 func (l *Layer) RunRestore(ctx context.Context, run RestoreRun) (ApplyView, error) {
-	if !l.Enabled() {
-		return ApplyView{}, ErrDisabled
-	}
 	if run.Trigger == "" {
 		return ApplyView{}, errors.New("configlayer: не задан триггер запуска")
 	}
@@ -1885,9 +1834,6 @@ func (l *Layer) RunSourceRefresh(ctx context.Context, overlay Sections) (ApplyVi
 // дрейфом (ключи keys игнорируются). Пустой набор или ключ вне манифеста —
 // ErrUnknownKey. Возврат сразу после запуска; итог приходит событием apply_done.
 func (l *Layer) Rebuild(keys []string, all bool) error {
-	if !l.Enabled() {
-		return ErrDisabled
-	}
 	st := l.store.Snapshot()
 	var only []string
 	// Файлы неустановленного ядра пересобирать нечем: ключи такого ядра — неизвестные.
@@ -1936,9 +1882,6 @@ func (l *Layer) Rebuild(keys []string, all bool) error {
 // не перезаписывается, не сверяется и не считается сиротой, пока пользователь не
 // нажмёт «Пересобрать» по его ключу. Файл не переименовывается.
 func (l *Layer) Release(key string) (FilesEvent, error) {
-	if !l.Enabled() {
-		return FilesEvent{}, ErrDisabled
-	}
 	if _, ok := l.store.Snapshot().Manifest[key]; !ok {
 		return FilesEvent{}, ErrUnknownKey
 	}
@@ -1971,6 +1914,8 @@ func (l *Layer) Release(key string) (FilesEvent, error) {
 // уведомления и публикует событие notices.
 func (l *Layer) DismissNotice(id string) ([]NoticeView, error) {
 	switch {
+	case id == LegacyLeftoversNotice:
+		return nil, ErrUnknownNotice
 	case id == "schema_reset" || id == "recovered_from_journal" || id == "journal_recovery_failed":
 		if err := l.store.DismissNotice(id); err != nil {
 			return nil, err
@@ -1989,6 +1934,40 @@ func (l *Layer) DismissNotice(id string) ([]NoticeView, error) {
 	views := l.noticeViews(l.store.Snapshot())
 	l.broker.Publish(Event{Type: EventNotices, Data: NoticesEvent{Notices: views}})
 	return views, nil
+}
+
+// CleanLegacy сериализует очистку с применением черновика и операциями ядер.
+func (l *Layer) CleanLegacy() error {
+	if l.opts.LegacyClean == nil {
+		return ErrUnknownNotice
+	}
+	if err := l.runLegacyCleanup(l.opts.LegacyClean, true); err != nil {
+		l.RequestCheck()
+		return err
+	}
+	l.SetNotices("legacy_cleanup_failed", nil)
+	l.RequestCheck()
+	return nil
+}
+
+func (l *Layer) runLegacyCleanup(clean func(context.Context, LegacyRestart) error, user bool) error {
+	release, err := l.pipeline.TryBegin(l.ctx, user)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return clean(l.ctx, l.restartAfterLegacyCleanup)
+}
+
+func (l *Layer) restartAfterLegacyCleanup(ctx context.Context, kernel string) (func() error, error) {
+	if l.pipeline.d.Applier == nil {
+		return nil, nil
+	}
+	outcome, err := l.pipeline.restartAndConfirm(ctx, kernel)
+	if outcome != services.ApplyRestarted && outcome != services.ApplyRestartFailed {
+		return nil, err
+	}
+	return func() error { return l.pipeline.recoverKernel(context.WithoutCancel(ctx), kernel) }, err
 }
 
 // isBuildFailedID — идентификатор вида build_failed:<ядро> известного ядра.
@@ -2038,7 +2017,7 @@ func (l *Layer) NoteBuildResult(kernel string, view ApplyView) {
 // тот же Preview конвейера, остановленное и неактивное ядро не трогается.
 // Неудача — уведомление build_failed:<ядро>.
 func (l *Layer) OnKernelInstalled(kernel string) {
-	if (kernel != KernelXray && kernel != KernelMihomo) || !l.Enabled() {
+	if kernel != KernelXray && kernel != KernelMihomo {
 		return
 	}
 	l.invalidateVersions()
@@ -2067,11 +2046,10 @@ func (l *Layer) OnKernelInstalled(kernel string) {
 // IsManagedPath — абсолютный путь указывает на файл, которым владеет панель
 // (запись манифеста managed). Пути сравниваются после полного разворачивания
 // симлинков: путь через симлинк-каталог на корень ядра и симлинк на панельный
-// файл (config.yaml → profiles/xcp-*.yaml) распознаются; отпущенные файлы и
-// выключенный слой дают false. Нужен Редактору (D-12): панельные файлы там только
-// на чтение.
+// файл (config.yaml → profiles/xcp-*.yaml) распознаются; отпущенные файлы дают
+// false. Нужен Редактору (D-12): панельные файлы там только на чтение.
 func (l *Layer) IsManagedPath(absPath string) bool {
-	if !l.Enabled() || !filepath.IsAbs(absPath) {
+	if !filepath.IsAbs(absPath) {
 		return false
 	}
 	target := resolveFullSymlinks(absPath)
@@ -2117,18 +2095,11 @@ func resolveDirSymlinks(p string) string {
 // снимка), — удерживая хранилище: правки черновика и запись конвейера ждут,
 // поэтому восстановленный файл состояния не будет затёрт состоянием из памяти.
 // После fn состояние перечитывается, рассылается snapshot и запрашивается сверка
-// дрейфа. Выключенный слой диск не читает: только забывает кэш в памяти.
+// дрейфа.
 //
 // applyMu не берётся: вызывающий уже держит замок жизненного цикла (порядок
 // applyMu → lifecycleMu нарушать нельзя).
 func (l *Layer) RestoreExternally(fn func() error) error {
-	if !l.Enabled() {
-		// фоновая запись черновика, начатая до выключения, не ляжет поверх снимка
-		l.store.Flush()
-		err := fn()
-		l.store.Invalidate()
-		return err
-	}
 	fnErr, reloadErr := l.store.ReplaceExternally(fn)
 	// Восстановленный файл состояния мог дать ту же ревизию с другим черновиком.
 	l.mu.Lock()

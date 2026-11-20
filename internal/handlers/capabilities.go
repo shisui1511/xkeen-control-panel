@@ -21,10 +21,8 @@ type CapabilitiesResponse struct {
 	KernelConflict bool `json:"kernel_conflict"`
 	// RunningKernels — запущенные ядра в порядке [xray, mihomo].
 	RunningKernels []string `json:"running_kernels,omitempty"`
-	XKeenDNS       bool     `json:"xkeen_dns"`
 	// XKeenInstalled — бинарник XKeen найден (без него ядра не запустить)
-	XKeenInstalled bool   `json:"xkeen_installed"`
-	GlobalHwid     string `json:"global_hwid,omitempty"`
+	XKeenInstalled bool `json:"xkeen_installed"`
 	// ApplyRestarts — перезапустит ли применение конфигурации целевое ядро
 	// (по ключу xray/mihomo). Предсказание того же KernelApplier, что решает
 	// при apply: по нему UI подписывает кнопки «Применить».
@@ -58,6 +56,7 @@ type MihomoCapability struct {
 	ProcessRunning   bool   `json:"process_running"`
 	APIReachable     bool   `json:"api_reachable"`
 	APIAuthenticated bool   `json:"api_authenticated"`
+	NoSocket         bool   `json:"no_socket"`
 	Reachable        bool   `json:"reachable"` // backward compatibility
 	APIURL           string `json:"api_url,omitempty"`
 	DiscoveredSecret string `json:"discovered_secret,omitempty"`
@@ -120,21 +119,15 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var reachable, authenticated bool
-	if a.mihomoSvc != nil {
+	if ctrlInfo.Type == "unix" {
 		reachable, authenticated = a.mihomoSvc.ProbeAPI(secret)
-	} else {
-		reachable, authenticated = probeMihomoAPI(a.cfg.MihomoAPIURL, secret)
 	}
 
 	resp.Mihomo.ProcessRunning = running
 	resp.Mihomo.APIReachable = reachable
 	resp.Mihomo.APIAuthenticated = authenticated
 	resp.Mihomo.Reachable = reachable
-	if ctrlInfo.Target != "" {
-		resp.Mihomo.APIURL = ctrlInfo.Target
-	} else {
-		resp.Mihomo.APIURL = a.cfg.MihomoAPIURL
-	}
+	resp.Mihomo.APIURL = ctrlInfo.Target
 	resp.Mihomo.DiscoveredSecret = discoveredSecret
 	resp.Mihomo.ControllerType = ctrlInfo.Type
 	resp.Mihomo.ControllerTarget = ctrlInfo.Target
@@ -146,6 +139,9 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 	resp.ActiveKernel = st.Label()
 	resp.KernelConflict = st.Conflict
 	resp.RunningKernels = st.Running
+	resp.Mihomo.NoSocket = running && resp.ActiveKernel == "mihomo" &&
+		ctrlInfo.Type != "" && ctrlInfo.Type != "unix" &&
+		(a.configLayer == nil || !a.configLayer.MihomoTaken())
 
 	// Предсказание рестарта при применении: то же решение, что примет Apply.
 	if a.kernelApplier != nil {
@@ -171,12 +167,7 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if a.xkeenSvc != nil {
-		resp.XKeenDNS = a.xkeenSvc.IsDNSProxyingEnabled()
 		resp.XKeenInstalled = a.xkeenSvc.Installed()
-	}
-
-	if a.subscriptionSvc != nil {
-		resp.GlobalHwid = a.subscriptionSvc.GetHWID()
 	}
 
 	// Не кэшируем "рваное" состояние (процесс жив, но API не отвечает):
@@ -186,7 +177,7 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 	// TTL транслируется в интерфейс как "Mihomo недоступен" всем поллерам
 	// сразу — хотя реальный сервис в порядке. Следующий запрос просто
 	// пробует живьём ещё раз, не дожидаясь протухания кэша.
-	if !(resp.Mihomo.ProcessRunning && !resp.Mihomo.APIReachable) {
+	if !resp.Mihomo.ProcessRunning || resp.Mihomo.APIReachable || resp.Mihomo.NoSocket {
 		a.capsCacheMutex.Lock()
 		a.capsCache = resp
 		a.capsCacheTime = time.Now()
@@ -204,30 +195,4 @@ func maskSecret(s string) string {
 		return "****"
 	}
 	return s[:2] + "****" + s[len(s)-2:]
-}
-
-// probeMihomoAPI attempts GET <mihomoURL>/version with a 3-second timeout and proper secret token.
-func probeMihomoAPI(mihomoURL string, secret string) (reachable bool, authenticated bool) {
-	req, err := http.NewRequest(http.MethodGet, mihomoURL+"/version", nil)
-	if err != nil {
-		return false, false
-	}
-	if secret != "" {
-		req.Header.Set("Authorization", "Bearer "+secret)
-	}
-
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return false, false
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusOK {
-		return true, true
-	}
-	if resp.StatusCode == http.StatusUnauthorized {
-		return true, false
-	}
-	return true, false
 }

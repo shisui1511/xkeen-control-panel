@@ -5,25 +5,26 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { api, layerFlag, resetDraft } from './lib/nodes-api';
+import { api, resetDraft, waitApplyIdle, withPanel } from './lib/nodes-api';
 
 // Вкладка «Правила» на настоящей панели (фаза 146, план 20): список правил из настоящего
 // представления маршрутизации, порядок кнопками «вверх/вниз», выключение без удаления,
 // цель «Всё остальное», перекрытие с кнопкой «Поднять выше», диалог правила и своё правило
-// ядра. Правила создаются настоящими маршрутами API; ответы сети не подменяются. Флаг слоя
-// включается на время файла и возвращается прежним, черновик сбрасывается до и после
-// проверки. Ядро не читается и не меняется. В вывод не попадают имена узлов и групп.
-
-const layer = layerFlag();
+// ядра. Правила создаются настоящими маршрутами API; ответы сети не подменяются. Черновик
+// сбрасывается до и после проверки. Ядро не читается и не меняется. В вывод не попадают имена
+// узлов и групп.
 
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
-  await layer.enable(browser);
+  await withPanel(browser, (page) => resetDraft(page));
 });
 
 test.afterAll(async ({ browser }) => {
-  await layer.restore(browser);
+  await withPanel(browser, async (page) => {
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
+  });
 });
 
 /** Страница, на которой API панели доступно из браузера (сессия и токен CSRF). */

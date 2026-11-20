@@ -73,7 +73,6 @@ func rtCoresSvcNew(t *testing.T) *rtCoresSvcEnv {
 	layer, err := configlayer.New(configlayer.Options{
 		DataDir:       dir,
 		Roots:         configlayer.Roots{Xray: e.xray, Mihomo: e.mihomo},
-		Enabled:       func() bool { return true },
 		Binaries:      func() configlayer.Binaries { return configlayer.Binaries{Xray: bin} },
 		DriftInterval: time.Hour,
 		DebounceDelay: 20 * time.Millisecond,

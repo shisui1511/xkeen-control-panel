@@ -4,7 +4,7 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
 import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
-import { api, layerFlag, withPanel } from './lib/nodes-api';
+import { withPanel } from './lib/nodes-api';
 
 // Управление службой ядра через интерфейс настоящей панели (RT-05, D-04): остановка, запуск и
 // перезапуск кнопками страницы «Службы». После каждого действия статус в интерфейсе (значок
@@ -175,7 +175,7 @@ test(
         'остановка, запуск и перезапуск ядра через интерфейс с проверкой состояния после каждого действия'
     }
   },
-  async ({ page, browser }) => {
+  async ({ page }) => {
     const core = RT.core;
     test.skip(core !== 'xray' && core !== 'mihomo', 'активное ядро стенда не определено');
     test.setTimeout(6 * ACTION);
@@ -219,26 +219,18 @@ test(
     await expect(stopBtn).toHaveCount(0);
 
     // --- раздел «Конфигурация» при остановленном ядре (CFG-01) ------------------------
-    // Слой включается на время шага и возвращается прежним: раздел открыт, все шесть вкладок
-    // видны, плашки «Mihomo API оффлайн» и заглушки конфликта ядер нет.
-    const layer = layerFlag();
-    try {
-      // enable внутри try: сбой после переключения флага не оставляет слой включённым.
-      // Простой конвейера после включения ждёт сам enable.
-      await layer.enable(browser);
-      await page.goto('/#/config/nodes');
-      for (const tab of ['nodes', 'groups', 'rules', 'lists', 'cores', 'files']) {
-        await expect(
-          page.getByTestId(`config-tab-${tab}`),
-          `ядро остановлено: вкладка ${tab} раздела`
-        ).toBeVisible({ timeout: T.page });
-      }
-      await expect(page.getByTestId('config-draftbar')).toBeVisible();
-      await expect(page.locator('.api-offline')).toHaveCount(0);
-      await expect(page.getByTestId('kernel-conflict-gate')).toHaveCount(0);
-    } finally {
-      await layer.restore(browser);
+    // Раздел открыт, все шесть вкладок видны, плашки «Mihomo API оффлайн» и заглушки
+    // конфликта ядер нет. Шаг только читает: черновик не меняется.
+    await page.goto('/#/config/nodes');
+    for (const tab of ['nodes', 'groups', 'rules', 'lists', 'cores', 'files']) {
+      await expect(
+        page.getByTestId(`config-tab-${tab}`),
+        `ядро остановлено: вкладка ${tab} раздела`
+      ).toBeVisible({ timeout: T.page });
     }
+    await expect(page.getByTestId('config-draftbar')).toBeVisible();
+    await expect(page.locator('.api-offline')).toHaveCount(0);
+    await expect(page.getByTestId('kernel-conflict-gate')).toHaveCount(0);
     await page.goto('/#/services');
     await expect(startBtn).toBeVisible({ timeout: T.page });
 

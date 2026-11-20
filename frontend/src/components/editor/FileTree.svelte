@@ -2,7 +2,6 @@
   import { t } from '../../i18n';
   import Icon from '../../lib/components/Icon.svelte';
   import { matchXKeenStoplist } from '../../lib/xkeenStoplist';
-  import { configLayerEnabled } from '../../stores';
   import { filesByPath, type FileState } from '../../lib/configLayer';
   import Badge, { type BadgeTone } from '../Badge.svelte';
   import Button from '../Button.svelte';
@@ -69,9 +68,8 @@
   );
 
   // Владелец (D-05): поле ответа scope=files, без него — по манифесту слоя (файл манифеста —
-  // «Панель», отпущенный — «Пользователь»). Выключенный флаг — без бейджа, как до слоя.
+  // «Панель», отпущенный — «Пользователь»).
   function ownerOf(file: ConfigFileInfo): FileOwner | null {
-    if (!$configLayerEnabled) return null;
     if (file.owner) return file.owner;
     const f = $filesByPath.get(file.path);
     if (!f) return null;
@@ -79,7 +77,6 @@
   }
 
   function stateOf(file: ConfigFileInfo): FileState | undefined {
-    if (!$configLayerEnabled) return undefined;
     return file.state ?? $filesByPath.get(file.path)?.state;
   }
 

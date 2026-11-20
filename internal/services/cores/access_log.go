@@ -291,12 +291,12 @@ func mergeAccessDraft(draft json.RawMessage, path string) (json.RawMessage, erro
 // комментариев, блокировки; файла нет — пресет.
 func (s *Service) takeAccess(ctx context.Context, path string, ackComments bool) (configlayer.ApplyView, error) {
 	return s.d.Layer.ApplyEdit(ctx, func(st configlayer.StateView) (map[string]json.RawMessage, error) {
-		scans, files, err := s.d.Layer.ScanXraySections()
+		scans, _, err := s.d.Layer.ScanXraySections()
 		if err != nil {
 			return nil, err
 		}
 		sc := scans[logID]
-		if code, file := xrayBlock(logID, sc, files, false); code != "" {
+		if code, file := xrayBlock(logID, sc, false); code != "" {
 			return nil, errCode(code, "file", file)
 		}
 		var commentFiles []string

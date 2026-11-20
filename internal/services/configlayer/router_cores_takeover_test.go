@@ -95,7 +95,6 @@ func rtNewCoresEnv(t *testing.T, files map[string]string) *rtCoresEnv {
 	layer, err := New(Options{
 		DataDir:       dir,
 		Roots:         roots,
-		Enabled:       func() bool { return true },
 		Binaries:      func() Binaries { return Binaries{Xray: rtRefreshXrayBin} },
 		DriftInterval: time.Hour,
 		DebounceDelay: 20 * time.Millisecond,

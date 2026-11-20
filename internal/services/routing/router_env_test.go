@@ -16,7 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -149,12 +148,9 @@ func rtNewEnv(t *testing.T, opts ...rtOption) *rtEnv {
 			t.Fatal(err)
 		}
 	}
-	var enabled atomic.Bool
-	enabled.Store(true)
 	layer, err := configlayer.New(configlayer.Options{
 		DataDir: dir,
 		Roots:   roots,
-		Enabled: enabled.Load,
 		Binaries: func() configlayer.Binaries {
 			var b configlayer.Binaries
 			if o.installed.Xray {

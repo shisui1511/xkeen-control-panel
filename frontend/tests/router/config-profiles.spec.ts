@@ -10,10 +10,10 @@ import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
 import {
   addToDraft,
   api,
-  layerFlag,
   nodeLink,
   randomPort,
   resetDraft,
+  waitApplyIdle,
   withPanel
 } from './lib/nodes-api';
 
@@ -22,12 +22,11 @@ import {
 // имена, удаление, профиль без API Mihomo, доступность и 390 px. Ответы сети не подменяются.
 // Сценарии изменяющие: они создают профили rt-ui-* настоящим API, переводят Mihomo между
 // панелью и своими профилями и после каждого теста возвращают прежнее владение и убирают
-// свои профили. Флаг слоя включается на время прогона и возвращается прежним. Если Mihomo
-// был обычным файлом config.yaml (профили не включены), сценарии с переходом пропускаются:
-// усыновление этого файла необратимо.
+// свои профили. Черновик сбрасывается до и после прогона. Если Mihomo был обычным файлом
+// config.yaml (профили не включены), сценарии с переходом пропускаются: усыновление этого
+// файла необратимо.
 
 const PREFIX = 'rt-ui-';
-const layer = layerFlag();
 
 const LOCALES = ['ru', 'en'].map((lang) =>
   fileURLToPath(new URL(`../../src/locales/${lang}.json`, import.meta.url))
@@ -243,8 +242,8 @@ async function removeTestProfiles(page: Page): Promise<void> {
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
-  await layer.enable(browser);
   initial = await withPanel(browser, async (page) => {
+    await resetDraft(page);
     const view = await api(page, 'GET', '/api/configlayer/cores?kernel=mihomo');
     if (view.status !== 200 || view.data?.installed !== true) return null;
     return standState(page);
@@ -261,7 +260,10 @@ test.afterEach(async ({ browser }) => {
 });
 
 test.afterAll(async ({ browser }) => {
-  await layer.restore(browser);
+  await withPanel(browser, async (page) => {
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
+  });
 });
 
 // --- Страница ---

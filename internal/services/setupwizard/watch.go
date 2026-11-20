@@ -85,9 +85,6 @@ func (s *Service) tick() {
 		return
 	}
 	layer := s.d.Layer
-	if !layer.Enabled() {
-		return
-	}
 
 	start := time.Now()
 	seq := s.startSeq()
@@ -99,9 +96,6 @@ func (s *Service) tick() {
 	t = time.Now()
 	ks := s.d.Kernels()
 	kernelsTook := time.Since(t)
-	if !f.Enabled {
-		return
-	}
 	s.storeObservation(observation{seq: seq, inst: inst, xkeen: xkeen, facts: f, ks: ks})
 	ev := evaluate(f, inst, xkeen, ks)
 
@@ -121,7 +115,7 @@ func (s *Service) tick() {
 		s.tickMu.Lock()
 		inst = s.d.Installed()
 		fresh := layer.WizardFacts(probe(inst))
-		if fresh.Enabled && fresh.Status != configlayer.WizardDone && fresh.Status != configlayer.WizardHidden &&
+		if fresh.Status != configlayer.WizardDone && fresh.Status != configlayer.WizardHidden &&
 			evaluate(fresh, inst, s.d.XKeenInstalled(), ks).allDone() {
 			if changed, err := layer.MarkWizard(configlayer.WizardDone); err != nil {
 				// Повтор — на следующем тике. В тексте ошибки записи нет данных источников.

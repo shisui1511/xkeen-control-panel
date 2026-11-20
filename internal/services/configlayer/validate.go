@@ -101,6 +101,14 @@ func ValidateXray(ctx context.Context, tmpBase string, roots Roots, bin string, 
 		return notRun(KernelXray, err)
 	}
 
+	return ValidateXrayTree(ctx, bin, tmp, roots.Xray, env)
+}
+
+// ValidateXrayTree проверяет уже собранную изолированную копию конфигурации.
+func ValidateXrayTree(ctx context.Context, bin, tmp, assetsDir string, env func(dir string) []string) ValidationResult {
+	if bin == "" {
+		return skippedResult(KernelXray, NoteKernelNotInstalled)
+	}
 	// Проверка не идёт во время операции XKeen над ядром; ожидание не съедает
 	// её таймаут (services.AcquireKernelHelper).
 	defer services.AcquireKernelHelper(ctx)()
@@ -108,11 +116,11 @@ func ValidateXray(ctx context.Context, tmpBase string, roots Roots, bin string, 
 	defer cancel()
 	cmd := exec.CommandContext(cctx, bin, "run", "-test", "-confdir", tmp)
 	if env != nil {
-		cmd.Env = env(roots.Xray)
+		cmd.Env = env(assetsDir)
 	}
 	cmd.WaitDelay = ValidateWaitDelay
 	out, runErr := cmd.CombinedOutput()
-	return finishValidation(KernelXray, cctx, runErr, out, tmp, roots.Xray)
+	return finishValidation(KernelXray, cctx, runErr, out, tmp, assetsDir)
 }
 
 // ValidateMihomo проверяет план ядром Mihomo: `<mihomo> -t -d <tmp> -f
@@ -161,13 +169,21 @@ func ValidateMihomo(ctx context.Context, tmpBase string, roots Roots, bin string
 		return notRun(KernelMihomo, err)
 	}
 
+	return ValidateMihomoTree(ctx, bin, tmp, roots.Mihomo)
+}
+
+// ValidateMihomoTree проверяет уже собранную изолированную копию конфигурации.
+func ValidateMihomoTree(ctx context.Context, bin, tmp, workRoot string) ValidationResult {
+	if bin == "" {
+		return skippedResult(KernelMihomo, NoteKernelNotInstalled)
+	}
 	defer services.AcquireKernelHelper(ctx)()
 	cctx, cancel := context.WithTimeout(ctx, ValidateTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, bin, "-t", "-d", tmp, "-f", filepath.Join(tmp, "config.yaml"))
 	cmd.WaitDelay = ValidateWaitDelay
 	out, runErr := cmd.CombinedOutput()
-	return finishValidation(KernelMihomo, cctx, runErr, out, tmp, roots.Mihomo)
+	return finishValidation(KernelMihomo, cctx, runErr, out, tmp, workRoot)
 }
 
 // mihomoConfigAfterPlan возвращает файл, который Mihomo прочтёт как config.yaml

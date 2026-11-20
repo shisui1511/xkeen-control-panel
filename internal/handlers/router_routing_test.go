@@ -31,8 +31,7 @@ import (
 // Проверка API маршрутизации на настоящей панели устройства: маршруты
 // /api/configlayer/routing* вызываются по HTTPS с сессией, созданной на ПК
 // (routertest.Panel). Вердикт — коды и тела ответов панели, файлы ядер на диске
-// устройства и Clash API Mihomo через панель. Флаг слоя «Конфигурация» на время
-// проверки переключается и возвращается прежним, маршрутизация возвращается
+// устройства и Clash API Mihomo через панель. Маршрутизация возвращается
 // «Отпустить» + «Применить», черновик после сценария сбрасывается. В сообщения
 // попадают только коды и числа.
 
@@ -369,14 +368,14 @@ func (e *rtSrc) rtRtExpectReleased(tg routertest.Target, before rtRtDiskState) {
 	}
 }
 
-// Трасса: флаг → «Мои узлы» → группы по умолчанию → группа → take → «Применить» →
+// Трасса: «Мои узлы» → группы по умолчанию → группа → take → «Применить» →
 // маршрутизация активного ядра у панели → release → «Применить» → всё как было.
 // Метка ядра: тест читает активное ядро и меняет его маршрутизацию.
 func TestRouterRoutingAPIFlow(t *testing.T) {
 	routertest.Slow(t, "серия «Применить» по API маршрутизации с перезапуском ядра")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	e.rtRtPurge()
 	contract := rtLoadContractFile(t, routertest.RoutingContractFile(t))
@@ -385,7 +384,7 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 
 	// Маршрутизация и следы сценария убираются при любом исходе: release →
 	// «Применить», затем очистка узлов и секций. Cleanup регистрируется после
-	// enableLayer и потому идёт раньше сброса черновика и возврата флага.
+	// freshDraft и потому идёт раньше сброса черновика.
 	t.Cleanup(func() {
 		c := e.with(t)
 		if taken {
@@ -1376,7 +1375,7 @@ func (e *rtSrc) rtRtLongwaitPair(core, kind, gid, secondID string, check func(t 
 	return maxWait, secondWait
 }
 
-// Выбор участника ручной группы: флаг → два узла → ручная группа → take → «Применить»
+// Выбор участника ручной группы: два узла → ручная группа → take → «Применить»
 // → вид работающих прокси → POST select → «Сейчас» в представлении, now группы в
 // Mihomo или исходящий группы в Xray (горячая замена без смены PID Xray) → вид и
 // «Сейчас» страницы «Прокси» → пачка пинга с присоединением и отменой →
@@ -1386,7 +1385,7 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	routertest.Slow(t, "серия «Применить» и переключение группы на живом ядре")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	e.rtRtPurge()
 	contract := rtLoadContractFile(t, routertest.RoutingContractFile(t))
@@ -2360,12 +2359,12 @@ func rtRtHasRulesFromPreset(view map[string]any) bool {
 // ядра нет: тест меняет только черновик и не читает активное ядро.
 func TestRouterRoutingPresetsAndLists(t *testing.T) {
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	e.rtRtPurge()
 	contract := rtLoadContractFile(t, routertest.RoutingContractFile(t))
 	// Черновик с пресетом и узлом не применяется: при выходе узлы и секции
-	// убираются из черновика, затем enableLayer сбрасывает его к применённому.
+	// убираются из черновика, затем freshDraft сбрасывает его к применённому.
 	t.Cleanup(func() { e.with(t).rtRtPurge() })
 	e.rtRstAddMyNode(rtRtUniqueLink(t))
 
@@ -2489,23 +2488,11 @@ var rtRoutingRoutes = []struct{ method, path string }{
 	{http.MethodPost, "/api/configlayer/proxies/confirm"},
 }
 
-// Флаг слоя выключен: каждый маршрут маршрутизации отвечает 404 config_layer_disabled.
-func TestRouterRoutingFlagOff404(t *testing.T) {
-	e := rtNewSrc(t)
-	e.setLayer(false)
-	for _, rt := range rtRoutingRoutes {
-		r := e.call(rt.method, rt.path, rtBody(rt.method))
-		if r.Status != http.StatusNotFound || r.Code != "config_layer_disabled" {
-			t.Errorf("%s %s: статус %d, код %q; ожидалось 404 config_layer_disabled", rt.method, rt.path, r.Status, r.Code)
-		}
-	}
-}
-
 // Без сессии маршруты отвечают 401, изменяющие без X-CSRF-Token — 403; метод не из
 // контракта — 405. Ответы читаемых маршрутов совпадают с routingContract.json по ключам.
 func TestRouterRoutingProtected(t *testing.T) {
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	for _, rt := range rtRoutingRoutes {
 		var body []byte
 		if rt.method == http.MethodPost {

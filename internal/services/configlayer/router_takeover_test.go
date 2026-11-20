@@ -150,9 +150,7 @@ type rtTakeoverEnv struct {
 	rev    int64
 	hashes map[string]string
 	link   string
-	// enabled — флаг config_layer окружения; noMihomo скрывает бинарник Mihomo
-	// (ядро «ещё не установлено»).
-	enabled  atomic.Bool
+	// noMihomo скрывает бинарник Mihomo (ядро «ещё не установлено»).
 	noMihomo atomic.Bool
 }
 
@@ -210,12 +208,9 @@ func rtNewTakeoverEnvKind(t *testing.T, plain bool) *rtTakeoverEnv {
 	dir := rtLiveDir(t)
 	roots, hashes, link := rtWriteTakeoverLayout(t, dir, plain)
 	e := &rtTakeoverEnv{gen: &rtTakeoverGen{}, roots: roots, hashes: hashes, link: link}
-	e.enabled.Store(true)
-
 	layer, err := New(Options{
 		DataDir: dir,
 		Roots:   roots,
-		Enabled: e.enabled.Load,
 		Binaries: func() Binaries {
 			if e.noMihomo.Load() {
 				return Binaries{Xray: rtRefreshXrayBin}
@@ -545,7 +540,7 @@ func TestRouterTakeoverScan(t *testing.T) {
 	}
 	before := rtDirSnapshot(t, dir)
 
-	files, api, err := ScanXrayRouting(roots.Xray, nil)
+	files, api, err := ScanXrayRouting(roots.Xray)
 	if err != nil {
 		t.Fatalf("ScanXrayRouting: %v", err)
 	}
@@ -604,12 +599,12 @@ func TestRouterTakeoverScan(t *testing.T) {
 	t.Run("jsonc", func(t *testing.T) {
 		// Файл routing с комментариями — «чистый»: переносится целиком.
 		rf := rtScanFile(t, files, rtTkRoutingFile)
-		if !rf.Pure || rf.Broken || rf.Legacy || !containsString(pv.Xray.Move, rtTkRoutingFile) {
+		if !rf.Pure || rf.Broken || !containsString(pv.Xray.Move, rtTkRoutingFile) {
 			t.Errorf("файл routing с комментариями не чистый: %+v", rf)
 		}
 	})
 
-	t.Run("mixed_broken_legacy_panel", func(t *testing.T) {
+	t.Run("mixed_broken_panel", func(t *testing.T) {
 		d := rtLiveDir(t)
 		xr := filepath.Join(d, "xray")
 		if err := os.MkdirAll(xr, 0o755); err != nil {
@@ -619,7 +614,6 @@ func TestRouterTakeoverScan(t *testing.T) {
 			clean    = "12_clean.json"
 			mixed    = "10_mixed.json"
 			broken   = "11_broken.json"
-			legacy   = "05_routing.sub_test.json"
 			linked   = "13_linked.json"
 			rtTkPure = `{"routing": {"rules": [{"type": "field", "network": "tcp", "outboundTag": "direct"}]}}` + "\n"
 		)
@@ -627,7 +621,6 @@ func TestRouterTakeoverScan(t *testing.T) {
 			clean:  rtTkPure,
 			mixed:  `{"routing": {"rules": []}, "policy": {"levels": {"0": {"handshake": 4}}}}` + "\n",
 			broken: `{"routing": {"rules": [` + "\n",
-			legacy: rtTkPure,
 			// Файл панели в скан не попадает.
 			rtTkPanelRoute: rtTkPure,
 		}
@@ -647,8 +640,7 @@ func TestRouterTakeoverScan(t *testing.T) {
 		}
 		snap := rtDirSnapshot(t, d)
 
-		foreign := func(kernel, rel string) bool { return kernel == KernelXray && rel == legacy }
-		fs, _, err := ScanXrayRouting(xr, foreign)
+		fs, _, err := ScanXrayRouting(xr)
 		if err != nil {
 			t.Fatalf("битый файл ломает скан: %v", err)
 		}
@@ -660,9 +652,6 @@ func TestRouterTakeoverScan(t *testing.T) {
 		}
 		if rf := rtScanFile(t, fs, broken); rf.Pure || !rf.Broken {
 			t.Errorf("битый JSON должен быть смешанным: %+v", rf)
-		}
-		if rf := rtScanFile(t, fs, legacy); !rf.Legacy || rf.Pure {
-			t.Errorf("файл старого слоя должен быть помечен и не чистым: %+v", rf)
 		}
 		for _, f := range fs {
 			if f.Name == rtTkPanelRoute {
@@ -677,10 +666,8 @@ func TestRouterTakeoverScan(t *testing.T) {
 		if want := []string{mixed, broken, linked}; !rtSameStrings(got.Xray.Left, want) {
 			t.Errorf("Left: %v, ожидалось %v", got.Xray.Left, want)
 		}
-		for _, n := range []string{legacy, rtTkPanelRoute} {
-			if containsString(got.Xray.Move, n) || containsString(got.Xray.Left, n) {
-				t.Errorf("%s не должен ни переноситься, ни числиться оставленным: %+v", n, got.Xray)
-			}
+		if containsString(got.Xray.Move, rtTkPanelRoute) || containsString(got.Xray.Left, rtTkPanelRoute) {
+			t.Errorf("%s не должен ни переноситься, ни числиться оставленным: %+v", rtTkPanelRoute, got.Xray)
 		}
 
 		// Скан и предпросмотр ничего не трогают, в том числе битый файл.

@@ -124,7 +124,9 @@
         "internal/services/preflight_content.go",
         "internal/services/mihomo.go",
         "internal/services/setupwizard/**",
-        "internal/handlers/setup_wizard.go"
+        "internal/handlers/setup_wizard.go",
+        "internal/services/legacyarchive/**",
+        "internal/handlers/legacy.go"
       ],
       "canary": {
         "go": "TestRouterTakeoverApplyAndRelease",
@@ -160,7 +162,6 @@
             "go:TestRouterCheckerBlocksApply",
             "go:TestRouterTakeoverValidationFailKeepsAll",
             "go:TestRouterExclusiveGeodata",
-            "go:TestRouterExclusiveFlagRecheck",
             "go:TestRouterSettleSection"
           ]
         },
@@ -182,8 +183,8 @@
           "tests": [
             "go:TestRouterConfigFilesScope",
             "go:TestRouterProfileTargetKeepsXKeen",
-            "go:TestRouterDisableReleasesRouting",
-            "go:TestRouterCoresDisableReturnsOriginals",
+            "go:TestRouterRoutingReleaseLifecycle",
+            "go:TestRouterCoresReleaseReturnsOriginals",
             "go:TestRouterLayerRestore"
           ]
         },
@@ -222,7 +223,7 @@
             "internal/services/configlayer/types.go"
           ],
           "tests": [
-            "go:TestRouterCoresDisableReturnsOriginals",
+            "go:TestRouterCoresReleaseReturnsOriginals",
             "go:TestRouterCoresSectionDrift",
             "go:TestRouterCoresScanXray",
             "go:TestRouterCoresScanMihomoActive",
@@ -269,7 +270,7 @@
             "go:TestRouterTakeoverApplyAndRelease",
             "go:TestRouterTakeoverValidationFailKeepsAll",
             "go:TestRouterTakeoverScan",
-            "go:TestRouterDisableReleasesRouting",
+            "go:TestRouterRoutingReleaseLifecycle",
             "go:TestRouterRoutingDrift",
             "go:TestRouterKernelInstalledAutoTake",
             "go:TestRouterProfileSplitOps",
@@ -279,8 +280,7 @@
             "go:TestRouterMihomoSwitchDraftOpen",
             "go:TestRouterMihomoSwitchRollback",
             "go:TestRouterConfigApplyRestartsRunningKernel",
-            "go:TestRouterCoresDisableReturnsOriginals",
-            "go:TestRouterExclusiveFlagRecheck"
+            "go:TestRouterCoresReleaseReturnsOriginals"
           ]
         },
         "config-draft": {
@@ -301,17 +301,14 @@
           "tests": [
             "go:TestRouterLiveStore",
             "go:TestRouterLiveLayer",
-            "go:TestRouterLiveDisabled",
             "go:TestRouterSectionLive",
             "go:TestRouterLayerSectionLiveHooks",
             "go:TestRouterLayerRestore",
             "go:TestRouterSourceNotices",
             "go:TestRouterPublishSources",
             "go:TestRouterSourceRefresh",
-            "go:TestRouterSourceRefreshDisabled",
             "go:TestRouterApplyRevisionSnapshot",
             "go:TestRouterDraftEditWithDirtyDisk",
-            "go:TestRouterLegacyEntriesBlocked",
             "tests/router/config-cascade.spec.ts"
           ]
         },
@@ -326,10 +323,27 @@
           ],
           "tests": [
             "go:TestRouterWizardState",
-            "go:TestRouterWizardFlagOff404",
             "go:TestRouterWizardAPI",
             "go:TestRouterWizardConflict",
             "tests/router/config-setup.spec.ts"
+          ]
+        },
+        "config-legacy": {
+          "title": "Уход со старого слоя: архив старых данных, следы в каталогах ядер, окно чистого старта",
+          "paths": [
+            "internal/services/legacyarchive/**",
+            "internal/services/configlayer/legacy.go",
+            "internal/services/configlayer/backup.go",
+            "internal/services/configlayer/validate.go",
+            "internal/services/configlayer/layer.go",
+            "internal/services/configlayer/types.go",
+            "internal/services/configlayer/view.go",
+            "internal/services/configlayer/events.go",
+            "internal/handlers/legacy.go"
+          ],
+          "tests": [
+            "go:TestRouterLegacyArchive",
+            "go:TestRouterLegacyAPI"
           ]
         }
       }
@@ -354,9 +368,7 @@
         "internal/services/geodata/**",
         "internal/services/assets/**",
         "internal/handlers/geodata.go",
-        "internal/handlers/dat.go",
-        "internal/handlers/assets.go",
-        "internal/services/dat.go"
+        "internal/handlers/assets.go"
       ],
       "canary": {
         "go": "TestRouterGeodataRemoveAfterApply",
@@ -374,12 +386,11 @@
         "internal/handlers/proxies.go",
         "internal/handlers/route_tracer.go",
         "internal/handlers/rule_provider_inspect.go",
-        "internal/handlers/user_rules.go",
         "internal/handlers/smartproxy.go",
         "internal/services/route_tracer.go",
         "internal/services/route_matcher.go",
+        "internal/services/mihomo_geotag.go",
         "internal/services/rule_provider_inspect.go",
-        "internal/services/user_rules.go",
         "internal/services/smartproxy.go"
       ],
       "canary": {
@@ -395,19 +406,16 @@
         "internal/nodes/*.go",
         "internal/services/sources/**",
         "internal/handlers/sources.go",
-        "internal/handlers/subscription.go",
-        "internal/handlers/proxy_providers.go",
-        "internal/handlers/outbound.go",
         "internal/handlers/delay_guard.go",
         "internal/handlers/xray.go",
-        "internal/services/subscription*.go",
-        "internal/services/node_metadata.go",
-        "internal/services/xray.go"
+        "internal/services/xray.go",
+        "internal/services/xray_api_block.go",
+        "internal/services/hwid.go"
       ],
       "canary": {
         "go": "TestRouterApplyWithIncompatibleNodes",
         "spec": null,
-        "reason": "спеки области длиннее 30 с (config-nodes-list около 32 с на Mihomo) или несут тег ядра (subscription) — кандидат 148.1.1"
+        "reason": "спеки области длиннее 30 с (config-nodes-list около 32 с на Mihomo) или несут тег ядра (config-nodes-modals) — кандидат 148.1.1"
       }
     },
     "profiles": {
@@ -416,19 +424,14 @@
       "paths": [
         "internal/templates/**",
         "internal/handlers/mihomo_profiles.go",
-        "internal/handlers/mihomo_migrate.go",
-        "internal/handlers/template.go",
         "internal/services/mihomo_profile*.go",
-        "internal/services/mihomo_config_backup.go",
-        "internal/services/mihomo_migrate.go",
-        "internal/services/mihomo_yaml.go",
-        "internal/services/smart_merge.go",
+        "internal/services/mihomo_const.go",
         "internal/services/template.go"
       ],
       "canary": {
         "go": "TestRouterProfileSaveMirror",
         "spec": null,
-        "reason": "спек mihomo-undo-profile (бывшая канарейка) целиком под меткой известного падения router-harness-undo-spec-gen-layout до 2026-11-25: канарейка под такой меткой ничего не ловит; вернуть спек после закрытия todo"
+        "reason": "Go-канарейка покрывает путь сохранения профиля; длительность спеков области (config-profiles, config-profiles-deps, config-cores-profile) для канарейки не измерена — кандидат 148.1.1"
       }
     },
     "access-log": {
@@ -556,7 +559,7 @@
             "internal/i18n/**"
           ],
           "tests": [
-            "go:TestRouterLegacyEntriesBlocked"
+            "go:TestRouterUpdateChannels"
           ]
         },
         "server-system": {
@@ -752,11 +755,9 @@
         "go:TestRouterRulesModel",
         "go:TestRouterSchedulerAddressChangeAfterApply",
         "go:TestRouterSchedulerBacksOffAfterSnapshotFailure",
-        "go:TestRouterSchedulerFlagOffZeroRequests",
         "go:TestRouterSchedulerNetworkRetries",
         "go:TestRouterSelectMihomoReconcile",
         "go:TestRouterSelectXrayFaults",
-        "go:TestRouterShareLinks",
         "go:TestRouterSourcesMyNodesFlow",
         "go:TestRouterSourcesSubscriptionFlow",
         "go:TestRouterSourcesTracer",

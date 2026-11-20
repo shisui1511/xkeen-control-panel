@@ -139,7 +139,7 @@ func memberString(m Member) string {
 // первыми (D-36). Пусто — допустимых участников нет. Общий для генераторов и
 // представления (146-14, 146-15): они передают ссылки узлов своего ядра.
 func effectiveSelection(g Group, sel string, avail func(member string) bool, nodeRefs ...string) string {
-	cands := make([]string, 0, len(g.Members)+len(nodeRefs))
+	cands := make([]string, 0, len(g.Members))
 	for _, m := range g.Members {
 		if s := memberString(m); s != "" {
 			cands = append(cands, s)
@@ -418,7 +418,7 @@ func (b *xrayBuild) build() ([]configlayer.GeneratedFile, error) {
 		return nil, err
 	}
 
-	rules := make([]any, 0, len(b.rules.Items)+len(b.loopRules)+5)
+	rules := make([]any, 0, len(b.rules.Items))
 	if b.apiInbound {
 		// D-43: правило api первым, входящий api остаётся в чужом файле.
 		rules = append(rules, map[string]any{"inboundTag": []string{"api"}, "outboundTag": "api"})
@@ -589,7 +589,7 @@ func (b *xrayBuild) checkSelectors() error {
 	if len(b.balancers) == 0 {
 		return nil
 	}
-	all := make([]string, 0, len(b.catalog)+len(b.groups)+2)
+	all := make([]string, 0, len(b.catalog))
 	for _, n := range b.catalog {
 		if n.XrayTag != "" {
 			all = append(all, n.XrayTag)

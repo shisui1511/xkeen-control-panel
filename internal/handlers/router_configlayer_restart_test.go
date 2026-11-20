@@ -19,12 +19,12 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 )
 
-// «Применить» и выключение флага слоя при запущенном ядре на настоящей панели
-// устройства. Вердикт — процессы ядра в /proc (pidof, независимо от панели), файлы
-// слоя на диске и итог конвейера из GET /api/configlayer/state. Перезапуск идёт
-// через настоящий XKeen: «xkeen -restart» возвращается раньше, чем завершается
-// старый процесс ядра, и подтверждение перезапуска не должно засчитывать его как
-// «запущен» (D-28, FND-06). Узел — обезличенная фикстура internal/nodes/testdata/links.
+// «Применить» при запущенном ядре на настоящей панели устройства. Вердикт —
+// процессы ядра в /proc (pidof, независимо от панели), файлы слоя на диске и итог
+// конвейера из GET /api/configlayer/state. Перезапуск идёт через настоящий XKeen:
+// «xkeen -restart» возвращается раньше, чем завершается старый процесс ядра, и
+// подтверждение перезапуска не должно засчитывать его как «запущен» (D-28,
+// FND-06). Узел — обезличенная фикстура internal/nodes/testdata/links.
 
 const (
 	// rtRstApplyTimeout — предел ожидания итога «Применить»: на mipsle XKeen
@@ -321,12 +321,11 @@ func TestRouterConfigApplyRestartsRunningKernel(t *testing.T) {
 	var layerPath string // путь файла слоя «Моих узлов» текущего ядра
 
 	// Провал посреди сценария не оставляет узел в применённом состоянии: следующие
-	// проверки работают с тем же стендом. Выполняется до возврата флага слоя.
+	// проверки работают с тем же стендом.
 	t.Cleanup(func() {
 		if !t.Failed() {
 			return
 		}
-		root.setLayer(true)
 		root.rtRstIdle()
 		if id := root.rtRstMyEntry(); id != "" {
 			root.rtRstDeleteMyNode(id)
@@ -338,7 +337,6 @@ func TestRouterConfigApplyRestartsRunningKernel(t *testing.T) {
 
 	t.Run("подготовка", func(t *testing.T) {
 		e := root.with(t)
-		e.setLayer(true)
 		e.rtRstIdle()
 		e.resetDraft()
 		// Узел прошлых прогонов не должен превращать «Применить» в «нечего применять».
@@ -404,34 +402,12 @@ func TestRouterConfigApplyRestartsRunningKernel(t *testing.T) {
 		}
 	})
 
-	t.Run("выключение флага", func(t *testing.T) {
-		e := root.with(t)
-		pidBefore := rtRstKernelPID(t, kernel)
-		r := e.callSlow(http.MethodPost, "/api/settings/config-layer", map[string]bool{"enabled": false})
-		// Mihomo без external-controller (так настроен стенд mipsle) подтверждается
-		// только по процессу: Clash API у него нет, ждать его незачем.
-		if r.Status != http.StatusOK {
-			t.Fatalf("выключение слоя: %d %s %s", r.Status, r.Code, r.Detail)
-		}
-		pid := rtRstKernelPID(t, kernel)
-		if kernel == "xray" {
-			if pid == pidBefore {
-				t.Fatalf("PID xray не сменился при выключении слоя (%d)", pidBefore)
-			}
-			rtRstHoldPID(t, kernel, pid)
-		}
-		if rtRstExists(layerPath) {
-			t.Fatalf("файл слоя %s остался после выключения", layerPath)
-		}
-	})
-
 	t.Run("возврат стенда", func(t *testing.T) {
 		e := root.with(t)
-		e.setLayer(true)
 		e.rtRstIdle()
 		id := e.rtRstMyEntry()
 		if id == "" {
-			t.Fatal("после повторного включения слоя узла «Моих узлов» нет")
+			t.Fatal("перед возвратом стенда узла «Моих узлов» нет")
 		}
 		e.rtRstDeleteMyNode(id)
 		pidBefore := rtRstKernelPID(t, kernel)

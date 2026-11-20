@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { t } from '../../i18n';
+  import { t, tp } from '../../i18n';
   import Icon from '../../lib/components/Icon.svelte';
+  import Button from '../Button.svelte';
+  import { cleanLegacy, legacyErrorReason } from '../../lib/configLegacy';
   import {
     visibleNotices,
     dismissNotice,
@@ -10,7 +12,7 @@
     selectBgReason,
     type LayerNotice
   } from '../../lib/configLayer';
-  import { editorOpenRequest } from '../../stores';
+  import { editorOpenRequest, showConfirm, showToast } from '../../stores';
   // Часы с шагом в минуту: текст «повтор через N мин» не застывает на момент сборки
   import { minuteClock, formatDate } from '../../lib/nodesView';
 
@@ -22,6 +24,19 @@
     cabinet?: string;
     // Идентификаторы всех слитых уведомлений: закрытие снимает их разом
     ids: string[];
+    // Следы старой панели (legacy_leftovers): строки списка и кнопка «Убрать» вместо крестика
+    legacy?: LegacyLeftovers;
+  };
+
+  type LegacyRow = { file: string; what: string };
+  type LegacyLeftovers = {
+    rows: LegacyRow[];
+    more: number;
+    /** Файлы, которые «Убрать» действительно изменит (без причины отказа). */
+    count: number;
+    /** Файлы ядер есть, но все с отказом: убирать нечего, правка — вручную. */
+    manualOnly: boolean;
+    filesLink: boolean;
   };
 
   interface Props {
@@ -286,6 +301,93 @@
     }
   }
 
+  // Строк списка следов в уведомлении; остальные — строкой «и ещё n»
+  const LEGACY_ROWS = 5;
+
+  // Строки параметра сервера, разделённые переводом строки; пустые отбрасываются
+  function lines(raw: string | undefined): string[] {
+    return (raw ?? '').split('\n').filter((l) => l !== '');
+  }
+
+  // Файлы ядер, где старая панель оставляет блок «Свои правила»; прочие находки — её
+  // собственные файлы выбора узла и фрагменты подписок в каталоге Xray
+  const LEGACY_DIR = 'legacy';
+  const LEGACY_RULE_FILES = ['xray/05_routing.json', 'mihomo/config.yaml'];
+
+  // Следы старой панели в файлах ядер (фаза 151, D-04, D-05). Сервер даёт только имена файлов
+  // внутри каталогов ядер (`<ядро>/<файл>`) и безопасные причины отказа, без содержимого
+  function describeLegacy(n: LayerNotice): Described | null {
+    const p = n.params ?? {};
+    if (n.id === 'legacy_cleanup_failed') {
+      return {
+        notice: n,
+        tone: 'warning',
+        text: $t('cfg.notice.legacy_cleanup_failed', { reason: n.reason ?? p.reason ?? '' })
+      };
+    }
+    if (n.id === 'legacy_archive_failed') {
+      return {
+        notice: n,
+        tone: 'warning',
+        text: $t('cfg.notice.legacy_archive_failed', { reason: n.reason ?? p.reason ?? '' })
+      };
+    }
+    if (n.id !== 'legacy_leftovers') return null;
+    const files = lines(p.files);
+    // Без прототипа: имя файла не совпадёт со свойством объекта
+    const blocked: Record<string, string | undefined> = Object.create(null);
+    for (const line of lines(p.blocked)) {
+      const at = line.indexOf(' — ');
+      if (at > 0) blocked[line.slice(0, at)] = line.slice(at + 3);
+    }
+    // Сбой проверки («legacy» — архив, «<ядро>/.» — каталог ядра) — не файл ядра: «Убрать»
+    // его не уберёт, в счёт файлов не входит; такие строки идут после файлов ядер и показываются
+    // все (их не больше трёх), а «и ещё n» считает только файлы ядер
+    const isDir = (file: string) => file === LEGACY_DIR || file.endsWith('/.');
+    const kernelFiles = files.filter((f) => !isDir(f));
+    const dirFindings = files.filter(isDir);
+    // Файл с причиной отказа сервер в план правок не берёт: «Убрать» его не изменит
+    const removable = kernelFiles.filter((f) => !blocked[f]).length;
+    const describeRow = (file: string) => {
+      const reason = blocked[file];
+      if (isDir(file)) {
+        const base =
+          file === LEGACY_DIR
+            ? $t('cfg.notice.legacy_kind_archive')
+            : $t('cfg.notice.legacy_kind_kernel_dir', {
+                kernel: KERNEL_LABELS[file.slice(0, -2)] ?? file.slice(0, -2)
+              });
+        return {
+          file: file === LEGACY_DIR ? file : file.slice(0, -1),
+          what: reason ? base + '; ' + $t('cfg.notice.legacy_dir_reason', { reason }) : base
+        };
+      }
+      let what = LEGACY_RULE_FILES.includes(file)
+        ? $t('cfg.notice.legacy_kind_rules')
+        : $t('cfg.notice.legacy_kind_select');
+      if (reason) what += '; ' + $t('cfg.notice.legacy_blocked', { reason });
+      return { file, what };
+    };
+    const rows = [...kernelFiles.slice(0, LEGACY_ROWS), ...dirFindings].map(describeRow);
+    return {
+      notice: n,
+      tone: 'warning',
+      text:
+        kernelFiles.length > 0
+          ? $tp('cfg.notice.legacy_leftovers', kernelFiles.length)
+          : $t('cfg.notice.legacy_dir_only'),
+      legacy: {
+        rows,
+        more: Math.max(0, kernelFiles.length - LEGACY_ROWS),
+        count: removable,
+        manualOnly: kernelFiles.length > 0 && removable === 0,
+        // «Файлы» показывают файлы ядер; архив там исключён, поэтому для сбоя только в архиве
+        // ссылки нет
+        filesLink: kernelFiles.length > 0 || dirFindings.some((f) => f !== LEGACY_DIR)
+      }
+    };
+  }
+
   // Уведомления известных видов; неизвестные идентификаторы не показываем
   function describe(n: LayerNotice): Described | null {
     if (n.id === 'schema_reset') {
@@ -308,7 +410,13 @@
         })
       };
     }
-    return describeSource(n) ?? describeRouting(n) ?? describeGeodata(n) ?? describeDns(n);
+    return (
+      describeSource(n) ??
+      describeRouting(n) ??
+      describeGeodata(n) ??
+      describeDns(n) ??
+      describeLegacy(n)
+    );
   }
 
   // Уведомления о связи и об отказе провайдера сервер ведёт по одному на ядро, а в тексте
@@ -354,6 +462,42 @@
     if (firstDriftPath !== null) editorOpenRequest.set(firstDriftPath);
   }
 
+  // «Убрать»: подтверждение, затем запрос; пока он идёт, повторное нажатие не уходит, а
+  // остальные действия страницы («Применить», правки) не блокируются. Уведомление исчезает
+  // само, когда перечитанный снимок больше его не содержит
+  let cleaning = $state(false);
+
+  async function cleanLeftovers(count: number) {
+    if (cleaning) return;
+    const ok = await showConfirm({
+      title: $t('cfg.notice.legacy_confirm_title'),
+      message: $tp('cfg.notice.legacy_confirm_text', count),
+      confirmLabel: $t('cfg.notice.legacy_clean'),
+      cancelLabel: $t('app.cancel'),
+      variant: 'warning'
+    });
+    if (!ok || cleaning) return;
+    cleaning = true;
+    try {
+      await cleanLegacy();
+      showToast('success', $t('cfg.notice.legacy_clean_done'));
+    } catch (err) {
+      // Другая операция слоя или ядра ещё идёт: правки не было, это не сбой уборки
+      const code = (err as { code?: unknown } | null)?.code;
+      if (code === 'apply_busy' || code === 'kernel_op_in_progress') {
+        showToast('info', $t('cfg.notice.legacy_clean_busy'), 8000);
+      } else {
+        showToast(
+          'error',
+          $t('cfg.notice.legacy_clean_failed', { reason: legacyErrorReason(err) }),
+          8000
+        );
+      }
+    } finally {
+      cleaning = false;
+    }
+  }
+
   async function dismiss(ids: string[]) {
     try {
       for (const id of ids) await dismissNotice(id);
@@ -381,30 +525,74 @@
       >
     </div>
   {/if}
-  {#each shown as { notice, tone, text, cabinet, ids } (notice.id)}
-    <div class="alert alert-{tone} alert-dismissible" role="alert" data-notice={notice.id}>
-      <Icon name={tone === 'info' ? 'info' : 'warning'} size={16} />
-      <span class="notice-text"
-        >{text}
-        {#if cabinet}
-          <a
-            class="notice-link"
-            href={cabinet}
-            target="_blank"
-            rel="noopener noreferrer"
-            data-testid="notice-cabinet-link">{$t('cfg.notice.cabinet_link')}</a
-          >
-        {/if}</span
-      >
-      <button
-        type="button"
-        class="alert-close-btn"
-        aria-label={$t('app.dismiss')}
-        onclick={() => void dismiss(ids)}
-      >
-        &times;
-      </button>
-    </div>
+  {#each shown as { notice, tone, text, cabinet, ids, legacy } (notice.id)}
+    {#if legacy}
+      <div class="alert alert-{tone}" role="status" data-notice={notice.id}>
+        <Icon name="warning" size={16} />
+        <div class="notice-text notice-body">
+          <span>{text}</span>
+          <ul class="legacy-files" data-testid="legacy-leftovers-files">
+            {#each legacy.rows as row, i (i)}
+              <li><code class="legacy-file">{row.file}</code> — {row.what}</li>
+            {/each}
+            {#if legacy.more > 0}
+              <li>{$t('cfg.notice.legacy_more', { n: legacy.more })}</li>
+            {/if}
+          </ul>
+          {#if legacy.count > 0}
+            <span class="legacy-note">{$t('cfg.notice.legacy_backup')}</span>
+          {:else if legacy.manualOnly}
+            <span class="legacy-note">{$t('cfg.notice.legacy_manual_only')}</span>
+          {/if}
+          {#if legacy.count > 0 || legacy.filesLink}
+            <span class="legacy-actions">
+              {#if legacy.count > 0}
+                <Button
+                  variant="secondary"
+                  class="tap-zone-44"
+                  loading={cleaning}
+                  testid="legacy-leftovers-clean"
+                  onclick={() => void cleanLeftovers(legacy.count)}
+                >
+                  {$t('cfg.notice.legacy_clean')}
+                </Button>
+              {/if}
+              {#if legacy.filesLink}
+                <a
+                  class="notice-link"
+                  href="#/config/files"
+                  data-testid="legacy-leftovers-files-link">{$t('cfg.files.drift_notice_link')}</a
+                >
+              {/if}
+            </span>
+          {/if}
+        </div>
+      </div>
+    {:else}
+      <div class="alert alert-{tone} alert-dismissible" role="alert" data-notice={notice.id}>
+        <Icon name={tone === 'info' ? 'info' : 'warning'} size={16} />
+        <span class="notice-text"
+          >{text}
+          {#if cabinet}
+            <a
+              class="notice-link"
+              href={cabinet}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-testid="notice-cabinet-link">{$t('cfg.notice.cabinet_link')}</a
+            >
+          {/if}</span
+        >
+        <button
+          type="button"
+          class="alert-close-btn"
+          aria-label={$t('app.dismiss')}
+          onclick={() => void dismiss(ids)}
+        >
+          &times;
+        </button>
+      </div>
+    {/if}
   {/each}
 </section>
 
@@ -443,10 +631,51 @@
     overflow-wrap: anywhere;
   }
 
+  /* Следы старой панели: текст, список файлов, пояснение и действия столбиком */
+  .notice-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+  }
+
+  .legacy-files {
+    margin: 0;
+    padding-left: var(--spacing-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1);
+  }
+
+  .legacy-file {
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-sm);
+    overflow-wrap: anywhere;
+  }
+
+  .legacy-note {
+    font-size: var(--font-size-sm);
+  }
+
+  .legacy-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--spacing-3);
+  }
+
   .notice-link {
     color: inherit;
     font-weight: 600;
     text-decoration: underline;
     white-space: nowrap;
+  }
+
+  /* Ссылка в действиях уведомления — зона нажатия не ниже 44px на сенсорных и узких экранах */
+  @media (pointer: coarse), (max-width: 768px) {
+    .legacy-actions .notice-link {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+    }
   }
 </style>

@@ -7,6 +7,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 )
@@ -22,8 +22,7 @@ import (
 // Проверка API источников на настоящей панели устройства: маршруты
 // /api/configlayer/sources* вызываются по HTTPS с сессией, созданной на ПК
 // (routertest.Panel). Вердикт — коды и тела ответов панели, контракт ключей —
-// frontend/src/lib/sourcesContract.json. Флаг слоя «Конфигурация» на время
-// проверки переключается и возвращается прежним; черновик после сценариев
+// frontend/src/lib/sourcesContract.json. Черновик перед сценариями и после них
 // сбрасывается. Подписка идёт из XCP_RT_SUBSCRIPTION_URL, полный адрес в
 // сообщения не попадает.
 
@@ -58,11 +57,7 @@ type rtSrc struct {
 
 func rtNewSrc(t *testing.T) *rtSrc {
 	t.Helper()
-	e := &rtSrc{t: t, p: routertest.NewPanel(t)}
-	// Флаг слоя возвращается прежним в любом случае.
-	orig := e.layerFlag()
-	t.Cleanup(func() { e.setLayer(orig) })
-	return e
+	return &rtSrc{t: t, p: routertest.NewPanel(t)}
 }
 
 func (e *rtSrc) decode(status int, raw []byte) rtSrcResp {
@@ -91,38 +86,6 @@ func (e *rtSrc) callSlow(method, path string, in any) rtSrcResp {
 	return e.decode(status, raw)
 }
 
-func (e *rtSrc) layerFlag() bool {
-	e.t.Helper()
-	r := e.call(http.MethodGet, "/api/settings", nil)
-	if r.Status != http.StatusOK {
-		e.t.Fatalf("GET /api/settings: %d", r.Status)
-	}
-	flag, _ := r.object(e.t)["config_layer"].(bool)
-	return flag
-}
-
-func (e *rtSrc) setLayer(on bool) {
-	e.t.Helper()
-	if e.layerFlag() == on {
-		return
-	}
-	// Включение запускает фоновую сборку (flag_on): пока она идёт, выключение отвечает
-	// 409 apply_busy (на arm64 сборка не успевает закончиться к очистке теста).
-	deadline := time.Now().Add(90 * time.Second)
-	for {
-		// Выключение слоя с файлами перезапускает ядра внутри запроса.
-		r := e.callSlow(http.MethodPost, "/api/settings/config-layer", map[string]bool{"enabled": on})
-		if r.Status == http.StatusOK {
-			return
-		}
-		busy := r.Status == http.StatusConflict && (r.Code == "apply_busy" || r.Code == "kernel_op_in_progress")
-		if !busy || time.Now().After(deadline) {
-			e.t.Fatalf("переключение слоя в %v: %d %s", on, r.Status, r.Code)
-		}
-		time.Sleep(time.Second)
-	}
-}
-
 // revision читает ревизию черновика из представления источников.
 func (e *rtSrc) revision() int64 {
 	e.t.Helper()
@@ -144,14 +107,13 @@ func (e *rtSrc) resetDraft() {
 	}
 }
 
-// enableLayer включает слой и приводит черновик к чистому состоянию; сброс
-// повторяется при выходе из теста.
-func (e *rtSrc) enableLayer() {
+// freshDraft готовит постоянный слой к сценарию: черновик приводится к
+// применённому состоянию, сброс повторяется при выходе из теста.
+func (e *rtSrc) freshDraft() {
 	e.t.Helper()
-	e.setLayer(true)
 	e.resetDraft()
 	e.t.Cleanup(func() { e.resetDraft() })
-	// Включение слоя запускает фоновую сборку, она перезапускает ядро уже после теста:
+	// Сценарий мог запустить фоновую сборку, она перезапускает ядро уже после теста:
 	// без ожидания следующий тест или проверка конца сессии застают ядро остановленным.
 	e.t.Cleanup(func() { e.rtRstIdle() })
 }
@@ -163,6 +125,28 @@ func rtLinkText(t *testing.T, name string) string {
 		t.Fatalf("данные ссылки %s: %v", name, err)
 	}
 	return strings.TrimSpace(string(data))
+}
+
+// rtReadLogFrom читает журнал с заданного смещения. Файл меньше смещения — ошибка
+// (журнал ротирован).
+func rtReadLogFrom(path string, offset int64) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if st.Size() < offset {
+		return "", io.ErrUnexpectedEOF
+	}
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return "", err
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, 8<<20))
+	return string(raw), err
 }
 
 // rtNoSecrets проверяет, что в теле нет ни одной из секретных строк. Сами строки
@@ -286,23 +270,11 @@ func rtBody(method string) any {
 	return nil
 }
 
-// Флаг слоя выключен: все двенадцать маршрутов отвечают 404 config_layer_disabled.
-func TestRouterSourcesFlagOff404(t *testing.T) {
-	e := rtNewSrc(t)
-	e.setLayer(false)
-	for _, rt := range rtSourceRoutes {
-		r := e.call(rt.method, rt.path, rtBody(rt.method))
-		if r.Status != http.StatusNotFound || r.Code != "config_layer_disabled" {
-			t.Errorf("%s %s: статус %d, код %q; ожидалось 404 config_layer_disabled", rt.method, rt.path, r.Status, r.Code)
-		}
-	}
-}
-
 // Без сессии маршруты отвечают 401, изменяющие без X-CSRF-Token — 403; метод не
 // из контракта — 405.
 func TestRouterSourcesProtected(t *testing.T) {
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	for _, rt := range rtSourceRoutes {
 		var body []byte
 		if rt.method == http.MethodPost {
@@ -342,7 +314,7 @@ func TestRouterSourcesProtected(t *testing.T) {
 // остальные маршруты «Моих узлов» и коды ошибок.
 func TestRouterSourcesMyNodesFlow(t *testing.T) {
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	contract := rtLoadContract(t)
 	link := rtLinkText(t, "vless_ws")
 	secret := "11111111-1111-4111-8111-111111111111"
@@ -510,7 +482,7 @@ func TestRouterSourcesSubscriptionFlow(t *testing.T) {
 		t.Skip("нет XCP_RT_SUBSCRIPTION_URL: настоящая подписка не задана")
 	}
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	contract := rtLoadContract(t)
 	link := rtLinkText(t, "vless_ws")
 	secrets := []string{subURL, url.QueryEscape(subURL)}

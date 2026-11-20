@@ -12,8 +12,8 @@ import { RT, T } from './lib/env';
 // подписки, статусы по установленным ядрам, поиск и «Показать ещё 50». Ответы сети не
 // подменяются: черновик наполняют настоящие маршруты добавления (данные — ссылки из
 // internal/nodes/testdata/links, подписка — адрес зарезервированной зоны .invalid, провайдера
-// не затрагивает). Флаг слоя включается на время прогона и возвращается прежним, черновик
-// сбрасывается. В вывод не попадают имена узлов и содержимое ссылок.
+// не затрагивает). Черновик сбрасывается до и после прогона. В вывод не попадают имена узлов
+// и содержимое ссылок.
 //
 // Не покрыто этим спеком (нужны ответы провайдера, которые нельзя получить без подмены сети):
 // метаданные подписки (трафик, срок, объявление, ссылки поддержки и кабинета), статусы
@@ -109,31 +109,14 @@ async function installedKernels(page: Page): Promise<Installed> {
   return { xray: inst.xray === true, mihomo: inst.mihomo === true };
 }
 
-let layerWasOn = false;
-
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
-  await withPanel(browser, async (page) => {
-    const settings = await api(page, 'GET', '/api/settings');
-    expect(settings.status, 'GET /api/settings').toBe(200);
-    layerWasOn = settings.data?.config_layer === true;
-    if (!layerWasOn) {
-      const res = await api(page, 'POST', '/api/settings/config-layer', { enabled: true });
-      expect(res.status, 'включение слоя').toBe(200);
-    }
-    await resetDraft(page);
-  });
+  await withPanel(browser, (page) => resetDraft(page));
 });
 
 test.afterAll(async ({ browser }) => {
-  await withPanel(browser, async (page) => {
-    await resetDraft(page);
-    if (!layerWasOn) {
-      const res = await api(page, 'POST', '/api/settings/config-layer', { enabled: false });
-      expect(res.status, 'возврат флага слоя').toBe(200);
-    }
-  });
+  await withPanel(browser, (page) => resetDraft(page));
 });
 
 async function openNodes(page: Page, width = 1440): Promise<void> {

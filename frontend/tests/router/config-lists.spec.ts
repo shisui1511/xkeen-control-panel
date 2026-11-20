@@ -1,40 +1,32 @@
 // e2e-pages: config/lists
 // router-area: routing
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect, type Browser, type Page } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
-import { knownFailure, SLOW_ANNOTATION } from './lib/known';
+import { knownFailure } from './lib/known';
 import { T } from './lib/env';
-import { api, layerFlag, withPanel } from './lib/nodes-api';
+import { api, resetDraft, waitApplyIdle, withPanel } from './lib/nodes-api';
 
 // Вкладка «Списки» раздела «Конфигурация» (менеджер geodata XKeen, фаза 146.1, план 09):
-// открытие кликом, перенаправление со старого адреса #/dat при включённом флаге слоя и
-// прежнее поведение при выключенном. Ответы сети не подменяются. Флаг слоя включается на
-// время прогона и возвращается прежним. Ядро не читается и не меняется.
-
-const layer = layerFlag();
+// открытие кликом и перенаправление со старого адреса #/dat (таблица адресов D-10). Ответы сети
+// не подменяются. Черновик сбрасывается до и после прогона. Ядро не читается и не меняется.
 
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
-  await layer.enable(browser);
+  await withPanel(browser, (page) => resetDraft(page));
 });
 
 test.afterAll(async ({ browser }) => {
-  await layer.restore(browser);
+  await withPanel(browser, async (page) => {
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
+  });
 });
 
 async function openConfig(page: Page, hash: string): Promise<void> {
   await page.goto(`/${hash}`, { timeout: T.page, waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('config-page')).toBeVisible({ timeout: T.page });
-}
-
-/** Включает или выключает флаг слоя на время одного сценария (прежнее состояние вернёт layer.restore). */
-async function setLayerFlag(browser: Browser, enabled: boolean): Promise<void> {
-  await withPanel(browser, async (page) => {
-    const res = await api(page, 'POST', '/api/settings/config-layer', { enabled });
-    expect(res.status, enabled ? 'включение слоя' : 'выключение слоя').toBe(200);
-  });
 }
 
 /** Вкладка загружена: она видна и скелетона больше нет. */
@@ -82,7 +74,7 @@ test('lists: вкладка открывается кликом', async ({ page 
   await guard.assertClean();
 });
 
-test('lists: #/dat ведёт на вкладку при флаге', async ({ page }) => {
+test('lists: #/dat ведёт на вкладку', async ({ page }) => {
   const guard = attachConsoleGuard(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/#/dat', { timeout: T.page, waitUntil: 'domcontentloaded' });
@@ -391,41 +383,3 @@ for (const theme of ['dark', 'light'] as const) {
     });
   }
 }
-
-test.describe('флаг выключен', () => {
-  // флаг возвращается включённым для остальных сценариев; исходное состояние вернёт afterAll
-  test.afterEach(async ({ browser }) => {
-    await setLayerFlag(browser, true);
-  });
-
-  test(
-    'lists: с выключенным флагом всё как раньше',
-    {
-      annotation: {
-        type: SLOW_ANNOTATION,
-        description: 'переключение флага слоя и проверка прежней страницы DAT'
-      }
-    },
-    async ({ page, browser }) => {
-      await setLayerFlag(browser, false);
-      const guard = attachConsoleGuard(page);
-      await page.setViewportSize({ width: 1440, height: 900 });
-
-      // старая страница DAT на месте, пункт меню есть
-      await page.goto('/#/dat', { timeout: T.page, waitUntil: 'domcontentloaded' });
-      await expect(page.locator('.main-content .page-header h1').first()).toBeVisible({
-        timeout: T.page
-      });
-      await expect(page).toHaveURL(/#\/dat$/);
-      await expect(page.locator('a[href="#/dat"]').first()).toBeVisible({ timeout: T.action });
-      await expect(page.getByTestId('lists-tab')).toHaveCount(0);
-
-      // раздела «Конфигурация» нет: адрес вкладки уводит на обзор по общему правилу раздела
-      await page.goto('/#/config/lists', { timeout: T.page, waitUntil: 'domcontentloaded' });
-      await expect(page).toHaveURL(/#\/dashboard$/, { timeout: T.page });
-      await expect(page.getByTestId('lists-tab')).toHaveCount(0);
-
-      await guard.assertClean();
-    }
-  );
-});

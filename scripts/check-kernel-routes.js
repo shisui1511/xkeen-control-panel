@@ -12,11 +12,15 @@
  *      префиксу конкатенации.
  *   3. srv.SetProtectedWrapper(api.KernelRouteWrapper) стоит раньше первого
  *      HandleProtected с префиксом гейта, иначе гейт маршрут не увидит.
+ *   4. Снятые маршруты старого слоя (removed_routes в scripts/legacy-removal-contract.json)
+ *      не регистрируются в main.go и не держат ни записи политики, ни префикса гейта:
+ *      они отвечают обычным 404, а не отказом гейта ядра.
  *
  * Usage: node scripts/check-kernel-routes.js [--root <каталог>]
  */
 const fs = require('fs');
 const path = require('path');
+const { removedRoutes, removedMatch, removedRegistrations } = require('./lib/removed-routes');
 
 const argv = process.argv.slice(2);
 const rootIdx = argv.indexOf('--root');
@@ -47,9 +51,11 @@ function block(src, header) {
 const problems = [];
 let mainSrc;
 let gateSrc;
+let removed;
 try {
   mainSrc = stripGoLineComments(read(MAIN_GO));
   gateSrc = stripGoLineComments(read(GATE_GO));
+  removed = removedRoutes();
 } catch (e) {
   console.error('check-kernel-routes: не удалось прочитать файл: ' + e.message);
   process.exit(1);
@@ -113,9 +119,22 @@ if (wrapAt < 0) {
   }
 }
 
+// 4. Снятые маршруты не возвращаются ни регистрацией, ни записью гейта.
+problems.push(...removedRegistrations(MAIN_GO, mainSrc, removed));
+for (const key of policyKeys) {
+  const hit = removedMatch(key, removed);
+  if (hit) problems.push(`запись таблицы ${key} относится к снятому маршруту ${hit}: удалите её из kernelRoutePolicies`);
+}
+for (const prefix of prefixes) {
+  const hit = removedMatch(prefix.replace(/\/$/, ''), removed);
+  if (hit) problems.push(`префикс гейта ${prefix} относится к снятому маршруту ${hit}: удалите его из kernelGatedPrefixes`);
+}
+
 if (problems.length > 0) {
   console.error('❌ Таблица политик гейта ядра расходится с маршрутами:');
   for (const p of problems) console.error('  ' + p);
   process.exit(1);
 }
-console.log(`✅ Гейт ядра: маршрутов под префиксами: ${gated.length}, записей политик: ${policyKeys.length}, обёртка зарегистрирована раньше`);
+console.log(
+  `✅ Гейт ядра: маршрутов под префиксами: ${gated.length}, записей политик: ${policyKeys.length}, обёртка зарегистрирована раньше, снятых маршрутов нет (${removed.length})`
+);

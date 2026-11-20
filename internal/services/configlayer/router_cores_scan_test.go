@@ -103,7 +103,7 @@ func TestRouterCoresScanXray(t *testing.T) {
 	files[rtCoresBadName] = rtCoresBadBody
 	rtCoresWriteDir(t, all, files)
 
-	scanned, err := ScanXrayKeyFiles(all, nil)
+	scanned, err := ScanXrayKeyFiles(all)
 	if err != nil {
 		t.Fatalf("ScanXrayKeyFiles: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestRouterCoresScanXray(t *testing.T) {
 	}
 
 	// Без неразобранного файла: все файлы dns — из шаблонов XKeen.
-	clean, err := ScanXrayKeyFiles(valid, nil)
+	clean, err := ScanXrayKeyFiles(valid)
 	if err != nil {
 		t.Fatalf("ScanXrayKeyFiles(valid): %v", err)
 	}
@@ -244,7 +244,7 @@ func rtCoresScanAllSections(t *testing.T, dir string, base map[string]string) {
 		}
 	}
 	rtCoresWriteDir(t, dir, files)
-	scanned, err := ScanXrayKeyFiles(dir, nil)
+	scanned, err := ScanXrayKeyFiles(dir)
 	if err != nil {
 		t.Fatalf("ScanXrayKeyFiles: %v", err)
 	}
@@ -311,7 +311,7 @@ func rtCoresScanAllSections(t *testing.T, dir string, base map[string]string) {
 	if err := os.Remove(filepath.Join(dir, rtCoresAPIName)); err != nil {
 		t.Fatal(err)
 	}
-	after, err := ScanXrayKeyFiles(dir, nil)
+	after, err := ScanXrayKeyFiles(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +493,7 @@ func TestRouterCoresMergeSemantics(t *testing.T) {
 		if got, ok := rtCoresDig(merged, c.key); !ok || !reflect.DeepEqual(got, want) {
 			t.Errorf("слияние %s: ядро сливает не «поздний заменяет целиком»: два файла %v, один поздний %v", c.key, got, want)
 		}
-		scanned, err := ScanXrayKeyFiles(dir, nil)
+		scanned, err := ScanXrayKeyFiles(dir)
 		if err != nil {
 			t.Fatalf("ScanXrayKeyFiles(%s): %v", c.key, err)
 		}
@@ -551,7 +551,7 @@ func rtCoresMergeInbounds(t *testing.T, dir string) {
 	if len(kernel) > 0 {
 		t.Logf("входящий x: поле sniffing раннего файла сохранено ядром: %v", len(kernel[0].Sniffing) > 0)
 	}
-	scanned, err := ScanXrayKeyFiles(dir, nil)
+	scanned, err := ScanXrayKeyFiles(dir)
 	if err != nil {
 		t.Fatalf("ScanXrayKeyFiles: %v", err)
 	}

@@ -323,7 +323,7 @@ func TestRouterCoresMihomoControllerSecret(t *testing.T) {
 	routertest.Slow(t, "серия «Применить» с перезапуском Mihomo: external-controller и secret секций")
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	rtCoresLiveMihomoTake(t, e, tg)
 	addr := fmt.Sprintf("127.0.0.1:%d", rtCoresLiveFreePort(t))

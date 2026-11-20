@@ -22,7 +22,6 @@ const (
 	IssueProviderMissingKey    = "provider_missing_key"
 	IssueProviderEmpty         = "provider_empty"
 	IssueDuplicateFile         = "duplicate_file"
-	IssueNameTaken             = "name_taken"
 	IssueGeneratorFailed       = "generator_failed"
 	// IssueCheckerFailed — проверка черновика завершилась паникой (Registry.Check).
 	IssueCheckerFailed = "checker_failed"
@@ -54,13 +53,12 @@ func (e *BuildError) Error() string {
 
 // CheckGenerated проверяет сгенерированные файлы до записи и собирает все
 // проблемы в один BuildError (пользователь видит их сразу). Проверки: имя по
-// правилу панели и стоп-списку XKeen, имя не занято старым слоем
-// (foreignOwned, может быть nil), для Xray — ключ "transport": (XKeen при нём
+// правилу панели и стоп-списку XKeen, для Xray — ключ "transport": (XKeen при нём
 // выводит файл из работы), валидный JSON и объект на верхнем уровне, для
 // провайдеров Mihomo — YAML с обязательным ключом и непустым списком (текстовый
 // провайдер правил — непустой текст со строками правил). Файл
 // не переименовывается и другое имя не подбирается.
-func CheckGenerated(files []GeneratedFile, foreignOwned func(kernel, rel string) bool) error {
+func CheckGenerated(files []GeneratedFile) error {
 	var issues []BuildIssue
 	add := func(f GeneratedFile, code, detail string) {
 		issues = append(issues, BuildIssue{Key: f.Key(), Code: code, Detail: detail})
@@ -72,9 +70,6 @@ func CheckGenerated(files []GeneratedFile, foreignOwned func(kernel, rel string)
 				code = IssueStoplistName
 			}
 			add(f, code, err.Error())
-		}
-		if foreignOwned != nil && foreignOwned(f.Kernel, f.RelPath) {
-			add(f, IssueNameTaken, "имя занято файлом старого слоя")
 		}
 		switch f.Kind {
 		case KindXrayJSON:
@@ -214,7 +209,7 @@ func (p Plan) RuntimeChanges(kernel string) bool {
 // RemoveObsolete. Сироты — файлы панели вне манифеста и вне генерации; при
 // непустом only (пересборка названных файлов) сироты не собираются, а все
 // остальные действия сужаются до ключей из only. Файлы отсортированы по ключу.
-func ComputePlan(roots Roots, desired []GeneratedFile, manifest map[string]ManifestEntry, only map[string]bool, foreignOwned func(kernel, rel string) bool) (Plan, error) {
+func ComputePlan(roots Roots, desired []GeneratedFile, manifest map[string]ManifestEntry, only map[string]bool) (Plan, error) {
 	restricted := len(only) > 0
 	selected := func(key string) bool { return !restricted || only[key] }
 
@@ -289,7 +284,7 @@ func ComputePlan(roots Roots, desired []GeneratedFile, manifest map[string]Manif
 	sort.Slice(plan.Files, func(i, j int) bool { return plan.Files[i].Key < plan.Files[j].Key })
 
 	if !restricted {
-		orphans, err := ScanOrphans(roots, manifest, foreignOwned)
+		orphans, err := ScanOrphans(roots, manifest)
 		if err != nil {
 			return Plan{}, err
 		}

@@ -28,7 +28,7 @@ type ConfigFileInfo struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 	Size int64  `json:"size"`
-	// Поля ниже заполняются только при scope=files и включённом слое (D-03, D-05).
+	// Поля ниже заполняются только при scope=files и подключённом слое (D-03, D-05).
 	// Owner — panel, xkeen или user.
 	Owner string `json:"owner,omitempty"`
 	// TakeKernel и TakeSections — ядро и секции, которые панель может взять из файла.
@@ -84,6 +84,9 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
 	}
+	if a.rejectLegacyArchive(w, r, dir, cleanDir) {
+		return
+	}
 	// Вкладка «Файлы» видит только три каталога (D-04): данные панели, логи и
 	// бинарники сервер не отдаёт ей и по прямому запросу.
 	if scoped && !inFilesScope(cleanDir) {
@@ -97,9 +100,9 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Владелец файлов — только для вкладки «Файлы» при включённом слое.
+	// Владелец файлов — только для вкладки «Файлы» и только при подключённом слое.
 	var owners *configlayer.FileOwnerIndex
-	if scoped && a.configLayer != nil && a.configLayer.Enabled() {
+	if scoped && a.configLayer != nil {
 		owners = a.configLayer.FileOwnerIndex()
 	}
 	// Файлы с именем не латиницей в корне каталога Xray (XKeen их может не
@@ -146,6 +149,10 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 		cleanF, err := a.pathVal.Validate(f)
 		if err != nil {
 			restricted(f)
+			continue
+		}
+		// Ссылка из видимого каталога в архив прежних данных в списке не показывается.
+		if utils.IsLegacyArchivePath(a.cfg.DataDir, f) || utils.IsLegacyArchivePath(a.cfg.DataDir, cleanF) {
 			continue
 		}
 		// Explicit inline validation for CodeQL path sanitization
@@ -211,6 +218,9 @@ func (a *API) ConfigRead(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cleanPath, read = safe, a.configSvc.ReadValidated
+	}
+	if a.rejectLegacyArchive(w, r, path, cleanPath) {
+		return
 	}
 
 	data, err := read(cleanPath)
@@ -280,26 +290,16 @@ func (a *API) isMihomoProfilePath(path string) bool {
 	return false
 }
 
-// lockMihomoFiles берёт замок записи файлов Mihomo (SubscriptionService.mihomoMu)
-// и возвращает функцию снятия. Для создания и копирования профиля: методы сервиса
-// профилей берут свой замок сами, поэтому здесь он не берётся.
+// lockMihomoFiles берёт общий замок записи файлов Mihomo и возвращает функцию снятия.
+// При создании и копировании профиля второй замок берут сами методы сервиса.
 func (a *API) lockMihomoFiles() func() {
-	if a.subscriptionSvc == nil {
-		return func() {}
-	}
-	a.subscriptionSvc.LockMihomo()
-	return a.subscriptionSvc.UnlockMihomo
+	return a.mihomoProfileSvc.LockFiles()
 }
 
-// lockProfileWrite берёт замок записи профиля: mihomoMu, затем замок сервиса
-// профилей (порядок всегда такой, обратный не встречается). lifecycleMu не берётся:
-// запись профиля ядро не перезапускает. Только для ConfigSave, который методов
-// сервиса не зовёт: они берут тот же замок сами, повторное взятие повисло бы.
+// lockProfileWrite берёт общий замок файлов Mihomo, затем замок сервиса профилей.
+// ConfigSave пишет файл напрямую, а методы сервиса профилей сами берут второй замок.
 func (a *API) lockProfileWrite() func() {
 	unlockFiles := a.lockMihomoFiles()
-	if a.mihomoProfileSvc == nil {
-		return unlockFiles
-	}
 	a.mihomoProfileSvc.LockWrite()
 	return func() {
 		a.mihomoProfileSvc.UnlockWrite()
@@ -317,6 +317,9 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 	cleanPath, err := a.pathVal.Validate(path)
 	if err != nil {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+	if a.rejectLegacyArchive(w, r, path, cleanPath) {
 		return
 	}
 	// Файл панели под управлением слоя: отказ до чтения тела и до замков.
@@ -422,6 +425,9 @@ func (a *API) ConfigBackups(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
 	}
+	if a.rejectLegacyArchive(w, r, path, cleanPath) {
+		return
+	}
 
 	backups, err := a.configSvc.ListBackups(cleanPath)
 	if err != nil {
@@ -494,6 +500,9 @@ func (a *API) ConfigCreate(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
 	}
+	if a.rejectLegacyArchive(w, r, path, cleanPath) {
+		return
+	}
 
 	if a.rejectManagedPath(w, r, cleanPath) {
 		return
@@ -540,6 +549,9 @@ func (a *API) ConfigDelete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cleanPath, remove = safe, a.configSvc.DeleteValidated
+	}
+	if a.rejectLegacyArchive(w, r, path, cleanPath) {
+		return
 	}
 
 	if a.rejectManagedPath(w, r, cleanPath) {
@@ -588,6 +600,9 @@ func (a *API) ConfigRename(w http.ResponseWriter, r *http.Request) {
 	cleanNewPath, err := a.pathVal.Validate(newPath)
 	if err != nil {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+	if a.rejectLegacyArchive(w, r, oldPath, cleanOldPath, newPath, cleanNewPath) {
 		return
 	}
 
@@ -881,6 +896,9 @@ func (a *API) ConfigValidate(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
 	}
+	if a.rejectLegacyArchive(w, r, req.Path, cleanPath) {
+		return
+	}
 
 	// Explicit inline validation for CodeQL path sanitization
 	var pathAllowed bool
@@ -1055,80 +1073,24 @@ func (a *API) validateConfigContent(r *http.Request, cleanPath string, data []by
 	return msg
 }
 
-// ConfigSmartMergeRequest represents the payload for smart template merging.
-type ConfigSmartMergeRequest struct {
-	Type              string `json:"type"` // "mihomo" or "xray"
-	ExistingContent   string `json:"existing_content"`
-	TemplateContent   string `json:"template_content"`
-	TargetFile        string `json:"target_file,omitempty"`
-	ActiveOutboundTag string `json:"active_outbound_tag,omitempty"`
-	TemplateOwnsNodes bool   `json:"template_owns_nodes,omitempty"`
-}
-
-// ConfigSmartMerge handles smart merging of configuration templates without destroying user proxies or settings.
-func (a *API) ConfigSmartMerge(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
-		return
-	}
-	if a.legacyBlocked(w, r) {
-		return
-	}
-
-	var req ConfigSmartMergeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		a.errorResponse(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	var userRules []services.UserRule
-	if a.userRulesSvc != nil {
-		userRules = a.userRulesSvc.List()
-	}
-
-	var merged string
-	var stats services.MergeStats
-	var err error
-
-	if strings.EqualFold(req.Type, "xray") {
-		merged, stats, err = services.SmartMergeXray(req.ExistingContent, req.TemplateContent, req.TargetFile, req.ActiveOutboundTag, userRules)
-	} else {
-		merged, stats, err = services.SmartMergeMihomo(req.ExistingContent, req.TemplateContent, userRules, req.TemplateOwnsNodes)
-	}
-
-	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	kernelType := strings.ToLower(req.Type)
-	targetFile := req.TargetFile
-	if targetFile == "" {
-		if kernelType == "mihomo" {
-			targetFile = "config.yaml"
-		} else {
-			targetFile = "05_routing.json"
+// rejectLegacyArchive отвечает 403 path_not_allowed и возвращает true, если хотя
+// бы один из путей (исходный или развёрнутый PathValidator) лежит в каталоге
+// архива прежних данных. Архив с адресами прежних подписок выдаётся только окном
+// закрытия; общий файловый API его не читает, не правит и не копирует в backups/.
+func (a *API) rejectLegacyArchive(w http.ResponseWriter, r *http.Request, paths ...string) bool {
+	for _, p := range paths {
+		if utils.IsLegacyArchivePath(a.cfg.DataDir, p) {
+			a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+			return true
 		}
 	}
-	var kVer string
-	if a.kernelSvc != nil {
-		if k := a.kernelSvc.Get(kernelType); k != nil {
-			kVer = k.CurrentVersion
-		}
-	}
-	preflightRes := services.ValidateConfigContent(kernelType, targetFile, merged, kVer)
-
-	JSONSuccess(w, map[string]interface{}{
-		"content":  merged,
-		"stats":    stats,
-		"warnings": mapIssues(preflightRes.Warnings),
-	})
+	return false
 }
 
 // rejectManagedPath отвечает 409 file_managed и возвращает true, если файл
-// управляется слоем «Конфигурация» (запись манифеста managed при включённом
-// флаге). Серверная защита обязательна: интерфейс лишь скрывает правку, а
-// вкладка с устаревшим состоянием иначе создала бы дрейф гонкой (D-12, T-144-38).
+// управляется слоем «Конфигурация» (запись манифеста managed). Серверная
+// защита обязательна: интерфейс лишь скрывает правку, а вкладка с устаревшим
+// состоянием иначе создала бы дрейф гонкой (D-12, T-144-38).
 // Путь уже прошёл PathValidator, IsManagedPath дополнительно разворачивает
 // симлинки каталога (T-144-39). Отпущенные и чужие файлы правятся как раньше.
 func (a *API) rejectManagedPath(w http.ResponseWriter, r *http.Request, cleanPath string) bool {

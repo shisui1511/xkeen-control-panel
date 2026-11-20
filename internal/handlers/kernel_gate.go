@@ -39,9 +39,6 @@ var kernelGatedPrefixes = []string{
 	"/api/traffic/",
 	"/api/rule-providers/",
 	"/api/rules/test",
-	"/api/dat/",
-	"/api/outbound/",
-	"/api/proxy-providers",
 }
 
 const (
@@ -51,7 +48,6 @@ const (
 	reasonProfileFiles  = "файлы профилей Mihomo и проверка mihomo -t: конструктор работает при любом ядре"
 	reasonQuotaStore    = "JSON-хранилище квот панели: настройка доступна при любом ядре"
 	reasonSmartStore    = "хранилище профилей SmartProxy и расписание по часам, процесс ядра не опрашивается"
-	reasonGeoFiles      = "геобазы обоих ядер на диске"
 	reasonRuleFiles     = "правила и провайдеры правил читаются из файлов и по URL, без процесса ядра"
 	reasonXrayFiles     = "конфиги Xray и локальные утилиты, без gRPC-API"
 )
@@ -65,7 +61,6 @@ var kernelRoutePolicies = map[string]KernelRoutePolicy{
 	"/api/mihomo/dns/query":          {"mihomo", GateLive, "DNS-запрос через Clash API: " + reasonMihomoClash},
 	"/api/mihomo/cache/fakeip/flush": {"mihomo", GateLive, "сброс кэша fake-ip: " + reasonMihomoClash},
 	"/api/mihomo/connections/ws":     {"mihomo", GateLive, "WebSocket подключений: " + reasonMihomoClash},
-	"/api/proxy-providers/":          {"mihomo", GateLive, "обновление и узлы провайдера: " + reasonMihomoClash},
 	"/api/traffic/ws":                {"mihomo", GateLive, "WebSocket трафика: " + reasonMihomoCounter},
 	"/api/traffic/stats":             {"mihomo", GateLive, reasonMihomoCounter},
 	"/api/traffic/alerts":            {"mihomo", GateLive, "оповещения по живым счётчикам Mihomo"},
@@ -78,7 +73,6 @@ var kernelRoutePolicies = map[string]KernelRoutePolicy{
 
 	// Mihomo, данные
 	"/api/mihomo/status":            {"mihomo", GateData, "локальный статус службы Mihomo, нужен и когда ядро остановлено"},
-	"/api/mihomo/groups":            {"mihomo", GateData, "группы читаются из конфигурации на диске: вкладка работает при любом ядре"},
 	"/api/mihomo/profiles":          {"mihomo", GateData, reasonProfileFiles},
 	"/api/mihomo/profiles/create":   {"mihomo", GateData, reasonProfileFiles},
 	"/api/mihomo/profiles/preview":  {"mihomo", GateData, reasonProfileFiles},
@@ -86,33 +80,20 @@ var kernelRoutePolicies = map[string]KernelRoutePolicy{
 	"/api/mihomo/profiles/rename":   {"mihomo", GateData, reasonProfileFiles},
 	"/api/mihomo/profiles/delete":   {"mihomo", GateData, reasonProfileFiles},
 	"/api/mihomo/profiles/activate": {"mihomo", GateData, reasonProfileFiles},
-	"/api/mihomo/profiles/adopt":    {"mihomo", GateData, reasonProfileFiles},
-	"/api/proxy-providers":          {"mihomo", GateData, "список подписок обоих ядер для вкладки «Провайдеры», при недоступном Clash API деградирует без него"},
 
 	// Xray, данные
-	"/api/xray/access-log":        {"xray", GateData, reasonXrayFiles},
-	"/api/xray/access-log/toggle": {"xray", GateData, reasonXrayFiles},
-	"/api/xray/reality/keygen":    {"xray", GateData, "генерация ключей Reality локально: " + reasonXrayFiles},
-	"/api/xray/uuid":              {"xray", GateData, "генерация UUID локально: " + reasonXrayFiles},
-	"/api/xray/tls-ping":          {"xray", GateData, "TLS-проверка с роутера напрямую: " + reasonXrayFiles},
-	"/api/xray/grpc/monitoring":   {"xray", GateData, "настройка мониторинга в конфиге Xray на диске"},
-	"/api/xray/test-route":        {"xray", GateData, "проверка маршрута по конфигурации на диске"},
+	"/api/xray/access-log":      {"xray", GateData, reasonXrayFiles},
+	"/api/xray/reality/keygen":  {"xray", GateData, "генерация ключей Reality локально: " + reasonXrayFiles},
+	"/api/xray/uuid":            {"xray", GateData, "генерация UUID локально: " + reasonXrayFiles},
+	"/api/xray/tls-ping":        {"xray", GateData, "TLS-проверка с роутера напрямую: " + reasonXrayFiles},
+	"/api/xray/grpc/monitoring": {"xray", GateData, "настройка мониторинга в конфиге Xray на диске"},
+	"/api/xray/test-route":      {"xray", GateData, "проверка маршрута по конфигурации на диске"},
 
 	// Правила и провайдеры правил
 	"/api/rules/test":               {"mihomo", GateData, reasonRuleFiles},
 	"/api/rule-providers/info":      {"mihomo", GateData, reasonRuleFiles},
 	"/api/rule-providers/content":   {"mihomo", GateData, reasonRuleFiles},
 	"/api/rule-providers/check-url": {"mihomo", GateData, reasonRuleFiles},
-
-	// Прочее: конструкторы и утилиты
-	"/api/outbound/parse": {"xray", GateData, "разбор ссылки в outbound без процесса ядра: конструктор работает при любом ядре"},
-
-	"/api/dat/list":     {"xray", GateData, reasonGeoFiles},
-	"/api/dat/tags":     {"xray", GateData, reasonGeoFiles},
-	"/api/dat/update":   {"xray", GateData, reasonGeoFiles},
-	"/api/dat/rollback": {"xray", GateData, reasonGeoFiles},
-	"/api/dat/search":   {"xray", GateData, reasonGeoFiles},
-	"/api/dat/lookup":   {"xray", GateData, reasonGeoFiles},
 
 	"/api/smart-proxy/profiles":         {"mihomo", GateData, reasonSmartStore},
 	"/api/smart-proxy/profiles/get":     {"mihomo", GateData, reasonSmartStore},

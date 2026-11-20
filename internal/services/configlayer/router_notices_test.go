@@ -14,13 +14,12 @@ import (
 // Проверка уведомлений сервиса источников, события sources и порогов версий
 // функций узлов на устройстве: настоящие хранилище, шина событий и таблица порогов.
 
-func rtNewNoticeLayer(t *testing.T, enabled bool) *Layer {
+func rtNewNoticeLayer(t *testing.T) *Layer {
 	t.Helper()
 	dir := rtLiveDir(t)
 	layer, err := New(Options{
 		DataDir: dir,
 		Roots:   Roots{Xray: filepath.Join(dir, "xray"), Mihomo: filepath.Join(dir, "mihomo")},
-		Enabled: func() bool { return enabled },
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -66,7 +65,7 @@ func rtHasNotice(views []NoticeView, id string) (NoticeView, bool) {
 }
 
 func TestRouterSourceNotices(t *testing.T) {
-	layer := rtNewNoticeLayer(t, true)
+	layer := rtNewNoticeLayer(t)
 	events, cancel, err := layer.Subscribe()
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +136,7 @@ func TestRouterSourceNotices(t *testing.T) {
 }
 
 func TestRouterPublishSources(t *testing.T) {
-	layer := rtNewNoticeLayer(t, true)
+	layer := rtNewNoticeLayer(t)
 	events, cancel, err := layer.Subscribe()
 	if err != nil {
 		t.Fatal(err)
@@ -154,17 +153,6 @@ func TestRouterPublishSources(t *testing.T) {
 	}
 	if data, _ := ev.Data.(SourcesEvent); data.Revision != 1 {
 		t.Errorf("ревизия в событии sources: %+v", ev.Data)
-	}
-
-	off := rtNewNoticeLayer(t, false)
-	offEvents, offCancel, err := off.Subscribe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer offCancel()
-	off.PublishSources()
-	if _, got := rtNextEvent(offEvents, EventSources, 300*time.Millisecond); got {
-		t.Error("выключенный слой опубликовал событие sources")
 	}
 }
 

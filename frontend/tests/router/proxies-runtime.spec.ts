@@ -1,6 +1,7 @@
-// e2e-pages: proxies config/groups
+// e2e-pages: proxies config/groups config/cores
 // router-area: routing
 import { execFile } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { test, expect, type Browser, type Page } from '@playwright/test';
@@ -11,10 +12,10 @@ import {
   addToDraft,
   api,
   installedKernels,
-  layerFlag,
   nodeLink,
   randomPort,
   resetDraft,
+  waitApplyIdle,
   withPanel
 } from './lib/nodes-api';
 import {
@@ -26,16 +27,16 @@ import {
   type RoutingStand
 } from './lib/routing-api';
 
-// Страница «Прокси» при включённом слое «Конфигурация» на настоящей панели (фаза 150, план 12):
+// Страница «Прокси» со слоем «Конфигурация» на настоящей панели (фаза 150, план 12):
 // группы панели и строка «Сейчас», выбор узла плиткой без черновика с живым обновлением второй
 // вкладки, пинг группы и общей пачки с отменой, звено цепочки и адрес ?group=. Подготовка одна на
 // спек: три узла «Моих узлов» с портами, на которых сервер не слушает (замер падает предсказуемо;
 // узел TUIC — только для Mihomo), ручная группа «RT Прокси» и вложенная в «RT Внешняя», взятие
 // маршрутизации и «Применить». В конце стенд возвращается: группы и узлы удаляются, маршрутизация
-// отпускается, если не была взята, флаг слоя прежний. Ответы сети не подменяются. В сообщения
-// провалов попадают только testId и коды, без имён узлов.
+// отпускается, если не была взята, черновик сбрасывается. Ответы сети не подменяются. В сообщения
+// провалов попадают только testId и коды, без имён узлов. Сценарий «proxies-runtime no-socket»
+// (151-09) в конце файла проверяет подсказку для своего профиля Mihomo без Unix-сокета.
 
-const layer = layerFlag();
 const PREFIX = 'RTPX-';
 
 const stand: RoutingStand = { groupIds: [], myBefore: [], wasManaged: false };
@@ -211,9 +212,9 @@ async function prepare(browser: Browser): Promise<void> {
 }
 
 test.beforeAll(async ({ browser }) => {
-  // флаг слоя, узлы, две группы, взятие маршрутизации и «Применить» с перезапуском ядра
+  // сброс черновика, узлы, две группы, взятие маршрутизации и «Применить» с перезапуском ядра
   test.setTimeout(T.save * 8);
-  await layer.enable(browser);
+  await withPanel(browser, (page) => resetDraft(page));
   await prepare(browser);
 });
 
@@ -225,7 +226,10 @@ test.afterAll(async ({ browser }) => {
       await withPanel(browser, (page) => restoreRouting(page, stand));
     }
   } finally {
-    await layer.restore(browser);
+    await withPanel(browser, async (page) => {
+      await waitApplyIdle(page, 'перед сбросом черновика');
+      await resetDraft(page);
+    });
   }
 });
 
@@ -1258,5 +1262,479 @@ test(
         .toBe(badgeBefore);
     }, returnStand);
     await guard.assertClean();
+  }
+);
+
+// --- Профиль Mihomo без сокета (151-09, D-13) ---
+// Свой профиль пользователя без external-controller-unix: панель его не правит и к Clash API по
+// TCP не ходит, а «Прокси», «Подключения» и квоты показывают подсказку «У профиля нет доступа к
+// API» с переходом к профилям. Профили rtpx-nosock-* создаются настоящим API из шаблона, строки
+// контроллера правятся записью файла (config/save): у одного контроллера нет совсем, у другого
+// только TCP — его слушает сам Mihomo, свой сервер тест не поднимает. Подключения к TCP-порту
+// считаются на роутере по /proc/net/tcp. Остановленное ядро и профиль панели подсказки не дают.
+// В конце Mihomo возвращается прежнему владельцу, профили теста удаляются. В сообщения провалов
+// попадают только testId, коды и имена профилей теста — не содержимое YAML.
+
+const NOSOCK_PREFIX = 'rtpx-nosock-';
+const NOSOCK_NONE = `${NOSOCK_PREFIX}none`;
+const NOSOCK_TCP = `${NOSOCK_PREFIX}tcp`;
+const NOSOCK_PARK = `${NOSOCK_PREFIX}park`;
+const MIHOMO_PROFILES_DIR = '/opt/etc/mihomo/profiles';
+/** Строки контроллера верхнего уровня: TCP и Unix. */
+const CONTROLLER_LINES = /^external-controller(?:-unix)?[ \t]*:.*(?:\r?\n|$)/gm;
+
+/** Тексты ключа на обоих языках интерфейса: язык панели стенда заранее неизвестен. */
+function localeRe(key: string): RegExp {
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const all = ['ru', 'en'].map(
+    (lang) =>
+      (
+        JSON.parse(
+          readFileSync(
+            fileURLToPath(new URL(`../../src/locales/${lang}.json`, import.meta.url)),
+            'utf8'
+          )
+        ) as Record<string, string>
+      )[key]
+  );
+  return new RegExp(`^(${all.map(esc).join('|')})$`);
+}
+
+interface MihomoOwner {
+  /** Mihomo ведёт панель (профиль xcp-main). */
+  taken: boolean;
+  /** Значения секций Mihomo сохранены при отпускании: возврат без сборки заново. */
+  saved: boolean;
+  /** Активный профиль при включённых профилях, иначе пусто. */
+  active: string;
+  /** config.yaml — обычный файл XKeen: переход его усыновит. */
+  plain: boolean;
+  returnTarget: string;
+  /** Профили пользователя. */
+  users: string[];
+}
+
+async function mihomoOwner(page: Page): Promise<MihomoOwner> {
+  const st = await api(page, 'GET', '/api/configlayer/state');
+  expect(st.status, 'GET /api/configlayer/state').toBe(200);
+  const routing = (st.data?.routing ?? {}) as {
+    mihomo_saved?: boolean;
+    mihomo?: { taken?: boolean } | null;
+  };
+  const list = await api(page, 'GET', '/api/mihomo/profiles');
+  expect(list.status, 'GET /api/mihomo/profiles').toBe(200);
+  const p = (list.data ?? {}) as {
+    managed?: boolean;
+    active?: string;
+    plain_config?: unknown;
+    return_target?: string;
+    profiles?: { name: string; owner: string }[];
+  };
+  return {
+    taken: routing.mihomo?.taken === true,
+    saved: routing.mihomo_saved === true,
+    active: p.managed === true ? (p.active ?? '') : '',
+    plain: p.plain_config != null,
+    returnTarget: p.return_target ?? '',
+    users: (p.profiles ?? []).filter((x) => x.owner === 'user').map((x) => x.name)
+  };
+}
+
+/** Признак «нет сокета» обоих источников: capabilities и вид страницы «Прокси». */
+async function noSocketState(page: Page): Promise<string> {
+  const caps = await api(page, 'GET', '/api/capabilities');
+  const view = await api(page, 'GET', '/api/configlayer/proxies');
+  const m = (caps.data?.mihomo ?? {}) as { no_socket?: boolean };
+  return [
+    `caps ${caps.status} no_socket=${m.no_socket === true}`,
+    `view ${view.status} ${String(view.data?.state ?? '')} no_socket=${view.data?.no_socket === true}`
+  ].join(' | ');
+}
+
+const NO_SOCKET_ON = 'caps 200 no_socket=true | view 200 user_profile no_socket=true';
+
+async function expectNoSocketState(page: Page, want: string | RegExp, what: string): Promise<void> {
+  await expect
+    .poll(() => noSocketState(page), { message: what, timeout: T.save * 2, intervals: [2000] })
+    .toMatch(want);
+}
+
+/** Ответ текстом: файлы профилей читаются и пишутся без конверта JSON. */
+async function rawText(
+  page: Page,
+  method: string,
+  path: string,
+  body?: string
+): Promise<{ status: number; text: string }> {
+  return page.evaluate(
+    async ({ method, path, body }) => {
+      const res = await fetch(path, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': localStorage.getItem('csrf_token') ?? ''
+        },
+        body
+      });
+      return { status: res.status, text: await res.text() };
+    },
+    { method, path, body }
+  );
+}
+
+function profilePath(name: string): string {
+  return `${MIHOMO_PROFILES_DIR}/${name}.yaml`;
+}
+
+async function readProfile(page: Page, name: string): Promise<string> {
+  const res = await rawText(
+    page,
+    'GET',
+    `/api/config/read?path=${encodeURIComponent(profilePath(name))}`
+  );
+  expect(res.status, `чтение профиля ${name}`).toBe(200);
+  return res.text;
+}
+
+/**
+ * Профиль из шаблона с заменёнными строками контроллера: tcpPort — только TCP на loopback,
+ * null — контроллера нет. Файл пишется обычной записью «Файлов» с проверкой ядром.
+ */
+async function createNoSocketProfile(
+  page: Page,
+  name: string,
+  tcpPort: number | null
+): Promise<string> {
+  const created = await api(page, 'POST', '/api/mihomo/profiles/create', {
+    name,
+    template: 'rule-based.yaml'
+  });
+  expect(created.status, `создание профиля ${name}`).toBe(200);
+  let text = (await readProfile(page, name)).replace(CONTROLLER_LINES, '');
+  if (!text.endsWith('\n')) text += '\n';
+  if (tcpPort !== null) text += `external-controller: 127.0.0.1:${tcpPort}\n`;
+  const q = encodeURIComponent(profilePath(name));
+  const saved = await rawText(page, 'POST', `/api/config/save?path=${q}`, text);
+  expect(saved.status, `запись профиля ${name}`).toBe(200);
+  const back = await readProfile(page, name);
+  expect(back.includes('external-controller-unix'), `у профиля ${name} нет сокета`).toBe(false);
+  return back;
+}
+
+/** «Сделать активным» настоящим API; занятость ядра и конвейера пережидается. */
+async function activateProfile(page: Page, name: string, restoring = false): Promise<void> {
+  await resetDraft(page);
+  await waitApplyIdle(page, `перед активацией ${name}`);
+  const transient = restoring
+    ? ['kernel_op_in_progress', 'apply_busy', 'draft_open']
+    : ['kernel_op_in_progress', 'apply_busy'];
+  const busy = (r: { status: number; data: Record<string, unknown> | null }) =>
+    r.status === 409 && transient.includes(String(r.data?.code ?? ''));
+  let res = await api(page, 'POST', '/api/mihomo/profiles/activate', { name });
+  for (let i = 0; i < 30 && busy(res); i++) {
+    await page.waitForTimeout(2000);
+    res = await api(page, 'POST', '/api/mihomo/profiles/activate', { name });
+  }
+  expect(res.status, `активация ${name}: код ${String(res.data?.code ?? '')}`).toBe(200);
+  expect(res.data?.error, `активация ${name}: ошибка в ответе`).toBeUndefined();
+}
+
+/** Mihomo снова у панели: возврат при сохранённых значениях секций, иначе взятие и «Применить». */
+async function returnMihomoToPanel(page: Page): Promise<void> {
+  await resetDraft(page);
+  await waitApplyIdle(page, 'перед возвратом Mihomo панели');
+  const cur = await mihomoOwner(page);
+  if (cur.taken) return;
+  if (cur.saved) {
+    const res = await api(page, 'POST', '/api/configlayer/routing/mihomo', { action: 'return' });
+    expect(res.status, `возврат Mihomo панели: код ${String(res.data?.code ?? '')}`).toBe(200);
+    expect(res.data?.error, 'возврат Mihomo панели: ошибка в ответе').toBeUndefined();
+  } else {
+    const take = await api(page, 'POST', '/api/configlayer/routing/take', {
+      revision: (await routingInfo(page)).revision,
+      scope: 'mihomo'
+    });
+    expect(take.status, 'взятие Mihomo').toBe(200);
+    const start = await api(page, 'POST', '/api/configlayer/apply', {});
+    expect(start.status, 'применение взятия Mihomo').toBe(200);
+  }
+  await waitApplyIdle(page, 'после возврата Mihomo панели');
+  await expect
+    .poll(async () => (await mihomoOwner(page)).taken, {
+      message: 'Mihomo у панели',
+      timeout: T.save
+    })
+    .toBe(true);
+}
+
+/** Удаляет профили теста; strict — каждый обязан удалиться. */
+async function removeNoSocketProfiles(page: Page, strict: boolean): Promise<void> {
+  for (const name of (await mihomoOwner(page)).users) {
+    // Профиль возврата остаётся на стенде: он цель возврата Mihomo, его удалить нельзя
+    if (!name.startsWith(NOSOCK_PREFIX) || name === NOSOCK_PARK) continue;
+    const res = await api(page, 'POST', '/api/mihomo/profiles/delete', { name });
+    if (strict) {
+      expect(res.status, `удаление профиля ${name}: ${String(res.data?.code ?? '')}`).toBe(200);
+    }
+  }
+}
+
+/**
+ * Команда стенда по сокетам TCP роутера (IPv4 и IPv6): awk получает строки таблиц и порт
+ * контроллера в шестнадцатеричном виде (s = ":XXXX"), program решает код выхода.
+ */
+function tcpPortCmd(port: number, program: string): string {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('порт TCP-контроллера вне диапазона');
+  }
+  const hex = port.toString(16).toUpperCase().padStart(4, '0');
+  return [
+    'for f in /proc/net/tcp /proc/net/tcp6; do [ -r "$f" ] && cat "$f"; done |',
+    `awk -v s=':${hex}' '${program}'`
+  ].join(' ');
+}
+
+/** 0 — Mihomo слушает TCP-порт контроллера (локальный адрес, состояние LISTEN). */
+function listeningCmd(port: number): string {
+  return tcpPortCmd(
+    port,
+    '$1 ~ /^[0-9]+:$/ && $4 == "0A" && substr($2, length($2) - 4) == s { f = 1 } END { exit f ? 0 : 1 }'
+  );
+}
+
+/** 0 — ни одного клиентского сокета к порту контроллера (TIME_WAIT тоже считается). */
+function noClientsCmd(port: number): string {
+  return tcpPortCmd(
+    port,
+    '$1 ~ /^[0-9]+:$/ && substr($3, length($3) - 4) == s { n++ } END { exit n ? 1 : 0 }'
+  );
+}
+
+/** Заголовок «Профили» после перехода из подсказки: ниже липкой полосы черновика, но не далеко. */
+async function expectProfilesTitleBelowDraftBar(page: Page, where: string): Promise<void> {
+  const titleTop = await page
+    .getByTestId('profiles-card')
+    .locator('.pc-title')
+    .evaluate((el) => el.getBoundingClientRect().top);
+  const barBottom = await page
+    .getByTestId('config-draftbar')
+    .evaluate((el) => el.getBoundingClientRect().bottom);
+  expect(titleTop, `${where}: заголовок «Профили» ниже полосы черновика`).toBeGreaterThanOrEqual(
+    barBottom
+  );
+  expect(
+    titleTop - barBottom,
+    `${where}: запас под полосой — шаг, а не лишний экран`
+  ).toBeLessThanOrEqual(40);
+}
+
+/**
+ * Подсказка S3 на странице: заголовок и ссылка «Управлять в панели». На «Квотах» она — плашка
+ * над работающей страницей, без заголовка-раздела.
+ */
+async function expectNoSocketHint(page: Page, hash: string): Promise<void> {
+  await page.goto(`/${hash}`, { timeout: T.page, waitUntil: 'domcontentloaded' });
+  const hint = page.getByTestId('mihomo-no-socket');
+  await expect(hint, `подсказка на ${hash}`).toBeVisible({ timeout: T.page });
+  if (hash === '#/trafficquotas') {
+    await expect(hint.locator('strong')).toHaveText(localeRe('proxies.rt.no_socket_title'));
+  } else {
+    await expect(hint.getByRole('heading')).toHaveText(localeRe('proxies.rt.no_socket_title'));
+  }
+  await expect(
+    hint.getByRole('link', { name: localeRe('proxies.rt.no_socket_cta') })
+  ).toBeVisible();
+}
+
+test(
+  'proxies-runtime no-socket: свой профиль без сокета — подсказка на трёх страницах, без TCP, возврат профиля',
+  {
+    tag: CORE_TAG,
+    annotation: {
+      type: SLOW_ANNOTATION,
+      description:
+        'активации профилей Mihomo, остановка и запуск ядра и возврат панели: перезапуск Mihomo на каждом шаге'
+    }
+  },
+  async ({ page }) => {
+    test.setTimeout(T.save * 20);
+    test.skip(RT.core !== 'mihomo', 'подсказка относится к работающему Mihomo');
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/', { timeout: T.page, waitUntil: 'domcontentloaded' });
+    await page.locator('.main-content').first().waitFor({ state: 'visible', timeout: T.page });
+    test.skip(!(await installedKernels(page)).mihomo, 'Mihomo не установлен');
+    await removeNoSocketProfiles(page, false);
+    const before = await mihomoOwner(page);
+    test.skip(before.plain, 'config.yaml — обычный файл: переход его усыновит');
+    // Профиль, на который Mihomo встанет перед возвратом панели: иначе целью возврата
+    // останется профиль теста, и его нельзя удалить
+    // Своего профиля на стенде может не быть: тогда тест заводит такой сам и оставляет, потому
+    // что он становится целью возврата Mihomo
+    let park = before.users.includes(before.returnTarget)
+      ? before.returnTarget
+      : (before.users[0] ?? '');
+    const initial = await noSocketState(page);
+
+    // Профиль панели (или прежний свой профиль с сокетом) подсказки не даёт
+    if (!initial.includes('no_socket=true')) {
+      await page.goto('/#/proxies', { timeout: T.page, waitUntil: 'domcontentloaded' });
+      await expect(page.getByTestId('proxies-layer-page')).toBeVisible({ timeout: T.page });
+      await expect(page.locator('.main-content .skeleton-card')).toHaveCount(0, {
+        timeout: T.page
+      });
+      await expect(page.getByTestId('mihomo-no-socket')).toHaveCount(0);
+    }
+
+    const tcpPort = randomPort();
+    await withStandReturn(
+      async () => {
+        if (before.taken && park === '') {
+          const parked = await api(page, 'POST', '/api/mihomo/profiles/create', {
+            name: NOSOCK_PARK,
+            template: 'rule-based.yaml'
+          });
+          expect(parked.status, `создание профиля ${NOSOCK_PARK}`).toBe(200);
+          park = NOSOCK_PARK;
+        }
+        const noneBytes = await createNoSocketProfile(page, NOSOCK_NONE, null);
+        const tcpBytes = await createNoSocketProfile(page, NOSOCK_TCP, tcpPort);
+
+        // Контроллера нет совсем: признак на сервере и подсказка на «Прокси»
+        await activateProfile(page, NOSOCK_NONE);
+        await expectNoSocketState(page, NO_SOCKET_ON, `${NOSOCK_NONE}: признак no_socket`);
+        expect(await readProfile(page, NOSOCK_NONE), 'активация не правит профиль').toBe(noneBytes);
+        let guard = attachConsoleGuard(page);
+        await expectNoSocketHint(page, '#/proxies');
+        await guard.assertClean();
+
+        // Только TCP: Mihomo слушает порт, панель к нему не подключается
+        await activateProfile(page, NOSOCK_TCP);
+        await expectNoSocketState(page, NO_SOCKET_ON, `${NOSOCK_TCP}: признак no_socket`);
+        expect(await readProfile(page, NOSOCK_TCP), 'активация не правит профиль').toBe(tcpBytes);
+        await expect
+          .poll(() => standSh(listeningCmd(tcpPort)), {
+            message: 'Mihomo слушает TCP-контроллер профиля',
+            timeout: T.save,
+            intervals: [2000]
+          })
+          .toBe(0);
+        expect(await standSh(noClientsCmd(tcpPort)), 'к TCP-контроллеру нет подключений').toBe(0);
+
+        guard = attachConsoleGuard(page);
+        await expectNoSocketHint(page, '#/proxies');
+        await expect(page.getByTestId('proxies-runtime-notice')).toHaveCount(0);
+        await expectNoSocketHint(page, '#/connections');
+        await expect(page.locator('.main-content .conn-toolbar')).toHaveCount(0);
+        await expectNoSocketHint(page, '#/trafficquotas');
+        // Ссылка ведёт к профилям: вкладка ядер «Конфигурации», активен профиль теста
+        await page
+          .getByTestId('mihomo-no-socket')
+          .getByRole('link', { name: localeRe('proxies.rt.no_socket_cta') })
+          .click();
+        await expect
+          .poll(() => page.evaluate(() => window.location.hash), { timeout: T.page })
+          .toBe('#/config/cores?focus=profiles');
+        await expect(page.getByTestId('profiles-card')).toBeVisible({ timeout: T.page });
+        await expectProfilesTitleBelowDraftBar(page, 'десктоп');
+        await expect(page.getByTestId(`profile-row-${NOSOCK_TCP}`)).toHaveAttribute(
+          'data-active',
+          'true',
+          { timeout: T.page }
+        );
+        // Телефон: подсказка на «Прокси», переход к «Профилям», заголовок так же ниже полосы
+        await page.setViewportSize({ width: 390, height: 844 });
+        await expectNoSocketHint(page, '#/proxies');
+        await page
+          .getByTestId('mihomo-no-socket')
+          .getByRole('link', { name: localeRe('proxies.rt.no_socket_cta') })
+          .click();
+        await expect
+          .poll(() => page.evaluate(() => window.location.hash), { timeout: T.page })
+          .toBe('#/config/cores?focus=profiles');
+        await expect(page.getByTestId('profiles-card')).toBeVisible({ timeout: T.page });
+        await expectProfilesTitleBelowDraftBar(page, 'телефон');
+        await page.setViewportSize({ width: 1280, height: 900 });
+        await guard.assertClean();
+        // Страницы постояли открытыми: за это время ни одного подключения по TCP
+        expect(
+          await standSh(noClientsCmd(tcpPort)),
+          'после обхода страниц к TCP-контроллеру нет подключений'
+        ).toBe(0);
+
+        // Остановленное ядро — свой вид «Прокси», не подсказка
+        const stop = await api(page, 'POST', '/api/service/control?action=stop');
+        expect(stop.status, 'остановка службы').toBe(200);
+        await expect
+          .poll(async () => (await runningKernels(page)).length, {
+            message: 'ядро остановлено',
+            timeout: T.save * 3,
+            intervals: [2000]
+          })
+          .toBe(0);
+        await expectNoSocketState(
+          page,
+          /no_socket=false \| view 200 stopped no_socket=false$/,
+          'остановленное ядро снимает признак'
+        );
+        guard = attachConsoleGuard(page);
+        await page.goto('/#/proxies', { timeout: T.page, waitUntil: 'domcontentloaded' });
+        await expect(page.getByTestId('proxies-runtime-notice')).toHaveAttribute(
+          'data-kind',
+          'stopped',
+          { timeout: T.page }
+        );
+        await expect(page.getByTestId('mihomo-no-socket')).toHaveCount(0);
+        await page.goto('/#/connections', { timeout: T.page, waitUntil: 'domcontentloaded' });
+        await expect(page.locator('.main-content .empty-state').first()).toBeVisible({
+          timeout: T.page
+        });
+        // Признаки ядер страница берёт из capabilities, их опрос идёт раз в 10 с
+        await expect(page.getByTestId('mihomo-no-socket')).toHaveCount(0, { timeout: T.page });
+        await guard.assertClean();
+        const start = await api(page, 'POST', '/api/service/control?action=start');
+        expect(start.status, 'запуск службы').toBe(200);
+        await expectNoSocketState(page, NO_SOCKET_ON, 'после запуска признак вернулся');
+      },
+      async () => {
+        await page.goto('/', { timeout: T.page, waitUntil: 'domcontentloaded' });
+        if ((await runningKernels(page)).length === 0) {
+          await api(page, 'POST', '/api/service/control?action=start');
+        }
+        const cur = await mihomoOwner(page);
+        if (before.taken) {
+          if (!cur.taken) {
+            if (cur.active !== park) await activateProfile(page, park, true);
+            await returnMihomoToPanel(page);
+          }
+        } else if (before.active !== '' && cur.active !== before.active) {
+          await activateProfile(page, before.active, true);
+        }
+        await removeNoSocketProfiles(page, true);
+      }
+    );
+
+    // Профиль вернулся: признак прежний, на «Прокси» подсказки нет
+    await expectNoSocketState(
+      page,
+      new RegExp(`^${initial.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
+      'признак вернулся к исходному'
+    );
+    await expect
+      .poll(async () => (await runningKernels(page)).join(','), {
+        message: 'ядро вернулось в рабочее состояние',
+        timeout: T.save * 4,
+        intervals: [3000]
+      })
+      .toBe('mihomo');
+    if (!initial.includes('no_socket=true')) {
+      const guard = attachConsoleGuard(page);
+      await page.goto('/#/proxies', { timeout: T.page, waitUntil: 'domcontentloaded' });
+      await expect(page.getByTestId('proxies-layer-page')).toBeVisible({ timeout: T.page });
+      await expect(page.locator('.main-content .skeleton-card')).toHaveCount(0, {
+        timeout: T.page
+      });
+      await expect(page.getByTestId('mihomo-no-socket')).toHaveCount(0);
+      await guard.assertClean();
+    }
   }
 );

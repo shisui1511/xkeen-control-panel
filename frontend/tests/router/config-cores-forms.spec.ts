@@ -4,24 +4,25 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { api, layerFlag, resetDraft } from './lib/nodes-api';
+import { api, resetDraft, waitApplyIdle, withPanel } from './lib/nodes-api';
 
 // Общие блоки форм секций ядер на настоящей панели (фаза 147, план 19): «Прочие ключи»
 // обоих ядер правятся в «Дополнительно» с проверкой на сервере до записи в черновик, у
 // чужой секции блок только для чтения, раскрытая карточка проходит axe и умещается в 390 px.
-// Ответы сети не подменяются. Флаг слоя включается на время прогона и возвращается прежним.
-// Ядра не запускаются и не меняются; изменения идут только в черновик и сбрасываются.
-
-const layer = layerFlag();
+// Ответы сети не подменяются. Черновик сбрасывается до и после прогона. Ядра не запускаются
+// и не меняются; изменения идут только в черновик и сбрасываются.
 
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
-  await layer.enable(browser);
+  await withPanel(browser, (page) => resetDraft(page));
 });
 
 test.afterAll(async ({ browser }) => {
-  await layer.restore(browser);
+  await withPanel(browser, async (page) => {
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
+  });
 });
 
 type Kernel = 'xray' | 'mihomo';

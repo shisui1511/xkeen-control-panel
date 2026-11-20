@@ -143,7 +143,8 @@ type MihomoProfileService struct {
 	// управляет панель; пусто — не управляет. Читается при каждом вызове.
 	ReturnTarget func() string
 
-	mu sync.Mutex
+	filesMu sync.Mutex
+	mu      sync.Mutex
 }
 
 func NewMihomoProfileService(mihomoDir, dataDir string) *MihomoProfileService {
@@ -153,10 +154,15 @@ func NewMihomoProfileService(mihomoDir, dataDir string) *MihomoProfileService {
 	}
 }
 
+// LockFiles сериализует запись конфигурации Mihomo и возвращает функцию снятия замка.
+func (s *MihomoProfileService) LockFiles() func() {
+	s.filesMu.Lock()
+	return s.filesMu.Unlock
+}
+
 // LockWrite takes the profile write lock (s.mu) for a caller that writes a
-// profile file itself (ConfigSave). Lock order is always SubscriptionService
-// mihomoMu first, then this lock; the service methods take s.mu on their own,
-// so a caller that uses them must not call LockWrite.
+// profile file itself (ConfigSave). Take the file lock first. Service methods
+// take s.mu on their own, so callers of those methods should only use LockFiles.
 func (s *MihomoProfileService) LockWrite() { s.mu.Lock() }
 
 // UnlockWrite releases the lock taken by LockWrite.
@@ -286,38 +292,6 @@ func (s *MihomoProfileService) listLocked() (*MihomoProfilesState, error) {
 	return state, nil
 }
 
-// Adopt converts a plain config.yaml into the profile layout: the file moves
-// to profiles/<name>.yaml and config.yaml becomes a symlink to it. The
-// running core keeps working since the content is unchanged.
-func (s *MihomoProfileService) Adopt(name string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if isReservedProfileName(name) {
-		return ErrProfileReserved
-	}
-	if _, err := s.activeProfile(); err == nil {
-		return nil
-	}
-	dst, err := s.profilePath(name)
-	if err != nil {
-		return err
-	}
-	if _, err := os.Stat(dst); err == nil {
-		return ErrProfileExists
-	}
-	data, err := os.ReadFile(s.configPath())
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(s.profilesDir(), 0o755); err != nil {
-		return err
-	}
-	if err := utils.AtomicWriteFile(dst, data, 0o600); err != nil {
-		return err
-	}
-	return s.pointConfigTo(name)
-}
-
 // Create adds a profile: an empty minimal config, a copy of the active
 // config (from == "") or a copy of another profile.
 func (s *MihomoProfileService) Create(name, from string, empty bool) error {
@@ -338,7 +312,7 @@ func (s *MihomoProfileService) Create(name, from string, empty bool) error {
 	case empty:
 		data = []byte(profileMinimalConfig)
 	case from == "":
-		// Follows the symlink, so this also works before adoption.
+		// Follows the symlink, so this also works for a plain config.yaml.
 		if data, err = os.ReadFile(s.configPath()); err != nil {
 			return err
 		}
@@ -653,18 +627,10 @@ type ActivationResult struct {
 	Adopted string `json:"adopted,omitempty"`
 }
 
-// Activate validates a profile, points config.yaml to it and restarts the
-// core when Mihomo is running. If the core does not come back healthy, the
-// previous profile is restored and the core restarted again. Обычный config.yaml
-// не принимается: ErrProfilesUnmanaged (см. ActivateAdopting).
-func (s *MihomoProfileService) Activate(name string) (*ActivationResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.activateLocked(name)
-}
-
-// activateLocked — активация, когда config.yaml уже ссылка на профиль. Вызывается
-// под s.mu.
+// activateLocked — активация, когда config.yaml уже ссылка на профиль: проверка
+// профиля, переключение config.yaml и перезапуск запущенного Mihomo; ядро не
+// вернулось здоровым — прежний профиль возвращается и ядро перезапускается снова.
+// Обычный config.yaml не принимается: ErrProfilesUnmanaged. Вызывается под s.mu.
 func (s *MihomoProfileService) activateLocked(name string) (*ActivationResult, error) {
 	path, err := s.profilePath(name)
 	if err != nil {
@@ -693,7 +659,7 @@ func (s *MihomoProfileService) activateLocked(name string) (*ActivationResult, e
 	return s.restartConfirmed(&ActivationResult{Active: name}, previous, undo)
 }
 
-// ActivateAdopting — Activate, который принимает и обычный config.yaml XKeen
+// ActivateAdopting — активация профиля, которая принимает и обычный config.yaml XKeen
 // (D-27): файл одной операцией переезжает в profiles/config-xkeen.yaml (содержимое
 // то же, при занятом имени — суффикс -2…-99), config.yaml становится ссылкой на
 // выбранный профиль. Не запустилось — возвращается всё: прежний обычный файл с теми же

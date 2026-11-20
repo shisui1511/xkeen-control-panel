@@ -387,7 +387,7 @@ func TestRouterDNSStartReconcile(t *testing.T) {
 		}
 	})
 
-	// Трасса: слой включён, перехват выключен → остановка панели → в файле
+	// Трасса: перехват выключен → остановка панели → в файле
 	// состояния признак «override поставила панель» (override_set_by_panel: так
 	// выглядит панель, остановленная или упавшая до возврата DNS прошивке) и
 	// `opkg dns-override` из теста (override сохранён без панели, R3) → запуск панели
@@ -396,7 +396,7 @@ func TestRouterDNSStartReconcile(t *testing.T) {
 	// override исходный, панель запущена.
 	t.Run("stale_override", func(t *testing.T) {
 		e := rtNewSrc(t)
-		e.enableLayer()
+		e.freshDraft()
 		e.rtRstIdle()
 		e.rtDNSEnsureOff()
 		overrideBefore := rtDNSOverrideOn(t)
@@ -438,14 +438,14 @@ func TestRouterDNSStartReconcile(t *testing.T) {
 		}
 	})
 
-	// Трасса: слой включён, перехват выключен → остановка панели → в файле состояния
+	// Трасса: перехват выключен → остановка панели → в файле состояния
 	// нет признака «override поставила панель» и `opkg dns-override` из теста
 	// (чужой override: вручную, без панели) → запуск панели → через
 	// rtDNSReconcileForeignWait override по-прежнему включён, в истории действий нет
 	// записи о снятии override. t.Cleanup: override исходный, панель запущена.
 	t.Run("foreign_override", func(t *testing.T) {
 		e := rtNewSrc(t)
-		e.enableLayer()
+		e.freshDraft()
 		e.rtRstIdle()
 		e.rtDNSEnsureOff()
 		overrideBefore := rtDNSOverrideOn(t)

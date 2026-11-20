@@ -16,8 +16,9 @@ import (
 // перехвата XKeen с :53 строятся по ней при старте ядра: смена строки без
 // перезапуска запущенного ядра не действует. Поэтому каждая смена строки здесь
 // заканчивается KernelApplier.ApplyLocked под замком жизненного цикла;
-// остановленное ядро не запускается (FND-05). Код старого переключателя
-// (SetDNSProxying, /api/service/dns-redirect) не трогается: его удаляет Phase 151.
+// остановленное ядро не запускается (FND-05). Своего переключателя строки у
+// панели нет (DNSF-06): строку меняют только транзакция перехвата и кнопка
+// LegacyOff.
 
 // CodeLegacyOffFailed — старое перенаправление не выключилось (dnsErrorCodes.json).
 const CodeLegacyOffFailed = "legacy_off_failed"
@@ -77,7 +78,7 @@ func (s *Service) LegacyOff(ctx context.Context) (View, error) {
 	}
 	if fail == nil {
 		// Пользователь сам выключил строку: возвращать её к значению до включения
-		// перехвата (выключение флага слоя, сторож, сверка) больше не нужно.
+		// перехвата (откат, сторож, сверка) больше не нужно.
 		if err := s.update(func(p *persisted) {
 			p.ProxyDNSBefore = false
 			p.ProxyRestartPending = false
@@ -113,57 +114,6 @@ func legacyReason(s string) string {
 	return s
 }
 
-// opFlagOff — операция службы: возврат DNS прошивке при выключении флага слоя.
-const opFlagOff = "flag_off"
-
-// ReleaseForFlagOff — возврат DNS прошивке и строки proxy_dns перед выключением
-// флага слоя (D-36, D-04 из 144): обработчик настроек вызывает его до переноса
-// файлов, ошибка отменяет выключение флага. Перехвата нет (не включён, не желаем,
-// окна нет) — сразу nil.
-//
-// Синхронно, операцией службы: окно подтверждения закрывается без отката (таймер
-// остановлен); шаги выключения — ядро без слушателя (запущенное перезапускается,
-// остановленное не запускается), override к значению до включения, проверка ответа
-// прошивки через 127.0.0.1:53; desired=false, снимок снимается. Затем строка
-// proxy_dns получает значение до включения перехвата, и если строка изменилась,
-// запущенное ядро перезапускается KernelApplier.ApplyLocked: XKeen строит прежний
-// перехват с :53 только при старте ядра. DNS прошивке возвращается первым и тогда,
-// когда шаг ядра не удался. Сбой шагов выключения оставляет перехват желаемым
-// (disable_failed, runDisable): флаг остаётся включённым, и повторное выключение
-// флага снова возвращает DNS прошивке и строку proxy_dns, а не считает возврат
-// ненужным.
-func (s *Service) ReleaseForFlagOff(ctx context.Context) error {
-	pl, proxyBefore, needed, err := s.flagOffPlan()
-	if err != nil || !needed {
-		return err
-	}
-	steps := disableSteps
-	if pl.lineOnly {
-		steps = nil
-	}
-	if !s.beginOp(opFlagOff, steps) {
-		return errCode(CodeBusy)
-	}
-	defer s.endOp()
-	if !pl.lineOnly {
-		if !s.claimFlagOffWindow() {
-			return &Error{Code: CodeBusy, Detail: "идёт откат окна подтверждения"}
-		}
-		s.clearOutcome()
-		s.runDisable(ctx, pl)
-		// Окно закрывается и при сбое: откат окна заменён выключением, а override и
-		// proxy_dns до включения остались в состоянии службы вместе с desired.
-		s.closeFlagOffWindow()
-		if f := s.opFailure(); f != nil {
-			return &Error{Code: f.Code, Params: f.Params, Detail: f.Detail}
-		}
-	}
-	if e := s.returnProxyLine(ctx, proxyBefore); e != nil {
-		return s.flagOffFailed(e.Code, e.Params, errors.New(e.Detail))
-	}
-	return nil
-}
-
 // returnProxyLine — общий помощник возврата строки proxy_dns: строка получает
 // значение want, и если она менялась (или прежний перезапуск не довели,
 // ProxyRestartPending), запущенное активное ядро перезапускается KernelApplier.
@@ -171,9 +121,9 @@ func (s *Service) ReleaseForFlagOff(ctx context.Context) error {
 // остановленное ядро не запускается. Строка возвращена, перезапуск ещё впереди —
 // сбой между ними не теряется (ProxyRestartPending в файле). ProxyDNSBefore и
 // ProxyRestartPending снимаются только после успеха обоих шагов. Сбой — *Error:
-// generic (строка не прочитана или не записана) или restart_failed. Его зовут
-// выключение флага слоя и все пути, делающие перехват нежелаемым: откат переноса и
-// окна переноса, возврат DNS прошивке сторожем, сверка на старте.
+// generic (строка не прочитана или не записана) или restart_failed. Его зовут все
+// пути, делающие перехват нежелаемым: откат переноса и окна переноса, возврат DNS
+// прошивке сторожем, сверка на старте.
 func (s *Service) returnProxyLine(ctx context.Context, want bool) *Error {
 	changed, err := s.restoreProxyLine(ctx, want)
 	if err != nil {
@@ -181,7 +131,7 @@ func (s *Service) returnProxyLine(ctx context.Context, want bool) *Error {
 	}
 	if changed {
 		// Строка возвращена, перезапуск ещё впереди: сбой между ними не должен
-		// потеряться при повторном выключении флага.
+		// потеряться при следующем возврате.
 		if err := s.update(func(p *persisted) { p.ProxyRestartPending = true }); err != nil {
 			log.Printf("dnstakeover: %v", err)
 		}
@@ -207,10 +157,10 @@ func (s *Service) returnProxyLine(ctx context.Context, want bool) *Error {
 }
 
 // releaseProxyLine возвращает строку proxy_dns к значению до включения перехвата
-// (ProxyDNSBefore из состояния службы), когда перехват становится нежелаемым вне
-// выключения флага слоя. Строка до включения не была включена — ничего. Вызывается
-// после того, как DNS у прошивки и файлы ядра без слушателя: перезапуск ядра строит
-// прежние правила XKeen с :53 только на таких файлах.
+// (ProxyDNSBefore из состояния службы), когда перехват становится нежелаемым.
+// Строка до включения не была включена — ничего. Вызывается после того, как DNS
+// у прошивки и файлы ядра без слушателя: перезапуск ядра строит прежние правила
+// XKeen с :53 только на таких файлах.
 func (s *Service) releaseProxyLine(ctx context.Context) error {
 	s.mu.Lock()
 	before := s.st.ProxyDNSBefore
@@ -222,82 +172,6 @@ func (s *Service) releaseProxyLine(ctx context.Context) error {
 		return errors.New(e.Detail)
 	}
 	return nil
-}
-
-// flagOffPlan — что возвращать при выключении флага слоя: план шагов выключения,
-// proxy_dns до включения перехвата (из окна включения, снимка или состояния) и
-// нужен ли возврат вообще. Перехвата нет, а строка не возвращена (или не
-// перезапущено ядро после возврата) — план lineOnly.
-func (s *Service) flagOffPlan() (pl disablePlan, proxyBefore, needed bool, err error) {
-	st, err := s.d.Layer.ReadState()
-	if err != nil {
-		return disablePlan{}, false, false, err
-	}
-	live, on := configlayer.ParseDNSTakeoverLive(st.Live)
-	cur, curErr := ProxyDNS()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !on && !s.st.Desired && s.st.Window == nil {
-		// Перехвата нет, но предыдущий возврат мог не довести строку proxy_dns или
-		// перезапуск ядра до конца: тогда выключение флага доделывает только их.
-		if s.st.ProxyDNSBefore && curErr == nil && (!cur || s.st.ProxyRestartPending) {
-			return disablePlan{lineOnly: true}, true, true, nil
-		}
-		return disablePlan{}, false, false, nil
-	}
-	pl = disablePlan{kernel: s.st.Kernel, live: on, overrideBefore: s.st.OverrideBefore}
-	proxyBefore = s.st.ProxyDNSBefore
-	if on {
-		pl.kernel = live.Kernel
-	}
-	switch {
-	case s.st.Window != nil && s.st.Window.Kind == kindEnable:
-		pl.overrideBefore = s.st.Window.Snapshot.OverrideBefore
-		proxyBefore = s.st.Window.Snapshot.ProxyDNSBefore
-	case s.st.Snapshot != nil:
-		pl.overrideBefore = s.st.Snapshot.OverrideBefore
-		proxyBefore = s.st.Snapshot.ProxyDNSBefore
-	}
-	return pl, proxyBefore, true, nil
-}
-
-// claimFlagOffWindow забирает открытое окно подтверждения без отката: таймер
-// остановлен, флаг отката держит окно, пока идёт возврат. false — окно уже
-// откатывает таймер или «Откатить сейчас». Окна нет — true.
-func (s *Service) claimFlagOffWindow() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.st.Window == nil {
-		return true
-	}
-	if s.winRolling {
-		return false
-	}
-	s.winRolling = true
-	s.stopWindowTimerLocked()
-	return true
-}
-
-// closeFlagOffWindow закрывает окно, забранное claimFlagOffWindow: перехват
-// выключен, откатывать окну больше нечего.
-func (s *Service) closeFlagOffWindow() {
-	if err := s.update(func(p *persisted) { p.Window = nil }); err != nil {
-		log.Printf("dnstakeover: %v", err)
-	}
-	s.mu.Lock()
-	s.winRolling = false
-	s.mu.Unlock()
-}
-
-// opFailure — копия сбоя идущей операции; nil — сбоя нет.
-func (s *Service) opFailure() *Failure {
-	s.opMu.Lock()
-	defer s.opMu.Unlock()
-	if s.failure == nil {
-		return nil
-	}
-	f := *s.failure
-	return &f
 }
 
 // restoreProxyLine приводит строку proxy_dns к want; changed — строку пришлось менять.
@@ -315,13 +189,4 @@ func (s *Service) restoreProxyLine(ctx context.Context, want bool) (changed bool
 		return false, err
 	}
 	return true, nil
-}
-
-// flagOffFailed — сбой после возврата DNS прошивке (строка proxy_dns или
-// перезапуск ядра): сбой в виде, запись истории, ошибка с кодом для обработчика.
-func (s *Service) flagOffFailed(code string, params map[string]string, err error) error {
-	f := &Failure{Code: code, Params: params, Detail: truncateDetail(err.Error())}
-	s.setFailure(f)
-	s.recordHistory(opFlagOff, "", f)
-	return &Error{Code: f.Code, Params: f.Params, Detail: f.Detail}
 }

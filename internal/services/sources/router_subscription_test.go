@@ -388,8 +388,8 @@ func TestRouterErrPrivateNetwork(t *testing.T) {
 	}
 }
 
-// New() не создаёт каталогов и не обращается к диску и сети; при выключенном флаге
-// слоя сервис следов не оставляет, а первая запись снимка создаёт каталог 0700.
+// New() не создаёт каталогов, не берёт HWID и не создаёт сетевого клиента; первая
+// запись снимка создаёт каталог 0700.
 func TestRouterServiceNewCreatesNoDirs(t *testing.T) {
 	tg := routertest.Current(t)
 	dir, err := os.MkdirTemp(tg.WorkDir, "src-nodirs-")
@@ -401,7 +401,6 @@ func TestRouterServiceNewCreatesNoDirs(t *testing.T) {
 	layer, err := configlayer.New(configlayer.Options{
 		DataDir:  dir,
 		Roots:    roots,
-		Enabled:  func() bool { return false },
 		Binaries: func() configlayer.Binaries { return configlayer.Binaries{} },
 	})
 	if err != nil {
@@ -429,18 +428,11 @@ func TestRouterServiceNewCreatesNoDirs(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "config_layer")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("New создал каталог config_layer: %v", err)
 	}
-	// Выключенный слой: предпросмотр отказывает, сеть и диск не тронуты.
-	if _, err := svc.Preview(context.Background(), inputOf("https://xcp-provider.invalid/sub")); !errors.Is(err, configlayer.ErrDisabled) {
-		t.Errorf("предпросмотр при выключенном слое: %v", err)
-	}
 	mu.Lock()
 	h, c := hwidCalls, clientCalls
 	mu.Unlock()
 	if h != 0 || c != 0 {
-		t.Errorf("при выключенном слое: вызовов HWID %d, клиента %d", h, c)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "config_layer")); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("каталог config_layer создан при выключенном слое: %v", err)
+		t.Errorf("New: вызовов HWID %d, клиента %d", h, c)
 	}
 
 	// Первая запись снимка создаёт каталог с правами 0700 и файл 0600.

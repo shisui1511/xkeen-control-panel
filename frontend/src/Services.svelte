@@ -12,8 +12,7 @@
     activeKernelName,
     isConflict,
     lockNav,
-    mihomoOfflineReason,
-    configLayerEnabled
+    mihomoOfflineReason
   } from './stores';
   import { anyKernelInstalled } from './lib/navCaps';
   import { usePoller } from './lib/poller';
@@ -51,16 +50,12 @@
     type KernelName
   } from './lib/serviceControl';
   import { kernelLabel } from './lib/kernelState';
-  import { editorHash, editorHref } from './lib/editorRoute';
-  import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
+  import { constructorHash, editorHash } from './lib/editorRoute';
   import XKeenSettingsCard from './components/xkeen/XKeenSettingsCard.svelte';
   import XKeenInstallCard from './components/xkeen/XKeenInstallCard.svelte';
-  import MihomoProfilesCard from './components/mihomo/MihomoProfilesCard.svelte';
   import Icon from './lib/components/Icon.svelte';
 
   let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
-
-  let showMihomoMigrateModal = $state(false);
 
   interface Kernel extends KernelLike {
     name: string;
@@ -1096,7 +1091,7 @@
                 {/if}
                 {#if ($capabilities?.mihomo?.process_running || mihomo?.process_status === 'running') && $capabilities?.mihomo?.reachable && !$capabilities?.mihomo?.api_reachable}
                   <a
-                    href={$editorHref}
+                    href={editorHash()}
                     class="badge badge--tag badge-warning mihomo-api-badge-link"
                     title={$t('svc.mihomo_api_unavailable_title')}
                     onclick={(e) => e.stopPropagation()}
@@ -1356,7 +1351,7 @@
           {#if activeKernel === 'mihomo' && $capabilities?.mihomo?.is_insecure_lan}
             <button
               class="btn btn-warning-soft"
-              onclick={() => (showMihomoMigrateModal = true)}
+              onclick={() => (window.location.hash = constructorHash())}
               title={$t('mihomo.migrate_banner_body')}
             >
               ⚠ {$t('mihomo.controller_mode_insecure')}
@@ -1752,16 +1747,6 @@
         }}
       />
     {/key}
-
-    {#if $capabilities?.kernels?.mihomo?.installed && !$configLayerEnabled}
-      <MihomoProfilesCard
-        {onSwitchTab}
-        onactivated={() => {
-          fetchStatus();
-          fetchRestartLog();
-        }}
-      />
-    {/if}
   </div>
 
   <!-- Watchdog Card (WD-06, D-31) -->
@@ -1934,16 +1919,6 @@
     </Section>
   </div>
 </div>
-
-<MihomoSocketMigrateModal
-  bind:open={showMihomoMigrateModal}
-  onclose={() => (showMihomoMigrateModal = false)}
-  onsuccess={() => {
-    fetchStatus();
-    fetchKernels();
-    fetchCapabilities();
-  }}
-/>
 
 <style>
   .no-api-note {

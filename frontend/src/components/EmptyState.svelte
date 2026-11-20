@@ -9,6 +9,8 @@
     ctaText = '',
     ctaLoading = false,
     ctaVariant = 'primary',
+    ctaHref = '',
+    tone = 'default',
     plain = false,
     oncta = undefined
   }: {
@@ -19,12 +21,22 @@
     ctaLoading?: boolean;
     /** secondary — когда основная кнопка того же действия уже стоит на панели над пустым состоянием. */
     ctaVariant?: 'primary' | 'secondary';
+    /** Переход по адресу вместо действия: рисуется ссылкой, её можно открыть в новой вкладке. */
+    ctaHref?: string;
+    /** warning — неполадка, а не пустой список: иконка цвета предупреждения, описание — Body 14px. */
+    tone?: 'default' | 'warning';
     plain?: boolean;
     oncta?: () => void;
   } = $props();
 </script>
 
-<div class="empty-state" class:empty-state--plain={plain} role="status" aria-label={title}>
+<div
+  class="empty-state"
+  class:empty-state--plain={plain}
+  class:empty-state--warning={tone === 'warning'}
+  role="status"
+  aria-label={title}
+>
   {#if IconComponent}
     <div class="empty-state__icon" aria-hidden="true">
       <IconComponent size={42} />
@@ -32,7 +44,9 @@
   {/if}
   <h2 class="empty-state__title">{title}</h2>
   <p class="empty-state__description">{description}</p>
-  {#if ctaText && oncta}
+  {#if ctaText && ctaHref}
+    <a class="btn btn-{ctaVariant} tap-zone-44" href={ctaHref}>{ctaText}</a>
+  {:else if ctaText && oncta}
     <Button variant={ctaVariant} loading={ctaLoading} title={ctaText} onclick={oncta}
       >{ctaText}</Button
     >
@@ -50,7 +64,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    gap: var(--spacing-2-5);
+    gap: var(--spacing-3);
   }
 
   .empty-state.empty-state--plain,
@@ -77,6 +91,12 @@
     margin-bottom: var(--spacing-2);
     box-shadow: 0 0 24px -4px var(--accent-soft);
   }
+  .empty-state--warning .empty-state__icon {
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+    box-shadow: none;
+  }
   .empty-state__title {
     font-size: var(--font-size-lg);
     font-weight: 600;
@@ -84,7 +104,7 @@
     margin: 0;
   }
   .empty-state > :global(.btn) {
-    margin-top: var(--spacing-1-5);
+    margin-top: var(--spacing-2);
   }
   .empty-state__description {
     font-size: var(--font-size-sm);
@@ -92,5 +112,8 @@
     line-height: 1.5;
     max-width: 420px;
     margin: 0;
+  }
+  .empty-state--warning .empty-state__description {
+    font-size: var(--font-size-base);
   }
 </style>

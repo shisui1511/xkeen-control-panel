@@ -149,32 +149,6 @@ async function throwIfKernelGate(res: Response): Promise<void> {
 }
 
 /**
- * Код отказа старого входа настройки при включённом слое «Конфигурация» (D-17, D-34):
- * сервер отвечает 409 с этим кодом и уже переведённым текстом.
- */
-export const LEGACY_BLOCKED = 'legacy_blocked';
-
-/** Ошибка — отказ старого входа настройки (код legacy_blocked). */
-export function isLegacyBlocked(err: unknown): boolean {
-  return !!err && typeof err === 'object' && (err as { code?: unknown }).code === LEGACY_BLOCKED;
-}
-
-/**
- * Общий разбор ответа legacy_blocked: ошибка с текстом сервера и полями status, code.
- * Пустой текст сервера заменяется на fallback. Для других ответов — null.
- */
-function legacyBlockedError(status: number, payload: unknown, fallback?: string): Error | null {
-  if (!payload || typeof payload !== 'object') return null;
-  const { code, error } = payload as { code?: unknown; error?: unknown };
-  if (code !== LEGACY_BLOCKED) return null;
-  const message = typeof error === 'string' && error !== '' ? error : fallback || `HTTP ${status}`;
-  const err: any = new Error(message);
-  err.status = status;
-  err.code = LEGACY_BLOCKED;
-  return err;
-}
-
-/**
  * apiFetchJSON — like apiFetch but automatically parses the JSON envelope.
  * Returns envelope.data on success, throws with envelope.error message on failure.
  * Use this for endpoints that return {success, data?, error?} from JSONSuccess/JSONError.
@@ -195,8 +169,6 @@ export async function apiFetchJSON<T = unknown>(
   }
 
   if (!res.ok) {
-    const legacy = legacyBlockedError(res.status, payload);
-    if (legacy) throw legacy;
     const errorMsg =
       payload && typeof payload === 'object' && payload.error
         ? payload.error
@@ -222,16 +194,6 @@ export async function apiFetchJSON<T = unknown>(
   }
 
   return payload as T;
-}
-
-export interface UserRule {
-  id: string;
-  type: string; // 'domain' | 'domain_suffix' | 'domain_keyword' | 'ip_cidr' | 'port'
-  value: string;
-  target: string; // 'direct' | 'proxy' | 'reject'
-  group?: string;
-  comment?: string;
-  enabled: boolean;
 }
 
 export interface RuleProvider {
@@ -261,28 +223,6 @@ export interface RouteTraceResult {
   undetermined_reason?: string;
 }
 
-export async function fetchCustomRules(): Promise<UserRule[]> {
-  const res = await apiFetch('/api/rules/custom');
-  if (!res.ok) throw new Error('Failed to load custom rules');
-  const data = await res.json();
-  return data.data || data.rules || data || [];
-}
-
-export interface SaveCustomRulesResult {
-  applied: boolean;
-  reloaded: boolean;
-  count: number;
-  warning?: string;
-}
-
-export async function saveCustomRules(rules: UserRule[]): Promise<SaveCustomRulesResult> {
-  return apiFetchJSON<SaveCustomRulesResult>('/api/rules/custom', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rules })
-  });
-}
-
 export async function testRoute(target: string, port?: number): Promise<RouteTraceResult> {
   return apiFetchJSON<RouteTraceResult>('/api/rules/test', {
     method: 'POST',
@@ -299,34 +239,6 @@ export async function flushFakeIP(): Promise<void> {
     await throwIfKernelGate(res);
     throw new Error('Failed to flush Fake-IP cache');
   }
-}
-
-/** Ответ старого перенаправления DNS: при включённом слое «Конфигурация» — код legacy_blocked. */
-export const DNS_REDIRECT_LEGACY_BLOCKED = LEGACY_BLOCKED;
-
-/**
- * Turns XKeen's DNS redirection into the proxy core on or off. При включённом слое
- * «Конфигурация» сервер отвечает кодом legacy_blocked (D-34): ошибка несёт код и текст
- * сервера (общий разбор legacyBlockedError), а не сырой JSON. Остальные отказы —
- * прежний текст ответа.
- */
-export async function setDNSRedirect(enabled: boolean): Promise<void> {
-  const res = await apiFetch('/api/service/dns-redirect', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled })
-  });
-  if (res.ok) return;
-  const text = await res.text();
-  let payload: unknown = null;
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    payload = null;
-  }
-  const legacy = legacyBlockedError(res.status, payload, get(t)('cfg.dns.legacy_blocked'));
-  if (legacy) throw legacy;
-  throw new Error(text || `HTTP ${res.status}`);
 }
 
 export async function flushDNSCache(): Promise<void> {

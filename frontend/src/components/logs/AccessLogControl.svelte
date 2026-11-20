@@ -9,27 +9,18 @@
     path_denied?: boolean;
     /** Куда пойдёт журнал при включении. */
     will_write?: string;
-    /** Владелец секции log при включённом слое: panel, xkeen, user, none. */
+    /** Владелец секции log: panel, xkeen, user, none. */
     owner?: string;
   }
 </script>
 
 <script lang="ts">
-  import { t, currentLang } from '../../i18n';
-  import { apiFetch } from '../../lib/api';
-  import { applyToKernel, notifyApplyOutcome, type ApplyResult } from '../../lib/serviceApply';
-  import { parseValidationError } from '../../lib/errorParser';
+  import { t } from '../../i18n';
   import { applyRunning, refetchLayerState, type LayerApply } from '../../lib/configLayer';
   import { configSubTabHash } from '../../lib/configSubTab';
   import { coresErrorText, setAccessLog } from '../../lib/configCores';
   import { notifyAccessLog, notifyAccessLogApplied } from '../../lib/accessLog';
-  import {
-    configLayerEnabled,
-    isConflict,
-    runningKernels,
-    showConfirm,
-    showToast
-  } from '../../stores';
+  import { isConflict, runningKernels, showConfirm, showToast } from '../../stores';
   import Button from '../Button.svelte';
   import EmptyState from '../EmptyState.svelte';
   import TakeSectionModal from '../config/sections/TakeSectionModal.svelte';
@@ -37,8 +28,7 @@
   import ImmediateMark from '../config/ImmediateMark.svelte';
 
   // Блок управления access-логом Xray на «Логах» (PART-01, D-13…D-17, D-25, D-26). Кнопки, а не
-  // переключатель: действие требует подтверждения и перезапуска. Слой выключен — прежний путь
-  // (правка файла точечно и применение к ядру). Слой включён: секция у панели — вызов
+  // переключатель: действие требует подтверждения и перезапуска. Секция у панели — вызов
   // setAccessLog после подтверждения; секция за XKeen или пользователем — диалог взятия с
   // действием, там же отказ при открытом черновике. Ответ сервера сам решает, перезапущен ли
   // Xray, поэтому тост строится по исходу, а не по ожиданию.
@@ -58,11 +48,10 @@
   let takeOpen = $state(false);
   let takeThen = $state<'enable' | 'disable'>('enable');
 
-  const layerOn = $derived($configLayerEnabled);
   const xrayRunning = $derived($runningKernels.includes('xray'));
-  const owner = $derived(layerOn ? (status.owner ?? '') : '');
+  const owner = $derived(status.owner ?? '');
   // Секция «Лог» за XKeen, пользователем или без файла: берётся диалогом
-  const foreign = $derived(layerOn && owner !== '' && owner !== 'panel');
+  const foreign = $derived(owner !== '' && owner !== 'panel');
   const willWrite = $derived(status.will_write || status.access_path);
   const pathDenied = $derived(status.path_denied === true);
 
@@ -123,7 +112,7 @@
     });
   }
 
-  /** Слой включён, секция у панели: log.access применяется поверх применённого состояния. */
+  /** Секция у панели: log.access применяется поверх применённого состояния. */
   async function runLayer(enabled: boolean): Promise<void> {
     let view: LayerApply;
     try {
@@ -141,42 +130,6 @@
     notifyAccessLog(view, enabled);
   }
 
-  /** Слой выключен: прежний путь, файл ядра правится точечно, затем применение к ядру. */
-  async function runLegacy(enabled: boolean): Promise<void> {
-    try {
-      const res = await apiFetch('/api/xray/access-log/toggle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled })
-      });
-      const payload = await res.json().catch(() => null);
-      if (!res.ok || !payload?.success) throw new Error(payload?.error || `HTTP ${res.status}`);
-      // Конфиг записан: сервер сам решает, перезапускать ли запущенный активный Xray
-      let result: ApplyResult | null = null;
-      try {
-        result = await applyToKernel({ kernel: 'xray' });
-      } catch (applyErr: any) {
-        if (applyErr?.status === 401) return;
-        const reason =
-          parseValidationError(applyErr?.message || '', $currentLang) || applyErr?.message;
-        showToast('error', $t('apply.restart_failed', { reason }), 10000, {
-          label: $t('apply.open_logs'),
-          onClick: () => {
-            window.location.hash = '#/logs';
-          }
-        });
-      }
-      if (result) {
-        notifyApplyOutcome(result, {
-          restartedMessage: enabled ? $t('xlog.enabled_toast') : $t('xlog.disabled_toast')
-        });
-      }
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', `${$t('xlog.toggle_error')}: ${e?.message || e}`);
-    }
-  }
-
   async function act(enabled: boolean): Promise<void> {
     if (blocked) return;
     if (foreign) {
@@ -187,8 +140,7 @@
     if (!(await confirmAction(enabled))) return;
     busy = true;
     try {
-      if (layerOn) await runLayer(enabled);
-      else await runLegacy(enabled);
+      await runLayer(enabled);
       await onchange();
     } finally {
       busy = false;

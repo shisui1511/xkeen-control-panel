@@ -22,7 +22,7 @@ import { FULL_TAG, TIER_FULL_ANNOTATION } from './lib/known';
 // и «Файлы» с маршрутами #/config/nodes и #/config/files, общая полоса черновика,
 // бейдж меню, полоса вкладок на 390 px. Ответы сети не подменяются: черновик создаёт
 // настоящий маршрут добавления узла (данные — ссылка из internal/nodes/testdata/links).
-// Флаг слоя включается на время прогона и возвращается прежним; черновик сбрасывается.
+// Черновик сбрасывается до и после прогона.
 // В вывод не попадают имена узлов и содержимое ссылок.
 
 const LINK = fileURLToPath(
@@ -308,8 +308,6 @@ async function faultProblems(w: FaultWindow, name: string): Promise<string[]> {
   return out;
 }
 
-let layerWasOn = false;
-
 test.describe.configure({ mode: 'serial' });
 
 test.afterEach(async () => {
@@ -318,26 +316,11 @@ test.afterEach(async () => {
 });
 
 test.beforeAll(async ({ browser }) => {
-  await withPanel(browser, async (page) => {
-    const settings = await api(page, 'GET', '/api/settings');
-    expect(settings.status, 'GET /api/settings').toBe(200);
-    layerWasOn = settings.data?.config_layer === true;
-    if (!layerWasOn) {
-      const res = await api(page, 'POST', '/api/settings/config-layer', { enabled: true });
-      expect(res.status, 'включение слоя').toBe(200);
-    }
-    await resetDraft(page);
-  });
+  await withPanel(browser, (page) => resetDraft(page));
 });
 
 test.afterAll(async ({ browser }) => {
-  await withPanel(browser, async (page) => {
-    await resetDraft(page);
-    if (!layerWasOn) {
-      const res = await api(page, 'POST', '/api/settings/config-layer', { enabled: false });
-      expect(res.status, 'возврат флага слоя').toBe(200);
-    }
-  });
+  await withPanel(browser, (page) => resetDraft(page));
 });
 
 async function openConfig(page: Page, hash: string): Promise<void> {

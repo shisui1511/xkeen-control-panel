@@ -53,14 +53,7 @@ export default defineConfig({
     // не укладывается в 20 с (стресс 136-17). Предварительная трансформация
     // при старте переносит эту работу до первого теста.
     warmup: {
-      clientFiles: [
-        './src/Editor.svelte',
-        './src/Constructor.svelte',
-        './src/XrayRoutingConstructor.svelte',
-        './src/MihomoGenerator.svelte',
-        './src/Services.svelte',
-        './src/Traffic.svelte'
-      ]
+      clientFiles: ['./src/Editor.svelte', './src/Services.svelte', './src/Traffic.svelte']
     },
     proxy: {
       // D-12: панель отвечает только по HTTPS (134-06); dev-сервер на ПК не

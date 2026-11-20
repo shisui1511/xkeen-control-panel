@@ -144,7 +144,7 @@ func TestRouterApplyPreview(t *testing.T) {
 	// Пункт про ядра сверяет активное ядро ветви матрицы.
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 
 	// (1) Три узла «Моих узлов»: VLESS Reality, socks с паролем, WireGuard.
@@ -292,7 +292,7 @@ func TestRouterApplyPreview(t *testing.T) {
 			t.Errorf("в предпросмотре нет файла с ключом %s и маской значения", key)
 		}
 	}
-	// (6) Черновик сбрасывает очистка enableLayer.
+	// (6) Черновик сбрасывает очистка freshDraft.
 }
 
 // rtPvRandHex — случайная hex-строка из n байт для обезличенного секрета теста.

@@ -347,6 +347,9 @@ func TestRouterParseWG(t *testing.T) {
 	if c.WG.MTU != 1280 || c.WG.PreSharedKey == "" || len(c.WG.AllowedIPs) != 2 || len(c.WG.Address) != 1 {
 		t.Errorf("поля wg: %+v", c.WG)
 	}
+	if len(c.WG.DNS) == 0 || c.WG.KeepAlive == 0 {
+		t.Error("потеряны DNS или PersistentKeepalive из wg.conf")
+	}
 	if !strings.Contains(c.Text, "PostUp") {
 		t.Errorf("Text узла не хранит исходный блок")
 	}
@@ -419,6 +422,23 @@ func TestRouterParseWG(t *testing.T) {
 			t.Errorf("%s: ожидался wg_missing_key %v, получено: %v", file, want, err)
 		}
 	}
+
+	awg := string(rtInput(t, "wg_awg31.conf"))
+	iface, peer, ok := strings.Cut(awg, "[Peer]")
+	if !ok {
+		t.Fatal("в образце AWG нет секции Peer")
+	}
+	// Параметры пира перекрывают интерфейс. Ноль и false — заданные значения.
+	awg = iface + "CPA = 17\nRandomTrailers = yes\n[Peer]" + peer +
+		"\ncontent_padding_addition = 0\nrandom-trailers = off\n"
+	res, err := ParseBody([]byte(awg))
+	if err != nil || res.Format != "wg" || len(res.Nodes) != 1 || res.Nodes[0].WG == nil {
+		t.Fatalf("wg.conf с переопределениями: формат %q, узлов %d, ошибка %v", res.Format, len(res.Nodes), err)
+	}
+	wg := res.Nodes[0].WG
+	if wg.AWGVersion != "3.1" || wg.AWG["content-padding-addition"] != 0 || wg.AWG["random-trailers"] != false {
+		t.Error("версия или переопределения AWG потеряны")
+	}
 }
 
 func TestRouterParseBody(t *testing.T) {
@@ -473,6 +493,22 @@ func TestRouterParseBody(t *testing.T) {
 	}
 	if foo == nil || foo.Line != 2 || foo.Params["scheme"] != "foo" {
 		t.Errorf("пропуск foo://x: %+v", foo)
+	}
+
+	// Схемы wireguard:// и wg:// дают одинаковые поля для фактической share-ссылки.
+	link := rtFirstLink(t, filepath.Join(routertest.LinksDir(t), "wireguard.txt"))
+	_, payload, ok := strings.Cut(link, "://")
+	if !ok {
+		t.Fatal("в образце WireGuard нет схемы")
+	}
+	wgLinks, err := ParseBody([]byte("wireguard://" + payload + "\nwg://" + payload))
+	if err != nil || wgLinks.Format != "links" || len(wgLinks.Nodes) != 2 || len(wgLinks.Skipped) != 0 {
+		t.Fatalf("ссылки WireGuard: узлов %d, пропусков %d, ошибка %v", len(wgLinks.Nodes), len(wgLinks.Skipped), err)
+	}
+	first, alias := wgLinks.Nodes[0], wgLinks.Nodes[1]
+	if first.WG == nil || first.Protocol != "wireguard" || alias.Protocol != first.Protocol ||
+		first.Host != alias.Host || first.Port != alias.Port || !reflect.DeepEqual(first.WG, alias.WG) {
+		t.Error("алиас wg:// изменил параметры WireGuard")
 	}
 
 	// Те же ссылки в base64: Std, URL, Raw и с переносами строк.

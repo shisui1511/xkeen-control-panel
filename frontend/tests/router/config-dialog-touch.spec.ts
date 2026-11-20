@@ -7,25 +7,32 @@ import { settleMotion } from './lib/motion';
 import {
   addToDraft,
   api,
-  layerFlag,
   listSources,
   nodeLink,
   randomPort,
-  resetDraft
+  resetDraft,
+  waitApplyIdle,
+  withPanel
 } from './lib/nodes-api';
 
 // Цели касания в подвалах диалогов раздела «Конфигурация» на настоящей панели: на узком
 // экране и на касании (там плотность compact сжимает .btn до 32 px) кнопки подвала не ниже
 // 44 px. Ответы сети не подменяются: черновик наполняют настоящие маршруты предпросмотра и
-// добавления, подписка — адрес зарезервированной зоны .invalid. Флаг слоя включается на время
-// прогона и возвращается прежним, черновик сбрасывается; диалоги закрываются без сохранения.
-
-const layer = layerFlag();
+// добавления, подписка — адрес зарезервированной зоны .invalid. Черновик сбрасывается до и
+// после прогона; диалоги закрываются без сохранения.
 
 test.describe.configure({ mode: 'serial' });
 
-test.beforeAll(async ({ browser }) => layer.enable(browser));
-test.afterAll(async ({ browser }) => layer.restore(browser));
+test.beforeAll(async ({ browser }) => {
+  await withPanel(browser, (page) => resetDraft(page));
+});
+
+test.afterAll(async ({ browser }) => {
+  await withPanel(browser, async (page) => {
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
+  });
+});
 
 const BAD_SUB = 'https://sub.invalid/feed';
 

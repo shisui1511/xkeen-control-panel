@@ -252,6 +252,14 @@ func TestRouterCapabilityMatrix(t *testing.T) {
 		{name: "vless_httpupgrade", node: rtCapFromLink("vless_httpupgrade", nil)},
 		{name: "vless_tls_alpn", node: rtCapFromLink("vless_tls_alpn", nil)},
 		{name: "vmess_ws_tls", node: rtCapFromLink("vmess_ws_tls", nil)},
+		// port в JSON ссылки vmess — число: разбор принимает и число, и строку.
+		{name: "vmess_grpc_numeric_port", node: func(t *testing.T) Node {
+			n := rtCapLink(t, "vmess_grpc")
+			if n.Port <= 0 {
+				t.Fatalf("vmess с числовым port: порт %d", n.Port)
+			}
+			return n
+		}},
 		{name: "trojan_grpc", node: rtCapFromLink("trojan_grpc", nil)},
 		{name: "ss_plain", node: rtCapFromLink("ss_plain", nil)},
 		{name: "socks", node: rtCapFromLink("socks", nil)},

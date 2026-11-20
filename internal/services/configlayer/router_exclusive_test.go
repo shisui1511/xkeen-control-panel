@@ -58,16 +58,9 @@ func TestRouterExclusiveGeodata(t *testing.T) {
 	if h := layer.BusyHolder(); h != HolderGeodataUpdate {
 		t.Errorf("BusyHolder() = %q", h)
 	}
-	// Второй -ug по кнопке и выключение слоя — тоже geodata_busy.
+	// Второй -ug по кнопке — тоже geodata_busy.
 	if _, err := layer.BeginExclusive(ctx, true, HolderGeodataUpdate); !errors.Is(err, ErrGeodataBusy) {
 		t.Errorf("второй BeginExclusive по кнопке: %v", err)
-	}
-	committed := false
-	if err := layer.Disable(ctx, func() error { committed = true; return nil }); !errors.Is(err, ErrGeodataBusy) {
-		t.Errorf("Disable при замке менеджера: %v", err)
-	}
-	if committed {
-		t.Error("Disable вызвал commit при занятом замке")
 	}
 
 	release()
@@ -139,66 +132,6 @@ func TestRouterExclusiveGeodata(t *testing.T) {
 	if h := layer.BusyHolder(); h != "" {
 		t.Errorf("BusyHolder() в конце теста = %q", h)
 	}
-}
-
-// Флаг слоя выключили, пока фоновый вызов ждал замок: он получает ErrDisabled, замок
-// сразу свободен и держателя нет.
-func TestRouterExclusiveFlagRecheck(t *testing.T) {
-	var on atomic.Bool
-	on.Store(true)
-	layer, _ := rtNewCheckLayer(t, func(l *Layer) {
-		l.opts.Enabled = func() bool { return on.Load() }
-	})
-	ctx := context.Background()
-
-	hold, err := layer.BeginExclusive(ctx, false, HolderGeodataUpdate)
-	if err != nil {
-		t.Fatalf("BeginExclusive: %v", err)
-	}
-	released := false
-	defer func() {
-		if !released {
-			hold()
-		}
-	}()
-	errCh := make(chan error, 1)
-	go func() {
-		rel, err := layer.BeginExclusive(ctx, false, HolderGeodataRemove)
-		if err == nil {
-			rel()
-		}
-		errCh <- err
-	}()
-	select {
-	case err := <-errCh:
-		t.Fatalf("фоновый вызов не ждал замок: %v", err)
-	case <-time.After(300 * time.Millisecond):
-	}
-
-	on.Store(false)
-	hold()
-	released = true
-	select {
-	case err := <-errCh:
-		if !errors.Is(err, ErrDisabled) {
-			t.Errorf("BeginExclusive после выключения флага: %v, ожидалась ErrDisabled", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("BeginExclusive после выключения флага не вернулся")
-	}
-	if h := layer.BusyHolder(); h != "" {
-		t.Errorf("BusyHolder() после отказа = %q", h)
-	}
-
-	on.Store(true)
-	rel, err := layer.BeginExclusive(ctx, true, HolderGeodataWrite)
-	if err != nil {
-		t.Fatalf("BeginExclusive по кнопке после отказа: %v (замок не отпущен)", err)
-	}
-	if h := layer.BusyHolder(); h != HolderGeodataWrite {
-		t.Errorf("BusyHolder() = %q, ожидался %q", h, HolderGeodataWrite)
-	}
-	rel()
 }
 
 func TestRouterSettleSection(t *testing.T) {

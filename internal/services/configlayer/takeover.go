@@ -160,7 +160,7 @@ type XrayRoutingState struct {
 	TakenAt time.Time `json:"taken_at"`
 	// Moved — «чистые» файлы routing, перенесённые в резервный набор панели.
 	Moved []MovedFile `json:"moved"`
-	// Left — файлы с routing, оставленные на месте (смешанные и файлы старого слоя).
+	// Left — файлы с routing, оставленные на месте (смешанные и не разобравшиеся).
 	Left []string `json:"left"`
 }
 
@@ -242,8 +242,8 @@ type RoutingFacts struct {
 	// XrayAPIInbound — в configs/ есть входящий с тегом api (D-43): правило api
 	// файл панели пишет первым.
 	XrayAPIInbound bool
-	// XrayForeignAPI — в чужих файлах configs/ есть ключ api (в том числе в файле
-	// старого слоя): блок api панель не пишет.
+	// XrayForeignAPI — в чужих файлах configs/ есть ключ api: блок api панель не
+	// пишет.
 	XrayForeignAPI bool
 	// XrayObservatory — в чужих файлах есть observatory или burstObservatory.
 	XrayObservatory bool
@@ -261,12 +261,10 @@ type RoutingFile struct {
 	Name string
 	// HasRouting — на верхнем уровне есть ключ routing.
 	HasRouting bool
-	// Pure — routing единственный ключ верхнего уровня (кроме Legacy и разбираемых
-	// с ошибкой файлов): такой файл переносится целиком.
+	// Pure — routing единственный ключ верхнего уровня (кроме разбираемых с ошибкой
+	// файлов и симлинков): такой файл переносится целиком.
 	Pure bool
 	Keys []string
-	// Legacy — файл старого слоя: не переносится, он переписывается старым слоем.
-	Legacy bool
 	// ForceProxy — в правилах routing есть inboundTag с force-proxy (D-44).
 	ForceProxy bool
 	// Balancer — признак балансировщика XKeen: balancer с тегом balancer или
@@ -300,8 +298,8 @@ type RoutingOps struct {
 	// xrayTaking — это применение берёт Xray (Moved в Next заполняется при записи).
 	xrayTaking bool
 	// keepPrev — перекладка config.yaml не меняет сведений о прежнем профиле
-	// (повторное «вернуть профиль панели»): возврат при выключении ведёт к
-	// профилю, который был до первого взятия.
+	// (повторное «вернуть профиль панели»): отпускание ведёт к профилю, который
+	// был до первого взятия.
 	keepPrev bool
 	// CoreTake — «чистые» файлы секций Xray для переноса в резервный набор: id
 	// секции → имена файлов (147-05, D-01).
@@ -406,8 +404,8 @@ func parseXrayJSON(data []byte) (map[string]json.RawMessage, error) {
 }
 
 // scanRoutingFile разбирает один файл каталога Xray.
-func scanRoutingFile(name string, data []byte, legacy, symlink bool) (rf RoutingFile, apiInbound bool) {
-	rf = RoutingFile{Name: name, Legacy: legacy}
+func scanRoutingFile(name string, data []byte, symlink bool) (rf RoutingFile, apiInbound bool) {
+	rf = RoutingFile{Name: name}
 	top, err := parseXrayJSON(data)
 	if err != nil {
 		rf.Broken = true
@@ -422,7 +420,7 @@ func scanRoutingFile(name string, data []byte, legacy, symlink bool) (rf Routing
 	rf.HasRouting = has
 	// Симлинк не переносится: удаление ссылки унесло бы не файл, а ссылку, а
 	// содержимое лежит вне configs/.
-	rf.Pure = has && len(top) == 1 && !legacy && !symlink
+	rf.Pure = has && len(top) == 1 && !symlink
 	if has {
 		var routing struct {
 			Rules []struct {
@@ -464,10 +462,9 @@ func scanRoutingFile(name string, data []byte, legacy, symlink bool) (rf Routing
 }
 
 // ScanXrayRouting сканирует верхний уровень каталога конфигураций Xray: *.json
-// без подкаталогов, .obsolete и файлов панели. foreignOwned (может быть nil)
-// отмечает файлы старого слоя: они не переносятся. apiInbound — у какого-либо
+// без подкаталогов, .obsolete и файлов панели. apiInbound — у какого-либо
 // файла каталога есть входящий с тегом api.
-func ScanXrayRouting(root string, foreignOwned func(kernel, rel string) bool) (files []RoutingFile, apiInbound bool, err error) {
+func ScanXrayRouting(root string) (files []RoutingFile, apiInbound bool, err error) {
 	if root == "" {
 		return nil, false, nil
 	}
@@ -490,8 +487,7 @@ func ScanXrayRouting(root string, foreignOwned func(kernel, rel string) bool) (f
 			}
 			return nil, false, fmt.Errorf("%s: %w", name, err)
 		}
-		legacy := foreignOwned != nil && foreignOwned(KernelXray, name)
-		rf, api := scanRoutingFile(name, data, legacy, e.Type()&fs.ModeSymlink != 0)
+		rf, api := scanRoutingFile(name, data, e.Type()&fs.ModeSymlink != 0)
 		if api {
 			apiInbound = true
 		}
@@ -667,17 +663,15 @@ type TakeoverPreview struct {
 }
 
 // splitRoutingFiles делит файлы скана на переносимые и оставленные на месте:
-// переносится «чистый» файл routing (не старого слоя, с допустимым именем),
-// остаются смешанные и не разобравшиеся файлы с ключом routing (D-43). Файл
-// старого слоя не переносится и не числится оставленным: он переписывается
-// старым слоем. Оба списка отсортированы и не nil.
+// переносится «чистый» файл routing с допустимым именем, остаются смешанные и не
+// разобравшиеся файлы с ключом routing (D-43). Оба списка отсортированы и не nil.
 func splitRoutingFiles(files []RoutingFile) (move, left []string) {
 	move, left = []string{}, []string{}
 	for _, f := range files {
 		switch {
-		case f.Pure && !f.Legacy && safeRoutingName(f.Name):
+		case f.Pure && safeRoutingName(f.Name):
 			move = append(move, f.Name)
-		case f.HasRouting && !f.Legacy:
+		case f.HasRouting:
 			left = append(left, f.Name)
 		}
 	}
@@ -793,11 +787,11 @@ func needScan(desired RoutingDesired, actual RoutingState, installed InstalledKe
 
 // scanForOps сканирует только то, что нужно для взятия: возврат использует
 // сохранённое состояние и каталоги не читает.
-func scanForOps(roots Roots, desired RoutingDesired, actual RoutingState, installed InstalledKernels, scope string, foreignOwned func(kernel, rel string) bool) (routingScans, error) {
+func scanForOps(roots Roots, desired RoutingDesired, actual RoutingState, installed InstalledKernels, scope string) (routingScans, error) {
 	var s routingScans
 	needX, needM := needScan(desired, actual, installed, scope)
 	if needX {
-		files, _, err := ScanXrayRouting(roots.Xray, foreignOwned)
+		files, _, err := ScanXrayRouting(roots.Xray)
 		if err != nil {
 			return s, err
 		}
@@ -899,16 +893,16 @@ func releaseConflicts(roots Roots, ops *RoutingOps) []BuildIssue {
 
 // planRouting считает операции маршрутизации для запуска. Запуск, ограниченный
 // ключами («Пересобрать»), и фоновые обновления данных состояние владения не
-// меняют: взятие и возврат идут при «Применить», установке ядра и включении слоя.
+// меняют: взятие и возврат идут при «Применить», установке ядра и старте слоя.
 func (p *Pipeline) planRouting(src Sections, actual RoutingState, installed InstalledKernels, req ApplyRequest) (*RoutingOps, error) {
 	if len(req.Only) > 0 {
 		return nil, nil
 	}
-	if req.Source != SourceDraft && req.Trigger != TriggerKernelInstalled && req.Trigger != TriggerFlagOn {
+	if req.Source != SourceDraft && req.Trigger != TriggerKernelInstalled && req.Trigger != TriggerStartup {
 		return nil, nil
 	}
 	desired := DesiredRouting(src)
-	scans, err := scanForOps(p.d.Roots, desired, actual, installed, req.Kernel, p.d.ForeignOwned)
+	scans, err := scanForOps(p.d.Roots, desired, actual, installed, req.Kernel)
 	if err != nil {
 		return nil, &BuildError{Issues: []BuildIssue{{Key: RoutingSection, Code: IssueRoutingScanFailed, Detail: err.Error()}}}
 	}
@@ -989,7 +983,7 @@ func xrayRootFacts(root string) (apiInbound bool, facts XrayScanFacts) {
 		return m.api, cloneXrayFacts(m.facts)
 	}
 	scanMemo.mu.Unlock()
-	files, err := ScanXrayKeyFiles(root, nil)
+	files, err := ScanXrayKeyFiles(root)
 	if err != nil {
 		return false, XrayScanFacts{}
 	}

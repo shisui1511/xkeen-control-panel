@@ -5,25 +5,33 @@ import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
 import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
-import { addToDraft, api, layerFlag, nodeLink, randomPort, resetDraft } from './lib/nodes-api';
+import {
+  addToDraft,
+  api,
+  nodeLink,
+  randomPort,
+  resetDraft,
+  waitApplyIdle,
+  withPanel
+} from './lib/nodes-api';
 
 // Вкладки «Группы» и «Правила» раздела «Конфигурация» на настоящей панели (фаза 146,
 // план 17): маршруты #/config/groups и #/config/rules, общая полоса черновика, состояния
 // загрузки и пустые состояния, полоса вкладок на 390 px в обеих темах и проход axe.
-// Ответы сети не подменяются. Флаг слоя включается на время прогона и возвращается
-// прежним, черновик сбрасывается. Ядро не читается и не меняется. В вывод не попадают
-// имена узлов и групп.
-
-const layer = layerFlag();
+// Ответы сети не подменяются. Черновик сбрасывается до и после прогона. Ядро не читается и
+// не меняется. В вывод не попадают имена узлов и групп.
 
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
-  await layer.enable(browser);
+  await withPanel(browser, (page) => resetDraft(page));
 });
 
 test.afterAll(async ({ browser }) => {
-  await layer.restore(browser);
+  await withPanel(browser, async (page) => {
+    await waitApplyIdle(page, 'перед сбросом черновика');
+    await resetDraft(page);
+  });
 });
 
 async function openConfig(page: Page, hash: string): Promise<void> {

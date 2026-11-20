@@ -29,17 +29,14 @@ import (
 // появление новых auth-эндпоинтов без новой дыры: путь недоступен с
 // loopback, пока явно не добавлен сюда.
 var loopbackAllowedPaths = map[string]bool{
-	"/api/provider.yaml":         true,
-	"/mihomo/provider.yaml":      true,
-	"/mihomo/hwid/provider.yaml": true,
-	"/api/version":               true,
+	"/api/version": true,
 }
 
 // noCookieWriter удаляет заголовок Set-Cookie перед отправкой ответа —
 // защита на случай, если обработчик из allowlist когда-либо начнёт
-// выставлять cookie (T-134-35); сегодня ни один из четырёх путей этого не
-// делает, но loopback-поверхность не должна зависеть от будущей дисциплины
-// авторов обработчиков.
+// выставлять cookie (T-134-35); сегодня путь версии этого не делает, но
+// loopback-поверхность не должна зависеть от будущей дисциплины авторов
+// обработчиков.
 type noCookieWriter struct {
 	http.ResponseWriter
 }
@@ -54,23 +51,14 @@ func (w *noCookieWriter) WriteHeader(statusCode int) {
 // reachable from request-derived data (same shape/false-positive class as the
 // already-dismissed alert on maxBytesResponseWriter.Write in
 // internal/middleware/maxbytes.go). This is a false positive: since Handle()
-// only ever registers loopbackAllowedPaths handlers on s.loopbackMux (Version,
-// MihomoProviderAdapter, MihomoProviderRedirect), the only bytes that ever
-// reach here are a JSON body (json.NewEncoder, auto-escaping), a text/yaml
-// upstream-subscription payload (never an error message that echoes the raw
-// request), or net/http.Redirect's own html.EscapeString-ed anchor body over
-// a url.Values.Encode()-normalized query. auth.SecurityHeaders additionally
-// sets X-Content-Type-Options: nosniff on every loopback response, so a
-// browser will never interpret this body as HTML/JS regardless of content.
+// only ever registers loopbackAllowedPaths handlers on s.loopbackMux (Version),
+// the only bytes that ever reach here are a JSON body (json.NewEncoder,
+// auto-escaping). auth.SecurityHeaders additionally sets
+// X-Content-Type-Options: nosniff on every loopback response, so a browser
+// will never interpret this body as HTML/JS regardless of content.
 func (w *noCookieWriter) Write(b []byte) (int, error) {
 	w.Header().Del("Set-Cookie")
 	return w.ResponseWriter.Write(b)
-}
-
-// Flush пробрасывает сброс ответа вниз по цепочке: адаптер провайдера отдаёт тело
-// Mihomo до того, как пишет состояние подписки на диск.
-func (w *noCookieWriter) Flush() {
-	_ = http.NewResponseController(w.ResponseWriter).Flush()
 }
 
 type Server struct {

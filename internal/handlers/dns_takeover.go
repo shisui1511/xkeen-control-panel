@@ -13,8 +13,8 @@ import (
 
 // Перехват DNS роутера (фаза 148): GET /api/configlayer/dns — состояние для
 // карточки, POST /api/configlayer/dns/<действие> — действия службы. Маршруты
-// под сессией (HandleProtected), изменяющие — с X-CSRF-Token; выключенный слой и
-// неподключённая служба отвечают 404, как остальные /api/configlayer/*.
+// под сессией (HandleProtected), изменяющие — с X-CSRF-Token; работают сразу после
+// старта, без созданных в main.go слоя или службы — 404 not_found.
 
 // dnsActionPrefix — префикс маршрута действий службы перехвата.
 const dnsActionPrefix = "/api/configlayer/dns/"
@@ -31,7 +31,6 @@ var dnsErrorStatus = map[string]int{
 	"group_name_invalid":  http.StatusConflict,
 	"kernel_conflict":     http.StatusConflict,
 	"kernel_stopped":      http.StatusConflict,
-	"legacy_blocked":      http.StatusConflict,
 	"no_window":           http.StatusConflict,
 	"not_enabled":         http.StatusConflict,
 	"port_busy":           http.StatusConflict,
@@ -52,10 +51,10 @@ var dnsErrorStatus = map[string]int{
 	"generic":           http.StatusInternalServerError,
 }
 
-// requireDNS — requireLayer плюс подключённая служба перехвата: без службы
+// requireDNS — requireConfigLayer плюс подключённая служба перехвата: без службы
 // маршруты отвечают 404 not_found.
 func (a *API) requireDNS(w http.ResponseWriter, r *http.Request) bool {
-	if !a.requireLayer(w, r) {
+	if !a.requireConfigLayer(w, r) {
 		return false
 	}
 	if a.dns == nil {
@@ -173,11 +172,11 @@ func (a *API) configDNSView(w http.ResponseWriter, r *http.Request, act func(con
 // --- действия с ядром из обработчиков служб (D-14, D-15) ---------------------------
 //
 // Помощники живут здесь, а не в service.go: обработчики служб только вызывают их.
-// Служба перехвата не подключена или слой выключен — команда идёт как прежде.
+// Служба перехвата не подключена — команда идёт как прежде.
 
-// dnsLive — служба перехвата подключена и слой включён.
+// dnsLive — служба перехвата подключена (создаётся в main.go только вместе со слоем).
 func (a *API) dnsLive() bool {
-	return a.dns != nil && a.configLayer != nil && a.configLayer.Enabled()
+	return a.dns != nil
 }
 
 // dnsAroundStop выполняет остановку ядра kernel обёрткой службы перехвата:

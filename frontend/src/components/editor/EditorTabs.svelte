@@ -2,7 +2,6 @@
   import { tick } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import { t } from '../../i18n';
-  import { configLayerEnabled } from '../../stores';
   import { filesByPath } from '../../lib/configLayer';
   import OwnerBadge from './OwnerBadge.svelte';
   import type { FileOwner } from './fileOps';
@@ -30,7 +29,6 @@
 
   // Слой «Конфигурация»: значок владельца файла («Панель», «Пользователь»)
   function layerOwner(path: string): FileOwner | null {
-    if (!$configLayerEnabled) return null;
     const f = $filesByPath.get(path);
     if (!f) return null;
     return f.state === 'released' ? 'user' : 'panel';

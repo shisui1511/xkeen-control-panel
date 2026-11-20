@@ -89,9 +89,6 @@ func (s *Store) MarkWizard(status WizardStatus, now time.Time) (bool, error) {
 // done — отметка службы мастера). Признак монотонен: false — статус не изменился.
 // Смена публикует событие wizard.
 func (l *Layer) MarkWizard(status WizardStatus) (bool, error) {
-	if !l.Enabled() {
-		return false, ErrDisabled
-	}
 	if !validWizardStatus(status) {
 		return false, ErrWizardStatus
 	}
@@ -106,11 +103,7 @@ func (l *Layer) MarkWizard(status WizardStatus) (bool, error) {
 }
 
 // WizardStatus — текущий статус мастера; признака нет — пустая строка.
-// Выключенный слой диск не опрашивает.
 func (l *Layer) WizardStatus() WizardStatus {
-	if !l.Enabled() {
-		return ""
-	}
 	var status WizardStatus
 	l.store.read(func(st State) {
 		if st.Wizard != nil {
@@ -122,11 +115,8 @@ func (l *Layer) WizardStatus() WizardStatus {
 
 // PublishWizard сообщает клиентам, что состояние мастера изменилось (событие
 // wizard со сквозным счётчиком): клиент по нему перечитывает GET
-// /api/configlayer/wizard. Выключенный слой молчит.
+// /api/configlayer/wizard.
 func (l *Layer) PublishWizard() {
-	if !l.Enabled() {
-		return
-	}
 	l.broker.Publish(Event{Type: EventWizard, Data: WizardEvent{Seq: l.wizardSeq.Add(1)}})
 }
 
@@ -151,14 +141,10 @@ func (s *Store) ResetWizard() (bool, error) {
 	return true, nil
 }
 
-// CheckWizardReset — проверки сброса признака мастера без обращения к
-// хранилищу: слой включён (ErrDisabled) и включён режим разработчика
-// (ErrDevModeRequired). Служба мастера зовёт её до очереди записей, чтобы коды
-// 404 и 403 не ждали чужих записей признака.
+// CheckWizardReset — проверка сброса признака мастера без обращения к
+// хранилищу: включён режим разработчика (ErrDevModeRequired). Служба мастера
+// зовёт её до очереди записей, чтобы код 403 не ждал чужих записей признака.
 func (l *Layer) CheckWizardReset() error {
-	if !l.Enabled() {
-		return ErrDisabled
-	}
 	if !l.devMode() {
 		return ErrDevModeRequired
 	}
@@ -198,8 +184,6 @@ type WizardProbe struct {
 
 // WizardFacts — факты шагов 2–5 мастера одним чтением состояния (149 D-22, D-04).
 type WizardFacts struct {
-	// Enabled — слой включён; при выключенном остальные поля нулевые.
-	Enabled bool
 	// Status — признак мастера; пусто — мастер не тронут.
 	Status WizardStatus
 	// XrayTaken — секции Xray черновика под панелью (из XraySectionIDs).
@@ -239,12 +223,8 @@ func xrayTakenCount(s Sections) int {
 
 // WizardFacts читает факты шагов мастера одним чтением под замком хранилища, без
 // глубоких копий: наблюдатель службы мастера зовёт её на каждом тике.
-// Выключенный слой диск не опрашивает.
 func (l *Layer) WizardFacts(p WizardProbe) WizardFacts {
-	if !l.Enabled() {
-		return WizardFacts{Enabled: false}
-	}
-	f := WizardFacts{Enabled: true}
+	var f WizardFacts
 	l.store.read(func(st State) {
 		if st.Wizard != nil {
 			f.Status = st.Wizard.Status

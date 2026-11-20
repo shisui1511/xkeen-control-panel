@@ -123,13 +123,7 @@ func TestRouterDNSStateView(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
 
-	// Слой выключен: маршрут отвечает 404, как остальные /api/configlayer/*.
-	e.setLayer(false)
-	if r := e.call(http.MethodGet, rtDNSBase, nil); r.Status != http.StatusNotFound {
-		t.Errorf("слой выключен: GET %s — %d %s, ожидалось 404", rtDNSBase, r.Status, r.Code)
-	}
-
-	e.enableLayer()
+	e.freshDraft()
 	v := e.rtDNSView()
 	if got, _ := v["state"].(string); got != "off" {
 		t.Errorf("state = %q, ожидалось off", got)
@@ -184,7 +178,7 @@ func TestRouterDNSStateView(t *testing.T) {
 func TestRouterDNSCheck(t *testing.T) {
 	routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 
 	// Имя по умолчанию: порт 53 у прошивки, путь — через прошивку.
 	r := e.call(http.MethodPost, rtDNSCheck, map[string]string{})
@@ -237,7 +231,7 @@ func TestRouterDNSCheck(t *testing.T) {
 // dns_zone_invalid проверки слоя. Черновик сбрасывается в t.Cleanup.
 func TestRouterDNSParamsCheck(t *testing.T) {
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtDNSDraft(map[string]any{"group": "", "zones": []string{"bad zone"}})
 	t.Cleanup(func() { e.resetDraft() })
 

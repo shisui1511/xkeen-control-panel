@@ -26,13 +26,14 @@ const (
 	backupMetaName  = "meta.json"
 )
 
-// Причины, по которым файл попал в набор копий.
+// Причины, по которым файл попал в набор копий. В наборах прошлых версий может
+// лежать снятая причина flag_off: meta.json читается как есть, без проверки
+// причины.
 const (
 	ReasonOverwrite = "overwrite"
 	ReasonDelete    = "delete"
 	ReasonOrphan    = "orphan"
 	ReasonObsolete  = "obsolete"
-	ReasonFlagOff   = "flag_off"
 )
 
 // BackupFileMeta — запись о файле в наборе копий.
@@ -122,6 +123,19 @@ func (b *BackupSet) SaveAbs(absPath, key, kernel, rel, reason string) (BackupFil
 	}
 	b.Meta.Files = append(b.Meta.Files, m)
 	return m, nil
+}
+
+// SaveContent сохраняет байты, прочитанные через закреплённый файловый корень.
+// Вызывающий проверяет идентичность исходника перед записью.
+func (b *BackupSet) SaveContent(kernel, rel, reason string, data []byte) error {
+	if err := b.writeCopy(kernel, rel, data); err != nil {
+		return err
+	}
+	b.Meta.Files = append(b.Meta.Files, BackupFileMeta{
+		Key: ManifestKey(kernel, rel), Kernel: kernel, RelPath: rel,
+		Existed: true, OldHash: HashContent(data), Reason: reason,
+	})
+	return nil
 }
 
 // Read возвращает прежнюю версию файла из набора копий. Отсутствующая запись

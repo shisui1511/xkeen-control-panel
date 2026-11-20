@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -231,11 +232,19 @@ func (a *API) ConnectionsWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	_, ctx, cancel := a.mihomoProxyContext(w, r)
+	if cancel == nil {
+		return
+	}
+	defer cancel()
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 
 	conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
 	conn.SetPongHandler(func(string) error {
@@ -245,8 +254,6 @@ func (a *API) ConnectionsWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	ch, unsub := a.trafficQuotaSvc.SubscribeConnections()
 	defer unsub()
-
-	ctx := r.Context()
 
 	// Ping-горутина
 	stopPing := make(chan struct{})
@@ -301,11 +308,19 @@ func (a *API) TrafficWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	_, ctx, cancel := a.mihomoProxyContext(w, r)
+	if cancel == nil {
+		return
+	}
+	defer cancel()
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 
 	conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
 	conn.SetPongHandler(func(string) error {
@@ -315,8 +330,6 @@ func (a *API) TrafficWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	ch, unsub := a.trafficQuotaSvc.SubscribeTraffic()
 	defer unsub()
-
-	ctx := r.Context()
 
 	// Ping-горутина
 	stopPing := make(chan struct{})

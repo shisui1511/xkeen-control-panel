@@ -31,7 +31,10 @@ type ApplyCopyView struct {
 	ID string `json:"id"`
 	// At — время применения.
 	At time.Time `json:"at"`
-	// Reason — почему файл попал в набор: overwrite, delete, orphan, obsolete, flag_off.
+	// Reason — почему файл попал в набор: overwrite, delete, orphan, obsolete,
+	// routing_takeover, cores_takeover. Значение из meta.json отдаётся как есть:
+	// в наборах прошлых версий может лежать снятая причина, набор от этого не
+	// пропускается.
 	Reason string `json:"reason"`
 	// Size — размер копии в байтах.
 	Size int64 `json:"size"`
@@ -92,9 +95,6 @@ func fileCopyIn(set *BackupSet, key string, entry ManifestEntry) (BackupFileMeta
 
 // manifestEntry — запись манифеста по ключу и путь файла на диске.
 func (l *Layer) manifestEntry(key string) (ManifestEntry, string, error) {
-	if !l.Enabled() {
-		return ManifestEntry{}, "", ErrDisabled
-	}
 	entry, ok := l.store.Snapshot().Manifest[key]
 	if !ok {
 		return ManifestEntry{}, "", ErrUnknownKey

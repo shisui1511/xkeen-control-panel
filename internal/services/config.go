@@ -30,6 +30,9 @@ func (s *ConfigService) resolvePath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if s.inLegacyArchive(clean, validated) {
+		return "", ErrLegacyArchivePath
+	}
 	// Extra guard: path must be within one of the known allowed roots (CWE-22).
 	for _, root := range s.validator.AllowedRoots {
 		cleanRoot := filepath.Clean(root)
@@ -40,16 +43,35 @@ func (s *ConfigService) resolvePath(path string) (string, error) {
 	return "", errors.New("path not within allowed configuration roots")
 }
 
+// ErrLegacyArchivePath — путь ведёт в закрытый каталог архива прежних данных
+// (utils.LegacyArchiveDirectory в каталоге данных панели). Архив выдаётся только
+// окном закрытия, общий файловый API его не читает и не правит.
+var ErrLegacyArchivePath = errors.New("path not allowed: legacy archive")
+
 type ConfigService struct {
 	ConfigDir string
 	validator *utils.PathValidator
+	// dataDir — каталог данных панели; его подкаталог архива закрыт для сервиса.
+	dataDir string
 }
 
-func NewConfigService(dir string, roots []string) *ConfigService {
+func NewConfigService(dir string, roots []string, dataDir string) *ConfigService {
 	return &ConfigService{
 		ConfigDir: dir,
 		validator: utils.NewPathValidator(roots),
+		dataDir:   dataDir,
 	}
+}
+
+// inLegacyArchive сообщает, что хотя бы один из путей (исходный или
+// развёрнутый) лежит в каталоге архива прежних данных.
+func (s *ConfigService) inLegacyArchive(paths ...string) bool {
+	for _, p := range paths {
+		if utils.IsLegacyArchivePath(s.dataDir, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *ConfigService) List(dir string) ([]string, error) {
@@ -217,6 +239,9 @@ func (s *ConfigService) withinRoots(path string) (string, error) {
 		return "", errors.New("path traversal detected")
 	}
 	clean := filepath.Clean(path)
+	if s.inLegacyArchive(clean) {
+		return "", ErrLegacyArchivePath
+	}
 	for _, root := range s.validator.AllowedRoots {
 		bases := []string{filepath.Clean(root)}
 		if resolved, err := filepath.EvalSymlinks(root); err == nil {

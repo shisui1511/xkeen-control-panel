@@ -47,9 +47,9 @@ type Deps struct {
 	Now func() time.Time
 	// Rand — источник случайности для токенов и идентификаторов (nil — crypto/rand).
 	Rand io.Reader
-	// HWID — общий HWID роутера для запросов к провайдерам (nil — HWID из
-	// каталога данных, общий со старым слоем подписок). Вызывается только при
-	// запросе подписки: конструктор диска и сети не трогает.
+	// HWID возвращает идентификатор устройства для запросов к провайдерам.
+	// При nil используется services.LoadOrGenerateHWID с каталогом DataDir.
+	// Идентификатор читается при запросе подписки.
 	HWID func() string
 	// Device — модель, ОС и версия ОС для заголовков устройства (nil — данные
 	// прошивки, определяются лениво при первом запросе).
@@ -128,7 +128,7 @@ type Service struct {
 	startOnce sync.Once
 	stopOnce  sync.Once
 	// startupDone — стартовые действия (уборка, уведомления, отложенные записи)
-	// выполнены: они ждут включения слоя.
+	// выполнены: они идут один раз при запуске цикла.
 	startupDone atomic.Bool
 
 	// cmu защищает calls и backoffs: одновременные обновления одного источника
@@ -258,15 +258,10 @@ func (s *Service) spawn(fn func()) bool {
 }
 
 // OnKernelInstalled — хук установки ядра (D-01): панель сама запрашивает
-// подписки под это ядро и в фоне собирает его файлы. Выключенный слой — возврат до
-// горутины: ни запросов к провайдерам, ни чтения состояния, ни каталогов на диске.
-// Запущенное ядро решает конвейер (Xray перезапускается, файл Mihomo пишется без
+// подписки под это ядро и в фоне собирает его файлы. Запущенное ядро решает конвейер (Xray перезапускается, файл Mihomo пишется без
 // перезагрузки); остановленное не запускается.
 func (s *Service) OnKernelInstalled(kernel string) {
 	if kernel != kernelXray && kernel != kernelMihomo {
-		return
-	}
-	if !s.d.Layer.Enabled() {
 		return
 	}
 	s.spawn(func() {
@@ -279,7 +274,7 @@ func (s *Service) OnKernelInstalled(kernel string) {
 				return
 			}
 			if _, err := s.refreshCurrent(s.ctx, id, []string{kernel}); err != nil && !errors.Is(err, ErrSourceDisabled) {
-				log.Printf("[sources] сборка источника %s после установки ядра %s не выполнена: %v", id, kernel, err)
+				log.Printf("[sources] сборка источника %q после установки ядра %q не выполнена: %v", id, kernel, err)
 			}
 		}
 	})

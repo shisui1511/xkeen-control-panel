@@ -20,7 +20,9 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
-// Trigger — что запустило конвейер.
+// Trigger — что запустило конвейер. Значение — строка: в журналах и наборах копий
+// прошлых версий могут лежать снятые причины (flag_on, flag_off), читатели
+// принимают любую строку и не превращают незнакомую в ошибку.
 type Trigger string
 
 // Источники запуска.
@@ -28,8 +30,9 @@ const (
 	TriggerUser            Trigger = "user"
 	TriggerRebuild         Trigger = "rebuild"
 	TriggerKernelInstalled Trigger = "kernel_installed"
-	TriggerFlagOn          Trigger = "flag_on"
-	TriggerFlagOff         Trigger = "flag_off"
+	// TriggerStartup — сборка файлов из применённого состояния при старте слоя
+	// (Layer.Start): черновик не применяется, остановленное ядро не запускается.
+	TriggerStartup Trigger = "startup"
 	// TriggerSourceRefresh — фоновое обновление источника: сборка из применённого
 	// состояния с оверлеем живых данных, черновик не трогается (FND-06, U-04).
 	TriggerSourceRefresh Trigger = "source_refresh"
@@ -346,19 +349,15 @@ type ApplyView struct {
 
 // PipelineDeps — зависимости конвейера.
 type PipelineDeps struct {
-	Store        *Store
-	Broker       *Broker
-	Registry     *Registry
-	Roots        Roots
-	DataDir      string
-	Binaries     func() Binaries
-	XrayEnv      func(dir string) []string
-	ForeignOwned func(kernel, rel string) bool
-	WriteFile    func(path string, data []byte) error
-	Now          func() time.Time
-	// Enabled — включён ли слой. Run перепроверяет его под замками применения:
-	// фоновый запуск мог ждать замок, пока Disable снимал флаг. nil — всегда включён.
-	Enabled func() bool
+	Store     *Store
+	Broker    *Broker
+	Registry  *Registry
+	Roots     Roots
+	DataDir   string
+	Binaries  func() Binaries
+	XrayEnv   func(dir string) []string
+	WriteFile func(path string, data []byte) error
+	Now       func() time.Time
 
 	// Шаг перезапуска (144-07). Applier == nil — шаг пропускается.
 	Applier        KernelApplier
@@ -524,8 +523,9 @@ func (p *Pipeline) begin(req ApplyRequest) {
 }
 
 // setStep меняет шаг и публикует apply_step. Вне запуска (Running=false) шаги не
-// меняются и не публикуются: вызов из выключения слоя иначе открыл бы в UI
-// «фантомное» применение без apply_done и переписал итог прошлого запуска.
+// меняются и не публикуются: вызов вне конвейера (возврат маршрутизации) иначе
+// открыл бы в UI «фантомное» применение без apply_done и переписал итог прошлого
+// запуска.
 func (p *Pipeline) setStep(id StepID, state StepState, note, msg string) {
 	p.mu.Lock()
 	if !p.view.Running {
@@ -582,17 +582,36 @@ func (p *Pipeline) binaries() Binaries {
 	return p.d.Binaries()
 }
 
+// runStartup собирает файлы из применённого состояния при старте слоя (CUT-01).
+// Запуск ждёт общий замок применения TryBegin, как фоновые запуски: идущее
+// «Применить» или операция над ядром с ним не пересекаются, Applied и манифест
+// меняются только под этим замком. Источник — req.Source (Applied), черновик не
+// собирается и не фиксируется. Перезапускается только запущенное ядро с
+// изменениями, остановленное не запускается. Итог виден событиями apply_*, в
+// журнал идёт только код неудачи, без содержимого файлов.
+func (l *Layer) runStartup(req ApplyRequest) {
+	release, err := l.pipeline.TryBegin(l.ctx, false)
+	if err != nil {
+		if l.ctx.Err() == nil {
+			log.Printf("[configlayer] сборка применённого состояния на старте не запущена: %v", err)
+		}
+		return
+	}
+	defer release()
+	view := l.runPipeline(req)
+	release()
+	if view.Result != nil && !view.Result.OK {
+		log.Printf("[configlayer] сборка применённого состояния на старте не удалась: %s", view.Result.Code)
+	}
+	l.afterRun()
+	l.fireAfterApply(req, view)
+}
+
 // Run выполняет один запуск: сборка, проверка Xray, проверка Mihomo (обе до
 // первой записи: D-14), запись, перезапуск ядер, коммит манифеста и применённого состояния.
 // Файлы пишутся только если оба ядра приняли конфигурацию.
 func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	p.begin(req)
-	// Решение «слой включён» принимается под замками, которые держит и Disable:
-	// запуск, дождавшийся замка после выключения, файлов не пишет (D-04, FND-01).
-	if p.d.Enabled != nil && !p.d.Enabled() {
-		p.setStep(StepBuild, StepSkipped, NoteNoChanges, "")
-		return p.finish(ResultView{OK: true, Code: ResultNothingToApply})
-	}
 	// Журнал прошлой неудавшейся записи или отката нельзя перезаписать новым
 	// набором: сначала возвращаем файлы по нему (WR-03).
 	if err := p.recoverPendingJournal(); err != nil {
@@ -790,14 +809,14 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 		// маршрутизацию этого ядра; запуск, отпускающий ядро, — это и есть решение
 		// «Отпустить», дрейфом этого ядра он не блокируется (по ядрам, D-06 из 147.1).
 		if blocked == 0 {
-			if rd := routingDrift(p.d.Roots, snap.Routing, installed, req.Kernel, p.d.ForeignOwned); routingDriftBlocks(src, rd) {
+			if rd := routingDrift(p.d.Roots, snap.Routing, installed, req.Kernel); routingDriftBlocks(src, rd) {
 				blocked = len(rd)
 			}
 		}
 		// Чужой файл с ключом взятой секции блокирует запуск, который эту секцию
 		// держит (managed); запуск с managed=false — «Отпустить» — не блокируется.
 		if blocked == 0 {
-			if sd := sectionsDrift(p.d.Roots, snap.Cores, installed, req.Kernel, p.d.ForeignOwned); sectionDriftBlocks(src, sd) {
+			if sd := sectionsDrift(p.d.Roots, snap.Cores, installed, req.Kernel); sectionDriftBlocks(src, sd) {
 				blocked = len(sd)
 			}
 		}
@@ -826,7 +845,7 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 	}
 	if err == nil {
 		files = filesOfScope(files, req.Kernel)
-		err = CheckGenerated(files, p.d.ForeignOwned)
+		err = CheckGenerated(files)
 	}
 	bt.generate = bt.lap(&mark)
 	if err == nil {
@@ -890,7 +909,7 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 					}
 				}
 			}
-			plan, err = ComputePlan(p.d.Roots, files, planManifest, only, p.d.ForeignOwned)
+			plan, err = ComputePlan(p.d.Roots, files, planManifest, only)
 			// Каталог неустановленного ядра (и ядра вне области запуска) так же не
 			// трогается: его сирот не убираем.
 			plan.Orphans = orphansOfScope(plan.Orphans, installed, req.Kernel)
@@ -912,7 +931,7 @@ func (p *Pipeline) buildPlan(snap State, req *ApplyRequest, installed InstalledK
 		// горячей перезагрузки Mihomo (D-16): правила XKeen пересобираются только им.
 		// Тот же расчёт, что и у объявления в снимке; на переходе владения
 		// сравнивается значение по ту сторону перехода (G-147-3).
-		base := restartBase(p.d.Roots, snap, src, installed, p.d.ForeignOwned)
+		base := restartBase(p.d.Roots, snap, src, installed)
 		plan.FullRestart = fullRestartOf(RestartReasons(snap.Applied, src, base))
 	}
 	if err == nil && req.ForceFullRestart {

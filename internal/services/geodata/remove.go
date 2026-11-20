@@ -51,8 +51,7 @@ func (s *Service) AfterApply(ctx context.Context, _ configlayer.AfterApplyInfo) 
 		s.changed()
 		release()
 	}
-	if err != nil && !errors.Is(err, configlayer.ErrDisabled) && !errors.Is(err, configlayer.ErrStopped) &&
-		s.ctx.Err() == nil {
+	if err != nil && !errors.Is(err, configlayer.ErrStopped) && s.ctx.Err() == nil {
 		log.Printf("[geodata] шаг удаления источников после «Применить»: %v", err)
 	}
 }

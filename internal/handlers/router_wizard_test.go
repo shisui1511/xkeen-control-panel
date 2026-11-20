@@ -22,8 +22,8 @@ import (
 
 // API мастера первого запуска на настоящей панели устройства (фаза 149.1):
 // GET /api/configlayer/wizard и POST …/close, …/hide, …/reset. Вердикт — ответы
-// панели и процессы ядер устройства. Флаг слоя, режим разработчика, признак
-// мастера и черновик возвращаются прежними. Проверки статуса после сброса идут
+// панели и процессы ядер устройства. Режим разработчика, признак мастера и
+// черновик возвращаются прежними. Проверки статуса после сброса идут
 // при удержанном открытом черновике: шаг «применение» тогда не выполнен, и
 // наблюдатель службы (период tick_s ответа) не ставит done между сбросом и
 // проверкой, какими бы ни были шаги 1–6 стенда. Сроки ожидания отметки и
@@ -346,27 +346,13 @@ func rtWizardXrayCounts(desired map[string]bool, view map[string]any) (inDraft, 
 	return
 }
 
-// Флаг слоя выключен: четыре маршрута мастера отвечают 404 config_layer_disabled.
-// Отдельный тест: переключение флага дорогое, остальные проверки идут при
-// включённом слое.
-func TestRouterWizardFlagOff404(t *testing.T) {
-	e := rtNewSrc(t)
-	e.setLayer(false)
-	for _, rt := range rtWizardRoutes {
-		r := e.call(rt.method, rt.path, nil)
-		if r.Status != http.StatusNotFound || r.Code != "config_layer_disabled" {
-			t.Errorf("%s %s: статус %d, код %q; ожидалось 404 config_layer_disabled", rt.method, rt.path, r.Status, r.Code)
-		}
-	}
-}
-
 // Статус мастера и шагов 1–6, защита маршрутов, узлы без скачанного набора,
 // монотонность признака и отметка «пройдено» сервером без запросов клиента.
 func TestRouterWizardAPI(t *testing.T) {
 	// Шаг «запуск» и отметка «пройдено» зависят от запущенного ядра стенда.
 	routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 
 	start := rtWizardView(e)
 	t.Logf("статус мастера стенда до теста: %q, шагов выполнено %d", rtWizardStatus(start), rtWizardNum(start, "done_count"))
@@ -718,7 +704,7 @@ func TestRouterWizardConflict(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
 	routertest.Tier(t, routertest.Full, "внесение сбоя: второй процесс ядра рядом с активным — конфликт ядер (D-15)")
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 
 	core := tg.Core
 	other, otherBin := "mihomo", rtRpMihomoBin

@@ -14,24 +14,17 @@
     fetchDevMode,
     setDevMode,
     showConfirm,
-    configLayerEnabled,
-    setConfigLayerEnabled,
     type ThemeDensity,
     applyDensity
   } from './stores';
-  import { applyRunning } from './lib/configLayer';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { notifyApplyOutcome, type ApplyResult } from './lib/serviceApply';
-  import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
+  import { constructorHash } from './lib/editorRoute';
   import { capsuleConfigStore, updateCapsuleConfig } from './lib/capsuleSettings';
   import DevDiagnostics from './components/config/DevDiagnostics.svelte';
   import PingTargetSettingsCard from './components/PingTargetSettingsCard.svelte';
   import PageHeader from './PageHeader.svelte';
   import UpdatesPanel from './components/settings/UpdatesPanel.svelte';
-  import DependentProfilesNote from './components/config/profiles/DependentProfilesNote.svelte';
-  import DnsFlagOffNote from './components/config/dns/DnsFlagOffNote.svelte';
-  import { loadDns, dnsTakeover } from './lib/configDns';
-  import { get } from 'svelte/store';
   import Tabs, { type TabItem } from './components/Tabs.svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import SegmentedControl, { type SegmentItem } from './components/SegmentedControl.svelte';
@@ -53,7 +46,6 @@
 
   let { onSwitchTab }: { onSwitchTab?: (tab: string) => void } = $props();
 
-  let showMihomoMigrateModal = $state(false);
   let checkingConnection = $state(false);
   let secretVisible = $state(false);
 
@@ -127,68 +119,6 @@
       showSectionList = true;
     }
     window.scrollTo({ top: 0 });
-  }
-
-  // Переключатель слоя «Конфигурация» (D-01, D-04): на время запроса заблокирован
-  let configLayerPending = $state(false);
-
-  /**
-   * Перехват DNS включён или желаем (D-36): тогда подтверждение выключения флага слоя
-   * предупреждает о возврате DNS прошивке. Сбой чтения (404 без службы, сеть) — абзаца нет,
-   * выключение не блокируется.
-   */
-  async function dnsTakeoverActive(): Promise<boolean> {
-    await loadDns();
-    const view = get(dnsTakeover);
-    if (!view) return false;
-    return view.desired || (view.state !== 'off' && view.state !== 'unavailable');
-  }
-
-  async function onToggleConfigLayer(e: Event) {
-    const input = e.currentTarget as HTMLInputElement;
-    const enable = input.checked;
-    if (!enable) {
-      // Чтение состояния перехвата — сетевой запрос: на это время переключатель неактивен
-      // и показывает спиннер, повторный клик не проходит
-      configLayerPending = true;
-      let dnsActive = false;
-      try {
-        dnsActive = await dnsTakeoverActive();
-      } catch {
-        dnsActive = false;
-      } finally {
-        configLayerPending = false;
-      }
-      const confirmed = await showConfirm({
-        variant: 'warning',
-        title: $t('settings.config_layer_off_title'),
-        message: $t('settings.config_layer_off_message'),
-        consequence: $t('settings.config_layer_off_consequence'),
-        extra: dnsActive
-          ? { component: DnsFlagOffNote, props: { profilesAll: true } }
-          : { component: DependentProfilesNote, props: { all: true } },
-        confirmLabel: $t('settings.config_layer_off_ok')
-      });
-      if (!confirmed) {
-        input.checked = true;
-        return;
-      }
-    }
-    configLayerPending = true;
-    try {
-      await setConfigLayerEnabled(enable);
-      // Вид перехвата, прочитанный для подтверждения, при выключенном слое недействителен
-      if (!enable) dnsTakeover.set(null);
-      showToast(
-        'success',
-        $t(enable ? 'settings.config_layer_on_toast' : 'settings.config_layer_off_toast')
-      );
-    } catch (err) {
-      input.checked = !enable;
-      showToast('error', err instanceof Error ? err.message : String(err));
-    } finally {
-      configLayerPending = false;
-    }
   }
 
   const settingsTabItems = $derived<TabItem[]>([
@@ -1227,32 +1157,12 @@
                 onchange={(e) => setDevMode((e.target as HTMLInputElement).checked)}
               />
             </div>
-            <div class="field-row" data-testid="config-layer-row">
-              <div>
-                <span class="field-row-name">{$t('settings.config_layer')}</span>
-                <div class="field-row-desc">{$t('settings.config_layer_desc')}</div>
-              </div>
-              <div class="ctrl">
-                {#if configLayerPending}
-                  <span class="spinner" aria-hidden="true"></span>
-                {/if}
-                <Toggle
-                  title={$applyRunning ? $t('settings.config_layer_busy_hint') : undefined}
-                  ariaLabel={$t('settings.config_layer')}
-                  checked={$configLayerEnabled}
-                  disabled={configLayerPending || $applyRunning}
-                  onchange={onToggleConfigLayer}
-                />
-              </div>
-            </div>
           </div>
         </div>
       </Section>
 
       <!-- Диагностика слоя (D-07): карточка сама скрыта без режима разработчика -->
-      {#if $configLayerEnabled}
-        <DevDiagnostics />
-      {/if}
+      <DevDiagnostics />
 
       <PingTargetSettingsCard />
     {/if}
@@ -1493,7 +1403,7 @@
                   >
                   <button
                     class="btn btn-warning btn-sm"
-                    onclick={() => (showMihomoMigrateModal = true)}
+                    onclick={() => (window.location.hash = constructorHash())}
                   >
                     {$t('mihomo.migrate_btn')}
                   </button>
@@ -1845,12 +1755,6 @@
     {/if}
   </div>
 </div>
-
-<MihomoSocketMigrateModal
-  bind:open={showMihomoMigrateModal}
-  onclose={() => (showMihomoMigrateModal = false)}
-  onsuccess={recheckConnection}
-/>
 
 <style>
   /* Список разделов на телефоне: одна карточка, строки с иконкой, описанием

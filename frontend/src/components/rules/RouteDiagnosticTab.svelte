@@ -66,9 +66,6 @@
   }
 
   function getSourceBadge(source: string): { label: string; className: string } {
-    if (source === 'user' || source === 'user_rule') {
-      return { label: $t('rules.diagnostic_source_user'), className: 'source-user' };
-    }
     if (source === 'fallback') {
       return { label: $t('rules.diagnostic_source_fallback'), className: 'source-fallback' };
     }
@@ -531,12 +528,6 @@
     border-radius: var(--radius-sm);
     letter-spacing: 0;
     white-space: nowrap;
-  }
-
-  .source-user {
-    background: color-mix(in srgb, var(--accent) 15%, transparent);
-    color: var(--accent);
-    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   }
 
   .source-kernel {

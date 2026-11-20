@@ -24,6 +24,10 @@
 # пустые обе — строка FAIL pw:run (журнал — pw/run.log). Раньше обе части писали в pw/, и второй
 # запуск Playwright стирал артефакты первого (он очищает outputDir при старте).
 #
+# Если в локальном конфиге целей задан XCP_SUBSCRIPTION_URL, процесс Playwright получает его как
+# XCP_RT_SUBSCRIPTION_URL (адрес настоящей подписки, как у go-suite.sh): только в окружении
+# процесса, в журнал и отчёт не попадает. Не задан — сценарии с настоящей подпиской пропускаются.
+#
 # Результаты: строки `pw:<название теста>` в <отчёт>/<id>/results.tsv (или RT_RESULTS_NAME):
 #   PASS, FAIL, SKIP, а также KNOWN (тест с меткой knownFailure упал, как ожидалось),
 #   XPASS (помеченный тест прошёл: метка больше не нужна, прогон красный) и QFAIL/QPASS
@@ -285,6 +289,7 @@ run_pw() {
       XCP_ARCH=$ARCH \
       XCP_CORE=${CORE:--} \
       XCP_SLOW=$SLOW \
+      XCP_RT_SUBSCRIPTION_URL=${XCP_SUBSCRIPTION_URL:-} \
       XCP_PW_STATE=$STATE \
       XCP_PW_OUT=$OUT \
       XCP_PW_JSON=$_json \

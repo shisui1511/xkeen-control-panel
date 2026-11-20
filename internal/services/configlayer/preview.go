@@ -83,12 +83,9 @@ type ApplyPreview struct {
 
 // PreviewApply собирает предпросмотр «Применить» по текущему черновику. Дрейф,
 // проблемы проверки и занятый замок приходят полем Blocked, а не ошибкой: окно
-// показывает причину внутри себя. Ошибка — только выключенный слой (ErrDisabled)
-// или сбой чтения диска и сборки, не связанный с проверками.
+// показывает причину внутри себя. Ошибка — только сбой чтения диска и сборки, не
+// связанный с проверками.
 func (l *Layer) PreviewApply() (ApplyPreview, error) {
-	if !l.Enabled() {
-		return ApplyPreview{}, ErrDisabled
-	}
 	st := l.store.Snapshot()
 	installed := l.installed()
 	out := ApplyPreview{

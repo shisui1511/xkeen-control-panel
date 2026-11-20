@@ -128,7 +128,7 @@ func (a *API) validateMihomoContent(data []byte) error {
 }
 
 // mihomoReturnTarget — профиль, на который вернётся Mihomo при отпускании; пусто,
-// когда слой выключен или панель Mihomo не владеет. Читается при каждом обращении к
+// когда панель Mihomo не владеет. Читается при каждом обращении к
 // сервису профилей: владение меняется применением, а не перезапуском панели.
 func (a *API) mihomoReturnTarget() string {
 	if a.configLayer == nil {
@@ -178,8 +178,7 @@ func (a *API) profileActivationResult(res *services.ActivationResult) profileAct
 	return out
 }
 
-// activateByOwner ведёт «Сделать активным» по владельцу Mihomo, когда слой
-// «Конфигурация» включён. Панель владеет Mihomo — переход идёт через конвейер
+// activateByOwner ведёт «Сделать активным» по владельцу Mihomo. Панель владеет Mihomo — переход идёт через конвейер
 // (ActivateProfile под замком применения): черновик не затрагивается, при открытом
 // ответ 409 draft_open. Панель не владеет, но черновик хочет взять Mihomo (желание
 // есть, файл ещё не переключён) — тоже 409 draft_open: иначе «Применить» взял бы
@@ -187,7 +186,7 @@ func (a *API) profileActivationResult(res *services.ActivationResult) profileAct
 // другой черновика не касается и идёт обычной активацией. Возвращает true, когда
 // ответ уже записан.
 func (a *API) activateByOwner(w http.ResponseWriter, r *http.Request, name string) bool {
-	if a.configLayer == nil || !a.configLayer.Enabled() || a.routing == nil {
+	if a.configLayer == nil || a.routing == nil {
 		return false
 	}
 	if a.configLayer.MihomoTaken() {
@@ -256,7 +255,7 @@ func (a *API) planMihomoTemplate(w http.ResponseWriter, r *http.Request, file st
 		JSONErrorCode(w, http.StatusBadRequest, "template_unknown", a.t(r, "profiles.err_template_unknown"))
 		return nil, false
 	}
-	if !a.requireLayer(w, r) {
+	if !a.requireConfigLayer(w, r) {
 		return nil, false
 	}
 	if a.sources == nil {
@@ -421,7 +420,7 @@ func (a *API) MihomoProfileDeps(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// MihomoProfileAction handles POST /api/mihomo/profiles/{create|rename|delete|activate|adopt}.
+// MihomoProfileAction handles POST /api/mihomo/profiles/{create|rename|delete|activate}.
 func (a *API) MihomoProfileAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
@@ -474,28 +473,21 @@ func (a *API) MihomoProfileAction(w http.ResponseWriter, r *http.Request) {
 		err = svc.Rename(req.Name, req.NewName)
 	case "delete":
 		err = svc.Delete(req.Name)
-	case "adopt":
-		err = svc.Adopt(req.Name)
 	case "activate":
-		// Слой включён: путь выбирает владелец Mihomo (D-06, D-08). Ответ записан —
-		// дальше нечего делать.
+		// Путь выбирает владелец Mihomo (D-06, D-08). Ответ записан — дальше нечего
+		// делать.
 		if a.activateByOwner(w, r, req.Name) {
 			return
 		}
 		// Активация перезапускает ядро: под общим замком жизненного цикла, до
-		// переключения ссылки config.yaml. create/rename/delete/adopt ядро не трогают.
+		// переключения ссылки config.yaml. create/rename/delete ядро не трогают.
 		if !a.tryLifecycleLock(w, r) {
 			return
 		}
 		defer a.lifecycleMu.Unlock()
+		// Обычный config.yaml XKeen переезжает в profiles/ внутри активации (D-27).
 		var res *services.ActivationResult
-		if a.configLayer != nil && a.configLayer.Enabled() {
-			// Слой включён: обычный config.yaml XKeen переезжает в profiles/ внутри
-			// активации (D-27). Выключен — прежнее поведение: ErrProfilesUnmanaged.
-			res, err = svc.ActivateAdopting(req.Name)
-		} else {
-			res, err = svc.Activate(req.Name)
-		}
+		res, err = svc.ActivateAdopting(req.Name)
 		if err == nil {
 			a.ClearCapabilitiesCache()
 			result = a.profileActivationResult(res)

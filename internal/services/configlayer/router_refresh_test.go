@@ -103,7 +103,6 @@ func rtNewRefreshEnv(t *testing.T) *rtRefreshEnv {
 	layer, err := New(Options{
 		DataDir:       dir,
 		Roots:         roots,
-		Enabled:       func() bool { return true },
 		Binaries:      func() Binaries { return Binaries{Xray: rtRefreshXrayBin} },
 		DriftInterval: time.Hour,
 		DebounceDelay: 20 * time.Millisecond,
@@ -460,16 +459,4 @@ func TestRouterSourceRefresh(t *testing.T) {
 		case <-time.After(300 * time.Millisecond):
 		}
 	})
-}
-
-func TestRouterSourceRefreshDisabled(t *testing.T) {
-	dir := rtLiveDir(t)
-	layer, err := New(Options{DataDir: dir, Enabled: func() bool { return false }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer layer.Stop()
-	if _, err := layer.RunSourceRefresh(context.Background(), Sections{"probe": json.RawMessage(`{}`)}); !errors.Is(err, ErrDisabled) {
-		t.Errorf("RunSourceRefresh выключенного слоя: %v", err)
-	}
 }

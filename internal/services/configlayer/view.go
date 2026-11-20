@@ -109,9 +109,21 @@ type CoresSnapshot struct {
 	Restart []RestartNote              `json:"restart"`
 }
 
+// LegacySummary — несекретная часть ответа legacy и снимка слоя.
+type LegacySummary struct {
+	Pending       bool   `json:"pending"`
+	ArchivePath   string `json:"archive_path,omitempty"`
+	URLsAvailable bool   `json:"urls_available"`
+}
+
+// LegacyView возвращается только отдельной защищённой ручкой.
+type LegacyView struct {
+	LegacySummary
+	URLs []string `json:"urls"`
+}
+
 // SnapshotView — состояние слоя целиком для GET-снимка и первого события SSE.
 type SnapshotView struct {
-	Enabled       bool                     `json:"enabled"`
 	DevMode       bool                     `json:"dev_mode"`
 	DraftRevision int64                    `json:"draft_revision"`
 	DraftChanges  int                      `json:"draft_changes"`
@@ -130,7 +142,8 @@ type SnapshotView struct {
 	Cores CoresSnapshot `json:"cores"`
 	// BusyHolder — кто держит исключительный замок применения вне конвейера
 	// (менеджер geodata: geodata_update, geodata_remove); пусто — замок свободен.
-	BusyHolder string `json:"busy_holder,omitempty"`
+	BusyHolder string        `json:"busy_holder,omitempty"`
+	Legacy     LegacySummary `json:"legacy"`
 }
 
 // sortFileViews упорядочивает файлы для UI: drift, pending, ok, released;

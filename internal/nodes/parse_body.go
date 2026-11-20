@@ -5,8 +5,6 @@ import (
 	"errors"
 	"regexp"
 	"strings"
-
-	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 // maxNodes — предел узлов в одном разборе (T-145-04): больше — too_large.
@@ -88,7 +86,7 @@ func parseBody(data []byte, depth int) (ParseResult, error) {
 		err error
 	)
 	switch {
-	case services.LooksLikeWgQuickConf(text):
+	case LooksLikeWgQuickConf(text):
 		res, err = ParseWG(text)
 	case trimmed[0] == '{' || trimmed[0] == '[':
 		var v any

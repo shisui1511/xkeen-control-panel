@@ -1,44 +1,33 @@
 <script lang="ts">
   import { onMount, onDestroy, tick, untrack, type Snippet } from 'svelte';
-  import type { Attachment } from 'svelte/attachments';
-  import { fade, slide, DURATION } from './lib/motion.svelte';
   import { MediaQuery, SvelteSet } from 'svelte/reactivity';
   import { t, currentLang } from './i18n';
-  import {
-    showToast,
-    activeKernelName,
-    showConfirm,
-    editorOpenRequest,
-    configLayerEnabled
-  } from './stores';
+  import { showToast, activeKernelName, showConfirm, editorOpenRequest } from './stores';
   import { filesByPath, handleLayerError, layerSnapshot } from './lib/configLayer';
-  import { apiFetch, apiFetchJSON, isLegacyBlocked } from './lib/api';
+  import { apiFetch, apiFetchJSON } from './lib/api';
   import { parseValidationError } from './lib/errorParser';
   import Icon from './lib/components/Icon.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import Button from './components/Button.svelte';
   import EditorIcon from './lib/components/icons/Editor.svelte';
-  import Skeleton from './components/Skeleton.svelte';
   import { EditorState } from '@codemirror/state';
   import { EditorView } from '@codemirror/view';
 
   import { buildPathAtCursor, type PathSegment } from './lib/editor-utils';
 
   // Subcomponents
-  import EditorSidebar from './components/editor/EditorSidebar.svelte';
+  import ResponsiveSidebarPanel from './components/ResponsiveSidebarPanel.svelte';
+  import FileTree from './components/editor/FileTree.svelte';
   import EditorHeaderActions from './components/editor/EditorHeaderActions.svelte';
   import CodeMirrorEditor from './components/editor/CodeMirrorEditor.svelte';
   import BackupSidebar from './components/editor/BackupSidebar.svelte';
   import FileActionModals from './components/editor/FileActionModals.svelte';
-  import TemplatesModal, { type Template } from './components/editor/TemplatesModal.svelte';
   import SaveConfirmModal from './components/editor/SaveConfirmModal.svelte';
   import OutboundGeneratorModal from './components/editor/OutboundGeneratorModal.svelte';
   import EditorToolbar from './components/editor/EditorToolbar.svelte';
   import EditorStatusBar from './components/editor/EditorStatusBar.svelte';
   import EditorBreadcrumbs from './components/editor/EditorBreadcrumbs.svelte';
   import ManagedFileBanner from './components/editor/ManagedFileBanner.svelte';
-  import PageHeader from './PageHeader.svelte';
-  import Tabs, { type TabItem } from './components/Tabs.svelte';
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
   import { applyToKernel, notifyApplyOutcome, type ApplyResult } from './lib/serviceApply';
@@ -59,7 +48,6 @@
     createConfigFile,
     deleteConfigFile,
     renameConfigFile,
-    listConfigFiles,
     listConfigFilesScoped,
     formatBytes,
     ConfigOpError,
@@ -81,20 +69,14 @@
     currentContent: string;
   }
 
+  // Содержимое вкладки «Конфигурация → Файлы» (149 D-01, 151 D-11): единственный вход к файлам
+  // ядер и XKeen. Отдельной страницы Редактора и режима конструктора нет.
   let {
-    onSwitchTab = () => {},
-    embedded = false,
     active = true,
     onactivefile,
     aboveCode,
     appliesFor
   }: {
-    onSwitchTab?: (tab: string) => void;
-    /**
-     * Вкладка «Файлы» раздела «Конфигурация» (D-01): без заголовка страницы, без режима
-     * «Конструктор» и полноэкранной обёртки; разметка списка и редактора та же
-     */
-    embedded?: boolean;
     /**
      * Встроенный Редактор показан: вкладка раздела остаётся смонтированной и скрывается,
      * поэтому горячие клавиши, шторка и запрос открытия файла действуют только при показе
@@ -110,11 +92,6 @@
 
   let ru = $derived($currentLang === 'ru');
 
-  const editorModeTabItems = $derived<TabItem[]>([
-    { value: 'files', label: $t('editor.tab_files'), testId: 'tab-files' },
-    { value: 'constructor', label: $t('editor.tab_constructor'), testId: 'tab-constructor' }
-  ]);
-
   let editorView = $state<EditorView | null>(null);
 
   // States using runes
@@ -122,9 +99,8 @@
   let selectedFile = $state('');
 
   // Слой «Конфигурация» (D-12): файл панели под управлением правится только после
-  // «Отпустить управление». Статус берётся из стора слоя — отдельного запроса нет;
-  // с выключенным флагом всё как до включения слоя.
-  const managedFile = $derived($configLayerEnabled ? $filesByPath.get(selectedFile) : undefined);
+  // «Отпустить управление». Статус берётся из стора слоя — отдельного запроса нет.
+  const managedFile = $derived($filesByPath.get(selectedFile));
   // pending — файла ещё нет в манифесте: сервер его не защищает, а «Отпустить» ответил бы 404
   const isManagedReadOnly = $derived(
     managedFile !== undefined &&
@@ -139,7 +115,6 @@
   let queuedPick = $state<{ path: string; isPreviewClick: boolean } | null>(null);
   // Дерево показывает занятость у последнего выбранного файла
   const treeBusyPath = $derived(queuedPick?.path ?? loadingPath);
-  let templateLoading = $state(false);
   const pendingPins = new SvelteSet<string>();
   let saving = $state(false);
   let backups = $state<string[]>([]);
@@ -182,7 +157,7 @@
     drawerOpen &&
       (visibleBackups.length > 0 ||
         (drawerPath !== '' && drawerPath === selectedFile) ||
-        (embedded && managedFile?.owner === 'panel'))
+        managedFile?.owner === 'panel')
   );
   // Смена файла в редакторе сбрасывает выбор копии и сравнение в том же обновлении:
   // сравнение с копией другого файла недействительно (WR-01). Присваивания в
@@ -221,7 +196,6 @@
     kernel: 'xray' | 'mihomo',
     dir: string
   ): ConfigFileInfo[] {
-    if (!embedded || !$configLayerEnabled) return listed;
     const known = new Set(listed.map((f) => f.path));
     const extra: ConfigFileInfo[] = [];
     for (const f of $layerSnapshot?.files ?? []) {
@@ -249,20 +223,16 @@
   );
   // Файл манифеста, которого нет на диске (пропал или ещё не записан): вкладка «Файлы»
   // показывает его пустой вкладкой только для чтения, диск не читается
-  const selectedMissing = $derived(
-    embedded && selectedFile !== '' && missingPaths.has(selectedFile)
-  );
+  const selectedMissing = $derived(selectedFile !== '' && missingPaths.has(selectedFile));
 
   const allFiles = $derived([...xrayList, ...mihomoList, ...xkeenFiles]);
   const activeFileInfo = $derived(allFiles.find((f) => f.path === (activeTabPath || selectedFile)));
 
   // Вкладка «Файлы» (D-07): файл с дрейфом только для чтения до принятия решения
   const isDrift = $derived(
-    embedded &&
-      selectedFile !== '' &&
-      ($filesByPath.get(selectedFile)?.state?.startsWith('drift_') ?? false)
+    selectedFile !== '' && ($filesByPath.get(selectedFile)?.state?.startsWith('drift_') ?? false)
   );
-  const isRestricted = $derived(embedded && Boolean(activeFileInfo?.restricted));
+  const isRestricted = $derived(Boolean(activeFileInfo?.restricted));
   const isReadOnly = $derived(isManagedReadOnly || selectedMissing || isDrift || isRestricted);
 
   $effect(() => {
@@ -299,7 +269,6 @@
   // CRUD modals
   let showCreateModal = $state(false);
   let showRenameModal = $state(false);
-  let showTemplatesModal = $state(false);
   let showGeneratorModal = $state(false);
   let newFileName = $state('');
   let renameTarget = $state('');
@@ -341,41 +310,6 @@
     };
   });
 
-  // Local active tab: 'files' | 'constructor'
-  let activeTab = $state<'files' | 'constructor'>('files');
-
-  // Constructor.svelte lazy-chunk boundary (Pitfall 1, RESEARCH.md): without
-  // this, XrayRoutingConstructor.svelte (3 473 lines) rides statically inside
-  // this file's own lazy chunk. `constructorReloadKey` keys the {#key} block
-  // wrapping the {#await import(...)} below; the actual recovery mechanism is
-  // a full reload — see Dashboard.svelte's retryChunkLoad() for the same
-  // reasoning (a failed dynamic import() specifier is permanently cached by
-  // the browser's module map for the document's lifetime).
-  let constructorReloadKey = $state(0);
-  let constructorChunkErrorShown = false;
-
-  function retryConstructorChunkLoad() {
-    constructorChunkErrorShown = false;
-    constructorReloadKey++;
-    window.location.reload();
-  }
-
-  function reportConstructorChunkError(err: unknown): void {
-    console.error('Failed to load Constructor lazy chunk', err);
-    if (constructorChunkErrorShown) return;
-    constructorChunkErrorShown = true;
-    showToast('error', $t('app.chunk_load_failed'), 0, {
-      label: $t('app.retry'),
-      onClick: retryConstructorChunkLoad
-    });
-  }
-
-  function reportConstructorChunkErrorAttachment(err: unknown): Attachment {
-    return () => {
-      untrack(() => reportConstructorChunkError(err));
-    };
-  }
-
   function jumpToSegment(pos: number) {
     if (!editorView) return;
     editorView.focus();
@@ -391,64 +325,6 @@
       setTimeout(() => {
         lineEl.classList.remove('line-highlight-flash');
       }, 1000);
-    }
-  }
-
-  function checkHashTab() {
-    if (window.location.hash === '#/constructor') {
-      activeTab = 'constructor';
-    } else if (window.location.hash === '#/mihomo-gen') {
-      activeTab = 'constructor';
-      window.location.hash = '#/constructor';
-    } else {
-      activeTab = 'files';
-    }
-  }
-
-  function setTab(tab: 'files' | 'constructor') {
-    activeTab = tab;
-    constructorChunkErrorShown = false;
-    if (tab === 'constructor') {
-      window.location.hash = '#/constructor';
-    } else {
-      window.location.hash = '#/editor';
-    }
-    window.dispatchEvent(new Event('hashchange'));
-  }
-
-  async function handleInsertIntoEditor(yamlContent: string) {
-    if (isReadOnly) {
-      showToast('warning', $t('editor.managed_readonly_hint'));
-      return;
-    }
-    if (selectedFile) {
-      if (editorView && editorView.dom.isConnected) {
-        editorView.dispatch({
-          changes: {
-            from: 0,
-            to: editorView.state.doc.length,
-            insert: yamlContent
-          }
-        });
-        isDirty = true;
-        activeTab = 'files';
-        window.location.hash = '#/editor';
-      } else {
-        activeTab = 'files';
-        window.location.hash = '#/editor';
-        await tick();
-        if (editorView) {
-          editorView.dispatch({
-            changes: { from: 0, to: editorView.state.doc.length, insert: yamlContent }
-          });
-          isDirty = true;
-        }
-      }
-      showToast('success', $t('editor.yaml_inserted'));
-    } else {
-      activeTab = 'files';
-      window.location.hash = '#/editor';
-      showToast('info', $t('editor.select_file_for_yaml'));
     }
   }
 
@@ -527,17 +403,7 @@
 
   async function loadFiles(dir?: string) {
     if (dir) currentDir = dir;
-    if (embedded) {
-      await loadScopedFiles();
-      return;
-    }
-    try {
-      xrayFiles = await listConfigFiles(xrayDir);
-      mihomoFiles = await listConfigFiles(mihomoDir);
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', $t('editor.load_error'));
-    }
+    await loadScopedFiles();
   }
 
   function switchDir(dir: string) {
@@ -579,7 +445,7 @@
 
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
       e.preventDefault();
-      if (selectedFile && activeTab === 'files') {
+      if (selectedFile) {
         checkBeforeSave();
       }
     }
@@ -742,7 +608,7 @@
     }
 
     try {
-      const content = embedded && missingPaths.has(path) ? '' : await readConfigFile(path);
+      const content = missingPaths.has(path) ? '' : await readConfigFile(path);
 
       // Пока читался этот файл, выбрали другой: ответ отбрасывается до любых изменений вкладок
       let next = takeQueuedPick();
@@ -1306,9 +1172,7 @@
     const confirmed = await showConfirm({
       variant: 'danger',
       title: $t('editor.delete_file'),
-      message: embedded
-        ? $t('cfg.files.delete_message', { filename: fileName })
-        : $t('editor.delete_confirm_body', { file: fileName }),
+      message: $t('cfg.files.delete_message', { filename: fileName }),
       confirmLabel: $t('editor.delete_file'),
       cancelLabel: $t('app.cancel')
     });
@@ -1487,79 +1351,6 @@
     }
   }
 
-  function openTemplatesModal() {
-    showTemplatesModal = true;
-  }
-
-  async function applyTemplate(template: Template) {
-    if (!editorView || isReadOnly) return;
-    if (isDirty && !(await confirmUnsaved())) return;
-    if (
-      !(await showConfirm({
-        title: $t('editor.template_apply_title'),
-        objectName: template.name,
-        consequence: $t('editor.confirm_template'),
-        variant: 'warning',
-        confirmLabel: $t('editor.apply')
-      }))
-    )
-      return;
-
-    templateLoading = true;
-    saveWarnings = [];
-    try {
-      if (!template.content) throw new Error('Template is empty');
-
-      let finalContent = template.content;
-      try {
-        const currentContent = editorView.state.doc.toString();
-        const mergeRes = await apiFetchJSON<{
-          content: string;
-          warnings?: PreflightWarning[];
-        }>('/api/config/smart-merge', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: template.type,
-            existing_content: currentContent,
-            template_content: template.content,
-            target_file: selectedFile
-          })
-        });
-        if (mergeRes && mergeRes.content) {
-          finalContent = mergeRes.content;
-          const mergeData: any = mergeRes;
-          const w = mergeData?.data?.warnings ?? mergeData?.warnings;
-          saveWarnings = Array.isArray(w) ? w : [];
-        } else {
-          throw new Error('empty merge result');
-        }
-      } catch (mergeErr: any) {
-        if (mergeErr?.status === 401) return;
-        // Слой «Конфигурация» закрывает слияние шаблонов: показываем переведённый текст сервера
-        if (isLegacyBlocked(mergeErr)) {
-          showToast('warning', mergeErr.message);
-          return;
-        }
-        console.error('Smart merge failed:', mergeErr);
-        showToast('error', $t('editor.smart_merge_failed'));
-        return;
-      }
-
-      editorView.dispatch({
-        changes: { from: 0, to: editorView.state.doc.length, insert: finalContent }
-      });
-      isDirty = true;
-      showTemplatesModal = false;
-      showToast('success', $t('editor.template_applied'));
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', $t('editor.template_error') + ': ' + e.message);
-    } finally {
-      templateLoading = false;
-    }
-  }
-
   function handleGeneratedOutbound(content: string) {
     if (!editorView) return;
     const cursor = editorView.state.selection.main.head;
@@ -1625,11 +1416,10 @@
     void loadFile(requested, false);
   }
 
-  // Встроенный Редактор живёт, пока открыт раздел: запрос открытия файла приходит и после
-  // монтирования. Он берётся, только когда вкладка показана, — иначе запрос, после которого
-  // страница уходит в Редактор, перехватила бы скрытая вкладка.
+  // «Файлы» живут, пока открыт раздел: запрос открытия файла приходит и после монтирования.
+  // Он берётся, только когда вкладка показана, — иначе его перехватила бы скрытая вкладка.
   $effect(() => {
-    if (!embedded || !active) return;
+    if (!active) return;
     const requested = $editorOpenRequest;
     if (!requested) return;
     untrack(() => consumeOpenRequest(requested));
@@ -1637,12 +1427,6 @@
 
   onMount(() => {
     loadFiles();
-    if (!embedded) {
-      checkHashTab();
-      const requested = $editorOpenRequest;
-      if (requested) consumeOpenRequest(requested);
-      window.addEventListener('hashchange', checkHashTab);
-    }
 
     const draft = getDraft('editor');
     if (draft) {
@@ -1650,7 +1434,7 @@
     }
 
     unregisterDirty = registerDirtySource('editor', {
-      name: $t('nav.editor') || 'Editor',
+      name: $t('cfg.tab.files'),
       isDirty: () => isDirty || tabs.some((t) => t.isDirty),
       onSave: async () => {
         if (selectedFile && editorView) {
@@ -1683,7 +1467,6 @@
   });
 
   onDestroy(() => {
-    window.removeEventListener('hashchange', checkHashTab);
     if (unregisterDirty) {
       unregisterDirty();
       unregisterDirty = null;
@@ -1708,52 +1491,31 @@
     onSaveFile={checkBeforeSave}
     onSaveAndApply={handleSaveAndApply}
     managedReadOnly={isReadOnly}
-    immediate={embedded &&
-      Boolean(
-        activeFileInfo && (activeFileInfo.owner === 'xkeen' || activeFileInfo.owner === 'user')
-      )}
+    immediate={Boolean(
+      activeFileInfo && (activeFileInfo.owner === 'xkeen' || activeFileInfo.owner === 'user')
+    )}
     saveDisabledReason={isRestricted ? $t('cfg.files.restricted_title') : undefined}
-    {embedded}
+    embedded
   />
 {/snippet}
 
-<div
-  class={embedded ? 'editor-embedded' : 'editor-page-container'}
-  class:constructor-mode={!embedded && activeTab === 'constructor'}
->
-  {#if embedded}
-    <!-- Шапка встроенного Редактора: на ≤768 px «Файлы» открывает лист списка слева (EDT-02) -->
-    <div class="editor-embedded-head">
-      {#if isNarrow}
-        <Button
-          variant="secondary"
-          size="sm"
-          class="files-sheet-toggle"
-          aria-expanded={showSidebar}
-          onclick={() => (showSidebar = !showSidebar)}
-        >
-          <Icon name="folder" size={16} />
-          {$t('editor.tab_files')}
-        </Button>
-      {/if}
-      {@render headerActions()}
-    </div>
-  {:else}
-    <!-- Level 1 Header (EDIT-01) -->
-    <PageHeader title={$t('editor.h1')} subtitle={$t('editor.h1_sub')}>
-      <Tabs
-        items={editorModeTabItems}
-        value={activeTab}
-        onchange={(val) => setTab(val as 'files' | 'constructor')}
-        ariaLabel={$t('editor.h1')}
-        variant="pill"
-      />
-
-      {#if activeTab === 'files'}
-        {@render headerActions()}
-      {/if}
-    </PageHeader>
-  {/if}
+<div class="editor-embedded">
+  <!-- Шапка «Файлов»: на ≤768 px кнопка «Файлы» открывает лист списка слева (EDT-02) -->
+  <div class="editor-embedded-head">
+    {#if isNarrow}
+      <Button
+        variant="secondary"
+        size="sm"
+        class="files-sheet-toggle"
+        aria-expanded={showSidebar}
+        onclick={() => (showSidebar = !showSidebar)}
+      >
+        <Icon name="folder" size={16} />
+        {$t('editor.tab_files')}
+      </Button>
+    {/if}
+    {@render headerActions()}
+  </div>
 
   {#if detectedDraft}
     <DraftRestoreBanner
@@ -1763,21 +1525,28 @@
     />
   {/if}
 
-  {#if activeTab === 'files'}
-    <!-- Workspace with Resizable Splitter (EDIT-02) -->
-    <div class="editor-workspace">
-      <EditorSidebar
-        open={showSidebar && active}
+  <!-- Workspace with Resizable Splitter (EDIT-02) -->
+  <div class="editor-workspace">
+    <!-- Панель списка: колонка рядом с кодом, до 768 px — лист поверх редактора -->
+    <ResponsiveSidebarPanel
+      open={showSidebar && active}
+      overlay={isNarrow}
+      onclose={() => (showSidebar = false)}
+      title={$t('editor.tab_files')}
+      storageKey="editor_filetree_width"
+      defaultWidth={240}
+      minWidth={160}
+      maxWidth={450}
+    >
+      <FileTree
         xrayFiles={xrayList}
         mihomoFiles={mihomoList}
-        xkeenFiles={embedded ? xkeenFiles : undefined}
-        filesStatus={embedded ? filesStatus : 'ready'}
-        onRetryFiles={() => void loadScopedFiles()}
+        {xkeenFiles}
+        status={filesStatus}
+        onRetry={() => void loadScopedFiles()}
         {selectedFile}
         activeKernel={$activeKernelName}
-        overlay={isNarrow}
         loadingPath={treeBusyPath}
-        onclose={() => (showSidebar = false)}
         onLoadFile={async (path, isPreviewClick) => {
           const opened = await loadFile(path, isPreviewClick);
           // D-16: шторка закрывается только после того, как файл показан во вкладке; при отмене
@@ -1804,234 +1573,205 @@
           if (opened && isNarrow) showSidebar = false;
         }}
       />
+    </ResponsiveSidebarPanel>
 
-      <!-- Main Editor Card -->
-      {#if tabs.length === 0}
-        <div class="editor-empty-card">
-          <div class="editor-empty-content">
-            <EmptyState
-              title={$t('editor.select_file')}
-              description={isTouchLayout
-                ? $t('editor.empty_state_body_touch')
-                : $t('editor.empty_state_body')}
-              icon={EditorIcon}
-              plain={true}
-            />
-            <div class="editor-empty-actions">
-              <!-- На ≤768 px кнопка остаётся под бэкдропом: overlayLock возвращает фокус
-                   после Escape, «Закрыть» и фона только на элемент в разметке (G149-07, WR-05).
-                   На ПК при видимой колонке кнопки нет. -->
-              {#if !showSidebar || isNarrow}
-                <button
-                  class="btn btn-secondary"
-                  aria-expanded={showSidebar}
-                  onclick={() => (showSidebar = true)}
-                >
-                  <Icon name="folder" size={16} />
-                  {$t('editor.show_files')}
-                </button>
-              {/if}
-              <button
-                class="btn btn-primary"
-                onclick={() => {
-                  showCreateModal = true;
-                  newFileName = '';
-                }}
-              >
-                <Icon name="add" size={16} />
-                {$t('editor.create_file')}
-              </button>
-            </div>
-
-            {#if !isTouchLayout}
-              <div class="editor-empty-shortcuts">
-                <span class="shortcut-item"
-                  ><kbd>{isMac ? '⌘' : 'Ctrl'}+S</kbd> <span>{$t('editor.to_save')}</span></span
-                >
-                <span class="shortcut-dot">•</span>
-                <span class="shortcut-item"
-                  ><kbd>{isMac ? '⌘' : 'Ctrl'}+F</kbd>
-                  <span>{$t('editor.shortcut_search')}</span></span
-                >
-                <span class="shortcut-dot">•</span>
-                <span class="shortcut-item"
-                  ><kbd>{isMac ? '⌘' : 'Ctrl'}+Z</kbd>
-                  <span>{$t('editor.shortcut_undo')}</span></span
-                >
-              </div>
-            {/if}
-          </div>
-        </div>
-      {:else}
-        <div class="editor-main-card">
-          <!-- Level 2 Subhead Bar (EDIT-01) -->
-          <EditorToolbar
-            {showSidebar}
-            {tabs}
-            {activeTabPath}
-            {selectedFile}
-            {hasDraft}
-            {fileType}
-            activeKernel={$activeKernelName}
-            onToggleSidebar={() => (showSidebar = !showSidebar)}
-            onSwitchTab={switchTab}
-            onPinTab={pinTab}
-            onCloseTab={closeTab}
-            onRestoreDraft={restoreDraft}
-            onDiscardDraft={discardDraft}
-            onDownloadFile={downloadFile}
-            onRenameFile={() => {
-              menuTarget = '';
-              showRenameModal = true;
-              renameTarget = selectedFile.split('/').pop() || '';
-            }}
-            onOpenTemplates={openTemplatesModal}
-            onOpenGenerator={() => (showGeneratorModal = true)}
-            onApplyQuickFixes={applyQuickFixes}
-            onDeleteFile={deleteFile}
-            managedReadOnly={isReadOnly}
-          />
-
-          <EditorBreadcrumbs {breadcrumbs} onJump={jumpToSegment} />
-
-          <PreflightWarnings
-            warnings={saveWarnings}
-            onDismiss={() => {
-              saveWarnings = [];
-            }}
-          />
-
-          {#if managedFile && isManagedReadOnly && !managedFile.state?.startsWith('drift_')}
-            <ManagedFileBanner file={managedFile} />
-          {/if}
-
-          {#if aboveCode && (activeTabPath || selectedFile)}
-            {@render aboveCode(activeTabPath || selectedFile, activeFileInfo)}
-          {/if}
-
-          <!-- CodeMirror editor component -->
-          <div style="flex: 1; min-height: 0; position:relative; background: var(--cm-bg);">
-            {#if loading}
-              <div
-                style="display:grid;place-items:center;height:100%;position:absolute;inset:0;background:color-mix(in srgb, var(--bg-card) 75%, transparent);z-index:10;"
-              >
-                <div class="spinner" style="--spinner-size: 24px;"></div>
-              </div>
-            {/if}
-            {#each tabs as tab (tab.path)}
-              {#if tab.path === activeTabPath}
-                <CodeMirrorEditor
-                  content={tab.currentContent}
-                  path={tab.path}
-                  {expertMode}
-                  {schemaEnabled}
-                  readOnly={isReadOnly}
-                  bind:view={editorView}
-                  onContentChange={(newContent) => {
-                    tab.currentContent = newContent;
-                    tab.isDirty = newContent !== tab.originalContent;
-                    isDirty = tab.isDirty;
-                    saveError = false;
-
-                    if (tab.isPreview) {
-                      tab.isPreview = false;
-                      tabs = [...tabs];
-                    }
-
-                    if (isDirty) {
-                      localStorage.setItem(`editor.draft.${tab.path}`, newContent);
-                    } else {
-                      localStorage.removeItem(`editor.draft.${tab.path}`);
-                    }
-                  }}
-                  onCursorChange={(line, col, pos, state) => {
-                    cursorLine = line;
-                    cursorCol = col;
-                    const isYaml = tab.path.endsWith('.yaml') || tab.path.endsWith('.yml');
-                    breadcrumbs = buildPathAtCursor(state, pos, isYaml);
-                  }}
-                  onSave={checkBeforeSave}
-                />
-              {/if}
-            {/each}
-          </div>
-
-          <!-- Status Bar (EDIT-05, EDIT-06) -->
-          <EditorStatusBar
-            {cursorLine}
-            {cursorCol}
-            {isMac}
-            {schemaEnabled}
-            {expertMode}
-            {applyLoading}
-            {backgroundStatusText}
-            backupCount={visibleBackups.length}
-            backupsStatus={statusBarBackups}
-            drawerOpen={drawerVisible}
-            hasApplies={Boolean(embedded && managedFile?.owner === 'panel' && appliesFor)}
-            onToggleSchema={toggleSchema}
-            onToggleExpertMode={toggleExpertMode}
-            onToggleDrawer={() => {
-              drawerPath = selectedFile;
-              drawerOpen = !drawerVisible;
-            }}
-          />
-
-          <!-- Bottom Drawer -->
-          {#if drawerVisible}
-            {#snippet panelAppliesSnippet()}
-              {#if appliesFor && selectedFile}
-                {@render appliesFor(
-                  selectedFile,
-                  editorView ? editorView.state.doc.toString() : ''
-                )}
-              {/if}
-            {/snippet}
-            <BackupSidebar
-              backups={visibleBackups}
-              status={visibleBackupsStatus}
-              onRetry={retryBackups}
-              {selectedBackup}
-              {diffGroups}
-              {backupLoading}
-              restoreDisabled={isReadOnly}
-              panelApplies={embedded && managedFile?.owner === 'panel' && appliesFor
-                ? panelAppliesSnippet
-                : undefined}
-              onSelectBackup={selectBackup}
-              onRestoreBackup={restoreBackup}
-              onclose={() => (drawerOpen = false)}
-            />
-          {/if}
-        </div>
-      {/if}
-    </div>
-  {:else if activeTab === 'constructor'}
-    {#key constructorReloadKey}
-      {#await import('./Constructor.svelte')}
-        <Skeleton type="card" height="60vh" />
-      {:then { default: Constructor }}
-        <div transition:fade={{ duration: DURATION.fast }} style="margin-top: 16px;">
-          <Constructor
-            {onSwitchTab}
-            onInsertIntoEditor={handleInsertIntoEditor}
-            {selectedFile}
-            embedded={true}
-            invalidateCache={activeTab === 'constructor'}
-          />
-        </div>
-      {:catch err}
-        <div {@attach reportConstructorChunkErrorAttachment(err)}>
+    <!-- Main Editor Card -->
+    {#if tabs.length === 0}
+      <div class="editor-empty-card">
+        <div class="editor-empty-content">
           <EmptyState
-            title={$t('app.chunk_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={retryConstructorChunkLoad}
+            title={$t('editor.select_file')}
+            description={isTouchLayout
+              ? $t('editor.empty_state_body_touch')
+              : $t('editor.empty_state_body')}
+            icon={EditorIcon}
+            plain={true}
           />
+          <div class="editor-empty-actions">
+            <!-- На ≤768 px кнопка остаётся под бэкдропом: overlayLock возвращает фокус
+                 после Escape, «Закрыть» и фона только на элемент в разметке (G149-07, WR-05).
+                 На ПК при видимой колонке кнопки нет. -->
+            {#if !showSidebar || isNarrow}
+              <button
+                class="btn btn-secondary"
+                aria-expanded={showSidebar}
+                onclick={() => (showSidebar = true)}
+              >
+                <Icon name="folder" size={16} />
+                {$t('editor.show_files')}
+              </button>
+            {/if}
+            <button
+              class="btn btn-primary"
+              onclick={() => {
+                showCreateModal = true;
+                newFileName = '';
+              }}
+            >
+              <Icon name="add" size={16} />
+              {$t('editor.create_file')}
+            </button>
+          </div>
+
+          {#if !isTouchLayout}
+            <div class="editor-empty-shortcuts">
+              <span class="shortcut-item"
+                ><kbd>{isMac ? '⌘' : 'Ctrl'}+S</kbd> <span>{$t('editor.to_save')}</span></span
+              >
+              <span class="shortcut-dot">•</span>
+              <span class="shortcut-item"
+                ><kbd>{isMac ? '⌘' : 'Ctrl'}+F</kbd>
+                <span>{$t('editor.shortcut_search')}</span></span
+              >
+              <span class="shortcut-dot">•</span>
+              <span class="shortcut-item"
+                ><kbd>{isMac ? '⌘' : 'Ctrl'}+Z</kbd>
+                <span>{$t('editor.shortcut_undo')}</span></span
+              >
+            </div>
+          {/if}
         </div>
-      {/await}
-    {/key}
-  {/if}
+      </div>
+    {:else}
+      <div class="editor-main-card">
+        <!-- Level 2 Subhead Bar (EDIT-01) -->
+        <EditorToolbar
+          {showSidebar}
+          {tabs}
+          {activeTabPath}
+          {selectedFile}
+          {hasDraft}
+          {fileType}
+          activeKernel={$activeKernelName}
+          onToggleSidebar={() => (showSidebar = !showSidebar)}
+          onSwitchTab={switchTab}
+          onPinTab={pinTab}
+          onCloseTab={closeTab}
+          onRestoreDraft={restoreDraft}
+          onDiscardDraft={discardDraft}
+          onDownloadFile={downloadFile}
+          onRenameFile={() => {
+            menuTarget = '';
+            showRenameModal = true;
+            renameTarget = selectedFile.split('/').pop() || '';
+          }}
+          onOpenGenerator={() => (showGeneratorModal = true)}
+          onApplyQuickFixes={applyQuickFixes}
+          onDeleteFile={deleteFile}
+          managedReadOnly={isReadOnly}
+        />
+
+        <EditorBreadcrumbs {breadcrumbs} onJump={jumpToSegment} />
+
+        <PreflightWarnings
+          warnings={saveWarnings}
+          onDismiss={() => {
+            saveWarnings = [];
+          }}
+        />
+
+        {#if managedFile && isManagedReadOnly && !managedFile.state?.startsWith('drift_')}
+          <ManagedFileBanner file={managedFile} />
+        {/if}
+
+        {#if aboveCode && (activeTabPath || selectedFile)}
+          {@render aboveCode(activeTabPath || selectedFile, activeFileInfo)}
+        {/if}
+
+        <!-- CodeMirror editor component -->
+        <div style="flex: 1; min-height: 0; position:relative; background: var(--cm-bg);">
+          {#if loading}
+            <div
+              style="display:grid;place-items:center;height:100%;position:absolute;inset:0;background:color-mix(in srgb, var(--bg-card) 75%, transparent);z-index:10;"
+            >
+              <div class="spinner" style="--spinner-size: 24px;"></div>
+            </div>
+          {/if}
+          {#each tabs as tab (tab.path)}
+            {#if tab.path === activeTabPath}
+              <CodeMirrorEditor
+                content={tab.currentContent}
+                path={tab.path}
+                {expertMode}
+                {schemaEnabled}
+                readOnly={isReadOnly}
+                bind:view={editorView}
+                onContentChange={(newContent) => {
+                  tab.currentContent = newContent;
+                  tab.isDirty = newContent !== tab.originalContent;
+                  isDirty = tab.isDirty;
+                  saveError = false;
+
+                  if (tab.isPreview) {
+                    tab.isPreview = false;
+                    tabs = [...tabs];
+                  }
+
+                  if (isDirty) {
+                    localStorage.setItem(`editor.draft.${tab.path}`, newContent);
+                  } else {
+                    localStorage.removeItem(`editor.draft.${tab.path}`);
+                  }
+                }}
+                onCursorChange={(line, col, pos, state) => {
+                  cursorLine = line;
+                  cursorCol = col;
+                  const isYaml = tab.path.endsWith('.yaml') || tab.path.endsWith('.yml');
+                  breadcrumbs = buildPathAtCursor(state, pos, isYaml);
+                }}
+                onSave={checkBeforeSave}
+              />
+            {/if}
+          {/each}
+        </div>
+
+        <!-- Status Bar (EDIT-05, EDIT-06) -->
+        <EditorStatusBar
+          {cursorLine}
+          {cursorCol}
+          {isMac}
+          {schemaEnabled}
+          {expertMode}
+          {applyLoading}
+          {backgroundStatusText}
+          backupCount={visibleBackups.length}
+          backupsStatus={statusBarBackups}
+          drawerOpen={drawerVisible}
+          hasApplies={Boolean(managedFile?.owner === 'panel' && appliesFor)}
+          onToggleSchema={toggleSchema}
+          onToggleExpertMode={toggleExpertMode}
+          onToggleDrawer={() => {
+            drawerPath = selectedFile;
+            drawerOpen = !drawerVisible;
+          }}
+        />
+
+        <!-- Bottom Drawer -->
+        {#if drawerVisible}
+          {#snippet panelAppliesSnippet()}
+            {#if appliesFor && selectedFile}
+              {@render appliesFor(selectedFile, editorView ? editorView.state.doc.toString() : '')}
+            {/if}
+          {/snippet}
+          <BackupSidebar
+            backups={visibleBackups}
+            status={visibleBackupsStatus}
+            onRetry={retryBackups}
+            {selectedBackup}
+            {diffGroups}
+            {backupLoading}
+            restoreDisabled={isReadOnly}
+            panelApplies={managedFile?.owner === 'panel' && appliesFor
+              ? panelAppliesSnippet
+              : undefined}
+            onSelectBackup={selectBackup}
+            onRestoreBackup={restoreBackup}
+            onclose={() => (drawerOpen = false)}
+          />
+        {/if}
+      </div>
+    {/if}
+  </div>
 </div>
 
 <!-- CRUD Modals -->
@@ -2051,15 +1791,6 @@
   }}
 />
 
-<!-- Templates Modal -->
-<TemplatesModal
-  open={showTemplatesModal}
-  {selectedFile}
-  hasEditorView={!!editorView}
-  onApplyTemplate={applyTemplate}
-  onclose={() => (showTemplatesModal = false)}
-/>
-
 <OutboundGeneratorModal
   open={showGeneratorModal}
   onGenerate={handleGeneratedOutbound}
@@ -2076,21 +1807,7 @@
 />
 
 <style>
-  .editor-page-container {
-    display: flex;
-    flex-direction: column;
-    height: calc(100vh - 76px);
-    min-height: 500px;
-    gap: 0;
-  }
-
-  .editor-page-container.constructor-mode {
-    height: auto;
-    min-height: 100%;
-    padding-bottom: 60px;
-  }
-
-  /* Встроенный Редактор (вкладка «Файлы»): страница прокручивается обычным образом,
+  /* Вкладка «Файлы»: страница прокручивается обычным образом,
      список и код прокручиваются внутри области заданной высоты */
   .editor-embedded {
     display: flex;
@@ -2244,10 +1961,6 @@
   }
 
   @media (max-width: 768px) {
-    .editor-page-container {
-      height: calc(100dvh - 76px);
-    }
-
     .editor-embedded .editor-workspace {
       height: max(420px, 70dvh);
       min-height: max(420px, 70dvh);
@@ -2255,10 +1968,6 @@
 
     .editor-empty-card {
       padding: var(--spacing-6) var(--spacing-4);
-    }
-
-    .editor-page-container :global(.page-header-subtitle) {
-      display: none;
     }
 
     .editor-empty-shortcuts {

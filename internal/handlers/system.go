@@ -167,13 +167,6 @@ func (a *API) SystemStats(w http.ResponseWriter, r *http.Request) {
 		stats.Disk.Total = stat.Blocks * uint64(stat.Bsize)
 		stats.Disk.Free = stat.Bavail * uint64(stat.Bsize)
 		stats.Disk.Used = stats.Disk.Total - stats.Disk.Free
-
-		// Emergency trigger if free disk space is less than 10 MB
-		if stats.Disk.Free < 10*1024*1024 {
-			if a.subscriptionSvc != nil {
-				go a.subscriptionSvc.CleanOrphanedSubscriptions()
-			}
-		}
 	}
 
 	stats.SSLCertDays = a.getSSLCertDays()

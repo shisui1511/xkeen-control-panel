@@ -125,9 +125,6 @@ func (s *Service) guardLoop(ctx context.Context) {
 // guardPaused — сторож на паузе (Pitfall 7). Операция над ядрами отмечается
 // временем: пауза длится ещё guardBusyGrace после неё.
 func (s *Service) guardPaused(g *guardState) bool {
-	if !s.d.Layer.Enabled() {
-		return true
-	}
 	if s.d.XKeen.InRestart() {
 		// Окно штатного перезапуска (Restart, SwitchKernel и перезапуск сторожем).
 		return true

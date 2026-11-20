@@ -32,7 +32,6 @@ type FileOwnerInfo struct {
 // файл списка незачем. Только читает снимок состояния и диск, замок применения не
 // берёт.
 type FileOwnerIndex struct {
-	enabled bool
 	// managed и released — развёрнутые пути файлов манифеста по статусу.
 	managed  map[string]bool
 	released map[string]bool
@@ -49,18 +48,13 @@ type FileOwnerIndex struct {
 	mihomoTake   []string
 }
 
-// FileOwnerIndex строит индекс владельцев. Выключенный слой — пустой индекс:
-// FileOwner у него возвращает пустого владельца.
+// FileOwnerIndex строит индекс владельцев.
 func (l *Layer) FileOwnerIndex() *FileOwnerIndex {
 	idx := &FileOwnerIndex{
 		managed:  map[string]bool{},
 		released: map[string]bool{},
 		xrayTake: map[string][]string{},
 	}
-	if !l.Enabled() {
-		return idx
-	}
-	idx.enabled = true
 	st := l.store.Snapshot()
 	installed := l.installed()
 	for _, e := range manifestOfScope(st.Manifest, installed, "") {
@@ -110,9 +104,9 @@ func (l *Layer) FileOwnerIndex() *FileOwnerIndex {
 // FileOwner определяет владельца файла по абсолютному пути (D-05) и секции,
 // которые панель может взять из него (D-03). Путь сравнивается после
 // разворачивания симлинков: config.yaml, указывающий на профиль панели, — файл
-// панели. Выключенный слой — пустой владелец.
+// панели. Нет индекса или путь не абсолютный — пустой владелец.
 func (idx *FileOwnerIndex) FileOwner(path string) FileOwnerInfo {
-	if idx == nil || !idx.enabled || !filepath.IsAbs(path) {
+	if idx == nil || !filepath.IsAbs(path) {
 		return FileOwnerInfo{}
 	}
 	resolved := resolveFullSymlinks(path)

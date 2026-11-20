@@ -170,7 +170,6 @@ func rtRemoveNewEnv(t *testing.T) *rtRemoveEnv {
 	layer, err := configlayer.New(configlayer.Options{
 		DataDir: e.dir,
 		Roots:   configlayer.Roots{Xray: e.xrayDir, Mihomo: e.mihomoDir},
-		Enabled: func() bool { return true },
 		Binaries: func() configlayer.Binaries {
 			return configlayer.Binaries{Xray: rtRemoveXrayBin, Mihomo: rtRemoveMihomoBin}
 		},

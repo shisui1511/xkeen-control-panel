@@ -92,7 +92,7 @@ func (s *Service) openWindowState(kind string, snap txnSnapshot, deadline time.T
 	if kind == kindEnable {
 		// Снимок включения переходит в окно целиком; override до включения
 		// остаётся для выключения после «Оставить», proxy_dns до включения — для
-		// выключения флага слоя (D-36).
+		// возврата строки, когда перехват станет нежелаемым (D-36).
 		s.st.Snapshot = nil
 		s.st.OverrideBefore = snap.OverrideBefore
 		s.st.ProxyDNSBefore = snap.ProxyDNSBefore
@@ -471,10 +471,9 @@ func (s *Service) rollbackWindow(ctx context.Context, w windowState, reason stri
 			p.Snapshot = nil
 			if w.Kind == kindEnable && len(errs) == 0 && reason != reasonTxnInterrupted {
 				// Строка proxy_dns возвращена к значению до включения: запись окна о нём
-				// устарела, и выключение флага слоя не должно возвращать строку, которую
-				// пользователь потом выключил сам (flagOffPlan, lineOnly). Откат
-				// прерванного прохода запись не трогает: при возврате перехвата она
-				// относится к первому включению и нужна выключению флага.
+				// устарела, и следующий возврат не должен возвращать строку, которую
+				// пользователь потом выключил сам. Откат прерванного прохода запись не
+				// трогает: при возврате перехвата она относится к первому включению.
 				p.ProxyDNSBefore = false
 				p.ProxyRestartPending = false
 			}

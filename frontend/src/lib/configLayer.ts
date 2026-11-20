@@ -41,16 +41,32 @@ export interface LayerKernel {
 export type StepId = 'build' | 'validate_xray' | 'validate_mihomo' | 'write' | 'restart';
 export type StepState = 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'deferred';
 
-export type LayerTrigger =
-  | 'user'
-  | 'rebuild'
-  | 'kernel_installed'
-  | 'flag_on'
-  | 'flag_off'
-  | 'source_refresh'
-  | 'access_log'
-  | 'dns_takeover'
-  | 'dns_restore';
+const LAYER_TRIGGERS = [
+  'user',
+  'rebuild',
+  'kernel_installed',
+  'startup',
+  'source_refresh',
+  'select',
+  'dat_refresh',
+  'routing_reclaim',
+  'access_log',
+  'dns_takeover',
+  'dns_restore'
+] as const;
+
+export type LayerTrigger = (typeof LAYER_TRIGGERS)[number];
+
+/**
+ * Причина запуска из снимка или события. В журналах прошлых версий могут лежать снятые
+ * причины (например, включение и выключение прежнего флага слоя): незнакомая строка не
+ * ошибка, а «причина не указана».
+ */
+function asTrigger(raw: unknown): LayerTrigger | undefined {
+  return typeof raw === 'string' && (LAYER_TRIGGERS as readonly string[]).includes(raw)
+    ? (raw as LayerTrigger)
+    : undefined;
+}
 
 export interface LayerStep {
   id: StepId;
@@ -171,8 +187,18 @@ export interface LayerCoresSnapshot {
   restart: LayerRestartNote[];
 }
 
+/**
+ * Несекретная сводка окна чистого старта (фаза 151, D-06): ждёт ли окно закрытия, путь
+ * архива старых данных и доступен ли список адресов. Сами адреса в снимок не входят: их
+ * отдаёт только GET /api/configlayer/legacy (lib/configLegacy.ts).
+ */
+export interface LegacySummary {
+  pending: boolean;
+  archive_path?: string;
+  urls_available: boolean;
+}
+
 export interface LayerSnapshot {
-  enabled: boolean;
   dev_mode: boolean;
   draft_revision: number;
   draft_changes: number;
@@ -190,6 +216,8 @@ export interface LayerSnapshot {
   cores: LayerCoresSnapshot;
   /** Кто держит общий замок (менеджер geodata); пусто — замок свободен или его держит «Применить». */
   busy_holder?: string;
+  /** Окно чистого старта: только признак и путь архива, без адресов подписок. */
+  legacy: LegacySummary;
 }
 
 export interface LayerDiff {
@@ -231,7 +259,12 @@ const NOTICE_IDS = [
   'schema_reset',
   'recovered_from_journal',
   'journal_recovery_failed',
-  'geodata_cron_two'
+  'geodata_cron_two',
+  // Следы старой панели в файлах ядер и сбой их однократной уборки на старте (фаза 151, D-04)
+  'legacy_leftovers',
+  'legacy_cleanup_failed',
+  // Сбой архивации прежних данных при запуске: данные остались на месте нетронутыми
+  'legacy_archive_failed'
 ];
 const NOTICE_PREFIXES = [
   'build_failed',
@@ -257,10 +290,10 @@ export function isKnownNoticeId(id: string): boolean {
 }
 
 /**
- * Классы причины отказа фонового прохода выбора (params.reason уведомления выбора): disabled —
- * слой «Конфигурация» выключен.
+ * Классы причины отказа фонового прохода выбора (params.reason уведомления выбора). Снятый
+ * класс прежних версий читается как незнакомый и показывается как 'failed'.
  */
-const SELECT_BG_REASONS = ['rejected', 'busy', 'stopped', 'failed', 'disabled'] as const;
+const SELECT_BG_REASONS = ['rejected', 'busy', 'stopped', 'failed'] as const;
 export type SelectBgReason = (typeof SELECT_BG_REASONS)[number];
 
 /** Класс причины из параметров уведомления: незнакомый или пустой — 'failed'. */
@@ -311,7 +344,8 @@ function normalizeApply(raw: unknown): LayerApply {
     running: a.running === true,
     steps: asArray<LayerStep>(a.steps)
   };
-  if (typeof a.trigger === 'string') apply.trigger = a.trigger as LayerApply['trigger'];
+  const trigger = asTrigger(a.trigger);
+  if (trigger) apply.trigger = trigger;
   if (Array.isArray(a.restart)) apply.restart = a.restart as LayerRestart[];
   if (isObject(a.result)) apply.result = a.result as unknown as LayerResult;
   return apply;
@@ -369,10 +403,22 @@ function normalizeCores(raw: unknown): LayerCoresSnapshot {
   return { xray, restart };
 }
 
+/** Сводка окна чистого старта: незнакомые поля отбрасываются, адреса сюда не попадают. */
+export function normalizeLegacySummary(raw: unknown): LegacySummary {
+  const l = isObject(raw) ? raw : {};
+  const out: LegacySummary = {
+    pending: l.pending === true,
+    urls_available: l.urls_available === true
+  };
+  if (typeof l.archive_path === 'string' && l.archive_path !== '') {
+    out.archive_path = l.archive_path;
+  }
+  return out;
+}
+
 /** Приводит данные snapshot к полной форме: null и пропущенные поля становятся пустыми. */
 function normalizeSnapshot(raw: Record<string, unknown>): LayerSnapshot {
   return {
-    enabled: raw.enabled === true,
     dev_mode: raw.dev_mode === true,
     draft_revision: typeof raw.draft_revision === 'number' ? raw.draft_revision : 0,
     draft_changes: typeof raw.draft_changes === 'number' ? raw.draft_changes : 0,
@@ -385,6 +431,7 @@ function normalizeSnapshot(raw: Record<string, unknown>): LayerSnapshot {
     checks: asArray<BuildIssue>(raw.checks),
     routing: normalizeRouting(raw.routing),
     cores: normalizeCores(raw.cores),
+    legacy: normalizeLegacySummary(raw.legacy),
     ...(typeof raw.busy_holder === 'string' && raw.busy_holder !== ''
       ? { busy_holder: raw.busy_holder }
       : {})
@@ -438,7 +485,7 @@ export function reduceLayerEvent(
         ? base.steps.map((s) => (s.id === step.id ? { ...s, ...step } : s))
         : [...base.steps, step];
       // Фоновое обновление источника (source_refresh) несёт trigger в данных шага
-      const trigger = step.trigger ?? base.trigger;
+      const trigger = asTrigger(step.trigger) ?? base.trigger;
       return { ...state, apply: { ...base, running: true, trigger, steps } };
     }
     case 'apply_done': {
@@ -466,16 +513,18 @@ const EVENT_NAMES = [
   'geodata',
   'dns',
   'wizard',
-  'proxies'
+  'proxies',
+  'legacy'
 ] as const;
 const RETRY_MIN_MS = 3000;
 const RETRY_MAX_MS = 30000;
 
-// Обработчики событий sources, routing, geodata, dns, wizard, proxies и draft: представления
+// Обработчики событий sources, routing, geodata, dns, wizard, proxies, legacy и draft: представления
 // перечитывают клиенты источников, маршрутизации, менеджера geodata, перехвата DNS и мастера
 // первого запуска (обработчики регистрируются при загрузке модулей клиентов; configLayer их
 // не импортирует — цикла нет). У каждого имени свой набор.
-type HandlerEvent = 'sources' | 'routing' | 'geodata' | 'dns' | 'wizard' | 'draft' | 'proxies';
+type HandlerEvent =
+  'sources' | 'routing' | 'geodata' | 'dns' | 'wizard' | 'draft' | 'proxies' | 'legacy';
 const layerHandlers: Record<HandlerEvent, Set<(data?: unknown) => void>> = {
   sources: new Set(),
   routing: new Set(),
@@ -483,11 +532,13 @@ const layerHandlers: Record<HandlerEvent, Set<(data?: unknown) => void>> = {
   dns: new Set(),
   wizard: new Set(),
   draft: new Set(),
-  proxies: new Set()
+  proxies: new Set(),
+  legacy: new Set()
 };
 
 /**
- * Подписка на событие SSE `sources`, `routing`, `geodata`, `dns`, `wizard`, `proxies` или `draft`;
+ * Подписка на событие SSE `sources`, `routing`, `geodata`, `dns`, `wizard`, `proxies`, `legacy`
+ * или `draft`;
  * возвращает функцию отписки. Данные proxies передаются обработчику без изменения снимка.
  * При каждом открытии потока — первом и после обрыва — подписчики geodata, dns, wizard и
  * proxies получают вызов без события: до подписки их события могли пройти мимо.
@@ -573,6 +624,13 @@ function applyEvent(name: string, data: unknown): void {
     // Событие несёт только счётчик службы мастера: снимок слоя не меняется, статус шагов
     // перечитывает клиент мастера по подписке
     notifyHandlers('wizard');
+    return;
+  }
+  if (name === 'legacy') {
+    // Окно чистого старта закрыто (в этой или другой вкладке): событие несёт только
+    // счётчик. Признак pending перечитывается снимком, открытое окно — своим клиентом
+    refreshSnapshotSoon();
+    notifyHandlers('legacy');
     return;
   }
   eventSeq++;

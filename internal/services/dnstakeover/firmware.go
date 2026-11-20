@@ -555,7 +555,7 @@ func ProxyDNS() (bool, error) {
 	return parseProxyDNS(string(data)), nil
 }
 
-// parseProxyDNS — разбор строки proxy_dns=… как в IsDNSProxyingEnabled.
+// parseProxyDNS — разбор строки proxy_dns=… файла настроек XKeen.
 func parseProxyDNS(content string) bool {
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)

@@ -2,12 +2,9 @@ package services
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -82,7 +79,8 @@ type XrayAccessReport struct {
 	Parsed  int                 `json:"parsed"`
 }
 
-// XrayAccessLogService reads and toggles the Xray access log.
+// XrayAccessLogService reads the Xray access log. The log is switched on and off
+// by the section "log" of the configuration layer (cores.Service), not here.
 type XrayAccessLogService struct {
 	configDir string
 	// accessPath is where the log goes when it is switched on.
@@ -96,36 +94,6 @@ type XrayAccessLogService struct {
 
 func NewXrayAccessLogService(configDir string) *XrayAccessLogService {
 	return &XrayAccessLogService{configDir: configDir, accessPath: DefaultXrayAccessLog}
-}
-
-// findLogConfig returns the config file holding the top-level "log" section
-// and its parsed access value.
-func (s *XrayAccessLogService) findLogConfig() (string, string, bool, error) {
-	files, _ := filepath.Glob(filepath.Join(s.configDir, "*.json"))
-	sort.Strings(files)
-	for _, f := range files {
-		data, err := os.ReadFile(f)
-		if err != nil {
-			continue
-		}
-		var root map[string]json.RawMessage
-		if json.Unmarshal([]byte(StripJSONComments(string(data))), &root) != nil {
-			continue
-		}
-		raw, ok := root["log"]
-		if !ok {
-			continue
-		}
-		var log struct {
-			Access *string `json:"access"`
-		}
-		_ = json.Unmarshal(raw, &log)
-		if log.Access == nil {
-			return f, "", false, nil
-		}
-		return f, *log.Access, true, nil
-	}
-	return "", "", false, ErrXrayLogConfigNotFound
 }
 
 // ReadablePath reports whether path may be opened for reading: it passes the
@@ -157,63 +125,6 @@ func (s *XrayAccessLogService) StatusOf(configFile, access string) *XrayAccessLo
 		}
 	}
 	return st
-}
-
-// Status reports where the access log goes and whether it is enabled.
-func (s *XrayAccessLogService) Status() (*XrayAccessLogStatus, error) {
-	file, access, _, err := s.findLogConfig()
-	if err != nil {
-		return nil, err
-	}
-	return s.StatusOf(file, access), nil
-}
-
-var accessValueRe = regexp.MustCompile(`("access"\s*:\s*)"[^"]*"`)
-var logSectionRe = regexp.MustCompile(`("log"\s*:\s*\{)`)
-
-// SetEnabled switches the access log on (to s.accessPath) or off
-// ("none") by editing only the "access" value, so comments and the rest of
-// the file are kept. Xray must be restarted for the change to apply.
-func (s *XrayAccessLogService) SetEnabled(enabled bool) (*XrayAccessLogStatus, error) {
-	file, _, hasAccess, err := s.findLogConfig()
-	if err != nil {
-		return nil, err
-	}
-	data, err := os.ReadFile(file)
-	if err != nil {
-		return nil, err
-	}
-	value := "none"
-	if enabled {
-		value = s.accessPath
-		if err := os.MkdirAll(filepath.Dir(value), 0o755); err != nil {
-			return nil, err
-		}
-	}
-	quoted, _ := json.Marshal(value)
-	content := string(data)
-	if hasAccess {
-		content = accessValueRe.ReplaceAllString(content, "${1}"+strings.ReplaceAll(string(quoted), "$", "$$"))
-	} else {
-		loc := logSectionRe.FindStringIndex(content)
-		if loc == nil {
-			return nil, ErrXrayLogConfigNotFound
-		}
-		// The comma goes only before a non-empty body: `"log": {}` must not
-		// become `{"access": "...",}`. Comments after the brace are skipped.
-		sep := ","
-		if rest := strings.TrimSpace(StripJSONComments(content[loc[1]:])); strings.HasPrefix(rest, "}") {
-			sep = ""
-		}
-		content = content[:loc[1]] + "\n    \"access\": " + string(quoted) + sep + content[loc[1]:]
-	}
-	if !json.Valid([]byte(StripJSONComments(content))) {
-		return nil, fmt.Errorf("edited %s is not valid JSON", filepath.Base(file))
-	}
-	if err := utils.AtomicReplaceFile(file, []byte(content)); err != nil {
-		return nil, err
-	}
-	return s.Status()
 }
 
 // Xray access log line, e.g.
@@ -256,16 +167,6 @@ func parseXrayAccessLine(line string) (XrayAccessEntry, bool) {
 	}
 	e.Outbound = strings.TrimSpace(route)
 	return e, true
-}
-
-// Report parses the tail of the access log, applies the filter and builds
-// a per-device summary. Entries are returned newest first.
-func (s *XrayAccessLogService) Report(f XrayAccessFilter) (*XrayAccessReport, error) {
-	st, err := s.Status()
-	if err != nil {
-		return nil, err
-	}
-	return s.ReportOf(st, f)
 }
 
 // ReportOf parses the access log for an already built status. A disabled log

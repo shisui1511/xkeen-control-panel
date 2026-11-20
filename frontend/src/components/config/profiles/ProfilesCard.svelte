@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { t } from '../../../i18n';
   import { editorOpenRequest, isConflict, showConfirm, showToast } from '../../../stores';
   import Button from '../../Button.svelte';
@@ -75,6 +76,19 @@
     loadFailed = false;
     void load();
   }
+
+  // Переход из подсказки «нет сокета» (`#/config/cores?focus=profiles`): карточка в начале
+  // экрана, фокус на её заголовке
+  const focusOnRequest: Attachment<HTMLElement> = (node) => {
+    if (!window.location.hash.includes('focus=profiles')) return;
+    // Заголовок не должен уйти под липкую полосу черновика: запас — её высота, баннер DNS
+    // (переменная следит за ним сама) и шаг. Шапку телефона даёт scroll-padding страницы
+    const barHeight =
+      document.querySelector<HTMLElement>('[data-testid="config-draftbar"]')?.offsetHeight ?? 0;
+    node.style.scrollMarginTop = `calc(${barHeight}px + var(--dns-banner-h, 0px) + var(--spacing-6))`;
+    node.scrollIntoView({ block: 'start' });
+    node.focus({ preventScroll: true });
+  };
 
   onMount(() => {
     void load();
@@ -255,7 +269,9 @@
   <div class="pc-head">
     <div class="pc-titles">
       <div class="pc-title-row">
-        <h3 class="pc-title" id={titleId}>{$t('cfg.prof.title')}</h3>
+        <h3 class="pc-title" id={titleId} tabindex="-1" {@attach focusOnRequest}>
+          {$t('cfg.prof.title')}
+        </h3>
         <!-- Создание, переименование, удаление и активация профилей идут мимо черновика (D-14) -->
         <ImmediateMark />
       </div>
@@ -438,6 +454,12 @@
     line-height: 1.2;
     color: var(--fg-primary);
     overflow-wrap: anywhere;
+  }
+
+  /* Фокус сюда ставит переход из подсказки «нет сокета»: кольцо проекта, не браузера */
+  .pc-title:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   .pc-caption {

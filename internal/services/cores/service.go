@@ -323,18 +323,10 @@ func sectionDirty(st configlayer.StateView, name string) bool {
 }
 
 // xrayBlock возвращает причину, по которой секцию Xray нельзя взять, и файл-причину.
-func xrayBlock(id string, sc configlayer.XraySectionScan, files []configlayer.XrayKeyFile, tooOld bool) (code, file string) {
+func xrayBlock(id string, sc configlayer.XraySectionScan, tooOld bool) (code, file string) {
 	if id == "inbounds" && sc.InboundsMixed {
-		legacy := map[string]bool{}
-		for _, f := range files {
-			if f.Legacy {
-				legacy[f.Name] = true
-			}
-		}
-		for _, name := range sc.Mixed {
-			if !legacy[name] {
-				return configlayer.IssueInboundsMixed, name
-			}
+		if len(sc.Mixed) > 0 {
+			return configlayer.IssueInboundsMixed, sc.Mixed[0]
 		}
 		return configlayer.IssueInboundsMixed, ""
 	}
@@ -497,7 +489,7 @@ func (s *Service) viewXray(v *KernelView, st configlayer.StateView) error {
 			sv.Left = sc.Mixed
 			sv.Comments = sc.Comments
 			if !cs.Managed {
-				sv.Blocked, sv.BlockedFile = xrayBlock(spec.ID, sc, files, tooOld)
+				sv.Blocked, sv.BlockedFile = xrayBlock(spec.ID, sc, tooOld)
 			}
 		}
 		if len(sv.Left) == 0 {
@@ -806,7 +798,7 @@ func (s *Service) Preview(kernel string, ids []string) (TakePreview, error) {
 	if err != nil {
 		return TakePreview{}, err
 	}
-	scans, files, err := s.d.Layer.ScanXraySections()
+	scans, _, err := s.d.Layer.ScanXraySections()
 	if err != nil {
 		return TakePreview{}, err
 	}
@@ -837,7 +829,7 @@ func (s *Service) Preview(kernel string, ids []string) (TakePreview, error) {
 				sp.Comments = append(sp.Comments, name)
 			}
 		}
-		sp.Blocked, sp.BlockedFile = xrayBlock(id, sc, files, tooOld)
+		sp.Blocked, sp.BlockedFile = xrayBlock(id, sc, tooOld)
 		out.Sections = append(out.Sections, sp)
 		if id == "inbounds" && len(sc.ForceProxyTags) > 0 {
 			out.ForceProxyTags = slices.Clone(sc.ForceProxyTags)
@@ -862,7 +854,7 @@ func (s *Service) Take(rev int64, kernel string, ids []string, ackComments bool)
 		return configlayer.DraftEvent{}, err
 	}
 	return s.edit(rev, func(st configlayer.StateView) (map[string]json.RawMessage, error) {
-		scans, files, err := s.d.Layer.ScanXraySections()
+		scans, _, err := s.d.Layer.ScanXraySections()
 		if err != nil {
 			return nil, err
 		}
@@ -891,7 +883,7 @@ func (s *Service) Take(rev int64, kernel string, ids []string, ackComments bool)
 				continue
 			}
 			sc := scans[id]
-			if code, file := xrayBlock(id, sc, files, tooOld); code != "" {
+			if code, file := xrayBlock(id, sc, tooOld); code != "" {
 				e := errCode(code, "file", file)
 				if len(list) == 1 {
 					return nil, e

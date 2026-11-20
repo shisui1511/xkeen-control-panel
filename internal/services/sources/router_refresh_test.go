@@ -15,7 +15,6 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -851,66 +850,6 @@ func TestRouterMaskReason(t *testing.T) {
 	}
 	if empty := e.svc.maskReason("  ", "write_failed", cfg, nil); empty != "write_failed" {
 		t.Errorf("пустая причина заменяется кодом: %q", empty)
-	}
-}
-
-// Выключенный флаг: планировщик, установка ядра и стартовые действия не делают ни
-// одного запроса к провайдеру, не запрашивают HWID и не создают каталогов; уже
-// сохранённая применённая подписка тоже не обновляется.
-func TestRouterSchedulerFlagOffZeroRequests(t *testing.T) {
-	var hwid atomic.Int64
-	cap := &rtCapture{}
-	mutate := func(d *Deps) {
-		d.Client = rtObservedClient(cap)
-		d.HWID = func() string { hwid.Add(1); return "A1B2C3D4E5F6" }
-		d.Device = rtDevice
-		d.TickInterval = 5 * time.Millisecond
-	}
-
-	// Флаг выключен с самого начала: каталога слоя нет.
-	fresh := rtNewEnvOpts(t, false, false, false, mutate)
-	fresh.installed = configlayer.InstalledKernels{Xray: true, Mihomo: true}
-	fresh.svc.Start()
-	fresh.clock.Advance(100 * time.Hour)
-	time.Sleep(150 * time.Millisecond)
-	fresh.svc.OnKernelInstalled("mihomo")
-	fresh.svc.Stop()
-	if _, err := os.Stat(filepath.Join(fresh.dir, "config_layer")); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("каталог config_layer создан при выключенном флаге: %v", err)
-	}
-	if len(cap.all()) != 0 || hwid.Load() != 0 {
-		t.Errorf("при выключенном флаге: запросов %d, вызовов HWID %d", len(cap.all()), hwid.Load())
-	}
-
-	// Применённая подписка есть, флаг выключили: тишина.
-	e := rtNewEnvWith(t, false, false, mutate)
-	e.installed = configlayer.InstalledKernels{Xray: true, Mihomo: true}
-	ref := rtPut(t, e, "vless_ws")
-	rtSeedApplied(t, e, "a1b2c3d4", rtDeadURL, Interval{Mode: IntervalProvider}, true,
-		&LiveSource{Kernels: map[string]*KernelLive{kernelXray: rtAppliedRef(e, ref)}})
-	files := func() int {
-		list, _ := os.ReadDir(e.svc.blobs.dir)
-		return len(list)
-	}
-	filesBefore, reqBefore, hwBefore := files(), len(cap.all()), hwid.Load()
-	e.enabled.Store(false)
-	e.svc.Start()
-	e.clock.Advance(100 * time.Hour)
-	for range 20 {
-		e.svc.tick(context.Background())
-	}
-	time.Sleep(100 * time.Millisecond)
-	e.svc.OnKernelInstalled("mihomo")
-	e.svc.OnDriftResolved()
-	e.svc.Stop()
-	if got := len(cap.all()); got != reqBefore {
-		t.Errorf("запросов при выключенном флаге: %d", got-reqBefore)
-	}
-	if hwid.Load() != hwBefore {
-		t.Error("HWID запрошен при выключенном флаге")
-	}
-	if files() != filesBefore {
-		t.Errorf("снимки изменились при выключенном флаге: было %d, стало %d", filesBefore, files())
 	}
 }
 

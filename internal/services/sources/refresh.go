@@ -707,9 +707,6 @@ func (s *Service) retryAt(kl *KernelLive, base time.Time) time.Time {
 // нового запроса к провайдеру (D-27). Нерешённый дрейф оставляет запись
 // отложенной.
 func (s *Service) retryDeferred(ctx context.Context) {
-	if !s.d.Layer.Enabled() {
-		return
-	}
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
 		return
@@ -774,7 +771,7 @@ func (s *Service) retryDeferredOne(ctx context.Context, id string) bool {
 	}
 	sr, err := s.settle(ctx, id, cfg, cands)
 	if err != nil {
-		if !errors.Is(err, context.Canceled) && !errors.Is(err, configlayer.ErrStopped) && !errors.Is(err, configlayer.ErrDisabled) {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, configlayer.ErrStopped) {
 			log.Printf("[sources] отложенная запись источника %s не выполнена: %v", id, err)
 		}
 		return false

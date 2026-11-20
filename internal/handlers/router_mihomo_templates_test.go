@@ -7,7 +7,6 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	xkeencontrolpanel "github.com/shisui1511/xkeen-control-panel"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
@@ -45,26 +45,23 @@ func rtTplRemoveProfiles() {
 	}
 }
 
-// rtTplContents читает содержимое шаблонов каталога панели (файл → текст).
+// rtTplContents читает содержимое шаблонов каталога панели (файл → текст). Отдельного
+// маршрута списка шаблонов у панели нет: каталог встроен в бинарник, и тест собирается
+// из того же дерева, что и развёрнутая панель, поэтому читает тот же встроенный каталог.
 func (e *rtSrc) rtTplContents() map[string]string {
 	e.t.Helper()
-	status, raw, err := e.p.Call(http.MethodGet, "/api/templates/list", nil)
-	if err != nil || status != http.StatusOK {
-		e.t.Fatalf("GET /api/templates/list: %d %v", status, err)
-	}
-	var list []struct {
-		Type     string `json:"type"`
-		Filename string `json:"filename"`
-		Content  string `json:"content"`
-	}
-	if err := json.Unmarshal(raw, &list); err != nil {
-		e.t.Fatalf("каталог шаблонов не разобран: %v", err)
+	templatesFS, err := xkeencontrolpanel.GetTemplatesFS()
+	if err != nil {
+		e.t.Fatalf("встроенный каталог шаблонов: %v", err)
 	}
 	out := map[string]string{}
-	for _, t := range list {
+	for _, t := range services.NewTemplateService(templatesFS, "").List() {
 		if t.Type == "mihomo" {
 			out[t.Filename] = t.Content
 		}
+	}
+	if len(out) == 0 {
+		e.t.Fatal("во встроенном каталоге нет шаблонов Mihomo")
 	}
 	return out
 }
@@ -101,13 +98,13 @@ func rtTplHasKey(content, key string) bool {
 	return regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(key) + `:`).MatchString(content)
 }
 
-// rtTplPrepare включает слой, убирает узел прошлого прогона из «Моих узлов» и
+// rtTplPrepare сбрасывает черновик, убирает узел прошлого прогона из «Моих узлов» и
 // применяет узел из ссылки: файл провайдера xcp-my.yaml оказывается на диске.
 func (e *rtSrc) rtTplPrepare(link string) {
 	e.t.Helper()
-	e.enableLayer()
+	e.freshDraft()
 	// Узел «Моих узлов» из прогона не остаётся в применённом состоянии: уборка идёт
-	// до сброса черновика и возврата флага слоя.
+	// до сброса черновика.
 	// Уборка идёт в обратном порядке: сначала узел, затем сброс слоя, чтобы штатные группы
 	// «Прокси» и «Авто» не остались для следующих сценариев.
 	e.t.Cleanup(e.rtRtPurge)
@@ -377,7 +374,7 @@ func TestRouterProfileCopyPanel(t *testing.T) {
 		t.Skip("Mihomo не установлен на стенде")
 	}
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	rtCpRemove()
 	t.Cleanup(rtCpRemove)
@@ -746,7 +743,7 @@ func TestRouterCoresFill(t *testing.T) {
 	}
 	const file = "smart-antifilter.yaml"
 	e := rtNewSrc(t)
-	e.enableLayer()
+	e.freshDraft()
 	e.rtRstIdle()
 	tpl := e.rtTplContents()[file]
 	if !strings.Contains(tpl, "https://example.com") || !strings.Contains(tpl, "Mijia Cloud") {
