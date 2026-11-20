@@ -1519,7 +1519,7 @@ async function expectNoSocketHint(page: Page, hash: string): Promise<void> {
   const hint = page.getByTestId('mihomo-no-socket');
   await expect(hint, `подсказка на ${hash}`).toBeVisible({ timeout: T.page });
   if (hash === '#/trafficquotas') {
-    await expect(hint).toContainText(localeRe('proxies.rt.no_socket_title'));
+    await expect(hint.locator('strong')).toHaveText(localeRe('proxies.rt.no_socket_title'));
   } else {
     await expect(hint.getByRole('heading')).toHaveText(localeRe('proxies.rt.no_socket_title'));
   }

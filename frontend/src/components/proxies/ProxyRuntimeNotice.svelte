@@ -70,7 +70,7 @@
     </span>
     <div class="prn-body">
       <span class="prn-text">
-        <strong>{$t('proxies.rt.no_socket_title')}.</strong>
+        <strong class="prn-title">{$t('proxies.rt.no_socket_title')}</strong>
         {$t('proxies.rt.no_socket_desc')}
         <a class="prn-link prn-link--plain" href={PROFILES_HASH}>{$t('proxies.rt.no_socket_cta')}</a
         >
@@ -170,6 +170,11 @@
     min-width: 0;
     line-height: 1.5;
     overflow-wrap: anywhere;
+  }
+
+  .prn-title {
+    display: block;
+    font-weight: 600;
   }
 
   .prn-link {
