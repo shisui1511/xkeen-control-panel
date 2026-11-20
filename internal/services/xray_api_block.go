@@ -207,8 +207,9 @@ func DeprovisionXrayAPIBlock(existingContent string) (string, error) {
 	}
 
 	// 1. Remove api inbound
+	// Пустые срезы, а не nil: иначе ключи сериализуются как null.
 	if inbs, ok := root["inbounds"].([]interface{}); ok {
-		var newInbounds []interface{}
+		newInbounds := make([]interface{}, 0, len(inbs))
 		for _, inb := range inbs {
 			if m, ok := inb.(map[string]interface{}); ok {
 				if tag, ok := m["tag"].(string); ok && tag == "api" {
@@ -223,7 +224,7 @@ func DeprovisionXrayAPIBlock(existingContent string) (string, error) {
 	// 2. Remove api routing rule
 	if r, ok := root["routing"].(map[string]interface{}); ok && r != nil {
 		if rs, ok := r["rules"].([]interface{}); ok {
-			var newRules []interface{}
+			newRules := make([]interface{}, 0, len(rs))
 			for _, rule := range rs {
 				if rm, ok := rule.(map[string]interface{}); ok {
 					isAPIRule := false
@@ -247,7 +248,9 @@ func DeprovisionXrayAPIBlock(existingContent string) (string, error) {
 		}
 	}
 
-	// 3. Remove api object
+	// 3. Remove api object.
+	// Удаляется любой объект api, не только с тегом "api": FindXrayAPIFragment считает API включённым по наличию объекта, и
+	// оставленный объект не дал бы выключить мониторинг.
 	delete(root, "api")
 
 	out, err := json.MarshalIndent(root, "", "  ")
