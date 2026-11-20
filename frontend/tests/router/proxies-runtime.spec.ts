@@ -1628,6 +1628,10 @@ test(
         expect(titleTop, 'заголовок «Профили» ниже полосы черновика').toBeGreaterThanOrEqual(
           barBottom
         );
+        expect(
+          titleTop - barBottom,
+          'запас под полосой — шаг, а не лишний экран'
+        ).toBeLessThanOrEqual(40);
         await expect(page.getByTestId(`profile-row-${NOSOCK_TCP}`)).toHaveAttribute(
           'data-active',
           'true',

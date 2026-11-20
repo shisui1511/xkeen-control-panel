@@ -81,11 +81,11 @@
   // экрана, фокус на её заголовке
   const focusOnRequest: Attachment<HTMLElement> = (node) => {
     if (!window.location.hash.includes('focus=profiles')) return;
-    // Заголовок не должен уйти под липкую полосу черновика (она держит и шапку телефона, и
-    // баннер DNS): запас — до её нижней кромки плюс шаг
-    const bar = document.querySelector('[data-testid="config-draftbar"]');
-    const covered = bar ? Math.max(0, bar.getBoundingClientRect().bottom) : 0;
-    node.style.scrollMarginTop = `calc(${covered}px + var(--spacing-6))`;
+    // Заголовок не должен уйти под липкую полосу черновика: запас — её высота, баннер DNS
+    // (переменная следит за ним сама) и шаг. Шапку телефона даёт scroll-padding страницы
+    const barHeight =
+      document.querySelector<HTMLElement>('[data-testid="config-draftbar"]')?.offsetHeight ?? 0;
+    node.style.scrollMarginTop = `calc(${barHeight}px + var(--dns-banner-h, 0px) + var(--spacing-6))`;
     node.scrollIntoView({ block: 'start' });
     node.focus({ preventScroll: true });
   };
