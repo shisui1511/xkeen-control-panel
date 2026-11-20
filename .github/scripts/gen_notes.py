@@ -42,7 +42,6 @@ import os
 import re
 import subprocess
 import sys
-from pathlib import Path
 
 
 def git(*args):
@@ -51,19 +50,6 @@ def git(*args):
 
 
 RELEASE_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)(?:-(beta|rc)\.(\d+))?$")
-
-
-def release_repository():
-    root = Path(__file__).resolve().parents[2]
-    release_repo = (root / "internal/releasefeed/repository").read_text(encoding="utf-8").removesuffix("\n")
-    source_repo = os.environ["GITHUB_REPOSITORY"]
-    if (
-        not release_repo
-        or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9._-]+", release_repo)
-        or release_repo.lower() == source_repo.lower()
-    ):
-        raise SystemExit("Для заметок нужен отдельный источник выпусков")
-    return release_repo
 
 
 def version_key(tag):
@@ -253,11 +239,11 @@ def arch_table(version):
     )
 
 
-def stable_notes(version, prev_tag, release_repo, banner="", stable_tag=""):
+def stable_notes(version, prev_tag, banner="", stable_tag=""):
     """prev_tag — база списка изменений; stable_tag (только у пре-релиза) — последний stable
     для второй ссылки «все изменения», если база списка — другой пре-релиз."""
-    source_repo = os.environ["GITHUB_REPOSITORY"]
-    repo_url = f"https://github.com/{source_repo}"
+    repo = os.environ["GITHUB_REPOSITORY"]
+    repo_url = f"https://github.com/{repo}"
 
     compare_url = ""
     if prev_tag and prev_tag != version:
@@ -273,7 +259,7 @@ def stable_notes(version, prev_tag, release_repo, banner="", stable_tag=""):
             compare_line = f"**[Все изменения: {prev_tag} → {version}]({compare_url})**"
     else:
         range_spec = "HEAD~30..HEAD"
-        compare_line = f"**[История релизов](https://github.com/{release_repo}/releases)**"
+        compare_line = f"**[История релизов]({repo_url}/releases)**"
 
     feats, fixes, others = parse_commits(range_spec)
     changelog = build_changelog(feats, fixes, others, compare_url)
@@ -291,24 +277,18 @@ def stable_notes(version, prev_tag, release_repo, banner="", stable_tag=""):
 
 ## 📥 Установка и обновление
 
-**Переход со старого слоя.** Прежняя конфигурация несовместима с новым слоем.
-Сохраните URL подписок и установите панель заново вручную из
-[ассетов этого выпуска](https://github.com/{release_repo}/releases/tag/{version}).
-При первом запуске панель сложит старые данные в архив `/opt/etc/xcp/legacy/`.
-После установки добавьте подписки в разделе «Конфигурация → Узлы».
-
 {arch_table(version)}
 
 **Быстрая установка / обновление:**
 ```sh
-curl -fLs https://raw.githubusercontent.com/{source_repo}/{version}/scripts/setup.sh | sh
+curl -Ls https://raw.githubusercontent.com/{repo}/main/scripts/setup.sh | sh
 ```
 
 **Ручная установка с проверкой SHA256 (пример для ARM64):**
 ```sh
 cd /tmp
-curl -fLO "https://github.com/{release_repo}/releases/download/{version}/xcp_{version}_arm64"
-curl -fLO "https://github.com/{release_repo}/releases/download/{version}/xcp_{version}_arm64.sha256"
+curl -fLO "https://github.com/{repo}/releases/download/{version}/xcp_{version}_arm64"
+curl -fLO "https://github.com/{repo}/releases/download/{version}/xcp_{version}_arm64.sha256"
 sha256sum -c xcp_{version}_arm64.sha256 && \\
   mv xcp_{version}_arm64 /opt/sbin/xcp && chmod +x /opt/sbin/xcp && \\
   /opt/etc/init.d/S99xcp restart
@@ -320,7 +300,7 @@ sha256sum -c xcp_{version}_arm64.sha256 && \\
 """
 
 
-def beta_notes(version, prev_tag, release_repo, stable_tag=""):
+def beta_notes(version, prev_tag, stable_tag=""):
     repo_url = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}"
     base = version.split("-")[0]
     soak = os.environ.get("SOAK_HOURS", "24")
@@ -346,7 +326,7 @@ def beta_notes(version, prev_tag, release_repo, stable_tag=""):
         f"> Нашли проблему — [сообщите о регрессии]"
         f"({repo_url}/issues/new?template=regression.yml).\n"
     )
-    return stable_notes(version, prev_tag, release_repo, banner, stable_tag)
+    return stable_notes(version, prev_tag, banner, stable_tag)
 
 
 # Блок xcp-release первой строки тела: формат пишет auto_release.sh (marker и finalize)
@@ -365,16 +345,15 @@ def release_marker():
 
 def notes_for(version, mode):
     """(заметки без блока xcp-release, база списка изменений)."""
-    release_repo = release_repository()
     stable_tags = get_stable_tags()
     base_version = version.split("-")[0]
     last_stable = next((t for t in reversed(stable_tags)
                         if t != base_version and version_key(t) < version_key(version)), "")
     if mode == "beta":
         prev_tag = previous_release(version) or last_stable
-        return beta_notes(version, prev_tag, release_repo, last_stable), prev_tag
+        return beta_notes(version, prev_tag, last_stable), prev_tag
     # For stable: prev is the stable tag before current version
-    return stable_notes(version, last_stable, release_repo), last_stable
+    return stable_notes(version, last_stable), last_stable
 
 
 def main():

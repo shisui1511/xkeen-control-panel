@@ -60,7 +60,8 @@
 #                обходит; в аннотацию тега stable пишется строка "xcp-urgent: 1"
 #   RELEASE_STOP стоп выпуска: непустое значение, кроме 0 и false (переменная репозитория);
 #                на ПК, если переменная окружения не задана, читается из репозитория
-#   RELEASE_TOKEN токен отдельного источника выпусков с правом записи содержимого и workflow
+#   RELEASE_TOKEN необязательный токен для тега stable на коммите, где .github/workflows
+#                отличается от main (токен Actions такой тег не поставит)
 #   DRY_RUN=1    run только печатает решения
 #   RUN_SHA      коммит, чей CI завершился (workflow_run); пусто — берётся main
 #   NOW          время решения, unix
@@ -92,97 +93,9 @@ VIVA_INSTALL=stand/mipsle-install
 LOG_FD=1
 
 ROOT=$(git rev-parse --show-toplevel)
-RELEASE_CONTRACT=internal/releasefeed/repository
-REPO_RE='^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9._-]+$'
-RELEASE_LIMIT=1000
-
-init_release_source() {
-  local module_repo
-  module_repo=$(sed -n 's#^module github\.com/##p' "$ROOT/go.mod")
-  SOURCE_REPO="${GITHUB_REPOSITORY:-$module_repo}"
-  # Контракт допускает одну строку с завершающим переводом или без него.
-  RELEASE_REPO=$(cat "$ROOT/internal/releasefeed/repository") || return 1
-  if [ -z "$RELEASE_REPO" ] || ! [[ "$RELEASE_REPO" =~ $REPO_RE && "$SOURCE_REPO" =~ $REPO_RE ]] ||
-    [[ "${RELEASE_REPO,,}" = "${SOURCE_REPO,,}" || "${RELEASE_REPO,,}" = "${module_repo,,}" ]] ||
-    { ! cmp -s "$ROOT/$RELEASE_CONTRACT" <(printf '%s\n' "$RELEASE_REPO") &&
-      ! cmp -s "$ROOT/$RELEASE_CONTRACT" <(printf '%s' "$RELEASE_REPO"); }; then
-    logerr "нужен отдельный источник выпусков в $RELEASE_CONTRACT"
-    return 1
-  fi
-  if [ -z "${RELEASE_TOKEN:-}" ]; then
-    logerr "не настроен RELEASE_TOKEN для источника выпусков"
-    return 1
-  fi
-  RELEASE_URL="https://github.com/$RELEASE_REPO.git"
-}
-
-# REST получает полный путь, остальные команды gh — явный --repo.
-source_gh() {
-  if [ "$1" = api ]; then
-    gh "$@"
-  else
-    gh "$@" --repo "$SOURCE_REPO"
-  fi
-}
-
-release_git() {
-  GH_TOKEN="$RELEASE_TOKEN" GIT_TERMINAL_PROMPT=0 git \
-    -c http.https://github.com/.extraheader= -c credential.helper= \
-    -c 'credential.helper=!gh auth git-credential' "$@"
-}
-
-require_release_access() {
-  local writable_repo
-  writable_repo=$(GH_TOKEN="$RELEASE_TOKEN" gh api "repos/$RELEASE_REPO" \
-    --jq 'select(.visibility == "public" and .permissions.push == true and (.archived | not)) | .full_name') || return 1
-  if [[ "${writable_repo,,}" != "${RELEASE_REPO,,}" ]]; then
-    logerr "источник выпусков должен быть публичным и доступным на запись"
-    return 1
-  fi
-}
-
-release_commit() {
-  local contract
-  contract=$(git show "$1:$RELEASE_CONTRACT" 2>/dev/null) || return 1
-  [ "$contract" = "$RELEASE_REPO" ]
-}
-
-require_source_tag() {
-  local tag="$1" expected="$2" sha
-  [[ "$tag" =~ $STABLE_RE || "$tag" =~ $PRE_RE ]] || return 1
-  git fetch --no-tags origin "refs/tags/$tag:refs/tags/$tag" || return 1
-  sha=$(git rev-parse --verify "refs/tags/$tag^{commit}") || return 1
-  if [ "$sha" != "$expected" ] || ! release_commit "$sha"; then
-    logerr "$tag: исходный тег не соответствует сборке или источнику её выпусков"
-    return 1
-  fi
-}
-
-release_tag_sha() {
-  local ref="refs/tags/$1" refs
-  refs=$(release_git ls-remote "$RELEASE_URL" "$ref" "$ref^{}") || return 1
-  awk -v ref="$ref" '$2 == ref { tag = $1 } $2 == ref "^{}" { peeled = $1 }
-    END { if (peeled != "") print peeled; else if (tag != "") print tag }' <<<"$refs"
-}
-
-mirror_release_tag() {
-  local tag="$1" sha="$2" remote_sha ref="refs/tags/$1"
-  remote_sha=$(release_tag_sha "$tag") || return 1
-  if [ -n "$remote_sha" ] && [ "$remote_sha" != "$sha" ]; then
-    logerr "$tag: тег в источнике выпусков указывает на другой коммит"
-    return 1
-  fi
-  release_git push --no-follow-tags --dry-run "$RELEASE_URL" "$ref:$ref" || return 1
-  release_git push --no-follow-tags "$RELEASE_URL" "$ref:$ref" || return 1
-  remote_sha=$(release_tag_sha "$tag") || return 1
-  if [ "$remote_sha" != "$sha" ]; then
-    logerr "$tag: не удалось подтвердить SHA тега в источнике выпусков"
-    return 1
-  fi
-}
 
 last_stable() {
-  printf '%s\n' "$RELEASE_STABLE"
+  git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude '*-*' "${1:-HEAD}" 2>/dev/null || true
 }
 
 release_worthy() {
@@ -210,22 +123,21 @@ pre_n() {
   echo "${1##*-"${PRE_KIND}".}"
 }
 
-# Новейший опубликованный пре-релиз базы $1 (или пусто)
+# Новейший пре-релиз базы $1, достижимый из HEAD (или пусто)
 latest_pre() {
   local base="$1"
-  awk -v prefix="$base-${PRE_KIND}." 'index($1, prefix) == 1 { print $1 }' <<<"$PUBLISHED_TAGS" | sort -V | tail -1
+  { git tag -l "${base}-${PRE_KIND}.*" --merged HEAD | grep -E -- "$PRE_RE" | sort -V | tail -1; } || true
 }
 
 version_gt() {
   [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]
 }
 
-# Базы опубликованных пре-релизов новее stable, по возрастанию
+# Базы пре-релизов, достижимых из HEAD, строго новее последнего stable, по возрастанию
 live_bases() {
   local last base
   last=$(last_stable)
-  { grep -E -- "$PRE_RE" <<<"$PUBLISHED_TAGS" || [ "$?" -eq 1 ]; } |
-    sed -E "s/-${PRE_KIND}\\.[0-9]+\$//" | sort -uV |
+  { git tag -l "v*-${PRE_KIND}.*" --merged HEAD | grep -E -- "$PRE_RE" | sed -E "s/-${PRE_KIND}\\.[0-9]+\$//" | sort -uV || true; } |
     while read -r base; do
       if [ -z "$last" ] || version_gt "$base" "$last"; then
         echo "$base"
@@ -241,12 +153,11 @@ rc_superseded() {
   base=$(base_of "$tag")
   n=$(pre_n "$tag")
   tag_exists "$base" && return 0
-  newest=$(last_stable)
+  newest=$({ git tag -l 'v*' | grep -E "$STABLE_RE" | sort -V | tail -1; } || true)
   if [ -n "$newest" ] && ! version_gt "$base" "$newest"; then
     return 0
   fi
   for other in $(git tag -l "${base}-${PRE_KIND}.*" | grep -E "$PRE_RE" || true); do
-    release_commit "refs/tags/$other" || continue
     if [ "$(pre_n "$other")" -gt "$n" ]; then
       return 0
     fi
@@ -258,7 +169,6 @@ heal() {
   local since tag
   since=$((NOW - HEAL_DAYS * 24 * 3600))
   for tag in $(git tag -l 'v*' | grep -E "$STABLE_RE|$PRE_RE" | sort -V || true); do
-    release_commit "refs/tags/$tag" || continue
     [ "$(tag_time "$tag")" -ge "$since" ] || continue
     grep -qxF -- "$tag" <<<"${RELEASED:-}" && continue
     if [[ "$tag" =~ $PRE_RE ]] && rc_superseded "$tag"; then
@@ -271,7 +181,7 @@ heal() {
 
 # Что выпустить для HEAD. Stable не выпускается никогда: он выходит только из пре-релиза
 # (promote), патчи тоже идут через пре-релиз.
-#   нет пре-релизов новее последнего stable      → первый пре-релиз новой базы
+#   нет пре-релизов новее последнего stable      → первый пре-релиз версии по scripts/version.sh --next
 #   после последнего пре-релиза базы B нет изменений → он же (идемпотентно)
 #   после него feat или ломающее изменение       → новая база: минор B + 1 (major + 1 для ломающего при major ≥ 1)
 #   после него только fix/perf/refactor/revert    → следующий номер пре-релиза базы B
@@ -281,46 +191,46 @@ heal() {
 # изменения, которое поднимает major относительно последнего stable (major ≥ 1). Номер версии
 # растёт относительно последнего stable, а не на каждый feat.
 plan() {
-  local last="$VERSION_STABLE" tip="$VERSION_PRE" range log n major minor patch base
-  range="${last:-$tip}..HEAD"
+  local last range next B tip log n major minor last_major
+  last=$(last_stable)
+  range="${last:+$last..}HEAD"
   if ! release_worthy "$range"; then
-    echo "none нет feat/fix/perf/refactor после ${last:-$tip}"
+    echo "none нет feat/fix/perf/refactor после ${last:-начала истории}"
     return
   fi
 
-  if [ -n "$tip" ]; then
-    range="$tip..HEAD"
-    if ! release_worthy "$range"; then
-      echo "none после $tip нет изменений для выпуска"
-      return
-    fi
-  fi
-  base=$(base_of "${tip:-$last}")
-  IFS=. read -r major minor patch <<<"${base#v}"
-  log=$(git log --format='%s%n%b' "$range")
-  if [ "$major" -ge 1 ] && grep -qE '^[a-z]+(\([^)]*\))?!:|^BREAKING[ -]CHANGE' <<<"$log" &&
-    { [ -z "$tip" ] || [ "$SOAK_HOURS" != milestone ] || [[ "$last" = "v$major."* ]]; }; then
-    base="v$((major + 1)).0.0"
-  elif { [ -z "$tip" ] || [ "$SOAK_HOURS" != milestone ]; } &&
-    grep -qE '^feat(\([^)]*\))?!?:|^[a-z]+(\([^)]*\))?!:|^BREAKING[ -]CHANGE' <<<"$log"; then
-    base="v$major.$((minor + 1)).0"
-  elif [ -z "$tip" ]; then
-    base="v$major.$minor.$((patch + 1))"
+  B=$(live_bases | tail -1)
+  if [ -z "$B" ]; then
+    next=$(sh "$ROOT/scripts/version.sh" --next)
+    echo "rc $next-${PRE_KIND}.1"
+    return
   fi
 
-  n=1
-  if [[ "$tip" = "$base-${PRE_KIND}."* ]]; then
-    n=$(($(pre_n "$tip") + 1))
+  tip=$(latest_pre "$B")
+  if ! release_worthy "$tip..HEAD"; then
+    echo "rc $tip"
+    return
   fi
-  # Номера принадлежат тегам кода обеих эпох. Существующий старый тег остаётся на месте.
-  while tag_exists "$base-${PRE_KIND}.$n"; do
-    if release_commit "refs/tags/$base-${PRE_KIND}.$n"; then
-      echo "rc $base-${PRE_KIND}.$n"
+  log=$(git log --format='%s%n%b' "$tip..HEAD")
+  if grep -qE '^feat(\([^)]*\))?!?:|^[a-z]+(\([^)]*\))?!:|^BREAKING[ -]CHANGE' <<<"$log"; then
+    major=${B#v}
+    major=${major%%.*}
+    minor=${B#v*.}
+    minor=${minor%%.*}
+    if [ "$major" -ge 1 ] && grep -qE '^[a-z]+(\([^)]*\))?!:|^BREAKING[ -]CHANGE' <<<"$log"; then
+      last_major=${last#v}
+      last_major=${last_major%%.*}
+      if [ "$SOAK_HOURS" != milestone ] || [ "$major" = "${last_major:-0}" ]; then
+        echo "rc v$((major + 1)).0.0-${PRE_KIND}.1"
+        return
+      fi
+    elif [ "$SOAK_HOURS" != milestone ]; then
+      echo "rc v$major.$((minor + 1)).0-${PRE_KIND}.1"
       return
     fi
-    n=$((n + 1))
-  done
-  echo "rc $base-${PRE_KIND}.$n"
+  fi
+  n=$(pre_n "$tip")
+  echo "rc $B-${PRE_KIND}.$((n + 1))"
 }
 
 # ── Состояние GitHub ──
@@ -361,7 +271,7 @@ compute_stop() {
 
   if [ -z "${RELEASE_STOP+x}" ]; then
     # Запуск на ПК: переменная окружения не задана, читаем переменную репозитория
-    if ! val=$(source_gh variable list --json name,value --jq '.[] | select(.name == "RELEASE_STOP") | .value'); then
+    if ! val=$(gh variable list --json name,value --jq '.[] | select(.name == "RELEASE_STOP") | .value'); then
       STOP_UNKNOWN=1
       STOP_REASON="не удалось прочитать переменную RELEASE_STOP"
       return
@@ -378,7 +288,7 @@ compute_stop() {
       ;;
   esac
 
-  if ! issues=$(source_gh api "repos/$SOURCE_REPO/issues?state=open&labels=${STOP_LABEL}&per_page=20" \
+  if ! issues=$(gh api "repos/{owner}/{repo}/issues?state=open&labels=${STOP_LABEL}&per_page=20" \
     --jq '.[] | select(.pull_request | not) | .number'); then
     STOP_UNKNOWN=1
     STOP_REASON="не удалось проверить стоп-метки"
@@ -386,7 +296,7 @@ compute_stop() {
   fi
   for n in $issues; do
     [[ "$n" =~ ^[0-9]+$ ]] || continue
-    if ! login=$(source_gh api --paginate "repos/$SOURCE_REPO/issues/$n/events?per_page=100" \
+    if ! login=$(gh api --paginate "repos/{owner}/{repo}/issues/$n/events?per_page=100" \
       --jq ".[] | select(.event == \"labeled\" and .label.name == \"${STOP_LABEL}\") | .actor.login" | tail -1); then
       STOP_UNKNOWN=1
       STOP_REASON="не удалось проверить стоп-метки"
@@ -397,7 +307,7 @@ compute_stop() {
       continue
     fi
     err=$(mktemp)
-    if perm=$(source_gh api "repos/$SOURCE_REPO/collaborators/$login/permission" --jq .permission 2>"$err"); then
+    if perm=$(gh api "repos/{owner}/{repo}/collaborators/$login/permission" --jq .permission 2>"$err"); then
       rm -f "$err"
       case "$perm" in
         admin | maintain | write)
@@ -423,67 +333,19 @@ compute_stop() {
   done
 }
 
-release_history() {
-  local history="$1" epoch="$2" tag at sha contract_path
-  while read -r tag at; do
-    [[ "$tag" =~ $STABLE_RE || "$tag" =~ $PRE_RE ]] || continue
-    sha=$(git rev-parse --verify "refs/tags/$tag^{commit}" 2>/dev/null) || continue
-    git merge-base --is-ancestor "$sha" "${RELEASE_HISTORY_HEAD:-HEAD}" || continue
-    if [ "$epoch" = current ]; then
-      release_commit "$sha" || continue
-    else
-      contract_path=$(git ls-tree "$sha" -- "$RELEASE_CONTRACT") || return 1
-      [ -z "$contract_path" ] || continue
-    fi
-    printf '%s %s\n' "$tag" "$at"
-  done <<<"$history"
-}
-
-# Старые опубликованные теги нужны только для расчёта номера в пустом канале.
-# История берётся отдельно от кандидатов на продвижение и тел релизов.
-collect_baseline() {
-  local history="$RELEASED_AT" compatible
-  if [ -z "$history" ]; then
-    compatible=$(gh release list --repo "$SOURCE_REPO" --limit 100 --exclude-drafts \
-      --json tagName,publishedAt --jq '.[] | select(.publishedAt != null) | .tagName') || return 1
-    history=$(release_history "$compatible" legacy) || return 1
-  fi
-  VERSION_STABLE=$({ awk '{ print $1 }' <<<"$history" | grep -E "$STABLE_RE" || [ "$?" -eq 1 ]; } | sort -V | tail -1)
-  VERSION_PRE=$({ awk '{ print $1 }' <<<"$history" | grep -E "$PRE_RE" || [ "$?" -eq 1 ]; } | sort -V | tail -1)
-  if [ -n "$VERSION_STABLE" ] && ! version_gt "$(base_of "$VERSION_PRE")" "$VERSION_STABLE"; then
-    VERSION_PRE=""
-  fi
-  if [ -z "$VERSION_STABLE" ] && [ -z "$VERSION_PRE" ]; then
-    logerr "не найден опубликованный тег с подтверждённым базовым номером"
-    return 1
-  fi
-}
-
-collect_releases() {
-  local releases published release_count
-  releases=$(GH_TOKEN="$RELEASE_TOKEN" gh release list --repo "$RELEASE_REPO" --limit "$RELEASE_LIMIT" \
-    --json tagName,publishedAt,isDraft \
-    --jq '.[] | "\(.tagName) \(if .isDraft or .publishedAt == null then "-" else (.publishedAt | fromdateiso8601) end)"') || return 1
-  release_count=$(awk 'NF { count++ } END { print count + 0 }' <<<"$releases")
-  if [ "$release_count" -ge "$RELEASE_LIMIT" ]; then
-    logerr "история источника выпусков превышает лимит чтения"
-    return 1
-  fi
-  RELEASED=$(awk '{ print $1 }' <<<"$releases")
-  published=$(awk '$2 ~ /^[0-9]+$/' <<<"$releases")
-  RELEASED_AT=$(release_history "$published" current) || return 1
-  if [ -n "$published" ] && [ -z "$RELEASED_AT" ]; then
-    logerr "у опубликованных выпусков нет подтверждённых тегов новой эпохи"
-    return 1
-  fi
-  PUBLISHED_TAGS=$(awk '{ print $1 }' <<<"$RELEASED_AT")
-  RELEASE_STABLE=$({ grep -E "$STABLE_RE" <<<"$PUBLISHED_TAGS" || [ "$?" -eq 1 ]; } | sort -V | tail -1)
-}
-
+# Экспортирует RELEASED (теги всех релизов, включая draft), RELEASED_AT (строки "<тег> <unix
+# publishedAt>", только не draft), STOP_REASON и REPO_OWNER. Ошибки gh не глушатся.
 collect_state() {
-  collect_releases
-  REPO_OWNER=${SOURCE_REPO%%/*}
+  RELEASED=$(gh release list --limit 100 --json tagName --jq '.[].tagName')
+  RELEASED_AT=$(gh release list --limit 100 --json tagName,publishedAt,isDraft \
+    --jq '.[] | select((.isDraft | not) and .publishedAt != null) | "\(.tagName) \(.publishedAt | fromdateiso8601)"')
+  if [ -n "${GITHUB_REPOSITORY_OWNER:-}" ]; then
+    REPO_OWNER="$GITHUB_REPOSITORY_OWNER"
+  else
+    REPO_OWNER=$(gh repo view --json owner --jq .owner.login)
+  fi
   compute_stop
+  export RELEASED RELEASED_AT STOP_REASON STOP_UNKNOWN REPO_OWNER
 }
 
 # Последний статус каждого контекста stand/* на коммите: строки "<контекст> <состояние> <время>".
@@ -491,7 +353,7 @@ collect_state() {
 # Комбинированный /status не используется: его краснит любой чужой контекст.
 stand_state() {
   [[ "$1" =~ ^[0-9a-f]{40}$ ]] || return 1
-  source_gh api "repos/$SOURCE_REPO/commits/$1/statuses?per_page=100" \
+  gh api "repos/{owner}/{repo}/commits/$1/statuses?per_page=100" \
     --jq '[.[] | select(.context | startswith("stand/"))] | unique_by(.context) | .[] | "\(.context) \(.state) \(.created_at)"'
 }
 
@@ -544,11 +406,7 @@ verdict() {
     echo "stop $STOP_REASON"
     return
   fi
-  sha=$(git rev-parse "refs/tags/$tag^{commit}")
-  if [ "$(release_tag_sha "$tag")" != "$sha" ]; then
-    echo "wait тег выпуска не соответствует исходному"
-    return
-  fi
+  sha=$(git rev-list -n1 "$tag")
   if ! st=$(stand_state "$sha"); then
     echo "wait не удалось прочитать статусы"
     return
@@ -690,7 +548,7 @@ tag_is_red() {
 # удаляются перед вставкой; gh release edit только при отличии тела (идемпотентно). Ошибка правки
 # одного релиза — предупреждение.
 finalize() {
-  local tag at sha urgent hold red body cleaned new tmp total=0 changed=0 since mark always b
+  local tag at urgent hold red body cleaned new tmp total=0 changed=0 since mark always b
   # Стоп не прочитан (сбой gh): продвижение он держит, но в публичный контракт hold:true по
   # непроверенному стопу не пишется — тела не трогаются до следующего прогона
   if [ "${STOP_UNKNOWN:-0}" = 1 ]; then
@@ -706,11 +564,6 @@ finalize() {
   while read -r tag at; do
     [ -n "$tag" ] || continue
     [ "$at" -ge "$since" ] || grep -qxF -- "$tag" <<<"$always" || continue
-    sha=$(git rev-parse "refs/tags/$tag^{commit}")
-    if [ "$(release_tag_sha "$tag")" != "$sha" ]; then
-      echo "::warning::$tag: тело не изменено, тег выпуска не соответствует исходному"
-      continue
-    fi
     total=$((total + 1))
     if git for-each-ref --format='%(contents)' "refs/tags/$tag" | grep -qxF 'xcp-urgent: 1'; then
       urgent=true
@@ -719,7 +572,7 @@ finalize() {
     fi
     if [ -n "${STOP_REASON:-}" ]; then hold=true; else hold=false; fi
     red=$(tag_is_red "$tag")
-    if ! body=$(GH_TOKEN="$RELEASE_TOKEN" gh release view "$tag" --repo "$RELEASE_REPO" --json body --jq .body </dev/null); then
+    if ! body=$(gh release view "$tag" --json body --jq .body </dev/null); then
       echo "::warning::тело $tag не прочитано"
       continue
     fi
@@ -744,7 +597,7 @@ finalize() {
     fi
     tmp=$(mktemp)
     printf '%s\n' "$new" >"$tmp"
-    if GH_TOKEN="$RELEASE_TOKEN" gh release edit "$tag" --repo "$RELEASE_REPO" --notes-file "$tmp" </dev/null >/dev/null; then
+    if gh release edit "$tag" --notes-file "$tmp" </dev/null >/dev/null; then
       log "обновлено тело $tag: urgent=$urgent hold=$hold регрессия=$mark"
       changed=$((changed + 1))
     else
@@ -769,7 +622,11 @@ release_marker() {
   if git for-each-ref --format='%(contents)' "refs/tags/$tag" | grep -qxF 'xcp-urgent: 1'; then
     urgent=true
   fi
-  REPO_OWNER=${SOURCE_REPO%%/*}
+  if [ -n "${GITHUB_REPOSITORY_OWNER:-}" ]; then
+    REPO_OWNER="$GITHUB_REPOSITORY_OWNER"
+  elif ! REPO_OWNER=$(gh repo view --json owner --jq .owner.login); then
+    REPO_OWNER=""
+  fi
   compute_stop
   if [ -n "${STOP_REASON:-}" ]; then
     hold=true
@@ -783,7 +640,6 @@ report() {
   LOG_FD=2
   check_inputs
   collect_state
-  collect_baseline
   log "стоп выпуска: ${STOP_REASON:-нет}"
   PROMOTE_DECISION=$(promote)
   log "promote: $PROMOTE_DECISION"
@@ -798,9 +654,9 @@ report() {
 # Возвращает 0 — зелёный, 1 — есть красный, 2 — ещё идут (их завершение снова запустит нас).
 ci_state() {
   local sha="$1" runs
-  runs=$(source_gh run list --commit "$sha" --event push --limit 50 \
+  runs=$(gh run list --commit "$sha" --event push --limit 50 \
     --json workflowName,status,conclusion \
-    --jq '.[] | select(.workflowName != "Auto Release") | "\(.status) \(.conclusion) \(.workflowName)"') || return 3
+    --jq '.[] | select(.workflowName != "Auto Release") | "\(.status) \(.conclusion) \(.workflowName)"')
   if [ -z "$runs" ]; then
     return 2
   fi
@@ -815,17 +671,35 @@ ci_state() {
 }
 
 # Ставит тег stable $1 на коммит пре-релиза $2 (никогда на другой коммит).
-# Если GitHub отклоняет запись исходного тега токеном Actions, владелец может
-# поставить тот же тег. Следующий цикл подхватит его по обычному правилу heal.
+# Токен Actions не ставит тег на коммит, чьи .github/workflows отличаются от main (нужен scope
+# workflows). Тогда тег уходит запасным токеном RELEASE_TOKEN; без него — ошибка с готовой
+# командой владельцу. Токен нигде не печатается, трассировка (set -x) не включается.
+# Коды: 0 — запушен токеном Actions; 10 — запушен RELEASE_TOKEN (сборку запустит сам push
+# тега); 1 — поставить нельзя.
 push_stable_tag() {
   local tag="$1" sha="$2"
   local -a msgs=(-m "$tag")
   if [ "${URGENT:-0}" = 1 ] && [ "$tag" = "${PROMOTE_BASE:-}" ]; then
     msgs+=(-m 'xcp-urgent: 1')
   fi
-  git tag -a "${msgs[@]}" "$tag" "$sha" || return 1
-  if git push origin "refs/tags/$tag"; then
-    return 0
+  git tag -a "${msgs[@]}" "$tag" "$sha"
+  if git diff --quiet "$sha" HEAD -- .github/workflows; then
+    if git push origin "refs/tags/$tag"; then
+      return 0
+    fi
+    git tag -d "$tag" >/dev/null
+    echo "::error::не удалось запушить тег $tag"
+    return 1
+  fi
+  if [ -n "${RELEASE_TOKEN:-}" ]; then
+    # Заголовок авторизации, оставленный actions/checkout, сбрасывается: иначе уйдёт токен Actions
+    if git -c 'http.https://github.com/.extraheader=' push \
+      "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/$tag"; then
+      return 10
+    fi
+    git tag -d "$tag" >/dev/null
+    echo "::error::не удалось запушить тег $tag запасным токеном"
+    return 1
   fi
   git tag -d "$tag" >/dev/null
   # Подсказка из тех же сообщений, что и у тега выше: пометка «срочное» не теряется
@@ -833,7 +707,7 @@ push_stable_tag() {
   if [ "${#msgs[@]}" -gt 2 ]; then
     hint="$hint -m 'xcp-urgent: 1'"
   fi
-  echo "::error::токен Actions не поставил $tag. Владельцу: $hint $tag $sha && git push origin $tag"
+  echo "::error::workflows изменились после ${sha:0:8}; токен Actions тег не поставит. Владельцу: $hint $tag $sha && git push origin $tag"
   return 1
 }
 
@@ -841,50 +715,39 @@ push_stable_tag() {
 # ничего не делает, при идущей сборке ждёт, после двух упавших сборок сдаётся: тег попадает в
 # BUILD_GAVE_UP, а run доводит цикл до конца и выходит с ошибкой.
 publish() {
-  local tag="$1" sha="$2" active failed remote_sha push_ref="$2"
-  if ! release_commit "$sha"; then
-    logerr "$tag: коммит не принадлежит новой эпохе"
-    return 1
-  fi
-  if tag_exists "$tag" && [ "$(git rev-parse "refs/tags/$tag^{commit}")" != "$sha" ]; then
-    logerr "$tag: исходный тег указывает на другой коммит"
-    return 1
-  fi
-  if grep -qxF -- "$tag" <<<"$RELEASED"; then
-    log "$tag уже есть в источнике выпусков"
+  local tag="$1" sha="$2" active failed code
+  if gh release view "$tag" >/dev/null 2>&1; then
+    log "$tag уже опубликован"
     return
   fi
   if [ "${DRY_RUN:-0}" = 1 ]; then
     log "DRY_RUN: выпустил бы $tag на ${sha:0:8}"
     return
   fi
-  remote_sha=$(release_tag_sha "$tag") || return 1
-  if tag_exists "$tag"; then
-    push_ref="refs/tags/$tag"
-  fi
-  if [ -n "$remote_sha" ]; then
-    if [ "$remote_sha" != "$sha" ] || ! tag_exists "$tag"; then
-      logerr "$tag: тег в источнике выпусков конфликтует с исходным тегом"
-      return 1
-    fi
-  fi
-  # Проверка транспорта записи до создания исходного тега.
-  release_git push --no-follow-tags --dry-run "$RELEASE_URL" "$push_ref:refs/tags/$tag"
   if ! tag_exists "$tag"; then
     if [[ "$tag" =~ $STABLE_RE ]]; then
-      if ! push_stable_tag "$tag" "$sha"; then
-        STABLE_NOT_TAGGED=1
-        return
-      fi
+      code=0
+      push_stable_tag "$tag" "$sha" || code=$?
+      case "$code" in
+        10)
+          log "тег $tag поставлен на ${sha:0:8} запасным токеном, сборку запустит push тега"
+          return
+          ;;
+        0) ;;
+        *)
+          STABLE_NOT_TAGGED=1
+          return
+          ;;
+      esac
     else
       git tag -a "$tag" -m "$tag" "$sha"
       git push origin "refs/tags/$tag"
     fi
     log "тег $tag поставлен на ${sha:0:8}"
   fi
-  active=$(source_gh run list --workflow build.yml --branch "$tag" --json status \
+  active=$(gh run list --workflow build.yml --branch "$tag" --json status \
     --jq '[.[] | select(.status != "completed")] | length')
-  failed=$(source_gh run list --workflow build.yml --branch "$tag" --json conclusion \
+  failed=$(gh run list --workflow build.yml --branch "$tag" --json conclusion \
     --jq '[.[] | select(.conclusion == "failure")] | length')
   if [ "$active" -gt 0 ]; then
     log "сборка $tag уже идёт"
@@ -896,7 +759,7 @@ publish() {
     if [ "$failed" -ge 1 ]; then
       echo "::warning::сборка $tag упала, повторяю"
     fi
-    source_gh workflow run build.yml --ref "$tag" -f version="${tag#v}"
+    gh workflow run build.yml --ref "$tag" -f version="${tag#v}"
     log "запущена сборка $tag"
   fi
 }
@@ -904,22 +767,16 @@ publish() {
 # Упавшая сборка не должна теряться: вытесненный пре-релиз без релиза удаляется с
 # предупреждением в сводке прогона, актуальный тег пересобирается через publish.
 heal_tags() {
-  local actions action tag remote_sha
-  actions=$(heal)
+  local action tag
   while read -r action tag; do
     case "$action" in
       delete)
-        remote_sha=$(release_tag_sha "$tag") || return 1
-        if [ -n "$remote_sha" ]; then
-          log "$tag уже скопирован в источник выпусков, его проверит ротация"
-          continue
-        fi
         if [ "${DRY_RUN:-0}" = 1 ]; then
           log "DRY_RUN: удалил бы вытесненный неопубликованный $tag"
           continue
         fi
         echo "::warning::$tag вытеснен более новым релизом и не был опубликован (сборка: gh run list --workflow build.yml --branch $tag) — тег удалён"
-        git push origin --delete "refs/tags/$tag"
+        git push origin --delete "refs/tags/$tag" || true
         git tag -d "$tag" >/dev/null
         ;;
       publish)
@@ -927,7 +784,7 @@ heal_tags() {
         publish "$tag" "$(git rev-list -n1 "$tag")"
         ;;
     esac
-  done <<<"$actions"
+  done < <(heal)
 }
 
 run() {
@@ -938,15 +795,7 @@ run() {
 
   local kind tag rc main_sha state=0
   BUILD_GAVE_UP=""
-  if ! release_commit HEAD; then
-    logerr "main не содержит контракт новой эпохи"
-    return 1
-  fi
-  if [ "${DRY_RUN:-0}" != 1 ]; then
-    require_release_access
-  fi
   collect_state
-  collect_baseline
   heal_tags
   log "стоп выпуска: ${STOP_REASON:-нет}"
 
@@ -972,14 +821,13 @@ run() {
     case "$state" in
       1) PLAN_DECISION="не принималось (CI для ${main_sha:0:8} красный)" ;;
       2) PLAN_DECISION="не принималось (ждём остальные прогоны CI для ${main_sha:0:8}: решение примет последний из них)" ;;
-      0)
+      *)
         PLAN_DECISION=$(plan)
         read -r kind tag _ <<<"$PLAN_DECISION"
         if [ "$kind" = rc ]; then
           publish "$tag" "$(git rev-list -n1 "$tag" 2>/dev/null || echo "$main_sha")"
         fi
         ;;
-      *) logerr "не удалось прочитать состояние CI для ${main_sha:0:8}"; return 1 ;;
     esac
   fi
   log "plan: $PLAN_DECISION"
@@ -997,25 +845,18 @@ run() {
   fi
 }
 
-main() {
-  CAND_FILE=$(mktemp)
-  trap 'rm -f "$CAND_FILE"' EXIT
-  if [ "$#" -gt 0 ]; then
-    init_release_source
-  fi
-  case "${1:-}" in
-  plan)
-    collect_state
-    collect_baseline
-    plan
-    ;;
+CAND_FILE=$(mktemp)
+trap 'rm -f "$CAND_FILE"' EXIT
+
+case "${1:-}" in
+  plan) plan ;;
   promote)
     check_inputs
     collect_state
     promote
     ;;
   heal)
-    collect_state
+    [ -n "${RELEASED+x}" ] || collect_state
     heal
     ;;
   report) report ;;
@@ -1033,9 +874,4 @@ main() {
     awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
     exit 2
     ;;
-  esac
-}
-
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  main "$@"
-fi
+esac

@@ -66,7 +66,7 @@ jobs:
     # расписанию), в неё не входят и не вытесняют ожидающий настоящий запуск
     concurrency:
       group: auto-release
-      queue: max
+      cancel-in-progress: false
     steps:
       # Состояние: теги, коммиты main, push тегов
       - uses: actions/checkout@v7
@@ -84,9 +84,7 @@ jobs:
 
       - name: Release
         env:
-          # История кода, статусы стенда и запуск build.yml читаются исходным токеном.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           SOAK_HOURS: ${{ vars.RC_SOAK_HOURS || '24' }}
           # Ручной запуск не с main — всегда dry_run: код ветки не ставит теги и не правит релизы
           DRY_RUN: ${{ (inputs.dry_run == true || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')) && '1' || '0' }}
@@ -94,4 +92,5 @@ jobs:
           PROMOTE_BASE: ${{ inputs.promote_base }}
           URGENT: ${{ inputs.urgent == true && '1' || '0' }}
           RELEASE_STOP: ${{ vars.RELEASE_STOP }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: bash _wf/.github/scripts/auto_release.sh run
