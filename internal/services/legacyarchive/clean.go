@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -35,11 +36,25 @@ type Cleanup struct {
 	Roots    configlayer.Roots
 	Binaries func() configlayer.Binaries
 	XrayEnv  func(string) []string
+
+	// noticesMu охраняет lastNotices — последний набор уведомлений, который
+	// Notices отдаёт, пока замок данных держит очистка или запуск.
+	noticesMu   sync.Mutex
+	lastNotices []configlayer.NoticeView
 }
 
+// Scan ищет следы старой панели, дожидаясь общего замка данных.
 func (c *Cleanup) Scan() []Finding {
+	findings, err := c.scan(lockWait)
+	if err != nil {
+		findings = append(findings, Finding{File: Directory, Reason: archiveWarning(err)})
+	}
+	return findings
+}
+
+func (c *Cleanup) scan(mode lockMode) ([]Finding, error) {
 	var findings []Finding
-	_, err := withData(c.DataDir, func(data archiveDir) (Result, error) {
+	_, err := withDataMode(c.DataDir, mode, func(data archiveDir) (Result, error) {
 		stored, err := readKernelMarker(data)
 		if err != nil {
 			return Result{}, err
@@ -58,15 +73,28 @@ func (c *Cleanup) Scan() []Finding {
 		}
 		return Result{}, nil
 	})
-	if err != nil {
-		findings = append(findings, Finding{File: Directory, Reason: archiveWarning(err)})
-	}
-	return findings
+	return findings, err
 }
 
 // Notices переводит находки в одно предупреждение без содержимого файлов.
+// Слой зовёт её под замком сверки, поэтому замок данных берётся без ожидания:
+// пока его держат очистка или запуск (проверка ядром и перезапуск), сверки не
+// встают, а Notices отдаёт прежний набор уведомлений.
 func (c *Cleanup) Notices() []configlayer.NoticeView {
-	findings := c.Scan()
+	findings, err := c.scan(lockTry)
+	c.noticesMu.Lock()
+	defer c.noticesMu.Unlock()
+	if errors.Is(err, errBusy) {
+		return c.lastNotices
+	}
+	if err != nil {
+		findings = append(findings, Finding{File: Directory, Reason: archiveWarning(err)})
+	}
+	c.lastNotices = noticesFor(findings)
+	return c.lastNotices
+}
+
+func noticesFor(findings []Finding) []configlayer.NoticeView {
 	if len(findings) == 0 {
 		return nil
 	}
