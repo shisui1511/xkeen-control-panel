@@ -28,6 +28,9 @@
  *   --scope stand-download — обвязка стенда (scripts/router/deploy.sh, run.sh, release-status.sh):
  *     gh release (view, download, list) с явным --repo, контракт читается; статусы stand/* пишутся
  *     в репозиторий кода, не в переменную контракта; проверка sha256 ассета в deploy.sh сохранена;
+ *   --scope readme — README.md (адреса для пользователя): значки выпусков и адреса страниц
+ *     и загрузок выпусков ведут только в источник выпусков, ни одного адреса выпусков репозитория
+ *     кода; установщик скачивается raw-адресом из репозитория кода, не из источника выпусков;
  *   --scope stand — scripts/router/session.mjs: единственный вызов gh release list — в помощнике
  *     latestReleaseTag, с явным --repo из контракта и отказом при пустом или неверном источнике;
  *     оба потребителя — Session.resolveVersion (version: latest) и ветка smoke|delta (release:
@@ -38,7 +41,7 @@
  * контракта допускается только там, где файл прочитать нельзя: scripts/setup.sh (скачивается одним
  * файлом) и README.md (адреса загрузки для пользователя).
  *
- * Usage: node scripts/check-release-source.js [--scope client|publish|notes|stand-download|stand]
+ * Usage: node scripts/check-release-source.js [--scope client|publish|notes|stand-download|readme|stand]
  */
 'use strict';
 
@@ -55,16 +58,18 @@ const SESSION = 'scripts/router/session.mjs';
 const DEPLOY = 'scripts/router/deploy.sh';
 const RUN = 'scripts/router/run.sh';
 const RELEASE_STATUS = 'scripts/router/release-status.sh';
+const README = 'README.md';
 
 const SCOPES = {
   client: [UPDATE_GO, SETUP_SH, UPDATE_TEST],
   publish: ['.github/scripts/auto_release.sh', '.github/workflows/build.yml', '.github/workflows/auto-release.yml'],
   notes: ['.github/scripts/gen_notes.py', '.github/workflows/release-notes.yml', '.github/scripts/prune_dev_releases.sh'],
   'stand-download': [DEPLOY, RUN, RELEASE_STATUS],
+  readme: [README],
   stand: [SESSION]
 };
 // Файлы, где литерал источника допустим: прочитать контракт они не могут.
-const LITERAL_ALLOWED = new Set([SETUP_SH, 'README.md']);
+const LITERAL_ALLOWED = new Set([SETUP_SH, README]);
 
 const REPO_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/;
 const PUBLISHER = '.github/scripts/auto_release.sh';
@@ -577,6 +582,32 @@ function checkStand(contract) {
   checkLiteral([SESSION], contract);
 }
 
+// --- readme -----------------------------------------------------------------
+// Пользователь копирует адреса из README: прежний адрес выпусков репозитория кода
+// привёл бы новую установку к несовместимой эпохе (или старую — к новой без заметки).
+function checkReadme(source, contract) {
+  const text = need(README);
+  if (text === null || !source || !contract) return;
+  const repoRe = r => escapeRe(r);
+  const releasesOf = r =>
+    new RegExp(`github\\.com/${repoRe(r)}/releases|img\\.shields\\.io/github/v/release/${repoRe(r)}(?=[?)/\\s]|$)`, 'gi');
+  for (const m of text.matchAll(releasesOf(source))) {
+    fail(`${README}:${lineOf(text, m.index)}`, `адрес выпусков репозитория кода (${m[0]}) — только источник выпусков ${contract}`);
+  }
+  const own = [...text.matchAll(releasesOf(contract))].map(m => m[0]);
+  if (!own.some(u => /^img\.shields\.io/i.test(u))) fail(README, `нет значка выпуска источника ${contract}`);
+  if (!new RegExp(`github\\.com/${repoRe(contract)}/releases/latest/download/`, 'i').test(text)) {
+    fail(README, `нет адреса загрузки из источника ${contract}`);
+  }
+  if (!new RegExp(`raw\\.githubusercontent\\.com/${repoRe(source)}/[^/\\s]+/scripts/setup\\.sh`).test(text)) {
+    fail(README, `установщик не скачивается из репозитория кода ${source}`);
+  }
+  const rawContract = new RegExp(`raw\\.githubusercontent\\.com/${repoRe(contract)}/`, 'g');
+  for (const m of text.matchAll(rawContract)) {
+    fail(`${README}:${lineOf(text, m.index)}`, 'установщик из источника выпусков: в нём нет кода');
+  }
+}
+
 // --- запуск -----------------------------------------------------------------
 const source = sourceRepository();
 const contract = readContract(source);
@@ -588,6 +619,7 @@ for (const s of run) {
   if (s === 'client') checkClient(source, contract);
   else if (s === 'stand') checkStand(contract);
   else if (s === 'stand-download') checkStandDownloads(contract);
+  else if (s === 'readme') checkReadme(source, contract);
   else checkPipelineScope(s, contract);
 }
 

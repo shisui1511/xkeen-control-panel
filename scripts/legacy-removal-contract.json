@@ -975,7 +975,8 @@
         "README.md"
       ],
       "forbid": [
-        "\\bSmartMerge\\b|\\bSubscriptionService\\b|config_layer_disabled|legacy_blocked|/api/subscriptions|/api/service/dns-redirect|/api/config/smart-merge"
+        "\\bSmartMerge\\b|\\bSubscriptionService\\b|config_layer_disabled|legacy_blocked|/api/subscriptions|/api/service/dns-redirect|/api/config/smart-merge",
+        "за флагом `config_layer`|флаг `config_layer`|\\brequireLayer\\b|\\bForeignOwned\\b|\\bReleaseForFlagOff\\b|\\bSettingsConfigLayer\\b|\\bLayer\\.Disable\\b|\\bSetDNSProxying\\b|/api/settings/config-layer|github\\.com/shisui1511/xkeen-control-panel/releases|img\\.shields\\.io/github/v/release/shisui1511/xkeen-control-panel(?![-\\w])"
       ],
       "required": [
         {
@@ -989,6 +990,93 @@
         {
           "file": "README.md",
           "pattern": "shisui1511/xkeen-control-panel-releases"
+        },
+        {
+          "file": ".claude/docs/api.md",
+          "pattern": "/api/configlayer/legacy/close"
+        },
+        {
+          "file": ".claude/docs/api.md",
+          "pattern": "/api/configlayer/legacy/clean"
+        },
+        {
+          "file": ".claude/docs/api.md",
+          "pattern": "`no_socket`"
+        },
+        {
+          "file": ".claude/docs/api.md",
+          "pattern": "removed_routes"
+        },
+        {
+          "file": ".claude/docs/architecture.md",
+          "pattern": "IsLegacyArchivePath"
+        },
+        {
+          "file": ".claude/docs/architecture.md",
+          "pattern": "SchemaVersion"
+        },
+        {
+          "file": ".claude/docs/build.md",
+          "pattern": "check-release-source\\.js"
+        },
+        {
+          "file": ".claude/docs/build.md",
+          "pattern": "RELEASE_TOKEN"
+        },
+        {
+          "file": ".claude/docs/build.md",
+          "pattern": "/opt/etc/xcp/legacy/"
+        },
+        {
+          "file": "README.md",
+          "pattern": "/opt/etc/xcp/legacy/"
+        }
+      ],
+      "raw_required": []
+    },
+    "shared-moved": {
+      "files": [
+        "internal/services/hwid.go",
+        "internal/services/xray_api_block.go",
+        "internal/services/mihomo_const.go",
+        "internal/services/mihomo_geotag.go",
+        "internal/services/mihomo_profile_template.go"
+      ],
+      "forbid": [
+        "\\bSmartMerge\\b|\\bSubscriptionService\\b|\\bSubscriptionConfig\\b|\\bconfigLayerEnabled\\b|\\b(?:Layer|layer|configLayer)\\.Enabled\\s*\\("
+      ],
+      "required": [
+        {
+          "file": "internal/services/hwid.go",
+          "pattern": "^func LoadOrGenerateHWID\\("
+        },
+        {
+          "file": "internal/services/xray_api_block.go",
+          "pattern": "^func ProvisionXrayAPIBlock\\("
+        },
+        {
+          "file": "internal/services/xray_api_block.go",
+          "pattern": "^func DeprovisionXrayAPIBlock\\("
+        },
+        {
+          "file": "internal/services/xray_api_block.go",
+          "pattern": "^func CheckPortAvailable\\("
+        },
+        {
+          "file": "internal/services/mihomo_const.go",
+          "pattern": "^const DefaultMihomoSocketPath\\b"
+        },
+        {
+          "file": "internal/services/mihomo_geotag.go",
+          "pattern": "^func MihomoGeoTagLookup\\("
+        },
+        {
+          "file": "internal/services/mihomo_profile_template.go",
+          "pattern": "^func RenderMihomoTemplate\\("
+        },
+        {
+          "file": "internal/services/mihomo_profile_template.go",
+          "pattern": "^var ProfileTemplateFiles\\b"
         }
       ],
       "raw_required": []
