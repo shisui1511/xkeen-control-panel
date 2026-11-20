@@ -1,7 +1,7 @@
 <script lang="ts">
-  // Страница «Прокси» при включённом слое «Конфигурация»: что выбрано сейчас в группах
-  // панели для обоих ядер. Без флага слоя Dashboard рисует прежний Proxies.svelte, и этот
-  // модуль вместе с клиентом configProxies.ts не загружается.
+  // Страница «Прокси»: что выбрано сейчас в группах панели для обоих ядер. Для своего
+  // профиля Mihomo (user_profile) внутри лениво грузится Proxies.svelte — страница
+  // Clash API запущенного профиля.
   import { onMount, tick, untrack } from 'svelte';
   import { writable } from 'svelte/store';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';

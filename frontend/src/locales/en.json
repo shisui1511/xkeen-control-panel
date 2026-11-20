@@ -3663,7 +3663,6 @@
   "cfg.prof.delete_confirm": "Delete profile",
   "cfg.prof.delete_body": "A copy is kept in the panel backups. Mihomo keeps running with the active profile.",
   "cfg.prof.dep_source": "Profiles that reference this source file: {profiles}. After deletion proxy_providers/xcp-{id}.yaml disappears and Mihomo will not find nodes in these profiles. The panel does not edit them.",
-  "cfg.prof.dep_flag": "Profiles {profiles} reference panel source files (proxy_providers/xcp-*.yaml). If the files go away, these profiles will have no nodes. The panel does not edit them.",
   "cfg.prof.dep_more": "and {n} more",
   "cfg.prof.dep_check_failed": "Could not check which profiles use these files.",
   "cfg.prof.fill_open": "Fill from profile",
