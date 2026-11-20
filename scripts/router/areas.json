@@ -425,7 +425,6 @@
         "internal/templates/**",
         "internal/handlers/mihomo_profiles.go",
         "internal/services/mihomo_profile*.go",
-        "internal/services/mihomo_config_backup.go",
         "internal/services/mihomo_const.go",
         "internal/services/template.go"
       ],

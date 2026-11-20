@@ -335,31 +335,6 @@ func (s *MihomoService) ProbeAPI(secret string) (reachable bool, authenticated b
 	return true, false
 }
 
-func stripComment(line string) string {
-	inDoubleQuotes := false
-	inSingleQuotes := false
-	for i, char := range line {
-		if char == '"' && (i == 0 || line[i-1] != '\\') {
-			inDoubleQuotes = !inDoubleQuotes
-		} else if char == '\'' && (i == 0 || line[i-1] != '\\') {
-			inSingleQuotes = !inSingleQuotes
-		} else if char == '#' && !inDoubleQuotes && !inSingleQuotes {
-			return line[:i]
-		}
-	}
-	return line
-}
-
-func cleanYamlValue(val string) string {
-	val = strings.TrimSpace(val)
-	if len(val) >= 2 {
-		if (val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'') {
-			val = val[1 : len(val)-1]
-		}
-	}
-	return val
-}
-
 // ValidateMihomoConfig inspects the Mihomo config.yaml and returns a PreflightResult
 // with blocking errors and non-blocking warnings. On read or parse failure, returns
 // a non-nil error (the handler converts this to a safe valid:true response).
