@@ -456,6 +456,12 @@
     overflow-wrap: anywhere;
   }
 
+  /* Фокус сюда ставит переход из подсказки «нет сокета»: кольцо проекта, не браузера */
+  .pc-title:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
   .pc-caption {
     margin: 0;
     font-size: var(--font-size-xs);

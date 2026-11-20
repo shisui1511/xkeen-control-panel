@@ -527,24 +527,28 @@
           {#if legacy.count > 0}
             <span class="legacy-note">{$t('cfg.notice.legacy_backup')}</span>
           {/if}
-          <span class="legacy-actions">
-            {#if legacy.count > 0}
-              <Button
-                variant="secondary"
-                class="tap-zone-44"
-                loading={cleaning}
-                testid="legacy-leftovers-clean"
-                onclick={() => void cleanLeftovers(legacy.count)}
-              >
-                {$t('cfg.notice.legacy_clean')}
-              </Button>
-            {/if}
-            {#if legacy.filesLink}
-              <a class="notice-link" href="#/config/files" data-testid="legacy-leftovers-files-link"
-                >{$t('cfg.files.drift_notice_link')}</a
-              >
-            {/if}
-          </span>
+          {#if legacy.count > 0 || legacy.filesLink}
+            <span class="legacy-actions">
+              {#if legacy.count > 0}
+                <Button
+                  variant="secondary"
+                  class="tap-zone-44"
+                  loading={cleaning}
+                  testid="legacy-leftovers-clean"
+                  onclick={() => void cleanLeftovers(legacy.count)}
+                >
+                  {$t('cfg.notice.legacy_clean')}
+                </Button>
+              {/if}
+              {#if legacy.filesLink}
+                <a
+                  class="notice-link"
+                  href="#/config/files"
+                  data-testid="legacy-leftovers-files-link">{$t('cfg.files.drift_notice_link')}</a
+                >
+              {/if}
+            </span>
+          {/if}
         </div>
       </div>
     {:else}

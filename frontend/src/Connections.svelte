@@ -670,7 +670,9 @@
         class="btn btn-danger-soft"
         onclick={closeAllConnections}
         disabled={connections.length === 0}
-        title={$t('conn.close_all')}
+        title={$capabilities?.mihomo?.no_socket === true
+          ? $t('proxies.rt.no_socket_title')
+          : $t('conn.close_all')}
       >
         <svg
           width="13"
