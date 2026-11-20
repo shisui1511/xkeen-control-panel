@@ -3173,7 +3173,7 @@
   "cfg.geo.cron_found": "XKeen cron has a database update job: {schedule}. Adopt this schedule in the panel? Until you confirm, XKeen cron keeps working as before.",
   "cfg.geo.cron_adopt": "Adopt schedule",
   "cfg.geo.cron_keep": "Not now",
-  "cfg.geo.cron_adopted": "Schedule adopted. The XKeen cron job was removed and will be restored if the flag is turned off.",
+  "cfg.geo.cron_adopted": "Schedule adopted. The XKeen cron job was removed.",
   "cfg.geo.cron_two": "The XKeen cron job is back ({schedule}): databases update on two schedules.",
   "cfg.geo.cron_remove": "Remove cron job",
   "cfg.geo.cron_give": "Give schedule to XKeen",

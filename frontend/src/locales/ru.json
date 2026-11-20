@@ -3173,7 +3173,7 @@
   "cfg.geo.cron_found": "В cron XKeen есть задача обновления баз: {schedule}. Перенять это расписание в панель? До подтверждения cron XKeen работает как раньше.",
   "cfg.geo.cron_adopt": "Перенять расписание",
   "cfg.geo.cron_keep": "Не сейчас",
-  "cfg.geo.cron_adopted": "Расписание перенято. Задача cron XKeen убрана, при выключении флага она вернётся.",
+  "cfg.geo.cron_adopted": "Расписание перенято. Задача cron XKeen убрана.",
   "cfg.geo.cron_two": "Вернулась задача cron XKeen ({schedule}): базы обновляются по двум расписаниям.",
   "cfg.geo.cron_remove": "Убрать задачу cron",
   "cfg.geo.cron_give": "Отдать расписание XKeen",
