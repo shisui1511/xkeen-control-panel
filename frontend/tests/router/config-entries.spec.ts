@@ -20,6 +20,11 @@ import { SLOW_ANNOTATION } from './lib/known';
 
 test.describe.configure({ mode: 'serial' });
 
+// Файл содержит секретный сценарий окна «Панель начала с чистого листа»: ни trace, ни видео, ни
+// снимков — с самого начала, до подготовки. Параметры воркера (trace/video/screenshot) нельзя
+// задавать внутри describe, поэтому они выключены на весь файл.
+test.use({ trace: 'off', video: 'off', screenshot: 'off' });
+
 const VP_DESKTOP = { width: 1280, height: 800 };
 const XRAY_CONFIGS = '/opt/etc/xray/configs';
 
@@ -334,9 +339,6 @@ async function expectButtonsFit(page: Page, width: number): Promise<void> {
 }
 
 test.describe('config-entries legacy-reset', () => {
-  // Секретный сценарий: ни trace, ни видео, ни снимков — с самого начала, до подготовки
-  test.use({ trace: 'off', video: 'off', screenshot: 'off' });
-
   test(
     'window vp:1280',
     {
