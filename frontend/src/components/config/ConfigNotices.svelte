@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from '../../i18n';
+  import { t, tp } from '../../i18n';
   import Icon from '../../lib/components/Icon.svelte';
   import Button from '../Button.svelte';
   import { cleanLegacy } from '../../lib/configLegacy';
@@ -342,7 +342,7 @@
     return {
       notice: n,
       tone: 'warning',
-      text: $t('cfg.notice.legacy_leftovers', { k: files.length }),
+      text: $tp('cfg.notice.legacy_leftovers', files.length),
       legacy: { rows, more: Math.max(0, files.length - LEGACY_ROWS), count: files.length }
     };
   }
@@ -430,7 +430,7 @@
     if (cleaning) return;
     const ok = await showConfirm({
       title: $t('cfg.notice.legacy_confirm_title'),
-      message: $t('cfg.notice.legacy_confirm_text', { k: count }),
+      message: $tp('cfg.notice.legacy_confirm_text', count),
       confirmLabel: $t('cfg.notice.legacy_clean'),
       cancelLabel: $t('app.cancel'),
       variant: 'warning'
@@ -477,7 +477,7 @@
   {/if}
   {#each shown as { notice, tone, text, cabinet, ids, legacy } (notice.id)}
     {#if legacy}
-      <div class="alert alert-{tone}" role="alert" data-notice={notice.id}>
+      <div class="alert alert-{tone}" role="status" data-notice={notice.id}>
         <Icon name="warning" size={16} />
         <div class="notice-text notice-body">
           <span>{text}</span>
@@ -494,6 +494,7 @@
             <Button
               variant="secondary"
               size="sm"
+              class="tap-zone-44"
               loading={cleaning}
               testid="legacy-leftovers-clean"
               onclick={() => void cleanLeftovers(legacy.count)}
@@ -606,5 +607,14 @@
     font-weight: 600;
     text-decoration: underline;
     white-space: nowrap;
+  }
+
+  /* Ссылка в действиях уведомления — зона нажатия не ниже 44px на сенсорных и узких экранах */
+  @media (pointer: coarse), (max-width: 768px) {
+    .legacy-actions .notice-link {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+    }
   }
 </style>

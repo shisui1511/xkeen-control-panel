@@ -1434,7 +1434,7 @@
     }
 
     unregisterDirty = registerDirtySource('editor', {
-      name: $t('nav.editor') || 'Editor',
+      name: $t('cfg.tab.files'),
       isDirty: () => isDirty || tabs.some((t) => t.isDirty),
       onSave: async () => {
         if (selectedFile && editorView) {

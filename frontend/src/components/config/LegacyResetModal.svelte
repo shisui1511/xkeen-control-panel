@@ -21,6 +21,8 @@
   // текст в <code>, без атрибутов, тостов и консоли; у кнопки копирования — номер адреса.
 
   const COPIED_MS = 2000;
+  // Хвост адреса, который не обрезается: у адресов подписок общий префикс, различается конец
+  const URL_TAIL = 14;
 
   const view = $derived($legacyView);
   const archivePath = $derived(view?.archive_path ?? $layerSnapshot?.legacy.archive_path ?? '');
@@ -63,6 +65,9 @@
       if (inner !== null) clearTimeout(inner);
     };
   };
+
+  const urlHead = (url: string): string => url.slice(0, Math.max(0, url.length - URL_TAIL));
+  const urlTail = (url: string): string => url.slice(Math.max(0, url.length - URL_TAIL));
 
   function markCopied(i: number): void {
     copied = i;
@@ -110,6 +115,11 @@
     else showToast('warning', $t('cfg.reset.copy_failed'));
   }
 
+  // Пока идёт запись закрытия из «Настроить VPN», второе закрытие не отправляется
+  function closeWindow(): void {
+    if (!settingUp) dismissLegacy();
+  }
+
   // «Настроить VPN»: сначала запись закрытия, затем мастер — и при сбое записи (тост
   // показывает closeLegacy)
   async function setup(): Promise<void> {
@@ -129,13 +139,15 @@
   title={$t('cfg.reset.title')}
   maxWidth="560px"
   testid="legacy-reset-window"
-  onclose={dismissLegacy}
+  onclose={closeWindow}
 >
   <div class="legacy-reset">
-    <p class="legacy-heading">{$t('cfg.reset.heading')}</p>
-    <p class="legacy-body">
-      {archivePath ? $t('cfg.reset.body', { path: archivePath }) : $t('cfg.reset.body_no_path')}
-    </p>
+    <div class="legacy-intro">
+      <p class="legacy-heading">{$t('cfg.reset.heading')}</p>
+      <p class="legacy-body">
+        {archivePath ? $t('cfg.reset.body', { path: archivePath }) : $t('cfg.reset.body_no_path')}
+      </p>
+    </div>
 
     <div class="legacy-list-block" aria-busy={view === null && !unavailable}>
       {#if unavailable}
@@ -158,11 +170,17 @@
         >
           {#each view.urls as url, i (i)}
             <li class="legacy-url-row">
-              <code class="legacy-url" {@attach codeNode(i)}>{url}</code>
+              <code class="legacy-url" {@attach codeNode(i)}
+                ><span class="legacy-url-head">{urlHead(url)}</span><span class="legacy-url-tail"
+                  >{urlTail(url)}</span
+                ></code
+              >
               <Button
                 variant="secondary"
                 size="sm"
-                ariaLabel={$t('cfg.reset.copy_aria', { n: i + 1 })}
+                ariaLabel={copied === i
+                  ? $t('app.copied')
+                  : $t('cfg.reset.copy_aria', { n: i + 1 })}
                 testid="legacy-reset-copy"
                 onclick={() => void copy(i, url)}
               >
@@ -179,9 +197,6 @@
     <span class="sr-only" aria-live="polite">{copied !== null ? $t('app.copied') : ''}</span>
 
     <div class="legacy-actions">
-      <Button variant="ghost" testid="legacy-reset-close" onclick={dismissLegacy}>
-        {$t('app.close')}
-      </Button>
       <Button
         variant="primary"
         loading={settingUp}
@@ -191,12 +206,22 @@
       >
         {$t('cfg.reset.setup')}
       </Button>
+      <Button variant="ghost" testid="legacy-reset-close" onclick={closeWindow}>
+        {$t('app.close')}
+      </Button>
     </div>
   </div>
 </Modal>
 
 <style>
   .legacy-reset {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-6);
+    min-width: 0;
+  }
+
+  .legacy-intro {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-4);
@@ -208,9 +233,9 @@
   }
 
   .legacy-heading {
-    font-size: var(--font-size-lg);
+    font-size: var(--font-size-base);
     font-weight: 600;
-    line-height: 1.2;
+    line-height: 1.5;
     color: var(--fg-primary);
   }
 
@@ -243,17 +268,6 @@
     gap: var(--spacing-2);
     max-height: min(40vh, 280px);
     overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border-strong) transparent;
-  }
-
-  .legacy-urls::-webkit-scrollbar {
-    width: 6px;
-  }
-
-  .legacy-urls::-webkit-scrollbar-thumb {
-    background: var(--border-strong);
-    border-radius: var(--radius-sm);
   }
 
   .legacy-url-row {
@@ -263,12 +277,11 @@
     min-width: 0;
   }
 
-  /* Одна строка с многоточием: видна часть адреса, копируется он целиком */
+  /* Одна строка: многоточие в середине, начало и конец видны, копируется адрес целиком */
   .legacy-url {
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
     padding: var(--spacing-2) var(--spacing-3);
     background: var(--bg-elevated);
@@ -280,25 +293,47 @@
     color: var(--fg-primary);
   }
 
+  .legacy-url-head {
+    display: inline-block;
+    max-width: calc(100% - 14ch);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+  }
+
+  .legacy-url-tail {
+    display: inline-block;
+    vertical-align: bottom;
+  }
+
   .legacy-url-row > :global(button) {
     flex: none;
   }
 
+  /* Главная кнопка первая в разметке (порядок Tab), на экране — справа */
   .legacy-actions {
     display: flex;
-    justify-content: flex-end;
+    flex-direction: row-reverse;
+    justify-content: flex-start;
     gap: var(--spacing-2);
   }
 
-  /* Телефон: лист снизу, кнопки в столбец во всю ширину, главная — первой */
+  /* Телефон: лист снизу, кнопки в столбец во всю ширину, главная — сверху */
   @media (max-width: 768px) {
     .legacy-actions {
-      flex-direction: column-reverse;
+      flex-direction: column;
     }
 
-    /* Высота кнопок — --btn-h проекта: на сенсорных она уже не ниже 44px */
     .legacy-actions > :global(button) {
       width: 100%;
+    }
+  }
+
+  /* На плотности compact высота кнопки 32px: на сенсорных и узких экранах — не ниже 44px */
+  @media (max-width: 768px), (pointer: coarse) {
+    .legacy-actions > :global(button),
+    .legacy-url-row > :global(button) {
+      min-height: 44px;
     }
   }
 </style>
