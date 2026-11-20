@@ -482,8 +482,17 @@
       await cleanLegacy();
       showToast('success', $t('cfg.notice.legacy_clean_done'));
     } catch (err) {
-      const reason = legacyErrorReason(err);
-      showToast('error', $t('cfg.notice.legacy_clean_failed', { reason }), 8000);
+      // Другая операция слоя или ядра ещё идёт: правки не было, это не сбой уборки
+      const code = (err as { code?: unknown } | null)?.code;
+      if (code === 'apply_busy' || code === 'kernel_op_in_progress') {
+        showToast('info', $t('cfg.notice.legacy_clean_busy'), 8000);
+      } else {
+        showToast(
+          'error',
+          $t('cfg.notice.legacy_clean_failed', { reason: legacyErrorReason(err) }),
+          8000
+        );
+      }
     } finally {
       cleaning = false;
     }

@@ -100,8 +100,14 @@ function hideLegacy(): void {
  */
 export function legacyErrorReason(err: unknown): string {
   const detail = (err as { detail?: unknown } | null)?.detail;
-  if (typeof detail === 'string' && detail !== '') return detail;
-  return err instanceof Error ? err.message : String(err);
+  const raw =
+    typeof detail === 'string' && detail !== ''
+      ? detail
+      : err instanceof Error
+        ? err.message
+        : String(err);
+  // Тексты причин кончаются точкой, а строка шаблона ставит свою
+  return raw.replace(/[.\s]+$/, '');
 }
 
 function closeFailed(err: unknown): void {
