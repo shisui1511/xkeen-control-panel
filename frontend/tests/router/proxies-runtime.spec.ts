@@ -1510,14 +1510,21 @@ function noClientsCmd(port: number): string {
   );
 }
 
-/** Подсказка S3 на странице: заголовок и кнопка «Управлять в панели». */
+/**
+ * Подсказка S3 на странице: заголовок и ссылка «Управлять в панели». На «Квотах» она — плашка
+ * над работающей страницей, без заголовка-раздела.
+ */
 async function expectNoSocketHint(page: Page, hash: string): Promise<void> {
   await page.goto(`/${hash}`, { timeout: T.page, waitUntil: 'domcontentloaded' });
   const hint = page.getByTestId('mihomo-no-socket');
   await expect(hint, `подсказка на ${hash}`).toBeVisible({ timeout: T.page });
-  await expect(hint.getByRole('heading')).toHaveText(localeRe('proxies.rt.no_socket_title'));
+  if (hash === '#/trafficquotas') {
+    await expect(hint).toContainText(localeRe('proxies.rt.no_socket_title'));
+  } else {
+    await expect(hint.getByRole('heading')).toHaveText(localeRe('proxies.rt.no_socket_title'));
+  }
   await expect(
-    hint.getByRole('button', { name: localeRe('proxies.rt.no_socket_cta') })
+    hint.getByRole('link', { name: localeRe('proxies.rt.no_socket_cta') })
   ).toBeVisible();
 }
 
@@ -1604,11 +1611,11 @@ test(
         // Ссылка ведёт к профилям: вкладка ядер «Конфигурации», активен профиль теста
         await page
           .getByTestId('mihomo-no-socket')
-          .getByRole('button', { name: localeRe('proxies.rt.no_socket_cta') })
+          .getByRole('link', { name: localeRe('proxies.rt.no_socket_cta') })
           .click();
         await expect
           .poll(() => page.evaluate(() => window.location.hash), { timeout: T.page })
-          .toBe('#/config/cores');
+          .toBe('#/config/cores?focus=profiles');
         await expect(page.getByTestId('profiles-card')).toBeVisible({ timeout: T.page });
         await expect(page.getByTestId(`profile-row-${NOSOCK_TCP}`)).toHaveAttribute(
           'data-active',
