@@ -443,6 +443,7 @@
   }
 
   .pc-title {
+    scroll-margin-top: var(--spacing-6);
     margin: 0;
     font-size: var(--font-size-lg);
     font-weight: 600;

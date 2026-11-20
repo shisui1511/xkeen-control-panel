@@ -139,6 +139,7 @@
   title={$t('cfg.reset.title')}
   maxWidth="560px"
   testid="legacy-reset-window"
+  closeDisabled={settingUp}
   onclose={closeWindow}
 >
   <div class="legacy-reset">
@@ -177,7 +178,6 @@
               >
               <Button
                 variant="secondary"
-                size="sm"
                 ariaLabel={copied === i
                   ? $t('app.copied')
                   : $t('cfg.reset.copy_aria', { n: i + 1 })}
@@ -198,6 +198,14 @@
 
     <div class="legacy-actions">
       <Button
+        variant="ghost"
+        disabled={settingUp}
+        testid="legacy-reset-close"
+        onclick={closeWindow}
+      >
+        {$t('app.close')}
+      </Button>
+      <Button
         variant="primary"
         loading={settingUp}
         testid="legacy-reset-setup"
@@ -205,9 +213,6 @@
         {@attach focusPrimary}
       >
         {$t('cfg.reset.setup')}
-      </Button>
-      <Button variant="ghost" testid="legacy-reset-close" onclick={closeWindow}>
-        {$t('app.close')}
       </Button>
     </div>
   </div>
@@ -310,15 +315,14 @@
     flex: none;
   }
 
-  /* Главная кнопка первая в разметке (порядок Tab), на экране — справа */
+  /* Порядок в разметке совпадает с видимым и порядком Tab: «Закрыть», затем главная справа */
   .legacy-actions {
     display: flex;
-    flex-direction: row-reverse;
-    justify-content: flex-start;
+    justify-content: flex-end;
     gap: var(--spacing-2);
   }
 
-  /* Телефон: лист снизу, кнопки в столбец во всю ширину, главная — сверху */
+  /* Телефон: лист снизу, кнопки в столбец во всю ширину, главная — внизу, под большим пальцем */
   @media (max-width: 768px) {
     .legacy-actions {
       flex-direction: column;
@@ -334,6 +338,13 @@
     .legacy-actions > :global(button),
     .legacy-url-row > :global(button) {
       min-height: 44px;
+    }
+
+    /* Строка адреса той же высоты, что соседняя кнопка «Копировать» */
+    .legacy-url {
+      padding-block: var(--spacing-3);
+      min-height: 44px;
+      box-sizing: border-box;
     }
   }
 </style>

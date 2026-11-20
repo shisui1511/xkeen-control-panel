@@ -493,7 +493,6 @@
           <span class="legacy-actions">
             <Button
               variant="secondary"
-              size="sm"
               class="tap-zone-44"
               loading={cleaning}
               testid="legacy-leftovers-clean"

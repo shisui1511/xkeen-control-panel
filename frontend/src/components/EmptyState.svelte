@@ -45,7 +45,7 @@
   <h2 class="empty-state__title">{title}</h2>
   <p class="empty-state__description">{description}</p>
   {#if ctaText && ctaHref}
-    <a class="btn btn-{ctaVariant}" href={ctaHref}>{ctaText}</a>
+    <a class="btn btn-{ctaVariant} tap-zone-44" href={ctaHref}>{ctaText}</a>
   {:else if ctaText && oncta}
     <Button variant={ctaVariant} loading={ctaLoading} title={ctaText} onclick={oncta}
       >{ctaText}</Button
@@ -64,7 +64,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    gap: var(--spacing-2-5);
+    gap: var(--spacing-3);
   }
 
   .empty-state.empty-state--plain,
@@ -104,7 +104,7 @@
     margin: 0;
   }
   .empty-state > :global(.btn) {
-    margin-top: var(--spacing-1-5);
+    margin-top: var(--spacing-2);
   }
   .empty-state__description {
     font-size: var(--font-size-sm);

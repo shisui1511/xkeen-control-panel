@@ -439,9 +439,37 @@ test.describe('config-entries legacy-reset', () => {
 
         // Список недоступен: путь архива вместо списка, закрытие работает и на телефоне
         await restartPanel(page, registryOf(legacyUrls(1)));
+        // Телефон со списком: зоны нажатия не ниже 44px, строка адреса той же высоты, порядок
+        // кнопок в разметке совпадает с видимым (закрыть выше главной)
+        await page.setViewportSize(VP_PHONE);
+        await openAt(page, '#/');
+        await expect(win).toBeVisible({ timeout: T.page });
+        await expect(win.getByTestId('legacy-reset-copy')).toHaveCount(1, { timeout: T.page });
+        const boxes = await win.evaluate((el) => {
+          const box = (sel: string) => {
+            const r = el.querySelector(sel)?.getBoundingClientRect();
+            return r ? { y: r.y, h: r.height, w: r.width } : null;
+          };
+          return {
+            copy: box('[data-testid="legacy-reset-copy"]'),
+            row: box('.legacy-url'),
+            close: box('[data-testid="legacy-reset-close"]'),
+            setup: box('[data-testid="legacy-reset-setup"]')
+          };
+        });
+        expect(boxes.copy && boxes.copy.h >= 43.5, '«Копировать» не ниже 44px').toBe(true);
+        expect(boxes.close && boxes.close.h >= 43.5, '«Закрыть» не ниже 44px').toBe(true);
+        expect(boxes.setup && boxes.setup.h >= 43.5, '«Настроить VPN» не ниже 44px').toBe(true);
+        expect(
+          boxes.row && boxes.copy && Math.abs(boxes.row.h - boxes.copy.h) <= 1,
+          'строка адреса той же высоты, что «Копировать»'
+        ).toBe(true);
+        expect(
+          boxes.close && boxes.setup && boxes.close.y < boxes.setup.y,
+          'порядок кнопок в разметке совпадает с видимым'
+        ).toBe(true);
         const rm = await standSh(`rm -f ${XCP_DATA}/legacy/urls.json`);
         expect(rm, 'список адресов убран с диска').toBe(0);
-        await page.setViewportSize(VP_PHONE);
         const phoneGuard = attachConsoleGuard(page);
         await openAt(page, '#/');
         await expect(win).toBeVisible({ timeout: T.page });

@@ -71,8 +71,9 @@
     <div class="prn-body">
       <span class="prn-text">
         <strong class="prn-title">{$t('proxies.rt.no_socket_title')}</strong>
-        {$t('proxies.rt.no_socket_desc')}
-        <a class="prn-link prn-link--plain" href={PROFILES_HASH}>{$t('proxies.rt.no_socket_cta')}</a
+        {$t('proxies.rt.no_socket_desc_inline')}
+        <a class="prn-link prn-link--plain tap-zone-44" href={PROFILES_HASH}
+          >{$t('proxies.rt.no_socket_cta')}</a
         >
       </span>
     </div>
@@ -217,6 +218,12 @@
       display: inline-flex;
       align-items: center;
       min-height: 44px;
+    }
+
+    /* Ссылка внутри абзаца: строку не раздувает, зона нажатия — tap-zone-44 */
+    .prn-text .prn-link--plain {
+      display: inline;
+      min-height: 0;
     }
   }
 </style>

@@ -2089,6 +2089,7 @@
   "cfg.notice.legacy_archive_failed": "Failed to move the old panel data to the archive at startup: {reason}. The data was left in place unchanged; the panel will retry on its next start.",
   "proxies.rt.no_socket_title": "The profile has no API access",
   "proxies.rt.no_socket_desc": "The profile has no external-controller-unix: /opt/var/run/mihomo.sock line — add it in “Configuration → Cores” or hand the profile over to the panel. Without it the page cannot see the kernel.",
+  "proxies.rt.no_socket_desc_inline": "The profile has no external-controller-unix: /opt/var/run/mihomo.sock line, so traffic is not counted for quotas. Add it in “Configuration → Cores” or hand the profile over to the panel; quotas can still be set up meanwhile.",
   "proxies.rt.no_socket_cta": "Manage in the panel",
   "cfg.setup.finish": "Done",
   "cfg.setup.finish_later": "Continue later",

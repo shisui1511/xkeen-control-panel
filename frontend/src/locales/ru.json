@@ -2089,6 +2089,7 @@
   "cfg.notice.legacy_archive_failed": "Не удалось перенести данные старой панели в архив при запуске: {reason}. Данные остались на месте без изменений, попытка повторится при следующем запуске панели.",
   "proxies.rt.no_socket_title": "У профиля нет доступа к API",
   "proxies.rt.no_socket_desc": "В профиле нет строки external-controller-unix: /opt/var/run/mihomo.sock — добавьте её в «Конфигурация → Ядра» или передайте профиль панели. Без неё страница не видит ядро.",
+  "proxies.rt.no_socket_desc_inline": "В профиле нет строки external-controller-unix: /opt/var/run/mihomo.sock, поэтому трафик для квот не считается. Добавьте её в «Конфигурация → Ядра» или передайте профиль панели; квоты можно настраивать и сейчас.",
   "proxies.rt.no_socket_cta": "Управлять в панели",
   "cfg.setup.finish": "Готово",
   "cfg.setup.finish_later": "Продолжить позже",
