@@ -72,8 +72,7 @@
       <span class="prn-text">
         <strong class="prn-title">{$t('proxies.rt.no_socket_title')}</strong>
         {$t('proxies.rt.no_socket_desc_inline')}
-        <a class="prn-link prn-link--plain tap-zone-44" href={PROFILES_HASH}
-          >{$t('proxies.rt.no_socket_cta')}</a
+        <a class="prn-link prn-link--plain" href={PROFILES_HASH}>{$t('proxies.rt.no_socket_cta')}</a
         >
       </span>
     </div>

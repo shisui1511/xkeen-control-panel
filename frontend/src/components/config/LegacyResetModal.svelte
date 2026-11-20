@@ -140,6 +140,7 @@
   maxWidth="560px"
   testid="legacy-reset-window"
   closeDisabled={settingUp}
+  closeTitle={$t('cfg.reset.closing')}
   onclose={closeWindow}
 >
   <div class="legacy-reset">
@@ -185,7 +186,14 @@
                 onclick={() => void copy(i, url)}
               >
                 <Icon name={copied === i ? 'check' : 'copy'} size={14} />
-                {copied === i ? $t('app.copied') : $t('app.copy')}
+                <span class="legacy-copy-labels">
+                  <span class="legacy-copy-label" class:legacy-copy-off={copied === i}
+                    >{$t('app.copy')}</span
+                  >
+                  <span class="legacy-copy-label" class:legacy-copy-off={copied !== i}
+                    >{$t('app.copied')}</span
+                  >
+                </span>
               </Button>
             </li>
           {/each}
@@ -313,6 +321,19 @@
 
   .legacy-url-row > :global(button) {
     flex: none;
+  }
+
+  /* Обе подписи кнопки в одной ячейке: ширина по длинной, «Скопировано» её не сдвигает */
+  .legacy-copy-labels {
+    display: inline-grid;
+  }
+
+  .legacy-copy-label {
+    grid-area: 1 / 1;
+  }
+
+  .legacy-copy-off {
+    visibility: hidden;
   }
 
   /* Порядок в разметке совпадает с видимым и порядком Tab: «Закрыть», затем главная справа */

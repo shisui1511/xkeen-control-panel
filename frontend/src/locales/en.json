@@ -2068,6 +2068,7 @@
   "cfg.reset.urls_secret": "These addresses are your personal links: do not share them.",
   "cfg.reset.copy_aria": "Copy subscription address {n}",
   "cfg.reset.copy_failed": "Could not copy — select the address manually",
+  "cfg.reset.closing": "Opening the setup wizard: the window closes on its own",
   "cfg.reset.setup": "Set up VPN",
   "cfg.reset.close_failed": "Could not remember that the window was closed: {reason}",
   "cfg.notice.legacy_leftovers_one": "The old panel left traces in {count} kernel file (listed below). The panel does not edit this file on its own.",

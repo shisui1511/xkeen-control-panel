@@ -1617,6 +1617,17 @@ test(
           .poll(() => page.evaluate(() => window.location.hash), { timeout: T.page })
           .toBe('#/config/cores?focus=profiles');
         await expect(page.getByTestId('profiles-card')).toBeVisible({ timeout: T.page });
+        // Заголовок карточки после прокрутки не под липкой полосой черновика
+        const titleTop = await page
+          .getByTestId('profiles-card')
+          .locator('.pc-title')
+          .evaluate((el) => el.getBoundingClientRect().top);
+        const barBottom = await page
+          .getByTestId('config-draftbar')
+          .evaluate((el) => el.getBoundingClientRect().bottom);
+        expect(titleTop, 'заголовок «Профили» ниже полосы черновика').toBeGreaterThanOrEqual(
+          barBottom
+        );
         await expect(page.getByTestId(`profile-row-${NOSOCK_TCP}`)).toHaveAttribute(
           'data-active',
           'true',

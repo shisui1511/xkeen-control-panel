@@ -81,6 +81,11 @@
   // экрана, фокус на её заголовке
   const focusOnRequest: Attachment<HTMLElement> = (node) => {
     if (!window.location.hash.includes('focus=profiles')) return;
+    // Заголовок не должен уйти под липкую полосу черновика (она держит и шапку телефона, и
+    // баннер DNS): запас — до её нижней кромки плюс шаг
+    const bar = document.querySelector('[data-testid="config-draftbar"]');
+    const covered = bar ? Math.max(0, bar.getBoundingClientRect().bottom) : 0;
+    node.style.scrollMarginTop = `calc(${covered}px + var(--spacing-6))`;
     node.scrollIntoView({ block: 'start' });
     node.focus({ preventScroll: true });
   };
@@ -443,7 +448,6 @@
   }
 
   .pc-title {
-    scroll-margin-top: var(--spacing-6);
     margin: 0;
     font-size: var(--font-size-lg);
     font-weight: 600;
