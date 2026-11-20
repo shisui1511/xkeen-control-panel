@@ -2084,6 +2084,7 @@
   "cfg.notice.legacy_clean_failed": "Could not remove the traces: {reason}. Files were not changed. Try again or edit them in “Files”.",
   "cfg.notice.legacy_blocked": "not removed automatically: {reason}",
   "cfg.notice.legacy_cleanup_failed": "The one-time cleanup of old panel files at startup failed: {reason}. You can remove the traces with the “Remove” button.",
+  "cfg.notice.legacy_archive_failed": "Failed to move the old panel data to the archive at startup: {reason}. The data was left in place unchanged; the panel will retry on its next start.",
   "proxies.rt.no_socket_title": "The profile has no API access",
   "proxies.rt.no_socket_desc": "The profile has no external-controller-unix — add the line or hand the profile over to the panel. Without it the page cannot see the kernel.",
   "proxies.rt.no_socket_cta": "Manage in the panel",

@@ -316,6 +316,13 @@
         text: $t('cfg.notice.legacy_cleanup_failed', { reason: n.reason ?? p.reason ?? '' })
       };
     }
+    if (n.id === 'legacy_archive_failed') {
+      return {
+        notice: n,
+        tone: 'warning',
+        text: $t('cfg.notice.legacy_archive_failed', { reason: n.reason ?? p.reason ?? '' })
+      };
+    }
     if (n.id !== 'legacy_leftovers') return null;
     const files = lines(p.files);
     // Без прототипа: имя файла не совпадёт со свойством объекта

@@ -263,7 +263,9 @@ const NOTICE_IDS = [
   'geodata_cron_two',
   // Следы старой панели в файлах ядер и сбой их однократной уборки на старте (фаза 151, D-04)
   'legacy_leftovers',
-  'legacy_cleanup_failed'
+  'legacy_cleanup_failed',
+  // Сбой архивации прежних данных при запуске: данные остались на месте нетронутыми
+  'legacy_archive_failed'
 ];
 const NOTICE_PREFIXES = [
   'build_failed',
