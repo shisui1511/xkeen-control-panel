@@ -553,7 +553,8 @@
         "TestRouterSubscriptionRefreshXrayOnly",
         "TestRouterShareLinks",
         "TestRouterCoresDisableReturnsOriginals",
-        "TestRouterDisableReleasesRouting"
+        "TestRouterDisableReleasesRouting",
+        "TestRouterAccessLogLegacyEmptySection"
       ],
       "keep_test_declarations": {
         "internal/services/geodata/router_remove_test.go": [
@@ -612,7 +613,6 @@
           "TestRouterGeodataOutsideGone"
         ],
         "internal/handlers/router_xray_access_log_test.go": [
-          "TestRouterAccessLogLegacyEmptySection",
           "TestRouterAccessLogEnable",
           "TestRouterAccessLogForeignTake",
           "TestRouterAccessLogEmptyAccess"
