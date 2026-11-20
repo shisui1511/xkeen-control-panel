@@ -281,6 +281,9 @@ async function restartPanel(page: Page, registry: string | null): Promise<void> 
   const code = await standSh(`${STOP_PANEL}; ${seed}${START_PANEL}`, 150_000);
   if (code !== 0) throw new Error(`legacy-seed: панель не перезапущена (код ${code})`);
   await waitPanelUp(page);
+  // Страница со старым снимком слоя не должна пережить перезапуск: переход на тот же адрес с
+  // другим фрагментом не перезагружает приложение, окно читало бы устаревший признак
+  await page.goto('about:blank');
 }
 
 /** Синтетические адреса: длинный, Unicode в пути и percent-encoding в запросе. */
