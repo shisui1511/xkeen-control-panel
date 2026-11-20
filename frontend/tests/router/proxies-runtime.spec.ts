@@ -1278,6 +1278,7 @@ test(
 const NOSOCK_PREFIX = 'rtpx-nosock-';
 const NOSOCK_NONE = `${NOSOCK_PREFIX}none`;
 const NOSOCK_TCP = `${NOSOCK_PREFIX}tcp`;
+const NOSOCK_PARK = `${NOSOCK_PREFIX}park`;
 const MIHOMO_PROFILES_DIR = '/opt/etc/mihomo/profiles';
 /** Строки контроллера верхнего уровня: TCP и Unix. */
 const CONTROLLER_LINES = /^external-controller(?:-unix)?[ \t]*:.*(?:\r?\n|$)/gm;
@@ -1541,10 +1542,10 @@ test(
     test.skip(before.plain, 'config.yaml — обычный файл: переход его усыновит');
     // Профиль, на который Mihomo встанет перед возвратом панели: иначе целью возврата
     // останется профиль теста, и его нельзя удалить
-    const park = before.users.includes(before.returnTarget)
+    // Своего профиля на стенде может не быть: тогда тест заводит такой сам и убирает в конце
+    let park = before.users.includes(before.returnTarget)
       ? before.returnTarget
       : (before.users[0] ?? '');
-    test.skip(before.taken && park === '', 'нет своего профиля для цели возврата Mihomo');
     const initial = await noSocketState(page);
 
     // Профиль панели (или прежний свой профиль с сокетом) подсказки не даёт
@@ -1560,6 +1561,14 @@ test(
     const tcpPort = randomPort();
     await withStandReturn(
       async () => {
+        if (before.taken && park === '') {
+          const parked = await api(page, 'POST', '/api/mihomo/profiles/create', {
+            name: NOSOCK_PARK,
+            template: 'rule-based.yaml'
+          });
+          expect(parked.status, `создание профиля ${NOSOCK_PARK}`).toBe(200);
+          park = NOSOCK_PARK;
+        }
         const noneBytes = await createNoSocketProfile(page, NOSOCK_NONE, null);
         const tcpBytes = await createNoSocketProfile(page, NOSOCK_TCP, tcpPort);
 
