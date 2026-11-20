@@ -55,6 +55,12 @@ func (a *API) XrayAccessLog(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusServiceUnavailable, "xray access log service unavailable")
 		return
 	}
+	// Без сервиса секций ядер (не создался в main.go) статус журнала взять неоткуда:
+	// ответ как у остальных маршрутов слоя — 404 not_found с переведённым текстом.
+	if a.cores == nil {
+		JSONErrorCode(w, http.StatusNotFound, "not_found", a.t(r, "error.not_found"))
+		return
+	}
 	status, err := a.xrayAccessLogStatus()
 	if errors.Is(err, services.ErrXrayLogConfigNotFound) {
 		JSONError(w, http.StatusNotFound, err.Error())
