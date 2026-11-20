@@ -4,7 +4,7 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
 import { CORE_TAG, SLOW_ANNOTATION } from './lib/known';
-import { api, withPanel } from './lib/nodes-api';
+import { withPanel } from './lib/nodes-api';
 
 // Управление службой ядра через интерфейс настоящей панели (RT-05, D-04): остановка, запуск и
 // перезапуск кнопками страницы «Службы». После каждого действия статус в интерфейсе (значок

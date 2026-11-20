@@ -54,8 +54,15 @@ function inspect(file) {
       throw new Error('запрещённый предмет проверки');
     }
     const absolute = path.join(root, file);
-    if (!fs.lstatSync(absolute).isFile()) throw new Error('ожидался обычный файл');
-    const raw = fs.readFileSync(absolute, 'utf8');
+    // Один дескриптор: тип файла и содержимое берутся без промежутка между проверкой и чтением.
+    const fd = fs.openSync(absolute, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    let raw;
+    try {
+      if (!fs.fstatSync(fd).isFile()) throw new Error('ожидался обычный файл');
+      raw = fs.readFileSync(fd, 'utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
     const code = raw.replace(tokens, (token) => (isComment(token) ? blank(token) : token));
     const unquoted = raw.replace(tokens, blank);
     const subject = { raw, code, unquoted };

@@ -197,7 +197,7 @@ func (b *xrayBuild) dnsFront(live configlayer.DNSTakeoverLive, params configlaye
 	if err != nil {
 		return nil, err
 	}
-	direct := make([]string, 0, len(domains)+len(refs))
+	direct := make([]string, 0, len(domains))
 	for _, d := range domains {
 		direct = append(direct, xrayDomain(d))
 	}

@@ -364,7 +364,7 @@ func (e kernelEdits) mirror(tmp string) error {
 		if entry.IsDir() || !strings.HasSuffix(name, ".json") {
 			continue
 		}
-		content := []byte(nil)
+		var content []byte
 		if file, changed := byName[name]; changed {
 			if file.after == nil {
 				continue

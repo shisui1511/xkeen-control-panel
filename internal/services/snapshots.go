@@ -102,7 +102,13 @@ func (s *SnapshotService) Create(label string) (SnapshotMeta, error) {
 	if err != nil {
 		return SnapshotMeta{}, fmt.Errorf("create archive: %w", err)
 	}
-	defer f.Close()
+	closed := false
+	defer func() {
+		// Аварийный путь: ошибка записи уже возвращена вызывающему, повторное закрытие её не меняет.
+		if !closed {
+			_ = f.Close()
+		}
+	}()
 
 	gw := gzip.NewWriter(f)
 	tw := tar.NewWriter(gw)
@@ -187,6 +193,7 @@ func (s *SnapshotService) Create(label string) (SnapshotMeta, error) {
 		return SnapshotMeta{}, err
 	}
 	// Flush and stat to get size
+	closed = true
 	if err := f.Close(); err != nil {
 		os.Remove(archivePath)
 		return SnapshotMeta{}, fmt.Errorf("close archive: %w", err)
@@ -528,7 +535,13 @@ func (s *SnapshotService) SaveUploaded(r io.Reader, filename string) (SnapshotMe
 	if err != nil {
 		return SnapshotMeta{}, fmt.Errorf("create archive: %w", err)
 	}
-	defer f.Close()
+	closed := false
+	defer func() {
+		// Аварийный путь: ошибка записи уже возвращена вызывающему, повторное закрытие её не меняет.
+		if !closed {
+			_ = f.Close()
+		}
+	}()
 
 	// Limit to 15 MB
 	limitReader := io.LimitReader(r, 15*1024*1024)
@@ -545,6 +558,7 @@ func (s *SnapshotService) SaveUploaded(r io.Reader, filename string) (SnapshotMe
 		return SnapshotMeta{}, fmt.Errorf("uploaded file exceeds maximum size of 15 MB")
 	}
 
+	closed = true
 	if err := f.Close(); err != nil {
 		os.Remove(archivePath)
 		return SnapshotMeta{}, fmt.Errorf("close archive: %w", err)

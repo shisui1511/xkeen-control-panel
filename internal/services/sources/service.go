@@ -274,7 +274,7 @@ func (s *Service) OnKernelInstalled(kernel string) {
 				return
 			}
 			if _, err := s.refreshCurrent(s.ctx, id, []string{kernel}); err != nil && !errors.Is(err, ErrSourceDisabled) {
-				log.Printf("[sources] сборка источника %s после установки ядра %s не выполнена: %v", id, kernel, err)
+				log.Printf("[sources] сборка источника %q после установки ядра %q не выполнена: %v", id, kernel, err)
 			}
 		}
 	})
