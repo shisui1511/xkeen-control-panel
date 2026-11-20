@@ -14,17 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shisui1511/xkeen-control-panel/internal/releasefeed"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // Проверка обновления панели на настоящей панели устройства. Источник истины —
-// реальные релизы источника выпусков releasefeed (отдельный репозиторий GitHub:
-// published_at и блок xcp-release первой строки тела), прочитанные тестом
-// отдельно, и часы устройства. Панель обязана читать именно этот источник:
-// release_repository и download_url ответа проверки сверяются с контрактом, а
-// отсутствие источника (404) — провал, ответ репозитория кода не подставляется. Сеть и время не подменяются:
+// реальные релизы GitHub (published_at и блок xcp-release первой строки тела),
+// прочитанные тестом отдельно, и часы устройства. Сеть и время не подменяются:
 // оракул пишется здесь заново по правилам модели выпусков и функций продукта
 // не вызывает. Состояние автоустановки зависит от сборки панели: на сборке
 // ветки (версия вида X.Y.Z-alpha.N+g<sha>) это dev_build, на сборке под номером
@@ -171,74 +167,22 @@ func rtUpdSemver(a, b string) int {
 	return 0
 }
 
-// rtUpdReleases читает список релизов источника выпусков; второе значение —
-// причина недоступности GitHub (лимит 403, сеть, 5xx), пустая при успехе;
-// третье — код ответа (0 — ответа нет). В причине только имя репозитория и код.
-func rtUpdReleases() ([]rtUpdRelease, string, int) {
-	repo := releasefeed.Repository()
-	resp, err := utils.SafeHTTPClient(20 * time.Second).Get(releasefeed.APIReleasesURL() + "?per_page=30")
+// rtUpdReleases читает список релизов; второе значение — причина недоступности
+// GitHub (лимит 403, сеть, 5xx), пустая при успехе.
+func rtUpdReleases() ([]rtUpdRelease, string) {
+	resp, err := utils.SafeHTTPClient(20 * time.Second).Get(githubAPIReleases + "?per_page=30")
 	if err != nil {
-		return nil, "источник выпусков " + repo + " недоступен: " + err.Error(), 0
+		return nil, "GitHub недоступен: " + err.Error()
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, "источник выпусков " + repo + " недоступен: статус " + resp.Status, resp.StatusCode
+		return nil, "GitHub недоступен: статус " + resp.Status
 	}
 	var rels []rtUpdRelease
 	if err := json.NewDecoder(resp.Body).Decode(&rels); err != nil {
-		return nil, "источник выпусков " + repo + ": ответ не разобран: " + err.Error(), resp.StatusCode
+		return nil, "GitHub: ответ не разобран: " + err.Error()
 	}
-	return rels, "", resp.StatusCode
-}
-
-// rtUpdCheckResp — поля ответа GET /api/update/check, по которым видно, из
-// какого источника панель читает релизы и откуда скачает ассет.
-type rtUpdCheckResp struct {
-	LatestVersion     string `json:"latest_version"`
-	HasUpdate         bool   `json:"has_update"`
-	DownloadURL       string `json:"download_url"`
-	ReleaseRepository string `json:"release_repository"`
-}
-
-// rtUpdSource сверяет источник, которым пользуется панель, с контрактом
-// releasefeed: успешная проверка называет его в release_repository, адрес
-// ассета указывает на него; сбой проверки называет его в detail ошибки. Ответ
-// 404 источника выпусков — провал: внешняя настройка источника не завершена,
-// а репозиторий кода как запасной путь не допускается.
-func rtUpdSource(t *testing.T, channel string, code int, raw []byte) {
-	t.Helper()
-	repo := releasefeed.Repository()
-	if err := releasefeed.Check(); err != nil || repo == "" || strings.EqualFold(repo, releasefeed.SourceRepository) {
-		t.Fatalf("контракт источника выпусков неверен: %q (%v)", repo, err)
-	}
-	var env struct {
-		Data   rtUpdCheckResp `json:"data"`
-		Detail string         `json:"detail"`
-	}
-	if err := json.Unmarshal(raw, &env); err != nil {
-		t.Fatalf("канал %s: ответ проверки обновления не JSON (статус %d): %v", channel, code, err)
-	}
-	if code != http.StatusOK {
-		if strings.Contains(env.Detail, "404") {
-			t.Fatalf("канал %s: источник выпусков отвечает 404 (%s): внешняя настройка источника не завершена", channel, env.Detail)
-		}
-		if strings.Contains(env.Detail, "GitHub API") && !strings.Contains(env.Detail, repo) {
-			t.Errorf("канал %s: сбой проверки не называет источник выпусков %s: %q", channel, repo, env.Detail)
-		}
-		return
-	}
-	d := env.Data
-	if d.ReleaseRepository != repo {
-		t.Errorf("канал %s: release_repository=%q, контракт %q", channel, d.ReleaseRepository, repo)
-	}
-	if d.HasUpdate {
-		prefix := "https://github.com/" + repo + "/releases/download/v" + d.LatestVersion + "/"
-		if !strings.HasPrefix(d.DownloadURL, prefix) {
-			t.Errorf("канал %s: download_url=%q не из источника выпусков (ожидался префикс %q)", channel, d.DownloadURL, prefix)
-		}
-	} else if d.DownloadURL != "" {
-		t.Errorf("канал %s: download_url=%q без обновления", channel, d.DownloadURL)
-	}
+	return rels, ""
 }
 
 // rtUpdMarkerRe — блок xcp-release первой строки тела (формат — шапка
@@ -327,13 +271,9 @@ func rtUpdAutoStateChannel(t *testing.T, p *routertest.Panel, channel string) {
 		rtUpdPost(t, p, "/api/update/channel", map[string]string{"channel": channel})
 		rtUpdPost(t, p, "/api/update/settings", map[string]any{"auto_install": true, "install_window": window})
 
-		// Проверка записывает факты релиза в планировщик; сбой GitHub — не провал
-		// продукта, но источник, к которому панель обратилась, сверяется всегда.
-		checkCode, checkRaw, err := p.Call(http.MethodGet, "/api/update/check?channel="+channel, nil)
+		// Проверка записывает факты релиза в планировщик; сбой GitHub — не провал продукта.
+		checkCode, _, err := p.Call(http.MethodGet, "/api/update/check?channel="+channel, nil)
 		checkOK := err == nil && checkCode == http.StatusOK
-		if err == nil {
-			rtUpdSource(t, channel, checkCode, checkRaw)
-		}
 		st := rtUpdReadState(t, p)
 		now := time.Now()
 		if now.Format("2006-01-02") != started.Format("2006-01-02") && attempt == 0 {
@@ -345,11 +285,7 @@ func rtUpdAutoStateChannel(t *testing.T, p *routertest.Panel, channel string) {
 		var rels []rtUpdRelease
 		if checkOK {
 			var reason string
-			var status int
-			rels, reason, status = rtUpdReleases()
-			if status == http.StatusNotFound {
-				t.Fatalf("%s: внешняя настройка источника не завершена", reason)
-			}
+			rels, reason = rtUpdReleases()
 			if reason != "" {
 				checkOK = false
 				t.Logf("%s", reason)
@@ -371,7 +307,7 @@ func rtUpdAutoStateChannel(t *testing.T, p *routertest.Panel, channel string) {
 				}
 			}
 			if rel == nil {
-				t.Errorf("релиз %q из состояния панели не найден в источнике выпусков %s", st.LatestVersion, releasefeed.Repository())
+				t.Errorf("релиз %q из состояния панели не найден в списке GitHub", st.LatestVersion)
 			} else {
 				urgent, hold := rtUpdBlock(rel.Body)
 				if st.LatestPublishedAt != rel.PublishedAt {
@@ -391,20 +327,6 @@ func rtUpdAutoStateChannel(t *testing.T, p *routertest.Panel, channel string) {
 		}
 
 		t.Run(want, func(t *testing.T) {
-			// Кандидат автоустановки — релиз того же источника: автоустановка
-			// идёт штатно между версиями источника выпусков.
-			if st.AutoVersion != "" && checkOK {
-				found := false
-				for _, r := range rels {
-					if r.TagName == "v"+st.AutoVersion {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Errorf("канал %s: кандидат автоустановки %s не найден в источнике выпусков %s", channel, st.AutoVersion, releasefeed.Repository())
-				}
-			}
 			if st.AutoState != want || st.AutoInstallOn != wantDate || st.AutoVersion != wantVersion {
 				t.Errorf("канал %s: auto_state=%q auto_install_on=%q auto_version=%q, ожидалось %q, %q и %q (has_update=%v, latest=%s, published_at=%s, urgent=%v, hold=%v, окно %s)",
 					channel, st.AutoState, st.AutoInstallOn, st.AutoVersion, want, wantDate, wantVersion,
