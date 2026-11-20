@@ -470,6 +470,8 @@ test.describe('config-entries legacy-reset', () => {
         ).toBe(true);
         const rm = await standSh(`rm -f ${XCP_DATA}/legacy/urls.json`);
         expect(rm, 'список адресов убран с диска').toBe(0);
+        // Страница уже держит прочитанный список: чтобы увидеть отказ чтения, перечитываем её
+        await page.reload({ waitUntil: 'domcontentloaded' });
         const phoneGuard = attachConsoleGuard(page);
         await openAt(page, '#/');
         await expect(win).toBeVisible({ timeout: T.page });
