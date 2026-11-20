@@ -2089,7 +2089,7 @@
   "cfg.notice.legacy_confirm_text_few": "Old panel blocks will be cut out of {count} files; a backup copy of each is made first. If rules refer to node selection files, those are removed together with the blocks.",
   "cfg.notice.legacy_confirm_text_many": "Old panel blocks will be cut out of {count} files; a backup copy of each is made first. If rules refer to node selection files, those are removed together with the blocks.",
   "cfg.notice.legacy_clean_done": "Old panel traces removed. Backup copies saved.",
-  "cfg.notice.legacy_clean_failed": "Could not remove the traces: {reason}. Files were not changed. Try again or edit them in “Files”.",
+  "cfg.notice.legacy_clean_failed": "Could not remove the traces: {reason}. Check the files in the “Files” section: backup copies are made before each edit.",
   "cfg.notice.legacy_blocked": "not removed automatically: {reason}",
   "cfg.notice.legacy_cleanup_failed": "The one-time cleanup of old panel files at startup failed: {reason}. If traces remain, the panel shows them in a separate notice with a “Remove” button.",
   "cfg.notice.legacy_archive_failed": "Failed to move the old panel data to the archive at startup: {reason}. The data was left in place unchanged; the panel will retry on its next start.",

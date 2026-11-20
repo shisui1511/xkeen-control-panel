@@ -94,8 +94,18 @@ function hideLegacy(): void {
   forgetLegacy();
 }
 
+/**
+ * Причина отказа для тоста: конверт ошибки кладёт настоящую причину в `detail`, а `message`
+ * при ответе 500 — общее «Внутренняя ошибка сервера».
+ */
+export function legacyErrorReason(err: unknown): string {
+  const detail = (err as { detail?: unknown } | null)?.detail;
+  if (typeof detail === 'string' && detail !== '') return detail;
+  return err instanceof Error ? err.message : String(err);
+}
+
 function closeFailed(err: unknown): void {
-  const reason = err instanceof Error ? err.message : String(err);
+  const reason = legacyErrorReason(err);
   showToast('warning', get(t)('cfg.reset.close_failed', { reason }), 6000);
 }
 

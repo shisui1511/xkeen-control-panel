@@ -2,7 +2,7 @@
   import { t, tp } from '../../i18n';
   import Icon from '../../lib/components/Icon.svelte';
   import Button from '../Button.svelte';
-  import { cleanLegacy } from '../../lib/configLegacy';
+  import { cleanLegacy, legacyErrorReason } from '../../lib/configLegacy';
   import {
     visibleNotices,
     dismissNotice,
@@ -482,7 +482,7 @@
       await cleanLegacy();
       showToast('success', $t('cfg.notice.legacy_clean_done'));
     } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
+      const reason = legacyErrorReason(err);
       showToast('error', $t('cfg.notice.legacy_clean_failed', { reason }), 8000);
     } finally {
       cleaning = false;
