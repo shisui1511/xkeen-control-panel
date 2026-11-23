@@ -553,6 +553,27 @@ func rtxsBoHelp() string {
 	return ""
 }
 
+// rtxsPreflight — `xray run -test` каталога изолированного процесса до запуска:
+// отказ — поломка подготовки. В сообщении сначала строка отказа Xray: вывод
+// начинается с баннера версии и списка файлов, а подробность в отчёте стенда
+// обрезается.
+func rtxsPreflight(t *testing.T, dir string) {
+	t.Helper()
+	out, err := rtxsRunSoft("run", "-test", "-confdir", dir)
+	if err == nil {
+		return
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	reason := lines[len(lines)-1]
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.Contains(strings.ToLower(lines[i]), "failed") {
+			reason = lines[i]
+			break
+		}
+	}
+	t.Fatalf("подготовка: xray run -test отверг каталог процесса: %s", rtRedact(strings.TrimSpace(reason)))
+}
+
 // rtxsMs — длительность в миллисекундах для факта.
 func rtxsMs(d time.Duration) string { return strconv.FormatInt(d.Milliseconds(), 10) }
 
@@ -717,9 +738,30 @@ func rtxsGroupBodies(t *testing.T, apiPort int) {
 			map[string]any{"type": "field", "inboundTag": []string{"rt-xs-auto"}, "balancerTag": GroupTag(auto.ID)},
 		)
 	}
+	// Xray сливает файлы каталога по тегу только для inbounds и outbounds; routing
+	// из более позднего файла заменяет routing панели целиком (с ним пропали бы
+	// balancer «авто», loopback-правило группы «через авто» и «Остальное», а
+	// правило на balancerTag «авто» сослалось бы на несуществующий balancer).
+	// Поэтому в файле сценариев — копия routing панели, правила сценариев идут в
+	// ней первыми.
+	panelData, err := os.ReadFile(filepath.Join(dir, xrayRoutingFile))
+	if err != nil {
+		t.Fatalf("подготовка: routing панели: %v", err)
+	}
+	var panelDoc map[string]any
+	if err := json.Unmarshal(panelData, &panelDoc); err != nil {
+		t.Fatalf("подготовка: routing панели не JSON: %v", err)
+	}
+	panelRouting := rtxRouting(t, panelDoc)
+	routing := make(map[string]any, len(panelRouting))
+	for k, v := range panelRouting {
+		routing[k] = v
+	}
+	panelRules, _ := panelRouting["rules"].([]any)
+	routing["rules"] = append(append([]any{}, rules...), panelRules...)
 	writeSpike := func(policy bool) {
 		t.Helper()
-		doc := map[string]any{"inbounds": inbounds, "routing": map[string]any{"rules": rules}}
+		doc := map[string]any{"inbounds": inbounds, "routing": routing}
 		if policy {
 			doc["policy"] = map[string]any{"system": map[string]any{"statsOutboundUplink": true, "statsOutboundDownlink": true}}
 		}
@@ -748,6 +790,7 @@ func rtxsGroupBodies(t *testing.T, apiPort int) {
 	// X2 (предусловие): есть ли счётчики исходящих только с файлом api панели,
 	// без секции policy.
 	writeSpike(false)
+	rtxsPreflight(t, dir)
 	proc := rtStartProc(t, rtXrayBin, []string{"run", "-confdir", dir}, env, apiPort)
 	if err := get(inSpike); err != nil {
 		t.Fatalf("подготовка: запрос через группу на узле A не прошёл (без policy)")
@@ -760,6 +803,7 @@ func rtxsGroupBodies(t *testing.T, apiPort int) {
 	rtdsFact(t, "x2_counters_without_policy", rtdsYesNo(withoutPolicy))
 	proc.stop()
 	writeSpike(true)
+	rtxsPreflight(t, dir)
 	proc = rtStartProc(t, rtXrayBin, []string{"run", "-confdir", dir}, env, apiPort)
 
 	roles := map[string]string{
@@ -954,7 +998,8 @@ func rtxsGroupBodies(t *testing.T, apiPort int) {
 
 // rtxsBalancerOverride — подтест balancer_override_facts (X6): ручной файл
 // конфигурации с балансировщиком b1 (стратегия по умолчанию, selector из двух
-// узлов, fallbackTag — первый узел) и подмена цели через `xray api bo`.
+// узлов, fallbackTag — первый узел; наблюдение — только xcp-direct, его
+// требует fallbackTag) и подмена цели через `xray api bo`.
 func rtxsBalancerOverride(t *testing.T, apiPort int) {
 	started := time.Now()
 	help := rtxsBoHelp()
@@ -993,10 +1038,22 @@ func rtxsBalancerOverride(t *testing.T, apiPort int) {
 	const n1, n2, balancer = "rt-bo-n1", "rt-bo-n2", "rt-bo-b1"
 	inPort := rtFreePort(t)
 	server := net.JoinHostPort("127.0.0.1", strconv.Itoa(apiPort))
+	// Стратегия по умолчанию (random) с fallbackTag требует от Xray наблюдения
+	// (extension.Observatory): без него процесс не стартует («not all
+	// dependencies are resolved»). observatory наблюдает только xcp-direct и
+	// проверяет путь /probe цели напрямую: проверки не идут через узлы и не
+	// попадают в счётчики CONNECT и запросов сценариев, а узлы без записи в
+	// наблюдении Xray считает живыми — распределение между n1 и n2 и подмена не
+	// меняются.
 	cfg, err := json.Marshal(map[string]any{
 		"log":   map[string]any{"loglevel": "warning"},
 		"api":   map[string]any{"tag": "api", "listen": server, "services": []string{"RoutingService", "StatsService"}},
 		"stats": map[string]any{},
+		"observatory": map[string]any{
+			"subjectSelector": []string{TagDirect},
+			"probeUrl":        target.URL + rtxsProbePath,
+			"probeInterval":   "10s",
+		},
 		"inbounds": []any{map[string]any{"tag": "rt-bo-in", "listen": "127.0.0.1", "port": inPort, "protocol": "socks",
 			"settings": map[string]any{"auth": "noauth", "udp": false}}},
 		"outbounds": []any{httpOut(n1, proxy1), httpOut(n2, proxy2), freedomOutbound(TagDirect), blackholeOutbound(TagBlock)},
@@ -1013,6 +1070,7 @@ func rtxsBalancerOverride(t *testing.T, apiPort int) {
 		t.Fatal(err)
 	}
 	env := utils.XrayAssetEnv(os.Environ(), "")
+	rtxsPreflight(t, dir)
 	proc := rtStartProc(t, rtXrayBin, []string{"run", "-confdir", dir}, env, apiPort)
 
 	// send делает n запросов и возвращает приросты: узел 1, узел 2, цель, отказы.
