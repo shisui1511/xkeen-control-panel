@@ -334,19 +334,35 @@ func (e *rtEnv) catalog(t *testing.T) sources.Catalog {
 	return cat
 }
 
-// applyResult запускает «Применить» и ждёт apply_done. Отказ проверки до начала
-// применения возвращается ошибкой (и результата нет).
+// rtApplyLimit — предел ожидания одного «Применить»: и занятого замка применения,
+// и apply_done своего запуска. Срока применения среди XCP_RT_* нет
+// (routertest.Deadline его не знает), поэтому предел общий с прежним ожиданием
+// apply_done; ожидание — опрос, а не пауза на весь предел.
+const rtApplyLimit = 3 * time.Minute
+
+// rtApplyBusyPoll — как часто «Применить» повторяется, пока замок применения
+// держит фоновый запуск слоя.
+const rtApplyBusyPoll = 100 * time.Millisecond
+
+// applyResult запускает «Применить» и ждёт apply_done своего запуска. Отказ
+// проверки до начала применения возвращается ошибкой (и результата нет).
+//
+// layer.Start в rtNewEnv запускает в фоне сборку применённого состояния на старте
+// под замком применения; пока она идёт (хвост ещё не начался), «Применить» по
+// кнопке сразу получает ErrApplyBusy — так и задумано для пользователя. Тест
+// жмёт «Применить» через десятки миллисекунд после создания окружения, поэтому
+// ждёт конца чужого запуска (повтор до rtApplyLimit) и только потом применяет.
+// apply_done фонового запуска (стартового или иного) своим итогом не считается:
+// берётся только итог запуска по кнопке (TriggerUser).
 func (e *rtEnv) applyResult(t *testing.T) (*configlayer.ResultView, error) {
 	t.Helper()
-	events, cancel, err := e.layer.Subscribe()
-	if err != nil {
-		t.Fatal(err)
+	limit := time.Now().Add(rtApplyLimit)
+	events, cancel := e.startUserApply(t, limit)
+	if events == nil {
+		return nil, cancel()
 	}
 	defer cancel()
-	if err := e.layer.StartApply(true); err != nil {
-		return nil, err
-	}
-	deadline := time.After(3 * time.Minute)
+	deadline := time.After(time.Until(limit))
 	for {
 		select {
 		case ev, ok := <-events:
@@ -358,11 +374,49 @@ func (e *rtEnv) applyResult(t *testing.T) (*configlayer.ResultView, error) {
 				if !ok {
 					t.Fatalf("apply_done с данными %T", ev.Data)
 				}
+				if view.Trigger != configlayer.TriggerUser {
+					continue
+				}
 				return view.Result, nil
 			}
 		case <-deadline:
-			t.Fatal("«Применить» не завершилось за 3 минуты")
+			t.Fatalf("«Применить» не завершилось за %s", rtApplyLimit)
 		}
+	}
+}
+
+// startUserApply подписывается на шину и запускает «Применить» по кнопке. Пока
+// замок применения держит другой запуск (ErrApplyBusy), подписка снимается и
+// запуск повторяется каждые rtApplyBusyPoll до limit; не дождались — провал
+// подготовки. Запуск принят — канал событий и функция снятия подписки (она
+// возвращает nil). Иной отказ StartApply — канал nil и функция, возвращающая
+// этот отказ (подписка уже снята).
+func (e *rtEnv) startUserApply(t *testing.T, limit time.Time) (<-chan configlayer.Event, func() error) {
+	t.Helper()
+	var busySince time.Time
+	for {
+		events, cancel, err := e.layer.Subscribe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = e.layer.StartApply(true)
+		if err == nil {
+			if !busySince.IsZero() {
+				t.Logf("«Применить» ждало конца фонового запуска слоя: %d мс", time.Since(busySince).Milliseconds())
+			}
+			return events, func() error { cancel(); return nil }
+		}
+		cancel()
+		if !errors.Is(err, configlayer.ErrApplyBusy) {
+			return nil, func() error { return err }
+		}
+		if busySince.IsZero() {
+			busySince = time.Now()
+		}
+		if time.Now().After(limit) {
+			t.Fatalf("подготовка: замок применения занят фоновым запуском слоя дольше %s", rtApplyLimit)
+		}
+		time.Sleep(rtApplyBusyPoll)
 	}
 }
 
