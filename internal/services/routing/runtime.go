@@ -202,6 +202,7 @@ func (s *Service) runtimeSnapshot() (RuntimeView, appliedModel, error) {
 	case RuntimeStatePanel, RuntimeStateStopped:
 		live, unconfirmed := liveSelection(st.Live), readUnconfirmed(st.Live)
 		scheds, recs := readSchedules(st.Live), readArbiter(st.Live)
+		holds := s.limitHolds()
 		// Цель выбора подставляется только группе с отметкой select: ядро уже несёт
 		// узел, Live его ещё не записал. Копия live — общая для current и цепочек
 		// всех групп, поэтому внешняя группа с участником-группой видит ту же цель.
@@ -244,7 +245,7 @@ func (s *Service) runtimeSnapshot() (RuntimeView, appliedModel, error) {
 				rg.Current = effectiveSelection(g, live[g.ID], am.avail, nodeRefs(r.Nodes)...)
 				rg.CurrentLabel = am.label(rg.Current)
 				rg.Chain = runtimeChain(g, am, live)
-				rg.Schedule, rg.Hold = runtimeSchedule(g, am, scheds[g.ID], recs, now)
+				rg.Schedule, rg.Hold = runtimeSchedule(g, am, live[g.ID], scheds[g.ID], recs, holdFor(holds, g.ID), now)
 			}
 			if g.Mode == ModeFallback {
 				rg.Fallback = g.Reserve
@@ -277,32 +278,32 @@ func (s *Service) runtimeSnapshot() (RuntimeView, appliedModel, error) {
 	return v, am, nil
 }
 
-// runtimeSchedule — окна ручной группы g для вида и удержание окном: группу
-// держит активное окно, записанное арбитром как держатель (запись в Live).
-func runtimeSchedule(g Group, am appliedModel, ws []ScheduleWindow, recs map[string]arbiterRecord, now time.Time) ([]ScheduleWindowView, *RuntimeHold) {
+// runtimeSchedule — окна ручной группы g для вида и удержание группы арбитром
+// (лимит, перехват, окно, пропущенное окно, отказ ядра) по тому же решению, что у
+// тика (decide, runtimeHold). cur — выбор группы в Live.
+func runtimeSchedule(g Group, am appliedModel, cur string, ws []ScheduleWindow, recs map[string]arbiterRecord, hold *services.LimitHold, now time.Time) ([]ScheduleWindowView, *RuntimeHold) {
 	out := make([]ScheduleWindowView, 0, len(ws))
-	if len(ws) == 0 {
-		// Без окон удержания окном нет; варианты группы (Resolve по ядрам) на каждый
+	rec, hasRec := recs[g.ID]
+	if len(ws) == 0 && !hasRec && hold == nil {
+		// Группу никто не держит; варианты группы (Resolve по ядрам) на каждый
 		// опрос вида не считаются.
 		return out, nil
 	}
+	in := arbiterInput(g, am, cur, ws, rec, hasRec, hold, now)
 	labels := map[string]string{}
-	for _, o := range appliedOptions(g, am) {
-		labels[o.Member] = o.Label
+	if len(ws) > 0 {
+		for _, o := range appliedOptions(g, am) {
+			labels[o.Member] = o.Label
+		}
 	}
-	w, end, active := activeWindow(ws, now)
 	for _, x := range ws {
 		label, ok := labels[x.Member]
 		out = append(out, ScheduleWindowView{
 			ScheduleWindow: x, MemberLabel: label, Missing: !ok,
-			Active: active && x.ID == w.ID,
+			Active: in.hasWin && x.ID == in.win.ID,
 		})
 	}
-	rec, ok := recs[g.ID]
-	if !ok || !active || rec.Holder != holderSchedule || rec.Window != w.ID {
-		return out, nil
-	}
-	return out, &RuntimeHold{Kind: holderSchedule, Until: end.Unix(), Window: w.ID, Member: w.Member}
+	return out, runtimeHold(in, decide(in))
 }
 
 func runtimeRunning(v RuntimeView, kernel string) bool {

@@ -313,20 +313,28 @@ func (s *Service) SetScheduleWindowEnabled(gid, id string, enabled bool) error {
 
 // RestoreSchedule — «Вернуть расписание»: снимает перехват действующего окна
 // группы gid (запись арбитра — держатель окно, без Override и Until) и сразу
-// ставит узел окна входом арбитра. Действующего окна нет — ErrWindowNotFound, узла
-// окна нет среди вариантов группы — ErrMemberInvalid.
+// ставит узел окна входом арбитра. Группу держит лимит — ErrQuotaHeld; действующего
+// окна нет (или часы не синхронизированы) — ErrWindowNotFound; узла окна нет среди
+// вариантов группы — ErrMemberInvalid.
 func (s *Service) RestoreSchedule(ctx context.Context, gid string) (SelectResult, error) {
+	defer s.lockArbiter()()
 	g, am, st, err := s.manualAppliedGroup(gid)
 	if err != nil {
 		return SelectResult{}, err
 	}
-	w, _, ok := activeWindow(readSchedules(st.Live)[gid], s.d.Now())
-	if !ok {
+	rec, hasRec := readArbiter(st.Live)[gid]
+	in := arbiterInput(g, am, liveSelection(st.Live)[gid], readSchedules(st.Live)[gid], rec, hasRec,
+		holdFor(s.limitHolds(), gid), s.d.Now())
+	if decide(in).kind == holderQuota {
+		return SelectResult{}, ErrQuotaHeld
+	}
+	if !in.hasWin {
 		return SelectResult{}, ErrWindowNotFound
 	}
-	if !memberAllowed(g, w.Member, am) || !am.avail(w.Member) {
+	if !in.winAvail {
 		return SelectResult{}, ErrMemberInvalid
 	}
+	w := in.win
 	err = s.d.Layer.UpdateLive(func(live configlayer.Sections) error {
 		m := readArbiter(live)
 		rec, had := m[gid]

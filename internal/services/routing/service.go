@@ -151,9 +151,12 @@ type Service struct {
 	selNotes     groupNotes
 	selNoticeSeq atomic.Uint64
 
-	// arb — арбитр окон расписания (NewArbiter в cmd/xcp/main.go); nil — арбитра
-	// нет, правка окон его не будит.
+	// arb — арбитр окон расписания и лимитов (NewArbiter в cmd/xcp/main.go); nil —
+	// арбитра нет, правка окон его не будит, клик идёт без его проверки.
 	arb *Arbiter
+	// schedNotes — уведомления арбитра routing_schedule по группам (узел окна
+	// пропал, ядро не приняло выбор).
+	schedNotes groupNotes
 }
 
 // New создаёт сервис. Слой, сервис источников и источник «установленных ядер»
@@ -188,7 +191,8 @@ func New(d Deps) (*Service, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Service{d: d, ctx: ctx, cancel: cancel, gens: map[string][]configlayer.GeneratedFile{}, provs: map[string][]byte{},
-		repick: groupNotes{prefix: noticeRepickPrefix}, selNotes: groupNotes{prefix: noticeSelectPrefix}}
+		repick: groupNotes{prefix: noticeRepickPrefix}, selNotes: groupNotes{prefix: noticeSelectPrefix},
+		schedNotes: groupNotes{prefix: noticeSchedulePrefix}}
 	return s, nil
 }
 

@@ -550,9 +550,24 @@ func (s *Service) markReconcile() { s.reconcilePending.Store(true) }
 // принять PUT после таймаута клиента, поэтому сверка Mihomo запрошена, а выходы,
 // где выбор не записан или возвращён, ставят Mihomo по Live (WR-02).
 //
-// Select — вход клика пользователя (обработчик): быстрый путь разрешён.
+// Select — вход клика пользователя (обработчик): быстрый путь разрешён. Клик
+// проходит проверку арбитра (beforeUserSelect): группу держит лимит —
+// ErrQuotaHeld без обращения к ядру, держит окно — перехват до конца окна (D-04,
+// D-05). Неудачный или возвращённый ядром выбор откатывает запись арбитра.
 func (s *Service) Select(ctx context.Context, groupID, member string) (SelectResult, error) {
-	return s.selectOpts(ctx, groupID, member, true, false)
+	if s.arb == nil {
+		return s.selectOpts(ctx, groupID, member, true, false)
+	}
+	defer s.lockArbiter()()
+	undo, err := s.arb.beforeUserSelect(groupID, member)
+	if err != nil {
+		return SelectResult{}, err
+	}
+	res, err := s.selectOpts(ctx, groupID, member, true, false)
+	if err != nil || res.Reverted {
+		undo()
+	}
+	return res, err
 }
 
 // selectSync — служебный вход выбора без раннего ответа (WR-01 ревью 2): повторный
@@ -1653,18 +1668,23 @@ func (s *Service) CommitLive(st *configlayer.State, req configlayer.ApplyRequest
 	if st.Live == nil {
 		st.Live = configlayer.Sections{}
 	}
-	sel := liveSelection(st.Live)
-	repick := readRepick(st.Live)
-	if len(sel) == 0 && len(repick) == 0 {
-		return nil
-	}
-
 	manual := map[string]Group{}
 	for _, g := range cfg.Items {
 		if g.Mode == ModeManual {
 			manual[g.ID] = g
 		}
 	}
+	// Окна и записи арбитра есть только у ручных групп (D-10): у удалённых и
+	// переставших быть ручными они снимаются тем же проходом, что и выбор.
+	if err := dropNonManualArbiter(st.Live, manual); err != nil {
+		return err
+	}
+	sel := liveSelection(st.Live)
+	repick := readRepick(st.Live)
+	if len(sel) == 0 && len(repick) == 0 {
+		return nil
+	}
+
 	for gid := range sel {
 		if _, ok := manual[gid]; !ok {
 			delete(sel, gid)
@@ -1722,6 +1742,36 @@ func (s *Service) CommitLive(st *configlayer.State, req configlayer.ApplyRequest
 	return writeRepick(st.Live, repick)
 }
 
+// dropNonManualArbiter снимает из Live окна расписания и записи арбитра групп,
+// которых нет среди ручных групп manual.
+func dropNonManualArbiter(live configlayer.Sections, manual map[string]Group) error {
+	scheds := readSchedules(live)
+	changed := false
+	for gid := range scheds {
+		if _, ok := manual[gid]; !ok {
+			delete(scheds, gid)
+			changed = true
+		}
+	}
+	if changed {
+		if err := writeSchedules(live, scheds); err != nil {
+			return err
+		}
+	}
+	recs := readArbiter(live)
+	changed = false
+	for gid := range recs {
+		if _, ok := manual[gid]; !ok {
+			delete(recs, gid)
+			changed = true
+		}
+	}
+	if changed {
+		return writeArbiter(live, recs)
+	}
+	return nil
+}
+
 // containsString сообщает, что значение есть в списке.
 func containsString(list []string, v string) bool {
 	for _, x := range list {
@@ -1745,6 +1795,11 @@ func (s *Service) AfterApply(ctx context.Context, info configlayer.AfterApplyInf
 		}
 	}
 	s.repickAll(ctx)
+	if s.arb != nil && info.Trigger != configlayer.TriggerSelect {
+		// После «Применить» арбитр заново ставит удержания и окна: состав групп и
+		// узлов мог измениться. Свой выбор арбитра (TriggerSelect) тик не будит.
+		s.arb.Kick()
+	}
 }
 
 // groupNotes — уведомления одного префикса по группам (routing_repick,
