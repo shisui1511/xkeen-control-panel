@@ -391,7 +391,8 @@
         "internal/services/route_matcher.go",
         "internal/services/mihomo_geotag.go",
         "internal/services/rule_provider_inspect.go",
-        "internal/services/smartproxy.go"
+        "internal/services/smartproxy.go",
+        "internal/services/limits*.go"
       ],
       "canary": {
         "go": "TestRouterXrayRulesTraffic",
