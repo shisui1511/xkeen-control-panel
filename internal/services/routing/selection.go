@@ -927,8 +927,13 @@ func (s *Service) catalogInputSame(am appliedModel, prev, cur configlayer.StateV
 }
 
 // selectionLiveKeys — ключи Live, которые ведёт выбор групп; вход каталога и
-// профиля Mihomo от них не зависит.
-var selectionLiveKeys = map[string]bool{LiveKeySelection: true, LiveKeyUnconfirmed: true, LiveKeyRepick: true}
+// профиля Mihomo от них не зависит. Ключи арбитра (окна расписания и записи
+// удержания) во вход каталога и профиля Mihomo тоже не входят: правка окна не
+// меняет вход каталога.
+var selectionLiveKeys = map[string]bool{
+	LiveKeySelection: true, LiveKeyUnconfirmed: true, LiveKeyRepick: true,
+	LiveKeySchedules: true, LiveKeyArbiter: true,
+}
 
 // sectionsSame — побайтное равенство секций a и b, кроме ключей skip.
 func sectionsSame(a, b configlayer.Sections, skip map[string]bool) bool {
