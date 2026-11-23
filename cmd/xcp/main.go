@@ -417,6 +417,14 @@ func main() {
 	srv.HandleProtected("/api/traffic/alerts/clear", api.TrafficAlertsClear)
 	srv.HandleProtected("/api/traffic/ws", api.TrafficWebSocket)
 	srv.HandleProtected("/api/traffic/reset", api.TrafficReset)
+	// Лимиты трафика: служба нейтральна к ядру, маршруты работают при любом ядре.
+	srv.HandleProtected("/api/traffic/limits", api.TrafficLimitsList)
+	srv.HandleProtected("/api/traffic/limits/save", api.TrafficLimitsSave)
+	srv.HandleProtected("/api/traffic/limits/delete", api.TrafficLimitsDelete)
+	srv.HandleProtected("/api/traffic/limits/enabled", api.TrafficLimitsEnabled)
+	srv.HandleProtected("/api/traffic/limits/reset", api.TrafficLimitsReset)
+	srv.HandleProtected("/api/traffic/limits/alerts", api.TrafficLimitsAlerts)
+	srv.HandleProtected("/api/traffic/limits/alerts/clear", api.TrafficLimitsAlertsClear)
 	srv.HandleProtected("/api/mihomo/connections/ws", api.ConnectionsWebSocket)
 
 	// Kernel service must exist before background services that query it
@@ -431,6 +439,14 @@ func main() {
 		kernelSvc.InvalidateActiveState()
 		api.MihomoService().NotifyControllerChanged()
 	})
+
+	// Лимиты трафика: один счётчик на лимит при любом ядре (<DataDir>/traffic-limits.json).
+	limitsSvc := services.NewLimitsService(cfg.DataDir)
+	limitsSvc.SetActiveKernel(func() string { return kernelSvc.ActiveState().Kernel })
+	limitsSvc.Start()
+	api.SetLimitsService(limitsSvc)
+	// Финальная запись счётчиков лимитов — со своим бюджетом (shutdownSteps.save).
+	defer stops.save("traffic-limits", limitsSvc.Stop)
 
 	// Start background services
 	smartProxySvc := services.NewSmartProxyService(cfg.DataDir, api.MihomoService())

@@ -387,6 +387,7 @@
         "internal/handlers/route_tracer.go",
         "internal/handlers/rule_provider_inspect.go",
         "internal/handlers/smartproxy.go",
+        "internal/handlers/traffic_limits.go",
         "internal/services/route_tracer.go",
         "internal/services/route_matcher.go",
         "internal/services/mihomo_geotag.go",
