@@ -150,6 +150,10 @@ type Service struct {
 	// выбора); selNoticeSeq — номер идентификатора, новый на каждый отказ (D-11).
 	selNotes     groupNotes
 	selNoticeSeq atomic.Uint64
+
+	// arb — арбитр окон расписания (NewArbiter в cmd/xcp/main.go); nil — арбитра
+	// нет, правка окон его не будит.
+	arb *Arbiter
 }
 
 // New создаёт сервис. Слой, сервис источников и источник «установленных ядер»

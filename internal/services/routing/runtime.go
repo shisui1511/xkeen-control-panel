@@ -36,6 +36,44 @@ type RuntimeView struct {
 	Modes    RuntimeModes   `json:"modes"`
 	Probe    ProbeConfig    `json:"probe"`
 	Groups   []RuntimeGroup `json:"groups"`
+	// Clock — часы роутера (процесса панели): по ним действуют окна расписания
+	// (D-08), карточка показывает время окон в этом поясе.
+	Clock RuntimeClock `json:"clock"`
+}
+
+// RuntimeClock — момент и пояс часов роутера.
+type RuntimeClock struct {
+	// Now — unix, секунды.
+	Now int64 `json:"now"`
+	// Zone — сокращение пояса (например, MSK или UTC).
+	Zone string `json:"zone"`
+	// Offset — смещение пояса от UTC в секундах.
+	Offset int `json:"offset"`
+}
+
+// RuntimeHold — чем арбитр держит группу сейчас (строка состояния карточки).
+type RuntimeHold struct {
+	// Kind — "schedule", "override", "quota" или "node_missing".
+	Kind      string `json:"kind"`
+	Limit     string `json:"limit,omitempty"`
+	LimitName string `json:"limit_name,omitempty"`
+	ResetAt   int64  `json:"reset_at,omitempty"`
+	// Until — конец удержания (unix, секунды): конец окна или перехвата.
+	Until   int64  `json:"until,omitempty"`
+	Window  string `json:"window,omitempty"`
+	Member  string `json:"member,omitempty"`
+	Stalled bool   `json:"stalled,omitempty"`
+}
+
+// ScheduleWindowView — окно расписания группы в виде «Прокси».
+type ScheduleWindowView struct {
+	ScheduleWindow
+	// MemberLabel — подпись участника окна по применённому состоянию.
+	MemberLabel string `json:"member_label"`
+	// Missing — участника окна нет среди вариантов группы (D-07).
+	Missing bool `json:"missing"`
+	// Active — окно действует сейчас.
+	Active bool `json:"active"`
 }
 
 type RuntimeModes struct {
@@ -59,6 +97,10 @@ type RuntimeGroup struct {
 	LockedWith []string        `json:"locked_with"`
 	Counts     KernelCounts    `json:"counts"`
 	Members    []RuntimeMember `json:"members"`
+	// Hold — удержание группы арбитром; nil — группу никто не держит.
+	Hold *RuntimeHold `json:"hold,omitempty"`
+	// Schedule — окна расписания ручной группы; у остальных пусто.
+	Schedule []ScheduleWindowView `json:"schedule"`
 }
 
 type RuntimeLink struct {
@@ -128,9 +170,12 @@ func (s *Service) runtimeSnapshot() (RuntimeView, appliedModel, error) {
 		}
 		return foreign
 	}
+	now := s.d.Now()
+	zone, offset := now.Zone()
 	v := RuntimeView{
 		Kernel: active.Kernel, Running: append([]string{}, active.Running...),
 		Probe: probe, Groups: []RuntimeGroup{},
+		Clock: RuntimeClock{Now: now.Unix(), Zone: zone, Offset: offset},
 		Modes: RuntimeModes{
 			Xray:   mode(configlayer.KernelXray, am.installed.Xray, st.Routing.XrayTaken, RuntimeModeUserManaged),
 			Mihomo: mode(configlayer.KernelMihomo, am.installed.Mihomo, st.Routing.MihomoTaken, RuntimeModeUserProfile),
@@ -156,6 +201,7 @@ func (s *Service) runtimeSnapshot() (RuntimeView, appliedModel, error) {
 	switch v.State {
 	case RuntimeStatePanel, RuntimeStateStopped:
 		live, unconfirmed := liveSelection(st.Live), readUnconfirmed(st.Live)
+		scheds, recs := readSchedules(st.Live), readArbiter(st.Live)
 		// Цель выбора подставляется только группе с отметкой select: ядро уже несёт
 		// узел, Live его ещё не записал. Копия live — общая для current и цепочек
 		// всех групп, поэтому внешняя группа с участником-группой видит ту же цель.
@@ -198,6 +244,7 @@ func (s *Service) runtimeSnapshot() (RuntimeView, appliedModel, error) {
 				rg.Current = effectiveSelection(g, live[g.ID], am.avail, nodeRefs(r.Nodes)...)
 				rg.CurrentLabel = am.label(rg.Current)
 				rg.Chain = runtimeChain(g, am, live)
+				rg.Schedule, rg.Hold = runtimeSchedule(g, am, scheds[g.ID], recs, now)
 			}
 			if g.Mode == ModeFallback {
 				rg.Fallback = g.Reserve
@@ -222,7 +269,40 @@ func (s *Service) runtimeSnapshot() (RuntimeView, appliedModel, error) {
 			v.Groups[i].Counts = runtimeCounts(v.Groups[i].Members, am.installed)
 		}
 	}
+	for i := range v.Groups {
+		if v.Groups[i].Schedule == nil {
+			v.Groups[i].Schedule = []ScheduleWindowView{}
+		}
+	}
 	return v, am, nil
+}
+
+// runtimeSchedule — окна ручной группы g для вида и удержание окном: группу
+// держит активное окно, записанное арбитром как держатель (запись в Live).
+func runtimeSchedule(g Group, am appliedModel, ws []ScheduleWindow, recs map[string]arbiterRecord, now time.Time) ([]ScheduleWindowView, *RuntimeHold) {
+	out := make([]ScheduleWindowView, 0, len(ws))
+	if len(ws) == 0 {
+		// Без окон удержания окном нет; варианты группы (Resolve по ядрам) на каждый
+		// опрос вида не считаются.
+		return out, nil
+	}
+	labels := map[string]string{}
+	for _, o := range appliedOptions(g, am) {
+		labels[o.Member] = o.Label
+	}
+	w, end, active := activeWindow(ws, now)
+	for _, x := range ws {
+		label, ok := labels[x.Member]
+		out = append(out, ScheduleWindowView{
+			ScheduleWindow: x, MemberLabel: label, Missing: !ok,
+			Active: active && x.ID == w.ID,
+		})
+	}
+	rec, ok := recs[g.ID]
+	if !ok || !active || rec.Holder != holderSchedule || rec.Window != w.ID {
+		return out, nil
+	}
+	return out, &RuntimeHold{Kind: holderSchedule, Until: end.Unix(), Window: w.ID, Member: w.Member}
 }
 
 func runtimeRunning(v RuntimeView, kernel string) bool {

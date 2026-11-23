@@ -481,6 +481,28 @@ func (a *API) ConfigRoutingSelect(w http.ResponseWriter, r *http.Request) {
 	JSONSuccess(w, res)
 }
 
+// ConfigRoutingScheduleSave — POST /api/configlayer/routing/schedule/save: окно
+// расписания ручной группы (новое при пустом id, иначе замена). Ответ — сохранённое
+// окно с ID; узел окна ставит арбитр тем же выбором, что и клик (D-01).
+func (a *API) ConfigRoutingScheduleSave(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
+		return
+	}
+	var req struct {
+		Group  string                 `json:"group"`
+		Window routing.ScheduleWindow `json:"window"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	saved, err := a.routing.SaveScheduleWindow(req.Group, req.Window)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, saved)
+}
+
 // ConfigRoutingLists — GET /api/configlayer/routing/lists: каталог списков dat
 // роутера (сервисы, страны, списки с примерами, расширенные наборы) и состояние
 // geodata XKeen. Файлы dat не читаются — 503 catalog_unavailable.

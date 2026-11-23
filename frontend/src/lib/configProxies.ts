@@ -25,6 +25,51 @@ export interface RuntimeView {
   modes: RuntimeModes;
   probe: ProbeConfig;
   groups: RuntimeGroup[];
+  /** Часы роутера: по ним действуют окна расписания (D-08). */
+  clock: RuntimeClock;
+}
+
+/** Часы роутера (процесса панели). */
+export interface RuntimeClock {
+  /** Unix, секунды. */
+  now: number;
+  /** Сокращение пояса (MSK, UTC…). */
+  zone: string;
+  /** Смещение пояса от UTC в секундах. */
+  offset: number;
+}
+
+/** Окно расписания ручной группы: дни 0 — Пн … 6 — Вс, время HH:MM по часам роутера. */
+export interface ScheduleWindow {
+  /** Пусто — новое окно (ID выдаст сервер). */
+  id: string;
+  days: number[];
+  from: string;
+  to: string;
+  member: string;
+  enabled: boolean;
+}
+
+/** Окно расписания в виде «Прокси». */
+export interface ScheduleWindowView extends ScheduleWindow {
+  member_label: string;
+  /** Участника окна нет среди вариантов группы (D-07). */
+  missing: boolean;
+  /** Окно действует сейчас. */
+  active: boolean;
+}
+
+/** Чем арбитр держит группу сейчас. */
+export interface RuntimeHold {
+  kind: 'schedule' | 'override' | 'quota' | 'node_missing';
+  limit?: string;
+  limit_name?: string;
+  reset_at?: number;
+  /** Конец удержания (unix, секунды). */
+  until?: number;
+  window?: string;
+  member?: string;
+  stalled?: boolean;
 }
 
 export interface RuntimeModes {
@@ -47,6 +92,10 @@ export interface RuntimeGroup {
   locked_with: string[];
   counts: KernelCounts;
   members: RuntimeMember[];
+  /** Удержание группы арбитром; нет — группу никто не держит. */
+  hold?: RuntimeHold;
+  /** Окна расписания ручной группы; у остальных пусто. */
+  schedule: ScheduleWindowView[];
 }
 
 export interface RuntimeLink {
@@ -169,7 +218,8 @@ function normalizeView(v: RuntimeView): RuntimeView {
       chain: g.chain ?? [],
       locked_with: g.locked_with ?? [],
       members: g.members ?? [],
-      switching: g.switching ?? false
+      switching: g.switching ?? false,
+      schedule: g.schedule ?? []
     }))
   };
 }
@@ -245,6 +295,14 @@ export function resetNow(): void {
  */
 export async function selectNode(group: string, member: string): Promise<SelectResult> {
   return post<SelectResult>('/api/configlayer/routing/select', { group, member });
+}
+
+/** Сохранение окна расписания ручной группы; ответ — окно с ID сервера. */
+export async function saveScheduleWindow(
+  group: string,
+  window: ScheduleWindow
+): Promise<ScheduleWindow> {
+  return post<ScheduleWindow>('/api/configlayer/routing/schedule/save', { group, window });
 }
 
 /** Запуск пачки пинга: всех групп или одной; повтор во время пачки присоединяется к ней. */

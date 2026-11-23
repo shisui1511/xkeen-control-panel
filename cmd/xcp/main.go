@@ -910,6 +910,11 @@ func main() {
 			}, 0)
 			selWatch.Start()
 			defer stops.run("routing-selection", selWatch.Stop)
+			// Арбитр окон расписания (SPX-01): ставит узел ручной группы тем же выбором,
+			// что и клик. defer идёт после наблюдателя — арбитр останавливается первым.
+			arb := routing.NewArbiter(routingSvc)
+			arb.Start()
+			defer stops.run("routing-arbiter", arb.Stop)
 			if pingRunner != nil {
 				pingRunner.Start()
 				api.SetPingRunner(pingRunner)
@@ -990,6 +995,7 @@ func main() {
 	srv.HandleProtected("/api/configlayer/routing/reclaim", api.ConfigRoutingReclaim)
 	srv.HandleProtected("/api/configlayer/routing/mihomo", api.ConfigRoutingMihomo)
 	srv.HandleProtected("/api/configlayer/routing/select", api.ConfigRoutingSelect)
+	srv.HandleProtected("/api/configlayer/routing/schedule/save", api.ConfigRoutingScheduleSave)
 	srv.HandleProtected("/api/configlayer/routing/lists", api.ConfigRoutingLists)
 	srv.HandleProtected("/api/configlayer/routing/presets", api.ConfigRoutingPresets)
 	srv.HandleProtected("/api/configlayer/routing/presets/plan", api.ConfigRoutingPresetsPlan)

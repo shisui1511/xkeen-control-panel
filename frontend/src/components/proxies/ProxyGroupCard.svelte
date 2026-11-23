@@ -11,6 +11,7 @@
   import Spinner from '../Spinner.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import ProxyNodeStatus from './ProxyNodeStatus.svelte';
+  import GroupStateLine from './GroupStateLine.svelte';
   import {
     splitMembers,
     nowLine,
@@ -473,6 +474,8 @@
           {/if}
         </div>
       {/if}
+      <!-- UI-SPEC 1.1: состояние удержания группы арбитром, видно и в свёрнутом виде -->
+      <GroupStateLine group={g} clock={p.view.clock} />
     </div>
 
     {#if g.unconfirmed}
