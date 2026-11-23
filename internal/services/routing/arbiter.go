@@ -6,7 +6,6 @@ import (
 	"errors"
 	"log"
 	"sort"
-	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -131,177 +130,11 @@ func writeArbiter(live configlayer.Sections, m map[string]arbiterRecord) error {
 	return nil
 }
 
-// --- окна ---
-
-// parseClock переводит HH:MM в минуты суток 0…1439.
-func parseClock(hhmm string) (int, error) {
-	if len(hhmm) != 5 || hhmm[2] != ':' {
-		return 0, errors.New("routing: время не в формате HH:MM")
-	}
-	h, err := strconv.Atoi(hhmm[:2])
-	if err != nil || h < 0 || h > 23 || hhmm[0] == '+' || hhmm[0] == '-' {
-		return 0, errors.New("routing: час вне 00…23")
-	}
-	m, err := strconv.Atoi(hhmm[3:])
-	if err != nil || m < 0 || m > 59 || hhmm[3] == '+' || hhmm[3] == '-' {
-		return 0, errors.New("routing: минуты вне 00…59")
-	}
-	return h*60 + m, nil
-}
-
-// weekday0Mon — день недели t в нумерации окон: 0 — понедельник … 6 — воскресенье.
-func weekday0Mon(t time.Time) int { return (int(t.Weekday()) + 6) % 7 }
-
-// hasDay сообщает, что день d есть среди дней окна.
-func hasDay(days []int, d int) bool {
-	for _, x := range days {
-		if x == d {
-			return true
-		}
-	}
-	return false
-}
-
-// atClock — момент дня t (со сдвигом addDays) в минуту суток min, в поясе t.
-func atClock(t time.Time, addDays, min int) time.Time {
-	return time.Date(t.Year(), t.Month(), t.Day()+addDays, min/60, min%60, 0, 0, t.Location())
-}
-
-// activeWindow возвращает включённое окно, действующее в момент now, и его конец.
-// Обычное окно (From < To) действует в дни Days с From до To. Окно через полночь
-// (From > To) действует в день из Days с From до полуночи (конец — завтра в To) и в
-// следующий за ним день с полуночи до To (конец — сегодня в To). Окна одной группы
-// не пересекаются, поэтому подходящее окно одно; при порче данных берётся первое.
-func activeWindow(ws []ScheduleWindow, now time.Time) (ScheduleWindow, time.Time, bool) {
-	day := weekday0Mon(now)
-	prev := (day + 6) % 7
-	cur := now.Hour()*60 + now.Minute()
-	for _, w := range ws {
-		if !w.Enabled {
-			continue
-		}
-		from, err1 := parseClock(w.From)
-		to, err2 := parseClock(w.To)
-		if err1 != nil || err2 != nil || from == to {
-			continue
-		}
-		if from < to {
-			if hasDay(w.Days, day) && from <= cur && cur < to {
-				return w, atClock(now, 0, to), true
-			}
-			continue
-		}
-		if hasDay(w.Days, day) && cur >= from {
-			return w, atClock(now, 1, to), true
-		}
-		if hasDay(w.Days, prev) && cur < to {
-			return w, atClock(now, 0, to), true
-		}
-	}
-	return ScheduleWindow{}, time.Time{}, false
-}
-
-// validateWindow проверяет дни и время окна и приводит дни к порядку с понедельника.
-func validateWindow(w *ScheduleWindow) error {
-	if len(w.Days) == 0 || len(w.Days) > 7 {
-		return invalid("days", "invalid")
-	}
-	seen := map[int]bool{}
-	for _, d := range w.Days {
-		if d < 0 || d > 6 || seen[d] {
-			return invalid("days", "invalid")
-		}
-		seen[d] = true
-	}
-	sort.Ints(w.Days)
-	from, err := parseClock(w.From)
-	if err != nil {
-		return invalid("from", "invalid")
-	}
-	to, err := parseClock(w.To)
-	if err != nil || to == from {
-		return invalid("to", "invalid")
-	}
-	return nil
-}
-
-// --- сохранение окна ---
-
-// SaveScheduleWindow сохраняет окно расписания ручной группы gid: новое (пустой
-// ID) или замена окна с тем же ID. Группа должна быть применённой и ручной (D-10),
-// участник — среди вариантов группы по применённому состоянию. После записи
-// арбитр сверяет группы сразу, клиенты получают событие структуры.
-func (s *Service) SaveScheduleWindow(gid string, w ScheduleWindow) (ScheduleWindow, error) {
-	st, err := s.d.Layer.ReadState()
-	if err != nil {
-		return ScheduleWindow{}, err
-	}
-	if !configlayer.DesiredRouting(st.Applied).AnyManaged() {
-		return ScheduleWindow{}, ErrGroupNotApplied
-	}
-	am, err := s.appliedModelOf(st)
-	if err != nil {
-		return ScheduleWindow{}, err
-	}
-	g, ok := am.group(gid)
-	if !ok || g.Mode != ModeManual {
-		return ScheduleWindow{}, ErrGroupNotApplied
-	}
-	if err := validateWindow(&w); err != nil {
-		return ScheduleWindow{}, err
-	}
-	if !memberAllowed(g, w.Member, am) {
-		return ScheduleWindow{}, ErrMemberInvalid
-	}
-	if w.ID == "" {
-		id, err := newID(s.d.Rand)
-		if err != nil {
-			return ScheduleWindow{}, err
-		}
-		w.ID = id
-	} else if !idRE.MatchString(w.ID) {
-		return ScheduleWindow{}, invalid("id", "invalid")
-	}
-	err = s.d.Layer.UpdateLive(func(live configlayer.Sections) error {
-		all := readSchedules(live)
-		list := all[gid]
-		replaced := false
-		for i := range list {
-			if list[i].ID == w.ID {
-				list[i] = w
-				replaced = true
-				break
-			}
-		}
-		if !replaced {
-			// Чужой ID окна клиент не выдумывает: новое окно получает ID сервера.
-			for _, other := range all {
-				for _, x := range other {
-					if x.ID == w.ID {
-						return invalid("id", "invalid")
-					}
-				}
-			}
-			list = append(list, w)
-		}
-		all[gid] = list
-		return writeSchedules(live, all)
-	})
-	if err != nil {
-		return ScheduleWindow{}, err
-	}
-	if s.arb != nil {
-		s.arb.Kick()
-	}
-	s.d.Layer.PublishProxies(configlayer.ProxiesKindStructure)
-	return w, nil
-}
-
 // --- фоновая служба ---
 
 // Arbiter — фоновая служба выбора ручных групп по окнам расписания. Раз в
 // arbiterTick и по Kick сверяет фактический выбор в Live с тем, что положено
-// сейчас, и ставит недостающее через selectOpts (D-01). Создаётся и
+// сейчас, и ставит недостающее через selectArbiter (D-01). Создаётся и
 // останавливается только в cmd/xcp/main.go.
 type Arbiter struct {
 	s *Service
@@ -459,7 +292,7 @@ func (a *Arbiter) settle(g Group, am appliedModel, cur string, ws []ScheduleWind
 		return
 	}
 	if desired != "" && desired != cur {
-		res, err := s.selectOpts(a.ctx, g.ID, desired, false)
+		res, err := s.selectArbiter(a.ctx, g.ID, desired)
 		if err == nil && res.Reverted {
 			err = errors.New("routing: выбор возвращён ядром")
 		}

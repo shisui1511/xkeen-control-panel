@@ -552,7 +552,7 @@ func (s *Service) markReconcile() { s.reconcilePending.Store(true) }
 //
 // Select — вход клика пользователя (обработчик): быстрый путь разрешён.
 func (s *Service) Select(ctx context.Context, groupID, member string) (SelectResult, error) {
-	return s.selectOpts(ctx, groupID, member, true)
+	return s.selectOpts(ctx, groupID, member, true, false)
 }
 
 // selectSync — служебный вход выбора без раннего ответа (WR-01 ревью 2): повторный
@@ -561,14 +561,24 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 // постановку Mihomo по Live. Маркер повторного выбора группы проход не снимает:
 // его снимает repickOne только после поставленного выбора.
 func (s *Service) selectSync(ctx context.Context, groupID, member string) (SelectResult, error) {
-	return s.selectOpts(ctx, groupID, member, false)
+	return s.selectOpts(ctx, groupID, member, false, false)
 }
 
-// selectOpts — тело выбора (Select, selectSync). fast — разрешён быстрый путь при
-// запущенном Mihomo и остановленном Xray (ранний PUT и фоновый хвост); false —
-// прежний синхронный порядок: проход файла Xray, затем Mihomo по Live, и маркер
-// повторного выбора группы остаётся за вызывающим (keepRepick).
-func (s *Service) selectOpts(ctx context.Context, groupID, member string, fast bool) (SelectResult, error) {
+// selectArbiter — вход выбора арбитра (окна расписания, удержание лимитом,
+// «Вернуть расписание»): синхронный порядок без раннего ответа, служебные
+// варианты DIRECT и REJECT допускаются вне состава группы (D-13). Клик
+// пользователя этим входом не идёт.
+func (s *Service) selectArbiter(ctx context.Context, gid, member string) (SelectResult, error) {
+	return s.selectOpts(ctx, gid, member, false, true)
+}
+
+// selectOpts — тело выбора (Select, selectSync, selectArbiter). fast — разрешён
+// быстрый путь при запущенном Mihomo и остановленном Xray (ранний PUT и фоновый
+// хвост); false — прежний синхронный порядок: проход файла Xray, затем Mihomo по
+// Live, и маркер повторного выбора группы остаётся за вызывающим (keepRepick).
+// arbiter — выбор арбитра: кроме вариантов группы допускаются служебные DIRECT и
+// REJECT (удержание лимитом, D-13).
+func (s *Service) selectOpts(ctx context.Context, groupID, member string, fast, arbiter bool) (SelectResult, error) {
 	start := time.Now()
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
@@ -586,7 +596,7 @@ func (s *Service) selectOpts(ctx context.Context, groupID, member string, fast b
 	if !ok || g.Mode != ModeManual {
 		return SelectResult{}, ErrGroupNotApplied
 	}
-	if !memberAllowed(g, member, am) {
+	if !memberAllowed(g, member, am) && (!arbiter || (member != memberDirect && member != memberReject)) {
 		return SelectResult{}, ErrMemberInvalid
 	}
 
