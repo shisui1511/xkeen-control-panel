@@ -88,7 +88,10 @@ export function showMihomoNavFor(nav: NavCaps | null): boolean | null {
 
 /**
  * Показывать ли пункт «Трафик»; null — срез неизвестен. Страница работает при любом
- * ядре: блоки, которым нужен API Mihomo, она прячет сама.
+ * ядре: блоки, которым нужен API Mihomo, она прячет сама. Функция сводится к «срез
+ * известен», но сохранена рядом с showMihomoNavFor и showProxiesNavFor: пункты меню
+ * решаются одним трёхзначным видом (null — срез неизвестен), и правило пункта «Трафик»
+ * меняется в одном месте.
  */
 export function showTrafficNavFor(nav: NavCaps | null): boolean | null {
   if (!nav) return null;
