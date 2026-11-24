@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { t, currentLang } from '../../i18n';
   import { showConfirm, showToast } from '../../stores';
   import { usePoller } from '../../lib/poller';
@@ -24,6 +25,8 @@
   import Section from '../Section.svelte';
   import ProxyRuntimeNotice from '../proxies/ProxyRuntimeNotice.svelte';
   import Icon from '../../lib/components/Icon.svelte';
+  import { motion } from '../../lib/motion.svelte';
+  import TrafficLimitModal from './TrafficLimitModal.svelte';
 
   interface Props {
     /** Адрес #/traffic?tab=limits&new=1: открыть форму нового лимита. */
@@ -99,6 +102,45 @@
     presetGroup = '';
     modalOpen = true;
   }
+
+  // #/traffic?tab=limits&new=1&group=<id> — форма нового лимита с предвыбранной группой;
+  // ID проверяет сама форма по группам вида (неизвестный — без предвыбора). Закрытая
+  // пользователем форма по тому же адресу больше не открывается.
+  let linkKey = $derived(newLimit ? `new:${group}` : '');
+  let dismissedLink = $state('');
+  let linkModal = $derived(linkKey !== '' && linkKey !== dismissedLink);
+
+  function closeModal() {
+    modalOpen = false;
+    editing = null;
+    presetGroup = '';
+    dismissedLink = linkKey;
+  }
+
+  async function onSaved() {
+    closeModal();
+    showToast('success', $t('traffic.limits.toast_saved'));
+    await loadLimits().catch(() => {});
+  }
+
+  // Переход к карточке выполняется один раз на значение адреса
+  let handledQuota = '';
+
+  // #/traffic?tab=limits&quota=<id> — прокрутка к карточке лимита и фокус на ней; ID только
+  // из загруженного списка (T-152-24)
+  $effect(() => {
+    const id = quota;
+    const list = view?.limits;
+    if (!id || id === handledQuota || !list?.some((l) => l.id === id)) return;
+    handledQuota = id;
+    tick().then(() => {
+      const card = document.querySelector<HTMLElement>(
+        `[data-testid="traffic-limit-${CSS.escape(id)}"]`
+      );
+      card?.scrollIntoView({ block: 'center', behavior: motion.reduced ? 'auto' : 'smooth' });
+      card?.focus({ preventScroll: true });
+    });
+  });
 
   function stateTone(s: LimitState): BadgeTone {
     switch (s) {
@@ -459,6 +501,16 @@
     {/if}
   {/if}
 </div>
+
+{#if modalOpen || linkModal}
+  <TrafficLimitModal
+    limit={modalOpen ? editing : null}
+    presetGroup={modalOpen ? presetGroup : group}
+    kernel={view?.kernel ?? ''}
+    onclose={closeModal}
+    onsaved={onSaved}
+  />
+{/if}
 
 <style>
   .limits-tab {
