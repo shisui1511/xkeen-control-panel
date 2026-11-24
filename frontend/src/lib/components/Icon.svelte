@@ -11,9 +11,7 @@
   import Proxies from './icons/Proxies.svelte';
   import Rules from './icons/Rules.svelte';
   import Subscriptions from './icons/Subscriptions.svelte';
-  import SmartProxy from './icons/SmartProxy.svelte';
   import Traffic from './icons/Traffic.svelte';
-  import TrafficQuota from './icons/TrafficQuota.svelte';
   import Network from './icons/Network.svelte';
   import Pwa from './icons/Pwa.svelte';
   import Sun from './icons/Sun.svelte';
@@ -84,12 +82,8 @@
   <Rules {size} {color} class={className} />
 {:else if name === 'subscriptions'}
   <Subscriptions {size} {color} class={className} />
-{:else if name === 'smartproxy'}
-  <SmartProxy {size} {color} class={className} />
 {:else if name === 'traffic'}
   <Traffic {size} {color} class={className} />
-{:else if name === 'trafficquotas'}
-  <TrafficQuota {size} {color} class={className} />
 {:else if name === 'network'}
   <Network {size} {color} class={className} />
 {:else if name === 'pwa'}

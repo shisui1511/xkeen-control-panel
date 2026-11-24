@@ -9,7 +9,6 @@
     "Services.svelte": 3,
     "Settings.svelte": 6,
     "Setup.svelte": 1,
-    "SmartProxy.svelte": 3,
     "Traffic.svelte": 4,
     "components/AuthLayout.svelte": 4,
     "components/BottomDock.svelte": 1,
@@ -78,7 +77,6 @@
   },
   "shadow": {
     "Connections.svelte": 1,
-    "SmartProxy.svelte": 1,
     "components/AuthLayout.svelte": 2,
     "components/DraftRestoreBanner.svelte": 1,
     "components/LatencyHistoryPopover.svelte": 1,
