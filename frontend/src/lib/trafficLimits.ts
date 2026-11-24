@@ -10,7 +10,7 @@ export type LimitPeriod = 'daily' | 'weekly' | 'monthly';
 export type LimitTargetType = 'group' | 'all';
 export type LimitState = 'ok' | 'threshold' | 'exhausted' | 'disabled' | 'group_deleted';
 /** Состояние учёта: нет сокета Mihomo, нет счётчиков Xray, ядро остановлено. */
-export type LimitData = 'ok' | 'no_socket' | 'no_counters' | 'stopped';
+export type LimitData = 'ok' | 'no_socket' | 'no_counters' | 'no_stream' | 'stopped';
 export type LimitGroupMode = 'manual' | 'auto' | 'fallback' | '';
 
 /** Лимит группы панели (по стабильному ID) или всего трафика. */

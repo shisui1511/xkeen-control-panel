@@ -186,7 +186,9 @@
       ? $t('traffic.limits.no_socket')
       : view?.data === 'no_counters'
         ? $t('traffic.limits.no_counters')
-        : $t('traffic.limits.no_data')
+        : view?.data === 'no_stream'
+          ? $t('traffic.limits.no_stream')
+          : $t('traffic.limits.no_data')
   );
   let hasData = $derived(view?.data === 'ok');
 
@@ -331,6 +333,10 @@
     {:else if view.data === 'no_counters'}
       <div class="alert alert-warning" data-testid="traffic-limits-no-counters">
         {$t('traffic.limits.no_counters')}
+      </div>
+    {:else if view.data === 'no_stream'}
+      <div class="alert alert-warning" data-testid="traffic-limits-no-stream">
+        {$t('traffic.limits.no_stream')}
       </div>
     {/if}
 

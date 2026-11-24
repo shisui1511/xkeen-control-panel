@@ -1693,6 +1693,7 @@
   "traffic.limits.empty_desc": "Limit the traffic of a group or of all traffic: the panel will warn you, block the group or switch it to a direct connection.",
   "traffic.limits.no_socket": "Traffic accounting is stopped: the Mihomo profile has no external-controller-unix. Add the socket and restart the core.",
   "traffic.limits.no_counters": "No data: Xray counters are unavailable — check the Xray statistics in “Configuration → Cores”",
+  "traffic.limits.no_stream": "No data: the Mihomo connections stream is down, usage is not being counted. Check the controller secret and restart the core.",
   "traffic.limits.no_data": "no data",
   "traffic.limits.approx": "Usage is approximate: a node belongs to several groups",
   "traffic.limits.of": "{used} of {limit}",

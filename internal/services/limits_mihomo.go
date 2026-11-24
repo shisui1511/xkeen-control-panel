@@ -19,7 +19,7 @@ const (
 )
 
 // SetMihomoState задаёт источник состояния потока /connections Mihomo
-// (TrafficQuotaService.StreamState): no_socket, stopped, down или ok.
+// (TrafficQuotaService.StreamState): no_socket, stopped, down, failing или ok.
 func (s *LimitsService) SetMihomoState(fn func() string) {
 	s.mu.Lock()
 	s.mihomoStateF = fn
@@ -27,8 +27,9 @@ func (s *LimitsService) SetMihomoState(fn func() string) {
 }
 
 // mihomoDataState — состояние данных учёта при активном Mihomo: нет сокета
-// контроллера или ядро остановлено — соответствующее состояние; поток подключён или
-// временно переподключается — ok. Caller не держит s.mu.
+// контроллера или ядро остановлено — соответствующее состояние; идёт полоса отказов
+// подключения потока — no_stream (учёт стоит, данных нет); поток подключён или
+// кратко переподключается — ok. Caller не держит s.mu.
 func (s *LimitsService) mihomoDataState() string {
 	s.mu.RLock()
 	fn := s.mihomoStateF
@@ -41,6 +42,8 @@ func (s *LimitsService) mihomoDataState() string {
 		return LimitDataNoSocket
 	case StreamStateStopped:
 		return LimitDataStopped
+	case StreamStateFailing:
+		return LimitDataNoStream
 	}
 	return LimitDataOK
 }

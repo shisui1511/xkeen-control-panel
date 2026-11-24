@@ -128,6 +128,7 @@ const (
 	LimitDataNoSocket   = "no_socket"
 	LimitDataNoCounters = "no_counters"
 	LimitDataStopped    = "stopped"
+	LimitDataNoStream   = "no_stream"
 )
 
 // Виды оповещений лимита.

@@ -114,6 +114,7 @@ type ConnDelta struct {
 const (
 	StreamStateOK       = "ok"
 	StreamStateDown     = "down"
+	StreamStateFailing  = "failing"
 	StreamStateStopped  = "stopped"
 	StreamStateNoSocket = "no_socket"
 )
@@ -207,7 +208,8 @@ func (s *TrafficQuotaService) SetConnDeltaHook(fn func([]ConnDelta)) {
 
 // StreamState сообщает состояние потока /connections: no_socket — у профиля Mihomo
 // нет Unix-контроллера (151 D-13), stopped — ядро не запущено, down — поток сейчас
-// не подключён, ok — снимки идут.
+// не подключён (короткий разрыв или переподключение), failing — идёт полоса отказов
+// подключения (контроллер отвечает ошибкой, отказ в доступе), ok — снимки идут.
 func (s *TrafficQuotaService) StreamState() string {
 	if s.mihomoSvc == nil {
 		return StreamStateStopped
@@ -220,8 +222,13 @@ func (s *TrafficQuotaService) StreamState() string {
 	}
 	s.wsLinksMu.Lock()
 	defer s.wsLinksMu.Unlock()
-	if l := s.wsLinks["connections"]; l != nil && l.connected {
-		return StreamStateOK
+	if l := s.wsLinks["connections"]; l != nil {
+		switch {
+		case l.connected:
+			return StreamStateOK
+		case l.failing:
+			return StreamStateFailing
+		}
 	}
 	return StreamStateDown
 }

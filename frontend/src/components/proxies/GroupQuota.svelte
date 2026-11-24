@@ -33,7 +33,9 @@
       ? $t('traffic.limits.no_socket')
       : limits?.data === 'no_counters'
         ? $t('traffic.limits.no_counters')
-        : $t('traffic.limits.no_data')
+        : limits?.data === 'no_stream'
+          ? $t('traffic.limits.no_stream')
+          : $t('traffic.limits.no_data')
   );
 
   // Порядок строк: исчерпанный, затем достигший порога, затем остальные (выключенные — в конце)
