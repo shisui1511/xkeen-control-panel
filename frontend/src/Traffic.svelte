@@ -83,6 +83,9 @@
   let linkNew = $derived(linkParams.get('new') === '1');
   let linkGroup = $derived(linkParams.get('group') ?? '');
   let linkQuota = $derived(linkParams.get('quota') ?? '');
+  // Ссылка, форма которой закрыта: вкладка «Лимиты» размонтируется при переключении,
+  // поэтому признак живёт здесь и форма по той же ссылке не открывается повторно.
+  let dismissedLink = $state('');
 
   let pageTabs = $derived<TabItem[]>([
     { value: 'stats', label: $t('traffic.tab_stats'), testId: 'traffic-tab-stats' },
@@ -90,7 +93,9 @@
   ]);
 
   function onHashChange() {
-    linkQuery = hashQuery().toString();
+    const nextQuery = hashQuery().toString();
+    if (nextQuery !== linkQuery) dismissedLink = '';
+    linkQuery = nextQuery;
     const next = hashTab();
     if (next !== null) {
       tabChosen = true;
@@ -1367,7 +1372,7 @@
     </div>
   {:else}
     <div class="tab-content" role="tabpanel" data-testid="traffic-panel-limits">
-      <TrafficLimitsTab newLimit={linkNew} group={linkGroup} quota={linkQuota} />
+      <TrafficLimitsTab newLimit={linkNew} group={linkGroup} quota={linkQuota} bind:dismissedLink />
     </div>
   {/if}
 </div>

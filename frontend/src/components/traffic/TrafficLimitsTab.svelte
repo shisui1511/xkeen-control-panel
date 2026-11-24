@@ -39,9 +39,14 @@
     group?: string;
     /** ID лимита, к карточке которого прокрутить (&quota=<id>). */
     quota?: string;
+    /**
+     * Ключ ссылки, форма которой уже закрыта. Живёт у страницы: вкладка при переключении
+     * размонтируется, и собственное состояние форму по той же ссылке открыло бы снова.
+     */
+    dismissedLink?: string;
   }
 
-  let { newLimit = false, group = '', quota = '' }: Props = $props();
+  let { newLimit = false, group = '', quota = '', dismissedLink = $bindable('') }: Props = $props();
 
   let view = $derived($trafficLimits);
   let alerts = $state<LimitAlert[]>([]);
@@ -111,7 +116,6 @@
   // ID проверяет сама форма по группам вида (неизвестный — без предвыбора). Закрытая
   // пользователем форма по тому же адресу больше не открывается.
   let linkKey = $derived(newLimit ? `new:${group}` : '');
-  let dismissedLink = $state('');
   let linkModal = $derived(linkKey !== '' && linkKey !== dismissedLink);
 
   function closeModal() {
