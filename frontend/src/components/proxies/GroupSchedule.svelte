@@ -7,6 +7,7 @@
   import Skeleton from '../Skeleton.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import ScheduleWindowModal from './ScheduleWindowModal.svelte';
+  import { errorCode, errorParams, isUnauthorized } from '../../lib/apiErrors';
   import {
     deleteScheduleWindow,
     loadRuntime,
@@ -72,20 +73,6 @@
     return pendingEnabled[w.id] ?? w.enabled;
   }
 
-  function codeOf(e: unknown): string | undefined {
-    const code = (e as { code?: unknown } | null)?.code;
-    return typeof code === 'string' && code !== '' ? code : undefined;
-  }
-
-  function paramsOf(e: unknown): Record<string, string> | undefined {
-    const params = (e as { params?: unknown } | null)?.params;
-    return params && typeof params === 'object' ? (params as Record<string, string>) : undefined;
-  }
-
-  function isUnauthorized(e: unknown): boolean {
-    return (e as { status?: unknown } | null)?.status === 401;
-  }
-
   async function toggle(w: ScheduleWindowView, enabled: boolean) {
     if (pendingEnabled[w.id] !== undefined) return;
     pendingEnabled[w.id] = enabled;
@@ -93,7 +80,8 @@
       await setScheduleWindowEnabled(group.id, w.id, enabled);
       await loadRuntime();
     } catch (e) {
-      if (!isUnauthorized(e)) showToast('error', proxiesErrorText($t, codeOf(e), paramsOf(e)));
+      if (!isUnauthorized(e))
+        showToast('error', proxiesErrorText($t, errorCode(e), errorParams(e)));
     } finally {
       // Сбой — переключатель возвращается к значению вида; успех — вид уже перечитан
       delete pendingEnabled[w.id];
@@ -133,7 +121,8 @@
         .querySelector<HTMLButtonElement>(`[data-testid="proxy-group-schedule-add-${group.id}"]`)
         ?.focus();
     } catch (e) {
-      if (!isUnauthorized(e)) showToast('error', proxiesErrorText($t, codeOf(e), paramsOf(e)));
+      if (!isUnauthorized(e))
+        showToast('error', proxiesErrorText($t, errorCode(e), errorParams(e)));
     } finally {
       deleting = '';
     }

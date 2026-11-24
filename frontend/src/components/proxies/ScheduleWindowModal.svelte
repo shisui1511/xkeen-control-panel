@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorCode, errorParams } from '../../lib/apiErrors';
   import { onMount } from 'svelte';
   import { t } from '../../i18n';
   import { showToast } from '../../stores';
@@ -147,16 +148,6 @@
     formDays = [...days];
   }
 
-  function codeOf(e: unknown): string | undefined {
-    const code = (e as { code?: unknown } | null)?.code;
-    return typeof code === 'string' && code !== '' ? code : undefined;
-  }
-
-  function paramsOf(e: unknown): Record<string, string> | undefined {
-    const params = (e as { params?: unknown } | null)?.params;
-    return params && typeof params === 'object' ? (params as Record<string, string>) : undefined;
-  }
-
   onMount(() => {
     // Фокус — на первое поле формы (Modal ставит его на первый фокусируемый элемент — крестик)
     const timer = setTimeout(() => document.getElementById(memberId)?.focus(), 20);
@@ -182,8 +173,8 @@
       onsaved();
     } catch (e) {
       if ((e as { status?: unknown } | null)?.status === 401) return;
-      const code = codeOf(e);
-      const params = paramsOf(e);
+      const code = errorCode(e);
+      const params = errorParams(e);
       const other = params?.window;
       if (code === 'schedule_overlap' && other) {
         serverOverlap = { id: other, sig };

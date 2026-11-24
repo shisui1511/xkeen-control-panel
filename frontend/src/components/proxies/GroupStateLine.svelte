@@ -15,6 +15,7 @@
   import { loadLimits, limitsErrorMeta, resetLimit } from '../../lib/trafficLimits';
   import { formatRouterTime } from '../../lib/scheduleWindows';
   import { holdLeftover, quotaHoldParams } from '../../lib/proxyRuntimeAdapter';
+  import { errorCode, errorParams, isUnauthorized } from '../../lib/apiErrors';
 
   // Строка состояния группы (UI-SPEC 1.1, D-04, D-05, D-07): чем арбитр держит группу
   // сейчас и чем это снять. Сервер уже выбрал старшее удержание (квота > перехват >
@@ -39,20 +40,6 @@
 
   function routerTime(unix: number | undefined): string {
     return unix ? formatRouterTime(unix, clock?.offset ?? 0) : '--:--';
-  }
-
-  function codeOf(e: unknown): string | undefined {
-    const code = (e as { code?: unknown } | null)?.code;
-    return typeof code === 'string' && code !== '' ? code : undefined;
-  }
-
-  function paramsOf(e: unknown): Record<string, string> | undefined {
-    const params = (e as { params?: unknown } | null)?.params;
-    return params && typeof params === 'object' ? (params as Record<string, string>) : undefined;
-  }
-
-  function isUnauthorized(e: unknown): boolean {
-    return (e as { status?: unknown } | null)?.status === 401;
   }
 
   async function onReset() {
@@ -96,7 +83,8 @@
       await tick();
       rootEl?.focus();
     } catch (e) {
-      if (!isUnauthorized(e)) showToast('error', proxiesErrorText($t, codeOf(e), paramsOf(e)));
+      if (!isUnauthorized(e))
+        showToast('error', proxiesErrorText($t, errorCode(e), errorParams(e)));
     } finally {
       busy = '';
     }
