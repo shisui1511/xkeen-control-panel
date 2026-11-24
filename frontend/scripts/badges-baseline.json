@@ -5,7 +5,6 @@
   "Services.svelte": 2,
   "Settings.svelte": 1,
   "Traffic.svelte": 9,
-  "TrafficQuotas.svelte": 1,
   "components/BottomDock.svelte": 1,
   "components/LatencyHistoryPopover.svelte": 4,
   "components/PingTargetQuickMenu.svelte": 4,

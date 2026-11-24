@@ -5,7 +5,6 @@
   "Editor.svelte": 3,
   "Proxies.svelte": 1,
   "Traffic.svelte": 2,
-  "TrafficQuotas.svelte": 7,
   "components/NodeRowSkeleton.svelte": 4,
   "components/editor/BackupSidebar.svelte": 2,
   "components/editor/EditorToolbar.svelte": 2,
