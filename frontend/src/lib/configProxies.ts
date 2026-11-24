@@ -69,6 +69,8 @@ export interface RuntimeHold {
   until?: number;
   window?: string;
   member?: string;
+  /** Выбор группы до захвата окном (нет поля — вернётся выбор по умолчанию). */
+  origin?: string;
   stalled?: boolean;
 }
 

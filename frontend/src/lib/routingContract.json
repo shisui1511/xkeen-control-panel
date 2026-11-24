@@ -412,7 +412,16 @@
   },
   "RuntimeHold": {
     "required": ["kind"],
-    "optional": ["limit", "limit_name", "reset_at", "until", "window", "member", "stalled"],
+    "optional": [
+      "limit",
+      "limit_name",
+      "reset_at",
+      "until",
+      "window",
+      "member",
+      "origin",
+      "stalled"
+    ],
     "children": {}
   },
   "ScheduleWindowView": {

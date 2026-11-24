@@ -59,9 +59,12 @@ type RuntimeHold struct {
 	LimitName string `json:"limit_name,omitempty"`
 	ResetAt   int64  `json:"reset_at,omitempty"`
 	// Until — конец удержания (unix, секунды): конец окна или перехвата.
-	Until   int64  `json:"until,omitempty"`
-	Window  string `json:"window,omitempty"`
-	Member  string `json:"member,omitempty"`
+	Until  int64  `json:"until,omitempty"`
+	Window string `json:"window,omitempty"`
+	Member string `json:"member,omitempty"`
+	// Origin — выбор группы до захвата окном: к нему группа вернётся по концу окна
+	// или после удаления окна ("" — выбора не было, вернётся выбор по умолчанию).
+	Origin  string `json:"origin,omitempty"`
 	Stalled bool   `json:"stalled,omitempty"`
 }
 

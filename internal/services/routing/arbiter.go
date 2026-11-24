@@ -331,12 +331,12 @@ func runtimeHold(in decideInput, d decision) *RuntimeHold {
 	case holderOverride:
 		if in.hasRec && in.rec.Holder == holderOverride {
 			return &RuntimeHold{Kind: holderOverride, Until: in.rec.Until, Window: in.rec.Window,
-				Member: in.rec.Override, Stalled: stalled}
+				Member: in.rec.Override, Origin: in.rec.Origin, Stalled: stalled}
 		}
 	case holderSchedule:
 		if in.hasRec && in.rec.Holder == holderSchedule && in.rec.Window == in.win.ID {
 			return &RuntimeHold{Kind: holderSchedule, Until: in.winEnd.Unix(), Window: in.win.ID,
-				Member: in.win.Member, Stalled: stalled}
+				Member: in.win.Member, Origin: in.rec.Origin, Stalled: stalled}
 		}
 	case holdNodeMissing:
 		return &RuntimeHold{Kind: holdNodeMissing, Until: in.winEnd.Unix(), Window: in.win.ID, Member: in.win.Member}
