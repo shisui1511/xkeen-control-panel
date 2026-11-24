@@ -37,7 +37,6 @@ type KernelRoutePolicy struct {
 var kernelGatedPrefixes = []string{
 	"/api/mihomo/",
 	"/api/xray/",
-	"/api/smart-proxy/",
 	"/api/traffic/",
 	"/api/rule-providers/",
 	"/api/rules/test",
@@ -49,7 +48,6 @@ const (
 	reasonXrayGRPC      = "обращается к gRPC-API Xray"
 	reasonProfileFiles  = "файлы профилей Mihomo и проверка mihomo -t: конструктор работает при любом ядре"
 	reasonLimitsStore   = "JSON-хранилище лимитов панели: настройка и учёт при любом ядре"
-	reasonSmartStore    = "хранилище профилей SmartProxy и расписание по часам, процесс ядра не опрашивается"
 	reasonRuleFiles     = "правила и провайдеры правил читаются из файлов и по URL, без процесса ядра"
 	reasonXrayFiles     = "конфиги Xray и локальные утилиты, без gRPC-API"
 )
@@ -94,14 +92,6 @@ var kernelRoutePolicies = map[string]KernelRoutePolicy{
 	"/api/rule-providers/info":      {"mihomo", GateData, reasonRuleFiles},
 	"/api/rule-providers/content":   {"mihomo", GateData, reasonRuleFiles},
 	"/api/rule-providers/check-url": {"mihomo", GateData, reasonRuleFiles},
-
-	"/api/smart-proxy/profiles":         {"mihomo", GateData, reasonSmartStore},
-	"/api/smart-proxy/profiles/get":     {"mihomo", GateData, reasonSmartStore},
-	"/api/smart-proxy/profiles/add":     {"mihomo", GateData, reasonSmartStore},
-	"/api/smart-proxy/profiles/update":  {"mihomo", GateData, reasonSmartStore},
-	"/api/smart-proxy/profiles/delete":  {"mihomo", GateData, reasonSmartStore},
-	"/api/smart-proxy/profiles/enabled": {"mihomo", GateData, reasonSmartStore},
-	"/api/smart-proxy/status":           {"mihomo", GateData, reasonSmartStore},
 
 	// Лимиты трафика: нейтральны к ядру, Kernel пуст — маршрут обоих ядер.
 	"/api/traffic/limits":              {"", GateData, reasonLimitsStore},

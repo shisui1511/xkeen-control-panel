@@ -395,15 +395,6 @@ func main() {
 	// Network IP endpoint (Router WAN IP detection)
 	srv.HandleProtected("/api/network/ip", api.NetworkIP)
 
-	// Smart Proxy Manager endpoints
-	srv.HandleProtected("/api/smart-proxy/profiles", api.SmartProxyList)
-	srv.HandleProtected("/api/smart-proxy/profiles/get", api.SmartProxyGet)
-	srv.HandleProtected("/api/smart-proxy/profiles/add", api.SmartProxyAdd)
-	srv.HandleProtected("/api/smart-proxy/profiles/update", api.SmartProxyUpdate)
-	srv.HandleProtected("/api/smart-proxy/profiles/delete", api.SmartProxyDelete)
-	srv.HandleProtected("/api/smart-proxy/profiles/enabled", api.SmartProxySetEnabled)
-	srv.HandleProtected("/api/smart-proxy/status", api.SmartProxyStatus)
-
 	// Статистика и потоки трафика
 	srv.HandleProtected("/api/traffic/stats", api.TrafficStats)
 	srv.HandleProtected("/api/traffic/ws", api.TrafficWebSocket)
@@ -438,12 +429,6 @@ func main() {
 	api.SetLimitsService(limitsSvc)
 	// Финальная запись счётчиков лимитов — со своим бюджетом (shutdownSteps.save).
 	defer stops.save("traffic-limits", limitsSvc.Stop)
-
-	// Start background services
-	smartProxySvc := services.NewSmartProxyService(cfg.DataDir, api.MihomoService())
-	smartProxySvc.Start()
-	api.SetSmartProxyService(smartProxySvc)
-	defer stops.run("smart-proxy", smartProxySvc.Stop)
 
 	trafficQuotaSvc := services.NewTrafficQuotaService(cfg.DataDir, cfg.MihomoSecret, api.MihomoService())
 	// Живость ядра — по процессам, без определения версии: опрос квот не должен
