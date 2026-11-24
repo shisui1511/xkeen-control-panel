@@ -187,6 +187,15 @@
       if (p.method === 'tls') text += ' ' + $t('cfg.groups.repick_method_tls');
       return { notice: n, tone: 'warning', text };
     }
+    // Арбитр окон и лимитов (фаза 152): узла окна нет в группе или ядро не приняло выбор
+    // арбитра; повтор идёт на сервере сам
+    if (n.id.startsWith('routing_schedule:')) {
+      const key =
+        n.reason === 'node_missing'
+          ? 'cfg.notice.routing_schedule_node_missing'
+          : 'cfg.notice.routing_schedule_stalled';
+      return { notice: n, tone: 'warning', text: $t(key, { group: p.group ?? '' }) };
+    }
     if (n.id.startsWith('routing_list_missing:')) {
       return {
         notice: n,

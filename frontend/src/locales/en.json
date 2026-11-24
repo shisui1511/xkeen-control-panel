@@ -3092,6 +3092,8 @@
   "cfg.hint.cond_conflict": "Rule {rule} has two conditions of the same kind (for example, domains and geosite): Xray cannot express this. Split them into two rules.",
   "cfg.hint.checker_failed": "The draft could not be checked. Try “Apply” again.",
   "cfg.hint.xray_selector_prefix": "A node tag in Xray matches the beginning of another node tag. Exclude one of them from the group.",
+  "cfg.notice.routing_schedule_node_missing": "Group “{group}”: the scheduled node is not among the group options — pick a node manually or edit the window.",
+  "cfg.notice.routing_schedule_stalled": "Group “{group}”: the core has not accepted the schedule or limit choice — the panel keeps retrying.",
   "cfg.notice.routing_auto_taken": "{kernel} is installed: the panel took over its routing automatically. Check the groups and rules.",
   "cfg.notice.routing_reconcile": "Could not restore the choice in group “{group}”: Mihomo returned an error. Select the member again.",
   "cfg.notice.routing_select": "The selection in group “{group}” was cancelled — {reason}. The previous node has been restored.",

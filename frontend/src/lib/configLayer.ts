@@ -277,6 +277,7 @@ const NOTICE_PREFIXES = [
   'routing_select:',
   'routing_repick:',
   'routing_list_missing:',
+  'routing_schedule:',
   'geodata_update:',
   'geodata_cleanup:',
   'geodata_include:',
