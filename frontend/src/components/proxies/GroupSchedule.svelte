@@ -6,6 +6,7 @@
   import Toggle from '../Toggle.svelte';
   import Skeleton from '../Skeleton.svelte';
   import Icon from '../../lib/components/Icon.svelte';
+  import ScheduleWindowModal from './ScheduleWindowModal.svelte';
   import {
     deleteScheduleWindow,
     loadRuntime,
@@ -142,6 +143,18 @@
     sourceEl = e.currentTarget as HTMLElement;
     editing = w;
   }
+
+  /** Закрытие модалки: фокус — на кнопку-источник (или «Добавить окно», если её уже нет). */
+  async function closeEditor() {
+    editing = null;
+    await tick();
+    if (sourceEl?.isConnected) sourceEl.focus();
+    else
+      document
+        .querySelector<HTMLButtonElement>(`[data-testid="proxy-group-schedule-add-${group.id}"]`)
+        ?.focus();
+    sourceEl = null;
+  }
 </script>
 
 <section
@@ -261,6 +274,15 @@
     </div>
   {/if}
 </section>
+
+{#if editing !== null}
+  <ScheduleWindowModal
+    {group}
+    window={editing === 'new' ? null : editing}
+    onclose={closeEditor}
+    onsaved={closeEditor}
+  />
+{/if}
 
 <style>
   .gs {
