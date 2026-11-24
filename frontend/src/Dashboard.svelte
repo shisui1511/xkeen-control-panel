@@ -92,7 +92,14 @@
   let currentTab = $state(tabFromHash(initialHash));
   let currentHash = $state(initialHash);
 
-  const mihomoDependentTabs = ['proxies', 'connections', 'rules', 'traffic'];
+  // Вкладки, которым нужен API Mihomo. «Трафик» под Xray показывает статистику Xray и сам
+  // объясняет блоки только для Mihomo, поэтому при активном Xray в список не входит.
+  // В конфликте имя активного ядра пустое — «Трафик» остаётся под заглушкой конфликта
+  const mihomoDependentTabs = $derived(
+    $activeKernelName === 'xray'
+      ? ['proxies', 'connections', 'rules']
+      : ['proxies', 'connections', 'rules', 'traffic']
+  );
   // В конфликте ядер (оба процесса запущены) вкладки ядер закрыты заглушкой под баннером
   // Причина плашки «Mihomo API оффлайн» по состоянию ядер (todo mihomo-offline-banner-reason):
   // при активном Xray страница просто показывает данные другого ядра — запуск Mihomo
@@ -995,10 +1002,10 @@
           <span class="spinner"></span>
           <span>{$t('service.restarting_wait')}</span>
         </div>
-      {:else if currentTab !== 'rules' && currentTab !== 'proxies' && !(currentTab === 'traffic' && $activeKernelName === 'xray')}
+      {:else if currentTab !== 'rules' && currentTab !== 'proxies'}
         <!-- «Правила» работают без API Mihomo: вместо баннера — пометка на самой странице (D-19).
              «Прокси» сама объясняет состояние ядра плашкой (D-01…D-03).
-             «Трафик» под Xray показывает статистику Xray и сам объясняет блоки только для Mihomo -->
+             «Трафика» под Xray нет в mihomoDependentTabs — баннер на нём не рисуется -->
         <div class="shell-banner-slot">
           <ApiOffline
             reason={apiOfflineReason}
