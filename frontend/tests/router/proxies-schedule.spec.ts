@@ -232,12 +232,15 @@ async function prepare(browser: Browser): Promise<void> {
     autoId = await save({ name: 'RT Расписание авто', mode: 'auto' });
     stand.groupIds = [autoId, manualId];
     await takeAndApply(page);
-    const applied = (await routingInfo(page)).groups.filter(
-      (g) => g.id === manualId || g.id === autoId
-    );
-    expect(applied.length === 2 && applied.every((g) => g.applied), 'группы теста применены').toBe(
+    // признак «применена» бэкенд ставит только ручным группам; «авто» должна быть в списке
+    const groups = (await routingInfo(page)).groups;
+    expect(groups.find((g) => g.id === manualId)?.applied, 'ручная группа теста применена').toBe(
       true
     );
+    expect(
+      groups.some((g) => g.id === autoId),
+      'группа «авто» теста есть в списке'
+    ).toBe(true);
     const { g } = await runtimeView(page, manualId);
     expect(nodeIndexes(g).length, 'два узла в ручной группе').toBe(2);
   });

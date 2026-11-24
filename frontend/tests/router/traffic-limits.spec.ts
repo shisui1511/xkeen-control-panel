@@ -155,8 +155,9 @@ async function prepare(browser: Browser): Promise<void> {
     expect(autoId, 'идентификатор группы').not.toBe('');
     stand.groupIds = [autoId];
     await takeAndApply(page);
-    const applied = (await routingInfo(page)).groups.find((g) => g.id === autoId);
-    expect(applied?.applied, 'группа теста применена').toBe(true);
+    // признак «применена» бэкенд ставит только ручным группам: для «авто» достаточно записи в списке
+    const created = (await routingInfo(page)).groups.find((g) => g.id === autoId);
+    expect(created?.mode, 'группа «авто» теста есть в списке').toBe('auto');
   });
 }
 
