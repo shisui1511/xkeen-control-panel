@@ -42,6 +42,9 @@ const (
 const (
 	// arbiterTick — период сверки окон с выбором групп.
 	arbiterTick = 15 * time.Second
+	// selectLockWait — сколько клик пользователя ждёт замок выбора, пока тик арбитра
+	// ставит выборы групп: дольше — отказ ErrSelectBusy вместо зависшего запроса.
+	selectLockWait = 5 * time.Second
 	// arbiterMinYear — часы роутера раньше этого года считаются несинхронизированными:
 	// окна не применяются, удержание лимитом действует (A9).
 	arbiterMinYear = 2025
@@ -356,13 +359,25 @@ func (s *Service) limitHolds() services.LimitHolds {
 }
 
 // lockArbiter упорядочивает выбор пользователя и «Вернуть расписание» с тиком
-// арбитра: запись удержания и выбор не перемежаются. Без арбитра — ничего.
-func (s *Service) lockArbiter() func() {
+// арбитра: запись удержания и выбор не перемежаются. Без арбитра — ничего. Тик
+// держит замок на весь проход по группам, а синхронный выбор может занять десятки
+// секунд, поэтому ожидание ограничено отменой запроса и selectLockWait: вместо
+// зависшего запроса клиент получает ErrSelectBusy и повторяет клик.
+func (s *Service) lockArbiter(ctx context.Context) (func(), error) {
 	if s.arb == nil {
-		return func() {}
+		return func() {}, nil
 	}
-	s.arb.selMu.Lock()
-	return s.arb.selMu.Unlock
+	sem := s.arb.sel
+	timer := time.NewTimer(selectLockWait)
+	defer timer.Stop()
+	select {
+	case sem <- struct{}{}:
+		return func() { <-sem }, nil
+	case <-ctx.Done():
+		return nil, ErrSelectBusy
+	case <-timer.C:
+		return nil, ErrSelectBusy
+	}
 }
 
 // --- фоновая служба ---
@@ -377,12 +392,14 @@ type Arbiter struct {
 	// mu охраняет holds.
 	mu    sync.Mutex
 	holds HoldSource
-	// selMu упорядочивает тик, клик пользователя (Select) и RestoreSchedule.
-	selMu sync.Mutex
+	// sel — замок выбора ёмкостью 1: упорядочивает тик, клик пользователя (Select) и
+	// RestoreSchedule. Канал, а не sync.Mutex: ожидание клика отменяется контекстом
+	// запроса и ограничено по времени (lockArbiter).
+	sel chan struct{}
 
 	// lastErr — последняя записанная в журнал ошибка выбора по группе: повтор той
 	// же ошибки каждый тик журнал не засоряет. noted — причина уведомления
-	// routing_schedule по группе. Трогает только тик (под selMu).
+	// routing_schedule по группе. Трогает только тик (под замком выбора).
 	lastErr map[string]string
 	noted   map[string]string
 
@@ -401,7 +418,7 @@ type Arbiter struct {
 func NewArbiter(s *Service) *Arbiter {
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &Arbiter{s: s, lastErr: map[string]string{}, noted: map[string]string{}, ctx: ctx, cancel: cancel,
-		done: make(chan struct{}), kick: make(chan struct{}, 1)}
+		done: make(chan struct{}), kick: make(chan struct{}, 1), sel: make(chan struct{}, 1)}
 	s.arb = a
 	return a
 }
@@ -485,16 +502,20 @@ func (a *Arbiter) run() {
 // перехода окна, поэтому повтор безопасен: пропущенный тик (выбор занят,
 // перезапуск панели посреди окна) доводит следующий. Первым делом — сверка
 // служебного хвоста профиля Mihomo (syncTail, D-13): до проверки AnyManaged и до
-// решений по группам, без selMu (клик пользователя не ждёт конвейер). Решения
-// читают состояние заново под selMu, то есть уже после сверки: selectArbiter идёт
+// решений по группам, без замка выбора (клик пользователя не ждёт конвейер). Решения
+// читают состояние заново под замком выбора, то есть уже после сверки: selectArbiter идёт
 // по новому профилю.
 func (a *Arbiter) tick(ctx context.Context) {
 	s := a.s
 	if st, err := s.d.Layer.ReadState(); err == nil {
 		a.syncTail(ctx, st)
 	}
-	a.selMu.Lock()
-	defer a.selMu.Unlock()
+	select {
+	case a.sel <- struct{}{}:
+		defer func() { <-a.sel }()
+	case <-ctx.Done():
+		return
+	}
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
 		return
@@ -722,7 +743,7 @@ func (a *Arbiter) dropRecord(gid string, seen arbiterRecord) {
 // Origin не меняется); клик по узлу окна снимает перехват. Окна нет — запись,
 // оставшаяся от лимита или прошлого окна, снимается: ручной выбор пользователя
 // следующий тик не откатывает. undo возвращает прежнюю запись, если её никто не
-// сменил; вызывается при неудаче выбора. Вызывается под selMu.
+// сменил; вызывается при неудаче выбора. Вызывается под замком выбора.
 func (a *Arbiter) beforeUserSelect(gid, member string) (undo func(), err error) {
 	s := a.s
 	noop := func() {}

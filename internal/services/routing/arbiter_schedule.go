@@ -317,7 +317,11 @@ func (s *Service) SetScheduleWindowEnabled(gid, id string, enabled bool) error {
 // окна нет (или часы не синхронизированы) — ErrWindowNotFound; узла окна нет среди
 // вариантов группы — ErrMemberInvalid.
 func (s *Service) RestoreSchedule(ctx context.Context, gid string) (SelectResult, error) {
-	defer s.lockArbiter()()
+	unlock, err := s.lockArbiter(ctx)
+	if err != nil {
+		return SelectResult{}, err
+	}
+	defer unlock()
 	g, am, st, err := s.manualAppliedGroup(gid)
 	if err != nil {
 		return SelectResult{}, err

@@ -562,7 +562,11 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 	if s.arb == nil {
 		return s.selectOpts(ctx, groupID, member, true, false)
 	}
-	defer s.lockArbiter()()
+	unlock, err := s.lockArbiter(ctx)
+	if err != nil {
+		return SelectResult{}, err
+	}
+	defer unlock()
 	undo, err := s.arb.beforeUserSelect(groupID, member)
 	if err != nil {
 		return SelectResult{}, err
