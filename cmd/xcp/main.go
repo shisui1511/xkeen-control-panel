@@ -404,17 +404,8 @@ func main() {
 	srv.HandleProtected("/api/smart-proxy/profiles/enabled", api.SmartProxySetEnabled)
 	srv.HandleProtected("/api/smart-proxy/status", api.SmartProxyStatus)
 
-	// Traffic Quotas endpoints
-	srv.HandleProtected("/api/traffic/quotas", api.TrafficQuotaList)
-	srv.HandleProtected("/api/traffic/quotas/get", api.TrafficQuotaGet)
-	srv.HandleProtected("/api/traffic/quotas/add", api.TrafficQuotaAdd)
-	srv.HandleProtected("/api/traffic/quotas/update", api.TrafficQuotaUpdate)
-	srv.HandleProtected("/api/traffic/quotas/delete", api.TrafficQuotaDelete)
-	srv.HandleProtected("/api/traffic/quotas/enabled", api.TrafficQuotaSetEnabled)
-	srv.HandleProtected("/api/traffic/quotas/reset", api.TrafficQuotaReset)
+	// Статистика и потоки трафика
 	srv.HandleProtected("/api/traffic/stats", api.TrafficStats)
-	srv.HandleProtected("/api/traffic/alerts", api.TrafficAlerts)
-	srv.HandleProtected("/api/traffic/alerts/clear", api.TrafficAlertsClear)
 	srv.HandleProtected("/api/traffic/ws", api.TrafficWebSocket)
 	srv.HandleProtected("/api/traffic/reset", api.TrafficReset)
 	// Лимиты трафика: служба нейтральна к ядру, маршруты работают при любом ядре.

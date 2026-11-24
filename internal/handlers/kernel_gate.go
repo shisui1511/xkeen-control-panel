@@ -48,7 +48,6 @@ const (
 	reasonMihomoCounter = "живые счётчики трафика Mihomo"
 	reasonXrayGRPC      = "обращается к gRPC-API Xray"
 	reasonProfileFiles  = "файлы профилей Mihomo и проверка mihomo -t: конструктор работает при любом ядре"
-	reasonQuotaStore    = "JSON-хранилище квот панели: настройка доступна при любом ядре"
 	reasonLimitsStore   = "JSON-хранилище лимитов панели: настройка и учёт при любом ядре"
 	reasonSmartStore    = "хранилище профилей SmartProxy и расписание по часам, процесс ядра не опрашивается"
 	reasonRuleFiles     = "правила и провайдеры правил читаются из файлов и по URL, без процесса ядра"
@@ -66,8 +65,6 @@ var kernelRoutePolicies = map[string]KernelRoutePolicy{
 	"/api/mihomo/connections/ws":     {"mihomo", GateLive, "WebSocket подключений: " + reasonMihomoClash},
 	"/api/traffic/ws":                {"mihomo", GateLive, "WebSocket трафика: " + reasonMihomoCounter},
 	"/api/traffic/stats":             {"mihomo", GateLive, reasonMihomoCounter},
-	"/api/traffic/alerts":            {"mihomo", GateLive, "оповещения по живым счётчикам Mihomo"},
-	"/api/traffic/alerts/clear":      {"mihomo", GateLive, "сброс оповещений по живым счётчикам Mihomo"},
 	"/api/traffic/reset":             {"mihomo", GateLive, "сброс живых счётчиков Mihomo"},
 
 	// Xray, живые маршруты
@@ -105,14 +102,6 @@ var kernelRoutePolicies = map[string]KernelRoutePolicy{
 	"/api/smart-proxy/profiles/delete":  {"mihomo", GateData, reasonSmartStore},
 	"/api/smart-proxy/profiles/enabled": {"mihomo", GateData, reasonSmartStore},
 	"/api/smart-proxy/status":           {"mihomo", GateData, reasonSmartStore},
-
-	"/api/traffic/quotas":         {"mihomo", GateData, reasonQuotaStore},
-	"/api/traffic/quotas/get":     {"mihomo", GateData, reasonQuotaStore},
-	"/api/traffic/quotas/add":     {"mihomo", GateData, reasonQuotaStore},
-	"/api/traffic/quotas/update":  {"mihomo", GateData, reasonQuotaStore},
-	"/api/traffic/quotas/delete":  {"mihomo", GateData, reasonQuotaStore},
-	"/api/traffic/quotas/enabled": {"mihomo", GateData, reasonQuotaStore},
-	"/api/traffic/quotas/reset":   {"mihomo", GateData, reasonQuotaStore},
 
 	// Лимиты трафика: нейтральны к ядру, Kernel пуст — маршрут обоих ядер.
 	"/api/traffic/limits":              {"", GateData, reasonLimitsStore},
