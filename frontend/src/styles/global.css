@@ -1967,6 +1967,42 @@ body.drawer-locked {
   box-shadow: 0 0 8px var(--accent-line);
 }
 
+/* Полоса расхода лимита (вкладка «Лимиты», блок «Лимит» группы): сплошной токен состояния,
+   без градиента, тени и верхнего отступа. Заливка ограничена 100 % ширины. */
+.stat-bar--meter {
+  margin-top: 0;
+  height: 8px;
+  border-radius: var(--radius-full);
+}
+
+.stat-bar--meter .stat-bar-fill {
+  max-width: 100%;
+  border-radius: var(--radius-full);
+  box-shadow: none;
+}
+
+.stat-bar--meter .stat-bar-fill--ok {
+  background: var(--accent);
+}
+
+.stat-bar--meter .stat-bar-fill--warn {
+  background: var(--warning);
+}
+
+.stat-bar--meter .stat-bar-fill--danger {
+  background: var(--danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stat-bar--meter .stat-bar-fill {
+    transition: none;
+  }
+}
+
+:root[data-motion='reduced'] .stat-bar--meter .stat-bar-fill {
+  transition: none;
+}
+
 /* Quick actions row */
 .quick-actions {
   display: flex;

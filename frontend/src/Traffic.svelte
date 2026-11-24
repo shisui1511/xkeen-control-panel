@@ -18,6 +18,7 @@
   import Tabs, { type TabItem } from './components/Tabs.svelte';
   import Section from './components/Section.svelte';
   import EmptyState from './components/EmptyState.svelte';
+  import TrafficLimitsTab from './components/traffic/TrafficLimitsTab.svelte';
 
   interface TrafficPoint {
     up: number;
@@ -75,6 +76,13 @@
   let activeTab = $state<PageTab>(hashTab() ?? 'stats');
   // Вкладку выбрали руками или адресом: адрес без tab (переход из меню) её не сбрасывает.
   let tabChosen = $state(hashTab() !== null);
+  // Параметры перехода из карточки группы: new=1&group=<id> — форма нового лимита с
+  // предвыбранной группой, quota=<id> — карточка лимита. Обновляются тем же hashchange.
+  let linkQuery = $state(hashQuery().toString());
+  let linkParams = $derived(new URLSearchParams(linkQuery));
+  let linkNew = $derived(linkParams.get('new') === '1');
+  let linkGroup = $derived(linkParams.get('group') ?? '');
+  let linkQuota = $derived(linkParams.get('quota') ?? '');
 
   let pageTabs = $derived<TabItem[]>([
     { value: 'stats', label: $t('traffic.tab_stats'), testId: 'traffic-tab-stats' },
@@ -82,6 +90,7 @@
   ]);
 
   function onHashChange() {
+    linkQuery = hashQuery().toString();
     const next = hashTab();
     if (next !== null) {
       tabChosen = true;
@@ -1357,7 +1366,9 @@
       </div>
     </div>
   {:else}
-    <div class="tab-content" role="tabpanel" data-testid="traffic-panel-limits"></div>
+    <div class="tab-content" role="tabpanel" data-testid="traffic-panel-limits">
+      <TrafficLimitsTab newLimit={linkNew} group={linkGroup} quota={linkQuota} />
+    </div>
   {/if}
 </div>
 

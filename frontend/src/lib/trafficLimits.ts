@@ -139,6 +139,41 @@ export async function clearLimitAlerts(): Promise<void> {
   await postJSON<unknown>('/api/traffic/limits/alerts/clear', {});
 }
 
+// --- Единицы ---
+
+/** Единицы формы лимита (двоичные, как у счётчиков панели). */
+export const LIMIT_UNITS = [
+  { value: 'MB', bytes: 1024 ** 2 },
+  { value: 'GB', bytes: 1024 ** 3 },
+  { value: 'TB', bytes: 1024 ** 4 }
+] as const;
+
+export type LimitUnit = (typeof LIMIT_UNITS)[number]['value'];
+
+/** Байты в виде «12,4 GB» с разделителем дробной части языка интерфейса. */
+export function formatLimitBytes(bytes: number, lang: string): string {
+  const b = Math.max(0, bytes || 0);
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  let v = b;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  const num = new Intl.NumberFormat(lang, { maximumFractionDigits: i === 0 ? 0 : 1 }).format(v);
+  return `${num} ${units[i]}`;
+}
+
+/** Лимит в байтах → значение и единица формы (наибольшая единица с целым значением ≥ 1). */
+export function splitLimitBytes(bytes: number): { value: number; unit: LimitUnit } {
+  for (let i = LIMIT_UNITS.length - 1; i >= 0; i--) {
+    const u = LIMIT_UNITS[i];
+    if (bytes >= u.bytes)
+      return { value: Math.round((bytes / u.bytes) * 1000) / 1000, unit: u.value };
+  }
+  return { value: Math.round((bytes / LIMIT_UNITS[0].bytes) * 1000) / 1000, unit: 'MB' };
+}
+
 // --- Тексты ошибок ---
 
 export type LimitsTFn = (key: string, params?: Record<string, string | number>) => string;
