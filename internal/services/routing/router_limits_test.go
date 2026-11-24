@@ -307,6 +307,20 @@ func rtlmSaw(port int, accessLog, domain string) bool {
 	return false
 }
 
+// rtlmGroupsChanged ждёт, пока конвейер запишет в окружение тело групп, отличное от
+// копии в процессе: выбор в Live виден раньше записи файла, и замена без ожидания
+// молча пропустила бы перенос.
+func rtlmGroupsChanged(t *testing.T, e *rtEnv, dir, step string) {
+	t.Helper()
+	if !rtlmUntil(10*time.Second, func() bool {
+		old, err1 := os.ReadFile(filepath.Join(dir, xrayGroupsFile))
+		next, err2 := os.ReadFile(filepath.Join(e.xrayDir(), xrayGroupsFile))
+		return err1 == nil && err2 == nil && !bytes.Equal(old, next)
+	}) {
+		t.Fatalf("%s: конвейер не записал новое тело группы за 10 с", step)
+	}
+}
+
 // rtlmHotSync переносит в изолированный процесс Xray тело группы, которое выбор
 // арбитра записал в xcp-groups окружения: горячая замена (rmo→ado) тем же xrayHot,
 // что у конвейера при запущенном ядре, затем файл копируется в каталог процесса.
@@ -743,6 +757,7 @@ func TestRouterLimitsXray(t *testing.T) {
 			t.Fatalf("%s: выбор группы не поставлен за 40 с: расход %d байт, данные %s, держатель %q",
 				step, rtlmUsed(limits, l.ID), limits.List().Data, rtlmHolder(t, e, g.ID))
 		}
+		rtlmGroupsChanged(t, e, dir, step)
 		rtlmHotSync(t, ctx, e, dir, step)
 		sameProc(t, step)
 	}
@@ -756,6 +771,7 @@ func TestRouterLimitsXray(t *testing.T) {
 		if !rtlmUntil(10*time.Second, func() bool { return rtlmSel(t, e, g.ID) == memberA }) {
 			t.Fatalf("%s: сброс: узел не вернулся за 10 с", step)
 		}
+		rtlmGroupsChanged(t, e, dir, step+": сброс")
 		rtlmHotSync(t, ctx, e, dir, step+": сброс")
 		sameProc(t, step+": сброс")
 		viaNode(t, step+": сброс")
