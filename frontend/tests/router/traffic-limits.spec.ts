@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Browser, type Page } from '@playwright/test';
-import AxeBuilder from '@axe-core/playwright';
+import { axeSevere } from './lib/axe';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
 import { CORE_TAG } from './lib/known';
@@ -378,28 +378,6 @@ test(
     }
   }
 );
-
-/**
- * Критичные и серьёзные нарушения axe (WCAG 2.0/2.1 A и AA, в том числе color-contrast)
- * внутри области.
- */
-async function axeSevere(page: Page, scope: string): Promise<string[]> {
-  // переход между вкладками и открытие модалки идут с анимацией: axe не должен видеть
-  // полупрозрачный кадр
-  await page.waitForTimeout(500);
-  const scan = await new AxeBuilder({ page })
-    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
-    .include(scope)
-    .analyze();
-  return scan.violations
-    .filter((v) => v.impact === 'critical' || v.impact === 'serious')
-    .map((v) => {
-      const nodes = v.nodes
-        .slice(0, 3)
-        .map((n) => `${n.target.join(' ')} [${n.any[0]?.message ?? ''}]`);
-      return `${v.id} (${v.impact}, узлов ${v.nodes.length}): ${nodes.join(' | ')}`;
-    });
-}
 
 for (const theme of ['light', 'dark'] as const) {
   test(`traffic-limits axe: вкладка и модалка, тема ${theme}`, async ({ page }) => {
