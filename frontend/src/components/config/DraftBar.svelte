@@ -154,9 +154,9 @@
         <span class="status-line">
           <span class="status-icon status-icon-accent"><Icon name="edit" size={14} /></span>
           <span class="status-text label-long">{$t('cfg.draft_dirty', { n: $draftChanges })}</span>
-          <span class="status-text label-short"
-            >{$t('cfg.draft_dirty_short', { n: $draftChanges })}</span
-          >
+          <span class="status-text label-short">
+            {$t('cfg.draft_dirty_short', { n: $draftChanges })}
+          </span>
           {#if refreshing}<Spinner size={16} />{/if}
         </span>
       {:else if shown}
@@ -175,8 +175,10 @@
           ariaLabel={$t('cfg.reset_aria')}
           title={lost ? $t('cfg.sse_lost') : $t('cfg.reset_aria')}
           disabled={!ready || !dirty || busy || lost}
-          onclick={onReset}>{$t('cfg.reset')}</Button
+          onclick={onReset}
         >
+          {$t('cfg.reset')}
+        </Button>
         <Button
           variant="primary"
           class="draft-bar-btn"
@@ -185,8 +187,10 @@
           disabled={!$applyGate.canApply || resetting}
           loading={applyingHere}
           title={applyHint}
-          onclick={onApply}>{$t('cfg.apply')}</Button
+          onclick={onApply}
         >
+          {$t('cfg.apply')}
+        </Button>
       </div>
     {/if}
     {#if showReasons || holderHint !== ''}

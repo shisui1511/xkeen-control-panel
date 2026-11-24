@@ -452,8 +452,10 @@
         class="touch-key"
         aria-label={key.aria ? $t(key.aria) : key.label}
         onpointerdown={(e) => e.preventDefault()}
-        onclick={() => pressTouchKey(key.data)}>{key.label}</button
+        onclick={() => pressTouchKey(key.data)}
       >
+        {key.label}
+      </button>
     {/each}
   </div>
 

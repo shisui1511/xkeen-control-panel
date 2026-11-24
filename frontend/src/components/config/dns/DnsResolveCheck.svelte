@@ -248,8 +248,9 @@
                 <div class="dns-check-line">
                   <dt>{$t('cfg.dns.res_path')}</dt>
                   <dd data-testid="dns-check-path" data-path={g.path}>
-                    {path.before}{#if path.name}<span class="dns-check-mono">{path.name}</span
-                      >{path.after}{/if}
+                    {path.before}{#if path.name}<span class="dns-check-mono">
+                        {path.name}
+                      </span>{path.after}{/if}
                   </dd>
                 </div>
               {/if}

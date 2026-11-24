@@ -49,8 +49,10 @@
           data-testid="config-diag-{action}"
           disabled={$applyRunning || pending !== null}
           loading={pending === action}
-          onclick={() => void run(action)}>{$t(key)}</Button
+          onclick={() => void run(action)}
         >
+          {$t(key)}
+        </Button>
       {/each}
     </div>
   </Section>

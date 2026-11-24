@@ -267,9 +267,9 @@
                     {#if method !== ''}
                       <span class="restart-method">{$t('cfg.sec.restart_step.' + method)}</span>
                     {/if}
-                    <span
-                      >{$t('cfg.restart.' + row.outcome, { kernel: kernelLabel(row.kernel) })}</span
-                    >
+                    <span>
+                      {$t('cfg.restart.' + row.outcome, { kernel: kernelLabel(row.kernel) })}
+                    </span>
                   </li>
                 {/each}
               </ul>
@@ -322,8 +322,9 @@
         <div class="result-body">
           <span>{$t('cfg.result.success', { n: result.written })}</span>
           {#if orphans.length > 0}
-            <span class="result-line">{$t('cfg.result.orphans', { list: orphans.join(', ') })}</span
-            >
+            <span class="result-line">
+              {$t('cfg.result.orphans', { list: orphans.join(', ') })}
+            </span>
           {/if}
         </div>
       </div>
@@ -331,9 +332,9 @@
 
     {#if !running && result}
       <div class="progress-actions">
-        <Button variant="secondary" class="btn-sm" onclick={() => (dismissed = true)}
-          >{$t('cfg.hide')}</Button
-        >
+        <Button variant="secondary" class="btn-sm" onclick={() => (dismissed = true)}>
+          {$t('cfg.hide')}
+        </Button>
       </div>
     {/if}
   </section>

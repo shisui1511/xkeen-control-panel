@@ -53,11 +53,11 @@
 {:else if names !== null && names.length > 0}
   <div class="warning-text dep-note" data-testid="dep-profiles-note">
     <Icon name="warning" size={14} />
-    <span
-      >{parts[0]}{#each shown as name, i (name)}{i > 0 ? ', ' : ''}<span class="mono dep-name"
-          >{name}</span
-        >{/each}{moreText}{parts[1] ?? ''}</span
-    >
+    <span>
+      {parts[0]}{#each shown as name, i (name)}{i > 0 ? ', ' : ''}<span class="mono dep-name">
+          {name}
+        </span>{/each}{moreText}{parts[1] ?? ''}
+    </span>
   </div>
 {/if}
 

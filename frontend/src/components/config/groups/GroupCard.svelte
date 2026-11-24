@@ -232,8 +232,10 @@
         <a
           class="gc-link"
           href="#/proxies?group={group.id}"
-          data-testid="group-select-link-{group.id}">{$t('cfg.groups.select_on_proxies')}</a
+          data-testid="group-select-link-{group.id}"
         >
+          {$t('cfg.groups.select_on_proxies')}
+        </a>
       </p>
     {:else if group.mode === 'fallback' && reserveName}
       <p class="gc-hint" data-testid="group-reserve-{group.id}">

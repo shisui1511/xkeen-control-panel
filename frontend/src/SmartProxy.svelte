@@ -643,23 +643,29 @@
                   aria-label={$t('smartproxy.actions') || 'Actions'}
                   aria-haspopup="menu"
                   aria-expanded={activeDropdownId === p.id}
-                  onclick={() => toggleDropdown(p.id)}>⋯</button
+                  onclick={() => toggleDropdown(p.id)}
                 >
+                  ⋯
+                </button>
                 {#if activeDropdownId === p.id}
                   <div class="dropdown-menu">
                     <button
                       onclick={() => {
                         startEdit(p);
                         activeDropdownId = null;
-                      }}>{$t('app.edit')}</button
+                      }}
                     >
+                      {$t('app.edit')}
+                    </button>
                     <button
                       onclick={() => {
                         deleteProfile(p.id);
                         activeDropdownId = null;
                       }}
-                      class="delete-action">{$t('app.delete')}</button
+                      class="delete-action"
                     >
+                      {$t('app.delete')}
+                    </button>
                   </div>
                 {/if}
               </div>

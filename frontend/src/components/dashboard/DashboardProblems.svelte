@@ -255,9 +255,9 @@
           data-step={p.dataStep}
         >
           <div class="problem-content">
-            <span class="problem-icon"
-              ><Icon name={p.tone === 'step' ? 'arrow-right' : 'warning'} size={16} /></span
-            >
+            <span class="problem-icon">
+              <Icon name={p.tone === 'step' ? 'arrow-right' : 'warning'} size={16} />
+            </span>
             <div>
               {#if p.step}
                 <span class="problem-step-label">{$t('dash.next_step_label')}</span>

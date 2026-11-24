@@ -225,32 +225,32 @@
             <div class="provider-top">
               <span class="provider-name" title={provider.name}>{provider.name}</span>
               <div class="badges">
-                <span class="badge badge--tag badge-emphasis"
-                  >{provider.vehicleType || provider.type || 'HTTP'}</span
-                >
+                <span class="badge badge--tag badge-emphasis">
+                  {provider.vehicleType || provider.type || 'HTTP'}
+                </span>
                 {#if provider.behavior}
                   <span class="badge badge--tag badge-behavior">{provider.behavior}</span>
                 {/if}
                 {#if offline}
                   {#if fs === 'none_file'}
-                    <span class="badge badge--tag badge-danger"
-                      >{$t('rules.provider_badge_nofile')}</span
-                    >
+                    <span class="badge badge--tag badge-danger">
+                      {$t('rules.provider_badge_nofile')}
+                    </span>
                   {:else if fs === 'empty'}
-                    <span class="badge badge--tag badge-danger"
-                      >{$t('rules.provider_badge_empty_file')}</span
-                    >
+                    <span class="badge badge--tag badge-danger">
+                      {$t('rules.provider_badge_empty_file')}
+                    </span>
                   {/if}
                 {:else}
                   {#if isEmpty(provider)}
-                    <span class="badge badge--tag badge-empty"
-                      >{$t('rules.provider_status_empty')}</span
-                    >
+                    <span class="badge badge--tag badge-empty">
+                      {$t('rules.provider_status_empty')}
+                    </span>
                   {/if}
                   {#if d && !d.file_exists}
-                    <span class="badge badge--tag badge-empty"
-                      >{$t('rules.provider_status_no_file')}</span
-                    >
+                    <span class="badge badge--tag badge-empty">
+                      {$t('rules.provider_status_no_file')}
+                    </span>
                   {/if}
                 {/if}
               </div>
@@ -306,11 +306,11 @@
                 {/if}
                 {#if d?.file_exists && d.file_mtime}
                   <div class="meta-item">
-                    <span class="meta-value"
-                      >{$t('rules.provider_file_date', {
+                    <span class="meta-value">
+                      {$t('rules.provider_file_date', {
                         date: formatDateTime(d.file_mtime * 1000)
-                      })}</span
-                    >
+                      })}
+                    </span>
                   </div>
                 {/if}
                 {#if d && isInline(provider) && d.inline_count}
@@ -326,9 +326,9 @@
                 </div>
                 <div class="meta-item">
                   <span class="meta-label">{$t('rules.provider_updated')}:</span>
-                  <span class="meta-value updated-time"
-                    >{formatRelativeTime(provider.updatedAt)}</span
-                  >
+                  <span class="meta-value updated-time">
+                    {formatRelativeTime(provider.updatedAt)}
+                  </span>
                 </div>
               {/if}
             </div>

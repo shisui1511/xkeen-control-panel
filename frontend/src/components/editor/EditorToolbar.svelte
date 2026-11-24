@@ -84,8 +84,10 @@
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
-        stroke-width="2"><polyline points="15 18 9 12 15 6" /></svg
+        stroke-width="2"
       >
+        <polyline points="15 18 9 12 15 6" />
+      </svg>
     {:else}
       <svg
         width="13"
@@ -93,8 +95,10 @@
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
-        stroke-width="2"><polyline points="9 18 15 12 9 6" /></svg
+        stroke-width="2"
       >
+        <polyline points="9 18 15 12 9 6" />
+      </svg>
     {/if}
   </button>
 

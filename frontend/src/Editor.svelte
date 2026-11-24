@@ -1615,19 +1615,19 @@
 
           {#if !isTouchLayout}
             <div class="editor-empty-shortcuts">
-              <span class="shortcut-item"
-                ><kbd>{isMac ? '⌘' : 'Ctrl'}+S</kbd> <span>{$t('editor.to_save')}</span></span
-              >
+              <span class="shortcut-item">
+                <kbd>{isMac ? '⌘' : 'Ctrl'}+S</kbd> <span>{$t('editor.to_save')}</span>
+              </span>
               <span class="shortcut-dot">•</span>
-              <span class="shortcut-item"
-                ><kbd>{isMac ? '⌘' : 'Ctrl'}+F</kbd>
-                <span>{$t('editor.shortcut_search')}</span></span
-              >
+              <span class="shortcut-item">
+                <kbd>{isMac ? '⌘' : 'Ctrl'}+F</kbd>
+                <span>{$t('editor.shortcut_search')}</span>
+              </span>
               <span class="shortcut-dot">•</span>
-              <span class="shortcut-item"
-                ><kbd>{isMac ? '⌘' : 'Ctrl'}+Z</kbd>
-                <span>{$t('editor.shortcut_undo')}</span></span
-              >
+              <span class="shortcut-item">
+                <kbd>{isMac ? '⌘' : 'Ctrl'}+Z</kbd>
+                <span>{$t('editor.shortcut_undo')}</span>
+              </span>
             </div>
           {/if}
         </div>

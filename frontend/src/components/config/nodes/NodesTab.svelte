@@ -50,8 +50,9 @@
   {:else if failed}
     <div class="alert alert-error nodes-error" role="alert" data-testid="nodes-load-error">
       <span class="nodes-error-text">{$t('cfg.nodes.load_error')}</span>
-      <Button variant="secondary" onclick={() => void loadSources()}>{$t('cfg.nodes.retry')}</Button
-      >
+      <Button variant="secondary" onclick={() => void loadSources()}>
+        {$t('cfg.nodes.retry')}
+      </Button>
     </div>
   {:else if empty}
     <EmptyState

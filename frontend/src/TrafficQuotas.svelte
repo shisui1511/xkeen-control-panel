@@ -628,22 +628,22 @@
                     <td>
                       {#if percent(q) >= 100}
                         {#if q.action === 'block'}
-                          <span class="badge badge--tag badge-danger"
-                            >{$t('trafficquotas.badge_status_blocked')}</span
-                          >
+                          <span class="badge badge--tag badge-danger">
+                            {$t('trafficquotas.badge_status_blocked')}
+                          </span>
                         {:else if q.action === 'redirect_direct'}
-                          <span class="badge badge--tag badge-redirected"
-                            >{$t('trafficquotas.badge_status_redirected')}</span
-                          >
+                          <span class="badge badge--tag badge-redirected">
+                            {$t('trafficquotas.badge_status_redirected')}
+                          </span>
                         {:else}
-                          <span class="badge badge--tag badge-danger"
-                            >{$t('trafficquotas.status_exceeded')}</span
-                          >
+                          <span class="badge badge--tag badge-danger">
+                            {$t('trafficquotas.status_exceeded')}
+                          </span>
                         {/if}
                       {:else if percent(q) >= q.alert_threshold}
-                        <span class="badge badge--tag badge-warning"
-                          >{$t('trafficquotas.status_warning')}</span
-                        >
+                        <span class="badge badge--tag badge-warning">
+                          {$t('trafficquotas.status_warning')}
+                        </span>
                       {:else}
                         <span class="badge badge--tag badge-success">OK</span>
                       {/if}
@@ -666,8 +666,10 @@
                             aria-label={$t('app.actions') || 'Actions'}
                             aria-haspopup="menu"
                             aria-expanded={activeDropdownId === q.id}
-                            onclick={(e) => toggleDropdown(q.id, e)}>⋯</button
+                            onclick={(e) => toggleDropdown(q.id, e)}
                           >
+                            ⋯
+                          </button>
                           {#if activeDropdownId === q.id}
                             <div class="dropdown-menu">
                               <button
@@ -724,9 +726,9 @@
                     <td><b>{p.proxy_name}</b></td>
                     <td class="num">{formatBytes(p.upload_bytes)}</td>
                     <td class="num">{formatBytes(p.download_bytes)}</td>
-                    <td class="num" style="color: var(--fg-primary); font-weight: 600;"
-                      >{formatBytes(p.total_bytes)}</td
-                    >
+                    <td class="num" style="color: var(--fg-primary); font-weight: 600;">
+                      {formatBytes(p.total_bytes)}
+                    </td>
                   </tr>
                 {/each}
               </tbody>
@@ -809,9 +811,9 @@
     </div>
 
     <div class="form-group">
-      <label for="form-threshold" class="form-label"
-        >{$t('trafficquotas.alert_threshold')} (%)</label
-      >
+      <label for="form-threshold" class="form-label">
+        {$t('trafficquotas.alert_threshold')} (%)
+      </label>
       <input
         id="form-threshold"
         type="number"
@@ -826,9 +828,9 @@
       <label for="form-action" class="form-label">{$t('trafficquotas.action')}</label>
       <Select id="form-action" class="input" bind:value={formAction}>
         <option value="notify">{$t('trafficquotas.action_notify')}</option>
-        <option value="throttle" disabled
-          >{$t('trafficquotas.action_throttle')} ({$t('trafficquotas.action_unsupported')})</option
-        >
+        <option value="throttle" disabled>
+          {$t('trafficquotas.action_throttle')} ({$t('trafficquotas.action_unsupported')})
+        </option>
         <option value="log_only">{$t('trafficquotas.action_log_only')}</option>
         <option value="block">{$t('trafficquotas.action_block')}</option>
         <option value="redirect_direct">{$t('trafficquotas.action_redirect_direct')}</option>

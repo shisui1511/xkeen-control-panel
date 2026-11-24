@@ -306,8 +306,9 @@
         {#if moveRows.length > 0}
           {#if mode === 'one'}
             <p class="ts-text" data-testid="take-section-files">
-              {filesParts[0]}<span class="ts-files">{moveRows[0].move.join(', ')}</span
-              >{filesParts[1]}
+              {filesParts[0]}<span class="ts-files">
+                {moveRows[0].move.join(', ')}
+              </span>{filesParts[1]}
             </p>
           {:else}
             <div class="ts-group" data-testid="take-section-files">
@@ -358,8 +359,9 @@
           <div class="alert alert-warning ts-alert" data-testid="take-section-comments">
             <Icon name="warning" size={16} class="ts-alert-icon" />
             <span>
-              {commentParts[0]}<span class="ts-files">{commentFiles.join(', ')}</span
-              >{commentParts[1]}
+              {commentParts[0]}<span class="ts-files">
+                {commentFiles.join(', ')}
+              </span>{commentParts[1]}
             </span>
           </div>
           <label class="ts-ack">
