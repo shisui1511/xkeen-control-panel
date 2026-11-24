@@ -488,7 +488,11 @@ test('proxies-schedule: «Задать лимит» открывает форм�
   const set = page.getByTestId(`proxy-group-quota-set-${manualId}`);
   await expect(set).toBeVisible({ timeout: T.page });
   await expect(set).toHaveText(say('proxies.rt.quota.set'));
+  // уход со страницы обрывает опрос «Прокси» самой панелью: «Прокси» проверяется до перехода,
+  // «Трафик» — своим сборщиком после него
+  await guard.assertClean();
   await set.click();
+  const trafficGuard = attachConsoleGuard(page);
   await expect
     .poll(() => page.evaluate(() => window.location.hash), { timeout: T.page })
     .toBe(`#/traffic?tab=limits&new=1&group=${encodeURIComponent(manualId)}`);
@@ -505,7 +509,7 @@ test('proxies-schedule: «Задать лимит» открывает форм�
   await expect(modal).toHaveCount(0, { timeout: T.action });
   const after = await api(page, 'GET', '/api/traffic/limits');
   expect(((after.data?.limits ?? []) as unknown[]).length, 'лимит не создан').toBe(before);
-  await guard.assertClean();
+  await trafficGuard.assertClean();
 });
 
 /**
