@@ -1811,10 +1811,11 @@ func (s *Service) AfterApply(ctx context.Context, info configlayer.AfterApplyInf
 		}
 	}
 	s.repickAll(ctx)
-	if s.arb != nil && info.Trigger != configlayer.TriggerSelect {
+	if info.Trigger != configlayer.TriggerSelect {
 		// После «Применить» арбитр заново ставит удержания и окна: состав групп и
-		// узлов мог измениться. Свой выбор арбитра (TriggerSelect) тик не будит.
-		s.arb.Kick()
+		// узлов мог измениться; пауза сверки служебного хвоста снимается — причина
+		// её отказа могла уйти. Свой выбор арбитра (TriggerSelect) тик не будит.
+		s.arb.kickAfterApply()
 	}
 }
 

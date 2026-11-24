@@ -386,6 +386,9 @@ type Arbiter struct {
 	lastErr map[string]string
 	noted   map[string]string
 
+	// tail — пауза повтора сверки служебного хвоста Mihomo (arbiter_tail.go).
+	tail tailRetry
+
 	ctx     context.Context
 	cancel  context.CancelFunc
 	started atomic.Bool
@@ -445,6 +448,17 @@ func (a *Arbiter) Kick() {
 	}
 }
 
+// kickAfterApply — Kick после успешного применения любого вида со снятием паузы
+// сверки служебного хвоста: причина отказа могла уйти (дрейф решён, проверка
+// проходит). Не блокирует; nil-безопасен.
+func (a *Arbiter) kickAfterApply() {
+	if a == nil {
+		return
+	}
+	a.tail.reset()
+	a.Kick()
+}
+
 // run — цикл: первая сверка сразу, затем по тикеру и по Kick.
 func (a *Arbiter) run() {
 	defer close(a.done)
@@ -466,11 +480,18 @@ func (a *Arbiter) run() {
 
 // tick — одна сверка. Сравнение идёт с фактическим Live, а не по событиям
 // перехода окна, поэтому повтор безопасен: пропущенный тик (выбор занят,
-// перезапуск панели посреди окна) доводит следующий.
+// перезапуск панели посреди окна) доводит следующий. Первым делом — сверка
+// служебного хвоста профиля Mihomo (syncTail, D-13): до проверки AnyManaged и до
+// решений по группам, без selMu (клик пользователя не ждёт конвейер). Решения
+// читают состояние заново под selMu, то есть уже после сверки: selectArbiter идёт
+// по новому профилю.
 func (a *Arbiter) tick(ctx context.Context) {
+	s := a.s
+	if st, err := s.d.Layer.ReadState(); err == nil {
+		a.syncTail(ctx, st)
+	}
 	a.selMu.Lock()
 	defer a.selMu.Unlock()
-	s := a.s
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
 		return
