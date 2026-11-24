@@ -92,9 +92,9 @@ export interface RuntimeGroup {
   locked_with: string[];
   counts: KernelCounts;
   members: RuntimeMember[];
-  /** Удержание группы арбитром; нет — группу никто не держит. */
+  /** Удержание группы арбитром (поля нет — группу никто не держит). */
   hold?: RuntimeHold;
-  /** Окна расписания ручной группы; у остальных пусто. */
+  /** Окна расписания ручной группы (у остальных пусто). */
   schedule: ScheduleWindowView[];
 }
 
@@ -305,6 +305,25 @@ export async function saveScheduleWindow(
   return post<ScheduleWindow>('/api/configlayer/routing/schedule/save', { group, window });
 }
 
+/** Удаление окна расписания группы по ID. */
+export async function deleteScheduleWindow(group: string, id: string): Promise<void> {
+  await post<{ ok: boolean }>('/api/configlayer/routing/schedule/delete', { group, id });
+}
+
+/** Включение или выключение окна расписания группы. */
+export async function setScheduleWindowEnabled(
+  group: string,
+  id: string,
+  enabled: boolean
+): Promise<void> {
+  await post<{ ok: boolean }>('/api/configlayer/routing/schedule/enabled', { group, id, enabled });
+}
+
+/** «Вернуть расписание»: снимает перехват и ставит узел действующего окна (D-04). */
+export async function restoreSchedule(group: string): Promise<SelectResult> {
+  return post<SelectResult>('/api/configlayer/routing/schedule/restore', { group });
+}
+
 /** Запуск пачки пинга: всех групп или одной; повтор во время пачки присоединяется к ней. */
 export function startPing(scope: 'all' | 'group', group?: string): Promise<PingStart> {
   return post<PingStart>(
@@ -331,7 +350,7 @@ export type ProxiesTFn = (key: string, params?: Record<string, string | number>)
 const KNOWN_CODES = new Set<string>(routingErrorCodes);
 
 // Параметры текстов ошибок: не пришедший параметр — «?», а не голое «{field}»
-const ERROR_PARAMS = ['field', 'reason', 'group', 'file', 'kernel', 'name', 'tag'];
+const ERROR_PARAMS = ['field', 'reason', 'group', 'file', 'kernel', 'name', 'tag', 'window'];
 
 /** Текст ошибки по коду: cfg.routing.err.<код>, неизвестный код — cfg.routing.err.unknown. */
 export function proxiesErrorText(
