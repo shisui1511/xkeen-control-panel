@@ -23,8 +23,11 @@
   "ping_unavailable",
   "preset_unknown",
   "profile_unknown",
+  "quota_held",
   "rule_not_found",
+  "schedule_overlap",
   "scope_invalid",
   "select_busy",
-  "selection_unconfirmed"
+  "selection_unconfirmed",
+  "window_not_found"
 ]
