@@ -2,11 +2,12 @@
 // router-area: routing
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { test, expect, type Browser, type Page } from '@playwright/test';
+import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
 import { axeSevere } from './lib/axe';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
 import { SLOW_ANNOTATION } from './lib/known';
+import { settleMotion } from './lib/motion';
 import { escapeRe } from './lib/regex';
 import {
   addToDraft,
@@ -34,6 +35,8 @@ import {
 // часам роутера из вида «Прокси». В конце стенд возвращается: окна удаляются, группы и узлы
 // убираются, маршрутизация отпускается, если не была взята, черновик сбрасывается. Ответы сети
 // не подменяются; в сообщения провалов попадают только testId и коды, без имён узлов.
+// На 390 px axe-тест замеряет цели касания 44 px блока (пустое состояние и шесть неактивных
+// окон) и модалки окна (пробел G-152-1).
 
 const PREFIX = 'RTSC-';
 
@@ -190,6 +193,54 @@ async function setDays(page: Page, days: number[]): Promise<void> {
     if (pressed !== days.includes(d)) await chip.click();
     await expect(chip).toHaveAttribute('aria-pressed', String(days.includes(d)));
   }
+}
+
+/**
+ * Цели касания ниже 44 px внутри scope: «подпись ширинаxвысота». Правило — как у
+ * expectTouchTargets в config-setup, цель 44 px по UI-SPEC 152: кнопки, ссылки-кнопки, поля и
+ * переключатели (label.toggle-switch — нативный флажок внутри скрыт 0×0); у кнопок, ссылок и
+ * переключателей цель — большее из рамки и зоны ::after, у тех, что без .btn, меряется и
+ * ширина; у полей — только высота. Подпись — testId, классы или тег: текст, aria-label и title
+ * (имена узлов и лимитов) в отчёт не попадают.
+ */
+async function touchTargetsBelow44(scope: Locator): Promise<string[]> {
+  await settleMotion(scope.page());
+  return scope.locator('button, a.btn, select, input, label.toggle-switch').evaluateAll((els) =>
+    els
+      .filter((el) => el.getClientRects().length > 0)
+      .filter(
+        (el) =>
+          !(el instanceof HTMLInputElement && ['checkbox', 'radio', 'hidden'].includes(el.type))
+      )
+      .map((el, i) => {
+        const rect = el.getBoundingClientRect();
+        let h = rect.height;
+        let w = rect.width;
+        const tag = el.tagName.toLowerCase();
+        const target = tag === 'button' || tag === 'a' || el.classList.contains('toggle-switch');
+        if (target) {
+          const zone = getComputedStyle(el, '::after');
+          if (zone.content !== 'none' && zone.position === 'absolute') {
+            const zh = parseFloat(zone.height);
+            const zw = parseFloat(zone.width);
+            if (Number.isFinite(zh)) h = Math.max(h, zh);
+            if (Number.isFinite(zw)) w = Math.max(w, zw);
+          }
+        }
+        const classes = [...el.classList].slice(0, 2);
+        const label =
+          el.getAttribute('data-testid') ??
+          (classes.length ? `.${classes.join('.')}` : `${tag}#${i}`);
+        return {
+          label,
+          h: Math.round(h),
+          w: Math.round(w),
+          low: h < 43.5 || (target && !el.classList.contains('btn') && w < 43.5)
+        };
+      })
+      .filter((b) => b.low)
+      .map(({ label, w, h }) => `${label} ${w}x${h}`)
+  );
 }
 
 async function prepare(browser: Browser): Promise<void> {
@@ -514,7 +565,7 @@ test('proxies-schedule: «Задать лимит» открывает форм�
 
 for (const theme of ['light', 'dark'] as const) {
   test(`proxies-schedule axe: блок расписания и модалка, тема ${theme}`, async ({ page }) => {
-    test.setTimeout(T.page * 3);
+    test.setTimeout(T.page * 4);
     const guard = attachConsoleGuard(page);
     await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
     const problems: string[] = [];
@@ -528,6 +579,15 @@ for (const theme of ['light', 'dark'] as const) {
       const block = page.getByTestId(`proxy-group-schedule-${manualId}`);
       await expect(block).toBeVisible({ timeout: T.page });
       await expect(block.locator('.skeleton')).toHaveCount(0, { timeout: T.page });
+      if (width === 390) {
+        expect(
+          await page.evaluate(() => document.documentElement.dataset.density),
+          'на 390 px авто-плотность compact'
+        ).toBe('compact');
+        for (const v of await touchTargetsBelow44(block)) {
+          problems.push(`390 px, касание блока: ${v}`);
+        }
+      }
       for (const v of await axeSevere(page, `[data-testid="proxy-group-schedule-${manualId}"]`)) {
         problems.push(`${width} px, блок: ${v}`);
       }
@@ -536,6 +596,13 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(modal).toBeVisible({ timeout: T.action });
       for (const v of await axeSevere(page, '.modal-container[role="dialog"]')) {
         problems.push(`${width} px, модалка: ${v}`);
+      }
+      if (width === 390) {
+        for (const v of await touchTargetsBelow44(
+          page.locator('.modal-container[role="dialog"]')
+        )) {
+          problems.push(`390 px, касание модалки окна: ${v}`);
+        }
       }
       await modal.getByRole('button', { name: say('proxies.rt.sched.cancel', true) }).click();
       await expect(modal).toHaveCount(0, { timeout: T.action });
@@ -548,6 +615,40 @@ for (const theme of ['light', 'dark'] as const) {
         if (wide.scroll > wide.inner + 1) {
           problems.push(`390 px: scrollWidth ${wide.scroll} шире окна ${wide.inner}`);
         }
+
+        // Ветка списка: окон к этому шагу нет (предыдущие тесты их удаляют). Шесть окон на день
+        // «сегодня + 3» по часам роутера (не сегодня, не вчера, не завтра), 01:00–01:30 …
+        // 06:00–06:30: не пересекаются, не идут через полночь и сейчас не действуют — арбитр
+        // узел не выбирает, ядро не перезапускается. Страница открывается заново, замер не
+        // зависит от канала обновлений.
+        try {
+          const { g, clock } = await runtimeView(page, manualId);
+          const member = g.members[nodeIndexes(g)[0]].member;
+          const local = new Date((clock.now + clock.offset) * 1000);
+          const day = (((local.getUTCDay() + 6) % 7) + 3) % 7;
+          for (let h = 1; h <= 6; h++) {
+            await saveWindow(page, member, {
+              days: [day],
+              from: hhmm(h * 60),
+              to: hhmm(h * 60 + 30)
+            });
+          }
+          await openProxies(page, `#/proxies?group=${manualId}`, 390);
+          await expandCard(page, manualId);
+          const listBlock = page.getByTestId(`proxy-group-schedule-${manualId}`);
+          await expect(page.getByTestId(`proxy-group-schedule-more-${manualId}`)).toBeVisible({
+            timeout: T.page
+          });
+          await expect(
+            listBlock.locator('[data-testid^="proxy-group-schedule-window-"]')
+          ).toHaveCount(5, { timeout: T.page });
+          for (const v of await touchTargetsBelow44(listBlock)) {
+            problems.push(`390 px, касание блока с окнами: ${v}`);
+          }
+        } finally {
+          await dropWindows(page);
+        }
+        expect(windows.size, 'окна замера удалены').toBe(0);
       }
     }
     expect(problems, problems.join('\n')).toEqual([]);
