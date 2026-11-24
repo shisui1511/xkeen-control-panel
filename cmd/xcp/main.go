@@ -465,6 +465,12 @@ func main() {
 		}
 		return false
 	})
+	// Учёт лимитов на Mihomo (SPX-01): дельты соединений приходят от службы потоков,
+	// состояние данных — по состоянию её потока /connections. Хук ставится до Start,
+	// чтобы первый снимок уже дошёл до лимитов. Служба потоков останавливается раньше
+	// службы лимитов (defer — обратный порядок), поэтому хук после Stop лимитов не зовётся.
+	trafficQuotaSvc.SetConnDeltaHook(limitsSvc.ObserveMihomo)
+	limitsSvc.SetMihomoState(trafficQuotaSvc.StreamState)
 	trafficQuotaSvc.Start()
 	api.SetTrafficQuotaService(trafficQuotaSvc)
 	// Финальная запись счётчиков трафика — со своим бюджетом (shutdownSteps.save).
@@ -474,6 +480,8 @@ func main() {
 	// Единый резолвер активного ядра; при конфликте Kernel пуст, и gRPC Xray не опрашивается.
 	xrayGRPCSvc.SetActiveKernelFunc(func() string { return kernelSvc.ActiveState().Kernel })
 	xrayGRPCSvc.Start()
+	// Учёт лимитов на Xray: счётчики исходящих читаются через общее соединение gRPC.
+	limitsSvc.SetXrayCounters(xrayGRPCSvc)
 	api.SetXrayGRPCService(xrayGRPCSvc)
 	defer stops.run("xray-grpc", xrayGRPCSvc.Stop)
 
@@ -931,6 +939,18 @@ func main() {
 			arb := routing.NewArbiter(routingSvc)
 			arb.Start()
 			defer stops.run("routing-arbiter", arb.Stop)
+			// Лимиты держат группы через тот же арбитр (SPX-01): цели учёта — из
+			// применённого состояния маршрутизации, удержания — источник арбитра, каждая
+			// смена удержаний будит арбитр. Порядок важен: без источника удержаний сверка
+			// служебного хвоста профиля Mihomo не идёт, поэтому SetHoldSource раньше Kick.
+			// Kick сразу после проводки — первая сверка удержаний и хвоста с лимитами,
+			// прочитанными с диска. Арбитр останавливается раньше службы лимитов: его
+			// defer зарегистрирован позже. Без сервиса маршрутизации лимиты работают без
+			// целей групп.
+			limitsSvc.SetTargets(routingSvc.TrafficTargets)
+			arb.SetHoldSource(limitsSvc)
+			limitsSvc.SetOnHoldsChanged(arb.Kick)
+			arb.Kick()
 			if pingRunner != nil {
 				pingRunner.Start()
 				api.SetPingRunner(pingRunner)
