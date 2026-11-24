@@ -27,6 +27,7 @@
     kernelLabel,
     otherKernel,
     quotaHoldParams,
+    quotaHeld,
     type PanelCard,
     type NowLine,
     type ResultView
@@ -321,7 +322,7 @@
 
   /** Группу держит исчерпанный лимит (D-05): выбор отклонит и сервер (quota_held). */
   function pQuotaHeld(p: PanelCard): boolean {
-    return p.group.hold?.kind === 'quota';
+    return quotaHeld(p.group.hold);
   }
 
   /** Подсказка заблокированной плитки: почему выбор недоступен. */
@@ -330,7 +331,7 @@
     if (p.group.unconfirmed) return $t('proxies.rt.unconfirmed_title');
     if (p.selecting !== '' || p.locked) return $t('proxies.rt.locked_title');
     const hold = p.group.hold;
-    if (hold?.kind === 'quota')
+    if (hold && quotaHeld(hold))
       return $t('proxies.rt.quota.tile_title', quotaHoldParams(hold, p.view.clock));
     if (p.group.mode === 'source') return $t('proxies.rt.source_title');
     if (!pCanSelect(p)) return $t('proxies.rt.select_unavailable_title');

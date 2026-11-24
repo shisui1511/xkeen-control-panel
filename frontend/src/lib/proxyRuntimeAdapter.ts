@@ -163,6 +163,11 @@ export function holdLeftover(hold: RuntimeHold): boolean {
   return false;
 }
 
+/** Группу держит действующий лимит: след неудачного возврата выбор не блокирует (сервер его принимает). */
+export function quotaHeld(hold: RuntimeHold | undefined): boolean {
+  return hold?.kind === 'quota' && !holdLeftover(hold);
+}
+
 /** Узел окна, которое держит группу (у перехвата hold.member — узел пользователя). */
 export function holdWindowMember(group: RuntimeGroup): string {
   const hold = group.hold;

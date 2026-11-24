@@ -52,6 +52,7 @@
     pingHistory,
     holdWindowMember,
     quotaHoldParams,
+    quotaHeld,
     type ActiveKernel,
     type PanelCard
   } from './lib/proxyRuntimeAdapter';
@@ -269,7 +270,7 @@
     const v = view;
     // Квота держит группу (D-05): запрос не отправляется, причина — тостом; сервер всё
     // равно отклонил бы выбор (quota_held, T-152-33)
-    if (g.hold?.kind === 'quota') {
+    if (quotaHeld(g.hold)) {
       showToast('warning', quotaText(g));
       return;
     }
