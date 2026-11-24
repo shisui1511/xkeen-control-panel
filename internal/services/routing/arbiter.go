@@ -60,6 +60,9 @@ var ErrQuotaHeld = errors.New("routing: группу держит лимит т�
 
 // HoldSource — источник удержаний лимитами трафика (служба лимитов). Подключается
 // в cmd/xcp/main.go через SetHoldSource; без источника лимиты группы не держат.
+// Инвариант: в удержания попадают только лимиты с действием block или direct
+// (services.holdingAction); decide всё равно не принимает удержание без служебного
+// узла (quotaMember == ""), чтобы будущий источник не оставил группу без решения.
 type HoldSource interface {
 	Holds() services.LimitHolds
 }
