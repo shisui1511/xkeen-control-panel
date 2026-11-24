@@ -244,13 +244,31 @@
         {/each}
       </div>
       <div class="sw-quick">
-        <Button variant="ghost" size="xs" onclick={() => setDays(WEEKDAYS)}>
+        <Button
+          variant="ghost"
+          size="xs"
+          class="tap-zone-44"
+          testid="schedule-window-days-weekdays"
+          onclick={() => setDays(WEEKDAYS)}
+        >
           {$t('proxies.rt.sched.days_weekdays')}
         </Button>
-        <Button variant="ghost" size="xs" onclick={() => setDays(WEEKEND)}>
+        <Button
+          variant="ghost"
+          size="xs"
+          class="tap-zone-44"
+          testid="schedule-window-days-weekend"
+          onclick={() => setDays(WEEKEND)}
+        >
           {$t('proxies.rt.sched.days_weekend')}
         </Button>
-        <Button variant="ghost" size="xs" onclick={() => setDays(ALL_DAYS)}>
+        <Button
+          variant="ghost"
+          size="xs"
+          class="tap-zone-44"
+          testid="schedule-window-days-all"
+          onclick={() => setDays(ALL_DAYS)}
+        >
           {$t('proxies.rt.sched.days_all')}
         </Button>
       </div>
@@ -303,7 +321,12 @@
     {/if}
 
     <div class="sw-foot">
-      <Button variant="secondary" disabled={saving} onclick={onclose}>
+      <Button
+        variant="secondary"
+        disabled={saving}
+        testid="schedule-window-cancel"
+        onclick={onclose}
+      >
         {$t('proxies.rt.sched.cancel')}
       </Button>
       <Button
@@ -403,7 +426,17 @@
     margin-top: var(--spacing-2);
   }
 
-  @media (max-width: 768px) {
+  /* Узкий экран и касание: авто-плотность compact (≤1024 px) сжимает кнопки и поля
+     до 32 px. Подвал и поля дотягиваются до 44 px токенами на корне формы — как
+     ConfirmDialog и формы раздела «Конфигурация»; селекторов системных классов
+     кнопок и полей здесь нет, их check-controls считает перекраской. Быстрые дни
+     (xs) ставят свой --btn-h, поэтому у них зона tap-zone-44. */
+  @media (pointer: coarse), (max-width: 768px) {
+    .sw-form {
+      --btn-h: 44px;
+      --input-h: 44px;
+    }
+
     .sw-day {
       min-height: 44px;
     }
