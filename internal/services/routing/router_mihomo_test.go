@@ -220,17 +220,20 @@ func TestRouterMihomoGroupsMaterialize(t *testing.T) {
 			t.Errorf("у группы %q empty-fallback %v, ожидался REJECT (пустая группа не должна уходить в DIRECT)", name, g["empty-fallback"])
 		}
 	}
+	// Служебный хвост D-13: DIRECT и REJECT в конце proxies каждой ручной группы,
+	// use и filter остаются.
 	if g := groups["Прокси"]; g == nil || g["type"] != "select" ||
-		!rtxEqualStrings(rtmStrings(g["proxies"]), []string{"Авто"}) || !rtxEqualStrings(rtmStrings(g["use"]), []string{"xcp-my"}) {
-		t.Errorf("группа «Прокси»: %v (ожидались select, первый участник «Авто», use [xcp-my])", g)
+		!rtxEqualStrings(rtmStrings(g["proxies"]), []string{"Авто", "DIRECT", "REJECT"}) || !rtxEqualStrings(rtmStrings(g["use"]), []string{"xcp-my"}) {
+		t.Errorf("группа «Прокси»: %v (ожидались select, первый участник «Авто», служебный хвост DIRECT/REJECT, use [xcp-my])", g)
 	}
 	if g := groups["Авто"]; g == nil || g["type"] != "url-test" || !rtxEqualStrings(rtmStrings(g["use"]), []string{"xcp-my"}) ||
 		g["url"] != rtxDefaultProbeURL || g["interval"] != 20 || g["timeout"] != 5000 || g["tolerance"] != 50 || g["lazy"] != true {
 		t.Errorf("группа «Авто»: %v", g)
 	}
 	if g := groups[svcGroup.Name]; g == nil || g["type"] != "select" ||
-		!rtxEqualStrings(rtmStrings(g["proxies"]), []string{"Прокси", "Авто", "DIRECT"}) {
-		t.Errorf("группа «Сервис»: %v (ожидались участники «Прокси», «Авто», DIRECT)", g)
+		!rtxEqualStrings(rtmStrings(g["proxies"]), []string{"Прокси", "Авто", "DIRECT", "REJECT"}) {
+		// Служебный хвост D-13: DIRECT уже участник, дописывается только REJECT.
+		t.Errorf("группа «Сервис»: %v (ожидались участники «Прокси», «Авто», DIRECT и служебный REJECT)", g)
 	}
 	// «Резерв»: скрытая url-test по основным узлам (без резервного) и резервная копия.
 	proxies, _ := doc["proxies"].([]any)

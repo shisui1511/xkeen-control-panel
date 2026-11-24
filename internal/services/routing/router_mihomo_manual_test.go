@@ -130,7 +130,8 @@ func TestRouterMihomoManualFailClosed(t *testing.T) {
 
 // Группа [группа, пустая для Mihomo, DIRECT] с узлами источника: DIRECT стоит не
 // первым, поэтому по умолчанию не выбирается. В профиле proxies начинается с узла,
-// DIRECT последний и после всех узлов группы (узлы пишутся копиями, без use), а
+// DIRECT стоит после всех узлов группы (узлы пишутся копиями, без use), последним —
+// служебный REJECT (служебный хвост D-13; DIRECT уже участник), а
 // настоящий процесс Mihomo без сверки выбирает узел, и запрос по правилу группы
 // доходит до узла-процесса.
 func TestRouterMihomoManualDefaultNode(t *testing.T) {
@@ -180,8 +181,10 @@ func TestRouterMihomoManualDefaultNode(t *testing.T) {
 	proxies := rtmStrings(g["proxies"])
 	if len(proxies) == 0 || proxies[0] == "DIRECT" || proxies[0] == "REJECT" {
 		t.Errorf("DIRECT раньше узлов в Mihomo: группа начинается с %v", proxies)
-	} else if proxies[len(proxies)-1] != "DIRECT" {
-		t.Errorf("DIRECT не последний в группе «Узел первым»: %v", proxies)
+	} else if n := len(proxies); n < 3 || proxies[n-2] != "DIRECT" || proxies[n-1] != "REJECT" {
+		// Служебный хвост D-13: последним стоит служебный REJECT, пользовательский
+		// DIRECT — после узлов и перед ним.
+		t.Errorf("в группе «Узел первым» конец не [DIRECT REJECT] (DIRECT после узлов, служебный хвост D-13): %v", proxies)
 	}
 	if _, has := g["use"]; has {
 		t.Errorf("DIRECT раньше узлов в Mihomo: узлы провайдера идут после proxies (%v)", g["use"])

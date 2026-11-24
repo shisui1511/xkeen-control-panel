@@ -345,9 +345,10 @@ func runtimeCounts(members []RuntimeMember, installed configlayer.InstalledKerne
 }
 
 // runtimeMihomo использует тот же расчёт имён копий и скрытых групп, что
-// генератор профиля, без повторного чтения состояния или каталога.
+// генератор профиля (и тот же снимок служебного хвоста, сохранённый в модели),
+// без повторного чтения состояния или каталога.
 func runtimeMihomo(am appliedModel) *mihomoBuild {
-	b := newMihomoBuild(mihomoBuild{groups: am.groups.Items, catalog: am.cat.Mihomo, groupsOK: true})
+	b := newMihomoBuild(mihomoBuild{groups: am.groups.Items, catalog: am.cat.Mihomo, groupsOK: true, tail: am.tail})
 	b.prepare()
 	return b
 }

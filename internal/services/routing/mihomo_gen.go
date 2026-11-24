@@ -2,6 +2,7 @@ package routing
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"log"
 	"regexp"
@@ -38,6 +39,42 @@ const (
 // hiddenGroupSuffix — суффикс скрытой группы основных узлов «резерва».
 const hiddenGroupSuffix = "-main"
 
+// LiveKeyHiddenTail — ключ State.Live со снимком служебного хвоста DIRECT/REJECT
+// групп только из провайдера (D-13): JSON {"all": bool, "groups": [ID…]} с ID по
+// возрастанию; пустой снимок — ключа нет. Пишет его только сверка хвоста арбитра
+// (Arbiter.syncTail) одной записью с манифестом; генератор, модели выбора, вид и
+// предпросмотр читают его отсюда, поэтому модель выбора совпадает с профилем ядра.
+// В selectionLiveKeys ключ не входит: смена снимка меняет форму профиля.
+const LiveKeyHiddenTail = "hidden_tail"
+
+// hiddenTail — снимок служебного хвоста: All — хвост пишется всем ручным группам
+// (включён общий лимит block/direct), Groups — ID групп со своим таким лимитом.
+type hiddenTail struct {
+	All    bool     `json:"all"`
+	Groups []string `json:"groups"`
+}
+
+// has — группе gid только из провайдера пишется служебный хвост.
+func (t hiddenTail) has(gid string) bool {
+	return t.All || slices.Contains(t.Groups, gid)
+}
+
+// readHiddenTail разбирает снимок LiveKeyHiddenTail; нет ключа или значение
+// повреждено — пустой снимок. ID приводятся к порядку по возрастанию без повторов.
+func readHiddenTail(live configlayer.Sections) hiddenTail {
+	raw, ok := live[LiveKeyHiddenTail]
+	if !ok || isEmptyRaw(raw) {
+		return hiddenTail{}
+	}
+	var t hiddenTail
+	if err := json.Unmarshal(raw, &t); err != nil {
+		return hiddenTail{}
+	}
+	sort.Strings(t.Groups)
+	t.Groups = slices.Compact(t.Groups)
+	return t
+}
+
 // mihomoGen — генератор профиля Mihomo: секции ядра, провайдеры, группы и правила.
 type mihomoGen struct{ s *Service }
 
@@ -59,7 +96,8 @@ type mihomoGroup struct {
 	g Group
 	// proxies — итоговый упорядоченный список proxies ручной группы: участник по
 	// умолчанию первым, затем выпущенные вложенные группы и DIRECT/REJECT с первого
-	// места, копии узлов, в конце DIRECT/REJECT не с первого места.
+	// места, копии узлов, DIRECT/REJECT не с первого места и в самом конце
+	// служебный хвост DIRECT/REJECT (D-13).
 	proxies []string
 	// names — ручная группа: ссылка узла состава → его имя в группе профиля (имя
 	// копии или имя в файле провайдера); по ним идут выбор и сверка Mihomo.
@@ -88,6 +126,10 @@ type mihomoBuild struct {
 	// live — живые данные входа: из Live[dns_takeover] часть dns узнаёт, что
 	// перехват DNS роутера включён и где резолвер прошивки (takeoverDNS).
 	live configlayer.Sections
+	// tail — снимок служебного хвоста групп только из провайдера (LiveKeyHiddenTail
+	// входа): его задают все построения — генератор из in.Live, модели выбора из
+	// Live применённого состояния.
+	tail hiddenTail
 	// forceNames — имена listeners force-proxy* (D-12); forceGroup — группа, в
 	// которую их ведут строки IN-NAME первыми. Пусто или nil — строк нет.
 	forceNames []string
@@ -428,6 +470,18 @@ func (b *mihomoBuild) shapeOf(g Group) *mihomoGroup {
 // proxies, поэтому при узле по умолчанию и таких участниках (или копиях Picks)
 // узлы группы пишутся копиями без use: ни DIRECT, ни REJECT не оказываются перед
 // узлами, а Mihomo до первой сверки выбирает p.
+//
+// Служебный хвост (D-13, гибрид по Open Question 1): в самом конце proxies стоят
+// DIRECT и REJECT, которых ещё нет в группе, — на них арбитр ставит группу при
+// удержании лимитом block/direct (PUT /proxies/<группа> принимается, только если
+// вариант стоит в proxies). Варианты невидимы пользователю: в состав и вид они не
+// входят, по умолчанию не выбираются и первыми не стоят. Особая форма «только
+// провайдер» — узел по умолчанию из провайдера без копий (pIsBase && !copyAll):
+// proxies без хвоста пуст, и хвост вынудил бы копии узлов вместо use (иначе первым
+// оказался бы служебный вариант). Такой группе хвост и копии пишутся, только пока
+// её включает снимок Live hidden_tail (b.tail, свой или общий включённый лимит
+// block/direct); иначе группа прежняя — use и filter без хвоста. Снимок пишет
+// только сверка арбитра, все построения читают его из Live.
 func (b *mihomoBuild) manualShape(g Group) *mihomoGroup {
 	mg := &mihomoGroup{g: g, names: map[string]string{}}
 	base, picks := b.split(g)
@@ -485,6 +539,15 @@ func (b *mihomoBuild) manualShape(g Group) *mihomoGroup {
 		}
 	}
 
+	// Особая форма «только провайдер»: lead, копии и tail пусты (узел по умолчанию
+	// из провайдера исключает и первые DIRECT/REJECT и группы, и отдельные узлы, и
+	// DIRECT/REJECT не с первого места — они дали бы copyAll выше).
+	hidden := true
+	if pIsBase && !copyAll {
+		hidden = b.tail.has(g.ID)
+		copyAll = hidden
+	}
+
 	var copies []string
 	if copyAll {
 		for _, n := range b.res[g.ID].Nodes {
@@ -533,6 +596,15 @@ func (b *mihomoBuild) manualShape(g Group) *mihomoGroup {
 	for _, list := range [][]string{lead, copies, tail} {
 		for _, name := range list {
 			if name != pName {
+				mg.proxies = append(mg.proxies, name)
+			}
+		}
+	}
+	// Служебный хвост D-13 — после всех участников; пустой proxies (копии не
+	// записались) хвост не получает: служебный вариант не может стать первым.
+	if hidden && len(mg.proxies) > 0 {
+		for _, name := range []string{mihomoDirect, mihomoReject} {
+			if !slices.Contains(mg.proxies, name) {
 				mg.proxies = append(mg.proxies, name)
 			}
 		}
@@ -672,7 +744,8 @@ func uses(srcs []string) []string {
 // groupsSection — proxy-groups: ручная группа — select, «авто» — url-test,
 // «резерв» — fallback из скрытой url-test по основным узлам и резервного узла
 // (без резерва — REJECT). Первым в proxies select стоит участник по умолчанию D-36,
-// DIRECT и REJECT не с первого места идут после узлов группы (manualShape). У
+// DIRECT и REJECT не с первого места идут после узлов группы, служебный хвост
+// DIRECT/REJECT (D-13) — в самом конце (manualShape). У
 // каждой группы empty-fallback: REJECT. nil — групп нет.
 func groupsSection(b *mihomoBuild) *yaml.Node {
 	if len(b.shapes) == 0 {
@@ -806,7 +879,7 @@ func (s *Service) generateMihomo(in configlayer.Input, installed configlayer.Ins
 	b := newMihomoBuild(mihomoBuild{
 		groups: groups.Items, rules: rules, probe: probe, catalog: cat.Mihomo,
 		ports: in.Routing.Mihomo, groupsOK: s.mihomoGroupsAvailable(),
-		sections: in.Sections, live: in.Live,
+		sections: in.Sections, live: in.Live, tail: readHiddenTail(in.Live),
 		forceNames: forceNames, forceGroup: forceGroup,
 	})
 	if err := b.collectLists(s.d.Lists); err != nil {

@@ -144,6 +144,9 @@ type appliedModel struct {
 	// xrayVer, mihomoVer — версии ядер, прочитанные до расчёта каталога: от них
 	// зависят версионные ворота узлов каталога и групп Mihomo (catalogInputSame).
 	xrayVer, mihomoVer string
+	// tail — снимок служебного хвоста Mihomo (Live hidden_tail) того же состояния:
+	// по нему модели выбора считают форму групп так же, как генератор профиля.
+	tail hiddenTail
 }
 
 // appliedModelOf читает группы и каталог узлов применённого состояния.
@@ -153,7 +156,8 @@ func (s *Service) appliedModelOf(st configlayer.StateView) (appliedModel, error)
 		return appliedModel{}, err
 	}
 	m := appliedModel{groups: cfg, installed: s.d.Installed(), byRef: map[string]sources.CatalogNode{},
-		xrayVer: s.d.KernelVersion(configlayer.KernelXray), mihomoVer: s.d.KernelVersion(configlayer.KernelMihomo)}
+		xrayVer: s.d.KernelVersion(configlayer.KernelXray), mihomoVer: s.d.KernelVersion(configlayer.KernelMihomo),
+		tail: readHiddenTail(st.Live)}
 	if m.installed.Xray || m.installed.Mihomo {
 		cat, err := s.d.Sources.Catalog(appliedInput(st), m.installed)
 		if err != nil {
@@ -923,7 +927,7 @@ func (s *Service) mihomoEntryFromModel(am appliedModel, st configlayer.StateView
 	if !s.mihomoSelPossible(st.Applied, am.installed) {
 		return nil, nil
 	}
-	b := newMihomoBuild(mihomoBuild{groups: am.groups.Items, catalog: am.cat.Mihomo, groupsOK: true})
+	b := newMihomoBuild(mihomoBuild{groups: am.groups.Items, catalog: am.cat.Mihomo, groupsOK: true, tail: am.tail})
 	b.prepare()
 	for _, mg := range b.shapes {
 		if mg.g.ID != gid {
@@ -1382,7 +1386,8 @@ type mihomoSelEntry struct {
 }
 
 // mihomoBuildOf готовит расчёт профиля Mihomo по применённому состоянию, ровно
-// как генератор (имена групп и копий узлов). nil — Mihomo не установлен,
+// как генератор (имена групп и копий узлов, служебный хвост по снимку Live
+// hidden_tail). nil — Mihomo не установлен,
 // маршрутизацией не управляет панель или группы ниже порога версии (D-45).
 func (s *Service) mihomoBuildOf(st configlayer.StateView, installed configlayer.InstalledKernels) (*mihomoBuild, error) {
 	if !s.mihomoSelPossible(st.Applied, installed) {
@@ -1396,7 +1401,7 @@ func (s *Service) mihomoBuildOf(st configlayer.StateView, installed configlayer.
 	if err != nil {
 		return nil, err
 	}
-	b := newMihomoBuild(mihomoBuild{groups: groups.Items, catalog: cat.Mihomo, groupsOK: true})
+	b := newMihomoBuild(mihomoBuild{groups: groups.Items, catalog: cat.Mihomo, groupsOK: true, tail: readHiddenTail(st.Live)})
 	b.prepare()
 	return b, nil
 }
