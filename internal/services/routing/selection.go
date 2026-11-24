@@ -611,7 +611,7 @@ func (s *Service) selectOpts(ctx context.Context, groupID, member string, fast, 
 	if !ok || g.Mode != ModeManual {
 		return SelectResult{}, ErrGroupNotApplied
 	}
-	if !memberAllowed(g, member, am) && (!arbiter || (member != memberDirect && member != memberReject)) {
+	if !memberAllowed(g, member, am) && (!arbiter || !hiddenMember(member)) {
 		return SelectResult{}, ErrMemberInvalid
 	}
 
@@ -823,6 +823,10 @@ func appliedOptions(g Group, am appliedModel) []MemberOption {
 	members := Resolve(g, am.union, am.groups.Items).Members
 	return memberOptions(g, members, am.groups.Items, xray, mihomo)
 }
+
+// hiddenMember — служебные варианты ручной группы: ставит только арбитр, в составе
+// и виде их нет (удержание лимитом с действием block или direct, D-13).
+func hiddenMember(m string) bool { return m == memberDirect || m == memberReject }
 
 // memberAllowed — участник есть среди вариантов группы по применённому состоянию
 // (те же варианты, что отдаёт представление для применённой группы,
@@ -1699,6 +1703,8 @@ func (s *Service) CommitLive(st *configlayer.State, req configlayer.ApplyRequest
 	repick = keep
 
 	installed := s.d.Installed()
+	// Записи арбитра читаются после dropNonManualArbiter: у ручных групп они те же.
+	recs := readArbiter(st.Live)
 	if installed.Xray || installed.Mihomo {
 		if cat, err := s.d.Sources.Catalog(used, installed); err == nil {
 			am := appliedModel{groups: cfg, cat: cat, union: unionCatalog(cat), installed: installed, byRef: map[string]sources.CatalogNode{}}
@@ -1709,6 +1715,11 @@ func (s *Service) CommitLive(st *configlayer.State, req configlayer.ApplyRequest
 				g := manual[gid]
 				cands := am.candidates(g)
 				if cur != "" && containsString(cands, cur) && am.avail(cur) {
+					continue
+				}
+				if hiddenMember(cur) && recs[gid].Holder == holderQuota {
+					// Служебный выбор держит лимит трафика (D-05, D-13): «Применить» его
+					// не снимает, исходный выбор вернёт арбитр после сброса лимита.
 					continue
 				}
 				if cur != "" && !strings.HasPrefix(cur, memberNode) {

@@ -136,8 +136,11 @@ func memberString(m Member) string {
 // группе и avail(участник) истинно; иначе — первый допустимый по порядку:
 // сначала участники Members, затем узлы состава Resolve (nodeRefs — их ссылки в
 // порядке состава). DIRECT и REJECT берутся по умолчанию, только если стоят
-// первыми (D-36). Пусто — допустимых участников нет. Общий для генераторов и
-// представления (146-14, 146-15): они передают ссылки узлов своего ядра.
+// первыми (D-36). Явный выбор служебного варианта DIRECT или REJECT ручной группы
+// (его ставит только арбитр при удержании лимитом, D-13) действует и вне состава
+// группы, если avail его допускает. Пусто — допустимых участников нет. Общий для
+// генераторов и представления (146-14, 146-15): они передают ссылки узлов своего
+// ядра.
 func effectiveSelection(g Group, sel string, avail func(member string) bool, nodeRefs ...string) string {
 	cands := make([]string, 0, len(g.Members))
 	for _, m := range g.Members {
@@ -153,6 +156,9 @@ func effectiveSelection(g Group, sel string, avail func(member string) bool, nod
 			if c == sel && avail(c) {
 				return c
 			}
+		}
+		if g.Mode == ModeManual && hiddenMember(sel) && avail(sel) {
+			return sel
 		}
 	}
 	for i, c := range cands {
