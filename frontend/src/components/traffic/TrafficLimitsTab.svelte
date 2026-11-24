@@ -426,7 +426,7 @@
             <div class="limit-row limit-meta">
               <span class="limit-reset">
                 {$t('traffic.limits.reset_line', {
-                  date: formatLimitDate(l.reset_at),
+                  date: formatLimitDate(l.reset_at, view?.offset),
                   period: periodLabel(l.period)
                 })}
               </span>

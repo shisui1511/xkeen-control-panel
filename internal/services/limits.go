@@ -219,11 +219,14 @@ type LimitsView struct {
 	// Groups — группы применённого состояния маршрутизации по имени (те же, по которым
 	// Save проверяет цель); пусто, пока цели учёта неизвестны.
 	Groups []LimitGroup `json:"groups"`
-	// Data — состояние учёта: ok | no_socket | no_counters | stopped.
+	// Data — состояние учёта: ok | no_socket | no_counters | no_stream | stopped.
 	Data string `json:"data"`
 	// Kernel — активное ядро ("xray" | "mihomo" | "" — ни одного или конфликт).
 	Kernel string `json:"kernel"`
 	Now    int64  `json:"now"`
+	// Offset — смещение пояса часов роутера от UTC в секундах: даты сброса лимитов
+	// интерфейс показывает по часам роутера, а не браузера (D-08).
+	Offset int `json:"offset"`
 }
 
 // GroupTarget — группа панели как цель учёта.
@@ -785,6 +788,12 @@ func (s *LimitsService) holdKeyLocked() string {
 	return strings.Join(ids, ",")
 }
 
+// routerOffset — смещение пояса часов процесса от UTC в секундах.
+func routerOffset(now time.Time) int {
+	_, off := now.Zone()
+	return off
+}
+
 // List возвращает лимиты с состояниями: исчерпанные, достигшие порога, затем по имени.
 func (s *LimitsService) List() LimitsView {
 	t, known := s.readTargets()
@@ -870,7 +879,7 @@ func (s *LimitsService) List() LimitsView {
 			return limitLess(groups[i].Name, groups[i].ID, groups[j].Name, groups[j].ID)
 		})
 	}
-	return LimitsView{Limits: views, Groups: groups, Data: data, Kernel: kernel, Now: now.Unix()}
+	return LimitsView{Limits: views, Groups: groups, Data: data, Kernel: kernel, Now: now.Unix(), Offset: routerOffset(now)}
 }
 
 // AddUsage прибавляет байты включённым лимитам: общему — allBytes, лимиту группы —

@@ -63,6 +63,8 @@ export interface LimitsView {
   /** Активное ядро: xray | mihomo | '' (ни одного или конфликт). */
   kernel: string;
   now: number;
+  /** Смещение пояса роутера от UTC, секунды; нет — часы браузера. */
+  offset?: number;
 }
 
 /** Оповещение о достижении порога или исчерпании лимита. */
@@ -100,7 +102,8 @@ function normalizeView(v: LimitsView): LimitsView {
     groups: v?.groups ?? [],
     data: v?.data ?? 'ok',
     kernel: v?.kernel ?? '',
-    now: v?.now ?? 0
+    now: v?.now ?? 0,
+    offset: typeof v?.offset === 'number' ? v.offset : undefined
   };
 }
 
@@ -195,7 +198,7 @@ export function limitFillKind(l: LimitView): 'ok' | 'warn' | 'danger' {
 
 /**
  * «DD.MM, HH:MM» момента unix-секунд: со смещением пояса — по часам роутера, без
- * него — в поясе браузера (у LimitsView смещения нет).
+ * него — в поясе браузера (смещение роутера приходит в LimitsView.offset).
  */
 export function formatLimitDate(unix: number, offsetSec?: number): string {
   if (!unix) return '—';
