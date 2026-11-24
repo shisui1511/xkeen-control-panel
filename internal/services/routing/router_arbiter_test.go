@@ -446,4 +446,164 @@ func TestRouterArbiter(t *testing.T) {
 			t.Error("конец окна Mihomo: запрос группы прошёл через узел окна")
 		}
 	})
+
+	// Окно через полночь и пересечения окон (D-06, D-08, D-11): поведение тика и
+	// вида, расчёт окна напрямую не вызывается. Окружение со слоем и установленным
+	// Xray без процесса ядра: selectArbiter фиксирует выбор в Live конвейером с
+	// исходом «ядро не запущено», вид «Прокси» строится из того же Live.
+	t.Run("overnight_and_overlap", func(t *testing.T) {
+		ctx := context.Background()
+		clk := &rtarClock{now: rtarAt(0, 9, 0)}
+		gr := rtarNewLight(t, clk)
+		arb := NewArbiter(gr.e.svc)
+		t.Cleanup(arb.Stop)
+		night := gr.window(t, []int{0}, "22:00", "07:00", "B")
+		steps := []struct {
+			name        string
+			at          time.Time
+			sel, holder string
+			hold        string
+			until       int64
+		}{
+			{"понедельник 21:00", rtarAt(0, 21, 0), "A", "", "", 0},
+			{"вторник 03:00", rtarAt(1, 3, 0), "B", holderSchedule, holderSchedule, rtarAt(1, 7, 0).Unix()},
+			{"вторник 07:00", rtarAt(1, 7, 0), "A", "", "", 0},
+		}
+		for _, s := range steps {
+			clk.set(s.at)
+			arb.tick(ctx)
+			gr.expect(t, s.name, s.sel, s.holder)
+			v := gr.view(t)
+			kind, until := "", int64(0)
+			if v.Hold != nil {
+				kind, until = v.Hold.Kind, v.Hold.Until
+			}
+			if kind != s.hold || until != s.until {
+				t.Errorf("%s: вид: удержание %q (ожидалось %q), конец удержания совпал=%t", s.name, kind, s.hold, until == s.until)
+			}
+			if s.hold == holderSchedule && v.Hold != nil && v.Hold.Until != rtarAt(1, 7, 0).Unix() {
+				t.Errorf("%s: Hold.Until не равен вторнику 07:00 по часам теста", s.name)
+			}
+		}
+
+		// Пересечения отклоняются без записи в Live: окна группы после отказа прежние.
+		ids := func() string {
+			t.Helper()
+			var out []string
+			for _, w := range readSchedules(gr.e.state(t).Live)[gr.g.ID] {
+				out = append(out, w.ID)
+			}
+			return strings.Join(out, ",")
+		}
+		reject := func(step string, gid string, w ScheduleWindow, ok func(error) bool) {
+			t.Helper()
+			before := ids()
+			_, err := gr.e.svc.SaveScheduleWindow(gid, w)
+			if !ok(err) {
+				t.Errorf("%s: отказ не тот: %s", step, rtarErrCode(err))
+			}
+			if ids() != before {
+				t.Errorf("%s: окна группы изменились после отказа", step)
+			}
+		}
+		overlapWith := func(id string) func(error) bool {
+			return func(err error) bool {
+				var o *ScheduleOverlapError
+				return errors.As(err, &o) && o.Window == id
+			}
+		}
+		reject("вторник 06:00–08:00", gr.g.ID,
+			ScheduleWindow{Days: []int{1}, From: "06:00", To: "08:00", Member: gr.member["B"], Enabled: true},
+			overlapWith(night.ID))
+		sunday := gr.window(t, []int{6}, "23:00", "01:00", "B")
+		reject("понедельник 00:30–02:00 (перенос через неделю)", gr.g.ID,
+			ScheduleWindow{Days: []int{0}, From: "00:30", To: "02:00", Member: gr.member["B"], Enabled: true},
+			overlapWith(sunday.ID))
+		reject("равные «с» и «по»", gr.g.ID,
+			ScheduleWindow{Days: []int{2}, From: "10:00", To: "10:00", Member: gr.member["B"], Enabled: true},
+			func(err error) bool { var inv *InvalidInputError; return errors.As(err, &inv) })
+		auto, ok := rtGroupByName(gr.e.groups(t), "Авто")
+		if !ok {
+			t.Fatal("нет группы «Авто»")
+		}
+		reject("группа «авто»", auto.ID,
+			ScheduleWindow{Days: []int{3}, From: "10:00", To: "12:00", Member: gr.member["B"], Enabled: true},
+			func(err error) bool { return errors.Is(err, ErrGroupNotApplied) })
+		if n := len(readSchedules(gr.e.state(t).Live)[auto.ID]); n != 0 {
+			t.Errorf("группа «авто»: окон в Live %d после отказа", n)
+		}
+	})
+
+	// Узел окна пропал из группы (D-07): окно пропускается — тик не меняет выбор,
+	// вид отдаёт hold.kind=node_missing.
+	t.Run("node_missing", func(t *testing.T) {
+		ctx := context.Background()
+		clk := &rtarClock{now: rtarAt(0, 9, 0)}
+		gr := rtarNewLight(t, clk)
+		arb := NewArbiter(gr.e.svc)
+		t.Cleanup(arb.Stop)
+		clk.set(rtarAt(0, 12, 0))
+		gr.window(t, []int{0}, "10:00", "14:00", "B")
+		entryID := strings.TrimPrefix(gr.ref["B"], sources.MySourceID+"/")
+		if _, err := gr.e.svc.DeleteNode(gr.e.rev(t), entryID); err != nil {
+			t.Fatalf("удаление узла окна из «Моих узлов»: %v", err)
+		}
+		gr.e.applyOK(t)
+		before, _, _ := gr.live(t)
+		arb.tick(ctx)
+		after, _, hasRec := gr.live(t)
+		if after != before || gr.role(after) != "A" || hasRec {
+			t.Errorf("пропавший узел: выбор не изменился=%t, выбор=%s, запись арбитра=%t", after == before, gr.role(after), hasRec)
+		}
+		v := gr.view(t)
+		if v.Hold == nil || v.Hold.Kind != holdNodeMissing {
+			kind := ""
+			if v.Hold != nil {
+				kind = v.Hold.Kind
+			}
+			t.Errorf("пропавший узел: вид: удержание %q, ожидалось %q", kind, holdNodeMissing)
+		}
+	})
+
+	// Часы с годом меньше 2025 считаются несинхронизированными (A9): окно «на весь
+	// день» не применяется. Контроль — те же окна на верных часах действуют.
+	t.Run("clock_not_synced", func(t *testing.T) {
+		ctx := context.Background()
+		clk := &rtarClock{now: rtarAt(0, 9, 0)}
+		gr := rtarNewLight(t, clk)
+		arb := NewArbiter(gr.e.svc)
+		t.Cleanup(arb.Stop)
+		old := time.Date(2000, time.January, 5, 12, 0, 0, 0, time.Local)
+		clk.set(old)
+		day := weekday0Mon(old)
+		gr.window(t, []int{day}, "00:00", "23:59", "B")
+		arb.tick(ctx)
+		gr.expect(t, "часы 2000 года", "A", "")
+		if v := gr.view(t); v.Hold != nil {
+			t.Errorf("часы 2000 года: вид отдаёт удержание %q", v.Hold.Kind)
+		}
+		// Тот же день недели и время на часах 2026 года: окно действует.
+		clk.set(rtarAt(day, 12, 0))
+		arb.tick(ctx)
+		gr.expect(t, "контроль на верных часах", "B", holderSchedule)
+	})
+}
+
+// rtarErrCode — код отказа для журнала без текста ошибки.
+func rtarErrCode(err error) string {
+	var o *ScheduleOverlapError
+	var inv *InvalidInputError
+	switch {
+	case err == nil:
+		return "nil"
+	case errors.As(err, &o):
+		return "overlap"
+	case errors.As(err, &inv):
+		return "invalid:" + inv.Field
+	case errors.Is(err, ErrGroupNotApplied):
+		return "group_not_applied"
+	case errors.Is(err, ErrMemberInvalid):
+		return "member_invalid"
+	}
+	return "other"
 }
