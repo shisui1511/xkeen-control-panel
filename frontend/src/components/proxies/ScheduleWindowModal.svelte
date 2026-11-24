@@ -383,7 +383,7 @@
   .sw-day[aria-pressed='true'] {
     background: var(--accent-soft);
     border-color: var(--accent-line);
-    color: var(--accent-text);
+    color: var(--fg-primary);
   }
 
   .sw-quick {
