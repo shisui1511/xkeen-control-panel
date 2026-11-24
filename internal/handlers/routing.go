@@ -61,6 +61,7 @@ func (a *API) writeRoutingError(w http.ResponseWriter, r *http.Request, err erro
 		cycle   *routing.GroupCycleError
 		refd    *routing.ReferencedError
 		mixed   *configlayer.ForeignMixedError
+		overlap *routing.ScheduleOverlapError
 	)
 	switch {
 	case errors.As(err, &invalid):
@@ -123,6 +124,16 @@ func (a *API) writeRoutingError(w http.ResponseWriter, r *http.Request, err erro
 		JSONErrorCode(w, http.StatusConflict, "draft_open", a.t(r, "configlayer.routing.draft_open"))
 	case errors.Is(err, routing.ErrProfileUnknown):
 		JSONErrorCode(w, http.StatusNotFound, "profile_unknown", a.t(r, "configlayer.routing.profile_unknown"))
+	case errors.Is(err, routing.ErrQuotaHeld):
+		// Группу держит исчерпанный лимит: клик и «Вернуть расписание» отклоняются
+		// без обращения к ядру (D-05).
+		JSONErrorCode(w, http.StatusConflict, "quota_held", a.t(r, "configlayer.routing.quota_held"))
+	case errors.As(err, &overlap):
+		// В параметрах — только ID конфликтующего окна (D-11).
+		JSONErrorCodeParams(w, http.StatusConflict, "schedule_overlap", a.t(r, "configlayer.routing.schedule_overlap"),
+			map[string]string{"window": overlap.Window})
+	case errors.Is(err, routing.ErrWindowNotFound):
+		JSONErrorCode(w, http.StatusNotFound, "window_not_found", a.t(r, "configlayer.routing.window_not_found"))
 	default:
 		// Ошибки источников (узел или источник не найден) и слоя — по их таблицам.
 		a.writeSourceError(w, r, err)
@@ -501,6 +512,70 @@ func (a *API) ConfigRoutingScheduleSave(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	JSONSuccess(w, saved)
+}
+
+// ConfigRoutingScheduleDelete — POST /api/configlayer/routing/schedule/delete
+// {group, id}: удаление окна расписания. Действующее окно возвращает группе
+// исходный выбор следующим тиком арбитра (D-06).
+func (a *API) ConfigRoutingScheduleDelete(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
+		return
+	}
+	var req struct {
+		Group string `json:"group"`
+		ID    string `json:"id"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	if err := a.routing.DeleteScheduleWindow(req.Group, req.ID); err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, map[string]bool{"ok": true})
+}
+
+// ConfigRoutingScheduleEnabled — POST /api/configlayer/routing/schedule/enabled
+// {group, id, enabled}: включение или выключение окна расписания.
+func (a *API) ConfigRoutingScheduleEnabled(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
+		return
+	}
+	var req struct {
+		Group   string `json:"group"`
+		ID      string `json:"id"`
+		Enabled bool   `json:"enabled"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	if err := a.routing.SetScheduleWindowEnabled(req.Group, req.ID, req.Enabled); err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, map[string]bool{"ok": true})
+}
+
+// ConfigRoutingScheduleRestore — POST /api/configlayer/routing/schedule/restore
+// {group}: «Вернуть расписание». Снимает перехват действующего окна и синхронно
+// ставит его узел; ответ — исход выбора, как у /select (D-04). Отмена запроса
+// вкладкой выбор не прерывает.
+func (a *API) ConfigRoutingScheduleRestore(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
+		return
+	}
+	var req struct {
+		Group string `json:"group"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	res, err := a.routing.RestoreSchedule(context.WithoutCancel(r.Context()), req.Group)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, res)
 }
 
 // ConfigRoutingLists — GET /api/configlayer/routing/lists: каталог списков dat
