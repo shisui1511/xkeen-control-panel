@@ -117,7 +117,7 @@
     {#if leftover}
       <!-- Возврат после удержания не принят ядром: повтор идёт на сервере -->
     {:else if hold.kind === 'quota'}
-      <Badge tone="danger" class="pc-state-badge" title={quotaText}>
+      <Badge tone="danger" class="pc-state-item" title={quotaText}>
         <Icon name="warning" size={12} />
         <span class="pc-state-text">{quotaText}</span>
       </Badge>
@@ -138,7 +138,7 @@
         {$t('proxies.rt.quota.reset')}
       </Button>
     {:else if hold.kind === 'override'}
-      <Badge tone="warning" class="pc-state-badge">
+      <Badge tone="warning" class="pc-state-item">
         <span class="pc-state-text">
           {$t('proxies.rt.sched.state_override', { time: routerTime(hold.until) })}
         </span>
@@ -155,13 +155,13 @@
         {$t('proxies.rt.sched.restore')}
       </Button>
     {:else if hold.kind === 'schedule'}
-      <Badge tone="info" class="pc-state-badge">
+      <Badge tone="info" class="pc-state-item">
         <span class="pc-state-text">
           {$t('proxies.rt.sched.state_active', { time: routerTime(hold.until) })}
         </span>
       </Badge>
     {:else if hold.kind === 'node_missing'}
-      <Badge tone="warning" class="pc-state-badge">
+      <Badge tone="warning" class="pc-state-item">
         <Icon name="warning" size={12} />
         <span class="pc-state-text">{$t('proxies.rt.sched.node_missing')}</span>
       </Badge>
@@ -174,7 +174,7 @@
       )}
       <Badge
         tone="warning"
-        class="pc-state-badge pc-state-badge--wrap"
+        class="pc-state-item pc-state-item--wrap"
         testid="proxy-group-stalled-{group.id}"
       >
         <Icon name="warning" size={12} />
@@ -203,12 +203,12 @@
     border-radius: var(--radius-sm);
   }
   /* Длинное имя лимита усекается, полный текст — в title Badge */
-  .pc-state :global(.pc-state-badge) {
+  .pc-state :global(.pc-state-item) {
     max-width: 100%;
     min-width: 0;
     gap: var(--spacing-1);
   }
-  .pc-state :global(.pc-state-badge--wrap) {
+  .pc-state :global(.pc-state-item--wrap) {
     white-space: normal;
   }
   .pc-state-text {

@@ -142,6 +142,7 @@
   "proxies.rt.sched.stalled": "The core has not accepted the scheduled choice yet — the panel keeps retrying. See the notices in Configuration for the reason.",
   "proxies.rt.sched.toast_override": "Manual until the window ends at {time}",
   "proxies.rt.sched.toast_restored": "Schedule restored",
+  "proxies.rt.quota.title": "Limit “{name}”",
   "proxies.rt.quota.none": "No limit",
   "proxies.rt.quota.set": "Set a limit",
   "proxies.rt.quota.exhausted": "Limit “{name}” is exhausted until {date}",

@@ -142,6 +142,7 @@
   "proxies.rt.sched.stalled": "Ядро ещё не приняло выбор расписания — панель повторяет попытку сама. Причина — в уведомлениях на «Конфигурации».",
   "proxies.rt.sched.toast_override": "Вручную до конца окна {time}",
   "proxies.rt.sched.toast_restored": "Расписание возвращено",
+  "proxies.rt.quota.title": "Лимит «{name}»",
   "proxies.rt.quota.none": "Лимита нет",
   "proxies.rt.quota.set": "Задать лимит",
   "proxies.rt.quota.exhausted": "Лимит «{name}» исчерпан до {date}",

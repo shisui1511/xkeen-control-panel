@@ -12,6 +12,10 @@
     loadLimitAlerts,
     clearLimitAlerts,
     formatLimitBytes,
+    formatLimitDate,
+    limitFill,
+    limitFillKind,
+    limitPercent,
     type LimitAlert,
     type LimitView,
     type LimitState
@@ -170,23 +174,6 @@
   function targetLabel(l: LimitView): string {
     if (l.target_type === 'all') return $t('traffic.limits.target_all');
     return l.target_name || l.target_id;
-  }
-
-  function percentOf(l: LimitView): number {
-    return l.limit_bytes > 0 ? (l.used_bytes / l.limit_bytes) * 100 : 0;
-  }
-
-  function fillKind(l: LimitView): 'ok' | 'warn' | 'danger' {
-    if (l.state === 'exhausted') return 'danger';
-    if (l.state === 'threshold') return 'warn';
-    return 'ok';
-  }
-
-  function resetDate(unix: number): string {
-    if (!unix) return '—';
-    const d = new Date(unix * 1000);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
 
   // Подсказка «нет данных»: чего именно не хватает учёту
@@ -354,8 +341,8 @@
     {:else}
       <div class="limits-grid">
         {#each view.limits as l (l.id)}
-          {@const pct = percentOf(l)}
-          {@const fill = Math.min(100, Math.max(0, pct))}
+          {@const pct = limitPercent(l)}
+          {@const fill = limitFill(l)}
           {@const ofText = $t('traffic.limits.of', {
             used: formatLimitBytes(l.used_bytes, $currentLang),
             limit: formatLimitBytes(l.limit_bytes, $currentLang)
@@ -414,7 +401,7 @@
               aria-valuetext={hasData ? ofText : $t('traffic.limits.no_data')}
             >
               <div
-                class="stat-bar-fill stat-bar-fill--{fillKind(l)}"
+                class="stat-bar-fill stat-bar-fill--{limitFillKind(l)}"
                 style:width="{hasData ? fill : 0}%"
               ></div>
             </div>
@@ -429,7 +416,7 @@
             <div class="limit-row limit-meta">
               <span class="limit-reset">
                 {$t('traffic.limits.reset_line', {
-                  date: resetDate(l.reset_at),
+                  date: formatLimitDate(l.reset_at),
                   period: periodLabel(l.period)
                 })}
               </span>

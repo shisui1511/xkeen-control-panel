@@ -13,6 +13,8 @@
   import ProxyNodeStatus from './ProxyNodeStatus.svelte';
   import GroupStateLine from './GroupStateLine.svelte';
   import GroupSchedule from './GroupSchedule.svelte';
+  import GroupQuota from './GroupQuota.svelte';
+  import { trafficLimits } from '../../lib/trafficLimits';
   import {
     splitMembers,
     nowLine,
@@ -514,6 +516,7 @@
       <div class="gc-body">
         <div class="gc-body-inner">
           {#if g.mode === 'manual'}<GroupSchedule group={g} clock={p.view.clock} />{/if}
+          <GroupQuota group={g} limits={$trafficLimits} clock={p.view.clock} />
           {#if pEmpty}
             <!-- D-23: совместимых участников нет — вместо сетки сообщение и ссылка на группу -->
             <div class="pc-state" data-testid="proxy-group-empty-{g.id}">

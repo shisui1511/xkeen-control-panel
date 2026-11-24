@@ -66,6 +66,7 @@
     selectBgReason,
     type LayerNotice
   } from './lib/configLayer';
+  import { loadLimits } from './lib/trafficLimits';
   import type { ProxiesViewMode } from './lib/proxyViewPrefs';
   import type { SelectResult } from './lib/configRouting';
   import type { KernelName } from './lib/configSources';
@@ -558,6 +559,23 @@
     nowPollEnabled.set(needsNow);
     // Опрос остановлен (ядра стоят, авто-групп нет): прежний «Сейчас» не показывается (D-26)
     if (!needsNow) resetNow();
+  });
+
+  // Расход лимитов для блока «Лимит» карточек (D-17): опрос раз в 5 с только при видимой
+  // вкладке и наличии групп панели (у групп источника блока нет, T-152-34)
+  const LIMITS_POLL_MS = 5000;
+  const limitsPollEnabled = writable(false);
+  usePoller(
+    async (signal) => {
+      await loadLimits(signal);
+    },
+    LIMITS_POLL_MS,
+    { enabledWhen: limitsPollEnabled }
+  );
+  $effect(() => {
+    limitsPollEnabled.set(
+      !!view && view.state !== 'user_profile' && view.groups.some((g) => g.mode !== 'source')
+    );
   });
 
   let kernelTimer: ReturnType<typeof setTimeout> | null = null;

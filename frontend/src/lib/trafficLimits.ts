@@ -174,6 +174,40 @@ export function formatLimitBytes(bytes: number, lang: string): string {
   return `${num} ${units[i]}`;
 }
 
+// --- Расход и даты лимита (вкладка «Лимиты» и блок «Лимит» карточки группы) ---
+
+/** Расход в процентах лимита (может быть больше 100). */
+export function limitPercent(l: LimitView): number {
+  return l.limit_bytes > 0 ? (l.used_bytes / l.limit_bytes) * 100 : 0;
+}
+
+/** Заполнение полосы расхода: не выходит за 0…100 %. */
+export function limitFill(l: LimitView): number {
+  return Math.min(100, Math.max(0, limitPercent(l)));
+}
+
+/** Вид заливки полосы по состоянию лимита. */
+export function limitFillKind(l: LimitView): 'ok' | 'warn' | 'danger' {
+  if (l.state === 'exhausted') return 'danger';
+  if (l.state === 'threshold') return 'warn';
+  return 'ok';
+}
+
+/**
+ * «DD.MM, HH:MM» момента unix-секунд: со смещением пояса — по часам роутера, без
+ * него — в поясе браузера (у LimitsView смещения нет).
+ */
+export function formatLimitDate(unix: number, offsetSec?: number): string {
+  if (!unix) return '—';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  if (offsetSec !== undefined) {
+    const d = new Date((unix + offsetSec) * 1000);
+    return `${pad(d.getUTCDate())}.${pad(d.getUTCMonth() + 1)}, ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  }
+  const d = new Date(unix * 1000);
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /** Лимит в байтах → значение и единица формы (наибольшая единица с целым значением ≥ 1). */
 export function splitLimitBytes(bytes: number): { value: number; unit: LimitUnit } {
   for (let i = LIMIT_UNITS.length - 1; i >= 0; i--) {
