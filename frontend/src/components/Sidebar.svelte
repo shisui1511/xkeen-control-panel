@@ -11,7 +11,7 @@
     activeKernelName
   } from '../stores';
   import { navBadgeCount, badgeTotal } from '../lib/configLayer';
-  import { showMihomoNavFor, showProxiesNavFor } from '../lib/navCaps';
+  import { showMihomoNavFor, showProxiesNavFor, showTrafficNavFor } from '../lib/navCaps';
   import Skeleton from './Skeleton.svelte';
   import BrandMark from './BrandMark.svelte';
   import { capsuleConfigStore } from '../lib/capsuleSettings';
@@ -148,6 +148,8 @@
   const showMihomoNav = $derived($isConflict ? false : showMihomoNavFor($navCaps));
   // «Прокси» — страница групп панели для обоих ядер
   const showProxiesNav = $derived($isConflict ? false : showProxiesNavFor($navCaps, true));
+  // «Трафик» — при любом ядре: под Xray страница читает статистику самого Xray
+  const showTrafficNav = $derived($isConflict ? false : showTrafficNavFor($navCaps));
 
   // Same hoist for the "Mihomo API unreachable" nav-item badge (72-REVIEW WR-05)
   // — was copy-pasted verbatim at 3 call sites, risking condition drift.
@@ -343,19 +345,6 @@
           {/if}
         </a>
       {/if}
-      {#if showMihomoNav === true}
-        <a
-          href="#/smartproxy"
-          class="nav-item"
-          aria-current={currentTab === 'smartproxy' ? 'page' : undefined}
-          data-label={$t('nav.smartproxy')}
-          onclick={() => isSidebarOpen.set(false)}
-          title={$isSidebarCollapsed ? undefined : $t('nav.smartproxy')}
-        >
-          <Icon name="smartproxy" size={16} />
-          <span class="lbl">{$t('nav.smartproxy')}</span>
-        </a>
-      {/if}
     </details>
   {/if}
 
@@ -448,7 +437,7 @@
         {/if}
       </a>
     {/if}
-    {#if showMihomoNav === true}
+    {#if showTrafficNav === true}
       <a
         href="#/traffic"
         class="nav-item"
@@ -459,17 +448,6 @@
       >
         <Icon name="traffic" size={16} />
         <span class="lbl">{$t('nav.traffic')}</span>
-      </a>
-      <a
-        href="#/trafficquotas"
-        class="nav-item"
-        aria-current={currentTab === 'trafficquotas' ? 'page' : undefined}
-        data-label={$t('nav.trafficquotas')}
-        onclick={() => isSidebarOpen.set(false)}
-        title={$isSidebarCollapsed ? undefined : $t('nav.trafficquotas')}
-      >
-        <Icon name="trafficquotas" size={16} />
-        <span class="lbl">{$t('nav.trafficquotas')}</span>
       </a>
     {/if}
     <a

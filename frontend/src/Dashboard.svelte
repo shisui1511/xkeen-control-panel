@@ -92,14 +92,7 @@
   let currentTab = $state(tabFromHash(initialHash));
   let currentHash = $state(initialHash);
 
-  const mihomoDependentTabs = [
-    'proxies',
-    'connections',
-    'rules',
-    'traffic',
-    'smartproxy',
-    'trafficquotas'
-  ];
+  const mihomoDependentTabs = ['proxies', 'connections', 'rules', 'traffic'];
   // В конфликте ядер (оба процесса запущены) вкладки ядер закрыты заглушкой под баннером
   // Причина плашки «Mihomo API оффлайн» по состоянию ядер (todo mihomo-offline-banner-reason):
   // при активном Xray страница просто показывает данные другого ядра — запуск Mihomo
@@ -1002,9 +995,10 @@
           <span class="spinner"></span>
           <span>{$t('service.restarting_wait')}</span>
         </div>
-      {:else if currentTab !== 'rules' && currentTab !== 'proxies'}
+      {:else if currentTab !== 'rules' && currentTab !== 'proxies' && !(currentTab === 'traffic' && $activeKernelName === 'xray')}
         <!-- «Правила» работают без API Mihomo: вместо баннера — пометка на самой странице (D-19).
-             «Прокси» сама объясняет состояние ядра плашкой (D-01…D-03) -->
+             «Прокси» сама объясняет состояние ядра плашкой (D-01…D-03).
+             «Трафик» под Xray показывает статистику Xray и сам объясняет блоки только для Mihomo -->
         <div class="shell-banner-slot">
           <ApiOffline
             reason={apiOfflineReason}
@@ -1279,40 +1273,6 @@
         {:then { default: Services }}
           <div in:pageIn>
             <Services onSwitchTab={switchTab} />
-          </div>
-        {:catch err}
-          <div {@attach reportChunkErrorAttachment(err)}>
-            <EmptyState
-              title={$t('app.chunk_load_failed')}
-              description=""
-              ctaText={$t('app.retry')}
-              oncta={retryChunkLoad}
-            />
-          </div>
-        {/await}
-      {:else if currentTab === 'smartproxy'}
-        {#await import('./SmartProxy.svelte')}
-          <Skeleton type="card" height="60vh" />
-        {:then { default: SmartProxy }}
-          <div in:pageIn>
-            <SmartProxy onSwitchTab={switchTab} />
-          </div>
-        {:catch err}
-          <div {@attach reportChunkErrorAttachment(err)}>
-            <EmptyState
-              title={$t('app.chunk_load_failed')}
-              description=""
-              ctaText={$t('app.retry')}
-              oncta={retryChunkLoad}
-            />
-          </div>
-        {/await}
-      {:else if currentTab === 'trafficquotas'}
-        {#await import('./TrafficQuotas.svelte')}
-          <Skeleton type="card" height="60vh" />
-        {:then { default: TrafficQuotas }}
-          <div in:pageIn>
-            <TrafficQuotas onSwitchTab={switchTab} />
           </div>
         {:catch err}
           <div {@attach reportChunkErrorAttachment(err)}>
