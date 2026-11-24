@@ -48,8 +48,17 @@ export interface LimitView extends TrafficLimit {
   holding: string[];
 }
 
+/** Группа панели, доступная как цель лимита. */
+export interface LimitGroup {
+  id: string;
+  name: string;
+  mode: 'manual' | 'auto' | 'fallback';
+}
+
 export interface LimitsView {
   limits: LimitView[];
+  /** Группы применённого состояния маршрутизации по имени; пусто, пока цели учёта неизвестны. */
+  groups: LimitGroup[];
   data: LimitData;
   /** Активное ядро: xray | mihomo | '' (ни одного или конфликт). */
   kernel: string;
@@ -88,6 +97,7 @@ export const trafficLimits = writable<LimitsView | null>(null);
 function normalizeView(v: LimitsView): LimitsView {
   return {
     limits: (v?.limits ?? []).map((l) => ({ ...l, holding: l.holding ?? [] })),
+    groups: v?.groups ?? [],
     data: v?.data ?? 'ok',
     kernel: v?.kernel ?? '',
     now: v?.now ?? 0

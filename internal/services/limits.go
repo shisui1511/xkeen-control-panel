@@ -204,9 +204,20 @@ type LimitView struct {
 	Holding []string `json:"holding"`
 }
 
+// LimitGroup — группа панели, доступная как цель лимита (поле «Цель» формы).
+type LimitGroup struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Mode — "manual" | "auto" | "fallback".
+	Mode string `json:"mode"`
+}
+
 // LimitsView — ответ списка лимитов.
 type LimitsView struct {
 	Limits []LimitView `json:"limits"`
+	// Groups — группы применённого состояния маршрутизации по имени (те же, по которым
+	// Save проверяет цель); пусто, пока цели учёта неизвестны.
+	Groups []LimitGroup `json:"groups"`
 	// Data — состояние учёта: ok | no_socket | no_counters | stopped.
 	Data string `json:"data"`
 	// Kernel — активное ядро ("xray" | "mihomo" | "" — ни одного или конфликт).
@@ -849,7 +860,16 @@ func (s *LimitsService) List() LimitsView {
 	default:
 		data = LimitDataStopped
 	}
-	return LimitsView{Limits: views, Data: data, Kernel: kernel, Now: now.Unix()}
+	groups := make([]LimitGroup, 0, len(t.Groups))
+	if known {
+		for id, g := range t.Groups {
+			groups = append(groups, LimitGroup{ID: id, Name: g.Name, Mode: g.Mode})
+		}
+		sort.Slice(groups, func(i, j int) bool {
+			return limitLess(groups[i].Name, groups[i].ID, groups[j].Name, groups[j].ID)
+		})
+	}
+	return LimitsView{Limits: views, Groups: groups, Data: data, Kernel: kernel, Now: now.Unix()}
 }
 
 // AddUsage прибавляет байты включённым лимитам: общему — allBytes, лимиту группы —
