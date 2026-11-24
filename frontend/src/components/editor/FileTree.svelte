@@ -227,9 +227,9 @@
     {:else if status === 'error'}
       <div class="alert alert-error ft-error" role="alert">
         <span>{$t('cfg.files.list_error')}</span>
-        <Button variant="secondary" size="sm" onclick={() => onRetry?.()}
-          >{$t('cfg.files.retry')}</Button
-        >
+        <Button variant="secondary" size="sm" onclick={() => onRetry?.()}>
+          {$t('cfg.files.retry')}
+        </Button>
       </div>
     {:else if nothingFound}
       <EmptyState
@@ -286,9 +286,9 @@
         {/if}
       </div>
       <span class="group-path-wrap">
-        <span class="group-path" title={dir}
-          >{#each breakableParts(dir) as part, i (i)}{part}<wbr />{/each}</span
-        >
+        <span class="group-path" title={dir}>
+          {#each breakableParts(dir) as part, i (i)}{part}<wbr />{/each}
+        </span>
         <span class="nav-group-arrow">›</span>
       </span>
     </summary>
@@ -325,9 +325,9 @@
         {#if activeConfig}
           <span class="active-dot" title={$t('editor.active_config')}></span>
         {/if}
-        <span class="fr-name file-name" title={file.name}
-          >{#each breakableParts(file.name) as part, i (i)}{part}<wbr />{/each}</span
-        >
+        <span class="fr-name file-name" title={file.name}>
+          {#each breakableParts(file.name) as part, i (i)}{part}<wbr />{/each}
+        </span>
         {#if file.restricted}
           {@const markTitle = $t('cfg.files.restricted_title')}
           <span class="stoplist-mark" title={markTitle} aria-label={markTitle} role="img">
@@ -354,8 +354,10 @@
             variant="status"
             tone={fileStatus.tone}
             testid="files-drift-badge"
-            data-state={fileStatus.state}>{fileStatus.label}</Badge
+            data-state={fileStatus.state}
           >
+            {fileStatus.label}
+          </Badge>
         {/if}
       </span>
     {/if}
@@ -389,10 +391,9 @@
         fill="none"
         stroke="currentColor"
         stroke-width="2"
-        ><path d="M12 20h9" /><path
-          d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
-        /></svg
       >
+        <path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+      </svg>
       <span>{$t('editor.rename_file')}</span>
     </button>
     <button
@@ -410,10 +411,11 @@
         fill="none"
         stroke="currentColor"
         stroke-width="2"
-        ><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
-          d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-        /></svg
       >
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
+          d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+        />
+      </svg>
       <span>{$t('editor.duplicate_file')}</span>
     </button>
     <button
@@ -431,10 +433,11 @@
         fill="none"
         stroke="currentColor"
         stroke-width="2"
-        ><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
-          points="7 10 12 15 17 10"
-        /><line x1="12" y1="15" x2="12" y2="3" /></svg
       >
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
+          points="7 10 12 15 17 10"
+        /><line x1="12" y1="15" x2="12" y2="3" />
+      </svg>
       <span>{$t('editor.download_file')}</span>
     </button>
     <button
@@ -452,8 +455,9 @@
         fill="none"
         stroke="currentColor"
         stroke-width="2"
-        ><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg
       >
+        <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+      </svg>
       <span>{$t('editor.compare_backup')}</span>
     </button>
     <div class="ctx-divider"></div>
@@ -472,10 +476,11 @@
         fill="none"
         stroke="currentColor"
         stroke-width="2"
-        ><polyline points="3 6 5 6 21 6" /><path
-          d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
-        /></svg
       >
+        <polyline points="3 6 5 6 21 6" /><path
+          d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+        />
+      </svg>
       <span>{$t('editor.delete_file')}</span>
     </button>
   </div>

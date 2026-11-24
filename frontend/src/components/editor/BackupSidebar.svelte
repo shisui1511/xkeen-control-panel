@@ -87,9 +87,9 @@
         {$t('app.back')}
       </button>
     {/if}
-    <span class="drawer-title"
-      >{panelApplies ? $t('cfg.files.applies_title') : $t('editor.backups')}</span
-    >
+    <span class="drawer-title">
+      {panelApplies ? $t('cfg.files.applies_title') : $t('editor.backups')}
+    </span>
     <button type="button" class="drawer-close-btn" onclick={() => onClose?.()}>
       {$t('app.close')}
     </button>
@@ -156,11 +156,11 @@
         {#if selectedBackup}
           <div class="diff-viewer-container">
             <div class="diff-header">
-              <span
-                >{$t('editor.compare_with_backup', {
+              <span>
+                {$t('editor.compare_with_backup', {
                   date: formatBackupDate(selectedBackup)
-                })}</span
-              >
+                })}
+              </span>
               <button
                 type="button"
                 class="btn btn-primary btn-sm diff-restore-btn"

@@ -226,9 +226,9 @@
           <ul class="im-list" aria-label={$t('cfg.geo.insp_tags')} data-testid="geo-tag-list">
             {#each shownTags as x (x.tag)}
               <li class="im-row" data-testid="geo-tag-{x.tag}">
-                <span class="im-row-text"
-                  >{$tp('cfg.geo.insp_tag_row', x.count, { tag: x.tag })}</span
-                >
+                <span class="im-row-text">
+                  {$tp('cfg.geo.insp_tag_row', x.count, { tag: x.tag })}
+                </span>
                 <span class="im-row-actions">
                   <Button
                     variant="secondary"

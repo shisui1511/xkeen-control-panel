@@ -47,9 +47,9 @@
   {#if ctaText && ctaHref}
     <a class="btn btn-{ctaVariant} tap-zone-44" href={ctaHref}>{ctaText}</a>
   {:else if ctaText && oncta}
-    <Button variant={ctaVariant} loading={ctaLoading} title={ctaText} onclick={oncta}
-      >{ctaText}</Button
-    >
+    <Button variant={ctaVariant} loading={ctaLoading} title={ctaText} onclick={oncta}>
+      {ctaText}
+    </Button>
   {/if}
 </div>
 

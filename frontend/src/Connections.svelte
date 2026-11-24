@@ -649,20 +649,20 @@
             : $t('conn.pause')}
       >
         {#if paused}
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
-            ><polygon points="5 3 19 12 5 21 5 3" /></svg
-          >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3" />
+          </svg>
           <span>{$t('conn.resume')}</span>
         {:else}
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
-            ><rect x="6" y="5" width="4" height="14" rx="1" /><rect
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="5" width="4" height="14" rx="1" /><rect
               x="14"
               y="5"
               width="4"
               height="14"
               rx="1"
-            /></svg
-          >
+            />
+          </svg>
           <span>{$t('conn.pause')}</span>
         {/if}
       </button>
@@ -681,10 +681,11 @@
           fill="none"
           stroke="currentColor"
           stroke-width="2"
-          ><polyline points="3 6 5 6 21 6" /><path
-            d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"
-          /></svg
         >
+          <polyline points="3 6 5 6 21 6" /><path
+            d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"
+          />
+        </svg>
         <span>{$t('conn.close_all')}</span>
       </button>
     {/snippet}
@@ -747,8 +748,9 @@
             fill="none"
             stroke="currentColor"
             stroke-width="2"
-            ><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg
           >
+            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
           <input
             type="text"
             id="filter-source"
@@ -760,14 +762,17 @@
             <button
               class="clear-search-btn"
               onclick={() => (searchQuery = '')}
-              aria-label={$t('app.clear')}>×</button
+              aria-label={$t('app.clear')}
             >
+              ×
+            </button>
           {/if}
         </div>
         {#if searchQuery}
-          <span class="match-badge"
-            >{$t('conn.match_found')} {filteredConnections.length}/{connections.length}</span
-          >
+          <span class="match-badge">
+            {$t('conn.match_found')}
+            {filteredConnections.length}/{connections.length}
+          </span>
         {/if}
       </div>
 
@@ -813,10 +818,10 @@
 
       <!-- Live Totals Summary -->
       <div class="metrics-pill">
-        <span class="m-stat"
-          ><b>{filteredConnections.length}</b>
-          {$t('conn.shown', { count: '' }).replace(/:\s*$/, '').trim()}</span
-        >
+        <span class="m-stat">
+          <b>{filteredConnections.length}</b>
+          {$t('conn.shown', { count: '' }).replace(/:\s*$/, '').trim()}
+        </span>
         <span class="m-sep">·</span>
         <span class="m-stat text-upload">↑ {formatBytes(totalUpload)}</span>
         <span class="m-sep">·</span>
@@ -1058,9 +1063,9 @@
                   <td class="col-chain"><Skeleton type="text-line" width="100px" /></td>
                   <td class="col-network"><Skeleton type="text-line" width="40px" /></td>
                   <td class="col-traffic col-upload"><Skeleton type="text-line" width="50px" /></td>
-                  <td class="col-traffic col-download"
-                    ><Skeleton type="text-line" width="50px" /></td
-                  >
+                  <td class="col-traffic col-download">
+                    <Skeleton type="text-line" width="50px" />
+                  </td>
                   <td class="col-traffic col-speed"><Skeleton type="text-line" width="60px" /></td>
                   <td class="col-duration"><Skeleton type="text-line" width="30px" /></td>
                   <td></td>
@@ -1269,9 +1274,9 @@
           {/if}
           <div class="m-row">
             <span class="m-key">{$t('conn.network')}:</span>
-            <span class="m-val"
-              >{conn.metadata.network?.toUpperCase()} / {conn.metadata.type || 'Direct'}</span
-            >
+            <span class="m-val">
+              {conn.metadata.network?.toUpperCase()} / {conn.metadata.type || 'Direct'}
+            </span>
           </div>
           {#if conn.metadata.process}
             <div class="m-row">

@@ -104,7 +104,7 @@ for (const file of walk(SRC)) {
   }
 
   if (!SVG_OWN.test(rel)) {
-    for (const m of markup.matchAll(/<svg\b[\s\S]*?<\/svg>/g)) {
+    for (const m of markup.matchAll(/<svg\b[\s\S]*?<\/svg\s*>/g)) {
       if (!m[0].includes('{')) add('svg', rel, lineOf(markup, m.index));
     }
   }

@@ -36,12 +36,12 @@
       </span>
     </div>
     <div class="update-banner-actions">
-      <a class="btn btn-primary btn-sm" href="#/settings?tab=updates"
-        >{$t('dash.update_banner_open')}</a
-      >
-      <button class="btn btn-secondary btn-sm" onclick={hide}
-        >{$t('dash.update_banner_hide')}</button
-      >
+      <a class="btn btn-primary btn-sm" href="#/settings?tab=updates">
+        {$t('dash.update_banner_open')}
+      </a>
+      <button class="btn btn-secondary btn-sm" onclick={hide}>
+        {$t('dash.update_banner_hide')}
+      </button>
     </div>
   </div>
 {/if}

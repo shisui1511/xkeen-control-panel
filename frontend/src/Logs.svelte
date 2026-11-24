@@ -624,24 +624,20 @@
           stroke="currentColor"
           stroke-width="2"
           aria-hidden="true"
-          ><line x1="22" y1="12" x2="2" y2="12" /><path
+        >
+          <line x1="22" y1="12" x2="2" y2="12" /><path
             d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"
-          /><line x1="6" y1="16" x2="6.01" y2="16" /><line
-            x1="10"
-            y1="16"
-            x2="10.01"
-            y2="16"
-          /></svg
-        >
-        <span class="flash-stat"
-          >{$t('logs.flash_total_logs', {
+          /><line x1="6" y1="16" x2="6.01" y2="16" /><line x1="10" y1="16" x2="10.01" y2="16" />
+        </svg>
+        <span class="flash-stat">
+          {$t('logs.flash_total_logs', {
             size: formatBytes(flashHealth.total_logs_bytes)
-          })}</span
-        >
+          })}
+        </span>
         <span class="flash-divider">•</span>
-        <span class="flash-stat"
-          >{$t('logs.flash_free', { free: formatBytes(flashHealth.free_space_bytes) })}</span
-        >
+        <span class="flash-stat">
+          {$t('logs.flash_free', { free: formatBytes(flashHealth.free_space_bytes) })}
+        </span>
         {#if flashHealth.emergency_actions > 0}
           <span class="flash-alert-tag">⚡ {flashHealth.emergency_actions}</span>
         {/if}
@@ -684,20 +680,20 @@
             title={paused ? $t('logs.resume') : $t('logs.pause')}
           >
             {#if paused}
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
-                ><polygon points="5 3 19 12 5 21 5 3" /></svg
-              >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
               <span>{$t('logs.resume')}</span>
             {:else}
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
-                ><rect x="6" y="5" width="4" height="14" rx="1" /><rect
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="5" width="4" height="14" rx="1" /><rect
                   x="14"
                   y="5"
                   width="4"
                   height="14"
                   rx="1"
-                /></svg
-              >
+                />
+              </svg>
               <span>{$t('logs.pause')}</span>
             {/if}
           </button>
@@ -714,10 +710,11 @@
               fill="none"
               stroke="currentColor"
               stroke-width="2"
-              ><polyline points="3 6 5 6 21 6" /><path
-                d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"
-              /></svg
             >
+              <polyline points="3 6 5 6 21 6" /><path
+                d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"
+              />
+            </svg>
             <span>{$t('logs.clear')}</span>
           </button>
 
@@ -734,8 +731,9 @@
               fill="none"
               stroke="currentColor"
               stroke-width="2"
-              ><polyline points="7 13 12 18 17 13" /><polyline points="7 6 12 11 17 6" /></svg
             >
+              <polyline points="7 13 12 18 17 13" /><polyline points="7 6 12 11 17 6" />
+            </svg>
             <span>{$t('logs.autoscroll')}</span>
           </button>
 
@@ -752,8 +750,9 @@
               fill="none"
               stroke="currentColor"
               stroke-width="2"
-              ><polyline points="9 10 4 15 9 20" /><path d="M20 4v7a4 4 0 0 1-4 4H4" /></svg
             >
+              <polyline points="9 10 4 15 9 20" /><path d="M20 4v7a4 4 0 0 1-4 4H4" />
+            </svg>
             <span>{$t('logs.word_wrap')}</span>
           </button>
 
@@ -770,10 +769,11 @@
                 fill="none"
                 stroke="currentColor"
                 stroke-width="2"
-                ><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
-                  points="7 10 12 15 17 10"
-                /><line x1="12" y1="15" x2="12" y2="3" /></svg
               >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
+                  points="7 10 12 15 17 10"
+                /><line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
               <span>{$t('logs.export_filtered')}</span>
             </button>
             <button
@@ -788,8 +788,10 @@
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                stroke-width="2"><path d="M6 9l6 6 6-6" /></svg
+                stroke-width="2"
               >
+                <path d="M6 9l6 6 6-6" />
+              </svg>
             </button>
           </div>
 
@@ -854,8 +856,9 @@
               fill="none"
               stroke="currentColor"
               stroke-width="2"
-              ><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg
             >
+              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
             <input
               type="text"
               class="search-input"
@@ -974,10 +977,11 @@
                       fill="none"
                       stroke="currentColor"
                       stroke-width="2"
-                      ><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
-                        d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                      /></svg
                     >
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
+                        d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                      />
+                    </svg>
                   </button>
                 </div>
               {/each}
@@ -993,8 +997,9 @@
                 fill="none"
                 stroke="currentColor"
                 stroke-width="1.5"
-                ><circle cx="12" cy="12" r="10" /><line x1="8" y1="12" x2="16" y2="12" /></svg
               >
+                <circle cx="12" cy="12" r="10" /><line x1="8" y1="12" x2="16" y2="12" />
+              </svg>
               <div class="empty-title">
                 {!connected
                   ? $t('logs.disconnected_title')
@@ -1032,8 +1037,10 @@
               fill="none"
               stroke="currentColor"
               stroke-width="2.2"
-              aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7" /></svg
+              aria-hidden="true"
             >
+              <path d="M12 5v14M5 12l7 7 7-7" />
+            </svg>
             {$t('logs.jump_latest')}
           </button>
         {/if}

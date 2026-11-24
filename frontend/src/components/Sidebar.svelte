@@ -244,17 +244,19 @@
           stroke-linecap="round"
           stroke-linejoin="round"
           aria-hidden="true"
-          ><circle cx="12" cy="12" r="9" /><path
+        >
+          <circle cx="12" cy="12" r="9" /><path
             d="M16.24 7.76 14 14l-6.24 2.24L10 10z"
             fill="currentColor"
             stroke="none"
             opacity=".85"
-          /></svg
-        >
+          />
+        </svg>
         <span class="lbl" title={$t('nav.group_overview')}>{$t('nav.group_overview')}</span>
       </span>
-      <span class="nav-group-arrow" aria-hidden="true"><Icon name="chevron-right" size={14} /></span
-      >
+      <span class="nav-group-arrow" aria-hidden="true">
+        <Icon name="chevron-right" size={14} />
+      </span>
     </summary>
     <a
       href="#/dashboard"
@@ -282,8 +284,10 @@
           class="nav-badge-config"
           class:dot={$isSidebarCollapsed}
           role="img"
-          aria-label={$t('nav.config_badge_aria', { n: $badgeTotal })}>{$navBadgeCount}</span
+          aria-label={$t('nav.config_badge_aria', { n: $badgeTotal })}
         >
+          {$navBadgeCount}
+        </span>
       {/if}
     </a>
   </details>
@@ -319,9 +323,9 @@
           </svg>
           <span class="lbl" title={$t('nav.group_proxy_subs')}>{$t('nav.group_proxy_subs')}</span>
         </span>
-        <span class="nav-group-arrow" aria-hidden="true"
-          ><Icon name="chevron-right" size={14} /></span
-        >
+        <span class="nav-group-arrow" aria-hidden="true">
+          <Icon name="chevron-right" size={14} />
+        </span>
       </summary>
       {#if showProxiesNav === true}
         <a
@@ -338,8 +342,10 @@
             <span
               class="nav-badge-warn"
               role="img"
-              aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span
+              aria-label={$t('dash.quickstart.sidebar_badge_aria')}
             >
+              !
+            </span>
           {/if}
         </a>
       {/if}
@@ -380,9 +386,9 @@
           </svg>
           <span class="lbl" title={$t('nav.group_routing')}>{$t('nav.group_routing')}</span>
         </span>
-        <span class="nav-group-arrow" aria-hidden="true"
-          ><Icon name="chevron-right" size={14} /></span
-        >
+        <span class="nav-group-arrow" aria-hidden="true">
+          <Icon name="chevron-right" size={14} />
+        </span>
       </summary>
       <a
         href="#/rules"
@@ -398,8 +404,10 @@
           <span
             class="nav-badge-warn"
             role="img"
-            aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span
+            aria-label={$t('dash.quickstart.sidebar_badge_aria')}
           >
+            !
+          </span>
         {/if}
       </a>
     </details>
@@ -421,12 +429,13 @@
         >
           <path d="M3 12h4l2-7 4 14 2-7h6" />
         </svg>
-        <span class="lbl" title={$t('nav.group_observability')}
-          >{$t('nav.group_observability')}</span
-        >
+        <span class="lbl" title={$t('nav.group_observability')}>
+          {$t('nav.group_observability')}
+        </span>
       </span>
-      <span class="nav-group-arrow" aria-hidden="true"><Icon name="chevron-right" size={14} /></span
-      >
+      <span class="nav-group-arrow" aria-hidden="true">
+        <Icon name="chevron-right" size={14} />
+      </span>
     </summary>
     {#if showMihomoNav === true}
       <a
@@ -443,8 +452,10 @@
           <span
             class="nav-badge-warn"
             role="img"
-            aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span
+            aria-label={$t('dash.quickstart.sidebar_badge_aria')}
           >
+            !
+          </span>
         {/if}
       </a>
     {/if}
@@ -494,8 +505,9 @@
         <Icon name="system-chip" size={16} />
         <span class="lbl" title={$t('nav.group_system')}>{$t('nav.group_system')}</span>
       </span>
-      <span class="nav-group-arrow" aria-hidden="true"><Icon name="chevron-right" size={14} /></span
-      >
+      <span class="nav-group-arrow" aria-hidden="true">
+        <Icon name="chevron-right" size={14} />
+      </span>
     </summary>
     <a
       href="#/services"
@@ -600,9 +612,9 @@
       size={16}
       class={$isSidebarCollapsed ? 'collapse-toggle-icon' : 'collapse-toggle-icon is-expanded'}
     />
-    <span class="lbl"
-      >{$t($isSidebarCollapsed ? 'nav.expand_sidebar' : 'nav.collapse_sidebar')}</span
-    >
+    <span class="lbl">
+      {$t($isSidebarCollapsed ? 'nav.expand_sidebar' : 'nav.collapse_sidebar')}
+    </span>
   </button>
 </div>
 

@@ -55,8 +55,10 @@
         type="button"
         class="toast__close"
         onclick={() => dismiss(toast.id)}
-        aria-label={$t('app.dismiss')}>×</button
+        aria-label={$t('app.dismiss')}
       >
+        ×
+      </button>
     </div>
   {/each}
 </div>

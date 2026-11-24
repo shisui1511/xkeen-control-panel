@@ -73,10 +73,9 @@
 
     {#if applyLoading && backgroundStatusText}
       <div class="status-apply-indicator">
-        <span class="ks-dot-spin"
-          ><span class="ks-dot"></span><span class="ks-dot"></span><span class="ks-dot"
-          ></span></span
-        >
+        <span class="ks-dot-spin">
+          <span class="ks-dot"></span><span class="ks-dot"></span><span class="ks-dot"></span>
+        </span>
         <span>{backgroundStatusText}</span>
       </div>
     {/if}

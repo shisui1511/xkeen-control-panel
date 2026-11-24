@@ -296,11 +296,11 @@
       >
         <span class="step-start-icon" aria-hidden="true"><Icon name="warning" size={16} /></span>
         <div class="step-start-error-body">
-          <span
-            >{failParts[0]}{#if failReason === ''}<span class="setup-mono"
-                >{kernelLabel(failKernel || chosen)}</span
-              >{/if}{failParts[1]}</span
-          >
+          <span>
+            {failParts[0]}{#if failReason === ''}<span class="setup-mono">
+                {kernelLabel(failKernel || chosen)}
+              </span>{/if}{failParts[1]}
+          </span>
           {#if logLines.length > 0}
             <!-- Строки лога — только текстовый узел: разметка из лога не исполняется -->
             <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
