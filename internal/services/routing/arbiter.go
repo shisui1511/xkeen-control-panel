@@ -442,6 +442,9 @@ func (a *Arbiter) Stop() {
 
 // Kick просит сверку вне очереди; не блокирует (сверка уже запрошена — ничего).
 func (a *Arbiter) Kick() {
+	if a == nil {
+		return
+	}
 	select {
 	case a.kick <- struct{}{}:
 	default:

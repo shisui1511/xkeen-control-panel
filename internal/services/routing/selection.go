@@ -1815,7 +1815,14 @@ func (s *Service) AfterApply(ctx context.Context, info configlayer.AfterApplyInf
 		// После «Применить» арбитр заново ставит удержания и окна: состав групп и
 		// узлов мог измениться; пауза сверки служебного хвоста снимается — причина
 		// её отказа могла уйти. Свой выбор арбитра (TriggerSelect) тик не будит.
-		s.arb.kickAfterApply()
+		// Запуск самого хвоста (TriggerLimitTail) паузу не снимает: хук работает
+		// позже settleTail, и снятая им пауза «не зафиксирован» гнала бы конвейер
+		// Mihomo заново каждый тик; исход такого запуска разбирает settleTail.
+		if info.Trigger == configlayer.TriggerLimitTail {
+			s.arb.Kick()
+		} else {
+			s.arb.kickAfterApply()
+		}
 	}
 }
 
