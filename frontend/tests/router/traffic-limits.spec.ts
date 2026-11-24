@@ -2,11 +2,12 @@
 // router-area: routing
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { test, expect, type Browser, type Page } from '@playwright/test';
+import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
 import { axeSevere } from './lib/axe';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
 import { CORE_TAG } from './lib/known';
+import { settleMotion } from './lib/motion';
 import { escapeRe } from './lib/regex';
 import {
   addToDraft,
@@ -33,7 +34,8 @@ import {
 // применённой маршрутизации, поэтому подготовка заводит два узла «Моих узлов» на портах без
 // сервера и группу «авто», берёт маршрутизацию и применяет. Лимиты теста — с префиксом RTTL-,
 // в конце удаляются через API; группы и узлы убираются, маршрутизация отпускается, если не была
-// взята, черновик сбрасывается. Ответы сети не подменяются.
+// взята, черновик сбрасывается. Ответы сети не подменяются. На 390 px axe-тест замеряет цели
+// касания 44 px вкладки и модалки лимита (пробел G-152-1).
 
 const PREFIX = 'RTTL-';
 const LIMIT_NAME = `${PREFIX}весь трафик`;
@@ -109,6 +111,54 @@ async function openTraffic(page: Page, hash: string, width = 1280): Promise<void
   await expect(page.locator('.main-content .page-header h1').first()).toBeVisible({
     timeout: T.page
   });
+}
+
+/**
+ * Цели касания ниже 44 px внутри scope: «подпись ширинаxвысота». Правило — как у
+ * expectTouchTargets в config-setup, цель 44 px по UI-SPEC 152: кнопки, ссылки-кнопки, поля и
+ * переключатели (label.toggle-switch — нативный флажок внутри скрыт 0×0); у кнопок, ссылок и
+ * переключателей цель — большее из рамки и зоны ::after, у тех, что без .btn, меряется и
+ * ширина; у полей — только высота. Подпись — testId, классы или тег: текст, aria-label и title
+ * (имена узлов и лимитов) в отчёт не попадают.
+ */
+async function touchTargetsBelow44(scope: Locator): Promise<string[]> {
+  await settleMotion(scope.page());
+  return scope.locator('button, a.btn, select, input, label.toggle-switch').evaluateAll((els) =>
+    els
+      .filter((el) => el.getClientRects().length > 0)
+      .filter(
+        (el) =>
+          !(el instanceof HTMLInputElement && ['checkbox', 'radio', 'hidden'].includes(el.type))
+      )
+      .map((el, i) => {
+        const rect = el.getBoundingClientRect();
+        let h = rect.height;
+        let w = rect.width;
+        const tag = el.tagName.toLowerCase();
+        const target = tag === 'button' || tag === 'a' || el.classList.contains('toggle-switch');
+        if (target) {
+          const zone = getComputedStyle(el, '::after');
+          if (zone.content !== 'none' && zone.position === 'absolute') {
+            const zh = parseFloat(zone.height);
+            const zw = parseFloat(zone.width);
+            if (Number.isFinite(zh)) h = Math.max(h, zh);
+            if (Number.isFinite(zw)) w = Math.max(w, zw);
+          }
+        }
+        const classes = [...el.classList].slice(0, 2);
+        const label =
+          el.getAttribute('data-testid') ??
+          (classes.length ? `.${classes.join('.')}` : `${tag}#${i}`);
+        return {
+          label,
+          h: Math.round(h),
+          w: Math.round(w),
+          low: h < 43.5 || (target && !el.classList.contains('btn') && w < 43.5)
+        };
+      })
+      .filter((b) => b.low)
+      .map(({ label, w, h }) => `${label} ${w}x${h}`)
+  );
 }
 
 /** Вкладка «Лимиты» загружена: список пришёл (скелетона нет). */
@@ -392,6 +442,15 @@ for (const theme of ['light', 'dark'] as const) {
         'применена тема'
       ).toBe(theme);
       await limitsReady(page);
+      if (width === 390) {
+        expect(
+          await page.evaluate(() => document.documentElement.dataset.density),
+          'на 390 px авто-плотность compact'
+        ).toBe('compact');
+        for (const v of await touchTargetsBelow44(page.getByTestId('traffic-limits'))) {
+          problems.push(`390 px, касание вкладки: ${v}`);
+        }
+      }
       for (const v of await axeSevere(page, '[data-testid="traffic-limits"]')) {
         problems.push(`${width} px, вкладка: ${v}`);
       }
@@ -400,6 +459,13 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(modal).toBeVisible({ timeout: T.action });
       for (const v of await axeSevere(page, '.modal-container[role="dialog"]')) {
         problems.push(`${width} px, модалка: ${v}`);
+      }
+      if (width === 390) {
+        for (const v of await touchTargetsBelow44(
+          page.locator('.modal-container[role="dialog"]')
+        )) {
+          problems.push(`390 px, касание модалки лимита: ${v}`);
+        }
       }
       await modal.getByRole('button', { name: say('traffic.limits.cancel', true) }).click();
       await expect(modal).toHaveCount(0, { timeout: T.action });
