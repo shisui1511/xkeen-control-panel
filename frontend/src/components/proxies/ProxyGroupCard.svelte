@@ -12,6 +12,7 @@
   import Icon from '../../lib/components/Icon.svelte';
   import ProxyNodeStatus from './ProxyNodeStatus.svelte';
   import GroupStateLine from './GroupStateLine.svelte';
+  import GroupSchedule from './GroupSchedule.svelte';
   import {
     splitMembers,
     nowLine,
@@ -512,6 +513,7 @@
     {:else}
       <div class="gc-body">
         <div class="gc-body-inner">
+          {#if g.mode === 'manual'}<GroupSchedule group={g} clock={p.view.clock} />{/if}
           {#if pEmpty}
             <!-- D-23: совместимых участников нет — вместо сетки сообщение и ссылка на группу -->
             <div class="pc-state" data-testid="proxy-group-empty-{g.id}">
