@@ -119,8 +119,9 @@
     return null;
   });
 
+  // Окно с пропавшим узлом сервер не сохранит (member_invalid): сначала нужен другой узел
   const canSave = $derived(
-    !noDays && timesValid && !sameTime && formMember !== '' && conflict === null
+    !noDays && timesValid && !sameTime && formMember !== '' && !memberMissing && conflict === null
   );
 
   const summaryLine = $derived(
