@@ -3494,7 +3494,9 @@ pre.code-output {
    Плотные чипы, переключатели и значки остаются того же видимого размера,
    а прозрачная зона вокруг дотягивает их до 44 px по высоте (WCAG 2.5.5).
    Классы — из компонентов страниц; position у них не задан, поэтому
-   relative отсюда не спорит с их собственной раскладкой. */
+   relative отсюда не спорит с их собственной раскладкой. Крестик общего
+   Modal (.modal-close-btn: 40 px на телефоне, 28 px при касании на десктопе)
+   получает только зону — она выступает внутрь отступов шапки. */
 @media (max-width: 768px), (pointer: coarse) {
   :is(
     .about-link,
@@ -3510,7 +3512,8 @@ pre.code-output {
     .gc-pin-btn,
     .gc-ping-btn,
     .gc-chevron-btn,
-    .gc-lat-box
+    .gc-lat-box,
+    .modal-close-btn
   ) {
     position: relative;
   }
@@ -3530,6 +3533,7 @@ pre.code-output {
     .gc-ping-btn,
     .gc-chevron-btn,
     .gc-lat-box,
+    .modal-close-btn,
     /* × уведомления — только зона: у кнопки свой position: absolute в .alert-dismissible */
     .alert-close-btn
   )::after {
