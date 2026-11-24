@@ -257,6 +257,12 @@ type LimitsService struct {
 	targets       func() (TrafficTargets, error)
 	onHolds       func()
 	activeKernelF func() string
+	// mihomoStateF — состояние потока /connections Mihomo (SetMihomoState).
+	mihomoStateF func() string
+	// obsTargets, obsTargetsAt — цели учёта для частого приёма дельт Mihomo:
+	// снимки идут раз в секунду, цели читаются не чаще limitsTargetsTTL.
+	obsTargets   TrafficTargets
+	obsTargetsAt time.Time
 
 	stopCh   chan struct{}
 	done     chan struct{}
@@ -825,7 +831,10 @@ func (s *LimitsService) List() LimitsView {
 		}
 		return limitLess(views[i].Name, views[i].ID, views[j].Name, views[j].ID)
 	})
-	if kernel == "" {
+	switch kernel {
+	case "mihomo":
+		data = s.mihomoDataState()
+	case "":
 		data = LimitDataStopped
 	}
 	return LimitsView{Limits: views, Data: data, Kernel: kernel, Now: now.Unix()}

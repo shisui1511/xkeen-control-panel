@@ -139,6 +139,32 @@ type mihomoConn struct {
 	Metadata mihomoConnMetadata `json:"metadata"`
 }
 
+// ConnDelta — прирост байтов одного соединения Mihomo между снимками /connections:
+// Chains — цепочка исходящих соединения как в снимке, Bytes — upload+download.
+// Соединения DIRECT и REJECT тоже входят: их отбрасывает получатель.
+type ConnDelta struct {
+	Chains []string
+	Bytes  int64
+}
+
+// Состояния потока /connections (StreamState).
+const (
+	StreamStateOK       = "ok"
+	StreamStateDown     = "down"
+	StreamStateStopped  = "stopped"
+	StreamStateNoSocket = "no_socket"
+)
+
+// wsLinkState — состояние потока WS одной метки для журнала и StreamState.
+type wsLinkState struct {
+	// connected — поток подключён сейчас.
+	connected bool
+	// ever — поток хоть раз подключался после старта панели.
+	ever bool
+	// failing — идёт полоса отказов: первая ошибка уже записана в журнал.
+	failing bool
+}
+
 // TrafficQuotaService manages traffic accounting and quotas
 type TrafficQuotaService struct {
 	dataDir    string
@@ -187,6 +213,14 @@ type TrafficQuotaService struct {
 	// next scheduled call picks up any state change the skipped run would
 	// have observed.
 	checkQuotasMu sync.Mutex
+
+	// connDeltaHook получает ненулевые дельты всех соединений снимка (D-02);
+	// вызывается вне s.mu. Защищено s.mu.
+	connDeltaHook func([]ConnDelta)
+
+	// wsLinks — состояние потоков WS по метке ("connections", "traffic").
+	wsLinksMu sync.Mutex
+	wsLinks   map[string]*wsLinkState
 }
 
 func NewTrafficQuotaService(dataDir, secret string, mihomo *MihomoService) *TrafficQuotaService {
@@ -203,9 +237,83 @@ func NewTrafficQuotaService(dataDir, secret string, mihomo *MihomoService) *Traf
 		connSubs:       make(map[chan []byte]struct{}),
 		trafficSubs:    make(map[chan []byte]struct{}),
 		blockedProxies: make(map[string]string),
+		wsLinks:        make(map[string]*wsLinkState),
 	}
 	svc.load()
 	return svc
+}
+
+// SetConnDeltaHook задаёт получателя дельт соединений снимка /connections (служба
+// лимитов). Хук вызывается вне мьютекса службы и не должен блокировать надолго.
+func (s *TrafficQuotaService) SetConnDeltaHook(fn func([]ConnDelta)) {
+	s.mu.Lock()
+	s.connDeltaHook = fn
+	s.mu.Unlock()
+}
+
+// StreamState сообщает состояние потока /connections: no_socket — у профиля Mihomo
+// нет Unix-контроллера (151 D-13), stopped — ядро не запущено, down — поток сейчас
+// не подключён, ok — снимки идут.
+func (s *TrafficQuotaService) StreamState() string {
+	if s.mihomoSvc == nil {
+		return StreamStateStopped
+	}
+	if _, err := s.mihomoSvc.UnixController(); err != nil {
+		return StreamStateNoSocket
+	}
+	if !s.kernelAlive() {
+		return StreamStateStopped
+	}
+	s.wsLinksMu.Lock()
+	defer s.wsLinksMu.Unlock()
+	if l := s.wsLinks["connections"]; l != nil && l.connected {
+		return StreamStateOK
+	}
+	return StreamStateDown
+}
+
+// wsLinkLocked возвращает состояние потока метки. Caller holds s.wsLinksMu.
+func (s *TrafficQuotaService) wsLinkLocked(label string) *wsLinkState {
+	l := s.wsLinks[label]
+	if l == nil {
+		l = &wsLinkState{}
+		s.wsLinks[label] = l
+	}
+	return l
+}
+
+// streamUp отмечает подключение потока. В журнал — первое подключение после
+// старта и восстановление после полосы отказов; обычные переподключения (смена
+// профиля, контроллера) — молча.
+func (s *TrafficQuotaService) streamUp(label string) {
+	s.wsLinksMu.Lock()
+	l := s.wsLinkLocked(label)
+	first, recovered := !l.ever, l.failing
+	l.connected, l.ever, l.failing = true, true, false
+	s.wsLinksMu.Unlock()
+	switch {
+	case recovered:
+		log.Printf("TrafficQuota: WS %s восстановлен", label)
+	case first:
+		log.Printf("TrafficQuota: WS %s подключён", label)
+	}
+}
+
+// streamDown отмечает, что поток не подключён. err != nil — отказ: в журнал
+// пишется только первая ошибка полосы, повторы — молча (паузы задаёт
+// wsReconnectLoop). err == nil — штатное завершение (смена профиля, остановка ядра).
+func (s *TrafficQuotaService) streamDown(label string, err error) {
+	s.wsLinksMu.Lock()
+	l := s.wsLinkLocked(label)
+	l.connected = false
+	logIt := err != nil && !l.failing
+	if err != nil {
+		l.failing = true
+	}
+	s.wsLinksMu.Unlock()
+	if logIt {
+		log.Printf("TrafficQuota: WS %s недоступен: %v — повторы без записи в журнал до восстановления", label, err)
+	}
 }
 
 // SetKernelAliveCheck configures the predicate used to determine whether the Mihomo
@@ -712,6 +820,7 @@ func (s *TrafficQuotaService) wsReconnectLoop(label string, streamFn func(contex
 	for s.ctx.Err() == nil {
 		ctx, cancel := s.mihomoSvc.ControllerContext(s.ctx)
 		if !s.kernelAlive() {
+			s.streamDown(label, nil)
 			s.handleKernelSleep(label, true)
 			select {
 			case <-ctx.Done():
@@ -723,6 +832,7 @@ func (s *TrafficQuotaService) wsReconnectLoop(label string, streamFn func(contex
 		}
 		info, err := s.mihomoSvc.UnixController()
 		if err != nil {
+			s.streamDown(label, nil)
 			s.handleKernelSleep(label, false)
 			<-ctx.Done()
 			cancel()
@@ -734,6 +844,7 @@ func (s *TrafficQuotaService) wsReconnectLoop(label string, streamFn func(contex
 		start := time.Now()
 		err = streamFn(ctx, info)
 		if ctx.Err() != nil || !s.mihomoSvc.HasController() {
+			s.streamDown(label, nil)
 			cancel()
 			backoff, consecutiveFailures = baseBackoff, 0
 			continue
@@ -755,7 +866,9 @@ func (s *TrafficQuotaService) wsReconnectLoop(label string, streamFn func(contex
 			backoffCap = extendedBackoffCap
 		}
 
-		log.Printf("TrafficQuota: WS %s stream ended: %v — retry in %s", label, err, backoff)
+		// Журнал — только первая ошибка полосы отказов и восстановление (streamUp);
+		// повторы с той же нарастающей паузой идут молча.
+		s.streamDown(label, err)
 
 		select {
 		case <-time.After(backoff):
@@ -776,7 +889,7 @@ func (s *TrafficQuotaService) streamConnections(ctx context.Context, info Contro
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
-	log.Print("TrafficQuota: WebSocket connected to /connections")
+	s.streamUp("connections")
 
 	for {
 		// Mihomo emits a /connections snapshot roughly once per second even when
@@ -839,15 +952,12 @@ func (s *TrafficQuotaService) processConnSnapshot(ctx context.Context, connectio
 	isFirstSnapshot := !s.trackerInitialized
 	s.trackerInitialized = true
 
-	for _, conn := range connections {
-		if len(conn.Chains) == 0 {
-			continue
-		}
-		proxyName := conn.Chains[len(conn.Chains)-1]
-		if proxyName == "" || proxyName == "DIRECT" || proxyName == "REJECT" {
-			continue
-		}
+	// Дельты всех соединений снимка, включая DIRECT и REJECT, для службы лимитов:
+	// конечный исходящий и привязку к группам решает она (D-02).
+	var deltas []ConnDelta
+	hook := s.connDeltaHook
 
+	for _, conn := range connections {
 		activeIDs[conn.ID] = true
 
 		var deltaUp, deltaDown int64
@@ -868,6 +978,20 @@ func (s *TrafficQuotaService) processConnSnapshot(ctx context.Context, connectio
 		}
 		if deltaDown < 0 {
 			deltaDown = 0
+		}
+		s.connectionTracker.Store(conn.ID, connStats{Upload: conn.Upload, Download: conn.Download})
+
+		if hook != nil && deltaUp+deltaDown > 0 && len(conn.Chains) > 0 {
+			deltas = append(deltas, ConnDelta{Chains: conn.Chains, Bytes: deltaUp + deltaDown})
+		}
+
+		// Учёт по прокси (proxyStats) и старые квоты пропускают DIRECT и REJECT, как прежде.
+		if len(conn.Chains) == 0 {
+			continue
+		}
+		proxyName := conn.Chains[len(conn.Chains)-1]
+		if proxyName == "" || proxyName == "DIRECT" || proxyName == "REJECT" {
+			continue
 		}
 
 		if deltaUp > 0 || deltaDown > 0 {
@@ -896,8 +1020,6 @@ func (s *TrafficQuotaService) processConnSnapshot(ctx context.Context, connectio
 				}
 			}
 		}
-
-		s.connectionTracker.Store(conn.ID, connStats{Upload: conn.Upload, Download: conn.Download})
 	}
 
 	// Clean up closed connections from the tracker.
@@ -957,6 +1079,9 @@ func (s *TrafficQuotaService) processConnSnapshot(ctx context.Context, connectio
 	}
 	s.mu.Unlock()
 
+	if hook != nil && len(deltas) > 0 {
+		hook(deltas)
+	}
 	s.checkQuotas(ctx)
 }
 
@@ -1003,7 +1128,7 @@ func (s *TrafficQuotaService) streamTraffic(ctx context.Context, info Controller
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
-	log.Print("TrafficQuota: WebSocket connected to /traffic")
+	s.streamUp("traffic")
 
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
