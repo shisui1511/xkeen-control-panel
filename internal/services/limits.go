@@ -263,9 +263,13 @@ type LimitsService struct {
 	// снимки идут раз в секунду, цели читаются не чаще limitsTargetsTTL.
 	obsTargets   TrafficTargets
 	obsTargetsAt time.Time
+	// xraySrc — источник клиента gRPC Xray для опроса счётчиков (SetXrayCounters).
+	xraySrc XrayCounterSource
 
-	stopCh   chan struct{}
-	done     chan struct{}
+	stopCh chan struct{}
+	done   chan struct{}
+	// xrayDone закрывает цикл опроса счётчиков Xray.
+	xrayDone chan struct{}
 	started  bool
 	stopOnce sync.Once
 }
@@ -277,6 +281,7 @@ func NewLimitsService(dataDir string) *LimitsService {
 		dataState: LimitDataOK,
 		stopCh:    make(chan struct{}),
 		done:      make(chan struct{}),
+		xrayDone:  make(chan struct{}),
 	}
 	path := filepath.Join(dataDir, limitsFileName)
 	clean, err := utils.NewPathValidator([]string{dataDir}).ValidateUnder(path, dataDir)
@@ -328,7 +333,9 @@ func (s *LimitsService) load() {
 	}
 }
 
-// Start запускает цикл раз в минуту: сбросы периодов и запись счётчиков с троттлингом.
+// Start запускает цикл раз в минуту (сбросы периодов и запись счётчиков с
+// троттлингом) и цикл опроса счётчиков Xray (xrayPollInterval, только при активном
+// Xray под управлением панели).
 func (s *LimitsService) Start() {
 	s.mu.Lock()
 	if s.started {
@@ -338,6 +345,7 @@ func (s *LimitsService) Start() {
 	s.started = true
 	s.mu.Unlock()
 	go s.loop()
+	go s.xrayLoop()
 }
 
 func (s *LimitsService) loop() {
@@ -366,6 +374,7 @@ func (s *LimitsService) Stop() {
 		s.mu.RUnlock()
 		if started {
 			<-s.done
+			<-s.xrayDone
 		}
 		s.flush(true)
 	})
@@ -831,10 +840,13 @@ func (s *LimitsService) List() LimitsView {
 		}
 		return limitLess(views[i].Name, views[i].ID, views[j].Name, views[j].ID)
 	})
+	// Состояние данных по активному ядру: Mihomo — поток /connections, Xray —
+	// последний опрос счётчиков (dataState), ни одного — stopped.
 	switch kernel {
 	case "mihomo":
 		data = s.mihomoDataState()
-	case "":
+	case "xray":
+	default:
 		data = LimitDataStopped
 	}
 	return LimitsView{Limits: views, Data: data, Kernel: kernel, Now: now.Unix()}
