@@ -308,9 +308,14 @@ test(
       const id = created!.id;
       const card = page.getByTestId(`traffic-limit-${id}`);
       await expect(card).toBeVisible({ timeout: T.action });
-      await expect(page.getByTestId(`traffic-limit-target-${id}`)).toHaveText(
-        say('traffic.limits.target_all', true)
-      );
+      // перед названием цели стоит иконка: текст сравнивается без крайних пробелов
+      await expect
+        .poll(
+          async () =>
+            ((await page.getByTestId(`traffic-limit-target-${id}`).textContent()) ?? '').trim(),
+          { timeout: T.action }
+        )
+        .toMatch(say('traffic.limits.target_all', true));
       // Расход «X из Y», когда счётчики ядра доступны; иначе «нет данных»
       const data = (await limitsList(page)).data;
       await expect(card).toContainText(
