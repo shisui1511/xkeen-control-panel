@@ -10,7 +10,14 @@ import { apiFetch, apiFetchJSON } from './api';
 import { activateRestartGrace, clearRestartGrace } from './serviceGrace';
 import { kernelGateMessage, readKernelGateMeta } from './kernelGateError';
 import { KERNEL_NAMES, kernelLabel, type KernelName } from './kernelState';
-import { activeKernelName, fetchCapabilities, isConflict, showConfirm, showToast } from '../stores';
+import {
+  activeKernelName,
+  fetchCapabilities,
+  isConflict,
+  mihomoApiState,
+  showConfirm,
+  showToast
+} from '../stores';
 import { t } from '../i18n';
 
 export type { KernelName } from './kernelState';
@@ -203,6 +210,9 @@ export async function switchKernel(kernel: KernelName): Promise<SwitchResult> {
     if (!data || !SWITCH_OUTCOMES.has(outcome)) throw new Error('Invalid switch response');
     clearRestartGrace();
     if (outcome === 'switched' && kernel === 'mihomo') activateRestartGrace(API_WARMUP_GRACE_MS);
+    // Mihomo остановлен переключением: гейт опросов и потока трафика закрывается сразу, не ждёт
+    // очередного ответа capabilities — иначе переподключение потока получило бы отказ 409
+    if (outcome === 'switched' && kernel !== 'mihomo') mihomoApiState.set('down');
     return {
       outcome: outcome as SwitchOutcome,
       old: typeof data.old === 'string' ? data.old : 'none',
