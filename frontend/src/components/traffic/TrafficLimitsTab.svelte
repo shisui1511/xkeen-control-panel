@@ -280,7 +280,12 @@
 <div class="limits-tab" data-testid="traffic-limits">
   <div class="limits-head">
     <p class="limits-desc">{$t('traffic.limits.header_desc')}</p>
-    <Button variant="primary" testid="traffic-limit-add" onclick={() => openCreate()}>
+    <Button
+      variant="primary"
+      class="tap-zone-44"
+      testid="traffic-limit-add"
+      onclick={() => openCreate()}
+    >
       <Icon name="add" size={14} />
       {$t('traffic.limits.add')}
     </Button>
@@ -293,7 +298,14 @@
       data-testid="traffic-limits-error"
     >
       <span>{$t('traffic.limits.load_failed')}</span>
-      <Button variant="secondary" size="sm" loading={retrying} onclick={retry}>
+      <Button
+        variant="secondary"
+        size="sm"
+        class="tap-zone-44"
+        loading={retrying}
+        testid="traffic-limits-retry"
+        onclick={retry}
+      >
         {$t('traffic.limits.retry')}
       </Button>
     </div>
@@ -310,7 +322,14 @@
     {#if alerts.length > 0}
       <Section title={$t('trafficquotas.alerts')}>
         {#snippet meta()}
-          <Button variant="secondary" size="sm" loading={clearingAlerts} onclick={onClearAlerts}>
+          <Button
+            variant="secondary"
+            size="sm"
+            class="tap-zone-44"
+            loading={clearingAlerts}
+            testid="traffic-limits-alerts-clear"
+            onclick={onClearAlerts}
+          >
             {$t('trafficquotas.clear_alerts')}
           </Button>
         {/snippet}

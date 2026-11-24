@@ -321,7 +321,7 @@
     </div>
 
     <div class="limit-form-foot">
-      <Button variant="secondary" disabled={saving} onclick={onclose}>
+      <Button variant="secondary" disabled={saving} testid="traffic-limit-cancel" onclick={onclose}>
         {$t('traffic.limits.cancel')}
       </Button>
       <Button type="submit" variant="primary" loading={saving} testid="traffic-limit-save">
@@ -363,5 +363,17 @@
     flex-wrap: wrap;
     gap: var(--spacing-3);
     margin-top: var(--spacing-2);
+  }
+
+  /* Узкий экран и касание: авто-плотность compact (≤1024 px) сжимает кнопки и поля
+     до 32 px. Подвал и поля дотягиваются до 44 px токенами на корне формы — как
+     ConfirmDialog и формы раздела «Конфигурация»; селекторов системных классов
+     кнопок и полей здесь нет, их check-controls считает перекраской. У переключателя
+     «Лимит включён» своя зона 44 px. */
+  @media (pointer: coarse), (max-width: 768px) {
+    .limit-form {
+      --btn-h: 44px;
+      --input-h: 44px;
+    }
   }
 </style>
