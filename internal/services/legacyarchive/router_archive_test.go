@@ -94,6 +94,8 @@ func TestRouterLegacyArchive(t *testing.T) {
 			"subscriptions.json":               registry,
 			"cache/providers/test.yaml":        []byte("proxies: []"),
 			"user_rules.json":                  []byte("[]"),
+			"smartproxy/current":               []byte("smartproxy"),
+			"traffic/current":                  []byte("traffic"),
 		}
 		protected := map[string][]byte{
 			"data/xcp_hwid.txt":           []byte("012345abcdef"),
@@ -104,8 +106,8 @@ func TestRouterLegacyArchive(t *testing.T) {
 			"cache/rulesets/current.yaml": []byte("payload: []"),
 			"kernels/current":             []byte("kernel"),
 			"geodata/current":             []byte("geodata"),
-			"smartproxy/current":          []byte("smartproxy"),
-			"traffic/current":             []byte("traffic"),
+			"traffic-limits.json":         []byte(`{"limits":[]}`),
+			"traffic-stats.json":          []byte("{}"),
 		}
 		for path, content := range oldFiles {
 			writeArchiveTestFile(t, data, path, content)
@@ -192,6 +194,63 @@ func TestRouterLegacyArchive(t *testing.T) {
 		archives, err := filepath.Glob(filepath.Join(legacyPath, "*.tar.gz"))
 		if err != nil || len(archives) != 1 {
 			t.Fatal("ожидался один архив после повторных запусков")
+		}
+	})
+
+	t.Run("smartproxy-traffic", func(t *testing.T) {
+		data := newArchiveTestDir(t, workDir)
+		// Синтетические профиль и квоты старой модели: без адресов и имён узлов.
+		profiles := []byte(`[{"id":"sp-test","name":"test-profile","enabled":true}]`)
+		quotas := []byte(`{"quotas":[{"id":"q-test","limit_bytes":1024}],"blocked_proxies":["test-proxy"]}`)
+		oldFiles := map[string][]byte{
+			"smartproxy/profiles.json": profiles,
+			"traffic/traffic.json":     quotas,
+		}
+		current := map[string][]byte{
+			"traffic-limits.json": []byte(`{"limits":[{"id":"l-test"}]}`),
+			"traffic-stats.json":  []byte(`{"total":{"up":1,"down":2}}`),
+		}
+		for path, content := range oldFiles {
+			writeArchiveTestFile(t, data, path, content)
+		}
+		for path, content := range current {
+			writeArchiveTestFile(t, data, path, content)
+		}
+		result, err := Run(data)
+		if err != nil || !result.Complete || result.Warning != "" {
+			t.Fatal("старые данные Smart Proxy и квот не ушли в архив")
+		}
+		archiveInfo := requireMode(t, result.ArchivePath, 0600)
+		f, err := os.Open(result.ArchivePath)
+		if err != nil {
+			t.Fatal("не удалось открыть архив старых данных")
+		}
+		files := tarDigests(t, f)
+		f.Close()
+		if len(files) != len(oldFiles) {
+			t.Fatal("архив содержит неожиданный набор файлов")
+		}
+		for name, content := range oldFiles {
+			if files[name] != sha256.Sum256(content) {
+				t.Fatal("содержимое архивного файла отличается от источника")
+			}
+		}
+		requireMissing(t, filepath.Join(data, "smartproxy"))
+		requireMissing(t, filepath.Join(data, "traffic"))
+		for path, content := range current {
+			requireFileBytes(t, filepath.Join(data, path), content)
+		}
+
+		repeated, err := Run(data)
+		if err != nil || repeated.ArchivePath != result.ArchivePath || !repeated.Complete {
+			t.Fatal("повторный старт вернул другой архив")
+		}
+		again := requireMode(t, result.ArchivePath, 0600)
+		if !os.SameFile(archiveInfo, again) || !again.ModTime().Equal(archiveInfo.ModTime()) {
+			t.Fatal("повторный старт пересоздал архив")
+		}
+		for path, content := range current {
+			requireFileBytes(t, filepath.Join(data, path), content)
 		}
 	})
 

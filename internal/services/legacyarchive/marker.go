@@ -463,7 +463,7 @@ func validSource(item source, parent string) bool {
 		if !item.Directory || len(item.Children) != 1 || item.Children[0].Name != "providers" {
 			return false
 		}
-	case "subscriptions", "cache/providers":
+	case "subscriptions", "cache/providers", "smartproxy", "traffic":
 		if !item.Directory {
 			return false
 		}
