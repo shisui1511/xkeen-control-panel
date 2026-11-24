@@ -17,12 +17,15 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
@@ -368,6 +371,155 @@ func (e *rtSrc) rtRtExpectReleased(tg routertest.Target, before rtRtDiskState) {
 	}
 }
 
+// rtRtTailGroup — ручная группа сценария только из «Источников» (сверка хвоста).
+const rtRtTailGroup = "Хвост"
+
+// rtRtPoll опрашивает cond раз в секунду до wait; true — условие выполнилось.
+func rtRtPoll(wait time.Duration, cond func() bool) bool {
+	for end := time.Now().Add(wait); ; time.Sleep(time.Second) {
+		if cond() {
+			return true
+		}
+		if time.Now().After(end) {
+			return false
+		}
+	}
+}
+
+// rtRtProfileText — профиль панели Mihomo на диске устройства ("" — не прочитан).
+func rtRtProfileText() string {
+	data, err := os.ReadFile(filepath.Join(rtRtMihomoDir, rtRtPanelProfile))
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// rtRtProfileGroup — группа name профиля панели Mihomo на диске: use — группа берёт
+// узлы провайдеров, proxies — её proxies; found=false — профиль не разобран или
+// группы нет.
+func rtRtProfileGroup(name string) (use bool, proxies []string, found bool) {
+	var doc struct {
+		Groups []struct {
+			Name    string   `yaml:"name"`
+			Use     []string `yaml:"use"`
+			Proxies []string `yaml:"proxies"`
+		} `yaml:"proxy-groups"`
+	}
+	if yaml.Unmarshal([]byte(rtRtProfileText()), &doc) != nil {
+		return false, nil, false
+	}
+	for _, g := range doc.Groups {
+		if g.Name == name {
+			return len(g.Use) > 0, g.Proxies, true
+		}
+	}
+	return false, nil, false
+}
+
+// rtRtHiddenTail — proxies оканчивается служебными DIRECT и REJECT.
+func rtRtHiddenTail(proxies []string) bool {
+	n := len(proxies)
+	return n >= 2 && proxies[n-2] == "DIRECT" && proxies[n-1] == "REJECT"
+}
+
+// rtRtMihomoAll — варианты группы в Clash API Mihomo через панель (nil — не прочитаны).
+func (e *rtSrc) rtRtMihomoAll(group string) []string {
+	e.t.Helper()
+	r := e.call(http.MethodGet, "/api/mihomo/proxy/proxies/"+url.PathEscape(group), nil)
+	if r.Status != http.StatusOK {
+		return nil
+	}
+	var body struct {
+		All []string `json:"all"`
+	}
+	_ = json.Unmarshal(r.Raw, &body)
+	return body.All
+}
+
+// rtRtLimitTail — подтест limit_tail_reconcile: лимит block, сохранённый через
+// POST /api/traffic/limits/save без «Применить», сам меняет профиль Mihomo на диске
+// (служебный хвост и копии узлов у группы только из «Источников») и группу в Clash
+// API (REJECT в all); неприменённая правка черновика в профиль не попадает, ревизия
+// и число изменений черновика те же; удаление лимита возвращает use без хвоста.
+// Сообщения — только коды, да/нет и числа.
+func (e *rtSrc) rtRtLimitTail(name, gid string) {
+	t := e.t
+	t.Helper()
+	if use, proxies, found := rtRtProfileGroup(name); !found || !use || slices.Contains(proxies, "REJECT") {
+		t.Fatalf("до лимита: группа в профиле=%t, use=%t, REJECT в proxies=%t", found, use, slices.Contains(proxies, "REJECT"))
+	}
+
+	// Правка черновика без «Применить»: сверка хвоста её применять не должна.
+	const draftDomain = "tail-draft.invalid"
+	rs := e.call(http.MethodPost, rtRoutingBase+"/rules/save", map[string]any{"revision": e.rtRtRevision(), "rule": map[string]any{
+		"enabled": true,
+		"conds":   []map[string]any{{"type": "domain", "values": []string{draftDomain}}},
+		"target":  map[string]string{"kind": "direct"},
+	}})
+	if rs.Status != http.StatusOK {
+		t.Fatalf("rules/save: %d %s", rs.Status, rs.Code)
+	}
+	rule, _ := rs.object(t)["rule"].(map[string]any)
+	rid, _ := rule["id"].(string)
+	rev, changes := e.rtRtRevision(), e.rtRtDraftChanges()
+	if changes == 0 {
+		t.Error("после rules/save черновик не отличается от применённого")
+	}
+
+	ls := e.call(http.MethodPost, "/api/traffic/limits/save", map[string]any{
+		"name": "rt хвост", "target_type": "group", "target_id": gid, "limit_bytes": int64(1) << 40,
+		"period": "monthly", "threshold": 80, "action": "block", "enabled": true,
+	})
+	if ls.Status != http.StatusOK {
+		t.Fatalf("limits/save: %d %s", ls.Status, ls.Code)
+	}
+	lid, _ := ls.object(t)["id"].(string)
+	if lid == "" {
+		t.Fatal("limits/save: в ответе нет id лимита")
+	}
+	deleted := false
+	t.Cleanup(func() {
+		if !deleted {
+			_ = e.call(http.MethodPost, "/api/traffic/limits/delete", map[string]string{"id": lid})
+		}
+	})
+
+	// Без «Применить»: сверка арбитра пересобирает профиль, Mihomo его перечитывает.
+	if !rtRtPoll(30*time.Second, func() bool {
+		use, proxies, found := rtRtProfileGroup(name)
+		return found && !use && rtRtHiddenTail(proxies) && slices.Contains(e.rtRtMihomoAll(name), "REJECT")
+	}) {
+		use, proxies, found := rtRtProfileGroup(name)
+		t.Fatalf("сверка хвоста за 30 с: группа в профиле=%t, use=%t, хвост=%t, REJECT в Clash API=%t",
+			found, use, rtRtHiddenTail(proxies), slices.Contains(e.rtRtMihomoAll(name), "REJECT"))
+	}
+	if gotRev, gotChanges := e.rtRtRevision(), e.rtRtDraftChanges(); gotRev != rev || gotChanges != changes {
+		t.Errorf("сверка хвоста тронула черновик: ревизия %d → %d, изменений %d → %d", rev, gotRev, changes, gotChanges)
+	}
+	if strings.Contains(rtRtProfileText(), draftDomain) {
+		t.Error("сверка хвоста применила неприменённую правку черновика")
+	}
+
+	if r := e.call(http.MethodPost, "/api/traffic/limits/delete", map[string]string{"id": lid}); r.Status != http.StatusOK {
+		t.Fatalf("limits/delete: %d %s", r.Status, r.Code)
+	}
+	deleted = true
+	if !rtRtPoll(30*time.Second, func() bool {
+		use, proxies, found := rtRtProfileGroup(name)
+		return found && use && !slices.Contains(proxies, "REJECT")
+	}) {
+		use, proxies, _ := rtRtProfileGroup(name)
+		t.Errorf("удаление лимита за 30 с: use=%t, REJECT в proxies=%t", use, slices.Contains(proxies, "REJECT"))
+	}
+
+	// Фоновая сверка не должна столкнуться со следующим «Применить» сценария.
+	e.rtRstIdle()
+	if r := e.call(http.MethodPost, rtRoutingBase+"/rules/delete", map[string]any{"revision": e.rtRtRevision(), "id": rid}); r.Status != http.StatusOK {
+		t.Errorf("rules/delete: %d %s", r.Status, r.Code)
+	}
+}
+
 // Трасса: «Мои узлы» → группы по умолчанию → группа → take → «Применить» →
 // маршрутизация активного ядра у панели → release → «Применить» → всё как было.
 // Метка ядра: тест читает активное ядро и меняет его маршрутизацию.
@@ -381,12 +533,17 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 	contract := rtLoadContractFile(t, routertest.RoutingContractFile(t))
 	before := rtRtScanDisk(t)
 	taken := false
+	// proxyID и winID — окно расписания сценария, которое ещё не удалено.
+	var proxyID, winID string
 
-	// Маршрутизация и следы сценария убираются при любом исходе: release →
-	// «Применить», затем очистка узлов и секций. Cleanup регистрируется после
-	// freshDraft и потому идёт раньше сброса черновика.
+	// Маршрутизация и следы сценария убираются при любом исходе: окно расписания,
+	// release → «Применить», затем очистка узлов и секций. Cleanup регистрируется
+	// после freshDraft и потому идёт раньше сброса черновика.
 	t.Cleanup(func() {
 		c := e.with(t)
+		if winID != "" {
+			_ = c.call(http.MethodPost, rtRoutingBase+"/schedule/delete", map[string]string{"group": proxyID, "id": winID})
+		}
 		if taken {
 			r := c.call(http.MethodPost, rtRoutingBase+"/release", map[string]int64{"revision": c.rtRtRevision()})
 			if r.Status != http.StatusOK {
@@ -593,6 +750,18 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 		t.Error("groups/delete: правило не направлено на DIRECT")
 	}
 
+	// Ручная группа «Хвост» только из «Источников» (без участников): её применяет
+	// то же «взятие»; на проходе Mihomo на ней проверяется сверка служебного хвоста.
+	ts := e.call(http.MethodPost, rtRoutingBase+"/groups/save", map[string]any{
+		"revision": e.rtRtRevision(),
+		"group":    map[string]any{"name": rtRtTailGroup, "mode": "manual", "sources": map[string]any{"all": true}},
+	})
+	if ts.Status != http.StatusOK {
+		t.Fatalf("groups/save «Хвост»: %d %s", ts.Status, ts.Code)
+	}
+	tailGroup, _ := ts.object(t)["group"].(map[string]any)
+	tailID, _ := tailGroup["id"].(string)
+
 	// Предпросмотр взятия и reclaim с неизвестным ядром.
 	tp := e.call(http.MethodGet, rtRoutingBase+"/takeover", nil)
 	if tp.Status != http.StatusOK {
@@ -627,6 +796,60 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 	// Взято и применено: расхождений нет, возвращать нечего.
 	e.rtRtExpect("reclaim: нет расхождений", e.call(http.MethodPost, rtRoutingBase+"/reclaim",
 		map[string]string{"kernel": tg.Core}), http.StatusConflict, "nothing_to_reclaim")
+
+	// Окна расписания на живом ядре (D-10, D-11): окно ручной группы «Прокси» на
+	// её узел — 200 и ID; пересекающееся — 409 schedule_overlap с ID первого окна;
+	// окно группы «авто» — 409 group_not_applied; удаление неизвестного окна — 404.
+	// Окна — через 2 ч от часов роутера: тест не ждёт, пока арбитр сменит узел.
+	view = e.rtRtView()
+	proxyGroup := rtRtFindGroup(view, "Прокси")
+	if proxyGroup == nil {
+		t.Fatal("представление: нет группы «Прокси» после взятия")
+	}
+	proxyID, _ = proxyGroup["id"].(string)
+	proxyNodes, _ := rtRtNodeOptions(proxyGroup)
+	if len(proxyNodes) == 0 {
+		t.Fatal("представление: у группы «Прокси» нет узлов среди вариантов")
+	}
+	now := time.Now()
+	window := func(from, to time.Duration) map[string]any {
+		return map[string]any{
+			"days": []int{0, 1, 2, 3, 4, 5, 6}, "from": now.Add(from).Format("15:04"), "to": now.Add(to).Format("15:04"),
+			"member": proxyNodes[0], "enabled": true,
+		}
+	}
+	ws := e.call(http.MethodPost, rtRoutingBase+"/schedule/save", map[string]any{"group": proxyID, "window": window(2*time.Hour, 3*time.Hour)})
+	if ws.Status != http.StatusOK {
+		t.Fatalf("schedule/save: %d %s", ws.Status, ws.Code)
+	}
+	winID, _ = ws.object(t)["id"].(string)
+	if winID == "" {
+		t.Fatal("schedule/save: в ответе нет id окна")
+	}
+	ov := e.call(http.MethodPost, rtRoutingBase+"/schedule/save", map[string]any{"group": proxyID, "window": window(2*time.Hour+30*time.Minute, 4*time.Hour)})
+	e.rtRtExpect("schedule/save: пересечение", ov, http.StatusConflict, "schedule_overlap")
+	if ov.Params["window"] != winID {
+		t.Errorf("schedule/save: пересечение: params.window совпал с первым окном=%t", ov.Params["window"] == winID)
+	}
+	if auto := rtRtFindGroup(view, "Авто"); auto != nil {
+		autoID, _ := auto["id"].(string)
+		e.rtRtExpect("schedule/save: группа «авто»", e.call(http.MethodPost, rtRoutingBase+"/schedule/save",
+			map[string]any{"group": autoID, "window": window(5*time.Hour, 6*time.Hour)}), http.StatusConflict, "group_not_applied")
+	}
+	e.rtRtExpect("schedule/delete: неизвестное окно", e.call(http.MethodPost, rtRoutingBase+"/schedule/delete",
+		map[string]string{"group": proxyID, "id": "ffffffff"}), http.StatusNotFound, "window_not_found")
+	if r := e.call(http.MethodPost, rtRoutingBase+"/schedule/delete", map[string]string{"group": proxyID, "id": winID}); r.Status != http.StatusOK {
+		t.Errorf("schedule/delete: %d %s", r.Status, r.Code)
+	} else {
+		winID = ""
+	}
+
+	// Сверка служебного хвоста через HTTP (D-13, 152-09) — путь пользователя:
+	// сохранение лимита без «Применить». Хвост — форма профиля Mihomo, на проходе
+	// Xray подтест не вызывается.
+	if tg.Core == "mihomo" {
+		t.Run("limit_tail_reconcile", func(t *testing.T) { e.with(t).rtRtLimitTail(rtRtTailGroup, tailID) })
+	}
 
 	// release → «Применить»: файлы ядра как были.
 	rl := e.call(http.MethodPost, rtRoutingBase+"/release", map[string]int64{"revision": e.rtRtRevision()})
@@ -2480,6 +2703,10 @@ var rtRoutingRoutes = []struct{ method, path string }{
 	{http.MethodGet, rtRoutingBase + "/presets"},
 	{http.MethodPost, rtRoutingBase + "/presets/plan"},
 	{http.MethodPost, rtRoutingBase + "/presets/apply"},
+	{http.MethodPost, rtRoutingBase + "/schedule/save"},
+	{http.MethodPost, rtRoutingBase + "/schedule/delete"},
+	{http.MethodPost, rtRoutingBase + "/schedule/enabled"},
+	{http.MethodPost, rtRoutingBase + "/schedule/restore"},
 	{http.MethodGet, "/api/configlayer/proxies"},
 	{http.MethodGet, "/api/configlayer/proxies/now"},
 	{http.MethodGet, "/api/configlayer/proxies/results"},
@@ -2488,12 +2715,27 @@ var rtRoutingRoutes = []struct{ method, path string }{
 	{http.MethodPost, "/api/configlayer/proxies/confirm"},
 }
 
+// rtLimitsRoutes — маршруты лимитов трафика (152, вкладка «Трафик → Лимиты»).
+var rtLimitsRoutes = []struct{ method, path string }{
+	{http.MethodGet, "/api/traffic/limits"},
+	{http.MethodPost, "/api/traffic/limits/save"},
+	{http.MethodPost, "/api/traffic/limits/delete"},
+	{http.MethodPost, "/api/traffic/limits/enabled"},
+	{http.MethodPost, "/api/traffic/limits/reset"},
+	{http.MethodGet, "/api/traffic/limits/alerts"},
+	{http.MethodPost, "/api/traffic/limits/alerts/clear"},
+}
+
 // Без сессии маршруты отвечают 401, изменяющие без X-CSRF-Token — 403; метод не из
-// контракта — 405. Ответы читаемых маршрутов совпадают с routingContract.json по ключам.
+// контракта — 405 (маршрутизация, расписание и лимиты). Ответы читаемых маршрутов
+// совпадают с routingContract.json по ключам (вид «Прокси» — с clock, schedule и
+// hold). Действия лимита throttle и log_only не принимаются (SPX-04), снятые
+// маршруты Smart Proxy, квот и прежних оповещений — обычный 404 (151 D-12).
 func TestRouterRoutingProtected(t *testing.T) {
 	e := rtNewSrc(t)
 	e.freshDraft()
-	for _, rt := range rtRoutingRoutes {
+	routes := append(append([]struct{ method, path string }{}, rtRoutingRoutes...), rtLimitsRoutes...)
+	for _, rt := range routes {
 		var body []byte
 		if rt.method == http.MethodPost {
 			body = []byte("{}")
@@ -2516,7 +2758,7 @@ func TestRouterRoutingProtected(t *testing.T) {
 			t.Errorf("%s %s без X-CSRF-Token: статус %d, ожидался 403", rt.method, rt.path, status)
 		}
 	}
-	for _, rt := range rtRoutingRoutes {
+	for _, rt := range routes {
 		other := http.MethodGet
 		if rt.method == http.MethodGet {
 			other = http.MethodPost
@@ -2549,4 +2791,22 @@ func TestRouterRoutingProtected(t *testing.T) {
 		t.Fatalf("GET /api/configlayer/proxies/results: %d %s", results.Status, results.Code)
 	}
 	rtAssertContractKeys(t, contract, results.object(t), "PingSnapshot", "proxies/results")
+
+	// Лимиты: список отвечает при любом активном ядре; throttle и log_only — 400
+	// action_invalid (SPX-04), лимит не создаётся.
+	if r := e.call(http.MethodGet, "/api/traffic/limits", nil); r.Status != http.StatusOK {
+		t.Errorf("GET /api/traffic/limits: %d %s", r.Status, r.Code)
+	}
+	for _, action := range []string{"throttle", "log_only"} {
+		r := e.call(http.MethodPost, "/api/traffic/limits/save", map[string]any{
+			"name": "rt " + action, "target_type": "all", "limit_bytes": 1 << 30,
+			"period": "monthly", "threshold": 80, "action": action, "enabled": true,
+		})
+		e.rtRtExpect("limits/save: действие "+action, r, http.StatusBadRequest, "action_invalid")
+	}
+
+	// Снятые маршруты — обычный 404 общего обработчика.
+	for _, path := range []string{"/api/smart-proxy/profiles", "/api/traffic/quotas", "/api/traffic/alerts"} {
+		e.rtRtExpect("снятый маршрут "+path, e.call(http.MethodGet, path, nil), http.StatusNotFound, "")
+	}
 }
