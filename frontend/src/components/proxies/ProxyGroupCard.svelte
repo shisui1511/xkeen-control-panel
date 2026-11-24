@@ -26,6 +26,7 @@
     sortByPing,
     kernelLabel,
     otherKernel,
+    quotaHoldParams,
     type PanelCard,
     type NowLine,
     type ResultView
@@ -315,7 +316,12 @@
    * переключение своей или связанной группы (D-17); независимые группы не блокируются.
    */
   function pBlocked(p: PanelCard): boolean {
-    return !pCanSelect(p) || p.group.unconfirmed || p.selecting !== '' || p.locked;
+    return !pCanSelect(p) || p.group.unconfirmed || p.selecting !== '' || p.locked || pQuotaHeld(p);
+  }
+
+  /** Группу держит исчерпанный лимит (D-05): выбор отклонит и сервер (quota_held). */
+  function pQuotaHeld(p: PanelCard): boolean {
+    return p.group.hold?.kind === 'quota';
   }
 
   /** Подсказка заблокированной плитки: почему выбор недоступен. */
@@ -323,6 +329,9 @@
     if (p.group.mode === 'auto' || p.group.mode === 'fallback') return $t('proxies.rt.auto_hint');
     if (p.group.unconfirmed) return $t('proxies.rt.unconfirmed_title');
     if (p.selecting !== '' || p.locked) return $t('proxies.rt.locked_title');
+    const hold = p.group.hold;
+    if (hold?.kind === 'quota')
+      return $t('proxies.rt.quota.tile_title', quotaHoldParams(hold, p.view.clock));
     if (p.group.mode === 'source') return $t('proxies.rt.source_title');
     if (!pCanSelect(p)) return $t('proxies.rt.select_unavailable_title');
     return undefined;
@@ -348,6 +357,11 @@
 
   // Повторные нажатия во время переключения не ставятся в очередь (D-17)
   function pSelect(p: PanelCard, m: RuntimeMember) {
+    // Квота держит группу: страница объясняет причину тостом, выбор не отправляется
+    if (pCanSelect(p) && pQuotaHeld(p)) {
+      p.onSelect(m.member);
+      return;
+    }
     if (pBlocked(p) || pIsCurrent(p, m)) return;
     p.onSelect(m.member);
   }
@@ -465,6 +479,10 @@
                 {/if}
               {/each}{after}
             </span>
+          {:else if pNow.kind === 'reject'}
+            <span class="pc-now-text">{$t('proxies.rt.now_reject')}</span>
+          {:else if pNow.kind === 'direct'}
+            <span class="pc-now-text">{$t('proxies.rt.now_direct')}</span>
           {:else if pNow.kind === 'fastest'}
             <span class="pc-now-text">{$t('proxies.rt.now_fastest')}</span>
           {:else}
@@ -605,6 +623,7 @@
                   class:pc-tile-current={current && pAutoLike}
                   class:pc-subgroup={m.kind === 'group'}
                   class:pc-static={pBlocked(p) || current}
+                  class:pc-quota={pQuotaHeld(p)}
                 >
                   <button
                     type="button"
@@ -1985,6 +2004,10 @@
   .pc-select[aria-disabled='true'],
   .pc-tile.pc-static .pc-select {
     cursor: default;
+  }
+  /* Квота держит группу (D-05): выбор недоступен до сброса или правки лимита */
+  .pc-tile.pc-quota .pc-select {
+    cursor: not-allowed;
   }
   /* Текущий узел авто и резерва: тот же индикатор, без акцентной рамки (D-09) */
   .pc-tile-current {

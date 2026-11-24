@@ -97,6 +97,10 @@ export type NowLine =
   | { kind: 'chain'; links: RuntimeLink[] }
   /** Xray без API: имя узла получить нельзя (D-09). */
   | { kind: 'fastest' }
+  /** Группу держит лимит с действием «Блокировать»: стоит служебный REJECT (D-13). */
+  | { kind: 'reject' }
+  /** Группу держит лимит с действием «Напрямую»: стоит служебный DIRECT (D-13). */
+  | { kind: 'direct' }
   /** Ядро не сообщает узел (D-26): последний известный выбор не подставляется. */
   | { kind: 'unknown' }
   /** Строки нет (узлы источника без выбора). */
@@ -107,12 +111,16 @@ export type NowLine =
  * «Сейчас» ядра с подписью из участников, «самый быстрый из живых» при Xray без API,
  * иначе — «неизвестен». Неподтверждённый выбор (D-16) и «самый быстрый», когда ни один
  * узел не ответил (D-26), — тоже «неизвестен»: последний известный выбор не подставляется.
- * Узел, подтверждённый ядром, неудачные пробы не опровергают.
+ * Узел, подтверждённый ядром, неудачные пробы не опровергают. Ручная группа, которую
+ * лимит держит на служебном REJECT или DIRECT, — «Блокировка» или «Напрямую» (D-13).
  */
 export function nowLine(group: RuntimeGroup, now: GroupNow | null, allFailed = false): NowLine {
   if (group.mode === 'source') return { kind: 'none' };
   if (group.unconfirmed) return { kind: 'unknown' };
   if (group.mode === 'manual') {
+    // Служебные REJECT/DIRECT в сетке не показываются: позицию называет строка «Сейчас»
+    if (group.hold?.kind === 'quota' && (group.current === 'reject' || group.current === 'direct'))
+      return { kind: group.current };
     if (group.chain.length > 0) return { kind: 'chain', links: group.chain };
     return { kind: 'unknown' };
   }
