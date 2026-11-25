@@ -35,7 +35,8 @@ import {
 // сервера и группу «авто», берёт маршрутизацию и применяет. Лимиты теста — с префиксом RTTL-,
 // в конце удаляются через API; группы и узлы убираются, маршрутизация отпускается, если не была
 // взята, черновик сбрасывается. Ответы сети не подменяются. На 390 px axe-тест замеряет цели
-// касания 44 px вкладки и модалки лимита (пробел G-152-1).
+// касания 44 px вкладки и модалки лимита (пробел G-152-1) и то, что зоны касания соседних целей
+// не пересекаются, в том числе на карточке созданного лимита (пробел G-152-4).
 
 const PREFIX = 'RTTL-';
 const LIMIT_NAME = `${PREFIX}весь трафик`;
@@ -159,6 +160,73 @@ async function touchTargetsBelow44(scope: Locator): Promise<string[]> {
       .filter((b) => b.low)
       .map(({ label, w, h }) => `${label} ${w}x${h}`)
   );
+}
+
+/**
+ * Пары целей касания внутри scope, чьи зоны пересекаются: «подпись × подпись ширинаxвысота»
+ * (размер пересечения). Цели — те же, что у touchTargetsBelow44; прямоугольник цели — большее
+ * из рамки и зоны ::after с центром в центре рамки: зоны проекта центрированы (tap-zone-44 и
+ * общий список зон в global.css — через translate(-50%, -50%), переключатель — симметричным
+ * inset). Пара, где одна цель содержит другую, не сравнивается; пересечение больше 0,5 px по
+ * обеим осям — провал, допуск как у замера размера. Подпись — testId (у переключателя без
+ * своего — testId вложенного флажка), классы или тег: текст, aria-label и title (имена узлов и
+ * лимитов) в отчёт не попадают. Пробел G-152-4: замер размера пересечений не видит.
+ */
+async function touchZonesOverlapping(scope: Locator): Promise<string[]> {
+  await settleMotion(scope.page());
+  return scope.locator('button, a.btn, select, input, label.toggle-switch').evaluateAll((els) => {
+    const targets = els
+      .filter((el) => el.getClientRects().length > 0)
+      .filter(
+        (el) =>
+          !(el instanceof HTMLInputElement && ['checkbox', 'radio', 'hidden'].includes(el.type))
+      )
+      .map((el, i) => {
+        const rect = el.getBoundingClientRect();
+        let w = rect.width;
+        let h = rect.height;
+        const tag = el.tagName.toLowerCase();
+        const toggle = el.classList.contains('toggle-switch');
+        if (tag === 'button' || tag === 'a' || toggle) {
+          const zone = getComputedStyle(el, '::after');
+          if (zone.content !== 'none' && zone.position === 'absolute') {
+            const zw = parseFloat(zone.width);
+            const zh = parseFloat(zone.height);
+            if (Number.isFinite(zw)) w = Math.max(w, zw);
+            if (Number.isFinite(zh)) h = Math.max(h, zh);
+          }
+        }
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const classes = [...el.classList].slice(0, 2);
+        const label =
+          el.getAttribute('data-testid') ??
+          (toggle ? el.querySelector('input')?.getAttribute('data-testid') : null) ??
+          (classes.length ? `.${classes.join('.')}` : `${tag}#${i}`);
+        return {
+          el,
+          label,
+          left: cx - w / 2,
+          right: cx + w / 2,
+          top: cy - h / 2,
+          bottom: cy + h / 2
+        };
+      });
+    const out: string[] = [];
+    for (let a = 0; a < targets.length; a++) {
+      for (let b = a + 1; b < targets.length; b++) {
+        const p = targets[a];
+        const q = targets[b];
+        if (p.el.contains(q.el) || q.el.contains(p.el)) continue;
+        const ox = Math.min(p.right, q.right) - Math.max(p.left, q.left);
+        const oy = Math.min(p.bottom, q.bottom) - Math.max(p.top, q.top);
+        if (ox > 0.5 && oy > 0.5) {
+          out.push(`${p.label} × ${q.label} ${Math.round(ox)}x${Math.round(oy)}`);
+        }
+      }
+    }
+    return out;
+  });
 }
 
 /** Вкладка «Лимиты» загружена: список пришёл (скелетона нет). */
@@ -431,7 +499,7 @@ test(
 
 for (const theme of ['light', 'dark'] as const) {
   test(`traffic-limits axe: вкладка и модалка, тема ${theme}`, async ({ page }) => {
-    test.setTimeout(T.page * 3);
+    test.setTimeout(T.page * 4);
     const guard = attachConsoleGuard(page);
     await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
     const problems: string[] = [];
@@ -450,6 +518,9 @@ for (const theme of ['light', 'dark'] as const) {
         for (const v of await touchTargetsBelow44(page.getByTestId('traffic-limits'))) {
           problems.push(`390 px, касание вкладки: ${v}`);
         }
+        for (const v of await touchZonesOverlapping(page.getByTestId('traffic-limits'))) {
+          problems.push(`390 px, пересечение зон касания вкладки: ${v}`);
+        }
       }
       for (const v of await axeSevere(page, '[data-testid="traffic-limits"]')) {
         problems.push(`${width} px, вкладка: ${v}`);
@@ -466,6 +537,11 @@ for (const theme of ['light', 'dark'] as const) {
         )) {
           problems.push(`390 px, касание модалки лимита: ${v}`);
         }
+        for (const v of await touchZonesOverlapping(
+          page.locator('.modal-container[role="dialog"]')
+        )) {
+          problems.push(`390 px, пересечение зон касания модалки лимита: ${v}`);
+        }
       }
       await modal.getByRole('button', { name: say('traffic.limits.cancel', true) }).click();
       await expect(modal).toHaveCount(0, { timeout: T.action });
@@ -477,6 +553,45 @@ for (const theme of ['light', 'dark'] as const) {
         if (wide.scroll > wide.inner + 1) {
           problems.push(`390 px: scrollWidth ${wide.scroll} шире окна ${wide.inner}`);
         }
+        // Лимитов теста здесь нет (их удаляют prepare и предыдущий тест), поэтому замер выше
+        // видел пустую вкладку; переключатель и три кнопки карточки — на лимите замера. Порог
+        // 1 ТБ и «Уведомить»: исчерпание недостижимо, ядро и группы не трогаются.
+        try {
+          const saved = await api(page, 'POST', '/api/traffic/limits/save', {
+            id: '',
+            name: `${PREFIX}касание`,
+            target_type: 'all',
+            target_id: '',
+            limit_bytes: 1024 * GB,
+            period: 'monthly',
+            threshold: 80,
+            action: 'notify',
+            enabled: true
+          });
+          expect(saved.status, 'POST /api/traffic/limits/save').toBe(200);
+          const id = String(saved.data?.id ?? '');
+          expect(id, 'ID лимита замера').not.toBe('');
+          await openTraffic(page, '#/traffic?tab=limits', 390);
+          await limitsReady(page);
+          await expect(page.getByTestId(`traffic-limit-${id}`)).toBeVisible({
+            timeout: T.page
+          });
+          await expect(page.getByTestId(`traffic-limit-delete-${id}`)).toBeVisible({
+            timeout: T.action
+          });
+          for (const v of await touchTargetsBelow44(page.getByTestId('traffic-limits'))) {
+            problems.push(`390 px, касание вкладки с лимитом: ${v}`);
+          }
+          for (const v of await touchZonesOverlapping(page.getByTestId('traffic-limits'))) {
+            problems.push(`390 px, пересечение зон касания вкладки с лимитом: ${v}`);
+          }
+        } finally {
+          await dropLimits(page);
+        }
+        expect(
+          (await limitsList(page)).limits.some((l) => l.name.startsWith(PREFIX)),
+          'лимит замера удалён'
+        ).toBe(false);
       }
     }
     expect(problems, problems.join('\n')).toEqual([]);
