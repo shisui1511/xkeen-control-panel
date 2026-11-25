@@ -36,7 +36,8 @@ import {
 // убираются, маршрутизация отпускается, если не была взята, черновик сбрасывается. Ответы сети
 // не подменяются; в сообщения провалов попадают только testId и коды, без имён узлов.
 // На 390 px axe-тест замеряет цели касания 44 px блока (пустое состояние и шесть неактивных
-// окон) и модалки окна (пробел G-152-1).
+// окон) и модалки окна (пробел G-152-1) и то, что зоны касания соседних целей не
+// пересекаются (пробел G-152-4).
 
 const PREFIX = 'RTSC-';
 
@@ -241,6 +242,73 @@ async function touchTargetsBelow44(scope: Locator): Promise<string[]> {
       .filter((b) => b.low)
       .map(({ label, w, h }) => `${label} ${w}x${h}`)
   );
+}
+
+/**
+ * Пары целей касания внутри scope, чьи зоны пересекаются: «подпись × подпись ширинаxвысота»
+ * (размер пересечения). Цели — те же, что у touchTargetsBelow44; прямоугольник цели — большее
+ * из рамки и зоны ::after с центром в центре рамки: зоны проекта центрированы (tap-zone-44 и
+ * общий список зон в global.css — через translate(-50%, -50%), переключатель — симметричным
+ * inset). Пара, где одна цель содержит другую, не сравнивается; пересечение больше 0,5 px по
+ * обеим осям — провал, допуск как у замера размера. Подпись — testId (у переключателя без
+ * своего — testId вложенного флажка), классы или тег: текст, aria-label и title (имена узлов и
+ * лимитов) в отчёт не попадают. Пробел G-152-4: замер размера пересечений не видит.
+ */
+async function touchZonesOverlapping(scope: Locator): Promise<string[]> {
+  await settleMotion(scope.page());
+  return scope.locator('button, a.btn, select, input, label.toggle-switch').evaluateAll((els) => {
+    const targets = els
+      .filter((el) => el.getClientRects().length > 0)
+      .filter(
+        (el) =>
+          !(el instanceof HTMLInputElement && ['checkbox', 'radio', 'hidden'].includes(el.type))
+      )
+      .map((el, i) => {
+        const rect = el.getBoundingClientRect();
+        let w = rect.width;
+        let h = rect.height;
+        const tag = el.tagName.toLowerCase();
+        const toggle = el.classList.contains('toggle-switch');
+        if (tag === 'button' || tag === 'a' || toggle) {
+          const zone = getComputedStyle(el, '::after');
+          if (zone.content !== 'none' && zone.position === 'absolute') {
+            const zw = parseFloat(zone.width);
+            const zh = parseFloat(zone.height);
+            if (Number.isFinite(zw)) w = Math.max(w, zw);
+            if (Number.isFinite(zh)) h = Math.max(h, zh);
+          }
+        }
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const classes = [...el.classList].slice(0, 2);
+        const label =
+          el.getAttribute('data-testid') ??
+          (toggle ? el.querySelector('input')?.getAttribute('data-testid') : null) ??
+          (classes.length ? `.${classes.join('.')}` : `${tag}#${i}`);
+        return {
+          el,
+          label,
+          left: cx - w / 2,
+          right: cx + w / 2,
+          top: cy - h / 2,
+          bottom: cy + h / 2
+        };
+      });
+    const out: string[] = [];
+    for (let a = 0; a < targets.length; a++) {
+      for (let b = a + 1; b < targets.length; b++) {
+        const p = targets[a];
+        const q = targets[b];
+        if (p.el.contains(q.el) || q.el.contains(p.el)) continue;
+        const ox = Math.min(p.right, q.right) - Math.max(p.left, q.left);
+        const oy = Math.min(p.bottom, q.bottom) - Math.max(p.top, q.top);
+        if (ox > 0.5 && oy > 0.5) {
+          out.push(`${p.label} × ${q.label} ${Math.round(ox)}x${Math.round(oy)}`);
+        }
+      }
+    }
+    return out;
+  });
 }
 
 async function prepare(browser: Browser): Promise<void> {
@@ -587,6 +655,9 @@ for (const theme of ['light', 'dark'] as const) {
         for (const v of await touchTargetsBelow44(block)) {
           problems.push(`390 px, касание блока: ${v}`);
         }
+        for (const v of await touchZonesOverlapping(block)) {
+          problems.push(`390 px, пересечение зон касания блока: ${v}`);
+        }
       }
       for (const v of await axeSevere(page, `[data-testid="proxy-group-schedule-${manualId}"]`)) {
         problems.push(`${width} px, блок: ${v}`);
@@ -602,6 +673,11 @@ for (const theme of ['light', 'dark'] as const) {
           page.locator('.modal-container[role="dialog"]')
         )) {
           problems.push(`390 px, касание модалки окна: ${v}`);
+        }
+        for (const v of await touchZonesOverlapping(
+          page.locator('.modal-container[role="dialog"]')
+        )) {
+          problems.push(`390 px, пересечение зон касания модалки окна: ${v}`);
         }
       }
       await modal.getByRole('button', { name: say('proxies.rt.sched.cancel', true) }).click();
@@ -644,6 +720,9 @@ for (const theme of ['light', 'dark'] as const) {
           ).toHaveCount(5, { timeout: T.page });
           for (const v of await touchTargetsBelow44(listBlock)) {
             problems.push(`390 px, касание блока с окнами: ${v}`);
+          }
+          for (const v of await touchZonesOverlapping(listBlock)) {
+            problems.push(`390 px, пересечение зон касания блока с окнами: ${v}`);
           }
         } finally {
           await dropWindows(page);
