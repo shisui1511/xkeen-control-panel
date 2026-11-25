@@ -22,7 +22,13 @@ var (
 	errChanged    = errors.New("старые данные изменились после чтения")
 )
 
-var sourceNames = []string{"subscriptions", "subscriptions.json", "cache", "user_rules.json"}
+// sourceNames — источники архива в корне DataDir. Каталоги smartproxy и traffic
+// (профили Smart Proxy и квоты старой модели) не конвертируются и уходят в архив
+// общей веткой archiveSource. Новые лимиты и статистика живут в traffic-limits.json
+// и traffic-stats.json в корне DataDir, чтобы архив их не забрал. При маркере
+// complete второго прохода нет: каталоги, появившиеся в списке позже, остаются
+// на диске и панелью не читаются.
+var sourceNames = []string{"subscriptions", "subscriptions.json", "cache", "user_rules.json", "smartproxy", "traffic"}
 
 // Run оставляет причину сбоя в результате и ошибке. Обе безопасны для журнала
 // и уведомления: ошибки файловой системы и декодера могут содержать секреты.
@@ -309,7 +315,7 @@ func (d archiveDir) archiveSource(tw *tar.Writer, name, parent string, stored *m
 			return nil, err
 		}
 		return item, err
-	case path == "subscriptions" || path == "cache/providers":
+	case path == "subscriptions" || path == "cache/providers" || path == "smartproxy" || path == "traffic":
 		if !info.IsDir() {
 			return nil, errUnsafePath
 		}

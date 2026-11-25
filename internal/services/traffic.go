@@ -1,16 +1,14 @@
 package services
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -19,27 +17,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
-
-// TrafficQuota represents a traffic limit
-type TrafficQuota struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	TargetType     string `json:"target_type"` // "proxy", "global"
-	TargetID       string `json:"target_id"`   // proxy name or empty
-	LimitBytes     int64  `json:"limit_bytes"`
-	Period         string `json:"period"` // "daily", "weekly", "monthly"
-	Enabled        bool   `json:"enabled"`
-	AlertThreshold int    `json:"alert_threshold"` // 0-100, percent
-	// "notify", "log_only" and "block" (→ Mihomo REJECT) are implemented in
-	// checkQuotas; "redirect_direct" (→ Mihomo DIRECT) is also implemented
-	// but was previously undocumented here. "throttle" is accepted (the
-	// frontend renders it as a disabled/"unsupported" option) but has no
-	// bandwidth-limiting implementation yet — it currently behaves exactly
-	// like "notify".
-	Action       string `json:"action"`
-	CurrentBytes int64  `json:"current_bytes"`
-	LastReset    int64  `json:"last_reset"`
-}
 
 // ProxyTraffic holds accumulated traffic per proxy
 type ProxyTraffic struct {
@@ -56,27 +33,6 @@ type ClientTraffic struct {
 	Download    int64  `json:"download"`
 	TotalBytes  int64  `json:"total_bytes"`
 	ActiveConns int    `json:"active_connections"`
-}
-
-// TrafficAlert represents an alert when quota is exceeded
-type TrafficAlert struct {
-	QuotaID   string `json:"quota_id"`
-	QuotaName string `json:"quota_name"`
-	Severity  string `json:"severity"` // "warning", "critical"
-	// Message is a pre-formatted, Russian-language string kept for backward
-	// compatibility with any consumer that hasn't switched to the structured
-	// fields below (e.g. old entries loaded from a pre-upgrade traffic.json).
-	// New consumers should prefer Kind/CurrentBytes/LimitBytes/Percent and
-	// render a localized string client-side via i18n.
-	Message string `json:"message"`
-	// Kind identifies which localized template the frontend should use:
-	// "exceeded" (quota reached/passed 100%) or "threshold" (quota crossed
-	// its configured alert_threshold but is still under 100%).
-	Kind         string  `json:"kind"`
-	CurrentBytes int64   `json:"current_bytes"`
-	LimitBytes   int64   `json:"limit_bytes"`
-	Percent      float64 `json:"percent"`
-	Timestamp    int64   `json:"timestamp"`
 }
 
 // TrafficPeaks holds peak upload and download rates over calendar periods with timestamps
@@ -98,20 +54,27 @@ type TrafficPeaks struct {
 	WeekStart        int64 `json:"week_start"`
 }
 
-// TrafficStore is the on-disk format
+// TrafficStore — содержимое файла статистики трафика: учёт по прокси, пики и
+// момент сброса. Лимиты расхода хранит служба лимитов (traffic-limits.json).
 type TrafficStore struct {
-	Quotas         []TrafficQuota           `json:"quotas"`
-	ProxyStats     map[string]*ProxyTraffic `json:"proxy_stats"`
-	Peaks          TrafficPeaks             `json:"peaks"`
-	ResetTime      int64                    `json:"reset_time"`
-	BlockedProxies map[string]string        `json:"blocked_proxies"`
+	ProxyStats map[string]*ProxyTraffic `json:"proxy_stats"`
+	Peaks      TrafficPeaks             `json:"peaks"`
+	ResetTime  int64                    `json:"reset_time"`
 }
 
+// trafficStatsFileName — файл статистики трафика в корне DataDir. С фазы 152 он
+// лежит вне каталога traffic/: прежний traffic/traffic.json с квотами уходит в
+// архив и не читается, статистика начинается с нуля.
+const trafficStatsFileName = "traffic-stats.json"
+
+// errTrafficStatsPath — путь файла статистики не прошёл проверку: запись не идёт.
+var errTrafficStatsPath = errors.New("traffic: stats file path rejected")
+
 // saveLockThrottle is the minimum interval between background/periodic saves
-// (CRUD-triggered saves always use force=true and bypass throttling).
+// (the reset of statistics uses force=true and bypasses throttling).
 const saveLockThrottle = 1 * time.Minute
 
-// maxTrafficFileSize is the rotation threshold for traffic.json.
+// maxTrafficFileSize is the rotation threshold for traffic-stats.json.
 const maxTrafficFileSize = 5 * 1024 * 1024 // 5 MB
 
 // wsReadDeadline bounds how long streamConnections/streamTraffic will block on
@@ -139,13 +102,41 @@ type mihomoConn struct {
 	Metadata mihomoConnMetadata `json:"metadata"`
 }
 
-// TrafficQuotaService manages traffic accounting and quotas
+// ConnDelta — прирост байтов одного соединения Mihomo между снимками /connections:
+// Chains — цепочка исходящих соединения как в снимке, Bytes — upload+download.
+// Соединения DIRECT и REJECT тоже входят: их отбрасывает получатель.
+type ConnDelta struct {
+	Chains []string
+	Bytes  int64
+}
+
+// Состояния потока /connections (StreamState).
+const (
+	StreamStateOK       = "ok"
+	StreamStateDown     = "down"
+	StreamStateFailing  = "failing"
+	StreamStateStopped  = "stopped"
+	StreamStateNoSocket = "no_socket"
+)
+
+// wsLinkState — состояние потока WS одной метки для журнала и StreamState.
+type wsLinkState struct {
+	// connected — поток подключён сейчас.
+	connected bool
+	// ever — поток хоть раз подключался после старта панели.
+	ever bool
+	// failing — идёт полоса отказов: первая ошибка уже записана в журнал.
+	failing bool
+}
+
+// TrafficQuotaService — служба потоков трафика Mihomo: статистика по прокси, пики,
+// потоки /connections и /traffic для подписчиков и дельты соединений для службы
+// лимитов. Группы она не переключает: выбор групп ставит только арбитр маршрутизации.
 type TrafficQuotaService struct {
-	dataDir    string
+	// path — проверенный путь файла статистики; "" — путь не прошёл проверку.
+	path       string
 	secret     string
-	quotas     []TrafficQuota
 	proxyStats map[string]*ProxyTraffic
-	alerts     []TrafficAlert
 	mu         sync.RWMutex
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -169,7 +160,6 @@ type TrafficQuotaService struct {
 	trafficSubsMu     sync.RWMutex
 
 	mihomoSvc          *MihomoService
-	blockedProxies     map[string]string
 	resetTime          int64
 	trackerInitialized bool
 
@@ -177,35 +167,114 @@ type TrafficQuotaService struct {
 	kernelAliveCheck func() bool
 	asleep           bool
 
-	// checkQuotasMu serializes checkQuotas() invocations. It is invoked both
-	// from the periodic resetTicker in collectorLoop and from every processed
-	// connections snapshot (potentially several times per second under active
-	// traffic); without this guard two concurrent invocations could compute
-	// overlapping block/restore sets for the same proxy group and issue
-	// conflicting applyProxyToGroup calls to Mihomo. TryLock coalesces
-	// overlapping triggers by skipping a run instead of queueing it — the
-	// next scheduled call picks up any state change the skipped run would
-	// have observed.
-	checkQuotasMu sync.Mutex
+	// connDeltaHook получает ненулевые дельты всех соединений снимка (D-02);
+	// вызывается вне s.mu. Защищено s.mu.
+	connDeltaHook func([]ConnDelta)
+
+	// wsLinks — состояние потоков WS по метке ("connections", "traffic").
+	wsLinksMu sync.Mutex
+	wsLinks   map[string]*wsLinkState
 }
 
 func NewTrafficQuotaService(dataDir, secret string, mihomo *MihomoService) *TrafficQuotaService {
 	ctx, cancel := context.WithCancel(context.Background())
 	svc := &TrafficQuotaService{
-		dataDir:        dataDir,
-		mihomoSvc:      mihomo,
-		secret:         secret,
-		quotas:         []TrafficQuota{},
-		proxyStats:     make(map[string]*ProxyTraffic),
-		alerts:         []TrafficAlert{},
-		ctx:            ctx,
-		cancel:         cancel,
-		connSubs:       make(map[chan []byte]struct{}),
-		trafficSubs:    make(map[chan []byte]struct{}),
-		blockedProxies: make(map[string]string),
+		mihomoSvc:   mihomo,
+		secret:      secret,
+		proxyStats:  make(map[string]*ProxyTraffic),
+		ctx:         ctx,
+		cancel:      cancel,
+		connSubs:    make(map[chan []byte]struct{}),
+		trafficSubs: make(map[chan []byte]struct{}),
+		wsLinks:     make(map[string]*wsLinkState),
+	}
+	path := filepath.Join(dataDir, trafficStatsFileName)
+	if clean, err := utils.NewPathValidator([]string{dataDir}).ValidateUnder(path, dataDir); err != nil {
+		log.Printf("traffic: путь файла статистики не прошёл проверку, статистика не сохраняется")
+	} else {
+		svc.path = clean
 	}
 	svc.load()
 	return svc
+}
+
+// SetConnDeltaHook задаёт получателя дельт соединений снимка /connections (служба
+// лимитов). Хук вызывается вне мьютекса службы и не должен блокировать надолго.
+func (s *TrafficQuotaService) SetConnDeltaHook(fn func([]ConnDelta)) {
+	s.mu.Lock()
+	s.connDeltaHook = fn
+	s.mu.Unlock()
+}
+
+// StreamState сообщает состояние потока /connections: no_socket — у профиля Mihomo
+// нет Unix-контроллера (151 D-13), stopped — ядро не запущено, down — поток сейчас
+// не подключён (короткий разрыв или переподключение), failing — идёт полоса отказов
+// подключения (контроллер отвечает ошибкой, отказ в доступе), ok — снимки идут.
+func (s *TrafficQuotaService) StreamState() string {
+	if s.mihomoSvc == nil {
+		return StreamStateStopped
+	}
+	if _, err := s.mihomoSvc.UnixController(); err != nil {
+		return StreamStateNoSocket
+	}
+	if !s.kernelAlive() {
+		return StreamStateStopped
+	}
+	s.wsLinksMu.Lock()
+	defer s.wsLinksMu.Unlock()
+	if l := s.wsLinks["connections"]; l != nil {
+		switch {
+		case l.connected:
+			return StreamStateOK
+		case l.failing:
+			return StreamStateFailing
+		}
+	}
+	return StreamStateDown
+}
+
+// wsLinkLocked возвращает состояние потока метки. Caller holds s.wsLinksMu.
+func (s *TrafficQuotaService) wsLinkLocked(label string) *wsLinkState {
+	l := s.wsLinks[label]
+	if l == nil {
+		l = &wsLinkState{}
+		s.wsLinks[label] = l
+	}
+	return l
+}
+
+// streamUp отмечает подключение потока. В журнал — первое подключение после
+// старта и восстановление после полосы отказов; обычные переподключения (смена
+// профиля, контроллера) — молча.
+func (s *TrafficQuotaService) streamUp(label string) {
+	s.wsLinksMu.Lock()
+	l := s.wsLinkLocked(label)
+	first, recovered := !l.ever, l.failing
+	l.connected, l.ever, l.failing = true, true, false
+	s.wsLinksMu.Unlock()
+	switch {
+	case recovered:
+		log.Printf("TrafficQuota: WS %s восстановлен", label)
+	case first:
+		log.Printf("TrafficQuota: WS %s подключён", label)
+	}
+}
+
+// streamDown отмечает, что поток не подключён. err != nil — отказ: в журнал
+// пишется только первая ошибка полосы, повторы — молча (паузы задаёт
+// wsReconnectLoop). err == nil — штатное завершение (смена профиля, остановка ядра).
+func (s *TrafficQuotaService) streamDown(label string, err error) {
+	s.wsLinksMu.Lock()
+	l := s.wsLinkLocked(label)
+	l.connected = false
+	logIt := err != nil && !l.failing
+	if err != nil {
+		l.failing = true
+	}
+	s.wsLinksMu.Unlock()
+	if logIt {
+		log.Printf("TrafficQuota: WS %s недоступен: %v — повторы без записи в журнал до восстановления", label, err)
+	}
 }
 
 // SetKernelAliveCheck configures the predicate used to determine whether the Mihomo
@@ -288,17 +357,14 @@ func (s *TrafficQuotaService) handleKernelSleep(label string, stopped bool) {
 }
 
 // handleKernelWake transitions the service out of asleep state when the kernel is running (D-26).
-func (s *TrafficQuotaService) handleKernelWake(ctx context.Context, label string) {
+func (s *TrafficQuotaService) handleKernelWake(label string) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if !s.asleep {
-		s.mu.Unlock()
 		return
 	}
 	s.asleep = false
 	log.Printf("TrafficQuota: [%s] Mihomo Unix controller configured, resuming monitoring", label)
-	s.mu.Unlock()
-
-	s.checkQuotas(ctx)
 }
 
 func (s *TrafficQuotaService) controllerSecret(info ControllerInfo) string {
@@ -324,9 +390,12 @@ func (s *TrafficQuotaService) dialStream(ctx context.Context, info ControllerInf
 	return conn, err
 }
 
+// Start запускает потоки /connections и /traffic; каждый переподключается сам
+// (wsReconnectLoop).
 func (s *TrafficQuotaService) Start() {
-	s.wg.Add(1)
-	go s.collectorLoop()
+	s.wg.Add(2)
+	go s.connectionsWSLoop()
+	go s.trafficWSLoop()
 }
 
 func (s *TrafficQuotaService) Stop() {
@@ -343,58 +412,48 @@ func (s *TrafficQuotaService) Stop() {
 	s.mu.Unlock()
 }
 
-func (s *TrafficQuotaService) storePath() string {
-	dir := filepath.Join(s.dataDir, "traffic")
-	_ = os.MkdirAll(dir, 0755)
-	return filepath.Join(dir, "traffic.json")
-}
-
+// load читает файл статистики. Нет файла, путь не прошёл проверку или содержимое
+// повреждено — статистика начинается с нуля.
 func (s *TrafficQuotaService) load() {
-	data, err := os.ReadFile(s.storePath())
-	if err != nil {
-		s.mu.Lock()
-		s.resetTime = time.Now().Unix()
-		s.mu.Unlock()
-		return
-	}
 	var store TrafficStore
-	if err := json.Unmarshal(data, &store); err != nil {
-		s.mu.Lock()
-		s.resetTime = time.Now().Unix()
-		s.mu.Unlock()
-		return
+	data, err := s.readStore()
+	if err == nil {
+		err = json.Unmarshal(data, &store)
 	}
 	s.mu.Lock()
-	s.quotas = store.Quotas
+	defer s.mu.Unlock()
+	if err != nil {
+		s.resetTime = time.Now().Unix()
+		return
+	}
 	if store.ProxyStats != nil {
 		s.proxyStats = store.ProxyStats
-	} else {
-		s.proxyStats = make(map[string]*ProxyTraffic)
 	}
 	s.peaks = store.Peaks
 	s.resetTime = store.ResetTime
 	if s.resetTime == 0 {
 		s.resetTime = time.Now().Unix()
 	}
-	if store.BlockedProxies != nil {
-		s.blockedProxies = store.BlockedProxies
-	} else {
-		s.blockedProxies = make(map[string]string)
+}
+
+// readStore читает файл статистики по проверенному пути.
+func (s *TrafficQuotaService) readStore() ([]byte, error) {
+	if s.path == "" {
+		return nil, errTrafficStatsPath
 	}
-	s.mu.Unlock()
+	return os.ReadFile(s.path)
 }
 
 // saveLocked writes state to disk. Caller MUST hold s.mu (write lock).
 // If force is false the write is skipped when a previous write happened
 // within saveLockThrottle — suitable for high-frequency periodic saves.
-// Pass force=true for CRUD operations (quota add/update/delete/reset)
-// so user changes are always persisted immediately.
+// Pass force=true for the reset of statistics so it is persisted immediately.
 //
 // Периодическое сохранение (force=false) идёт без fsync: под идущей записью на
 // флешку fsync ждёт фиксации журнала ext4 десятки секунд, держа s.mu и цикл
 // WebSocket, а остановка панели ждала этот цикл дольше окна init-скрипта. Потеря
 // последнего снимка счётчиков при обрыве питания допустима (подмена файла
-// остаётся атомарной, utils.AtomicWriteFileNoSync); правки квот пишутся с fsync.
+// остаётся атомарной, utils.AtomicWriteFileNoSync); сброс статистики пишется с fsync.
 func (s *TrafficQuotaService) saveLocked(force bool) error {
 	if !force && !s.lastSave.IsZero() && time.Since(s.lastSave) < saveLockThrottle {
 		return nil
@@ -411,190 +470,47 @@ func (s *TrafficQuotaService) saveLocked(force bool) error {
 	return nil
 }
 
-// writeStoreLocked сериализует состояние и пишет traffic.json функцией write.
+// writeStoreLocked сериализует состояние и пишет файл статистики функцией write.
 // Caller MUST hold s.mu (write lock).
 func (s *TrafficQuotaService) writeStoreLocked(write func(path string, data []byte, perm os.FileMode) error) error {
-	store := TrafficStore{
-		Quotas:         s.quotas,
-		ProxyStats:     s.proxyStats,
-		Peaks:          s.peaks,
-		ResetTime:      s.resetTime,
-		BlockedProxies: s.blockedProxies,
+	if s.path == "" {
+		return errTrafficStatsPath
 	}
-
+	store := TrafficStore{
+		ProxyStats: s.proxyStats,
+		Peaks:      s.peaks,
+		ResetTime:  s.resetTime,
+	}
 	data, err := json.MarshalIndent(store, "", "  ")
 	if err != nil {
 		return err
 	}
-	return write(s.storePath(), data, 0600)
+	return write(s.path, data, 0600)
 }
 
-// rotateIfNeeded renames traffic.json to a timestamped .bak when it exceeds
-// maxTrafficFileSize. Caller MUST hold s.mu (write lock).
+// rotateIfNeeded renames the stats file to a timestamped .bak when it exceeds
+// maxTrafficFileSize and writes the current state back at once. Caller MUST hold
+// s.mu (write lock).
 func (s *TrafficQuotaService) rotateIfNeeded() {
-	info, err := os.Stat(s.storePath())
+	if s.path == "" {
+		return
+	}
+	info, err := os.Stat(s.path)
 	if err != nil || info.Size() < maxTrafficFileSize {
 		return
 	}
-	bakPath := fmt.Sprintf("%s.%s.bak", s.storePath(), time.Now().Format("20060102-150405"))
-	if err := os.Rename(s.storePath(), bakPath); err != nil {
+	bakPath := fmt.Sprintf("%s.%s.bak", s.path, time.Now().Format("20060102-150405"))
+	if err := os.Rename(s.path, bakPath); err != nil {
 		log.Printf("traffic: rotate failed: %v", err)
 		return
 	}
-	log.Printf("traffic: traffic.json exceeded 5 MB, rotated → %s", bakPath)
-
-	// Write state back to disk immediately so traffic.json exists
-	store := TrafficStore{
-		Quotas:         s.quotas,
-		ProxyStats:     s.proxyStats,
-		Peaks:          s.peaks,
-		ResetTime:      s.resetTime,
-		BlockedProxies: s.blockedProxies,
-	}
-	data, marshalErr := json.MarshalIndent(store, "", "  ")
-	if marshalErr != nil {
-		log.Printf("traffic: rotate marshal failed: %v", marshalErr)
-		return
-	}
-	if writeErr := utils.AtomicWriteFile(s.storePath(), data, 0600); writeErr != nil {
-		log.Printf("traffic: rotate write failed: %v", writeErr)
-		return
+	log.Printf("traffic: %s exceeded 5 MB, rotated → %s", trafficStatsFileName, bakPath)
+	if err := s.writeStoreLocked(utils.AtomicWriteFile); err != nil {
+		log.Printf("traffic: rotate write failed: %v", err)
 	}
 }
 
-// --- CRUD for quotas ---
-
-func (s *TrafficQuotaService) ListQuotas() []TrafficQuota {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]TrafficQuota, len(s.quotas))
-	copy(result, s.quotas)
-	return result
-}
-
-func (s *TrafficQuotaService) GetQuota(id string) (TrafficQuota, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for i := range s.quotas {
-		if s.quotas[i].ID == id {
-			return s.quotas[i], true
-		}
-	}
-	return TrafficQuota{}, false
-}
-
-// validateQuota rejects quota field combinations that would silently defeat
-// the automated quota-driven proxy blocking/alerting logic in checkQuotas
-// and checkResets (e.g. a non-positive limit, an unreachable alert
-// threshold, or a Period value the reset switch does not recognize). An
-// empty Period defaults to "monthly" (mirroring the TrafficQuotaAdd HTTP
-// handler's own default) rather than being rejected, so callers that omit
-// it keep working; only a non-empty, unrecognized Period is an error. An
-// empty TargetType is likewise defaulted to "global" (mirroring the same
-// HTTP handler's TargetType default) rather than rejected — but a
-// TargetType of "proxy" with no TargetID, or any other unrecognized
-// TargetType, is rejected: either would silently defeat quota enforcement
-// in checkQuotas/processConnSnapshot (CurrentBytes never increments) while
-// still showing up in the UI as an active, enabled limit.
-func validateQuota(q *TrafficQuota) error {
-	if q.LimitBytes <= 0 {
-		return fmt.Errorf("limit_bytes must be positive")
-	}
-	if q.AlertThreshold < 0 || q.AlertThreshold > 100 {
-		return fmt.Errorf("alert_threshold must be between 0 and 100")
-	}
-	if q.Period == "" {
-		q.Period = "monthly"
-	}
-	switch q.Period {
-	case "daily", "weekly", "monthly":
-	default:
-		return fmt.Errorf("invalid period: %s", q.Period)
-	}
-	if q.TargetType == "" {
-		q.TargetType = "global"
-	}
-	switch q.TargetType {
-	case "global":
-		// TargetID not required
-	case "proxy":
-		if q.TargetID == "" {
-			return fmt.Errorf("target_id is required when target_type is \"proxy\"")
-		}
-	default:
-		return fmt.Errorf("invalid target_type: %s", q.TargetType)
-	}
-	return nil
-}
-
-func (s *TrafficQuotaService) AddQuota(q *TrafficQuota) error {
-	if err := validateQuota(q); err != nil {
-		return err
-	}
-	if q.ID == "" {
-		q.ID = fmt.Sprintf("quota_%d", time.Now().UnixNano())
-	}
-	q.LastReset = time.Now().Unix()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.quotas = append(s.quotas, *q)
-	return s.saveLocked(true)
-}
-
-func (s *TrafficQuotaService) UpdateQuota(id string, q *TrafficQuota) error {
-	if err := validateQuota(q); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range s.quotas {
-		if s.quotas[i].ID == id {
-			s.quotas[i] = *q
-			s.quotas[i].ID = id
-			return s.saveLocked(true)
-		}
-	}
-	return fmt.Errorf("quota not found")
-}
-
-func (s *TrafficQuotaService) DeleteQuota(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i, q := range s.quotas {
-		if q.ID == id {
-			s.quotas = append(s.quotas[:i], s.quotas[i+1:]...)
-			return s.saveLocked(true)
-		}
-	}
-	return fmt.Errorf("quota not found")
-}
-
-func (s *TrafficQuotaService) SetQuotaEnabled(id string, enabled bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range s.quotas {
-		if s.quotas[i].ID == id {
-			s.quotas[i].Enabled = enabled
-			return s.saveLocked(true)
-		}
-	}
-	return fmt.Errorf("quota not found")
-}
-
-func (s *TrafficQuotaService) ResetQuota(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range s.quotas {
-		if s.quotas[i].ID == id {
-			s.quotas[i].CurrentBytes = 0
-			s.quotas[i].LastReset = time.Now().Unix()
-			return s.saveLocked(true)
-		}
-	}
-	return fmt.Errorf("quota not found")
-}
-
-// --- Stats & Alerts ---
+// --- Stats ---
 
 func (s *TrafficQuotaService) GetStats() map[string]interface{} {
 	s.mu.RLock()
@@ -636,56 +552,10 @@ func (s *TrafficQuotaService) ResetStats() error {
 	}
 	s.peaks.WeekStart = time.Date(now.Year(), now.Month(), now.Day()-offset, 0, 0, 0, 0, now.Location()).Unix()
 
-	for i := range s.quotas {
-		s.quotas[i].CurrentBytes = 0
-		s.quotas[i].LastReset = now.Unix()
-	}
-
 	return s.saveLocked(true)
 }
 
-func (s *TrafficQuotaService) GetAlerts() []TrafficAlert {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]TrafficAlert, len(s.alerts))
-	copy(result, s.alerts)
-	return result
-}
-
-func (s *TrafficQuotaService) ClearAlerts() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.alerts = []TrafficAlert{}
-}
-
 // --- Collector ---
-
-func (s *TrafficQuotaService) collectorLoop() {
-	defer s.wg.Done()
-
-	// Periodic housekeeping: quota resets and threshold checks.
-	resetTicker := time.NewTicker(1 * time.Minute)
-	defer resetTicker.Stop()
-
-	s.checkResets()
-
-	// WebSocket stream runs in its own goroutine with reconnect logic.
-	s.wg.Add(2)
-	go s.connectionsWSLoop()
-	go s.trafficWSLoop()
-
-	for {
-		select {
-		case <-resetTicker.C:
-			s.checkResets()
-			if s.kernelAlive() {
-				s.checkQuotas(s.ctx)
-			}
-		case <-s.ctx.Done():
-			return
-		}
-	}
-}
 
 // connectionsWSLoop connects to Mihomo's /connections WebSocket endpoint and
 // processes real-time connection snapshots. Reconnects automatically with
@@ -712,6 +582,7 @@ func (s *TrafficQuotaService) wsReconnectLoop(label string, streamFn func(contex
 	for s.ctx.Err() == nil {
 		ctx, cancel := s.mihomoSvc.ControllerContext(s.ctx)
 		if !s.kernelAlive() {
+			s.streamDown(label, nil)
 			s.handleKernelSleep(label, true)
 			select {
 			case <-ctx.Done():
@@ -723,6 +594,7 @@ func (s *TrafficQuotaService) wsReconnectLoop(label string, streamFn func(contex
 		}
 		info, err := s.mihomoSvc.UnixController()
 		if err != nil {
+			s.streamDown(label, nil)
 			s.handleKernelSleep(label, false)
 			<-ctx.Done()
 			cancel()
@@ -730,10 +602,11 @@ func (s *TrafficQuotaService) wsReconnectLoop(label string, streamFn func(contex
 			continue
 		}
 
-		s.handleKernelWake(ctx, label)
+		s.handleKernelWake(label)
 		start := time.Now()
 		err = streamFn(ctx, info)
 		if ctx.Err() != nil || !s.mihomoSvc.HasController() {
+			s.streamDown(label, nil)
 			cancel()
 			backoff, consecutiveFailures = baseBackoff, 0
 			continue
@@ -755,7 +628,9 @@ func (s *TrafficQuotaService) wsReconnectLoop(label string, streamFn func(contex
 			backoffCap = extendedBackoffCap
 		}
 
-		log.Printf("TrafficQuota: WS %s stream ended: %v — retry in %s", label, err, backoff)
+		// Журнал — только первая ошибка полосы отказов и восстановление (streamUp);
+		// повторы с той же нарастающей паузой идут молча.
+		s.streamDown(label, err)
 
 		select {
 		case <-time.After(backoff):
@@ -776,7 +651,7 @@ func (s *TrafficQuotaService) streamConnections(ctx context.Context, info Contro
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
-	log.Print("TrafficQuota: WebSocket connected to /connections")
+	s.streamUp("connections")
 
 	for {
 		// Mihomo emits a /connections snapshot roughly once per second even when
@@ -799,7 +674,7 @@ func (s *TrafficQuotaService) streamConnections(ctx context.Context, info Contro
 			continue
 		}
 		s.broadcastConnections(raw)
-		s.processConnSnapshot(ctx, payload.Connections)
+		s.processConnSnapshot(payload.Connections)
 	}
 }
 
@@ -832,22 +707,19 @@ func (s *TrafficQuotaService) SubscribeConnections() (ch chan []byte, unsub func
 
 // processConnSnapshot computes per-proxy traffic deltas from a Mihomo
 // connections snapshot and accumulates them into proxyStats.
-func (s *TrafficQuotaService) processConnSnapshot(ctx context.Context, connections []mihomoConn) {
+func (s *TrafficQuotaService) processConnSnapshot(connections []mihomoConn) {
 	s.mu.Lock()
 
 	activeIDs := make(map[string]bool, len(connections))
 	isFirstSnapshot := !s.trackerInitialized
 	s.trackerInitialized = true
 
-	for _, conn := range connections {
-		if len(conn.Chains) == 0 {
-			continue
-		}
-		proxyName := conn.Chains[len(conn.Chains)-1]
-		if proxyName == "" || proxyName == "DIRECT" || proxyName == "REJECT" {
-			continue
-		}
+	// Дельты всех соединений снимка, включая DIRECT и REJECT, для службы лимитов:
+	// конечный исходящий и привязку к группам решает она (D-02).
+	var deltas []ConnDelta
+	hook := s.connDeltaHook
 
+	for _, conn := range connections {
 		activeIDs[conn.ID] = true
 
 		var deltaUp, deltaDown int64
@@ -869,6 +741,20 @@ func (s *TrafficQuotaService) processConnSnapshot(ctx context.Context, connectio
 		if deltaDown < 0 {
 			deltaDown = 0
 		}
+		s.connectionTracker.Store(conn.ID, connStats{Upload: conn.Upload, Download: conn.Download})
+
+		if hook != nil && deltaUp+deltaDown > 0 && len(conn.Chains) > 0 {
+			deltas = append(deltas, ConnDelta{Chains: conn.Chains, Bytes: deltaUp + deltaDown})
+		}
+
+		// Учёт по прокси (proxyStats) пропускает DIRECT и REJECT, как прежде.
+		if len(conn.Chains) == 0 {
+			continue
+		}
+		proxyName := conn.Chains[len(conn.Chains)-1]
+		if proxyName == "" || proxyName == "DIRECT" || proxyName == "REJECT" {
+			continue
+		}
 
 		if deltaUp > 0 || deltaDown > 0 {
 			stat, ok := s.proxyStats[proxyName]
@@ -879,25 +765,7 @@ func (s *TrafficQuotaService) processConnSnapshot(ctx context.Context, connectio
 			stat.UploadBytes += deltaUp
 			stat.DownloadBytes += deltaDown
 			stat.TotalBytes = stat.UploadBytes + stat.DownloadBytes
-
-			for i := range s.quotas {
-				q := &s.quotas[i]
-				if !q.Enabled {
-					continue
-				}
-				match := false
-				if q.TargetType == "global" {
-					match = true
-				} else if q.TargetType == "proxy" && q.TargetID == proxyName {
-					match = true
-				}
-				if match {
-					q.CurrentBytes += (deltaUp + deltaDown)
-				}
-			}
 		}
-
-		s.connectionTracker.Store(conn.ID, connStats{Upload: conn.Upload, Download: conn.Download})
 	}
 
 	// Clean up closed connections from the tracker.
@@ -957,7 +825,9 @@ func (s *TrafficQuotaService) processConnSnapshot(ctx context.Context, connectio
 	}
 	s.mu.Unlock()
 
-	s.checkQuotas(ctx)
+	if hook != nil && len(deltas) > 0 {
+		hook(deltas)
+	}
 }
 
 // SubscribeTraffic регистрирует канал для получения снимков трафика.
@@ -1003,7 +873,7 @@ func (s *TrafficQuotaService) streamTraffic(ctx context.Context, info Controller
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
-	log.Print("TrafficQuota: WebSocket connected to /traffic")
+	s.streamUp("traffic")
 
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
@@ -1112,492 +982,8 @@ func (s *TrafficQuotaService) processTrafficSnapshot(up, down int64) {
 	}
 }
 
-func (s *TrafficQuotaService) checkResets() {
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	changed := false
-	for i := range s.quotas {
-		q := &s.quotas[i]
-		if !q.Enabled {
-			continue
-		}
-		lastReset := time.Unix(q.LastReset, 0)
-		shouldReset := false
-
-		switch q.Period {
-		case "daily":
-			shouldReset = lastReset.Year() != now.Year() || lastReset.YearDay() != now.YearDay()
-		case "weekly":
-			// Reset on calendar week boundary (Monday 00:00).
-			lastOffset := int(lastReset.Weekday() - time.Monday)
-			if lastOffset < 0 {
-				lastOffset += 7
-			}
-			lastWeekStart := time.Date(lastReset.Year(), lastReset.Month(), lastReset.Day()-lastOffset, 0, 0, 0, 0, lastReset.Location()).Unix()
-
-			nowOffset := int(now.Weekday() - time.Monday)
-			if nowOffset < 0 {
-				nowOffset += 7
-			}
-			nowWeekStart := time.Date(now.Year(), now.Month(), now.Day()-nowOffset, 0, 0, 0, 0, now.Location()).Unix()
-
-			shouldReset = lastWeekStart != nowWeekStart
-		case "monthly":
-			shouldReset = lastReset.Year() != now.Year() || lastReset.Month() != now.Month()
-		}
-
-		if shouldReset {
-			q.CurrentBytes = 0
-			q.LastReset = now.Unix()
-			changed = true
-		}
-	}
-
-	if changed {
-		// Background periodic save — use force=false to throttle disk I/O.
-		_ = s.saveLocked(false)
-	}
-}
-
-// checkQuotas checks all quotas against current stats
-
 // connStats holds last seen bytes for a connection
 type connStats struct {
 	Upload   int64
 	Download int64
-}
-
-type mihomoProxy struct {
-	Name string   `json:"name"`
-	Type string   `json:"type"`
-	Now  string   `json:"now"`
-	All  []string `json:"all"`
-}
-
-// quotaBuiltinOutbounds — встроенные исходящие mihomo: трафик через них
-// не идёт через прокси и под глобальный лимит не попадает.
-var quotaBuiltinOutbounds = map[string]bool{
-	"DIRECT": true, "REJECT": true, "REJECT-DROP": true, "PASS": true, "COMPATIBLE": true,
-}
-
-// quotaNextHop — куда группа name ведёт трафик. Уже переключённая ради
-// лимита группа считается ведущей в свой исходный выбор: иначе на следующей
-// проверке вышестоящий селектор «потерял» бы цель и был бы восстановлен.
-func quotaNextHop(proxies map[string]mihomoProxy, blocked map[string]string, name, fallback string) string {
-	p := proxies[name]
-	if orig, ok := blocked[name]; ok && p.Now == fallback {
-		return orig
-	}
-	return p.Now
-}
-
-// quotaSwitchable — селектор, который можно переключить на fallback.
-func quotaSwitchable(p mihomoProxy, fallback string) bool {
-	return p.Type == "Selector" && slices.Contains(p.All, fallback)
-}
-
-// quotaChainEnd проходит цепочку выбора от селектора name (Selector →
-// URLTest → … → нода) и возвращает, куда она приводит. Цепочка обрывается на
-// следующем переключаемом селекторе (stopped=true): переключится он сам, а
-// вышестоящие группы трогать незачем.
-func quotaChainEnd(proxies map[string]mihomoProxy, blocked map[string]string, name, target, fallback string) (end string, stopped bool) {
-	seen := map[string]bool{name: true}
-	cur := quotaNextHop(proxies, blocked, name, fallback)
-	for cur != "" && !seen[cur] {
-		if cur == target {
-			return cur, false
-		}
-		p, ok := proxies[cur]
-		if ok && quotaSwitchable(p, fallback) {
-			return cur, true
-		}
-		seen[cur] = true
-		next := quotaNextHop(proxies, blocked, cur, fallback)
-		if next == "" {
-			break
-		}
-		cur = next
-	}
-	return cur, false
-}
-
-// quotaBlockGroups — группы, которые нужно переключить на fallback
-// (REJECT/DIRECT), чтобы трафик перестал идти через target.
-//
-// Группа, в которой fallback есть, переключается сама. Иначе target — нода
-// или группа без fallback: переключаются селекторы, чья цепочка выбора
-// (в том числе через url-test/fallback и вложенные селекторы) сейчас ведёт
-// через target, и уже переключённые ради неё.
-func quotaBlockGroups(proxies map[string]mihomoProxy, blocked map[string]string, target, fallback string) []string {
-	if group, ok := proxies[target]; ok && slices.Contains(group.All, fallback) {
-		return []string{target}
-	}
-	var groups []string
-	for name, p := range proxies {
-		if !quotaSwitchable(p, fallback) {
-			continue
-		}
-		if end, stopped := quotaChainEnd(proxies, blocked, name, target, fallback); !stopped && end == target {
-			groups = append(groups, name)
-		}
-	}
-	slices.Sort(groups)
-	return groups
-}
-
-// quotaGlobalBlockGroups — группы для глобального лимита: селекторы
-// (включая GLOBAL), чья цепочка сейчас ведёт в прокси. Одного GLOBAL мало:
-// в режиме rule трафик идёт по правилам через остальные группы.
-func quotaGlobalBlockGroups(proxies map[string]mihomoProxy, blocked map[string]string, fallback string) []string {
-	var groups []string
-	for name, p := range proxies {
-		if !quotaSwitchable(p, fallback) {
-			continue
-		}
-		if end, stopped := quotaChainEnd(proxies, blocked, name, "", fallback); !stopped && end != "" && !quotaBuiltinOutbounds[end] {
-			groups = append(groups, name)
-		}
-	}
-	slices.Sort(groups)
-	return groups
-}
-
-func (s *TrafficQuotaService) getMihomoProxies(ctx context.Context, info ControllerInfo) (map[string]mihomoProxy, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mihomoControllerURL+"/proxies", nil)
-	if err != nil {
-		return nil, err
-	}
-	if secret := s.controllerSecret(info); secret != "" {
-		req.Header.Set("Authorization", "Bearer "+secret)
-	}
-
-	resp, err := s.mihomoSvc.httpClient(info.Target).Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("mihomo API returned %d", resp.StatusCode)
-	}
-
-	var payload struct {
-		Proxies map[string]mihomoProxy `json:"proxies"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
-	}
-	return payload.Proxies, nil
-}
-
-func (s *TrafficQuotaService) applyProxyToGroup(ctx context.Context, info ControllerInfo, groupName, proxyName string) error {
-	reqURL := mihomoControllerURL + "/proxies/" + url.PathEscape(groupName)
-	bodyMap := map[string]string{"name": proxyName}
-	bodyBytes, err := json.Marshal(bodyMap)
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, reqURL, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if secret := s.controllerSecret(info); secret != "" {
-		req.Header.Set("Authorization", "Bearer "+secret)
-	}
-
-	resp, err := s.mihomoSvc.httpClient(info.Target).Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("mihomo API returned %d", resp.StatusCode)
-	}
-	return nil
-}
-
-func (s *TrafficQuotaService) checkQuotas(parent context.Context) {
-	// Coalesce overlapping invocations (see checkQuotasMu doc comment): if a
-	// check is already running, skip this trigger rather than queueing
-	// behind it — the running check (or the next scheduled trigger) will
-	// observe any state change this call would have seen.
-	if !s.checkQuotasMu.TryLock() {
-		return
-	}
-	defer s.checkQuotasMu.Unlock()
-
-	s.mu.RLock()
-	if len(s.quotas) == 0 && len(s.blockedProxies) == 0 {
-		s.mu.RUnlock()
-		return
-	}
-	quotasCopy := make([]TrafficQuota, len(s.quotas))
-	copy(quotasCopy, s.quotas)
-	hasBlockedProxies := len(s.blockedProxies) > 0
-	s.mu.RUnlock()
-
-	alertsToCreate := make([]struct {
-		quotaID  string
-		severity string
-		message  string
-		kind     string
-		current  int64
-		limit    int64
-		percent  float64
-	}, 0)
-
-	type quotaFallback struct {
-		groupName string
-		fallback  string
-		global    bool
-	}
-	var neededActions []quotaFallback
-
-	for i := range quotasCopy {
-		q := &quotasCopy[i]
-		if !q.Enabled || q.LimitBytes <= 0 {
-			continue
-		}
-
-		current := q.CurrentBytes
-		percent := float64(current) / float64(q.LimitBytes) * 100
-
-		if percent >= 100 {
-			alertsToCreate = append(alertsToCreate, struct {
-				quotaID  string
-				severity string
-				message  string
-				kind     string
-				current  int64
-				limit    int64
-				percent  float64
-			}{
-				quotaID:  q.ID,
-				severity: "critical",
-				message:  fmt.Sprintf("Лимит %q превышен: %s из %s (%.0f%%)", q.Name, formatBytes(current), formatBytes(q.LimitBytes), percent),
-				kind:     "exceeded",
-				current:  current,
-				limit:    q.LimitBytes,
-				percent:  percent,
-			})
-
-			var fallback string
-			if q.Action == "block" {
-				fallback = "REJECT"
-			} else if q.Action == "redirect_direct" {
-				fallback = "DIRECT"
-			}
-
-			if fallback != "" {
-				if q.TargetType == "proxy" {
-					neededActions = append(neededActions, quotaFallback{groupName: q.TargetID, fallback: fallback})
-				} else {
-					neededActions = append(neededActions, quotaFallback{fallback: fallback, global: true})
-				}
-			}
-		} else if q.AlertThreshold > 0 && percent >= float64(q.AlertThreshold) {
-			alertsToCreate = append(alertsToCreate, struct {
-				quotaID  string
-				severity string
-				message  string
-				kind     string
-				current  int64
-				limit    int64
-				percent  float64
-			}{
-				quotaID:  q.ID,
-				severity: "warning",
-				message:  fmt.Sprintf("Лимит %q на %.0f%%: %s из %s", q.Name, percent, formatBytes(current), formatBytes(q.LimitBytes)),
-				kind:     "threshold",
-				current:  current,
-				limit:    q.LimitBytes,
-				percent:  percent,
-			})
-		}
-	}
-
-	// Always process and record alerts
-	if len(alertsToCreate) > 0 {
-		s.mu.Lock()
-		for _, alert := range alertsToCreate {
-			var quotaPtr *TrafficQuota
-			for i := range s.quotas {
-				if s.quotas[i].ID == alert.quotaID {
-					quotaPtr = &s.quotas[i]
-					break
-				}
-			}
-			if quotaPtr != nil {
-				s.addAlert(quotaPtr, alert.severity, alert.message, alert.kind, alert.current, alert.limit, alert.percent)
-			}
-		}
-		s.mu.Unlock()
-	}
-
-	// If no group actions (blocking/redirection) and no previously blocked proxies need restoration,
-	// skip fetching Mihomo proxies entirely!
-	if (len(neededActions) == 0 && !hasBlockedProxies) || s.mihomoSvc == nil {
-		return
-	}
-	ctx, cancel := s.mihomoSvc.ControllerContext(parent)
-	defer cancel()
-	info, err := s.mihomoSvc.UnixController()
-	if err != nil {
-		return
-	}
-	mihomoProxies, err := s.getMihomoProxies(ctx, info)
-	if err != nil {
-		if ctx.Err() == nil {
-			log.Printf("TrafficQuota: failed to fetch Mihomo proxies: %v", err)
-		}
-		return
-	}
-	hasMihomo := ctx.Err() == nil
-
-	shouldBlock := make(map[string]string)
-	if hasMihomo {
-		s.mu.Lock()
-		blocked := make(map[string]string, len(s.blockedProxies))
-		for g, orig := range s.blockedProxies {
-			blocked[g] = orig
-		}
-		s.mu.Unlock()
-		for _, action := range neededActions {
-			var groups []string
-			if action.global {
-				groups = quotaGlobalBlockGroups(mihomoProxies, blocked, action.fallback)
-			} else {
-				groups = quotaBlockGroups(mihomoProxies, blocked, action.groupName, action.fallback)
-			}
-			for _, g := range groups {
-				shouldBlock[g] = action.fallback
-			}
-		}
-	}
-
-	s.mu.Lock()
-
-	var restoreActions []struct {
-		groupName     string
-		originalProxy string
-	}
-	if hasMihomo {
-		for groupName, originalProxy := range s.blockedProxies {
-			if _, needed := shouldBlock[groupName]; !needed {
-				restoreActions = append(restoreActions, struct {
-					groupName     string
-					originalProxy string
-				}{groupName, originalProxy})
-			}
-		}
-	}
-
-	var blockActions []struct {
-		groupName string
-		fallback  string
-	}
-	if hasMihomo {
-		for groupName, fallback := range shouldBlock {
-			group, ok := mihomoProxies[groupName]
-			if !ok {
-				continue
-			}
-			if group.Now != fallback {
-				if _, saved := s.blockedProxies[groupName]; !saved {
-					s.blockedProxies[groupName] = group.Now
-				}
-				blockActions = append(blockActions, struct {
-					groupName string
-					fallback  string
-				}{groupName, fallback})
-			}
-		}
-	}
-
-	s.mu.Unlock()
-
-	successfulRestores := make([]string, 0)
-	if hasMihomo {
-		for _, action := range restoreActions {
-			if err := s.applyProxyToGroup(ctx, info, action.groupName, action.originalProxy); err != nil {
-				if ctx.Err() != nil {
-					break
-				}
-				log.Printf("TrafficQuota: failed to restore group %s to %s: %v", action.groupName, action.originalProxy, err)
-			} else {
-				successfulRestores = append(successfulRestores, action.groupName)
-			}
-		}
-
-		for _, action := range blockActions {
-			if err := s.applyProxyToGroup(ctx, info, action.groupName, action.fallback); err != nil {
-				if ctx.Err() != nil {
-					break
-				}
-				log.Printf("TrafficQuota: failed to block group %s with %s: %v", action.groupName, action.fallback, err)
-			}
-		}
-	}
-
-	s.mu.Lock()
-	if hasMihomo {
-		for _, groupName := range successfulRestores {
-			delete(s.blockedProxies, groupName)
-		}
-	}
-	s.mu.Unlock()
-}
-
-func (s *TrafficQuotaService) addAlert(q *TrafficQuota, severity, message, kind string, current, limit int64, percent float64) {
-	// Deduplicate: don't add same alert within 1 hour
-	for _, a := range s.alerts {
-		if a.QuotaID == q.ID && a.Severity == severity {
-			if time.Now().Unix()-a.Timestamp < 3600 {
-				return
-			}
-		}
-	}
-
-	// Cap alerts list to 100 items to prevent memory leak
-	if len(s.alerts) >= 100 {
-		s.alerts = s.alerts[1:]
-	}
-
-	s.alerts = append(s.alerts, TrafficAlert{
-		QuotaID:      q.ID,
-		QuotaName:    q.Name,
-		Severity:     severity,
-		Message:      message,
-		Kind:         kind,
-		CurrentBytes: current,
-		LimitBytes:   limit,
-		Percent:      percent,
-		Timestamp:    time.Now().Unix(),
-	})
-}
-
-func formatBytes(b int64) string {
-	const (
-		KB = 1024
-		MB = KB * 1024
-		GB = MB * 1024
-		TB = GB * 1024
-	)
-	switch {
-	case b >= TB:
-		return fmt.Sprintf("%.2f TB", float64(b)/TB)
-	case b >= GB:
-		return fmt.Sprintf("%.2f GB", float64(b)/GB)
-	case b >= MB:
-		return fmt.Sprintf("%.2f MB", float64(b)/MB)
-	case b >= KB:
-		return fmt.Sprintf("%.2f KB", float64(b)/KB)
-	default:
-		return fmt.Sprintf("%d B", b)
-	}
 }

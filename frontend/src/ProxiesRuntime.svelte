@@ -50,6 +50,9 @@
     historyView,
     proxyLike,
     pingHistory,
+    holdWindowMember,
+    quotaHoldParams,
+    quotaHeld,
     type ActiveKernel,
     type PanelCard
   } from './lib/proxyRuntimeAdapter';
@@ -66,6 +69,8 @@
     selectBgReason,
     type LayerNotice
   } from './lib/configLayer';
+  import { loadLimits } from './lib/trafficLimits';
+  import { formatRouterTime } from './lib/scheduleWindows';
   import type { ProxiesViewMode } from './lib/proxyViewPrefs';
   import type { SelectResult } from './lib/configRouting';
   import type { KernelName } from './lib/configSources';
@@ -247,16 +252,51 @@
     }
   }
 
+  /** Текст удержания лимитом: тот же, что в подсказке плиток (D-05). */
+  function quotaText(g: RuntimeGroup): string {
+    return $t('proxies.rt.quota.tile_title', g.hold ? quotaHoldParams(g.hold, view?.clock) : {});
+  }
+
+  /** Выбор прошёл на ядре без отказов и возврата (исход для тоста перехвата окна). */
+  function selectSucceeded(v: RuntimeView, res: SelectResult): boolean {
+    if (res.reverted || (res.unconfirmed ?? []).length > 0) return false;
+    const outcomes = res.kernels ?? {};
+    if (Object.values(outcomes).some((o) => o === 'failed')) return false;
+    const outcome = outcomes[outcomeKernel(v, res)];
+    return outcome === 'applied' || outcome === 'restarted' || outcome === 'pending_stopped';
+  }
+
   async function onSelect(g: RuntimeGroup, member: string) {
     const v = view;
+    // Квота держит группу (D-05): запрос не отправляется, причина — тостом; сервер всё
+    // равно отклонил бы выбор (quota_held, T-152-33)
+    if (quotaHeld(g.hold)) {
+      showToast('warning', quotaText(g));
+      return;
+    }
     if (!v || selecting.has(g.id) || lockedBy(g, v)) return;
     const name = memberName(g, member);
+    // Группу держит окно, выбран не его узел (D-04): узел ставится сразу, перехват — до конца окна
+    const hold = g.hold;
+    const overrides =
+      (hold?.kind === 'schedule' || hold?.kind === 'override') &&
+      !!hold.until &&
+      member !== holdWindowMember(g);
+    const until =
+      overrides && hold?.until ? formatRouterTime(hold.until, v.clock?.offset ?? 0) : '';
     selecting.set(g.id, member);
     try {
       const res = await selectNode(g.id, member);
-      notifySelect(v, res, name);
+      if (overrides && selectSucceeded(v, res)) {
+        showToast('success', $t('proxies.rt.sched.toast_override', { time: until }));
+      } else {
+        notifySelect(v, res, name);
+      }
     } catch (e) {
-      showToast('error', proxiesErrorText($t, codeOf(e)));
+      const code = codeOf(e);
+      // Лимит исчерпан между загрузкой вида и кликом
+      if (code === 'quota_held') showToast('warning', quotaText(g));
+      else showToast('error', proxiesErrorText($t, code));
     } finally {
       selecting.delete(g.id);
     }
@@ -558,6 +598,23 @@
     nowPollEnabled.set(needsNow);
     // Опрос остановлен (ядра стоят, авто-групп нет): прежний «Сейчас» не показывается (D-26)
     if (!needsNow) resetNow();
+  });
+
+  // Расход лимитов для блока «Лимит» карточек (D-17): опрос раз в 5 с только при видимой
+  // вкладке и наличии групп панели (у групп источника блока нет, T-152-34)
+  const LIMITS_POLL_MS = 5000;
+  const limitsPollEnabled = writable(false);
+  usePoller(
+    async (signal) => {
+      await loadLimits(signal);
+    },
+    LIMITS_POLL_MS,
+    { enabledWhen: limitsPollEnabled }
+  );
+  $effect(() => {
+    limitsPollEnabled.set(
+      !!view && view.state !== 'user_profile' && view.groups.some((g) => g.mode !== 'source')
+    );
   });
 
   let kernelTimer: ReturnType<typeof setTimeout> | null = null;

@@ -386,12 +386,12 @@
         "internal/handlers/proxies.go",
         "internal/handlers/route_tracer.go",
         "internal/handlers/rule_provider_inspect.go",
-        "internal/handlers/smartproxy.go",
+        "internal/handlers/traffic_limits.go",
         "internal/services/route_tracer.go",
         "internal/services/route_matcher.go",
         "internal/services/mihomo_geotag.go",
         "internal/services/rule_provider_inspect.go",
-        "internal/services/smartproxy.go"
+        "internal/services/limits*.go"
       ],
       "canary": {
         "go": "TestRouterXrayRulesTraffic",
@@ -786,7 +786,9 @@
         "tests/router/config-profiles.spec.ts",
         "tests/router/config-routing.spec.ts",
         "tests/router/config-setup.spec.ts",
-        "tests/router/proxies-runtime.spec.ts"
+        "tests/router/proxies-runtime.spec.ts",
+        "tests/router/proxies-schedule.spec.ts",
+        "tests/router/traffic-limits.spec.ts"
       ]
     },
     "contract-routing": {

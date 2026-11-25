@@ -97,7 +97,13 @@
     "frontend/src/components/subscriptions/NodeImporter.svelte",
     "frontend/src/components/rules/RuleModal.svelte",
     "internal/services/configlayer/router_cores_flag_test.go",
-    "scripts/check-xray-protocols.js"
+    "scripts/check-xray-protocols.js",
+    "internal/services/smartproxy.go",
+    "internal/handlers/smartproxy.go",
+    "frontend/src/SmartProxy.svelte",
+    "frontend/src/TrafficQuotas.svelte",
+    "frontend/src/lib/components/icons/SmartProxy.svelte",
+    "frontend/src/lib/components/icons/TrafficQuota.svelte"
   ],
   "removed_routes": [
     "/api/subscriptions",
@@ -115,7 +121,10 @@
     "/api/mihomo/profiles/adopt",
     "/api/outbound/parse",
     "/api/dat",
-    "/api/templates/list"
+    "/api/templates/list",
+    "/api/smart-proxy",
+    "/api/traffic/quotas",
+    "/api/traffic/alerts"
   ],
   "scopes": {
     "entry-routes": {
@@ -907,7 +916,6 @@
       "files": [
         "internal/handlers/base.go",
         "internal/handlers/xray.go",
-        "internal/handlers/smartproxy.go",
         "internal/handlers/traffic.go",
         "frontend/tests/router/lib/nodes-api.ts"
       ],

@@ -1,5 +1,6 @@
-import { writable, type Readable } from 'svelte/store';
+import { get, writable, type Readable } from 'svelte/store';
 import { mihomoApiReady } from '../stores';
+import { isServiceRestarting } from './serviceGrace';
 
 export interface TrafficDataPoint {
   up: number;
@@ -64,6 +65,7 @@ export class TrafficStreamManager {
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = 1000;
   private readonly MAX_RECONNECT_DELAY = 16000;
+  private readonly RESTART_RETRY_MS = 1500;
   private disconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private readonly DISCONNECT_GRACE_MS = 5000;
 
@@ -135,6 +137,18 @@ export class TrafficStreamManager {
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
+    }
+
+    // Окно перезапуска или переключения ядра: прежнее ядро уже остановлено, а гейт закроется
+    // только по ответу capabilities — подключение сейчас получило бы отказ 409. Ждём конца окна.
+    if (get(isServiceRestarting)) {
+      if (this.subscribers.size > 0) {
+        this.reconnectTimeout = setTimeout(() => {
+          this.reconnectTimeout = null;
+          this.connect();
+        }, this.RESTART_RETRY_MS);
+      }
+      return;
     }
 
     if (

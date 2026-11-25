@@ -97,24 +97,45 @@ type TrafficStats struct {
 // It parses counter names in format: {scope}>>>{tag/email}>>>traffic>>>{direction}
 // and returns categorised maps.
 func (c *Client) QueryAllTraffic(ctx context.Context) (*TrafficStats, error) {
+	stats, err := c.queryStats(ctx, &statspb.QueryStatsRequest{Pattern: "", Reset_: false})
+	if err != nil {
+		return nil, err
+	}
+	return parseTraffic(stats), nil
+}
+
+// OutboundCounters читает только счётчики исходящих (шаблон outbound>>>) без сброса:
+// тег → uplink/downlink. Учёт лимитов считает дельты сам, reset не нужен.
+func (c *Client) OutboundCounters(ctx context.Context) (map[string]TrafficPair, error) {
+	stats, err := c.queryStats(ctx, &statspb.QueryStatsRequest{Pattern: "outbound>>>", Reset_: false})
+	if err != nil {
+		return nil, err
+	}
+	return parseTraffic(stats).Outbounds, nil
+}
+
+// queryStats выполняет QueryStats с тайм-аутом 3 с.
+func (c *Client) queryStats(ctx context.Context, req *statspb.QueryStatsRequest) ([]*statspb.Stat, error) {
 	callCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	resp, err := c.stats.QueryStats(callCtx, &statspb.QueryStatsRequest{
-		Pattern: "",
-		Reset_:  false,
-	})
+	resp, err := c.stats.QueryStats(callCtx, req)
 	if err != nil {
 		return nil, normalizeGRPCError(err)
 	}
+	return resp.GetStat(), nil
+}
 
+// parseTraffic раскладывает счётчики {scope}>>>{tag/email}>>>traffic>>>{direction}
+// по исходящим, входящим и пользователям.
+func parseTraffic(stats []*statspb.Stat) *TrafficStats {
 	result := &TrafficStats{
 		Outbounds: make(map[string]TrafficPair),
 		Inbounds:  make(map[string]TrafficPair),
 		Users:     make(map[string]TrafficPair),
 	}
 
-	for _, stat := range resp.GetStat() {
+	for _, stat := range stats {
 		parts := strings.Split(stat.GetName(), ">>>")
 		if len(parts) == 4 && parts[2] == "traffic" {
 			scope := parts[0]
@@ -143,7 +164,7 @@ func (c *Client) QueryAllTraffic(ctx context.Context) (*TrafficStats, error) {
 		}
 	}
 
-	return result, nil
+	return result
 }
 
 // OutboundTraffic queries all outbound traffic counters.

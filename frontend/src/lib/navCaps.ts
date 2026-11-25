@@ -86,6 +86,18 @@ export function showMihomoNavFor(nav: NavCaps | null): boolean | null {
   return nav.active_kernel !== 'xray';
 }
 
+/**
+ * Показывать ли пункт «Трафик»; null — срез неизвестен. Страница работает при любом
+ * ядре: блоки, которым нужен API Mihomo, она прячет сама. Функция сводится к «срез
+ * известен», но сохранена рядом с showMihomoNavFor и showProxiesNavFor: пункты меню
+ * решаются одним трёхзначным видом (null — срез неизвестен), и правило пункта «Трафик»
+ * меняется в одном месте.
+ */
+export function showTrafficNavFor(nav: NavCaps | null): boolean | null {
+  if (!nav) return null;
+  return true;
+}
+
 /** При слое «Прокси» — страница обоих ядер; без слоя сохраняется прежнее меню. */
 export function showProxiesNavFor(nav: NavCaps | null, layerOn: boolean): boolean | null {
   if (!nav) return null;

@@ -22,7 +22,9 @@ const (
 
 // KernelRoutePolicy — запись таблицы «маршрут → ядро / режим / причина».
 type KernelRoutePolicy struct {
-	// Kernel — ядро, к которому относится маршрут ("xray" | "mihomo").
+	// Kernel — ядро, к которому относится маршрут ("xray" | "mihomo"). Пусто —
+	// маршрут обоих ядер; допустимо только при GateData (живой маршрут без ядра
+	// гейтить не по чему — регистрация такой записи паникует).
 	Kernel string
 	Mode   GateMode
 	// Reason — почему маршрут помечен именно так (что опрашивает live,
@@ -35,7 +37,6 @@ type KernelRoutePolicy struct {
 var kernelGatedPrefixes = []string{
 	"/api/mihomo/",
 	"/api/xray/",
-	"/api/smart-proxy/",
 	"/api/traffic/",
 	"/api/rule-providers/",
 	"/api/rules/test",
@@ -46,8 +47,7 @@ const (
 	reasonMihomoCounter = "живые счётчики трафика Mihomo"
 	reasonXrayGRPC      = "обращается к gRPC-API Xray"
 	reasonProfileFiles  = "файлы профилей Mihomo и проверка mihomo -t: конструктор работает при любом ядре"
-	reasonQuotaStore    = "JSON-хранилище квот панели: настройка доступна при любом ядре"
-	reasonSmartStore    = "хранилище профилей SmartProxy и расписание по часам, процесс ядра не опрашивается"
+	reasonLimitsStore   = "JSON-хранилище лимитов панели: настройка и учёт при любом ядре"
 	reasonRuleFiles     = "правила и провайдеры правил читаются из файлов и по URL, без процесса ядра"
 	reasonXrayFiles     = "конфиги Xray и локальные утилиты, без gRPC-API"
 )
@@ -63,8 +63,6 @@ var kernelRoutePolicies = map[string]KernelRoutePolicy{
 	"/api/mihomo/connections/ws":     {"mihomo", GateLive, "WebSocket подключений: " + reasonMihomoClash},
 	"/api/traffic/ws":                {"mihomo", GateLive, "WebSocket трафика: " + reasonMihomoCounter},
 	"/api/traffic/stats":             {"mihomo", GateLive, reasonMihomoCounter},
-	"/api/traffic/alerts":            {"mihomo", GateLive, "оповещения по живым счётчикам Mihomo"},
-	"/api/traffic/alerts/clear":      {"mihomo", GateLive, "сброс оповещений по живым счётчикам Mihomo"},
 	"/api/traffic/reset":             {"mihomo", GateLive, "сброс живых счётчиков Mihomo"},
 
 	// Xray, живые маршруты
@@ -95,21 +93,14 @@ var kernelRoutePolicies = map[string]KernelRoutePolicy{
 	"/api/rule-providers/content":   {"mihomo", GateData, reasonRuleFiles},
 	"/api/rule-providers/check-url": {"mihomo", GateData, reasonRuleFiles},
 
-	"/api/smart-proxy/profiles":         {"mihomo", GateData, reasonSmartStore},
-	"/api/smart-proxy/profiles/get":     {"mihomo", GateData, reasonSmartStore},
-	"/api/smart-proxy/profiles/add":     {"mihomo", GateData, reasonSmartStore},
-	"/api/smart-proxy/profiles/update":  {"mihomo", GateData, reasonSmartStore},
-	"/api/smart-proxy/profiles/delete":  {"mihomo", GateData, reasonSmartStore},
-	"/api/smart-proxy/profiles/enabled": {"mihomo", GateData, reasonSmartStore},
-	"/api/smart-proxy/status":           {"mihomo", GateData, reasonSmartStore},
-
-	"/api/traffic/quotas":         {"mihomo", GateData, reasonQuotaStore},
-	"/api/traffic/quotas/get":     {"mihomo", GateData, reasonQuotaStore},
-	"/api/traffic/quotas/add":     {"mihomo", GateData, reasonQuotaStore},
-	"/api/traffic/quotas/update":  {"mihomo", GateData, reasonQuotaStore},
-	"/api/traffic/quotas/delete":  {"mihomo", GateData, reasonQuotaStore},
-	"/api/traffic/quotas/enabled": {"mihomo", GateData, reasonQuotaStore},
-	"/api/traffic/quotas/reset":   {"mihomo", GateData, reasonQuotaStore},
+	// Лимиты трафика: нейтральны к ядру, Kernel пуст — маршрут обоих ядер.
+	"/api/traffic/limits":              {"", GateData, reasonLimitsStore},
+	"/api/traffic/limits/save":         {"", GateData, reasonLimitsStore},
+	"/api/traffic/limits/delete":       {"", GateData, reasonLimitsStore},
+	"/api/traffic/limits/enabled":      {"", GateData, reasonLimitsStore},
+	"/api/traffic/limits/reset":        {"", GateData, reasonLimitsStore},
+	"/api/traffic/limits/alerts":       {"", GateData, reasonLimitsStore},
+	"/api/traffic/limits/alerts/clear": {"", GateData, reasonLimitsStore},
 }
 
 // KernelRoutePolicyFor возвращает политику маршрута по точному шаблону.
@@ -155,6 +146,9 @@ func (a *API) KernelRouteWrapper(pattern string, h http.HandlerFunc) http.Handle
 	p, ok := kernelRoutePolicies[pattern]
 	if !ok {
 		panic("kernel route policy missing: " + pattern)
+	}
+	if p.Mode == GateLive && p.Kernel == "" {
+		panic("kernel route policy invalid: live route without kernel: " + pattern)
 	}
 	if p.Mode != GateLive {
 		return h

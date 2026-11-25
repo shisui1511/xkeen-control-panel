@@ -9,7 +9,7 @@
   //   bare      — без обёртки .form-group: поле встаёт в строку (тулбар, ячейка таблицы).
   interface Props extends Omit<HTMLInputAttributes, 'class' | 'type' | 'value' | 'size'> {
     id: string;
-    type?: 'text' | 'password' | 'number' | 'email' | 'search' | 'url' | 'tel';
+    type?: 'text' | 'password' | 'number' | 'email' | 'search' | 'url' | 'tel' | 'time';
     label?: string;
     ariaLabel?: string;
     value?: string | number | null;
@@ -48,7 +48,12 @@
   }
 
   const describedBy = $derived(
-    [error ? `${id}-error` : warning ? `${id}-warning` : '', hint ? `${id}-hint` : '']
+    [
+      error ? `${id}-error` : warning ? `${id}-warning` : '',
+      hint ? `${id}-hint` : '',
+      // Внешнее пояснение (общая ошибка формы под несколькими полями)
+      typeof rest['aria-describedby'] === 'string' ? rest['aria-describedby'] : ''
+    ]
       .filter(Boolean)
       .join(' ') || undefined
   );
@@ -66,7 +71,7 @@
     class:input-mono={mono}
     bind:value
     aria-label={label ? undefined : ariaLabel}
-    aria-invalid={error ? 'true' : undefined}
+    aria-invalid={error ? 'true' : (rest['aria-invalid'] ?? undefined)}
     aria-describedby={describedBy}
     data-testid={testid}
   />

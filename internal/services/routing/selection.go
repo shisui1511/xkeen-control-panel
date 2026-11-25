@@ -144,6 +144,9 @@ type appliedModel struct {
 	// xrayVer, mihomoVer — версии ядер, прочитанные до расчёта каталога: от них
 	// зависят версионные ворота узлов каталога и групп Mihomo (catalogInputSame).
 	xrayVer, mihomoVer string
+	// tail — снимок служебного хвоста Mihomo (Live hidden_tail) того же состояния:
+	// по нему модели выбора считают форму групп так же, как генератор профиля.
+	tail hiddenTail
 }
 
 // appliedModelOf читает группы и каталог узлов применённого состояния.
@@ -153,7 +156,8 @@ func (s *Service) appliedModelOf(st configlayer.StateView) (appliedModel, error)
 		return appliedModel{}, err
 	}
 	m := appliedModel{groups: cfg, installed: s.d.Installed(), byRef: map[string]sources.CatalogNode{},
-		xrayVer: s.d.KernelVersion(configlayer.KernelXray), mihomoVer: s.d.KernelVersion(configlayer.KernelMihomo)}
+		xrayVer: s.d.KernelVersion(configlayer.KernelXray), mihomoVer: s.d.KernelVersion(configlayer.KernelMihomo),
+		tail: readHiddenTail(st.Live)}
 	if m.installed.Xray || m.installed.Mihomo {
 		cat, err := s.d.Sources.Catalog(appliedInput(st), m.installed)
 		if err != nil {
@@ -550,9 +554,28 @@ func (s *Service) markReconcile() { s.reconcilePending.Store(true) }
 // принять PUT после таймаута клиента, поэтому сверка Mihomo запрошена, а выходы,
 // где выбор не записан или возвращён, ставят Mihomo по Live (WR-02).
 //
-// Select — вход клика пользователя (обработчик): быстрый путь разрешён.
+// Select — вход клика пользователя (обработчик): быстрый путь разрешён. Клик
+// проходит проверку арбитра (beforeUserSelect): группу держит лимит —
+// ErrQuotaHeld без обращения к ядру, держит окно — перехват до конца окна (D-04,
+// D-05). Неудачный или возвращённый ядром выбор откатывает запись арбитра.
 func (s *Service) Select(ctx context.Context, groupID, member string) (SelectResult, error) {
-	return s.selectOpts(ctx, groupID, member, true)
+	if s.arb == nil {
+		return s.selectOpts(ctx, groupID, member, true, false)
+	}
+	unlock, err := s.lockArbiter(ctx)
+	if err != nil {
+		return SelectResult{}, err
+	}
+	defer unlock()
+	undo, err := s.arb.beforeUserSelect(groupID, member)
+	if err != nil {
+		return SelectResult{}, err
+	}
+	res, err := s.selectOpts(ctx, groupID, member, true, false)
+	if err != nil || res.Reverted {
+		undo()
+	}
+	return res, err
 }
 
 // selectSync — служебный вход выбора без раннего ответа (WR-01 ревью 2): повторный
@@ -561,14 +584,24 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 // постановку Mihomo по Live. Маркер повторного выбора группы проход не снимает:
 // его снимает repickOne только после поставленного выбора.
 func (s *Service) selectSync(ctx context.Context, groupID, member string) (SelectResult, error) {
-	return s.selectOpts(ctx, groupID, member, false)
+	return s.selectOpts(ctx, groupID, member, false, false)
 }
 
-// selectOpts — тело выбора (Select, selectSync). fast — разрешён быстрый путь при
-// запущенном Mihomo и остановленном Xray (ранний PUT и фоновый хвост); false —
-// прежний синхронный порядок: проход файла Xray, затем Mihomo по Live, и маркер
-// повторного выбора группы остаётся за вызывающим (keepRepick).
-func (s *Service) selectOpts(ctx context.Context, groupID, member string, fast bool) (SelectResult, error) {
+// selectArbiter — вход выбора арбитра (окна расписания, удержание лимитом,
+// «Вернуть расписание»): синхронный порядок без раннего ответа, служебные
+// варианты DIRECT и REJECT допускаются вне состава группы (D-13). Клик
+// пользователя этим входом не идёт.
+func (s *Service) selectArbiter(ctx context.Context, gid, member string) (SelectResult, error) {
+	return s.selectOpts(ctx, gid, member, false, true)
+}
+
+// selectOpts — тело выбора (Select, selectSync, selectArbiter). fast — разрешён
+// быстрый путь при запущенном Mihomo и остановленном Xray (ранний PUT и фоновый
+// хвост); false — прежний синхронный порядок: проход файла Xray, затем Mihomo по
+// Live, и маркер повторного выбора группы остаётся за вызывающим (keepRepick).
+// arbiter — выбор арбитра: кроме вариантов группы допускаются служебные DIRECT и
+// REJECT (удержание лимитом, D-13).
+func (s *Service) selectOpts(ctx context.Context, groupID, member string, fast, arbiter bool) (SelectResult, error) {
 	start := time.Now()
 	st, err := s.d.Layer.ReadState()
 	if err != nil {
@@ -586,7 +619,7 @@ func (s *Service) selectOpts(ctx context.Context, groupID, member string, fast b
 	if !ok || g.Mode != ModeManual {
 		return SelectResult{}, ErrGroupNotApplied
 	}
-	if !memberAllowed(g, member, am) {
+	if !memberAllowed(g, member, am) && (!arbiter || !hiddenMember(member)) {
 		return SelectResult{}, ErrMemberInvalid
 	}
 
@@ -799,6 +832,10 @@ func appliedOptions(g Group, am appliedModel) []MemberOption {
 	return memberOptions(g, members, am.groups.Items, xray, mihomo)
 }
 
+// hiddenMember — служебные варианты ручной группы: ставит только арбитр, в составе
+// и виде их нет (удержание лимитом с действием block или direct, D-13).
+func hiddenMember(m string) bool { return m == memberDirect || m == memberReject }
+
 // memberAllowed — участник есть среди вариантов группы по применённому состоянию
 // (те же варианты, что отдаёт представление для применённой группы,
 // appliedOptions). Выбор вне состава effectiveSelection всё равно игнорировал бы.
@@ -894,7 +931,7 @@ func (s *Service) mihomoEntryFromModel(am appliedModel, st configlayer.StateView
 	if !s.mihomoSelPossible(st.Applied, am.installed) {
 		return nil, nil
 	}
-	b := newMihomoBuild(mihomoBuild{groups: am.groups.Items, catalog: am.cat.Mihomo, groupsOK: true})
+	b := newMihomoBuild(mihomoBuild{groups: am.groups.Items, catalog: am.cat.Mihomo, groupsOK: true, tail: am.tail})
 	b.prepare()
 	for _, mg := range b.shapes {
 		if mg.g.ID != gid {
@@ -927,8 +964,13 @@ func (s *Service) catalogInputSame(am appliedModel, prev, cur configlayer.StateV
 }
 
 // selectionLiveKeys — ключи Live, которые ведёт выбор групп; вход каталога и
-// профиля Mihomo от них не зависит.
-var selectionLiveKeys = map[string]bool{LiveKeySelection: true, LiveKeyUnconfirmed: true, LiveKeyRepick: true}
+// профиля Mihomo от них не зависит. Ключи арбитра (окна расписания и записи
+// удержания) во вход каталога и профиля Mihomo тоже не входят: правка окна не
+// меняет вход каталога.
+var selectionLiveKeys = map[string]bool{
+	LiveKeySelection: true, LiveKeyUnconfirmed: true, LiveKeyRepick: true,
+	LiveKeySchedules: true, LiveKeyArbiter: true,
+}
 
 // sectionsSame — побайтное равенство секций a и b, кроме ключей skip.
 func sectionsSame(a, b configlayer.Sections, skip map[string]bool) bool {
@@ -1348,7 +1390,8 @@ type mihomoSelEntry struct {
 }
 
 // mihomoBuildOf готовит расчёт профиля Mihomo по применённому состоянию, ровно
-// как генератор (имена групп и копий узлов). nil — Mihomo не установлен,
+// как генератор (имена групп и копий узлов, служебный хвост по снимку Live
+// hidden_tail). nil — Mihomo не установлен,
 // маршрутизацией не управляет панель или группы ниже порога версии (D-45).
 func (s *Service) mihomoBuildOf(st configlayer.StateView, installed configlayer.InstalledKernels) (*mihomoBuild, error) {
 	if !s.mihomoSelPossible(st.Applied, installed) {
@@ -1362,7 +1405,7 @@ func (s *Service) mihomoBuildOf(st configlayer.StateView, installed configlayer.
 	if err != nil {
 		return nil, err
 	}
-	b := newMihomoBuild(mihomoBuild{groups: groups.Items, catalog: cat.Mihomo, groupsOK: true})
+	b := newMihomoBuild(mihomoBuild{groups: groups.Items, catalog: cat.Mihomo, groupsOK: true, tail: readHiddenTail(st.Live)})
 	b.prepare()
 	return b, nil
 }
@@ -1638,18 +1681,23 @@ func (s *Service) CommitLive(st *configlayer.State, req configlayer.ApplyRequest
 	if st.Live == nil {
 		st.Live = configlayer.Sections{}
 	}
-	sel := liveSelection(st.Live)
-	repick := readRepick(st.Live)
-	if len(sel) == 0 && len(repick) == 0 {
-		return nil
-	}
-
 	manual := map[string]Group{}
 	for _, g := range cfg.Items {
 		if g.Mode == ModeManual {
 			manual[g.ID] = g
 		}
 	}
+	// Окна и записи арбитра есть только у ручных групп (D-10): у удалённых и
+	// переставших быть ручными они снимаются тем же проходом, что и выбор.
+	if err := dropNonManualArbiter(st.Live, manual); err != nil {
+		return err
+	}
+	sel := liveSelection(st.Live)
+	repick := readRepick(st.Live)
+	if len(sel) == 0 && len(repick) == 0 {
+		return nil
+	}
+
 	for gid := range sel {
 		if _, ok := manual[gid]; !ok {
 			delete(sel, gid)
@@ -1664,6 +1712,8 @@ func (s *Service) CommitLive(st *configlayer.State, req configlayer.ApplyRequest
 	repick = keep
 
 	installed := s.d.Installed()
+	// Записи арбитра читаются после dropNonManualArbiter: у ручных групп они те же.
+	recs := readArbiter(st.Live)
 	if installed.Xray || installed.Mihomo {
 		if cat, err := s.d.Sources.Catalog(used, installed); err == nil {
 			am := appliedModel{groups: cfg, cat: cat, union: unionCatalog(cat), installed: installed, byRef: map[string]sources.CatalogNode{}}
@@ -1674,6 +1724,11 @@ func (s *Service) CommitLive(st *configlayer.State, req configlayer.ApplyRequest
 				g := manual[gid]
 				cands := am.candidates(g)
 				if cur != "" && containsString(cands, cur) && am.avail(cur) {
+					continue
+				}
+				if hiddenMember(cur) && recs[gid].Holder == holderQuota {
+					// Служебный выбор держит лимит трафика (D-05, D-13): «Применить» его
+					// не снимает, исходный выбор вернёт арбитр после сброса лимита.
 					continue
 				}
 				if cur != "" && !strings.HasPrefix(cur, memberNode) {
@@ -1707,6 +1762,36 @@ func (s *Service) CommitLive(st *configlayer.State, req configlayer.ApplyRequest
 	return writeRepick(st.Live, repick)
 }
 
+// dropNonManualArbiter снимает из Live окна расписания и записи арбитра групп,
+// которых нет среди ручных групп manual.
+func dropNonManualArbiter(live configlayer.Sections, manual map[string]Group) error {
+	scheds := readSchedules(live)
+	changed := false
+	for gid := range scheds {
+		if _, ok := manual[gid]; !ok {
+			delete(scheds, gid)
+			changed = true
+		}
+	}
+	if changed {
+		if err := writeSchedules(live, scheds); err != nil {
+			return err
+		}
+	}
+	recs := readArbiter(live)
+	changed = false
+	for gid := range recs {
+		if _, ok := manual[gid]; !ok {
+			delete(recs, gid)
+			changed = true
+		}
+	}
+	if changed {
+		return writeArbiter(live, recs)
+	}
+	return nil
+}
+
 // containsString сообщает, что значение есть в списке.
 func containsString(list []string, v string) bool {
 	for _, x := range list {
@@ -1730,6 +1815,19 @@ func (s *Service) AfterApply(ctx context.Context, info configlayer.AfterApplyInf
 		}
 	}
 	s.repickAll(ctx)
+	if info.Trigger != configlayer.TriggerSelect {
+		// После «Применить» арбитр заново ставит удержания и окна: состав групп и
+		// узлов мог измениться; пауза сверки служебного хвоста снимается — причина
+		// её отказа могла уйти. Свой выбор арбитра (TriggerSelect) тик не будит.
+		// Запуск самого хвоста (TriggerLimitTail) паузу не снимает: хук работает
+		// позже settleTail, и снятая им пауза «не зафиксирован» гнала бы конвейер
+		// Mihomo заново каждый тик; исход такого запуска разбирает settleTail.
+		if info.Trigger == configlayer.TriggerLimitTail {
+			s.arb.Kick()
+		} else {
+			s.arb.kickAfterApply()
+		}
+	}
 }
 
 // groupNotes — уведомления одного префикса по группам (routing_repick,

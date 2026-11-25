@@ -17,9 +17,10 @@ import { routes } from './lib/pages';
 // axe не исключаются: находка размечается knownFailure с todo (D-12).
 //
 // Прежние адреса удалённых экранов (таблица D-10) входят в обход как перенаправления: адрес
-// ведёт в подраздел «Конфигурации», вкладка загружается и проходит те же проверки. Тест
-// называется по странице цели (`page:config … from:<адрес>`), поэтому сужение обхода по
-// затронутым страницам его не теряет.
+// ведёт на страницу цели (подраздел «Конфигурации», с фазы 152 — также «Прокси» и «Трафик →
+// Лимиты»), страница загружается и проходит те же проверки. Тест называется по странице цели
+// записи (`page:<цель> … from:<адрес>`), метки известных находок берутся по ней же, поэтому
+// сужение обхода по затронутым страницам его не теряет.
 //
 // Спек касается всех страниц (e2e-pages: *); выбор по маршрутам — через --grep по
 // названию `page:<маршрут> theme:<тема> vp:<ширина>`.
@@ -48,20 +49,41 @@ function configTabReady(hash: string, testId: string): (page: Page) => Promise<v
 interface LegacyAddress {
   /** Прежний маршрут без «#/». */
   from: string;
+  /** Страница цели: по ней метки известных находок, визит и название теста. */
+  route: string;
   /** Адрес подраздела, куда панель ведёт прежний адрес. */
   target: string;
   ready: (page: Page) => Promise<void>;
 }
 
 // Прежние адреса удалённых экранов: генератор Mihomo — вкладка секций ядер «Xray │ Mihomo»,
-// менеджер DAT — вкладка «Списки». Цель — вкладка страницы config
+// менеджер DAT — вкладка «Списки» (цель — страница config). Фаза 152 добавила Smart Proxy —
+// «Прокси» (цель proxies) и квоты — вкладку «Лимиты» на «Трафике» (цель traffic).
 const LEGACY: readonly LegacyAddress[] = [
   {
     from: 'mihomo-gen',
+    route: 'config',
     target: '#/config/cores',
     ready: configTabReady('#/config/cores', 'cores-tab')
   },
-  { from: 'dat', target: '#/config/lists', ready: configTabReady('#/config/lists', 'lists-tab') }
+  {
+    from: 'dat',
+    route: 'config',
+    target: '#/config/lists',
+    ready: configTabReady('#/config/lists', 'lists-tab')
+  },
+  {
+    from: 'smartproxy',
+    route: 'proxies',
+    target: '#/proxies',
+    ready: proxiesReady
+  },
+  {
+    from: 'trafficquotas',
+    route: 'traffic',
+    target: '#/traffic?tab=limits',
+    ready: limitsTabReady
+  }
 ];
 
 // Прокси: группы Mihomo и значок внешнего IP клиента. Нарушения контраста живут в счётчиках
@@ -84,6 +106,16 @@ async function proxiesReady(page: Page): Promise<void> {
     .catch(() => {
       throw fail('проверка внешнего IP не закончилась', T.page);
     });
+}
+
+// «Трафик → Лимиты»: вкладка «Лимиты» активна, список лимитов загружен (скелетона нет)
+async function limitsTabReady(page: Page): Promise<void> {
+  await expect(page.getByTestId('traffic-tab-limits')).toHaveAttribute('aria-selected', 'true', {
+    timeout: T.page
+  });
+  const tab = page.getByTestId('traffic-limits');
+  await expect(tab).toBeVisible({ timeout: T.page });
+  await expect(tab.locator('[aria-busy="true"]')).toHaveCount(0, { timeout: T.page });
 }
 
 // Подключения: индикатор в шапке зелёный («Онлайн») только после соединения сокета Mihomo.
@@ -110,10 +142,11 @@ async function connectionsReady(page: Page): Promise<void> {
     });
 }
 
-// Подсказка «У профиля нет доступа к API» (D-13) на «Прокси», «Подключениях» и в квотах видна
-// ровно тогда, когда сервер сообщает no_socket: профиль панели, остановленное ядро и Xray её
-// не дают. Признак читается из /api/capabilities после загрузки страницы.
-const NO_SOCKET_ROUTES = new Set(['proxies', 'connections', 'trafficquotas']);
+// Подсказка «У профиля нет доступа к API» (D-13) на «Прокси» и «Подключениях» видна ровно
+// тогда, когда сервер сообщает no_socket: профиль панели, остановленное ядро и Xray её не дают.
+// Признак читается из /api/capabilities после загрузки страницы. Плашку на вкладке «Лимиты»
+// «Трафика» проверяет сценарий proxies-runtime no-socket.
+const NO_SOCKET_ROUTES = new Set(['proxies', 'connections']);
 
 async function serverNoSocket(page: Page): Promise<boolean> {
   return page.evaluate(async () => {
@@ -164,7 +197,6 @@ function markKnown(route: string, theme: string, width: number): void {
   if (light && route === 'logs') knownFailure('*', 'muted-small-label-text-contrast');
   if (route === 'proxies') knownFailure('arm64/mihomo', 'muted-small-label-text-contrast');
   if (light && !wide && route === 'services') knownFailure('*', 'muted-small-label-text-contrast');
-  if (route === 'smartproxy') knownFailure('*', 'muted-small-label-text-contrast');
 }
 
 // Маршруты, чей тест читает ядро: connectionsReady ждёт сокет Mihomo только на Mihomo
@@ -308,21 +340,25 @@ for (const route of routes()) {
   });
 }
 
-// Прежние адреса удалённых экранов: перенаправление в подраздел «Конфигурации» и те же проверки
+// Прежние адреса удалённых экранов: перенаправление на страницу цели и те же проверки; метки
+// известных находок, тег ядра и название теста — по странице цели записи
 for (const legacy of LEGACY) {
   test.describe(`#/${legacy.from}`, () => {
     test.describe.configure({ mode: 'default' });
     for (const theme of THEMES) {
       for (const vp of VIEWPORTS) {
-        const tag = coreTagsOf(() => markKnown('config', theme, vp.width));
+        const tag = [
+          ...coreTagsOf(() => markKnown(legacy.route, theme, vp.width)),
+          ...(CORE_ROUTES.has(legacy.route) ? [CORE_TAG] : [])
+        ];
         test(
-          `page:config theme:${theme} vp:${vp.width} from:${legacy.from}`,
+          `page:${legacy.route} theme:${theme} vp:${vp.width} from:${legacy.from}`,
           { tag },
           async ({ page }) => {
             await checkPage(
               page,
               {
-                route: 'config',
+                route: legacy.route,
                 address: `#/${legacy.from}`,
                 expected: legacy.target,
                 ready: legacy.ready

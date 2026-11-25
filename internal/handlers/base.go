@@ -39,11 +39,11 @@ type API struct {
 	kernelApplier       *services.KernelApplier
 	kernelSwitcher      *services.KernelSwitcher
 	networkSvc          *services.NetworkToolsService
-	smartProxySvc       *services.SmartProxyService
 	xkeenSettingsSvc    *services.XKeenSettingsService
 	mihomoProfileSvc    *services.MihomoProfileService
 	xrayAccessLogSvc    *services.XrayAccessLogService
 	trafficQuotaSvc     *services.TrafficQuotaService
+	limitsSvc           *services.LimitsService
 	watchdogSvc         *services.WatchdogService
 	xkeenStatus         *services.XKeenStatusCache
 	updateScheduler     *UpdateScheduler
@@ -131,12 +131,13 @@ func (a *API) ClientResolver() *services.ClientResolver {
 	return a.clientResolver
 }
 
-func (a *API) SetSmartProxyService(svc *services.SmartProxyService) {
-	a.smartProxySvc = svc
-}
-
 func (a *API) SetTrafficQuotaService(svc *services.TrafficQuotaService) {
 	a.trafficQuotaSvc = svc
+}
+
+// SetLimitsService подключает службу лимитов трафика (маршруты /api/traffic/limits*).
+func (a *API) SetLimitsService(svc *services.LimitsService) {
+	a.limitsSvc = svc
 }
 
 func (a *API) SetWatchdogService(svc *services.WatchdogService) {

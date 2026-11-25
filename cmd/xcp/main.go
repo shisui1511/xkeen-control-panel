@@ -395,28 +395,18 @@ func main() {
 	// Network IP endpoint (Router WAN IP detection)
 	srv.HandleProtected("/api/network/ip", api.NetworkIP)
 
-	// Smart Proxy Manager endpoints
-	srv.HandleProtected("/api/smart-proxy/profiles", api.SmartProxyList)
-	srv.HandleProtected("/api/smart-proxy/profiles/get", api.SmartProxyGet)
-	srv.HandleProtected("/api/smart-proxy/profiles/add", api.SmartProxyAdd)
-	srv.HandleProtected("/api/smart-proxy/profiles/update", api.SmartProxyUpdate)
-	srv.HandleProtected("/api/smart-proxy/profiles/delete", api.SmartProxyDelete)
-	srv.HandleProtected("/api/smart-proxy/profiles/enabled", api.SmartProxySetEnabled)
-	srv.HandleProtected("/api/smart-proxy/status", api.SmartProxyStatus)
-
-	// Traffic Quotas endpoints
-	srv.HandleProtected("/api/traffic/quotas", api.TrafficQuotaList)
-	srv.HandleProtected("/api/traffic/quotas/get", api.TrafficQuotaGet)
-	srv.HandleProtected("/api/traffic/quotas/add", api.TrafficQuotaAdd)
-	srv.HandleProtected("/api/traffic/quotas/update", api.TrafficQuotaUpdate)
-	srv.HandleProtected("/api/traffic/quotas/delete", api.TrafficQuotaDelete)
-	srv.HandleProtected("/api/traffic/quotas/enabled", api.TrafficQuotaSetEnabled)
-	srv.HandleProtected("/api/traffic/quotas/reset", api.TrafficQuotaReset)
+	// Статистика и потоки трафика
 	srv.HandleProtected("/api/traffic/stats", api.TrafficStats)
-	srv.HandleProtected("/api/traffic/alerts", api.TrafficAlerts)
-	srv.HandleProtected("/api/traffic/alerts/clear", api.TrafficAlertsClear)
 	srv.HandleProtected("/api/traffic/ws", api.TrafficWebSocket)
 	srv.HandleProtected("/api/traffic/reset", api.TrafficReset)
+	// Лимиты трафика: служба нейтральна к ядру, маршруты работают при любом ядре.
+	srv.HandleProtected("/api/traffic/limits", api.TrafficLimitsList)
+	srv.HandleProtected("/api/traffic/limits/save", api.TrafficLimitsSave)
+	srv.HandleProtected("/api/traffic/limits/delete", api.TrafficLimitsDelete)
+	srv.HandleProtected("/api/traffic/limits/enabled", api.TrafficLimitsEnabled)
+	srv.HandleProtected("/api/traffic/limits/reset", api.TrafficLimitsReset)
+	srv.HandleProtected("/api/traffic/limits/alerts", api.TrafficLimitsAlerts)
+	srv.HandleProtected("/api/traffic/limits/alerts/clear", api.TrafficLimitsAlertsClear)
 	srv.HandleProtected("/api/mihomo/connections/ws", api.ConnectionsWebSocket)
 
 	// Kernel service must exist before background services that query it
@@ -432,11 +422,13 @@ func main() {
 		api.MihomoService().NotifyControllerChanged()
 	})
 
-	// Start background services
-	smartProxySvc := services.NewSmartProxyService(cfg.DataDir, api.MihomoService())
-	smartProxySvc.Start()
-	api.SetSmartProxyService(smartProxySvc)
-	defer stops.run("smart-proxy", smartProxySvc.Stop)
+	// Лимиты трафика: один счётчик на лимит при любом ядре (<DataDir>/traffic-limits.json).
+	limitsSvc := services.NewLimitsService(cfg.DataDir)
+	limitsSvc.SetActiveKernel(func() string { return kernelSvc.ActiveState().Kernel })
+	limitsSvc.Start()
+	api.SetLimitsService(limitsSvc)
+	// Финальная запись счётчиков лимитов — со своим бюджетом (shutdownSteps.save).
+	defer stops.save("traffic-limits", limitsSvc.Stop)
 
 	trafficQuotaSvc := services.NewTrafficQuotaService(cfg.DataDir, cfg.MihomoSecret, api.MihomoService())
 	// Живость ядра — по процессам, без определения версии: опрос квот не должен
@@ -449,6 +441,12 @@ func main() {
 		}
 		return false
 	})
+	// Учёт лимитов на Mihomo (SPX-01): дельты соединений приходят от службы потоков,
+	// состояние данных — по состоянию её потока /connections. Хук ставится до Start,
+	// чтобы первый снимок уже дошёл до лимитов. Служба потоков останавливается раньше
+	// службы лимитов (defer — обратный порядок), поэтому хук после Stop лимитов не зовётся.
+	trafficQuotaSvc.SetConnDeltaHook(limitsSvc.ObserveMihomo)
+	limitsSvc.SetMihomoState(trafficQuotaSvc.StreamState)
 	trafficQuotaSvc.Start()
 	api.SetTrafficQuotaService(trafficQuotaSvc)
 	// Финальная запись счётчиков трафика — со своим бюджетом (shutdownSteps.save).
@@ -458,6 +456,8 @@ func main() {
 	// Единый резолвер активного ядра; при конфликте Kernel пуст, и gRPC Xray не опрашивается.
 	xrayGRPCSvc.SetActiveKernelFunc(func() string { return kernelSvc.ActiveState().Kernel })
 	xrayGRPCSvc.Start()
+	// Учёт лимитов на Xray: счётчики исходящих читаются через общее соединение gRPC.
+	limitsSvc.SetXrayCounters(xrayGRPCSvc)
 	api.SetXrayGRPCService(xrayGRPCSvc)
 	defer stops.run("xray-grpc", xrayGRPCSvc.Stop)
 
@@ -910,6 +910,23 @@ func main() {
 			}, 0)
 			selWatch.Start()
 			defer stops.run("routing-selection", selWatch.Stop)
+			// Арбитр окон расписания (SPX-01): ставит узел ручной группы тем же выбором,
+			// что и клик. defer идёт после наблюдателя — арбитр останавливается первым.
+			arb := routing.NewArbiter(routingSvc)
+			arb.Start()
+			defer stops.run("routing-arbiter", arb.Stop)
+			// Лимиты держат группы через тот же арбитр (SPX-01): цели учёта — из
+			// применённого состояния маршрутизации, удержания — источник арбитра, каждая
+			// смена удержаний будит арбитр. Порядок важен: без источника удержаний сверка
+			// служебного хвоста профиля Mihomo не идёт, поэтому SetHoldSource раньше Kick.
+			// Kick сразу после проводки — первая сверка удержаний и хвоста с лимитами,
+			// прочитанными с диска. Арбитр останавливается раньше службы лимитов: его
+			// defer зарегистрирован позже. Без сервиса маршрутизации лимиты работают без
+			// целей групп.
+			limitsSvc.SetTargets(routingSvc.TrafficTargets)
+			arb.SetHoldSource(limitsSvc)
+			limitsSvc.SetOnHoldsChanged(arb.Kick)
+			arb.Kick()
 			if pingRunner != nil {
 				pingRunner.Start()
 				api.SetPingRunner(pingRunner)
@@ -990,6 +1007,10 @@ func main() {
 	srv.HandleProtected("/api/configlayer/routing/reclaim", api.ConfigRoutingReclaim)
 	srv.HandleProtected("/api/configlayer/routing/mihomo", api.ConfigRoutingMihomo)
 	srv.HandleProtected("/api/configlayer/routing/select", api.ConfigRoutingSelect)
+	srv.HandleProtected("/api/configlayer/routing/schedule/save", api.ConfigRoutingScheduleSave)
+	srv.HandleProtected("/api/configlayer/routing/schedule/delete", api.ConfigRoutingScheduleDelete)
+	srv.HandleProtected("/api/configlayer/routing/schedule/enabled", api.ConfigRoutingScheduleEnabled)
+	srv.HandleProtected("/api/configlayer/routing/schedule/restore", api.ConfigRoutingScheduleRestore)
 	srv.HandleProtected("/api/configlayer/routing/lists", api.ConfigRoutingLists)
 	srv.HandleProtected("/api/configlayer/routing/presets", api.ConfigRoutingPresets)
 	srv.HandleProtected("/api/configlayer/routing/presets/plan", api.ConfigRoutingPresetsPlan)

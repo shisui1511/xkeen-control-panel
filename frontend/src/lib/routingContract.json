@@ -361,9 +361,14 @@
     "children": {}
   },
   "RuntimeView": {
-    "required": ["kernel", "running", "state", "no_socket", "modes", "probe", "groups"],
+    "required": ["kernel", "running", "state", "no_socket", "modes", "probe", "groups", "clock"],
     "optional": [],
-    "children": { "modes": "RuntimeModes", "probe": "ProbeConfig", "groups": "RuntimeGroup[]" }
+    "children": {
+      "modes": "RuntimeModes",
+      "probe": "ProbeConfig",
+      "groups": "RuntimeGroup[]",
+      "clock": "RuntimeClock"
+    }
   },
   "RuntimeModes": {
     "required": ["xray", "mihomo"],
@@ -383,10 +388,17 @@
       "switching",
       "locked_with",
       "counts",
-      "members"
+      "members",
+      "schedule"
     ],
-    "optional": ["fallback"],
-    "children": { "chain": "RuntimeLink[]", "counts": "KernelCounts", "members": "RuntimeMember[]" }
+    "optional": ["fallback", "hold"],
+    "children": {
+      "chain": "RuntimeLink[]",
+      "counts": "KernelCounts",
+      "members": "RuntimeMember[]",
+      "hold": "RuntimeHold",
+      "schedule": "ScheduleWindowView[]"
+    }
   },
   "RuntimeLink": {
     "required": ["kind", "name"],
@@ -396,6 +408,40 @@
   "RuntimeMember": {
     "required": ["member", "kind", "name", "xray", "mihomo"],
     "optional": ["ref", "group", "proto", "source", "source_name"],
+    "children": {}
+  },
+  "RuntimeHold": {
+    "required": ["kind"],
+    "optional": [
+      "limit",
+      "limit_name",
+      "reset_at",
+      "until",
+      "window",
+      "member",
+      "origin",
+      "stalled"
+    ],
+    "children": {}
+  },
+  "ScheduleWindowView": {
+    "required": [
+      "id",
+      "days",
+      "from",
+      "to",
+      "member",
+      "enabled",
+      "member_label",
+      "missing",
+      "active"
+    ],
+    "optional": [],
+    "children": {}
+  },
+  "RuntimeClock": {
+    "required": ["now", "zone", "offset"],
+    "optional": [],
     "children": {}
   },
   "RuntimeNow": {

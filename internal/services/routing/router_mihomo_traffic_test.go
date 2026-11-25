@@ -5,12 +5,18 @@
 package routing
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -488,4 +494,203 @@ func TestRouterMihomoRulesTraffic(t *testing.T) {
 	if !sawTCP443 {
 		t.Error("TCP на порт 443 не дошёл до узла: правило udp+443 задело TCP")
 	}
+
+	// Spike D-18 и D-02 (M1–M2): порядок chains в /connections для цепочки «узел ←
+	// вложенная группа ← внешняя группа», вид chains при DIRECT и ответ
+	// PUT /proxies на REJECT, когда его нет и когда он есть в proxies группы.
+	// Отдельный процесс Mihomo в каталоге подтеста со своим сокетом контроллера:
+	// сокет и ядро стенда не трогаются, активное ядро тест не читает и не
+	// переключает — метка ядра не нужна. Факты — строки FACT с ролями (outer,
+	// inner, node, direct, reject) вместо имён; тест падает только при поломке
+	// подготовки.
+	t.Run("chains_facts", func(t *testing.T) { rtmtChainsFacts(t, e, nodePort, accessLog) })
+}
+
+// Имена spike M1–M2 в профиле отдельного процесса; в факты попадают только роли.
+const (
+	rtmtSpikeNode   = "rt-spike-node"
+	rtmtSpikeOuter  = "Внешн"
+	rtmtSpikeInner  = "Внутр"
+	rtmtSpikeNoSvc  = "БезСлужебных"
+	rtmtSpikeSvc    = "СоСлужебными"
+	rtmtSpikeDomain = "m2-reject.example.test"
+)
+
+// rtmtSpikeRole — роль элемента chains для факта.
+func rtmtSpikeRole(name string) string {
+	switch name {
+	case rtmtSpikeNode:
+		return "node"
+	case rtmtSpikeInner:
+		return "inner"
+	case rtmtSpikeOuter:
+		return "outer"
+	case "DIRECT":
+		return "direct"
+	case "REJECT":
+		return "reject"
+	}
+	return "other"
+}
+
+// rtmtChainsFacts — подтест chains_facts (M1–M2).
+func rtmtChainsFacts(t *testing.T, e *rtEnv, nodePort int, accessLog string) {
+	started := time.Now()
+	// Цель с медленным ответом: соединение держится, пока его читает /connections.
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(3 * time.Second):
+		case <-r.Context().Done():
+			return
+		}
+		_, _ = io.WriteString(w, "ok")
+	}))
+	t.Cleanup(slow.Close)
+	su, err := url.Parse(slow.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slowURL, slowPort := slow.URL+"/slow", su.Port()
+
+	core := rtNewMihomoCore(t)
+	groups := []any{
+		map[string]any{"name": rtmtSpikeInner, "type": "select", "proxies": []string{rtmtSpikeNode}},
+		map[string]any{"name": rtmtSpikeOuter, "type": "select", "proxies": []string{rtmtSpikeInner, "DIRECT"}},
+		map[string]any{"name": rtmtSpikeNoSvc, "type": "select", "proxies": []string{rtmtSpikeNode}},
+		map[string]any{"name": rtmtSpikeSvc, "type": "select", "proxies": []string{rtmtSpikeNode, "DIRECT", "REJECT"}},
+	}
+	rules := []string{"DOMAIN," + rtmtSpikeDomain + "," + rtmtSpikeSvc, "MATCH," + rtmtSpikeOuter}
+	var secret string
+	rtmtStart(t, e, core, func(doc map[string]any) {
+		rtmtGroupsRules(groups, rules)(doc)
+		proxies, _ := doc["proxies"].([]any)
+		doc["proxies"] = append(proxies, map[string]any{
+			"name": rtmtSpikeNode, "type": "socks5", "server": "127.0.0.1", "port": nodePort,
+		})
+		secret, _ = doc["secret"].(string)
+	})
+
+	sock := filepath.Join(core.dir, "c.sock")
+	api := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{
+		DisableKeepAlives: true,
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", sock)
+		},
+	}}
+	call := func(method, path string, body any) (int, []byte) {
+		t.Helper()
+		var rd io.Reader
+		if body != nil {
+			data, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rd = bytes.NewReader(data)
+		}
+		req, err := http.NewRequest(method, "http://localhost"+path, rd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if secret != "" {
+			req.Header.Set("Authorization", "Bearer "+secret)
+		}
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		resp, err := api.Do(req)
+		if err != nil {
+			return 0, nil
+		}
+		defer resp.Body.Close()
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return resp.StatusCode, data
+	}
+	rtWaitCond(t, 30*time.Second, "ответ Clash API отдельного процесса", func() bool {
+		code, _ := call(http.MethodGet, "/proxies", nil)
+		return code == http.StatusOK
+	})
+	put := func(group, name string) int {
+		code, _ := call(http.MethodPut, "/proxies/"+url.PathEscape(group), map[string]string{"name": name})
+		return code
+	}
+
+	// held открывает медленное соединение через socks и, пока оно открыто, ищет
+	// его в /connections по порту цели; возвращает chains (nil — не нашли).
+	held := func() []string {
+		t.Helper()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_, _ = rtSocksGet(core.port, slowURL, 6*time.Second)
+		}()
+		defer func() { <-done }()
+		for end := time.Now().Add(2500 * time.Millisecond); time.Now().Before(end); time.Sleep(150 * time.Millisecond) {
+			code, data := call(http.MethodGet, "/connections", nil)
+			if code != http.StatusOK {
+				continue
+			}
+			var snap struct {
+				Connections []struct {
+					Chains   []string       `json:"chains"`
+					Metadata map[string]any `json:"metadata"`
+				} `json:"connections"`
+			}
+			if json.Unmarshal(data, &snap) != nil {
+				continue
+			}
+			for _, c := range snap.Connections {
+				if fmt.Sprint(c.Metadata["destinationPort"]) == slowPort {
+					return c.Chains
+				}
+			}
+		}
+		return nil
+	}
+	rolesOf := func(chains []string) string {
+		out := make([]string, 0, len(chains))
+		for _, n := range chains {
+			out = append(out, rtmtSpikeRole(n))
+		}
+		return strings.Join(out, ",")
+	}
+
+	// M1: цепочка «узел ← Внутр ← Внешн».
+	chains := held()
+	rtdsFact(t, "m1_found", rtdsYesNo(chains != nil))
+	if chains != nil {
+		final := "none"
+		switch {
+		case len(chains) == 1 && chains[0] == rtmtSpikeNode:
+			final = "only"
+		case chains[0] == rtmtSpikeNode:
+			final = "first"
+		case chains[len(chains)-1] == rtmtSpikeNode:
+			final = "last"
+		}
+		rtdsFact(t, "m1_chains_len", strconv.Itoa(len(chains)))
+		rtdsFact(t, "m1_chain", rolesOf(chains))
+		rtdsFact(t, "m1_final_index", final)
+		rtdsFact(t, "m1_outer_in_chains", rtdsYesNo(slices.Contains(chains, rtmtSpikeOuter)))
+		rtdsFact(t, "m1_inner_in_chains", rtdsYesNo(slices.Contains(chains, rtmtSpikeInner)))
+	}
+
+	// M1: внешняя группа на DIRECT — вид chains ролями.
+	rtdsFact(t, "m1_put_direct", strconv.Itoa(put(rtmtSpikeOuter, "DIRECT")))
+	if chains := held(); chains != nil {
+		rtdsFact(t, "m1_direct_chain", rolesOf(chains))
+	} else {
+		rtdsFact(t, "m1_direct_chain", "not_found")
+	}
+
+	// M2: PUT REJECT в группу без REJECT в proxies и в группу с ним.
+	rtdsFact(t, "m2_put_absent", strconv.Itoa(put(rtmtSpikeNoSvc, "REJECT")))
+	rtdsFact(t, "m2_put_present", strconv.Itoa(put(rtmtSpikeSvc, "REJECT")))
+	_, reqErr := rtSocksGet(core.port, "http://"+rtmtSpikeDomain+"/", 3*time.Second)
+	sawNode := rtWaitNodeSaw(accessLog, rtmtSpikeDomain, 2*time.Second)
+	rtdsFact(t, "m2_reject_blocks", rtdsYesNo(reqErr != nil && !sawNode))
+
+	if core.pid() == 0 {
+		t.Fatalf("подготовка: процесс Mihomo завершился: %s", core.proc.tail())
+	}
+	rtdsFact(t, "m_chains_facts_ms", strconv.FormatInt(time.Since(started).Milliseconds(), 10))
 }

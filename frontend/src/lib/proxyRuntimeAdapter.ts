@@ -6,7 +6,9 @@ import type {
   NowDelay,
   PingResult,
   ProxyKernel,
+  RuntimeClock,
   RuntimeGroup,
+  RuntimeHold,
   RuntimeLink,
   RuntimeMember,
   RuntimeView
@@ -95,6 +97,10 @@ export type NowLine =
   | { kind: 'chain'; links: RuntimeLink[] }
   /** Xray без API: имя узла получить нельзя (D-09). */
   | { kind: 'fastest' }
+  /** Группу держит лимит с действием «Блокировать»: стоит служебный REJECT (D-13). */
+  | { kind: 'reject' }
+  /** Группу держит лимит с действием «Напрямую»: стоит служебный DIRECT (D-13). */
+  | { kind: 'direct' }
   /** Ядро не сообщает узел (D-26): последний известный выбор не подставляется. */
   | { kind: 'unknown' }
   /** Строки нет (узлы источника без выбора). */
@@ -105,12 +111,16 @@ export type NowLine =
  * «Сейчас» ядра с подписью из участников, «самый быстрый из живых» при Xray без API,
  * иначе — «неизвестен». Неподтверждённый выбор (D-16) и «самый быстрый», когда ни один
  * узел не ответил (D-26), — тоже «неизвестен»: последний известный выбор не подставляется.
- * Узел, подтверждённый ядром, неудачные пробы не опровергают.
+ * Узел, подтверждённый ядром, неудачные пробы не опровергают. Ручная группа, которую
+ * лимит держит на служебном REJECT или DIRECT, — «Блокировка» или «Напрямую» (D-13).
  */
 export function nowLine(group: RuntimeGroup, now: GroupNow | null, allFailed = false): NowLine {
   if (group.mode === 'source') return { kind: 'none' };
   if (group.unconfirmed) return { kind: 'unknown' };
   if (group.mode === 'manual') {
+    // Служебные REJECT/DIRECT в сетке не показываются: позицию называет строка «Сейчас»
+    if (group.hold?.kind === 'quota' && (group.current === 'reject' || group.current === 'direct'))
+      return { kind: group.current };
     if (group.chain.length > 0) return { kind: 'chain', links: group.chain };
     return { kind: 'unknown' };
   }
@@ -121,6 +131,49 @@ export function nowLine(group: RuntimeGroup, now: GroupNow | null, allFailed = f
   }
   if (now?.fastest && !allFailed) return { kind: 'fastest' };
   return { kind: 'unknown' };
+}
+
+// --- Удержание группы арбитром (D-04, D-05) ---
+
+/** DD.MM момента unix-секунд по часам роутера (смещение пояса из вида, D-08). */
+export function routerDay(unix: number | undefined, clock: RuntimeClock | undefined): string {
+  if (!unix) return '--.--';
+  const d = new Date((unix + (clock?.offset ?? 0)) * 1000);
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+  return `${dd}.${mo}`;
+}
+
+/** Параметры текстов удержания лимитом: имя лимита и день сброса по часам роутера. */
+export function quotaHoldParams(
+  hold: RuntimeHold,
+  clock: RuntimeClock | undefined
+): { name: string; date: string } {
+  return { name: hold.limit_name || hold.limit || '', date: routerDay(hold.reset_at, clock) };
+}
+
+/**
+ * Удержание — только след неудачного возврата (Stalled без действующего удержания):
+ * лимит уже снят или окно кончилось, а ядро не приняло возврат к исходному выбору.
+ */
+export function holdLeftover(hold: RuntimeHold): boolean {
+  if (!hold.stalled) return false;
+  if (hold.kind === 'quota') return !hold.limit_name;
+  if (hold.kind === 'schedule' || hold.kind === 'override') return !hold.until;
+  return false;
+}
+
+/** Группу держит действующий лимит: след неудачного возврата выбор не блокирует (сервер его принимает). */
+export function quotaHeld(hold: RuntimeHold | undefined): boolean {
+  return hold?.kind === 'quota' && !holdLeftover(hold);
+}
+
+/** Узел окна, которое держит группу (у перехвата hold.member — узел пользователя). */
+export function holdWindowMember(group: RuntimeGroup): string {
+  const hold = group.hold;
+  if (!hold) return '';
+  if (hold.kind === 'schedule') return hold.member ?? '';
+  return group.schedule.find((w) => w.id === hold.window)?.member ?? '';
 }
 
 /** Участник — резервный узел группы «Резерв» (поле fallback — ссылка узла). */

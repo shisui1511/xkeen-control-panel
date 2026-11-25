@@ -303,6 +303,7 @@ for (const prefix of [
   "routing_reconcile:",
   "routing_repick:",
   "routing_list_missing:",
+  "routing_schedule:",
 ]) {
   expect(
     layerTs.includes(`'${prefix}'`),
@@ -354,6 +355,7 @@ for (const id of [
   "routing_reconcile:",
   "routing_repick:",
   "routing_list_missing:",
+  "routing_schedule:",
 ]) {
   expect(notices.includes(id), `ConfigNotices.svelte: нет разбора ${id}`);
 }

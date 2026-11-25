@@ -283,9 +283,9 @@ function checkArchive(files) {
           '\\bfunc Run\\s*\\(',
           '\\bValidateUnder\\s*\\(',
           '\\bos\\.OpenRoot\\s*\\(',
-          'sourceNames\\s*=\\s*\\[\\]string\\s*\\{\\s*"subscriptions"\\s*,\\s*"subscriptions\\.json"\\s*,\\s*"cache"\\s*,\\s*"user_rules\\.json"\\s*,?\\s*\\}'
+          'sourceNames\\s*=\\s*\\[\\]string\\s*\\{\\s*"subscriptions"\\s*,\\s*"subscriptions\\.json"\\s*,\\s*"cache"\\s*,\\s*"user_rules\\.json"\\s*,\\s*"smartproxy"\\s*,\\s*"traffic"\\s*,?\\s*\\}'
         ]) checkPattern(file, code, pattern, true);
-        checkPattern(file, code, '"(?:xcp_hwid\\.txt|config_layer_state\\.json)"', false);
+        checkPattern(file, code, '"(?:xcp_hwid\\.txt|config_layer_state\\.json|traffic-limits\\.json|traffic-stats\\.json)"', false);
         break;
       case 1:
         for (const field of ['state', 'archive', 'created_at', 'files', 'url_count', 'kernel_cleanup_done']) {

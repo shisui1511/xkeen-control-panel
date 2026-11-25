@@ -54,6 +54,10 @@ const (
 	// TriggerDNSRestore — откат перехвата DNS к снимку (RunRestore): применённое
 	// состояние и живые данные перехвата возвращаются к значениям до транзакции.
 	TriggerDNSRestore Trigger = "dns_restore"
+	// TriggerLimitTail — сверка служебного хвоста профиля Mihomo по лимитам трафика:
+	// запуск поверх применённого состояния, фиксирует Live hidden_tail, черновик не
+	// трогается.
+	TriggerLimitTail Trigger = "limit_tail"
 )
 
 // SourceKind — из какого состояния собираются файлы.

@@ -1267,8 +1267,8 @@ test(
 
 // --- Профиль Mihomo без сокета (151-09, D-13) ---
 // Свой профиль пользователя без external-controller-unix: панель его не правит и к Clash API по
-// TCP не ходит, а «Прокси», «Подключения» и квоты показывают подсказку «У профиля нет доступа к
-// API» с переходом к профилям. Профили rtpx-nosock-* создаются настоящим API из шаблона, строки
+// TCP не ходит, а «Прокси», «Подключения» и вкладка «Лимиты» «Трафика» показывают подсказку
+// «У профиля нет доступа к API» с переходом к профилям. Профили rtpx-nosock-* создаются настоящим API из шаблона, строки
 // контроллера правятся записью файла (config/save): у одного контроллера нет совсем, у другого
 // только TCP — его слушает сам Mihomo, свой сервер тест не поднимает. Подключения к TCP-порту
 // считаются на роутере по /proc/net/tcp. Остановленное ядро и профиль панели подсказки не дают.
@@ -1529,14 +1529,14 @@ async function expectProfilesTitleBelowDraftBar(page: Page, where: string): Prom
 }
 
 /**
- * Подсказка S3 на странице: заголовок и ссылка «Управлять в панели». На «Квотах» она — плашка
- * над работающей страницей, без заголовка-раздела.
+ * Подсказка S3 на странице: заголовок и ссылка «Управлять в панели». На вкладке «Лимиты»
+ * «Трафика» она — плашка над работающей вкладкой, без заголовка-раздела.
  */
 async function expectNoSocketHint(page: Page, hash: string): Promise<void> {
   await page.goto(`/${hash}`, { timeout: T.page, waitUntil: 'domcontentloaded' });
   const hint = page.getByTestId('mihomo-no-socket');
   await expect(hint, `подсказка на ${hash}`).toBeVisible({ timeout: T.page });
-  if (hash === '#/trafficquotas') {
+  if (hash === '#/traffic?tab=limits') {
     await expect(hint.locator('strong')).toHaveText(localeRe('proxies.rt.no_socket_title'));
   } else {
     await expect(hint.getByRole('heading')).toHaveText(localeRe('proxies.rt.no_socket_title'));
@@ -1625,7 +1625,7 @@ test(
         await expect(page.getByTestId('proxies-runtime-notice')).toHaveCount(0);
         await expectNoSocketHint(page, '#/connections');
         await expect(page.locator('.main-content .conn-toolbar')).toHaveCount(0);
-        await expectNoSocketHint(page, '#/trafficquotas');
+        await expectNoSocketHint(page, '#/traffic?tab=limits');
         // Ссылка ведёт к профилям: вкладка ядер «Конфигурации», активен профиль теста
         await page
           .getByTestId('mihomo-no-socket')

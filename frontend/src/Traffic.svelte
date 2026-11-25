@@ -15,9 +15,10 @@
   import { notifyApplyOutcome, type ApplyResult } from './lib/serviceApply';
   import PageHeader from './PageHeader.svelte';
   import SegmentedControl from './components/SegmentedControl.svelte';
-  import Tabs from './components/Tabs.svelte';
+  import Tabs, { type TabItem } from './components/Tabs.svelte';
   import Section from './components/Section.svelte';
   import EmptyState from './components/EmptyState.svelte';
+  import TrafficLimitsTab from './components/traffic/TrafficLimitsTab.svelte';
 
   interface TrafficPoint {
     up: number;
@@ -56,6 +57,53 @@
   }
 
   let { onSwitchTab = () => {} }: Props = $props();
+
+  // Вкладки страницы (D-17): «Статистика» — прежнее содержимое, «Лимиты» — лимиты трафика.
+  // Адрес #/traffic?tab=limits открывает «Лимиты»; любое другое значение tab — «Статистику».
+  type PageTab = 'stats' | 'limits';
+
+  function hashQuery(): URLSearchParams {
+    return new URLSearchParams(window.location.hash.split('?')[1] ?? '');
+  }
+
+  /** Вкладка из адреса; null — параметра tab нет. */
+  function hashTab(): PageTab | null {
+    const tab = hashQuery().get('tab');
+    if (tab === null) return null;
+    return tab === 'limits' ? 'limits' : 'stats';
+  }
+
+  let activeTab = $state<PageTab>(hashTab() ?? 'stats');
+  // Вкладку выбрали руками или адресом: адрес без tab (переход из меню) её не сбрасывает.
+  let tabChosen = $state(hashTab() !== null);
+  // Параметры перехода из карточки группы: new=1&group=<id> — форма нового лимита с
+  // предвыбранной группой, quota=<id> — карточка лимита. Обновляются тем же hashchange.
+  let linkQuery = $state(hashQuery().toString());
+  let linkParams = $derived(new URLSearchParams(linkQuery));
+  let linkNew = $derived(linkParams.get('new') === '1');
+  let linkGroup = $derived(linkParams.get('group') ?? '');
+  let linkQuota = $derived(linkParams.get('quota') ?? '');
+  // Ссылка, форма которой закрыта: вкладка «Лимиты» размонтируется при переключении,
+  // поэтому признак живёт здесь и форма по той же ссылке не открывается повторно.
+  let dismissedLink = $state('');
+
+  let pageTabs = $derived<TabItem[]>([
+    { value: 'stats', label: $t('traffic.tab_stats'), testId: 'traffic-tab-stats' },
+    { value: 'limits', label: $t('traffic.tab_limits'), testId: 'traffic-tab-limits' }
+  ]);
+
+  function onHashChange() {
+    const nextQuery = hashQuery().toString();
+    if (nextQuery !== linkQuery) dismissedLink = '';
+    linkQuery = nextQuery;
+    const next = hashTab();
+    if (next !== null) {
+      tabChosen = true;
+      activeTab = next;
+    } else if (!tabChosen) {
+      activeTab = 'stats';
+    }
+  }
 
   type Timeframe = '1m' | '5m' | '15m' | '1h';
   let activeTimeframe: Timeframe = $state('1m');
@@ -581,12 +629,14 @@
 
   onMount(() => {
     window.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('hashchange', onHashChange);
   });
 
   onDestroy(() => {
     disconnect();
     stopXrayStatsPolling();
     window.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.removeEventListener('hashchange', onHashChange);
   });
 
   // SVG Chart path generator
@@ -696,588 +746,635 @@
 
 <div class="container">
   <PageHeader title={$t('traffic.title')} subtitle={$t('traffic.realtime')}>
-    <span
-      class="badge-live-indicator"
-      class:is-live={connected && !coreOffline && !isPaused}
-      class:is-paused={isPaused}
-      class:is-offline={!connected || coreOffline}
-    >
-      <span class="live-dot"></span>
-      {#if !connected || coreOffline}
-        {$t('traffic.offline_badge')}
-      {:else if isPaused}
-        {$t('traffic.paused_badge')}
-      {:else}
-        {$t('traffic.live_badge')}
-      {/if}
-    </span>
+    {#if activeTab === 'stats' && !$isXray}
+      <span
+        class="badge-live-indicator"
+        class:is-live={connected && !coreOffline && !isPaused}
+        class:is-paused={isPaused}
+        class:is-offline={!connected || coreOffline}
+      >
+        <span class="live-dot"></span>
+        {#if !connected || coreOffline}
+          {$t('traffic.offline_badge')}
+        {:else if isPaused}
+          {$t('traffic.paused_badge')}
+        {:else}
+          {$t('traffic.live_badge')}
+        {/if}
+      </span>
 
-    <button
-      type="button"
-      class="btn btn-secondary btn-sm"
-      class:btn-active={isPaused}
-      onclick={togglePause}
-      aria-label={isPaused ? $t('traffic.resume_action') : $t('traffic.pause_action')}
-    >
-      {#if isPaused}
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
-          <polygon points="5 3 19 12 5 21 5 3" />
-        </svg>
-        {$t('traffic.resume_action')}
-      {:else}
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
-          <rect x="6" y="4" width="4" height="16" />
-          <rect x="14" y="4" width="4" height="16" />
-        </svg>
-        {$t('traffic.pause_action')}
-      {/if}
-    </button>
+      <button
+        type="button"
+        class="btn btn-secondary btn-sm"
+        class:btn-active={isPaused}
+        onclick={togglePause}
+        aria-label={isPaused ? $t('traffic.resume_action') : $t('traffic.pause_action')}
+      >
+        {#if isPaused}
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3" />
+          </svg>
+          {$t('traffic.resume_action')}
+        {:else}
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+            <rect x="6" y="4" width="4" height="16" />
+            <rect x="14" y="4" width="4" height="16" />
+          </svg>
+          {$t('traffic.pause_action')}
+        {/if}
+      </button>
 
-    <button type="button" class="btn btn-secondary btn-sm btn-reset" onclick={resetStatistics}>
-      {$t('traffic.reset_stats')}
-    </button>
+      <button type="button" class="btn btn-secondary btn-sm btn-reset" onclick={resetStatistics}>
+        {$t('traffic.reset_stats')}
+      </button>
+    {/if}
   </PageHeader>
 
-  <!-- Standard Order KPI Grid: 1. Download (Left), 2. Upload (Center), 3. Connections (Right) -->
-  <div class="card card-tight traffic-stats-grid">
-    <!-- Download Card (TRAF-01: First from left) -->
-    <div class="stat-cell stat-card-spark">
-      <div class="stat-card-content">
-        <div class="stat-label">
-          <span class="sw download-bg"></span>
-          {$t('traffic.download')}
-        </div>
-        <div class="stat-value download-color">{formatSpeed(totalDown)}</div>
-        <div class="stat-session">
-          {$t('traffic.session_stat', { bytes: formatBytes(sessionDown) })}
-        </div>
-      </div>
-      {#if allTrafficData.length >= 2}
-        <svg
-          class="sparkline"
-          viewBox="0 0 200 42"
-          preserveAspectRatio="none"
-          role="img"
-          aria-label={$t('traffic.download_sparkline')}
-        >
-          <defs>
-            <linearGradient id="sg-download" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.4" />
-              <stop offset="100%" stop-color="var(--accent)" stop-opacity="0" />
-            </linearGradient>
-          </defs>
-          <path d={sparklines.dArea} fill="url(#sg-download)" />
-          <path d={sparklines.dLine} fill="none" stroke="var(--accent)" stroke-width="1.5" />
-        </svg>
-      {/if}
-    </div>
-
-    <!-- Upload Card (TRAF-01: Second) -->
-    <div class="stat-cell stat-card-spark">
-      <div class="stat-card-content">
-        <div class="stat-label">
-          <span class="sw upload-bg"></span>
-          {$t('traffic.upload')}
-        </div>
-        <div class="stat-value upload-color">{formatSpeed(totalUp)}</div>
-        <div class="stat-session">
-          {$t('traffic.session_stat', { bytes: formatBytes(sessionUp) })}
-        </div>
-      </div>
-      {#if allTrafficData.length >= 2}
-        <svg
-          class="sparkline"
-          viewBox="0 0 200 42"
-          preserveAspectRatio="none"
-          role="img"
-          aria-label={$t('traffic.upload_sparkline')}
-        >
-          <defs>
-            <linearGradient id="sg-upload" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="var(--success)" stop-opacity="0.4" />
-              <stop offset="100%" stop-color="var(--success)" stop-opacity="0" />
-            </linearGradient>
-          </defs>
-          <path d={sparklines.uArea} fill="url(#sg-upload)" />
-          <path d={sparklines.uLine} fill="none" stroke="var(--success)" stroke-width="1.5" />
-        </svg>
-      {/if}
-    </div>
-
-    <!-- Active Connections Card (TRAF-01: Third) -->
-    <div class="stat-cell stat-card-normal">
-      <div class="stat-card-content">
-        <div class="stat-label">{$t('traffic.active_connections')}</div>
-        <div class="stat-value active-connections-color">{activeConnectionsCount}</div>
-        <div class="stat-session conns-protocols">
-          {tcpConnectionsCount} TCP · {udpConnectionsCount} UDP
-        </div>
-        <div class="stat-session conns-dynamics">
-          {$t('traffic.dynamics')}
-          {#if connDeltaPerMin === null}
-            — / {$t('traffic.per_min')}
-          {:else}
-            <span class:delta-up={connDeltaPerMin > 0} class:delta-down={connDeltaPerMin < 0}>
-              {connDeltaPerMin >= 0 ? '+' : ''}{connDeltaPerMin} / {$t('traffic.per_min')}
-            </span>
-          {/if}
-          · {$t('traffic.hour_peak')}{connPeakHour}
-        </div>
-      </div>
-    </div>
+  <div class="traffic-tabs">
+    <Tabs
+      variant="line"
+      items={pageTabs}
+      value={activeTab}
+      onchange={(val) => {
+        tabChosen = true;
+        activeTab = val as PageTab;
+      }}
+      ariaLabel={$t('traffic.title')}
+    />
   </div>
 
-  <!-- Main Chart Card with Toolbar (TRAF-02, TRAF-03, TRAF-04) -->
-  <div class="card chart-card">
-    <div class="chart-header-toolbar">
-      <!-- Interactive Legend with filter toggle -->
-      <div class="chart-legend">
-        <button
-          type="button"
-          class="key-btn"
-          class:key-inactive={!showDownload}
-          onclick={() => (showDownload = !showDownload)}
-          title={$t('traffic.download')}
-        >
-          <span class="sw download-bg"></span>
-          {$t('traffic.download')}
-        </button>
-        <button
-          type="button"
-          class="key-btn"
-          class:key-inactive={!showUpload}
-          onclick={() => (showUpload = !showUpload)}
-          title={$t('traffic.upload')}
-        >
-          <span class="sw upload-bg"></span>
-          {$t('traffic.upload')}
-        </button>
-      </div>
-
-      <!-- Timeframe Switcher (TRAF-02) -->
-      <div class="timeframe-picker">
-        <SegmentedControl
-          bind:value={activeTimeframe}
-          items={[
-            { value: '1m', label: $t('traffic.timeframe_1m'), class: 'tf-pill' },
-            { value: '5m', label: $t('traffic.timeframe_5m'), class: 'tf-pill' },
-            { value: '15m', label: $t('traffic.timeframe_15m'), class: 'tf-pill' },
-            { value: '1h', label: $t('traffic.timeframe_1h'), class: 'tf-pill' }
-          ]}
-        />
-      </div>
-    </div>
-
-    <div class="chart-area-wrapper">
-      {#if chartData.pointsCount < 2 && coreOffline}
-        <div class="chart-empty">
-          <span class="chart-empty-title">{$t('traffic.core_offline_title')}</span>
-          <p class="chart-empty-sub">{$t('traffic.core_offline_body')}</p>
-        </div>
-      {:else if chartData.pointsCount < 2}
-        <div class="chart-empty">
-          <span class="spinner"></span>
-          <span class="chart-empty-title">{$t('traffic.waiting')}</span>
-          <p class="chart-empty-sub">{$t('traffic.empty_state_body')}</p>
+  {#if activeTab === 'stats'}
+    <div class="tab-content" role="tabpanel" data-testid="traffic-panel-stats">
+      {#if $isXray}
+        <!-- Под Xray живого потока Mihomo нет: график, пики, топ клиентов и соединения скрыты -->
+        <div class="alert alert-info" data-testid="traffic-xray-mihomo-only">
+          {$t('traffic.xray_mihomo_only')}
         </div>
       {:else}
-        <div class="chart-y-axis">
-          <span class="y-label">{chartData.maxSpeed}</span>
-          <span class="y-label">{formatSpeed(Math.round(chartData.maxVal * 0.66))}</span>
-          <span class="y-label">{formatSpeed(Math.round(chartData.maxVal * 0.33))}</span>
-          <span class="y-label">0 B/s</span>
-        </div>
-        <div class="chart-svg-container">
-          <svg
-            viewBox="0 0 1000 240"
-            preserveAspectRatio="none"
-            class="main-traffic-svg"
-            onpointermove={handlePointerMove}
-            onpointerleave={handlePointerLeave}
-            role="img"
-            aria-label={$t('traffic.main_chart')}
-          >
-            <defs>
-              <linearGradient id="cg-download-main" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.3" />
-                <stop offset="100%" stop-color="var(--accent)" stop-opacity="0.0" />
-              </linearGradient>
-              <linearGradient id="cg-upload-main" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="var(--success)" stop-opacity="0.25" />
-                <stop offset="100%" stop-color="var(--success)" stop-opacity="0.0" />
-              </linearGradient>
-            </defs>
-
-            <!-- Grid Lines -->
-            <line
-              x1="0"
-              y1="60"
-              x2="1000"
-              y2="60"
-              stroke="var(--border)"
-              opacity="0.4"
-              stroke-dasharray="4"
-            />
-            <line
-              x1="0"
-              y1="120"
-              x2="1000"
-              y2="120"
-              stroke="var(--border)"
-              opacity="0.4"
-              stroke-dasharray="4"
-            />
-            <line
-              x1="0"
-              y1="180"
-              x2="1000"
-              y2="180"
-              stroke="var(--border)"
-              opacity="0.4"
-              stroke-dasharray="4"
-            />
-
-            <!-- Download Path (TRAF-01 & TRAF-03) -->
-            {#if showDownload}
-              <path d={chartData.dArea} fill="url(#cg-download-main)" />
-              <path d={chartData.dLine} fill="none" stroke="var(--accent)" stroke-width="2" />
-            {/if}
-
-            <!-- Upload Path (TRAF-01 & TRAF-03) -->
-            {#if showUpload}
-              <path d={chartData.uArea} fill="url(#cg-upload-main)" />
-              <path d={chartData.uLine} fill="none" stroke="var(--success)" stroke-width="2" />
-            {/if}
-
-            <!-- Crosshair Interactive Line (TRAF-03) -->
-            {#if hoveredPoint !== null}
-              <line
-                x1={crosshairSvgX}
-                y1="0"
-                x2={crosshairSvgX}
-                y2="240"
-                stroke="var(--fg-primary)"
-                stroke-width="1.5"
-                stroke-dasharray="3 3"
-                opacity="0.75"
-              />
-              {#if showDownload}
-                <circle
-                  cx={crosshairSvgX}
-                  cy={240 - (hoveredPoint.down / chartData.maxVal) * 216}
-                  r="4"
-                  fill="var(--accent)"
-                  stroke="var(--bg-card)"
-                  stroke-width="1.5"
-                />
-              {/if}
-              {#if showUpload}
-                <circle
-                  cx={crosshairSvgX}
-                  cy={240 - (hoveredPoint.up / chartData.maxVal) * 216}
-                  r="4"
-                  fill="var(--success)"
-                  stroke="var(--bg-card)"
-                  stroke-width="1.5"
-                />
-              {/if}
-            {/if}
-          </svg>
-
-          <!-- Floating Interactive Tooltip (TRAF-03) -->
-          {#if hoveredPoint !== null}
-            <div
-              class="chart-tooltip"
-              style="left: {tooltipX}px; top: {tooltipY}px; transform: translate({tooltipX > 500
-                ? '-110%'
-                : '10%'}, -50%);"
-            >
-              <div class="tt-time">{formatTooltipTime(hoveredPoint.time)}</div>
-              <div class="tt-row tt-down">
-                <span class="tt-label">↓ {$t('traffic.download')}:</span>
-                <span class="tt-val">{formatSpeed(hoveredPoint.down)}</span>
+        <!-- Standard Order KPI Grid: 1. Download (Left), 2. Upload (Center), 3. Connections (Right) -->
+        <div class="card card-tight traffic-stats-grid">
+          <!-- Download Card (TRAF-01: First from left) -->
+          <div class="stat-cell stat-card-spark">
+            <div class="stat-card-content">
+              <div class="stat-label">
+                <span class="sw download-bg"></span>
+                {$t('traffic.download')}
               </div>
-              <div class="tt-row tt-up">
-                <span class="tt-label">↑ {$t('traffic.upload')}:</span>
-                <span class="tt-val">{formatSpeed(hoveredPoint.up)}</span>
+              <div class="stat-value download-color">{formatSpeed(totalDown)}</div>
+              <div class="stat-session">
+                {$t('traffic.session_stat', { bytes: formatBytes(sessionDown) })}
               </div>
             </div>
-          {/if}
+            {#if allTrafficData.length >= 2}
+              <svg
+                class="sparkline"
+                viewBox="0 0 200 42"
+                preserveAspectRatio="none"
+                role="img"
+                aria-label={$t('traffic.download_sparkline')}
+              >
+                <defs>
+                  <linearGradient id="sg-download" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.4" />
+                    <stop offset="100%" stop-color="var(--accent)" stop-opacity="0" />
+                  </linearGradient>
+                </defs>
+                <path d={sparklines.dArea} fill="url(#sg-download)" />
+                <path d={sparklines.dLine} fill="none" stroke="var(--accent)" stroke-width="1.5" />
+              </svg>
+            {/if}
+          </div>
+
+          <!-- Upload Card (TRAF-01: Second) -->
+          <div class="stat-cell stat-card-spark">
+            <div class="stat-card-content">
+              <div class="stat-label">
+                <span class="sw upload-bg"></span>
+                {$t('traffic.upload')}
+              </div>
+              <div class="stat-value upload-color">{formatSpeed(totalUp)}</div>
+              <div class="stat-session">
+                {$t('traffic.session_stat', { bytes: formatBytes(sessionUp) })}
+              </div>
+            </div>
+            {#if allTrafficData.length >= 2}
+              <svg
+                class="sparkline"
+                viewBox="0 0 200 42"
+                preserveAspectRatio="none"
+                role="img"
+                aria-label={$t('traffic.upload_sparkline')}
+              >
+                <defs>
+                  <linearGradient id="sg-upload" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="var(--success)" stop-opacity="0.4" />
+                    <stop offset="100%" stop-color="var(--success)" stop-opacity="0" />
+                  </linearGradient>
+                </defs>
+                <path d={sparklines.uArea} fill="url(#sg-upload)" />
+                <path d={sparklines.uLine} fill="none" stroke="var(--success)" stroke-width="1.5" />
+              </svg>
+            {/if}
+          </div>
+
+          <!-- Active Connections Card (TRAF-01: Third) -->
+          <div class="stat-cell stat-card-normal">
+            <div class="stat-card-content">
+              <div class="stat-label">{$t('traffic.active_connections')}</div>
+              <div class="stat-value active-connections-color">{activeConnectionsCount}</div>
+              <div class="stat-session conns-protocols">
+                {tcpConnectionsCount} TCP · {udpConnectionsCount} UDP
+              </div>
+              <div class="stat-session conns-dynamics">
+                {$t('traffic.dynamics')}
+                {#if connDeltaPerMin === null}
+                  — / {$t('traffic.per_min')}
+                {:else}
+                  <span class:delta-up={connDeltaPerMin > 0} class:delta-down={connDeltaPerMin < 0}>
+                    {connDeltaPerMin >= 0 ? '+' : ''}{connDeltaPerMin} / {$t('traffic.per_min')}
+                  </span>
+                {/if}
+                · {$t('traffic.hour_peak')}{connPeakHour}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Main Chart Card with Toolbar (TRAF-02, TRAF-03, TRAF-04) -->
+        <div class="card chart-card">
+          <div class="chart-header-toolbar">
+            <!-- Interactive Legend with filter toggle -->
+            <div class="chart-legend">
+              <button
+                type="button"
+                class="key-btn"
+                class:key-inactive={!showDownload}
+                onclick={() => (showDownload = !showDownload)}
+                title={$t('traffic.download')}
+              >
+                <span class="sw download-bg"></span>
+                {$t('traffic.download')}
+              </button>
+              <button
+                type="button"
+                class="key-btn"
+                class:key-inactive={!showUpload}
+                onclick={() => (showUpload = !showUpload)}
+                title={$t('traffic.upload')}
+              >
+                <span class="sw upload-bg"></span>
+                {$t('traffic.upload')}
+              </button>
+            </div>
+
+            <!-- Timeframe Switcher (TRAF-02) -->
+            <div class="timeframe-picker">
+              <SegmentedControl
+                bind:value={activeTimeframe}
+                items={[
+                  { value: '1m', label: $t('traffic.timeframe_1m'), class: 'tf-pill' },
+                  { value: '5m', label: $t('traffic.timeframe_5m'), class: 'tf-pill' },
+                  { value: '15m', label: $t('traffic.timeframe_15m'), class: 'tf-pill' },
+                  { value: '1h', label: $t('traffic.timeframe_1h'), class: 'tf-pill' }
+                ]}
+              />
+            </div>
+          </div>
+
+          <div class="chart-area-wrapper">
+            {#if chartData.pointsCount < 2 && coreOffline}
+              <div class="chart-empty">
+                <span class="chart-empty-title">{$t('traffic.core_offline_title')}</span>
+                <p class="chart-empty-sub">{$t('traffic.core_offline_body')}</p>
+              </div>
+            {:else if chartData.pointsCount < 2}
+              <div class="chart-empty">
+                <span class="spinner"></span>
+                <span class="chart-empty-title">{$t('traffic.waiting')}</span>
+                <p class="chart-empty-sub">{$t('traffic.empty_state_body')}</p>
+              </div>
+            {:else}
+              <div class="chart-y-axis">
+                <span class="y-label">{chartData.maxSpeed}</span>
+                <span class="y-label">{formatSpeed(Math.round(chartData.maxVal * 0.66))}</span>
+                <span class="y-label">{formatSpeed(Math.round(chartData.maxVal * 0.33))}</span>
+                <span class="y-label">0 B/s</span>
+              </div>
+              <div class="chart-svg-container">
+                <svg
+                  viewBox="0 0 1000 240"
+                  preserveAspectRatio="none"
+                  class="main-traffic-svg"
+                  onpointermove={handlePointerMove}
+                  onpointerleave={handlePointerLeave}
+                  role="img"
+                  aria-label={$t('traffic.main_chart')}
+                >
+                  <defs>
+                    <linearGradient id="cg-download-main" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.3" />
+                      <stop offset="100%" stop-color="var(--accent)" stop-opacity="0.0" />
+                    </linearGradient>
+                    <linearGradient id="cg-upload-main" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stop-color="var(--success)" stop-opacity="0.25" />
+                      <stop offset="100%" stop-color="var(--success)" stop-opacity="0.0" />
+                    </linearGradient>
+                  </defs>
+
+                  <!-- Grid Lines -->
+                  <line
+                    x1="0"
+                    y1="60"
+                    x2="1000"
+                    y2="60"
+                    stroke="var(--border)"
+                    opacity="0.4"
+                    stroke-dasharray="4"
+                  />
+                  <line
+                    x1="0"
+                    y1="120"
+                    x2="1000"
+                    y2="120"
+                    stroke="var(--border)"
+                    opacity="0.4"
+                    stroke-dasharray="4"
+                  />
+                  <line
+                    x1="0"
+                    y1="180"
+                    x2="1000"
+                    y2="180"
+                    stroke="var(--border)"
+                    opacity="0.4"
+                    stroke-dasharray="4"
+                  />
+
+                  <!-- Download Path (TRAF-01 & TRAF-03) -->
+                  {#if showDownload}
+                    <path d={chartData.dArea} fill="url(#cg-download-main)" />
+                    <path d={chartData.dLine} fill="none" stroke="var(--accent)" stroke-width="2" />
+                  {/if}
+
+                  <!-- Upload Path (TRAF-01 & TRAF-03) -->
+                  {#if showUpload}
+                    <path d={chartData.uArea} fill="url(#cg-upload-main)" />
+                    <path
+                      d={chartData.uLine}
+                      fill="none"
+                      stroke="var(--success)"
+                      stroke-width="2"
+                    />
+                  {/if}
+
+                  <!-- Crosshair Interactive Line (TRAF-03) -->
+                  {#if hoveredPoint !== null}
+                    <line
+                      x1={crosshairSvgX}
+                      y1="0"
+                      x2={crosshairSvgX}
+                      y2="240"
+                      stroke="var(--fg-primary)"
+                      stroke-width="1.5"
+                      stroke-dasharray="3 3"
+                      opacity="0.75"
+                    />
+                    {#if showDownload}
+                      <circle
+                        cx={crosshairSvgX}
+                        cy={240 - (hoveredPoint.down / chartData.maxVal) * 216}
+                        r="4"
+                        fill="var(--accent)"
+                        stroke="var(--bg-card)"
+                        stroke-width="1.5"
+                      />
+                    {/if}
+                    {#if showUpload}
+                      <circle
+                        cx={crosshairSvgX}
+                        cy={240 - (hoveredPoint.up / chartData.maxVal) * 216}
+                        r="4"
+                        fill="var(--success)"
+                        stroke="var(--bg-card)"
+                        stroke-width="1.5"
+                      />
+                    {/if}
+                  {/if}
+                </svg>
+
+                <!-- Floating Interactive Tooltip (TRAF-03) -->
+                {#if hoveredPoint !== null}
+                  <div
+                    class="chart-tooltip"
+                    style="left: {tooltipX}px; top: {tooltipY}px; transform: translate({tooltipX >
+                    500
+                      ? '-110%'
+                      : '10%'}, -50%);"
+                  >
+                    <div class="tt-time">{formatTooltipTime(hoveredPoint.time)}</div>
+                    <div class="tt-row tt-down">
+                      <span class="tt-label">↓ {$t('traffic.download')}:</span>
+                      <span class="tt-val">{formatSpeed(hoveredPoint.down)}</span>
+                    </div>
+                    <div class="tt-row tt-up">
+                      <span class="tt-label">↑ {$t('traffic.upload')}:</span>
+                      <span class="tt-val">{formatSpeed(hoveredPoint.up)}</span>
+                    </div>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          </div>
+
+          <div class="chart-x">
+            {#each timeLabels as label, i (i)}
+              <span>{label}</span>
+            {/each}
+          </div>
         </div>
       {/if}
-    </div>
 
-    <div class="chart-x">
-      {#each timeLabels as label, i (i)}
-        <span>{label}</span>
-      {/each}
-    </div>
-  </div>
-
-  <!-- Bottom Analytics Grid (TRAF-05 Peak Load & TRAF-06 Top Clients) -->
-  <div class="traffic-analytics-grid">
-    <!-- Peak Load Cards (TRAF-05: timestamps & separated rows) -->
-    <Section title={$t('traffic.peak_load')} description={$t('traffic.peak_load_desc')}>
-      <div class="card card-tight analytics-section-card">
-        <div class="peak-cards-grid">
-          <!-- Hour Peak -->
-          <div class="peak-period-card">
-            <div class="peak-period-title">{$t('traffic.peak_hour_title')}</div>
-            <div class="peak-metric-row">
-              <span class="peak-flow download-color">
-                <span class="peak-arrow">↓</span>
-                {$t('traffic.download')}:
-              </span>
-              <span class="peak-val">{formatSpeed(peaks.peak_hour_down)}</span>
-              <span class="peak-ts">{formatTime(peaks.peak_hour_down_time)}</span>
-            </div>
-            <div class="peak-metric-row">
-              <span class="peak-flow upload-color">
-                <span class="peak-arrow">↑</span>
-                {$t('traffic.upload')}:
-              </span>
-              <span class="peak-val">{formatSpeed(peaks.peak_hour_up)}</span>
-              <span class="peak-ts">{formatTime(peaks.peak_hour_up_time)}</span>
-            </div>
-          </div>
-
-          <!-- Day Peak -->
-          <div class="peak-period-card">
-            <div class="peak-period-title">{$t('traffic.peak_day_title')}</div>
-            <div class="peak-metric-row">
-              <span class="peak-flow download-color">
-                <span class="peak-arrow">↓</span>
-                {$t('traffic.download')}:
-              </span>
-              <span class="peak-val">{formatSpeed(peaks.peak_day_down)}</span>
-              <span class="peak-ts">{formatTime(peaks.peak_day_down_time)}</span>
-            </div>
-            <div class="peak-metric-row">
-              <span class="peak-flow upload-color">
-                <span class="peak-arrow">↑</span>
-                {$t('traffic.upload')}:
-              </span>
-              <span class="peak-val">{formatSpeed(peaks.peak_day_up)}</span>
-              <span class="peak-ts">{formatTime(peaks.peak_day_up_time)}</span>
-            </div>
-          </div>
-
-          <!-- Week Peak -->
-          <div class="peak-period-card">
-            <div class="peak-period-title">{$t('traffic.peak_week_title')}</div>
-            <div class="peak-metric-row">
-              <span class="peak-flow download-color">
-                <span class="peak-arrow">↓</span>
-                {$t('traffic.download')}:
-              </span>
-              <span class="peak-val">{formatSpeed(peaks.peak_week_down)}</span>
-              <span class="peak-ts">{formatTime(peaks.peak_week_down_time)}</span>
-            </div>
-            <div class="peak-metric-row">
-              <span class="peak-flow upload-color">
-                <span class="peak-arrow">↑</span>
-                {$t('traffic.upload')}:
-              </span>
-              <span class="peak-val">{formatSpeed(peaks.peak_week_up)}</span>
-              <span class="peak-ts">{formatTime(peaks.peak_week_up_time)}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Section>
-
-    <!-- Top LAN Devices (TRAF-06) -->
-    <Section title={$t('traffic.top_clients')} description={$t('traffic.top_clients_desc')}>
-      <div class="card card-tight analytics-section-card clients-card">
-        {#if topClients.length === 0}
-          <EmptyState
-            title={$t('traffic.top_clients_empty_title')}
-            description={$t('traffic.top_clients_empty_desc')}
-          />
-        {:else}
-          <div class="clients-list">
-            {#each topClients as client, i (i)}
-              {@const sharePercent = Math.min(
-                100,
-                Math.max(2, Math.round((client.total_bytes / totalClientsTraffic) * 100))
-              )}
-              <div class="client-row">
-                <div class="client-info">
-                  <div class="client-ip-box">
-                    <span class="client-icon">
-                      <svg
-                        viewBox="0 0 24 24"
-                        width="14"
-                        height="14"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                      >
-                        <rect x="2" y="3" width="20" height="14" rx="2" />
-                        <line x1="8" y1="21" x2="16" y2="21" />
-                        <line x1="12" y1="17" x2="12" y2="21" />
-                      </svg>
+      <!-- Bottom Analytics Grid (TRAF-05 Peak Load & TRAF-06 Top Clients) -->
+      <div class="traffic-analytics-grid" class:xray-only={$isXray}>
+        {#if !$isXray}
+          <!-- Peak Load Cards (TRAF-05: timestamps & separated rows) -->
+          <Section title={$t('traffic.peak_load')} description={$t('traffic.peak_load_desc')}>
+            <div class="card card-tight analytics-section-card">
+              <div class="peak-cards-grid">
+                <!-- Hour Peak -->
+                <div class="peak-period-card">
+                  <div class="peak-period-title">{$t('traffic.peak_hour_title')}</div>
+                  <div class="peak-metric-row">
+                    <span class="peak-flow download-color">
+                      <span class="peak-arrow">↓</span>
+                      {$t('traffic.download')}:
                     </span>
-                    <span class="client-ip mono">{client.ip}</span>
-                    <span class="badge-sessions">
-                      {pluralize(
-                        client.active_connections,
-                        $t('conn.sessions_count_one', { count: String(client.active_connections) }),
-                        $t('conn.sessions_count_few', { count: String(client.active_connections) }),
-                        $t('conn.sessions_count_many', {
-                          count: String(client.active_connections)
-                        }),
-                        $currentLang
-                      )}
-                    </span>
+                    <span class="peak-val">{formatSpeed(peaks.peak_hour_down)}</span>
+                    <span class="peak-ts">{formatTime(peaks.peak_hour_down_time)}</span>
                   </div>
-                  <div class="client-bytes">{formatBytes(client.total_bytes)}</div>
+                  <div class="peak-metric-row">
+                    <span class="peak-flow upload-color">
+                      <span class="peak-arrow">↑</span>
+                      {$t('traffic.upload')}:
+                    </span>
+                    <span class="peak-val">{formatSpeed(peaks.peak_hour_up)}</span>
+                    <span class="peak-ts">{formatTime(peaks.peak_hour_up_time)}</span>
+                  </div>
                 </div>
-                <div class="client-progress-track">
-                  <div class="client-progress-bar" style="width: {sharePercent}%;"></div>
+
+                <!-- Day Peak -->
+                <div class="peak-period-card">
+                  <div class="peak-period-title">{$t('traffic.peak_day_title')}</div>
+                  <div class="peak-metric-row">
+                    <span class="peak-flow download-color">
+                      <span class="peak-arrow">↓</span>
+                      {$t('traffic.download')}:
+                    </span>
+                    <span class="peak-val">{formatSpeed(peaks.peak_day_down)}</span>
+                    <span class="peak-ts">{formatTime(peaks.peak_day_down_time)}</span>
+                  </div>
+                  <div class="peak-metric-row">
+                    <span class="peak-flow upload-color">
+                      <span class="peak-arrow">↑</span>
+                      {$t('traffic.upload')}:
+                    </span>
+                    <span class="peak-val">{formatSpeed(peaks.peak_day_up)}</span>
+                    <span class="peak-ts">{formatTime(peaks.peak_day_up_time)}</span>
+                  </div>
                 </div>
-                <div class="client-meta-sub">
-                  <span class="download-color">↓ {formatBytes(client.download)}</span>
-                  <span class="sep">·</span>
-                  <span class="upload-color">↑ {formatBytes(client.upload)}</span>
-                  <span class="share-label">{sharePercent}% {$t('traffic.session')}</span>
+
+                <!-- Week Peak -->
+                <div class="peak-period-card">
+                  <div class="peak-period-title">{$t('traffic.peak_week_title')}</div>
+                  <div class="peak-metric-row">
+                    <span class="peak-flow download-color">
+                      <span class="peak-arrow">↓</span>
+                      {$t('traffic.download')}:
+                    </span>
+                    <span class="peak-val">{formatSpeed(peaks.peak_week_down)}</span>
+                    <span class="peak-ts">{formatTime(peaks.peak_week_down_time)}</span>
+                  </div>
+                  <div class="peak-metric-row">
+                    <span class="peak-flow upload-color">
+                      <span class="peak-arrow">↑</span>
+                      {$t('traffic.upload')}:
+                    </span>
+                    <span class="peak-val">{formatSpeed(peaks.peak_week_up)}</span>
+                    <span class="peak-ts">{formatTime(peaks.peak_week_up_time)}</span>
+                  </div>
                 </div>
               </div>
-            {/each}
+            </div>
+          </Section>
+
+          <!-- Top LAN Devices (TRAF-06) -->
+          <Section title={$t('traffic.top_clients')} description={$t('traffic.top_clients_desc')}>
+            <div class="card card-tight analytics-section-card clients-card">
+              {#if topClients.length === 0}
+                <EmptyState
+                  title={$t('traffic.top_clients_empty_title')}
+                  description={$t('traffic.top_clients_empty_desc')}
+                />
+              {:else}
+                <div class="clients-list">
+                  {#each topClients as client, i (i)}
+                    {@const sharePercent = Math.min(
+                      100,
+                      Math.max(2, Math.round((client.total_bytes / totalClientsTraffic) * 100))
+                    )}
+                    <div class="client-row">
+                      <div class="client-info">
+                        <div class="client-ip-box">
+                          <span class="client-icon">
+                            <svg
+                              viewBox="0 0 24 24"
+                              width="14"
+                              height="14"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                            >
+                              <rect x="2" y="3" width="20" height="14" rx="2" />
+                              <line x1="8" y1="21" x2="16" y2="21" />
+                              <line x1="12" y1="17" x2="12" y2="21" />
+                            </svg>
+                          </span>
+                          <span class="client-ip mono">{client.ip}</span>
+                          <span class="badge-sessions">
+                            {pluralize(
+                              client.active_connections,
+                              $t('conn.sessions_count_one', {
+                                count: String(client.active_connections)
+                              }),
+                              $t('conn.sessions_count_few', {
+                                count: String(client.active_connections)
+                              }),
+                              $t('conn.sessions_count_many', {
+                                count: String(client.active_connections)
+                              }),
+                              $currentLang
+                            )}
+                          </span>
+                        </div>
+                        <div class="client-bytes">{formatBytes(client.total_bytes)}</div>
+                      </div>
+                      <div class="client-progress-track">
+                        <div class="client-progress-bar" style="width: {sharePercent}%;"></div>
+                      </div>
+                      <div class="client-meta-sub">
+                        <span class="download-color">↓ {formatBytes(client.download)}</span>
+                        <span class="sep">·</span>
+                        <span class="upload-color">↑ {formatBytes(client.upload)}</span>
+                        <span class="share-label">{sharePercent}% {$t('traffic.session')}</span>
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          </Section>
+        {/if}
+
+        {#if $isXray}
+          <!-- Xray Live Statistics Section (D-05, D-06) -->
+          <div class="xray-stats-section">
+            <Section title={$t('traffic.xray.section_title')} description={$t('traffic.xray.hint')}>
+              {#snippet meta()}
+                <button
+                  type="button"
+                  class="btn btn-sm"
+                  class:btn-primary={$capabilities?.xray?.grpc_ready}
+                  class:btn-secondary={!$capabilities?.xray?.grpc_ready}
+                  data-testid="xray-grpc-toggle-btn"
+                  onclick={toggleXrayMonitoring}
+                  disabled={xrayMonitoringToggling}
+                  title={$t('xray.grpc.hint')}
+                >
+                  {$capabilities?.xray?.grpc_ready
+                    ? $t('xray.grpc.disable')
+                    : $t('xray.grpc.enable')}
+                </button>
+              {/snippet}
+              <div
+                class="card analytics-section-card xray-stats-card"
+                data-testid="xray-stats-section"
+              >
+                {#if xrayStatsError && $capabilities?.xray?.grpc_ready}
+                  <div
+                    class="alert alert-warning"
+                    data-testid="xray-stats-error-alert"
+                    style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;"
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      style="flex-shrink: 0;"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                      />
+                      <line x1="12" y1="9" x2="12" y2="13" />
+                      <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                    <span>{$t('traffic.xray.connection_lost')} ({xrayStatsError})</span>
+                  </div>
+                {/if}
+
+                {#if $capabilities?.xray?.grpc_ready && !xrayStatsError}
+                  <div class="xray-stats-tabs">
+                    <Tabs
+                      bind:value={activeXrayTab}
+                      items={[
+                        {
+                          value: 'outbounds',
+                          label: `${$t('traffic.xray.tab_outbounds')} (${xrayOutbounds.length})`,
+                          testId: 'xray-tab-outbounds'
+                        },
+                        {
+                          value: 'inbounds',
+                          label: `${$t('traffic.xray.tab_inbounds')} (${xrayInbounds.length})`,
+                          testId: 'xray-tab-inbounds'
+                        },
+                        {
+                          value: 'users',
+                          label: `${$t('traffic.xray.tab_users')} (${xrayUsers.length})`,
+                          testId: 'xray-tab-users'
+                        }
+                      ]}
+                    />
+                  </div>
+                {/if}
+
+                {#if !$capabilities?.xray?.grpc_ready}
+                  <div class="alert alert-info" data-testid="xray-stats-disabled-hint">
+                    {$t('traffic.xray.unavailable')}
+                  </div>
+                {:else if currentXrayList.length === 0}
+                  <div class="text-muted xray-stats-empty" data-testid="xray-stats-empty">
+                    {$t('traffic.xray.no_data')}
+                  </div>
+                {:else}
+                  <div class="table-responsive" data-testid="xray-stats-table">
+                    <table class="data-table">
+                      <thead>
+                        <tr>
+                          <th>
+                            {activeXrayTab === 'outbounds'
+                              ? $t('traffic.xray.outbound')
+                              : activeXrayTab === 'inbounds'
+                                ? $t('traffic.xray.inbound')
+                                : $t('traffic.xray.user')}
+                          </th>
+                          <th>{$t('traffic.xray.downlink')}</th>
+                          <th>{$t('traffic.xray.uplink')}</th>
+                          <th>{$t('traffic.total')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {#each currentXrayList as item (item.tag)}
+                          <tr data-testid="xray-stats-row">
+                            <td>
+                              <span
+                                class="badge badge--tag badge-tag"
+                                class:badge-proxy={activeXrayTab === 'outbounds'}
+                                class:badge-direct={activeXrayTab === 'inbounds'}
+                                class:badge-secondary={activeXrayTab === 'users'}
+                                data-testid="xray-stats-tag"
+                              >
+                                {item.tag}
+                              </span>
+                            </td>
+                            <td class="num download-color">
+                              ↓ {formatBytes(item.downlink)}
+                            </td>
+                            <td class="num upload-color">
+                              ↑ {formatBytes(item.uplink)}
+                            </td>
+                            <td class="num text-muted">
+                              {formatBytes(item.total)}
+                            </td>
+                          </tr>
+                        {/each}
+                      </tbody>
+                    </table>
+                  </div>
+                {/if}
+              </div>
+            </Section>
           </div>
         {/if}
       </div>
-    </Section>
-
-    {#if $isXray}
-      <!-- Xray Live Statistics Section (D-05, D-06) -->
-      <div class="xray-stats-section">
-        <Section title={$t('traffic.xray.section_title')} description={$t('traffic.xray.hint')}>
-          {#snippet meta()}
-            <button
-              type="button"
-              class="btn btn-sm"
-              class:btn-primary={$capabilities?.xray?.grpc_ready}
-              class:btn-secondary={!$capabilities?.xray?.grpc_ready}
-              data-testid="xray-grpc-toggle-btn"
-              onclick={toggleXrayMonitoring}
-              disabled={xrayMonitoringToggling}
-              title={$t('xray.grpc.hint')}
-            >
-              {$capabilities?.xray?.grpc_ready ? $t('xray.grpc.disable') : $t('xray.grpc.enable')}
-            </button>
-          {/snippet}
-          <div class="card analytics-section-card xray-stats-card" data-testid="xray-stats-section">
-            {#if xrayStatsError && $capabilities?.xray?.grpc_ready}
-              <div
-                class="alert alert-warning"
-                data-testid="xray-stats-error-alert"
-                style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;"
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  style="flex-shrink: 0;"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
-                  />
-                  <line x1="12" y1="9" x2="12" y2="13" />
-                  <line x1="12" y1="17" x2="12.01" y2="17" />
-                </svg>
-                <span>{$t('traffic.xray.connection_lost')} ({xrayStatsError})</span>
-              </div>
-            {/if}
-
-            {#if $capabilities?.xray?.grpc_ready && !xrayStatsError}
-              <div class="xray-stats-tabs">
-                <Tabs
-                  bind:value={activeXrayTab}
-                  items={[
-                    {
-                      value: 'outbounds',
-                      label: `${$t('traffic.xray.tab_outbounds')} (${xrayOutbounds.length})`,
-                      testId: 'xray-tab-outbounds'
-                    },
-                    {
-                      value: 'inbounds',
-                      label: `${$t('traffic.xray.tab_inbounds')} (${xrayInbounds.length})`,
-                      testId: 'xray-tab-inbounds'
-                    },
-                    {
-                      value: 'users',
-                      label: `${$t('traffic.xray.tab_users')} (${xrayUsers.length})`,
-                      testId: 'xray-tab-users'
-                    }
-                  ]}
-                />
-              </div>
-            {/if}
-
-            {#if !$capabilities?.xray?.grpc_ready}
-              <div class="alert alert-info" data-testid="xray-stats-disabled-hint">
-                {$t('traffic.xray.unavailable')}
-              </div>
-            {:else if currentXrayList.length === 0}
-              <div class="text-muted xray-stats-empty" data-testid="xray-stats-empty">
-                {$t('traffic.xray.no_data')}
-              </div>
-            {:else}
-              <div class="table-responsive" data-testid="xray-stats-table">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>
-                        {activeXrayTab === 'outbounds'
-                          ? $t('traffic.xray.outbound')
-                          : activeXrayTab === 'inbounds'
-                            ? $t('traffic.xray.inbound')
-                            : $t('traffic.xray.user')}
-                      </th>
-                      <th>{$t('traffic.xray.downlink')}</th>
-                      <th>{$t('traffic.xray.uplink')}</th>
-                      <th>{$t('traffic.total')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {#each currentXrayList as item (item.tag)}
-                      <tr data-testid="xray-stats-row">
-                        <td>
-                          <span
-                            class="badge badge--tag badge-tag"
-                            class:badge-proxy={activeXrayTab === 'outbounds'}
-                            class:badge-direct={activeXrayTab === 'inbounds'}
-                            class:badge-secondary={activeXrayTab === 'users'}
-                            data-testid="xray-stats-tag"
-                          >
-                            {item.tag}
-                          </span>
-                        </td>
-                        <td class="num download-color">
-                          ↓ {formatBytes(item.downlink)}
-                        </td>
-                        <td class="num upload-color">
-                          ↑ {formatBytes(item.uplink)}
-                        </td>
-                        <td class="num text-muted">
-                          {formatBytes(item.total)}
-                        </td>
-                      </tr>
-                    {/each}
-                  </tbody>
-                </table>
-              </div>
-            {/if}
-          </div>
-        </Section>
-      </div>
-    {/if}
-  </div>
+    </div>
+  {:else}
+    <div class="tab-content" role="tabpanel" data-testid="traffic-panel-limits">
+      <TrafficLimitsTab newLimit={linkNew} group={linkGroup} quota={linkQuota} bind:dismissedLink />
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -1676,6 +1773,15 @@
 
   .xray-stats-section {
     grid-column: 1 / -1;
+  }
+
+  .traffic-tabs {
+    margin-bottom: var(--spacing-4);
+  }
+
+  /* Под Xray над счётчиками стоит только плашка: большой отступ сетки не нужен */
+  .traffic-analytics-grid.xray-only {
+    margin-top: var(--spacing-4);
   }
 
   @media (max-width: 1024px) {

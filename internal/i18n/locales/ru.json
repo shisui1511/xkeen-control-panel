@@ -45,6 +45,11 @@
   "kernel.restarting": "Ядро перезапускается: API Mihomo ещё не отвечает",
   "kernel.stop_failed": "Не удалось остановить ядро",
 
+  "traffic.limits.limit_not_found": "Лимит не найден",
+  "traffic.limits.action_invalid": "Это действие недоступно для лимита: допустимы «Уведомить», «Блокировать» и «Напрямую»; для групп «авто» и «резерв» — только «Уведомить»",
+  "traffic.limits.invalid_input": "Неверные поля лимита",
+  "traffic.limits.limits_unavailable": "Служба лимитов трафика недоступна",
+
   "mihomo.not_running": "Mihomo не запущен",
   "xray.api_managed": "Блок API Xray ведёт панель: мониторинг включается и выключается вместе с маршрутизацией в разделе «Конфигурация».",
 
@@ -149,6 +154,9 @@
   "configlayer.routing.group_no_nodes": "В группе нет узлов для активного ядра.",
   "configlayer.routing.confirm_failed": "Не удалось подтвердить активный узел. Повторите позже.",
   "configlayer.routing.selection_unconfirmed": "Активный узел группы не подтверждён. Нажмите «Повторить».",
+  "configlayer.routing.quota_held": "Группу держит исчерпанный лимит трафика: сбросьте или измените лимит.",
+  "configlayer.routing.schedule_overlap": "Окно пересекается с другим окном этой группы.",
+  "configlayer.routing.window_not_found": "Окно расписания не найдено.",
   "configlayer.routing.preset_unknown": "Неизвестный пресет",
   "configlayer.routing.country_unavailable": "Для выбранной страны нет списков на роутере",
   "configlayer.routing.catalog_unavailable": "Списки dat недоступны: не удалось прочитать файлы XKeen",

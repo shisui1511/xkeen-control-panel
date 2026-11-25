@@ -281,7 +281,9 @@ func TestRouterPanelRestartWithStalledStorage(t *testing.T) {
 	}
 
 	dir := config.Default().DataDir
-	store := filepath.Join(dir, "traffic", "traffic.json")
+	// Файл статистики трафика с фазы 152 лежит в корне DataDir (traffic-stats.json):
+	// прежний traffic/traffic.json с квотами больше не пишется.
+	store := filepath.Join(dir, "traffic-stats.json")
 	storeBefore, storeKnown := rtModTime(store)
 	thaw := rtFreezeStorage(t, dir, 40*time.Second)
 	probeTook, probeCode, probeErr := rtStallProbe(p, 2*time.Second)
