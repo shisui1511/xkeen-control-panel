@@ -172,11 +172,11 @@
         >
           {#each view.urls as url, i (i)}
             <li class="legacy-url-row">
-              <code class="legacy-url" {@attach codeNode(i)}
-                ><span class="legacy-url-head">{urlHead(url)}</span><span class="legacy-url-tail"
-                  >{urlTail(url)}</span
-                ></code
-              >
+              <code class="legacy-url" {@attach codeNode(i)}>
+                <span class="legacy-url-head">{urlHead(url)}</span><span class="legacy-url-tail">
+                  {urlTail(url)}
+                </span>
+              </code>
               <Button
                 variant="secondary"
                 ariaLabel={copied === i
@@ -187,12 +187,12 @@
               >
                 <Icon name={copied === i ? 'check' : 'copy'} size={14} />
                 <span class="legacy-copy-labels">
-                  <span class="legacy-copy-label" class:legacy-copy-off={copied === i}
-                    >{$t('app.copy')}</span
-                  >
-                  <span class="legacy-copy-label" class:legacy-copy-off={copied !== i}
-                    >{$t('app.copied')}</span
-                  >
+                  <span class="legacy-copy-label" class:legacy-copy-off={copied === i}>
+                    {$t('app.copy')}
+                  </span>
+                  <span class="legacy-copy-label" class:legacy-copy-off={copied !== i}>
+                    {$t('app.copied')}
+                  </span>
                 </span>
               </Button>
             </li>

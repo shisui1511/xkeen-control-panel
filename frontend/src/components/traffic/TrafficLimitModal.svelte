@@ -201,9 +201,9 @@
     />
 
     <div class="form-group">
-      <label class="form-label" for="traffic-limit-target"
-        >{$t('traffic.limits.field_target')}</label
-      >
+      <label class="form-label" for="traffic-limit-target">
+        {$t('traffic.limits.field_target')}
+      </label>
       <Select
         id="traffic-limit-target"
         bind:value={formTarget}
@@ -251,9 +251,9 @@
     </div>
 
     <div class="form-group">
-      <label class="form-label" for="traffic-limit-period"
-        >{$t('traffic.limits.field_period')}</label
-      >
+      <label class="form-label" for="traffic-limit-period">
+        {$t('traffic.limits.field_period')}
+      </label>
       <Select
         id="traffic-limit-period"
         bind:value={formPeriod}
@@ -274,9 +274,9 @@
     />
 
     <div class="form-group">
-      <label class="form-label" for="traffic-limit-action"
-        >{$t('traffic.limits.field_action')}</label
-      >
+      <label class="form-label" for="traffic-limit-action">
+        {$t('traffic.limits.field_action')}
+      </label>
       <Select
         id="traffic-limit-action"
         bind:value={formAction}

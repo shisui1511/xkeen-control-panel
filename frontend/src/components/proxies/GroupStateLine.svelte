@@ -112,8 +112,10 @@
       <a
         class="pc-state-link"
         href="#/traffic?tab=limits&quota={encodeURIComponent(hold.limit ?? '')}"
-        data-testid="proxy-group-quota-open-{group.id}">{$t('proxies.rt.quota.open')}</a
+        data-testid="proxy-group-quota-open-{group.id}"
       >
+        {$t('proxies.rt.quota.open')}
+      </a>
       <Button
         variant="secondary"
         size="sm"

@@ -52,8 +52,10 @@
       class="tap-zone-44"
       loading={ctaLoading}
       title={ctaText}
-      onclick={oncta}>{ctaText}</Button
+      onclick={oncta}
     >
+      {ctaText}
+    </Button>
   {/if}
 </div>
 

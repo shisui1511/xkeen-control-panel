@@ -105,8 +105,10 @@
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
-        stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /></svg
+        stroke-width="2"
       >
+        <path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" />
+      </svg>
       {$t('editor.reload')}
     </button>
     <button
@@ -122,10 +124,11 @@
         fill="none"
         stroke="currentColor"
         stroke-width="2"
-        ><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" /><polyline
-          points="17 21 17 13 7 13 7 21"
-        /><polyline points="7 3 7 8 15 8" /></svg
       >
+        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" /><polyline
+          points="17 21 17 13 7 13 7 21"
+        /><polyline points="7 3 7 8 15 8" />
+      </svg>
       {saving ? $t('app.loading') : $t('app.save')}
     </button>
     {#if immediate}
@@ -222,10 +225,9 @@
       aria-label={saveAndApplyLabel}
     >
       {#if applyLoading}
-        <span class="ks-dot-spin"
-          ><span class="ks-dot"></span><span class="ks-dot"></span><span class="ks-dot"
-          ></span></span
-        >
+        <span class="ks-dot-spin">
+          <span class="ks-dot"></span><span class="ks-dot"></span><span class="ks-dot"></span>
+        </span>
         {$t('app.loading')}
       {:else}
         <svg
@@ -235,10 +237,11 @@
           fill="none"
           stroke="currentColor"
           stroke-width="2.5"
-          ><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" /><polyline
-            points="17 21 17 13 7 13 7 21"
-          /><polyline points="7 3 7 8 15 8" /><path d="m14 11-2 2-2-2" /><path d="M12 7v6" /></svg
         >
+          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" /><polyline
+            points="17 21 17 13 7 13 7 21"
+          /><polyline points="7 3 7 8 15 8" /><path d="m14 11-2 2-2-2" /><path d="M12 7v6" />
+        </svg>
         {$t('editor.save_and_apply')}
       {/if}
     </button>

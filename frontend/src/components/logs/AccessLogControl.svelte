@@ -182,12 +182,12 @@
   {:else}
     <div class="alc-bar">
       <span class="alc-meta">
-        <span class="alc-path font-mono" title={status.config_file} data-testid="xlog-path"
-          >{status.access_path}</span
-        >
+        <span class="alc-path font-mono" title={status.config_file} data-testid="xlog-path">
+          {status.access_path}
+        </span>
         {#if !pathDenied}<span class="alc-size font-mono">
-            · {(status.file_size / 1024).toFixed(0)} KB</span
-          >{/if}
+            · {(status.file_size / 1024).toFixed(0)} KB
+          </span>{/if}
         {#if owner !== ''}
           <span class="badge badge--tag {ownerClass}" data-testid="xlog-owner">{ownerLabel}</span>
         {/if}
@@ -213,8 +213,9 @@
     {#if pathDenied}
       <div class="alert alert-warning alc-alert" role="status" data-testid="xlog-path-denied">
         <span class="alc-alert-text">
-          {deniedParts[0]}<span class="alc-path font-mono">{status.access_path}</span
-          >{deniedParts[1]}
+          {deniedParts[0]}<span class="alc-path font-mono">
+            {status.access_path}
+          </span>{deniedParts[1]}
         </span>
         <a class="alc-link" href={configSubTabHash('cores')}>{$t('xlog.open_section')}</a>
       </div>

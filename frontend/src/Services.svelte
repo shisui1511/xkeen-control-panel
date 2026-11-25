@@ -957,8 +957,10 @@
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
-        stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
+        stroke-width="2"
       >
+        <path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" />
+      </svg>
       {$t('svc.refresh_status')}
     </Button>
     <!-- Пока XKeen не установлен, главное действие страницы — установка в карточке ниже,
@@ -979,8 +981,10 @@
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
-        stroke-width="2"><polyline points="5 12 10 17 20 7" /></svg
+        stroke-width="2"
       >
+        <polyline points="5 12 10 17 20 7" />
+      </svg>
       {$t('svc.check_updates')}
     </Button>
   </PageHeader>
@@ -1067,9 +1071,9 @@
                 <div class="radio-name">
                   <span>Mihomo</span>
                   {#if kernelVersion(mihomo?.current_version)}
-                    <span class="k-ver text-secondary"
-                      >{kernelVersion(mihomo?.current_version)}</span
-                    >
+                    <span class="k-ver text-secondary">
+                      {kernelVersion(mihomo?.current_version)}
+                    </span>
                   {/if}
                   {#if activeKernel === 'mihomo'}
                     <span class="active-pill">{$t('svc.active_label')}</span>
@@ -1102,9 +1106,9 @@
                 {#if $mihomoOfflineReason === 'api_down'}
                   <div class="no-api-note" data-testid="mihomo-no-api-note" role="status">
                     <span class="mihomo-no-api-line">
-                      <span class="mihomo-no-api-icon"
-                        ><Icon name="warning" size={12} color="var(--warning)" /></span
-                      >
+                      <span class="mihomo-no-api-icon">
+                        <Icon name="warning" size={12} color="var(--warning)" />
+                      </span>
                       <span>{$t('svc.mihomo_no_api')}</span>
                     </span>
                     <span class="mihomo-no-api-hint">{$t('svc.mihomo_no_api_hint')}</span>
@@ -1225,12 +1229,12 @@
             <span class="meta-val monospace">{xkeenInfo.pid || activeKernelObj?.pid || '—'}</span>
           </div>
           <div class="meta-item">
-            <span class="meta-lbl"
-              >{$t('svc.uptime_label', { time: '' }).replace(':', '').trim()}:</span
-            >
-            <span class="meta-val monospace"
-              >{activeKernelObj?.uptime || xkeenInfo.uptime || '—'}</span
-            >
+            <span class="meta-lbl">
+              {$t('svc.uptime_label', { time: '' }).replace(':', '').trim()}:
+            </span>
+            <span class="meta-val monospace">
+              {activeKernelObj?.uptime || xkeenInfo.uptime || '—'}
+            </span>
           </div>
           <div class="meta-item">
             <span class="meta-lbl">API / Socket:</span>
@@ -1256,14 +1260,15 @@
                 fill="none"
                 stroke="currentColor"
                 stroke-width="2"
-                ><rect x="6" y="5" width="4" height="14" rx="1" /><rect
+              >
+                <rect x="6" y="5" width="4" height="14" rx="1" /><rect
                   x="14"
                   y="5"
                   width="4"
                   height="14"
                   rx="1"
-                /></svg
-              >
+                />
+              </svg>
               {$t('svc.action_stop')}
             </button>
             <button
@@ -1282,8 +1287,10 @@
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
+                stroke-width="2"
               >
+                <path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" />
+              </svg>
               {$t('svc.action_restart')}
             </button>
           {:else}
@@ -1298,9 +1305,9 @@
                 ? `${$t('svc.action_start')}: ${startDisabledReason}`
                 : undefined}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"
-                ><polygon points="5 3 19 12 5 21 5 3" /></svg
-              >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
               {$t('svc.action_start')}
             </button>
           {/if}
@@ -1318,8 +1325,9 @@
                 fill="none"
                 stroke="currentColor"
                 stroke-width="2"
-                ><circle cx="12" cy="12" r="9" /><path d="M12 3a14 14 0 0 1 0 18" /></svg
               >
+                <circle cx="12" cy="12" r="9" /><path d="M12 3a14 14 0 0 1 0 18" />
+              </svg>
               {$t('svc.api_test')}
             </button>
           {/if}
@@ -1336,15 +1344,16 @@
               fill="none"
               stroke="currentColor"
               stroke-width="2"
-              ><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline
+            >
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline
                 points="14 2 14 8 20 8"
               /><line x1="16" y1="13" x2="8" y2="13" /><line
                 x1="16"
                 y1="17"
                 x2="8"
                 y2="17"
-              /><polyline points="10 9 9 9 8 9" /></svg
-            >
+              /><polyline points="10 9 9 9 8 9" />
+            </svg>
             {$t('svc.logs')}
           </button>
 
@@ -1857,8 +1866,9 @@
               fill="none"
               stroke="currentColor"
               stroke-width="1.5"
-              ><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg
             >
+              <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+            </svg>
             <p>{$t('svc.restart_log_empty')}</p>
           </div>
         {:else}

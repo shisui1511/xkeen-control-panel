@@ -210,9 +210,9 @@
                 </td>
                 <td class="col-payload mono text-break">{rule.payload}</td>
                 <td class="col-target">
-                  <span class="badge badge--tag {getTargetBadgeClass(rule.proxy)}"
-                    >{rule.proxy}</span
-                  >
+                  <span class="badge badge--tag {getTargetBadgeClass(rule.proxy)}">
+                    {rule.proxy}
+                  </span>
                 </td>
                 <td class="col-actions">
                   <button
@@ -249,9 +249,9 @@
                   </td>
                   <td class="col-payload mono match-payload">{$t('rules.match_fallback')}</td>
                   <td class="col-target">
-                    <span class="badge badge--tag {getTargetBadgeClass(rule.proxy)}"
-                      >{rule.proxy}</span
-                    >
+                    <span class="badge badge--tag {getTargetBadgeClass(rule.proxy)}">
+                      {rule.proxy}
+                    </span>
                   </td>
                   <td class="col-actions">
                     <button

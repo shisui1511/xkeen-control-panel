@@ -190,8 +190,9 @@
     </div>
     <div class="ne-footer">
       <Button variant="secondary" onclick={onclose}>{$t('cfg.nodes.cancel')}</Button>
-      <Button variant="secondary" onclick={() => void load(entryId)}>{$t('cfg.nodes.retry')}</Button
-      >
+      <Button variant="secondary" onclick={() => void load(entryId)}>
+        {$t('cfg.nodes.retry')}
+      </Button>
     </div>
   {:else}
     <div class="ne-body">

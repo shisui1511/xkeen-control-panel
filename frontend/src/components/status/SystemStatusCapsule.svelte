@@ -134,9 +134,9 @@
       aria-expanded={isMenuOpen}
     >
       <span class="led-dot {ledClass}"></span>
-      <span class="mobile-kernel" class:is-wide={!activeKernel || activeKernel === 'none'}
-        >{kernelDisplayName}</span
-      >
+      <span class="mobile-kernel" class:is-wide={!activeKernel || activeKernel === 'none'}>
+        {kernelDisplayName}
+      </span>
       <!-- Без ядра трафик всегда «0 B/s»: место в узкой шапке отдаём подписи состояния -->
       {#if $capsuleConfigStore.showTraffic && activeKernel && activeKernel !== 'none'}
         <span class="mobile-traffic">↓↑ {combinedSpeedFormatted}</span>
@@ -167,9 +167,9 @@
       title={$t('capsule.quick_actions')}
     >
       <span class="led-dot {ledClass}"></span>
-      <span class="rail-code"
-        >{$isConflict ? 'X+M' : activeKernel ? activeKernel.slice(0, 3).toUpperCase() : 'OFF'}</span
-      >
+      <span class="rail-code">
+        {$isConflict ? 'X+M' : activeKernel ? activeKernel.slice(0, 3).toUpperCase() : 'OFF'}
+      </span>
     </button>
 
     <SystemQuickMenu

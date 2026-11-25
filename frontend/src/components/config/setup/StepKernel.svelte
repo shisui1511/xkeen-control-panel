@@ -180,8 +180,9 @@
     </div>
   {:else}
     <p class="step-kernel-note">
-      {installedParts[0]}<span class="setup-mono">{installed.map(kernelLabel).join(', ')}</span
-      >{installedParts[1]}
+      {installedParts[0]}<span class="setup-mono">
+        {installed.map(kernelLabel).join(', ')}
+      </span>{installedParts[1]}
     </p>
     {#if installed.length === 1}
       <a class="step-kernel-link" href="#/services" data-testid="setup-kernel-services-link">

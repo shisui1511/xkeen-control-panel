@@ -1200,8 +1200,8 @@
                             </svg>
                           </span>
                           <span class="client-ip mono">{client.ip}</span>
-                          <span class="badge-sessions"
-                            >{pluralize(
+                          <span class="badge-sessions">
+                            {pluralize(
                               client.active_connections,
                               $t('conn.sessions_count_one', {
                                 count: String(client.active_connections)
@@ -1213,8 +1213,8 @@
                                 count: String(client.active_connections)
                               }),
                               $currentLang
-                            )}</span
-                          >
+                            )}
+                          </span>
                         </div>
                         <div class="client-bytes">{formatBytes(client.total_bytes)}</div>
                       </div>

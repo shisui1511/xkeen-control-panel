@@ -190,8 +190,9 @@
                           viewBox="0 0 24 24"
                           fill="currentColor"
                           style="margin-right:8px;flex-shrink:0;"
-                          ><polygon points="5 3 19 12 5 21 5 3" /></svg
                         >
+                          <polygon points="5 3 19 12 5 21 5 3" />
+                        </svg>
                       {:else if cmd.command === '-stop'}
                         <svg
                           width="13"
@@ -199,13 +200,14 @@
                           viewBox="0 0 24 24"
                           fill="currentColor"
                           style="margin-right:8px;flex-shrink:0;"
-                          ><rect x="6" y="5" width="4" height="14" /><rect
+                        >
+                          <rect x="6" y="5" width="4" height="14" /><rect
                             x="14"
                             y="5"
                             width="4"
                             height="14"
-                          /></svg
-                        >
+                          />
+                        </svg>
                       {:else if cmd.command === '-restart'}
                         <svg
                           width="13"
@@ -217,8 +219,9 @@
                           stroke-linecap="round"
                           stroke-linejoin="round"
                           style="margin-right:8px;flex-shrink:0;"
-                          ><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
                         >
+                          <path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" />
+                        </svg>
                       {:else if cmd.command === '-status'}
                         <svg
                           width="13"
@@ -229,8 +232,10 @@
                           stroke-width="2"
                           stroke-linecap="round"
                           stroke-linejoin="round"
-                          style="margin-right:8px;flex-shrink:0;"><path d="M3 12h18" /></svg
+                          style="margin-right:8px;flex-shrink:0;"
                         >
+                          <path d="M3 12h18" />
+                        </svg>
                       {/if}
                       {#if cmd.command.startsWith('__diag:')}
                         {cmd.name}
@@ -252,8 +257,9 @@
           <div class="toolbar-left">
             <span
               style="font-family:var(--font-family-mono);font-size:var(--font-size-sm);color:var(--accent);"
-              >root@xkeen ~ #</span
             >
+              root@xkeen ~ #
+            </span>
           </div>
           <div class="toolbar-right">
             <button
@@ -274,8 +280,9 @@
             <span class="prompt">root@xkeen:~# {formatCommandLine(executing)}</span><br />
             <span style="color:var(--fg-dim);">Running...</span>
           {:else if output}
-            <span class="prompt">root@xkeen:~# {formatCommandLine(history[0]?.command || '')}</span
-            ><br />
+            <span class="prompt">
+              root@xkeen:~# {formatCommandLine(history[0]?.command || '')}
+            </span><br />
             {output}
           {:else}
             <span class="prompt">root@xkeen:~# _</span>

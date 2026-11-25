@@ -79,8 +79,9 @@
     <label
       for="gen-protocol"
       style="display: block; font-size: var(--font-size-xs); color: var(--fg-dim); margin-bottom: 4px;"
-      >{$t('editor.protocol')}</label
     >
+      {$t('editor.protocol')}
+    </label>
     <Select id="gen-protocol" class="input" bind:value={genProtocol}>
       <option value="vless">VLESS</option>
       <option value="shadowsocks">Shadowsocks</option>
@@ -92,8 +93,9 @@
       <label
         for="gen-address"
         style="display: block; font-size: var(--font-size-xs); color: var(--fg-dim); margin-bottom: 4px;"
-        >{$t('editor.address')}</label
       >
+        {$t('editor.address')}
+      </label>
       <input
         id="gen-address"
         type="text"
@@ -106,8 +108,9 @@
       <label
         for="gen-port"
         style="display: block; font-size: var(--font-size-xs); color: var(--fg-dim); margin-bottom: 4px;"
-        >{$t('editor.port')}</label
       >
+        {$t('editor.port')}
+      </label>
       <input id="gen-port" type="number" bind:value={genPort} class="input" />
     </div>
   </div>
@@ -116,8 +119,9 @@
     <label
       for="gen-uuid"
       style="display: block; font-size: var(--font-size-xs); color: var(--fg-dim); margin-bottom: 4px;"
-      >{genProtocol === 'vless' ? 'UUID' : 'Password'}</label
     >
+      {genProtocol === 'vless' ? 'UUID' : 'Password'}
+    </label>
     <div class="input-group" style="display: flex; gap: 8px;">
       <input id="gen-uuid" type="text" bind:value={genUUID} class="input" style="flex: 1;" />
       <button
@@ -136,8 +140,9 @@
       <label
         for="gen-sni"
         style="display: block; font-size: var(--font-size-xs); color: var(--fg-dim); margin-bottom: 4px;"
-        >SNI</label
       >
+        SNI
+      </label>
       <input
         id="gen-sni"
         type="text"
@@ -152,8 +157,9 @@
         <label
           for="gen-security"
           style="display: block; font-size: var(--font-size-xs); color: var(--fg-dim); margin-bottom: 4px;"
-          >Security</label
         >
+          Security
+        </label>
         <Select id="gen-security" class="input" bind:value={genSecurity}>
           <option value="reality">Reality</option>
           <option value="tls">TLS</option>
@@ -165,8 +171,9 @@
           <label
             for="gen-shortid"
             style="display: block; font-size: var(--font-size-xs); color: var(--fg-dim); margin-bottom: 4px;"
-            >Short ID</label
           >
+            Short ID
+          </label>
           <input
             id="gen-shortid"
             type="text"

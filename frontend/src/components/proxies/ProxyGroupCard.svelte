@@ -473,8 +473,10 @@
                     onclick={(e) => {
                       e.stopPropagation();
                       p.onFocusGroup(linkId);
-                    }}>{link.name}</button
+                    }}
                   >
+                    {link.name}
+                  </button>
                 {:else}
                   <span class="pc-now-node">{link.name}</span>
                 {/if}
@@ -542,9 +544,9 @@
               <span class="pc-state-text">
                 {$t('proxies.rt.no_nodes', { kernel: kernelLabel(p.kernel) || 'Xray / Mihomo' })}
               </span>
-              <a class="pc-link" href="#/config/groups?group={g.id}"
-                >{$t('proxies.rt.open_in_config')}</a
-              >
+              <a class="pc-link" href="#/config/groups?group={g.id}">
+                {$t('proxies.rt.open_in_config')}
+              </a>
             </div>
           {:else}
             <div class="group-filters">
@@ -644,15 +646,16 @@
                         {m.name}
                       </span>
                       {#if m.kind === 'group'}
-                        <span class="badge badge-neutral pc-tag">{$t('proxies.rt.chip.group')}</span
-                        >
+                        <span class="badge badge-neutral pc-tag">
+                          {$t('proxies.rt.chip.group')}
+                        </span>
                       {:else if m.proto}
                         <span class="p-type">{getProxyTypeLabel({ type: m.proto })}</span>
                       {/if}
                       {#if reserve}
-                        <span class="badge badge-neutral pc-tag"
-                          >{$t('proxies.rt.chip.fallback')}</span
-                        >
+                        <span class="badge badge-neutral pc-tag">
+                          {$t('proxies.rt.chip.fallback')}
+                        </span>
                       {/if}
                     </span>
                   </button>
@@ -674,9 +677,9 @@
                     {#if busy}
                       <Spinner size={12} tone="current" />
                     {:else if g.mode === 'manual'}
-                      <span class="selector-dot" class:active={current} aria-hidden="true"
-                        >{current ? '●' : '○'}</span
-                      >
+                      <span class="selector-dot" class:active={current} aria-hidden="true">
+                        {current ? '●' : '○'}
+                      </span>
                     {:else if pAutoLike && current}
                       <span class="selector-dot pc-auto-dot" aria-hidden="true">●</span>
                     {/if}
@@ -791,8 +794,10 @@
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                stroke-width="2"><polyline points="20 6 9 17 4 12" /></svg
+                stroke-width="2"
               >
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
             {:else if groupTypeKey === 'urltest' || groupTypeKey === 'fallback'}
               <svg
                 width="11"
@@ -800,8 +805,10 @@
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7" /><path d="M21 3v6h-6" /></svg
+                stroke-width="2"
               >
+                <path d="M21 12a9 9 0 1 1-3-6.7" /><path d="M21 3v6h-6" />
+              </svg>
             {:else if groupTypeKey === 'loadbalance'}
               <svg
                 width="11"
@@ -809,8 +816,10 @@
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                stroke-width="2"><path d="M7 7h11l-3-3" /><path d="M17 17H6l3 3" /></svg
+                stroke-width="2"
               >
+                <path d="M7 7h11l-3-3" /><path d="M17 17H6l3 3" />
+              </svg>
             {:else if groupTypeKey === 'relay'}
               <svg
                 width="11"
@@ -819,10 +828,11 @@
                 fill="none"
                 stroke="currentColor"
                 stroke-width="2"
-                ><circle cx="8" cy="12" r="3" /><circle cx="16" cy="12" r="3" /><path
-                  d="M10.5 12h3"
-                /></svg
               >
+                <circle cx="8" cy="12" r="3" /><circle cx="16" cy="12" r="3" /><path
+                  d="M10.5 12h3"
+                />
+              </svg>
             {/if}
           </span>
           <span class="type-badge-label">{getGroupTypeLabel(group.type)}</span>
@@ -1184,16 +1194,17 @@
                               stroke="currentColor"
                               stroke-width="2"
                               style="opacity: 0.6;"
-                              ><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
                             >
+                              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                            </svg>
                           {/if}
                         </button>
                       {/if}
 
                       {#if group.type === 'Selector'}
-                        <span class="selector-dot" class:active={isActive}
-                          >{isActive ? '●' : '○'}</span
-                        >
+                        <span class="selector-dot" class:active={isActive}>
+                          {isActive ? '●' : '○'}
+                        </span>
                       {/if}
                     </div>
                   </div>

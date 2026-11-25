@@ -111,9 +111,9 @@
             <div class="res-cell">
               <div class="res-head">
                 <span class="res-label">{$t('dash.disk')}</span>
-                <span class="res-pct" style="color: {getPctColor(diskUsedPct)};"
-                  >{diskUsedPct.toFixed(0)}%</span
-                >
+                <span class="res-pct" style="color: {getPctColor(diskUsedPct)};">
+                  {diskUsedPct.toFixed(0)}%
+                </span>
               </div>
               <!-- Как у ОЗУ: крупно — занятое (к нему же относятся процент и полоса),
                    свободное место — в подписи -->
@@ -147,9 +147,9 @@
           <div class="res-cell">
             <div class="res-head">
               <span class="res-label">{$t('dash.ram')}</span>
-              <span class="res-pct" style="color: {getPctColor(ramUsedPct)};"
-                >{ramUsedPct.toFixed(0)}%</span
-              >
+              <span class="res-pct" style="color: {getPctColor(ramUsedPct)};">
+                {ramUsedPct.toFixed(0)}%
+              </span>
             </div>
             <div class="res-value">
               {ramUsedMb}
@@ -174,8 +174,10 @@
                 <span
                   class="res-pct"
                   style="color: {getPctColor(loadPerCorePct)};"
-                  title={$t('dash.load_pct_title')}>{loadPerCorePct.toFixed(0)}%</span
+                  title={$t('dash.load_pct_title')}
                 >
+                  {loadPerCorePct.toFixed(0)}%
+                </span>
               {/if}
             </div>
             <div class="res-value">

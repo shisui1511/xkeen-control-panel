@@ -335,9 +335,9 @@
   {#if hasStatus}
     <div class="rr-status" data-testid="rule-status-{rule.id}">
       {#if rule.origin === 'preset'}
-        <span class="badge badge-neutral" data-chip="preset"
-          >{$t('cfg.rules.from_preset_chip')}</span
-        >
+        <span class="badge badge-neutral" data-chip="preset">
+          {$t('cfg.rules.from_preset_chip')}
+        </span>
       {/if}
       {#if rule.only === 'xray' || rule.only === 'mihomo'}
         <span class="badge badge-info" data-chip="only-{rule.only}">
@@ -345,8 +345,9 @@
         </span>
       {/if}
       {#if !rule.enabled}
-        <span class="badge badge-neutral" data-chip="disabled">{$t('cfg.rules.disabled_chip')}</span
-        >
+        <span class="badge badge-neutral" data-chip="disabled">
+          {$t('cfg.rules.disabled_chip')}
+        </span>
       {/if}
       {#each rule.issues as issue, i (i)}
         <span

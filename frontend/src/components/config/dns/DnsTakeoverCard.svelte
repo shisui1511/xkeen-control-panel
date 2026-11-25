@@ -676,11 +676,11 @@
         <div class="dns-row" data-testid="dns-row-owner">
           <dt class="form-label">{$t('cfg.dns.row_owner')}</dt>
           <dd>
-            <span
-              >{ownerSplit[0]}{#if ownerSplit.length > 1}<span class="dns-mono"
-                  >{ownerParts?.addr}</span
-                >{ownerSplit[1]}{/if}</span
-            >
+            <span>
+              {ownerSplit[0]}{#if ownerSplit.length > 1}<span class="dns-mono">
+                  {ownerParts?.addr}
+                </span>{ownerSplit[1]}{/if}
+            </span>
           </dd>
         </div>
         <div class="dns-row" data-testid="dns-row-kernel">

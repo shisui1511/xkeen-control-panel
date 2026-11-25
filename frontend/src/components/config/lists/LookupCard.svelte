@@ -95,8 +95,9 @@
           <ul class="lc-list" aria-label={$t('cfg.geo.lookup_title')}>
             {#each shown as m (m.file + ':' + m.tag)}
               <li class="lc-row" data-testid="geo-lookup-result">
-                <span class="lc-mono">{$t('cfg.geo.lookup_row', { file: m.file, tag: m.tag })}</span
-                >
+                <span class="lc-mono">
+                  {$t('cfg.geo.lookup_row', { file: m.file, tag: m.tag })}
+                </span>
                 <Button
                   variant="secondary"
                   class="btn-sm"

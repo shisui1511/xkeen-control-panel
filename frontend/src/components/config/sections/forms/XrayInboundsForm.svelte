@@ -485,8 +485,9 @@
 
           <div class="xi-f">
             {#if row.orig === null && !readonly}
-              <label class="xi-lbl" for="{uid}-protocol-{row.key}">{$t('cfg.sec.f.protocol')}</label
-              >
+              <label class="xi-lbl" for="{uid}-protocol-{row.key}">
+                {$t('cfg.sec.f.protocol')}
+              </label>
               <Select
                 id="{uid}-protocol-{row.key}"
                 class="form-select"
@@ -502,8 +503,9 @@
                 {/each}
               </Select>
             {:else if readonly}
-              <label class="xi-lbl" for="{uid}-protocol-{row.key}">{$t('cfg.sec.f.protocol')}</label
-              >
+              <label class="xi-lbl" for="{uid}-protocol-{row.key}">
+                {$t('cfg.sec.f.protocol')}
+              </label>
               <input
                 id="{uid}-protocol-{row.key}"
                 class="input xi-mono"

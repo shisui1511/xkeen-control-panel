@@ -82,8 +82,10 @@
         <a
           class="gq-link"
           href="#/traffic?tab=limits&new=1&group={encodeURIComponent(group.id)}"
-          data-testid="proxy-group-quota-set-{group.id}">{$t('proxies.rt.quota.set')}</a
+          data-testid="proxy-group-quota-set-{group.id}"
         >
+          {$t('proxies.rt.quota.set')}
+        </a>
       </p>
     {:else}
       {#each rows as l (l.id)}

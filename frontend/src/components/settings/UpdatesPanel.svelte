@@ -469,8 +469,10 @@
             {#if version && version !== '...'}
               <span
                 class="badge badge--tag {kindBadge(currentKind)}"
-                data-testid="update-kind-current">{$t(`settings.update_kind_${currentKind}`)}</span
+                data-testid="update-kind-current"
               >
+                {$t(`settings.update_kind_${currentKind}`)}
+              </span>
             {/if}
           </span>
         </div>
@@ -495,12 +497,12 @@
           <div class="progress-head">
             <span class="progress-stage">{stageLabel(status.status)}</span>
             {#if status.status === 'downloading' && status.total}
-              <span class="progress-bytes mono"
-                >{$t('settings.update_downloaded', {
+              <span class="progress-bytes mono">
+                {$t('settings.update_downloaded', {
                   done: formatBytes(status.downloaded || 0),
                   total: formatBytes(status.total)
-                })}</span
-              >
+                })}
+              </span>
             {/if}
           </div>
           {#if status.status !== 'failed'}
@@ -546,28 +548,28 @@
           {@const kind = releaseKind(info.latest_version)}
           <div class="update-available">
             <div class="available-head">
-              <span class="available-title"
-                >{$t('settings.update_available_title', { version: info.latest_version })}</span
-              >
-              <span class="badge badge--tag {kindBadge(kind)}"
-                >{$t(`settings.update_kind_${kind}`)}</span
-              >
+              <span class="available-title">
+                {$t('settings.update_available_title', { version: info.latest_version })}
+              </span>
+              <span class="badge badge--tag {kindBadge(kind)}">
+                {$t(`settings.update_kind_${kind}`)}
+              </span>
               {#if availableUrgent}
-                <span class="badge badge--tag badge-warning" data-testid="update-urgent-badge"
-                  >{$t('settings.update_urgent_badge')}</span
-                >
+                <span class="badge badge--tag badge-warning" data-testid="update-urgent-badge">
+                  {$t('settings.update_urgent_badge')}
+                </span>
               {/if}
             </div>
             <div class="available-meta">
               {#if info.published_at}<span>{formatDate(info.published_at)}</span>{/if}
-              {#if info.download_size}<span
-                  >{$t('settings.update_download_size', {
+              {#if info.download_size}<span>
+                  {$t('settings.update_download_size', {
                     size: formatBytes(info.download_size)
-                  })}</span
-                >{/if}
-              {#if info.releases && info.releases.length > 1}<span
-                  >{$t('settings.update_versions_behind', { count: info.releases.length })}</span
-                >{/if}
+                  })}
+                </span>{/if}
+              {#if info.releases && info.releases.length > 1}<span>
+                  {$t('settings.update_versions_behind', { count: info.releases.length })}
+                </span>{/if}
             </div>
             {#if availableView}
               <div class="available-auto" data-testid="update-available-auto" data-state={autoCode}>
@@ -590,9 +592,9 @@
           {checking ? $t('settings.checking') : $t('settings.check_update')}
         </button>
         {#if checkedAt && !checking}
-          <span class="checked-at"
-            >{$t('settings.update_checked_at', { time: formatTime(checkedAt) })}</span
-          >
+          <span class="checked-at">
+            {$t('settings.update_checked_at', { time: formatTime(checkedAt) })}
+          </span>
         {/if}
       </div>
     </div>
@@ -735,9 +737,9 @@
               <summary class="group-head">
                 <span class="group-title">{$t(KIND_TITLE[group.kind])}</span>
                 <span class="group-count">{total}</span>
-                <span class="group-chevron" aria-hidden="true"
-                  ><Icon name="chevron-down" size={14} /></span
-                >
+                <span class="group-chevron" aria-hidden="true">
+                  <Icon name="chevron-down" size={14} />
+                </span>
               </summary>
               <ul class="change-list">
                 {#each expanded ? group.items : group.items.slice(0, GROUP_PREVIEW) as item, j (j)}
@@ -754,8 +756,9 @@
                         target="_blank"
                         rel="noopener noreferrer"
                         aria-label={$t('settings.update_commit', { sha: item.commit.sha })}
-                        >{item.commit.sha}</a
                       >
+                        {item.commit.sha}
+                      </a>
                     {/if}
                   </li>
                 {/each}
@@ -781,11 +784,11 @@
 
         {#if compareUrl}
           <div class="digest-footer">
-            <a class="release-link" href={compareUrl} target="_blank" rel="noopener noreferrer"
-              >{notes.length > 1
+            <a class="release-link" href={compareUrl} target="_blank" rel="noopener noreferrer">
+              {notes.length > 1
                 ? $t('settings.update_compare_link')
-                : $t('settings.update_release_page')}</a
-            >
+                : $t('settings.update_release_page')}
+            </a>
           </div>
         {/if}
       </div>
@@ -804,11 +807,9 @@
           {#each backups as backup (backup.name)}
             <div class="field-row">
               <div>
-                <span class="field-row-name mono"
-                  >{backup.version
-                    ? `v${backup.version}`
-                    : $t('settings.backup_unknown_version')}</span
-                >
+                <span class="field-row-name mono">
+                  {backup.version ? `v${backup.version}` : $t('settings.backup_unknown_version')}
+                </span>
                 <div class="field-row-desc">
                   {formatDate(backup.created_at)} · {formatBytes(backup.size)}
                 </div>
@@ -840,12 +841,12 @@
     })}
   </p>
   <div class="modal-actions">
-    <button class="btn btn-secondary" onclick={() => (showConfirmInstall = false)}
-      >{$t('app.cancel')}</button
-    >
-    <button class="btn btn-primary" onclick={installUpdate}
-      >{$t('settings.update_install_btn')}</button
-    >
+    <button class="btn btn-secondary" onclick={() => (showConfirmInstall = false)}>
+      {$t('app.cancel')}
+    </button>
+    <button class="btn btn-primary" onclick={installUpdate}>
+      {$t('settings.update_install_btn')}
+    </button>
   </div>
 </Modal>
 

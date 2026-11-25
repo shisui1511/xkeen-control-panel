@@ -50,9 +50,9 @@
         <p class="main-msg">{$t('nav.unsaved_message')}</p>
         {#if dirtySources && dirtySources.length > 0}
           <div class="sources-list">
-            <span class="sources-label"
-              >{$t('nav.unsaved_sources', { sources: dirtySources.join(', ') })}</span
-            >
+            <span class="sources-label">
+              {$t('nav.unsaved_sources', { sources: dirtySources.join(', ') })}
+            </span>
             <div class="sources-tags">
               {#each dirtySources as source, i (i)}
                 <span class="source-badge">{source}</span>

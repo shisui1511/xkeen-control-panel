@@ -874,10 +874,11 @@
                 fill="none"
                 stroke="currentColor"
                 stroke-width="2"
-                ><rect x="5" y="11" width="14" height="10" rx="2" /><path
-                  d="M8 11V7a4 4 0 0 1 8 0v4"
-                /></svg
               >
+                <rect x="5" y="11" width="14" height="10" rx="2" /><path
+                  d="M8 11V7a4 4 0 0 1 8 0v4"
+                />
+              </svg>
             {:else}
               <Icon name={SECTION_ICONS[item.value as SettingsTab]} size={18} />
             {/if}
@@ -900,8 +901,10 @@
           fill="none"
           stroke="currentColor"
           stroke-width="2.2"
-          aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg
+          aria-hidden="true"
         >
+          <path d="M15 18l-6-6 6-6" />
+        </svg>
         {$t('settings.h1')}
       </button>
       <h2 class="settings-section-title">
@@ -1003,11 +1006,11 @@
                       style:--pv-text={th.preview.text}
                     >
                       <span class="pv-side"><i></i><i></i><i></i></span>
-                      <span class="pv-body"
-                        ><span class="pv-card"><i></i><i></i></span><span class="pv-card"
-                          ><i></i><i></i></span
-                        ></span
-                      >
+                      <span class="pv-body">
+                        <span class="pv-card"><i></i><i></i></span><span class="pv-card">
+                          <i></i><i></i>
+                        </span>
+                      </span>
                     </span>
                     <span class="theme-option-name">{$t(th.labelKey)}</span>
                   </label>
@@ -1396,11 +1399,11 @@
                 {#if $capabilities?.mihomo?.controller_type === 'unix'}
                   <span class="status-ok">● {$t('mihomo.controller_mode_unix')}</span>
                 {:else if $capabilities?.mihomo?.is_insecure_lan}
-                  <span class="status-err"
-                    >▲ {$capabilities?.mihomo?.controller_target || '0.0.0.0:9090'} ({$t(
+                  <span class="status-err">
+                    ▲ {$capabilities?.mihomo?.controller_target || '0.0.0.0:9090'} ({$t(
                       'mihomo.controller_mode_insecure'
-                    )})</span
-                  >
+                    )})
+                  </span>
                   <button
                     class="btn btn-warning btn-sm"
                     onclick={() => (window.location.hash = constructorHash())}
@@ -1408,9 +1411,9 @@
                     {$t('mihomo.migrate_btn')}
                   </button>
                 {:else}
-                  <span class="status-ok"
-                    >● {$capabilities?.mihomo?.controller_target || 'TCP'}</span
-                  >
+                  <span class="status-ok">
+                    ● {$capabilities?.mihomo?.controller_target || 'TCP'}
+                  </span>
                 {/if}
               </span>
             </div>
@@ -1542,9 +1545,9 @@
           <div class="field-group">
             <div class="field-row">
               <div>
-                <label class="field-row-name" for="idle-ttl"
-                  >{$t('settings.session_idle_ttl')}</label
-                >
+                <label class="field-row-name" for="idle-ttl">
+                  {$t('settings.session_idle_ttl')}
+                </label>
                 <div class="field-row-desc">{$t('settings.session_idle_ttl_desc')}</div>
                 {#if sessionTTL}
                   <div class="field-row-desc">
@@ -1573,9 +1576,9 @@
             {/if}
             <div class="field-row">
               <div>
-                <label class="field-row-name" for="absolute-ttl"
-                  >{$t('settings.session_absolute_ttl')}</label
-                >
+                <label class="field-row-name" for="absolute-ttl">
+                  {$t('settings.session_absolute_ttl')}
+                </label>
                 <div class="field-row-desc">{$t('settings.session_absolute_ttl_desc')}</div>
                 {#if sessionTTL}
                   <div class="field-row-desc">
@@ -1633,9 +1636,9 @@
             {:else if sessionsError}
               <div class="field-row">
                 <span class="field-row-desc">{sessionsError}</span>
-                <button class="btn btn-secondary btn-sm" onclick={loadSessions}
-                  >{$t('app.retry')}</button
-                >
+                <button class="btn btn-secondary btn-sm" onclick={loadSessions}>
+                  {$t('app.retry')}
+                </button>
               </div>
             {:else}
               {#each sessions as s (s.id)}
@@ -1644,9 +1647,9 @@
                     <div class="session-name-row">
                       <span class="field-row-name session-name-text">{sessionDeviceLabel(s)}</span>
                       {#if s.current}
-                        <span class="badge badge--tag badge-info"
-                          >{$t('settings.sessions_current_badge')}</span
-                        >
+                        <span class="badge badge--tag badge-info">
+                          {$t('settings.sessions_current_badge')}
+                        </span>
                       {/if}
                     </div>
                     <div class="field-row-desc">
@@ -1686,34 +1689,34 @@
         <div class="card card-rows">
           <div class="field-group">
             <div class="field-row-info">
-              <span class="feature-check"><Icon name="check" size={14} /></span><span
-                >{$t('settings.auth_bcrypt')}</span
-              >
+              <span class="feature-check"><Icon name="check" size={14} /></span><span>
+                {$t('settings.auth_bcrypt')}
+              </span>
             </div>
             <div class="field-row-info">
-              <span class="feature-check"><Icon name="check" size={14} /></span><span
-                >{$t('settings.csrf')}</span
-              >
+              <span class="feature-check"><Icon name="check" size={14} /></span><span>
+                {$t('settings.csrf')}
+              </span>
             </div>
             <div class="field-row-info">
-              <span class="feature-check"><Icon name="check" size={14} /></span><span
-                >{$t('settings.rate_limit')}</span
-              >
+              <span class="feature-check"><Icon name="check" size={14} /></span><span>
+                {$t('settings.rate_limit')}
+              </span>
             </div>
             <div class="field-row-info">
-              <span class="feature-check"><Icon name="check" size={14} /></span><span
-                >{$t('settings.security_headers')}</span
-              >
+              <span class="feature-check"><Icon name="check" size={14} /></span><span>
+                {$t('settings.security_headers')}
+              </span>
             </div>
             <div class="field-row-info">
-              <span class="feature-check"><Icon name="check" size={14} /></span><span
-                >{$t('settings.security_https_only')}</span
-              >
+              <span class="feature-check"><Icon name="check" size={14} /></span><span>
+                {$t('settings.security_https_only')}
+              </span>
             </div>
             <div class="field-row-info">
-              <span class="feature-check"><Icon name="check" size={14} /></span><span
-                >{$t('settings.security_cookie_flags')}</span
-              >
+              <span class="feature-check"><Icon name="check" size={14} /></span><span>
+                {$t('settings.security_cookie_flags')}
+              </span>
             </div>
           </div>
         </div>

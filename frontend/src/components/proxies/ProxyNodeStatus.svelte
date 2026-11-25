@@ -222,8 +222,11 @@
         onclick={(e) => {
           e.stopPropagation();
           onHistory(e);
-        }}>{result.ms} {$t('app.ms')}</button
+        }}
       >
+        {result.ms}
+        {$t('app.ms')}
+      </button>
     {:else if failed}
       <button
         bind:this={statusEl}
@@ -233,8 +236,10 @@
         data-testid="proxy-node-status-{groupId}-{index}"
         aria-haspopup="dialog"
         aria-expanded={open}
-        onclick={toggle}>{statusText}</button
+        onclick={toggle}
       >
+        {statusText}
+      </button>
     {/if}
     {#if result.tls}
       <button
@@ -244,8 +249,10 @@
         aria-controls={hint === 'tls' ? hintId : undefined}
         bind:this={tagEls[0]}
         title={$t('proxies.rt.node.tls_title')}
-        onclick={(e) => toggleHint('tls', e)}>{$t('proxies.rt.node.tls')}</button
+        onclick={(e) => toggleHint('tls', e)}
       >
+        {$t('proxies.rt.node.tls')}
+      </button>
     {/if}
     {#if result.otherKernel}
       <button
@@ -256,8 +263,9 @@
         bind:this={tagEls[1]}
         title={hintTitleKernel}
         onclick={(e) => toggleHint('kernel', e)}
-        >{$t('proxies.rt.node.via_kernel', { kernel: result.otherKernel })}</button
       >
+        {$t('proxies.rt.node.via_kernel', { kernel: result.otherKernel })}
+      </button>
     {/if}
     {#if ago}
       <span class="pns-age" title={$t('proxies.rt.node.age_title', { timeAgo: ago })}>{ago}</span>

@@ -307,8 +307,10 @@
           <div class="dm-alert-text">
             <span>
               {foreignParts[0]}{#each foreign as f, i (f.file + ':' + f.line + ':' + i)}{#if f.line > 0}<code
-                    class="dm-mono">{f.file}:{f.line}</code
-                  >{:else}<code class="dm-mono">{f.file}</code>{' (' +
+                    class="dm-mono"
+                  >
+                    {f.file}:{f.line}
+                  </code>{:else}<code class="dm-mono">{f.file}</code>{' (' +
                     $t('cfg.geo.del_foreign_unreadable') +
                     ')'}{/if}{i < foreign.length - 1 ? ', ' : ''}{/each}{foreignParts[1] ?? ''}
             </span>

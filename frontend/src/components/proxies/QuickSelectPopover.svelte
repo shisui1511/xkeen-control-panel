@@ -299,8 +299,10 @@
             fill="none"
             stroke="currentColor"
             stroke-width="2"
-            aria-hidden="true"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" /></svg
+            aria-hidden="true"
           >
+            <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+          </svg>
           {testing ? $t('proxies.quick_select_testing') : $t('proxies.quick_select_test_all')}
         </button>
       {/if}

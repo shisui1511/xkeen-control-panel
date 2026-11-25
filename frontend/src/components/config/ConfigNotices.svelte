@@ -523,15 +523,17 @@
   {#if !filtered && $driftCount > 0}
     <div class="alert alert-warning" role="alert" data-testid="config-drift-notice">
       <Icon name="warning" size={16} />
-      <span class="notice-text"
-        >{$t('cfg.files.drift_notice', { k: $driftCount })}
+      <span class="notice-text">
+        {$t('cfg.files.drift_notice', { k: $driftCount })}
         <a
           class="notice-link"
           href="#/config/files"
           data-testid="config-drift-notice-link"
-          onclick={openFirstDrift}>{$t('cfg.files.drift_notice_link')}</a
-        ></span
-      >
+          onclick={openFirstDrift}
+        >
+          {$t('cfg.files.drift_notice_link')}
+        </a>
+      </span>
     </div>
   {/if}
   {#each shown as { notice, tone, text, cabinet, ids, legacy } (notice.id)}
@@ -570,8 +572,10 @@
                 <a
                   class="notice-link"
                   href="#/config/files"
-                  data-testid="legacy-leftovers-files-link">{$t('cfg.files.drift_notice_link')}</a
+                  data-testid="legacy-leftovers-files-link"
                 >
+                  {$t('cfg.files.drift_notice_link')}
+                </a>
               {/if}
             </span>
           {/if}
@@ -580,18 +584,20 @@
     {:else}
       <div class="alert alert-{tone} alert-dismissible" role="alert" data-notice={notice.id}>
         <Icon name={tone === 'info' ? 'info' : 'warning'} size={16} />
-        <span class="notice-text"
-          >{text}
+        <span class="notice-text">
+          {text}
           {#if cabinet}
             <a
               class="notice-link"
               href={cabinet}
               target="_blank"
               rel="noopener noreferrer"
-              data-testid="notice-cabinet-link">{$t('cfg.notice.cabinet_link')}</a
+              data-testid="notice-cabinet-link"
             >
-          {/if}</span
-        >
+              {$t('cfg.notice.cabinet_link')}
+            </a>
+          {/if}
+        </span>
         <button
           type="button"
           class="alert-close-btn"

@@ -121,9 +121,9 @@
                   <span class="xdev-counts">
                     {$t('xlog.connections', { n: String(d.connections) })}
                     {#if d.rejected > 0}
-                      · <span class="xdev-rejected"
-                        >{$t('xlog.rejected', { n: String(d.rejected) })}</span
-                      >
+                      · <span class="xdev-rejected">
+                        {$t('xlog.rejected', { n: String(d.rejected) })}
+                      </span>
                     {/if}
                   </span>
                   <span class="xdev-top font-mono">{d.top_destinations.join(', ')}</span>
